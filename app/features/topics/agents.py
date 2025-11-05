@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 import math
-from typing import List, Dict, Any, Optional
+import re
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -125,6 +128,40 @@ def normalize_framework(value: str) -> str:
         return "Transformation"
     return value  # Return as-is if no match, will fail validation
 
+def _sanitize_json_text(text: str) -> str:
+    replacements = {
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2018": "'",
+        "\u2019": "'",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    # Remove trailing commas before closing braces/brackets
+    text = re.sub(r",(\s*[}\]])", r"\1", text)
+    return text
+
+
+def _parse_json_or_yaml(text: str) -> Any:
+    text = _sanitize_json_text(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            parsed_yaml = yaml.safe_load(text)
+        except yaml.YAMLError as yaml_error:
+            raise ValidationError(
+                message="PROMPT_1 response not JSON",
+                details={"error": str(yaml_error), "snippet": text[:200]}
+            ) from yaml_error
+        if parsed_yaml is None:
+            raise ValidationError(
+                message="PROMPT_1 response empty",
+                details={"snippet": text[:200]}
+            )
+        return parsed_yaml
+
+
 def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
     # Strip markdown code fences if present
     cleaned = raw.strip()
@@ -136,13 +173,7 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
         cleaned = cleaned[:-3]  # Remove trailing ```
     cleaned = cleaned.strip()
     
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise ValidationError(
-            message="PROMPT_1 response not JSON",
-            details={"error": str(exc), "snippet": cleaned[:200]}
-        ) from exc
+    parsed = _parse_json_or_yaml(cleaned)
 
     payload = parsed if isinstance(parsed, dict) else {"items": parsed}
     
@@ -158,13 +189,30 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
                 if "estimated_duration_s" not in item and "script" in item:
                     word_count = len(item["script"].split())
                     item["estimated_duration_s"] = math.ceil(word_count / 2.6)
-                
+
                 if "tone" not in item:
                     item["tone"] = "direkt, freundlich, empowernd, du-Form"
                 
                 if "disclaimer" not in item:
                     item["disclaimer"] = "Keine Rechts- oder medizinische Beratung."
-    
+
+                # Ensure scripts respect 8-second / 20-word ceiling
+                script_words = item.get("script", "").split()
+                if script_words:
+                    while script_words and math.ceil(len(script_words) / 2.6) > 8:
+                        script_words.pop()
+                    trimmed_script = " ".join(script_words).strip()
+                    if not trimmed_script:
+                        raise ValidationError(
+                            message="PROMPT_1 script empty after trimming",
+                            details={"original": item.get("script", "")}
+                        )
+                    item["script"] = trimmed_script
+                    item["estimated_duration_s"] = max(
+                        1,
+                        math.ceil(len(script_words) / 2.6)
+                    )
+
     payload = parsed if isinstance(parsed, dict) else {"items": parsed}
     try:
         batch = ResearchAgentBatch(**payload)
@@ -183,17 +231,27 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
 
 
 def parse_prompt2_response(raw: str) -> DialogScripts:
+    def normalize_heading(line: str) -> str:
+        cleaned = line.strip()
+        cleaned = re.sub(r"^#+\s*", "", cleaned)
+        cleaned = re.sub(r"^\*+\s*", "", cleaned)
+        cleaned = cleaned.strip().strip("*").strip()
+        cleaned = cleaned.rstrip(":")
+        return cleaned.lower()
+
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
     headers = {
         "problem-agitieren-lösung ads": "problem_agitate_solution",
         "testimonial-stil ads": "testimonial",
+        "testimonial ads": "testimonial",
         "transformations-geschichten ads": "transformation",
     }
     buckets: Dict[str, List[str]] = {value: [] for value in headers.values()}
     current: Optional[str] = None
 
     for line in lines:
-        key = headers.get(line.lower())
+        normalized = normalize_heading(line)
+        key = headers.get(normalized)
         if key:
             current = key
             continue
@@ -313,7 +371,18 @@ def _generate_prompt1_chunk(
     )
     prompt_with_feedback = prompt
 
-    for attempt in range(3):
+    max_attempts = 4
+    for attempt in range(max_attempts):
+        logger.debug(
+            "research_agent_chunk_attempt",
+            brand=brand,
+            post_type=post_type,
+            desired_topics=desired_topics,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            attempt=attempt + 1,
+            prompt_characters=len(prompt_with_feedback),
+        )
         response = llm.generate_openai(
             prompt=prompt_with_feedback,
             system_prompt=None,
@@ -340,6 +409,16 @@ def _generate_prompt1_chunk(
                     message="PROMPT_1 chunk produced unexpected count",
                     details={"expected": desired_topics, "actual": len(items)}
                 )
+            logger.info(
+                "research_agent_chunk_success",
+                brand=brand,
+                post_type=post_type,
+                desired_topics=desired_topics,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                attempt=attempt + 1,
+                response_length=len(response),
+            )
             return items
         except ValidationError as exc:
             logger.warning(
@@ -348,6 +427,7 @@ def _generate_prompt1_chunk(
                 post_type=post_type,
                 attempt=attempt + 1,
                 chunk_index=chunk_index,
+                response_preview=response[:500],
                 error=exc.message,
                 details=exc.details
             )
@@ -369,32 +449,40 @@ def _generate_prompt1_chunk(
 def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
     llm = get_llm_client()
-    prompt = build_prompt2(brand=brand, topic=topic)
+    base_prompt = build_prompt2(brand=brand, topic=topic)
+    prompt = base_prompt
 
     for attempt in range(3):
-        response = llm.generate_chat(
-            prompt=prompt,
-            system_prompt=None,
-            max_tokens=900,
-        )
         try:
-            scripts = parse_prompt2_response(response)
+            response = llm.generate_json(
+                prompt=prompt,
+                system_prompt=None,
+                max_retries=1,
+            )
+            scripts = DialogScripts(**response)
             logger.info(
                 "dialog_scripts_success",
                 brand=brand,
-                topic=topic
+                topic=topic,
+                attempt=attempt + 1
             )
             return scripts
-        except ValidationError as exc:
+        except (ValidationError, PydanticValidationError) as exc:
+            error_msg = str(exc) if isinstance(exc, PydanticValidationError) else exc.message
+            error_details = {} if isinstance(exc, ValidationError) else {"validation_errors": str(exc)}
+            
             logger.warning(
                 "dialog_scripts_retry",
                 brand=brand,
                 topic=topic,
                 attempt=attempt + 1,
-                error=exc.message,
-                details=exc.details
+                error=error_msg,
+                details=error_details
             )
-            prompt = f"{prompt}\n\nFEEDBACK: {exc.message}."
+            
+            if attempt < 2:
+                prompt = f"{base_prompt}\n\nFEEDBACK from previous attempt: Your response was invalid. Error: {error_msg}. Please return ONLY valid JSON with exactly 5 lines per array."
+    
     raise ValidationError(message="Unable to produce dialog scripts", details={})
 
 

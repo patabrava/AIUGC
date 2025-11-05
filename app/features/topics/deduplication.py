@@ -114,6 +114,13 @@ def is_duplicate_topic(
     matched_topic_id = None
     
     for existing in existing_topics:
+        if not all(key in existing for key in ("title", "rotation", "cta")):
+            logger.warning(
+                "dedupe_missing_fields",
+                missing=[key for key in ("title", "rotation", "cta") if key not in existing],
+                available=list(existing.keys()),
+            )
+            continue
         similarity = calculate_topic_similarity(
             title, rotation, cta,
             existing["title"], existing["rotation"], existing["cta"]
@@ -121,7 +128,7 @@ def is_duplicate_topic(
         
         if similarity > max_similarity:
             max_similarity = similarity
-            matched_topic_id = existing["id"]
+            matched_topic_id = existing.get("id")
         
         # Early exit if we find a clear duplicate
         if similarity >= threshold:

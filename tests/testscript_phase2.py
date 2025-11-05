@@ -17,7 +17,7 @@ class TestScriptPhase2:
     
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url
-        self.client = httpx.Client(timeout=60.0)  # Longer timeout for LLM calls
+        self.client = httpx.Client(timeout=180.0)  # Extended timeout for multiple LLM calls
         self.passed = 0
         self.failed = 0
         self.artifacts = []

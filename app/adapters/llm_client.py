@@ -86,6 +86,16 @@ class LLMClient:
                 # Always use user role for the prompt content
                 payload["input"] = [{"role": "user", "content": prompt}]
 
+            logger.debug(
+                "openai_request",
+                model=target_model,
+                instructions_present=bool(system_prompt),
+                tools_configured=bool(tools),
+                prompt_length=len(prompt),
+                prompt_preview=prompt[:400],
+                metadata=metadata or {},
+            )
+
             response = self.http_client.post(
                 "/responses",
                 json=payload,
@@ -114,6 +124,13 @@ class LLMClient:
                 model=target_model,
                 prompt_length=len(prompt),
                 response_length=len(content)
+            )
+            logger.debug(
+                "openai_response",
+                model=target_model,
+                response_preview=content[:400],
+                response_full_length=len(content),
+                raw_response=data,
             )
 
             return content
@@ -164,10 +181,18 @@ class LLMClient:
                 "model": self.default_openai_model,
                 "messages": messages,
             }
-            
+
             if max_tokens:
                 payload["max_tokens"] = max_tokens
-            
+
+            logger.debug(
+                "openai_chat_request",
+                model=self.default_openai_model,
+                system_present=bool(system_prompt),
+                prompt_length=len(prompt),
+                prompt_preview=prompt[:400],
+            )
+
             response = self.http_client.post("/chat/completions", json=payload)
             
             if response.status_code >= 400:
@@ -186,14 +211,21 @@ class LLMClient:
             
             data = response.json()
             content = data["choices"][0]["message"]["content"]
-            
+
             logger.info(
                 "openai_chat_success",
                 model=self.default_openai_model,
                 prompt_length=len(prompt),
                 response_length=len(content)
             )
-            
+            logger.debug(
+                "openai_chat_response",
+                model=self.default_openai_model,
+                response_preview=content[:400],
+                response_full_length=len(content),
+                raw_response=data,
+            )
+
             return content
             
         except ThirdPartyError:

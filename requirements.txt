@@ -36,6 +36,7 @@ anthropic==0.7.7
 # Utilities
 python-dotenv==1.0.0
 pytz==2023.3.post1
+PyYAML==6.0.1
 
 # Development
 ruff==0.1.6
