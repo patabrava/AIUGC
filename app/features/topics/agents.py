@@ -216,38 +216,114 @@ def generate_topics_research_agent(
 ) -> List[ResearchAgentItem]:
     """Execute PROMPT_1 and return validated items."""
     llm = get_llm_client()
-    prompt = build_prompt1(brand=brand, post_type=post_type, desired_topics=count)
+    chunk_size = min(4, max(2, count // 2)) if count > 4 else count
+    total_chunks = math.ceil(count / chunk_size)
+    collected: List[ResearchAgentItem] = []
+
+    for chunk_index in range(1, total_chunks + 1):
+        remaining = count - len(collected)
+        desired_topics = min(chunk_size, remaining)
+        items = _generate_prompt1_chunk(
+            llm=llm,
+            brand=brand,
+            post_type=post_type,
+            desired_topics=desired_topics,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+        )
+        collected.extend(items)
+
+        logger.info(
+            "research_agent_chunk_complete",
+            brand=brand,
+            post_type=post_type,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            chunk_items=len(items),
+            collected=len(collected)
+        )
+
+        if len(collected) >= count:
+            break
+
+    if len(collected) < count:
+        raise ValidationError(
+            message="Unable to produce sufficient topics",
+            details={"requested": count, "produced": len(collected)}
+        )
+
+    return collected[:count]
+
+
+def _generate_prompt1_chunk(
+    llm,
+    brand: str,
+    post_type: str,
+    desired_topics: int,
+    chunk_index: int,
+    total_chunks: int,
+) -> List[ResearchAgentItem]:
+    prompt = build_prompt1(
+        brand=brand,
+        post_type=post_type,
+        desired_topics=desired_topics,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks,
+    )
+    prompt_with_feedback = prompt
 
     for attempt in range(3):
         response = llm.generate_openai(
-            prompt=prompt,
+            prompt=prompt_with_feedback,
             system_prompt=None,
-            model="gpt-4",
-            temperature=0.2,
-            max_tokens=3200,
-            tools=[{"type": "web_search"}],
-            store=False
+            tools=[{"type": "web_search", "external_web_access": True}],
+            reasoning={"effort": "low"},
+            tool_choice="auto",
+            include=[
+                "web_search_call",
+                "web_search_call.action",
+                "web_search_call.action.sources",
+            ],
+            metadata={
+                "feature": "topics.prompts_1",
+                "attempt": attempt + 1,
+                "chunk_index": chunk_index,
+                "total_chunks": total_chunks,
+                "desired_outputs": desired_topics,
+            },
         )
         try:
             batch = parse_prompt1_response(response)
-            logger.info(
-                "research_agent_success",
-                brand=brand,
-                post_type=post_type,
-                items=len(batch.items)
-            )
-            return batch.items
+            items = batch.items
+            if len(items) != desired_topics:
+                raise ValidationError(
+                    message="PROMPT_1 chunk produced unexpected count",
+                    details={"expected": desired_topics, "actual": len(items)}
+                )
+            return items
         except ValidationError as exc:
             logger.warning(
-                "research_agent_retry",
+                "research_agent_chunk_retry",
                 brand=brand,
                 post_type=post_type,
                 attempt=attempt + 1,
+                chunk_index=chunk_index,
                 error=exc.message,
                 details=exc.details
             )
-            prompt = f"{prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, default=str)[:500]}"
-    raise ValidationError(message="Unable to produce valid topics", details={})
+            prompt_with_feedback = (
+                f"{prompt}\n\nFEEDBACK: {exc.message}. Details: "
+                f"{json.dumps(exc.details, default=str)[:500]}"
+            )
+
+    raise ValidationError(
+        message="Unable to produce valid topics for chunk",
+        details={
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks,
+            "desired": desired_topics,
+        },
+    )
 
 
 def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
@@ -259,9 +335,12 @@ def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
         response = llm.generate_openai(
             prompt=prompt,
             system_prompt=None,
-            model="gpt-4",
-            temperature=0.5,
-            max_tokens=900,
+            reasoning={"effort": "low"},
+            tool_choice="auto",
+            metadata={
+                "feature": "topics.prompts_2",
+                "attempt": attempt + 1,
+            },
         )
         try:
             scripts = parse_prompt2_response(response)
@@ -325,8 +404,7 @@ Extract facts now:"""
         response = llm.generate_json(
             prompt=prompt,
             system_prompt=STRICT_EXTRACTOR_SYSTEM_PROMPT,
-            provider="openai",
-            model="gpt-4"
+            provider="openai"
         )
         
         seed = SeedData(**response)

@@ -76,7 +76,7 @@ class ResearchAgentItem(BaseModel):
 
 class ResearchAgentBatch(BaseModel):
     """Wrapper for PROMPT_1 batch output."""
-    items: List[ResearchAgentItem] = Field(..., min_length=10, max_length=10)
+    items: List[ResearchAgentItem] = Field(..., min_length=1, max_length=10)
 
 
 class DialogScripts(BaseModel):

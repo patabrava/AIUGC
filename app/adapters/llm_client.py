@@ -6,7 +6,7 @@ Per Constitution § VI: Adapterize Specialists
 
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
-from anthropic import Anthropic
+from openai import OpenAIError
 import json
 
 from app.core.config import get_settings
@@ -21,98 +21,93 @@ class LLMClient:
     
     def __init__(self):
         settings = get_settings()
-        self.openai_client = OpenAI(api_key=settings.openai_api_key)
-        self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
+        self.openai_api_key = settings.openai_api_key
+        self.default_openai_model = settings.openai_model
+        self.openai_client = OpenAI(api_key=settings.openai_api_key, timeout=600)
     
     def generate_openai(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        model: str = "gpt-4",
-        temperature: float = 0.7,
-        max_tokens: int = 1000,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        store: bool = False
+        store: bool = False,
+        text_format: Optional[Dict[str, Any]] = None,
+        input_override: Optional[List[Dict[str, Any]]] = None,
+        reasoning: Optional[Dict[str, Any]] = None,
+        tool_choice: Optional[Any] = None,
+        include: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate text using OpenAI Responses API."""
         try:
-            response = self.openai_client.responses.create(
-                model=model,
-                input=prompt,
-                instructions=system_prompt,
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-                tools=tools,
-                store=store
-            )
+            target_model = model or self.default_openai_model
 
-            content = response.output_text or ""
+            payload: Dict[str, Any] = {
+                "model": target_model,
+                "store": store,
+            }
+
+            if system_prompt:
+                payload["instructions"] = system_prompt
+            if temperature is not None:
+                payload["temperature"] = temperature
+            if max_tokens is not None:
+                payload["max_output_tokens"] = max_tokens
+            if tools:
+                payload["tools"] = tools
+            if text_format is not None:
+                payload.setdefault("text", {})["format"] = text_format
+            if reasoning is not None:
+                payload["reasoning"] = reasoning
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
+            if include is not None:
+                payload["include"] = include
+            if metadata is not None:
+                payload["metadata"] = metadata
+
+            payload["input"] = input_override if input_override is not None else prompt
+
+            response = self.openai_client.responses.create(**payload)
+
+            content = getattr(response, "output_text", None)
+            if not content:
+                data = response.model_dump()
+                content = self._extract_output_text(data)
 
             logger.info(
                 "openai_generation_success",
-                model=model,
+                model=target_model,
                 prompt_length=len(prompt),
                 response_length=len(content)
             )
 
             return content
 
+        except ThirdPartyError:
+            raise
+        except OpenAIError as exc:
+            logger.error(
+                "openai_generation_error",
+                model=target_model,
+                error=str(exc)
+            )
+            raise ThirdPartyError(
+                message="OpenAI API call failed",
+                details={"error": str(exc), "model": target_model}
+            ) from exc
         except Exception as e:
             logger.error(
                 "openai_generation_failed",
                 error=str(e),
-                model=model
+                model=target_model
             )
             raise ThirdPartyError(
                 message="OpenAI API call failed",
-                details={"error": str(e), "model": model}
-            )
-    
-    def generate_anthropic(
-        self,
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        model: str = "claude-3-sonnet-20240229",
-        temperature: float = 0.7,
-        max_tokens: int = 1000
-    ) -> str:
-        """
-        Generate text using Anthropic Claude.
-        Per Constitution § XII: Validate LLM Outputs
-        """
-        try:
-            kwargs = {
-                "model": model,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "messages": [{"role": "user", "content": prompt}]
-            }
-            
-            if system_prompt:
-                kwargs["system"] = system_prompt
-            
-            response = self.anthropic_client.messages.create(**kwargs)
-            
-            content = response.content[0].text
-            
-            logger.info(
-                "anthropic_generation_success",
-                model=model,
-                prompt_length=len(prompt),
-                response_length=len(content)
-            )
-            
-            return content
-        
-        except Exception as e:
-            logger.error(
-                "anthropic_generation_failed",
-                error=str(e),
-                model=model
-            )
-            raise ThirdPartyError(
-                message="Anthropic API call failed",
-                details={"error": str(e), "model": model}
+                details={"error": str(e), "model": target_model}
             )
     
     def generate_json(
@@ -130,23 +125,15 @@ class LLMClient:
         """
         for attempt in range(max_retries):
             try:
-                if provider == "openai":
-                    model = model or "gpt-4"
-                    response = self.generate_openai(
-                        prompt=prompt,
-                        system_prompt=system_prompt,
-                        model=model,
-                        max_tokens=2000,
-                        tools=tools,
-                        store=False
-                    )
-                else:
-                    model = model or "claude-3-sonnet-20240229"
-                    response = self.generate_anthropic(
-                        prompt=prompt,
-                        system_prompt=system_prompt,
-                        model=model
-                    )
+                model = model or self.default_openai_model
+                response = self.generate_openai(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    model=model,
+                    max_tokens=2000,
+                    tools=tools,
+                    store=False
+                )
                 
                 # Parse JSON
                 parsed = json.loads(response)
@@ -190,6 +177,31 @@ class LLMClient:
             message="Failed to generate JSON",
             details={"max_retries": max_retries}
         )
+
+    def _extract_output_text(self, data: Dict[str, Any]) -> str:
+        """Extract concatenated output text from Responses API payload."""
+        if not data:
+            return ""
+
+        output_text = data.get("output_text")
+        if isinstance(output_text, str):
+            return output_text.strip()
+
+        collected: List[str] = []
+
+        for item in data.get("output", []) or []:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for part in item.get("content", []) or []:
+                if isinstance(part, dict) and part.get("type") == "output_text" and part.get("text"):
+                    collected.append(part["text"])
+
+        if not collected and isinstance(data.get("content"), list):
+            for part in data.get("content", []):
+                if isinstance(part, dict) and part.get("type") == "output_text" and part.get("text"):
+                    collected.append(part["text"])
+
+        return "".join(collected).strip()
 
 
 # Singleton instance
