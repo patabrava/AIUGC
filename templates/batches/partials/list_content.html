@@ -1,0 +1,55 @@
+{% if batches %}
+<div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+  <table class="min-w-full divide-y divide-gray-200">
+    <thead class="bg-gray-50">
+      <tr>
+        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
+        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
+        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Posts</th>
+        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+      </tr>
+    </thead>
+    <tbody class="bg-white divide-y divide-gray-200">
+      {% for batch in batches %}
+      {% set counts = batch.post_type_counts %}
+      {% set total_posts = counts.value + counts.lifestyle + counts.product %}
+      <tr class="hover:bg-purple-50">
+        <td class="px-6 py-4 whitespace-nowrap">
+          <div class="text-sm font-medium text-gray-900">{{ batch.brand }}</div>
+          <div class="text-sm text-gray-500">ID: {{ batch.id }}</div>
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap">
+          <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold bg-purple-100 text-purple-700">
+            {{ batch.state }}
+          </span>
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap">
+          <div class="text-sm text-gray-900">{{ total_posts }} total</div>
+          <div class="text-xs text-gray-500">
+            Value {{ counts.value }} • Lifestyle {{ counts.lifestyle }} • Product {{ counts.product }}
+          </div>
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap">
+          <div class="text-sm text-gray-900">{{ batch.created_at }}</div>
+          <div class="text-xs text-gray-500">Updated {{ batch.updated_at }}</div>
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+          <a href="/batches/{{ batch.id }}" class="text-purple-600 hover:text-purple-900">View</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="bg-white border border-dashed border-gray-300 rounded-lg p-12 text-center">
+  <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-purple-100 text-purple-600">
+    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M16 3v4M8 3v4M4 11h16" />
+    </svg>
+  </div>
+  <h3 class="mt-4 text-lg font-semibold text-gray-900">No batches yet</h3>
+  <p class="mt-2 text-sm text-gray-500">Create your first batch to kick off the FLOW-FORGE pipeline.</p>
+</div>
+{% endif %}

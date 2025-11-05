@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}Batches - FLOW-FORGE{% endblock %}
+
+{% block content %}
+<div x-data="{ showCreateModal: false }">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h2 class="text-3xl font-bold text-gray-900">Batches</h2>
+            <p class="mt-1 text-sm text-gray-500">Manage your UGC video production batches</p>
+        </div>
+        <button 
+            @click="showCreateModal = true"
+            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+        >
+            <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            New Batch
+        </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="mb-6 flex space-x-4">
+        <button 
+            hx-get="/batches?archived=false" 
+            hx-target="#batches-list"
+            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+            Active
+        </button>
+        <button 
+            hx-get="/batches?archived=true" 
+            hx-target="#batches-list"
+            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+            Archived
+        </button>
+        <button 
+            hx-get="/batches" 
+            hx-target="#batches-list"
+            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+            All
+        </button>
+    </div>
+
+    <!-- Batches List -->
+    <div 
+        id="batches-list"
+        hx-get="/batches"
+        hx-trigger="load"
+        hx-target="#batches-list"
+        hx-swap="innerHTML"
+    >
+        {% include "batches/partials/list_content.html" %}
+    </div>
+
+    <!-- Create Batch Modal -->
+    <div 
+        x-show="showCreateModal" 
+        x-cloak
+        class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50"
+        @click.self="showCreateModal = false"
+    >
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Create New Batch</h3>
+            
+            <form 
+                hx-post="/batches" 
+                hx-target="#batches-list"
+                @htmx:after-request="showCreateModal = false"
+            >
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Brand Name</label>
+                        <input 
+                            type="text" 
+                            name="brand" 
+                            required
+                            class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-purple-500 focus:border-purple-500"
+                        >
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Post Type Counts</label>
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm text-gray-600">Value Posts</label>
+                                <input 
+                                    type="number" 
+                                    name="post_type_counts.value" 
+                                    min="0" 
+                                    max="100" 
+                                    value="3"
+                                    class="w-20 border border-gray-300 rounded-md py-1 px-2 text-center"
+                                >
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm text-gray-600">Lifestyle Posts</label>
+                                <input 
+                                    type="number" 
+                                    name="post_type_counts.lifestyle" 
+                                    min="0" 
+                                    max="100" 
+                                    value="4"
+                                    class="w-20 border border-gray-300 rounded-md py-1 px-2 text-center"
+                                >
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm text-gray-600">Product Posts</label>
+                                <input 
+                                    type="number" 
+                                    name="post_type_counts.product" 
+                                    min="0" 
+                                    max="100" 
+                                    value="3"
+                                    class="w-20 border border-gray-300 rounded-md py-1 px-2 text-center"
+                                >
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-6 flex justify-end space-x-3">
+                    <button 
+                        type="button"
+                        @click="showCreateModal = false"
+                        class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        type="submit"
+                        class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+                    >
+                        Create Batch
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+    [x-cloak] { display: none !important; }
+</style>
+{% endblock %}

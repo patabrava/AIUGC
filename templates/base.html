@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}FLOW-FORGE UGC System{% endblock %}</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- htmx -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <!-- Alpine.js -->
+    <script defer src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    
+    <style>
+        /* Material Design 3 inspired colors */
+        :root {
+            --primary: #6750A4;
+            --primary-container: #EADDFF;
+            --on-primary: #FFFFFF;
+            --on-primary-container: #21005D;
+            --secondary: #625B71;
+            --secondary-container: #E8DEF8;
+            --surface: #FFFBFE;
+            --surface-variant: #E7E0EC;
+            --on-surface: #1C1B1F;
+            --on-surface-variant: #49454F;
+            --outline: #79747E;
+            --error: #B3261E;
+            --error-container: #F9DEDC;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <h1 class="text-2xl font-bold text-purple-700">FLOW-FORGE</h1>
+                    <span class="ml-3 text-sm text-gray-500">UGC System v1.0</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/batches" class="text-gray-700 hover:text-purple-700 px-3 py-2 rounded-md text-sm font-medium">
+                        Batches
+                    </a>
+                    <a href="/docs" class="text-gray-700 hover:text-purple-700 px-3 py-2 rounded-md text-sm font-medium">
+                        API Docs
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <p class="text-center text-sm text-gray-500">
+                FLOW-FORGE UGC System &copy; 2025 | 
+                <a href="/health" class="text-purple-600 hover:text-purple-800">System Health</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

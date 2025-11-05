@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Batch {{ batch.brand }} - FLOW-FORGE{% endblock %}
+
+{% block content %}
+<div>
+    <!-- Breadcrumb -->
+    <nav class="mb-6">
+        <ol class="flex items-center space-x-2 text-sm">
+            <li><a href="/batches" class="text-purple-600 hover:text-purple-800">Batches</a></li>
+            <li class="text-gray-400">/</li>
+            <li class="text-gray-700">{{ batch.brand }}</li>
+        </ol>
+    </nav>
+
+    <!-- Header -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <div class="flex justify-between items-start">
+            <div>
+                <h2 class="text-3xl font-bold text-gray-900">{{ batch.brand }}</h2>
+                <p class="mt-1 text-sm text-gray-500">Created {{ batch.created_at }}</p>
+            </div>
+            <div class="flex space-x-2">
+                <button class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                    Duplicate
+                </button>
+                <button class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                    Archive
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- State Stepper -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Progress</h3>
+        
+        <div class="flex items-center justify-between">
+            {% set states = [
+                ('S1_SETUP', 'Setup'),
+                ('S2_SEEDED', 'Seeded'),
+                ('S4_SCRIPTED', 'Scripted'),
+                ('S5_PROMPTS_BUILT', 'Prompts'),
+                ('S6_QA', 'QA'),
+                ('S7_PUBLISH_PLAN', 'Plan'),
+                ('S8_COMPLETE', 'Complete')
+            ] %}
+            
+            {% for state_code, state_label in states %}
+            <div class="flex flex-col items-center flex-1">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center {% if batch.state == state_code %}bg-purple-600 text-white{% elif batch.state > state_code %}bg-green-500 text-white{% else %}bg-gray-200 text-gray-500{% endif %}">
+                    {% if batch.state > state_code %}
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                    {% else %}
+                    {{ loop.index }}
+                    {% endif %}
+                </div>
+                <span class="mt-2 text-xs font-medium {% if batch.state == state_code %}text-purple-600{% else %}text-gray-500{% endif %}">
+                    {{ state_label }}
+                </span>
+            </div>
+            
+            {% if not loop.last %}
+            <div class="flex-1 h-1 {% if batch.state > state_code %}bg-green-500{% else %}bg-gray-200{% endif %} mx-2"></div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0 bg-purple-100 rounded-md p-3">
+                    <svg class="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"/>
+                    </svg>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500">Total Posts</p>
+                    <p class="text-2xl font-semibold text-gray-900">{{ batch.posts_count }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0 bg-blue-100 rounded-md p-3">
+                    <svg class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500">Current State</p>
+                    <p class="text-2xl font-semibold text-gray-900">{{ batch.state }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0 bg-green-100 rounded-md p-3">
+                    <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500">Updated</p>
+                    <p class="text-lg font-semibold text-gray-900">{{ batch.updated_at }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Posts List -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Posts</h3>
+        
+        <div class="text-center py-8 text-gray-500">
+            <p>Posts will be created when batch advances to S2_SEEDED state</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
