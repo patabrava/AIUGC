@@ -51,36 +51,70 @@ def add_topic_to_registry(
                 title=title[:50]
             )
             return response.data[0]
+        
+        # If insert returned no data, log and raise
+        logger.error(
+            "topic_insert_no_data",
+            title=title[:50],
+            response=str(response)
+        )
+        raise Exception(f"Insert returned no data for topic: {title[:50]}")
     
     except Exception as e:
-        # If unique constraint violation, update existing
-        logger.info(
-            "topic_exists_in_registry",
-            title=title[:50],
-            error=str(e)
-        )
+        # Check if this is a unique constraint violation
+        error_str = str(e).lower()
+        is_duplicate = "unique" in error_str or "duplicate" in error_str or "constraint" in error_str
         
-        # Find existing topic and increment use_count
-        existing = supabase.client.table("topic_registry").select("*").eq("title", title).eq("rotation", rotation).eq("cta", cta).execute()
-        
-        if existing.data:
-            topic_id = existing.data[0]["id"]
-            current_count = existing.data[0]["use_count"]
-            
-            updated = supabase.client.table("topic_registry").update({
-                "use_count": current_count + 1,
-                "last_used_at": datetime.utcnow().isoformat()
-            }).eq("id", topic_id).execute()
-            
+        if is_duplicate:
+            # Find existing topic and increment use_count
             logger.info(
-                "topic_use_count_incremented",
-                topic_id=topic_id,
-                new_count=current_count + 1
+                "topic_exists_in_registry",
+                title=title[:50],
+                error=str(e)
             )
             
-            return updated.data[0]
-    
-    raise Exception("Failed to add topic to registry")
+            existing = supabase.client.table("topic_registry").select("*").eq("title", title).eq("rotation", rotation).eq("cta", cta).execute()
+            
+            if existing.data:
+                topic_id = existing.data[0]["id"]
+                current_count = existing.data[0]["use_count"]
+                
+                updated = supabase.client.table("topic_registry").update({
+                    "use_count": current_count + 1,
+                    "last_used_at": datetime.utcnow().isoformat()
+                }).eq("id", topic_id).execute()
+                
+                if updated.data:
+                    logger.info(
+                        "topic_use_count_incremented",
+                        topic_id=topic_id,
+                        new_count=current_count + 1
+                    )
+                    return updated.data[0]
+                else:
+                    logger.error(
+                        "topic_update_no_data",
+                        topic_id=topic_id,
+                        title=title[:50]
+                    )
+                    raise Exception(f"Update returned no data for topic: {title[:50]}")
+            else:
+                logger.error(
+                    "topic_not_found_after_duplicate",
+                    title=title[:50],
+                    rotation=rotation[:50],
+                    cta=cta[:50]
+                )
+                raise Exception(f"Topic not found after duplicate error: {title[:50]}")
+        else:
+            # Not a duplicate error, re-raise the original exception
+            logger.error(
+                "topic_registry_unexpected_error",
+                title=title[:50],
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            raise
 
 
 def create_post_for_batch(

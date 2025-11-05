@@ -4,6 +4,7 @@ FastAPI route handlers for batch operations.
 Per Constitution § V: Locality & Vertical Slices
 """
 
+import asyncio
 import json
 from typing import Dict, Optional
 
@@ -28,6 +29,7 @@ from app.features.batches.queries import (
     duplicate_batch,
     get_batch_posts_summary
 )
+from app.features.topics.handlers import discover_topics_for_batch
 from app.core.errors import FlowForgeException, SuccessResponse
 from app.core.logging import get_logger
 
@@ -84,7 +86,9 @@ async def create_batch_endpoint(request: Request):
             brand=payload.brand,
             post_type_counts=payload.post_type_counts.model_dump()
         )
-        
+
+        asyncio.get_running_loop().create_task(_run_discover_topics(batch["id"]))
+
         if _wants_html(request):
             batches, total = list_batches()
             batch_responses = [BatchResponse(**b).model_dump(mode="json") for b in batches]
@@ -105,6 +109,30 @@ async def create_batch_endpoint(request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create batch"
+        )
+
+
+async def _run_discover_topics(batch_id: str) -> None:
+    try:
+        result = await discover_topics_for_batch(batch_id)
+        logger.info(
+            "batch_autoseed_complete",
+            batch_id=batch_id,
+            posts_created=result["posts_created"],
+            new_state=result["state"]
+        )
+    except FlowForgeException as exc:
+        logger.error(
+            "batch_autoseed_failed",
+            batch_id=batch_id,
+            error=exc.message,
+            details=exc.details
+        )
+    except Exception as exc:
+        logger.exception(
+            "batch_autoseed_unexpected_error",
+            batch_id=batch_id,
+            error=str(exc)
         )
 
 

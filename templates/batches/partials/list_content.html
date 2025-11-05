@@ -13,7 +13,10 @@
     <tbody class="bg-white divide-y divide-gray-200">
       {% for batch in batches %}
       {% set counts = batch.post_type_counts %}
-      {% set total_posts = counts.value + counts.lifestyle + counts.product %}
+      {% set value_count = counts.get('value', 0) %}
+      {% set lifestyle_count = counts.get('lifestyle', 0) %}
+      {% set product_count = counts.get('product', 0) %}
+      {% set total_posts = value_count + lifestyle_count + product_count %}
       <tr class="hover:bg-purple-50">
         <td class="px-6 py-4 whitespace-nowrap">
           <div class="text-sm font-medium text-gray-900">{{ batch.brand }}</div>
@@ -27,7 +30,7 @@
         <td class="px-6 py-4 whitespace-nowrap">
           <div class="text-sm text-gray-900">{{ total_posts }} total</div>
           <div class="text-xs text-gray-500">
-            Value {{ counts.value }} • Lifestyle {{ counts.lifestyle }} • Product {{ counts.product }}
+            Value {{ value_count }} • Lifestyle {{ lifestyle_count }} • Product {{ product_count }}
           </div>
         </td>
         <td class="px-6 py-4 whitespace-nowrap">

@@ -236,31 +236,55 @@ def parse_prompt2_response(raw: str) -> DialogScripts:
         cleaned = re.sub(r"^#+\s*", "", cleaned)
         cleaned = re.sub(r"^\*+\s*", "", cleaned)
         cleaned = cleaned.strip().strip("*").strip()
-        cleaned = cleaned.rstrip(":")
         return cleaned.lower()
 
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    # Split by double newlines to get script blocks, then filter empty
+    lines = raw.splitlines()
     headers = {
         "problem-agitieren-lösung ads": "problem_agitate_solution",
-        "testimonial-stil ads": "testimonial",
         "testimonial ads": "testimonial",
+        "testimonial-stil ads": "testimonial",  # Legacy support
         "transformations-geschichten ads": "transformation",
     }
     buckets: Dict[str, List[str]] = {value: [] for value in headers.values()}
     current: Optional[str] = None
+    current_script_lines: List[str] = []
 
     for line in lines:
-        normalized = normalize_heading(line)
+        stripped = line.strip()
+        
+        # Check if this is a heading
+        normalized = normalize_heading(stripped)
         key = headers.get(normalized)
         if key:
+            # Save any accumulated script before switching sections
+            if current and current_script_lines:
+                script = " ".join(current_script_lines)
+                buckets[current].append(script)
+                current_script_lines = []
             current = key
             continue
+        
+        # Skip empty lines - they separate scripts
+        if not stripped:
+            if current and current_script_lines:
+                script = " ".join(current_script_lines)
+                buckets[current].append(script)
+                current_script_lines = []
+            continue
+        
+        # Accumulate script lines
         if current is None:
             raise ValidationError(
                 message="PROMPT_2 output missing headings",
-                details={"line": line}
+                details={"line": stripped}
             )
-        buckets[current].append(line)
+        current_script_lines.append(stripped)
+    
+    # Don't forget the last script
+    if current and current_script_lines:
+        script = " ".join(current_script_lines)
+        buckets[current].append(script)
 
     try:
         return DialogScripts(**buckets)
@@ -293,7 +317,13 @@ def build_seed_payload(
         "tone": item.tone,
         "estimated_duration_s": item.estimated_duration_s,
         "cta": extract_soft_cta(item.script),
-        "sources": [source.model_dump() for source in item.sources],
+        "sources": [
+            {
+                "title": source.title,
+                "url": str(source.url)  # Convert HttpUrl to string
+            }
+            for source in item.sources
+        ],
         "source_summary": item.source_summary,
         "dialog_scripts": {
             "problem": dialog_scripts.problem_agitate_solution,
@@ -449,40 +479,40 @@ def _generate_prompt1_chunk(
 def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
     llm = get_llm_client()
-    base_prompt = build_prompt2(brand=brand, topic=topic)
-    prompt = base_prompt
+    prompt = build_prompt2(brand=brand, topic=topic)
 
     for attempt in range(3):
+        response = llm.generate_chat(
+            prompt=prompt,
+            system_prompt=None,
+            max_tokens=900,
+        )
         try:
-            response = llm.generate_json(
-                prompt=prompt,
-                system_prompt=None,
-                max_retries=1,
-            )
-            scripts = DialogScripts(**response)
+            scripts = parse_prompt2_response(response)
             logger.info(
                 "dialog_scripts_success",
                 brand=brand,
-                topic=topic,
-                attempt=attempt + 1
+                topic=topic
             )
             return scripts
-        except (ValidationError, PydanticValidationError) as exc:
-            error_msg = str(exc) if isinstance(exc, PydanticValidationError) else exc.message
-            error_details = {} if isinstance(exc, ValidationError) else {"validation_errors": str(exc)}
-            
+        except ValidationError as exc:
             logger.warning(
                 "dialog_scripts_retry",
                 brand=brand,
                 topic=topic,
                 attempt=attempt + 1,
-                error=error_msg,
-                details=error_details
+                error=exc.message,
+                details=exc.details,
+                response_preview=response[:500]
             )
-            
-            if attempt < 2:
-                prompt = f"{base_prompt}\n\nFEEDBACK from previous attempt: Your response was invalid. Error: {error_msg}. Please return ONLY valid JSON with exactly 5 lines per array."
+            prompt = f"{prompt}\n\nFEEDBACK: {exc.message}."
     
+    logger.error(
+        "dialog_scripts_failed_all_attempts",
+        brand=brand,
+        topic=topic,
+        last_response=response[:1000] if 'response' in locals() else None
+    )
     raise ValidationError(message="Unable to produce dialog scripts", details={})
 
 

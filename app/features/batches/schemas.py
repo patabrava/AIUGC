@@ -4,8 +4,10 @@ Pydantic models for batch validation.
 Per Constitution § II: Validated Boundaries
 """
 
+from __future__ import annotations
+
 from pydantic import BaseModel, Field, validator
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from datetime import datetime
 from app.core.states import BatchState
 
@@ -68,6 +70,20 @@ class BatchListResponse(BaseModel):
     total: int
 
 
+class PostDetail(BaseModel):
+    """Post detail model for batch view."""
+    id: str
+    post_type: str
+    topic_title: str
+    topic_rotation: str
+    topic_cta: str
+    spoken_duration: float
+    state: Optional[str] = None
+    seed_data: Optional[Dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class BatchDetailResponse(BaseModel):
     """Detailed batch response with posts."""
     id: str
@@ -79,6 +95,7 @@ class BatchDetailResponse(BaseModel):
     archived: bool
     posts_count: int
     posts_by_state: Dict[str, int]
+    posts: List[PostDetail]
     
     class Config:
         from_attributes = True

@@ -63,7 +63,11 @@ def build_prompt2(brand: str, topic: str) -> str:
     format_kwargs = {"brand": brand, "topic": topic}
 
     return _join_sections(
-        data.get("task", "").format(**format_kwargs),
-        data.get("output", "").format(**format_kwargs),
-        data.get("rules", "").format(**format_kwargs),
+        data.get("core", "").format(**format_kwargs),
+        data.get("brand_context", "").format(**format_kwargs),
+        data.get("voice", "").format(**format_kwargs),
+        data.get("structure", "").format(**format_kwargs),
+        data.get("length_rules", "").format(**format_kwargs),
+        data.get("headings", "").format(**format_kwargs),
+        data.get("closing", "").format(**format_kwargs),
     )

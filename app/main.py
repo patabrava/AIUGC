@@ -7,7 +7,7 @@ Per Constitution § I: Canon Supremacy
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -146,12 +146,8 @@ app.include_router(topics_router)
 # Root endpoint
 @app.get("/")
 async def root():
-    """Root endpoint - redirects to dashboard."""
-    return {
-        "message": "FLOW-FORGE UGC System",
-        "version": "1.0.0",
-        "docs": "/docs"
-    }
+    """Root endpoint - redirect to batches dashboard."""
+    return RedirectResponse(url="/batches", status_code=status.HTTP_302_FOUND)
 
 
 if __name__ == "__main__":
