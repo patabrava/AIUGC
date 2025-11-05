@@ -31,41 +31,32 @@ class LLMClient:
         model: str = "gpt-4",
         temperature: float = 0.7,
         max_tokens: int = 1000,
-        response_format: Optional[Dict[str, str]] = None
+        tools: Optional[List[Dict[str, Any]]] = None,
+        store: bool = False
     ) -> str:
-        """
-        Generate text using OpenAI.
-        Per Constitution § XII: Validate LLM Outputs
-        """
+        """Generate text using OpenAI Responses API."""
         try:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            
-            kwargs = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            }
-            
-            if response_format:
-                kwargs["response_format"] = response_format
-            
-            response = self.openai_client.chat.completions.create(**kwargs)
-            
-            content = response.choices[0].message.content
-            
+            response = self.openai_client.responses.create(
+                model=model,
+                input=prompt,
+                instructions=system_prompt,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                tools=tools,
+                store=store
+            )
+
+            content = response.output_text or ""
+
             logger.info(
                 "openai_generation_success",
                 model=model,
                 prompt_length=len(prompt),
-                response_length=len(content) if content else 0
+                response_length=len(content)
             )
-            
-            return content or ""
-        
+
+            return content
+
         except Exception as e:
             logger.error(
                 "openai_generation_failed",
@@ -130,7 +121,8 @@ class LLMClient:
         system_prompt: Optional[str] = None,
         provider: str = "openai",
         model: Optional[str] = None,
-        max_retries: int = 3
+        max_retries: int = 3,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Generate JSON output with validation and retries.
@@ -144,7 +136,9 @@ class LLMClient:
                         prompt=prompt,
                         system_prompt=system_prompt,
                         model=model,
-                        response_format={"type": "json_object"}
+                        max_tokens=2000,
+                        tools=tools,
+                        store=False
                     )
                 else:
                     model = model or "claude-3-sonnet-20240229"

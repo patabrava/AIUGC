@@ -5,7 +5,7 @@ Per Constitution § V: Locality & Vertical Slices
 """
 
 from fastapi import APIRouter, HTTPException, status, Header
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from app.features.topics.schemas import (
     DiscoverTopicsRequest,
@@ -14,14 +14,16 @@ from app.features.topics.schemas import (
 )
 from app.features.topics.agents import (
     generate_topics_research_agent,
-    extract_seed_strict_extractor
+    generate_dialog_scripts,
+    extract_seed_strict_extractor,
+    convert_research_item_to_topic,
+    build_seed_payload,
 )
 from app.features.topics.deduplication import deduplicate_topics
 from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
     create_post_for_batch,
-    count_posts_by_batch_and_type
 )
 from app.features.batches.queries import get_batch_by_id, update_batch_state
 from app.core.states import BatchState
@@ -73,66 +75,74 @@ async def discover_topics_endpoint(request: DiscoverTopicsRequest):
                 count=count
             )
             
-            # Generate topics using research agent
-            topics = generate_topics_research_agent(
+            items = generate_topics_research_agent(
                 brand=batch["brand"],
                 post_type=post_type,
-                count=count * 2  # Generate 2x to account for deduplication
+                count=count * 2
             )
-            
-            # Convert to dict format for deduplication
+
+            # transform items into TopicData
+            topic_data = [convert_research_item_to_topic(item) for item in items]
             topics_dict = [
                 {
-                    "title": t.title,
-                    "rotation": t.rotation,
-                    "cta": t.cta,
-                    "spoken_duration": float(t.spoken_duration)
+                    "title": data.title,
+                    "rotation": data.rotation,
+                    "cta": data.cta,
+                    "spoken_duration": float(data.spoken_duration),
+                    "__item_index": idx,
                 }
-                for t in topics
+                for idx, data in enumerate(topic_data)
             ]
-            
-            # Deduplicate
+
+            # Deduplicate across registry and previous selections
             unique_topics = deduplicate_topics(
                 topics_dict,
                 existing_topics + all_generated_topics,
-                threshold=0.7
+                threshold=0.35
             )
-            
-            # Take only the needed count
+
             selected_topics = unique_topics[:count]
-            
-            # Create posts for each topic
+
             for topic_dict in selected_topics:
-                # Find original TopicData object
-                topic = next(
-                    t for t in topics 
-                    if t.title == topic_dict["title"]
+                original_item = items[topic_dict["__item_index"]]
+                topic_model = topic_data[topic_dict["__item_index"]]
+                dialog_scripts = generate_dialog_scripts(
+                    brand=batch["brand"],
+                    topic=original_item.topic
                 )
-                
-                # Extract seed data
-                seed = extract_seed_strict_extractor(topic)
-                
-                # Add to registry
+                seed = extract_seed_strict_extractor(topic_model)
+
+                seed_payload = build_seed_payload(
+                    original_item,
+                    strict_seed=seed,
+                    dialog_scripts=dialog_scripts
+                )
+
                 add_topic_to_registry(
-                    title=topic.title,
-                    rotation=topic.rotation,
-                    cta=topic.cta
+                    title=topic_model.title,
+                    rotation=topic_model.rotation,
+                    cta=topic_model.cta
                 )
-                
-                # Create post
+
                 post = create_post_for_batch(
                     batch_id=request.batch_id,
                     post_type=post_type,
-                    topic_title=topic.title,
-                    topic_rotation=topic.rotation,
-                    topic_cta=topic.cta,
-                    spoken_duration=float(topic.spoken_duration),
-                    seed_data=seed.model_dump()
+                    topic_title=topic_model.title,
+                    topic_rotation=topic_model.rotation,
+                    topic_cta=topic_model.cta,
+                    spoken_duration=float(topic_model.spoken_duration),
+                    seed_data=seed_payload
                 )
-                
+
                 created_posts.append(post)
-                all_generated_topics.append(topic_dict)
-        
+                dedup_topic_record: Dict[str, Any] = {
+                    "title": topic_model.title,
+                    "rotation": topic_model.rotation,
+                    "cta": topic_model.cta,
+                    "spoken_duration": float(topic_model.spoken_duration),
+                }
+                all_generated_topics.append(dedup_topic_record)
+
         # Update batch state to S2_SEEDED
         updated_batch = update_batch_state(request.batch_id, BatchState.S2_SEEDED)
         
@@ -216,14 +226,25 @@ async def cron_topic_discovery(
         )
     
     try:
-        # This is a placeholder for automated discovery
-        # In production, this would find batches in S1_SETUP and run discovery
-        logger.info("cron_topic_discovery_triggered")
-        
+        from app.features.batches.queries import list_batches
+
+        batches, _ = list_batches(archived=False, limit=100, offset=0)
+        seeded = []
+        for batch in batches:
+            if batch["state"] != BatchState.S1_SETUP.value:
+                continue
+            request_payload = DiscoverTopicsRequest(batch_id=batch["id"], count=10)
+            seeded.append(batch["id"])
+            await discover_topics_endpoint(request_payload)
+
+        logger.info(
+            "cron_topic_discovery_triggered",
+            seeded_batches=seeded
+        )
         return SuccessResponse(
             data={
                 "message": "Cron job executed successfully",
-                "timestamp": "2025-11-05T11:54:00Z"
+                "seeded_batches": seeded,
             }
         )
     

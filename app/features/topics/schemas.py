@@ -4,8 +4,8 @@ Pydantic models for topic discovery and validation.
 Per Constitution § II: Validated Boundaries
 """
 
-from pydantic import BaseModel, Field, validator
-from typing import List, Optional
+from pydantic import BaseModel, Field, validator, HttpUrl
+from typing import List, Optional, Literal
 from decimal import Decimal
 
 
@@ -45,6 +45,45 @@ class DiscoverTopicsRequest(BaseModel):
     """Request to discover topics for a batch."""
     batch_id: str = Field(..., description="Batch ID to discover topics for")
     count: int = Field(default=10, ge=1, le=100, description="Number of topics to discover")
+
+
+class ResearchAgentSource(BaseModel):
+    """Source metadata returned by PROMPT_1."""
+    title: str = Field(..., min_length=2, max_length=400, description="Source title")
+    url: HttpUrl = Field(..., description="Source URL")
+
+
+class ResearchAgentItem(BaseModel):
+    """Validated result item from PROMPT_1."""
+    topic: str = Field(..., min_length=2, max_length=400, description="Chosen topic from pool")
+    framework: Literal["PAL", "Testimonial", "Transformation"]
+    sources: List[ResearchAgentSource] = Field(..., min_length=1, max_length=2, description="Supporting sources")
+    script: str = Field(..., min_length=10, max_length=400, description="Spoken script (≤8s)")
+    source_summary: str = Field(..., min_length=35, max_length=500, description="Summary for IG caption")
+    estimated_duration_s: int = Field(..., ge=1, le=8, description="Ceiling of word_count/2.6")
+    tone: str = Field(..., min_length=5, max_length=120, description="Tone descriptor")
+    disclaimer: str = Field(..., min_length=5, max_length=200, description="Compliance disclaimer")
+
+    @validator("script")
+    def validate_script_line(cls, v: str) -> str:
+        if "\n" in v.strip():
+            raise ValueError("Script must be a single spoken line")
+        return v.strip()
+
+    def word_count(self) -> int:
+        return len(self.script.split())
+
+
+class ResearchAgentBatch(BaseModel):
+    """Wrapper for PROMPT_1 batch output."""
+    items: List[ResearchAgentItem] = Field(..., min_length=10, max_length=10)
+
+
+class DialogScripts(BaseModel):
+    """Structured set of dialog scripts from PROMPT_2."""
+    problem_agitate_solution: List[str] = Field(..., min_length=5, max_length=5)
+    testimonial: List[str] = Field(..., min_length=5, max_length=5)
+    transformation: List[str] = Field(..., min_length=5, max_length=5)
 
 
 class TopicResponse(BaseModel):
