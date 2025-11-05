@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     
     # LLM Providers
     openai_api_key: str = Field(..., description="OpenAI API key")
-    openai_model: str = Field("gpt-5-mini-2025-08-07", description="Default OpenAI model identifier")
+    openai_model: str = Field("gpt-4o-mini", description="Default OpenAI model identifier")
     
     # Video Providers
     veo_api_key: str = Field(default="", description="Veo 3.1 API key")

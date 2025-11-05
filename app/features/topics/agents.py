@@ -60,10 +60,12 @@ def compute_bigram_jaccard(a: str, b: str) -> float:
 def validate_round_robin(items: List[ResearchAgentItem]) -> None:
     topics = [item.topic for item in items]
     unique_topics = list(dict.fromkeys(topics))
-    if len(unique_topics) != 4:
+    # For chunks of 2-4 items, we expect at least 2 distinct topics
+    min_expected = min(2, len(items))
+    if len(unique_topics) < min_expected:
         raise ValidationError(
-            message="PROMPT_1 output must contain four distinct topics",
-            details={"unique_topics": unique_topics}
+            message=f"PROMPT_1 output must contain at least {min_expected} distinct topics",
+            details={"unique_topics": unique_topics, "expected_min": min_expected}
         )
     for idx in range(1, len(topics)):
         if topics[idx] == topics[idx - 1]:
@@ -98,15 +100,9 @@ def validate_duration(item: ResearchAgentItem) -> None:
             message="Script exceeds 8 seconds",
             details={"word_count": item.word_count(), "calculated": calculated}
         )
+    # Auto-correct estimated_duration_s if LLM calculated it wrong
     if calculated != item.estimated_duration_s:
-        raise ValidationError(
-            message="Estimated duration mismatch",
-            details={
-                "script": item.script,
-                "calculated": calculated,
-                "reported": item.estimated_duration_s,
-            }
-        )
+        item.estimated_duration_s = calculated
 
 
 def validate_summary(item: ResearchAgentItem) -> None:
@@ -118,15 +114,57 @@ def validate_summary(item: ResearchAgentItem) -> None:
         )
 
 
+def normalize_framework(value: str) -> str:
+    """Normalize framework value to match schema literals."""
+    value_lower = value.lower().strip()
+    if "pal" in value_lower or "problem" in value_lower or "agit" in value_lower or "lösung" in value_lower:
+        return "PAL"
+    elif "testimonial" in value_lower or "zeugnis" in value_lower:
+        return "Testimonial"
+    elif "transformation" in value_lower or "wandel" in value_lower:
+        return "Transformation"
+    return value  # Return as-is if no match, will fail validation
+
 def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
+    # Strip markdown code fences if present
+    cleaned = raw.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]  # Remove ```json
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]  # Remove ```
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]  # Remove trailing ```
+    cleaned = cleaned.strip()
+    
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise ValidationError(
             message="PROMPT_1 response not JSON",
-            details={"error": str(exc), "snippet": raw[:200]}
+            details={"error": str(exc), "snippet": cleaned[:200]}
         ) from exc
 
+    payload = parsed if isinstance(parsed, dict) else {"items": parsed}
+    
+    # Normalize items before validation
+    if "items" in payload and isinstance(payload["items"], list):
+        for item in payload["items"]:
+            if isinstance(item, dict):
+                # Normalize framework
+                if "framework" in item:
+                    item["framework"] = normalize_framework(item["framework"])
+                
+                # Add missing required fields with defaults
+                if "estimated_duration_s" not in item and "script" in item:
+                    word_count = len(item["script"].split())
+                    item["estimated_duration_s"] = math.ceil(word_count / 2.6)
+                
+                if "tone" not in item:
+                    item["tone"] = "direkt, freundlich, empowernd, du-Form"
+                
+                if "disclaimer" not in item:
+                    item["disclaimer"] = "Keine Rechts- oder medizinische Beratung."
+    
     payload = parsed if isinstance(parsed, dict) else {"items": parsed}
     try:
         batch = ResearchAgentBatch(**payload)
@@ -216,7 +254,10 @@ def generate_topics_research_agent(
 ) -> List[ResearchAgentItem]:
     """Execute PROMPT_1 and return validated items."""
     llm = get_llm_client()
-    chunk_size = min(4, max(2, count // 2)) if count > 4 else count
+    if count <= 2:
+        chunk_size = count
+    else:
+        chunk_size = 2
     total_chunks = math.ceil(count / chunk_size)
     collected: List[ResearchAgentItem] = []
 
@@ -277,20 +318,19 @@ def _generate_prompt1_chunk(
             prompt=prompt_with_feedback,
             system_prompt=None,
             tools=[{"type": "web_search", "external_web_access": True}],
-            reasoning={"effort": "low"},
             tool_choice="auto",
             include=[
-                "web_search_call",
-                "web_search_call.action",
+                "web_search_call.results",
                 "web_search_call.action.sources",
             ],
             metadata={
                 "feature": "topics.prompts_1",
-                "attempt": attempt + 1,
-                "chunk_index": chunk_index,
-                "total_chunks": total_chunks,
-                "desired_outputs": desired_topics,
+                "attempt": str(attempt + 1),
+                "chunk_index": str(chunk_index),
+                "total_chunks": str(total_chunks),
+                "desired_outputs": str(desired_topics),
             },
+            max_tokens=3500,
         )
         try:
             batch = parse_prompt1_response(response)
@@ -332,15 +372,10 @@ def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
     prompt = build_prompt2(brand=brand, topic=topic)
 
     for attempt in range(3):
-        response = llm.generate_openai(
+        response = llm.generate_chat(
             prompt=prompt,
             system_prompt=None,
-            reasoning={"effort": "low"},
-            tool_choice="auto",
-            metadata={
-                "feature": "topics.prompts_2",
-                "attempt": attempt + 1,
-            },
+            max_tokens=900,
         )
         try:
             scripts = parse_prompt2_response(response)

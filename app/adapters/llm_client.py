@@ -5,8 +5,7 @@ Per Constitution § VI: Adapterize Specialists
 """
 
 from typing import Optional, Dict, Any, List
-from openai import OpenAI
-from openai import OpenAIError
+import httpx
 import json
 
 from app.core.config import get_settings
@@ -23,7 +22,17 @@ class LLMClient:
         settings = get_settings()
         self.openai_api_key = settings.openai_api_key
         self.default_openai_model = settings.openai_model
-        self.openai_client = OpenAI(api_key=settings.openai_api_key, timeout=600)
+        self.http_client = httpx.Client(
+            base_url="https://api.openai.com/v1",
+            timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=None),
+            follow_redirects=True,
+            headers={
+                "Authorization": f"Bearer {self.openai_api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "OpenAI-Beta": "tools=v1",
+            },
+        )
     
     def generate_openai(
         self,
@@ -69,14 +78,36 @@ class LLMClient:
             if metadata is not None:
                 payload["metadata"] = metadata
 
-            payload["input"] = input_override if input_override is not None else prompt
+            # Responses API expects input as message array
+            # Note: system_prompt goes in 'instructions' field, NOT as a system role message
+            if input_override is not None:
+                payload["input"] = input_override
+            else:
+                # Always use user role for the prompt content
+                payload["input"] = [{"role": "user", "content": prompt}]
 
-            response = self.openai_client.responses.create(**payload)
+            response = self.http_client.post(
+                "/responses",
+                json=payload,
+            )
 
-            content = getattr(response, "output_text", None)
-            if not content:
-                data = response.model_dump()
-                content = self._extract_output_text(data)
+            if response.status_code >= 400:
+                logger.error(
+                    "openai_generation_http_error",
+                    status_code=response.status_code,
+                    response_text=response.text,
+                )
+                raise ThirdPartyError(
+                    message="OpenAI API call failed",
+                    details={
+                        "status_code": response.status_code,
+                        "body": response.text,
+                        "model": target_model,
+                    }
+                )
+
+            data = response.json()
+            content = self._extract_output_text(data)
 
             logger.info(
                 "openai_generation_success",
@@ -89,14 +120,25 @@ class LLMClient:
 
         except ThirdPartyError:
             raise
-        except OpenAIError as exc:
+        except httpx.TimeoutException as exc:
             logger.error(
-                "openai_generation_error",
+                "openai_generation_timeout",
+                model=target_model,
+                timeout=str(self.http_client.timeout),
+                error=str(exc)
+            )
+            raise ThirdPartyError(
+                message="OpenAI API call timed out",
+                details={"error": str(exc), "model": target_model}
+            ) from exc
+        except httpx.HTTPError as exc:
+            logger.error(
+                "openai_generation_http_exception",
                 model=target_model,
                 error=str(exc)
             )
             raise ThirdPartyError(
-                message="OpenAI API call failed",
+                message="OpenAI API transport failed",
                 details={"error": str(exc), "model": target_model}
             ) from exc
         except Exception as e:
@@ -108,6 +150,59 @@ class LLMClient:
             raise ThirdPartyError(
                 message="OpenAI API call failed",
                 details={"error": str(e), "model": target_model}
+            )
+    
+    def generate_chat(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: Optional[int] = None) -> str:
+        """Generate text using OpenAI Chat Completions API (for non-web-search requests)."""
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
+            payload = {
+                "model": self.default_openai_model,
+                "messages": messages,
+            }
+            
+            if max_tokens:
+                payload["max_tokens"] = max_tokens
+            
+            response = self.http_client.post("/chat/completions", json=payload)
+            
+            if response.status_code >= 400:
+                logger.error(
+                    "openai_chat_http_error",
+                    status_code=response.status_code,
+                    response_text=response.text,
+                )
+                raise ThirdPartyError(
+                    message="OpenAI Chat API call failed",
+                    details={
+                        "status_code": response.status_code,
+                        "body": response.text,
+                    }
+                )
+            
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            
+            logger.info(
+                "openai_chat_success",
+                model=self.default_openai_model,
+                prompt_length=len(prompt),
+                response_length=len(content)
+            )
+            
+            return content
+            
+        except ThirdPartyError:
+            raise
+        except Exception as e:
+            logger.error("openai_chat_failed", error=str(e))
+            raise ThirdPartyError(
+                message="OpenAI Chat API call failed",
+                details={"error": str(e)}
             )
     
     def generate_json(

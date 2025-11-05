@@ -27,17 +27,47 @@ def build_prompt1(
         "lifestyle": "Lifestyle-Vibes mit Community-Touch",
         "product": "Produktnahe Alltagshilfen",
     }.get(post_type, post_type)
+    example_json = '''[
+  {{
+    "topic": "Krankenkasse für Menschen im Rollstuhl",
+    "framework": "PAL",
+    "sources": [
+      {{"title": "GKV Hilfsmittelverzeichnis", "url": "https://www.gkv-spitzenverband.de/hilfsmittel/"}},
+      {{"title": "Rollstuhlversorgung", "url": "https://www.rehadat.de/rollstuhl/"}}
+    ],
+    "script": "Kennst du das GKV Hilfsmittelverzeichnis? Es zeigt dir, welche Rollstühle die Kasse zahlt.",
+    "source_summary": "Die gesetzliche Krankenversicherung übernimmt Kosten für viele Hilfsmittel. Das GKV-Hilfsmittelverzeichnis listet alle erstattungsfähigen Produkte auf. Quelle: GKV Hilfsmittelverzeichnis",
+    "estimated_duration_s": 6,
+    "tone": "direkt, freundlich, empowernd, du-Form",
+    "disclaimer": "Keine Rechts- oder medizinische Beratung."
+  }}
+]'''
+    
     chunk_instructions = ""
     if chunk_index is not None and total_chunks is not None:
         chunk_instructions = (
-            f"CHUNKING: Du arbeitest in Durchlauf {chunk_index} von {total_chunks}. "
-            f"Liefere GENAU {desired_topics} Outputs in diesem Durchlauf. "
-            "Stelle sicher, dass alle Regeln aus PROMPT_1 weiterhin gelten."
+            f"\n\n⚠️ CRITICAL REQUIREMENTS:\n"
+            f"- Batch {chunk_index} of {total_chunks}: Generate EXACTLY {desired_topics} items\n"
+            f"- framework MUST be EXACTLY one of: \"PAL\", \"Testimonial\", or \"Transformation\" (no other values allowed)\n"
+            f"- script MUST be ≤20 words (count carefully!)\n"
+            f"- estimated_duration_s = CEIL(word_count/2.6) - calculate precisely\n"
+            f"- ALL fields required: topic, framework, sources (1-2 items), script, source_summary (35-80 words), estimated_duration_s, tone, disclaimer\n\n"
+            f"EXAMPLE OUTPUT FORMAT:\n{example_json}\n\n"
+            f"Return ONLY the JSON array. NO markdown fences (no ```json), NO explanations, NO extra text."
         )
     else:
-        chunk_instructions = f"Liefere GENAU {desired_topics} Outputs."
+        chunk_instructions = (
+            f"\n\n⚠️ CRITICAL REQUIREMENTS:\n"
+            f"- Generate EXACTLY {desired_topics} items\n"
+            f"- framework MUST be EXACTLY one of: \"PAL\", \"Testimonial\", or \"Transformation\" (no other values allowed)\n"
+            f"- script MUST be ≤20 words (count carefully!)\n"
+            f"- estimated_duration_s = CEIL(word_count/2.6) - calculate precisely\n"
+            f"- ALL fields required: topic, framework, sources (1-2 items), script, source_summary (35-80 words), estimated_duration_s, tone, disclaimer\n\n"
+            f"EXAMPLE OUTPUT FORMAT:\n{example_json}\n\n"
+            f"Return ONLY the JSON array. NO markdown fences (no ```json), NO explanations, NO extra text."
+        )
     return dedent(
-        f"""{PROMPT_1_CORE}\n\nBRAND_KONTEXT: Du arbeitest f\u00fcr die Marke "{brand}". Post-Typ: {post_type_context}.\nDer:die Creator:in filmt im deutschen Alltag, Sprache: deutsch, Zielgruppe: Rollstuhlnutzer:innen.\n{chunk_instructions}\n"""
+        f"""{PROMPT_1_CORE}\n\nBRAND_KONTEXT: Du arbeitest f\u00fcr die Marke "{brand}". Post-Typ: {post_type_context}.\nDer:die Creator:in filmt im deutschen Alltag, Sprache: deutsch, Zielgruppe: Rollstuhlnutzer:innen.{chunk_instructions}\n"""
     )
 
 
