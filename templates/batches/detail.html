@@ -339,6 +339,96 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- Video Generation Status (S5_PROMPTS_BUILT and beyond) -->
+                    {% if batch.state in ['S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_prompt_json %}
+                    <div class="mt-6 border-t border-gray-200 pt-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="text-sm font-medium text-gray-700">Video Generation</span>
+                                    {% if post.video_status == 'completed' %}
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                        ✓ Completed
+                                    </span>
+                                    {% elif post.video_status == 'processing' %}
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                                        ⏳ Processing
+                                    </span>
+                                    {% elif post.video_status == 'submitted' %}
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
+                                        ⏳ Submitted
+                                    </span>
+                                    {% elif post.video_status == 'failed' %}
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                                        ✗ Failed
+                                    </span>
+                                    {% else %}
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+                                        ○ Pending
+                                    </span>
+                                    {% endif %}
+                                </div>
+                                
+                                {% if post.video_url %}
+                                <div class="mt-3">
+                                    <video 
+                                        controls 
+                                        class="w-full max-w-xs rounded-lg border border-gray-300"
+                                        poster="{{ post.video_metadata.thumbnail_url if post.video_metadata and post.video_metadata.thumbnail_url else '' }}"
+                                    >
+                                        <source src="{{ post.video_url }}" type="video/mp4">
+                                        Your browser does not support the video tag.
+                                    </video>
+                                    <div class="mt-2 flex items-center gap-2">
+                                        <a 
+                                            href="{{ post.video_url }}" 
+                                            target="_blank" 
+                                            class="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
+                                        >
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                                            </svg>
+                                            Open in new tab
+                                        </a>
+                                        {% if post.video_metadata and post.video_metadata.size_bytes %}
+                                        <span class="text-xs text-gray-500">
+                                            {{ (post.video_metadata.size_bytes / 1024 / 1024) | round(2) }} MB
+                                        </span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% elif post.video_status in ['submitted', 'processing'] %}
+                                <div class="mt-2 text-sm text-gray-600">
+                                    <p>Video is being generated. This typically takes 2-3 minutes.</p>
+                                    <p class="text-xs text-gray-500 mt-1">Operation ID: {{ post.video_operation_id }}</p>
+                                </div>
+                                {% elif post.video_status == 'failed' %}
+                                <div class="mt-2 text-sm text-red-600">
+                                    <p>Video generation failed. Please try again.</p>
+                                    {% if post.video_metadata and post.video_metadata.error %}
+                                    <p class="text-xs text-red-500 mt-1">Error: {{ post.video_metadata.error }}</p>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
+                            
+                            {% if batch.state == 'S5_PROMPTS_BUILT' and post.video_status in ['pending', 'failed'] %}
+                            <div>
+                                <button
+                                    hx-post="/videos/{{ post.id }}/generate"
+                                    hx-vals='js:{provider: "veo_3_1", format: "9:16"}'
+                                    hx-swap="none"
+                                    hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                    class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition"
+                                >
+                                    Generate Video
+                                </button>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>

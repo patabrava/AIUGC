@@ -14,9 +14,11 @@ Deterministic UGC video production system for TikTok and Instagram.
 
 ### Setup
 
-1. **Clone and install dependencies:**
+1. **Create & activate Python 3.11 virtualenv, install deps:**
 ```bash
-python3 -m pip install -r requirements.txt
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 2. **Configure environment:**
@@ -25,12 +27,17 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
-3. **Run the application:**
+3. **Run the application (FastAPI + worker):**
 ```bash
-python3 -m app.main
+source .venv/bin/activate
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# in another shell (same venv) for the background poller
+source .venv/bin/activate
+python workers/video_poller.py
 ```
 
-The application will start on `http://localhost:8000`
+The API will be available at `http://127.0.0.1:8000`
 
 ### Environment Variables
 

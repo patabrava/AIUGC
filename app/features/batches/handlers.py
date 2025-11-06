@@ -455,14 +455,21 @@ async def approve_scripts_endpoint(batch_id: str, request: Request):
                 details={"current_state": batch["state"], "required_state": BatchState.S2_SEEDED.value}
             )
 
-        if current_state != BatchState.S2_SEEDED:
+        if current_state == BatchState.S4_SCRIPTED:
+            logger.info(
+                "scripts_already_approved",
+                batch_id=batch_id,
+                current_state=current_state.value
+            )
+            updated_batch = batch
+        elif current_state != BatchState.S2_SEEDED:
             raise FlowForgeException(
                 code="state_transition_error",
                 message=f"Cannot approve scripts from state {batch['state']}",
                 details={"current_state": batch["state"], "required_state": BatchState.S2_SEEDED.value}
             )
-
-        updated_batch = update_batch_state(batch_id, BatchState.S4_SCRIPTED)
+        else:
+            updated_batch = update_batch_state(batch_id, BatchState.S4_SCRIPTED)
 
         logger.info(
             "scripts_approved",

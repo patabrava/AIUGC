@@ -107,7 +107,7 @@ Monitoring: Health endpoint + structured logs
 S1_SETUP → S2_SEEDED
   Trigger: POST /batches (create batch)
   Actions: Initialize posts, fetch topics, run Strict Extractor
-  Guards: Brand selected, valid post_type_counts
+  Guards: Campaign selected, valid post_type_counts
 
 S2_SEEDED → S4_SCRIPTED
   Trigger: PUT /batches/{id}/approve-scripts

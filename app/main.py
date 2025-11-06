@@ -18,6 +18,7 @@ from app.adapters.supabase_client import get_supabase
 from app.features.batches.handlers import router as batches_router
 from app.features.topics.handlers import router as topics_router
 from app.features.posts.handlers import router as posts_router
+from app.features.videos.handlers import router as videos_router
 
 
 # Configure logging on module import
@@ -143,6 +144,7 @@ async def health_check():
 app.include_router(batches_router)
 app.include_router(topics_router)
 app.include_router(posts_router)
+app.include_router(videos_router)
 
 
 # Root endpoint

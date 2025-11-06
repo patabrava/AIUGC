@@ -34,8 +34,14 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4.1-mini", description="Default OpenAI model identifier")
     
     # Video Providers
-    veo_api_key: str = Field(default="", description="Veo 3.1 API key")
-    sora_api_key: str = Field(default="", description="Sora 2 API key")
+    google_ai_api_key: str = Field(..., description="Google AI API key for VEO 3.1")
+    google_ai_project_id: Optional[str] = Field(None, description="Google Cloud project ID")
+    # sora_api_key: str = Field(default="", description="Sora 2 API key")  # Future
+    
+    # Video Storage
+    imagekit_public_key: str = Field(..., description="ImageKit public key")
+    imagekit_private_key: str = Field(..., description="ImageKit private key")
+    imagekit_url_endpoint: str = Field(..., description="ImageKit URL endpoint")
     
     # Social Media
     tiktok_client_key: str = Field(default="", description="TikTok client key")

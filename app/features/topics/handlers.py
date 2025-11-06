@@ -172,6 +172,64 @@ async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
                 }
                 all_generated_topics.append(dedup_topic_record)
 
+    if not created_posts:
+        logger.warning(
+            "topic_discovery_no_posts_after_dedup",
+            batch_id=batch_id,
+            requested_counts=post_type_counts
+        )
+
+        lifestyle_topics = generate_lifestyle_topics(
+            brand=batch["brand"],
+            count=1
+        )
+
+        if lifestyle_topics:
+            fallback_topic = lifestyle_topics[0]
+            dialog_scripts = fallback_topic["dialog_scripts"]
+
+            add_topic_to_registry(
+                title=fallback_topic["title"],
+                rotation=fallback_topic["rotation"],
+                cta=fallback_topic["cta"]
+            )
+
+            seed_payload = build_lifestyle_seed_payload(
+                topic_data=fallback_topic,
+                dialog_scripts=dialog_scripts
+            )
+
+            fallback_post = create_post_for_batch(
+                batch_id=batch_id,
+                post_type="lifestyle",
+                topic_title=fallback_topic["title"],
+                topic_rotation=fallback_topic["rotation"],
+                topic_cta=fallback_topic["cta"],
+                spoken_duration=float(fallback_topic["spoken_duration"]),
+                seed_data=seed_payload
+            )
+
+            created_posts.append(fallback_post)
+            dedup_topic_record = {
+                "title": fallback_topic["title"],
+                "rotation": fallback_topic["rotation"],
+                "cta": fallback_topic["cta"],
+                "spoken_duration": float(fallback_topic["spoken_duration"]),
+            }
+            all_generated_topics.append(dedup_topic_record)
+
+            logger.info(
+                "topic_discovery_fallback_created",
+                batch_id=batch_id,
+                topic_title=fallback_topic["title"],
+                post_type="lifestyle"
+            )
+        else:
+            logger.error(
+                "topic_discovery_fallback_failed",
+                batch_id=batch_id
+            )
+
     updated_batch = update_batch_state(batch_id, BatchState.S2_SEEDED)
 
     logger.info(
