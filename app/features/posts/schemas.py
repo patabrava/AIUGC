@@ -24,7 +24,7 @@ class VideoPrompt(BaseModel):
         description="Character definition"
     )
     action: str = Field(
-        default="Action: Sits in a wheelchair in the bedroom, hair still slightly damp, looking directly into camera with a neutral, friendly expression that turns to a gentle smile. Maintains steady head-and-shoulders orientation; uses small, natural hand gestures and subtle upper-body nods while speaking. Remains seated and centered for a single continuous take with no cuts or alternate angles.",
+        default="Action: Sits in a wheelchair in the bedroom, hair still slightly damp, looking directly into camera with a neutral, friendly expression that turns to a gentle smile. Maintains steady head-and-shoulders orientation; uses small, natural hand gestures and subtle upper-body nods while speaking. Remains seated and centered for a single continuous take with no cuts or alternate angles and says: ENTER SCRIPT FROM POST HERE",
         description="Action description"
     )
     style: str = Field(

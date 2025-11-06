@@ -5,9 +5,15 @@ Per Canon Phase 3: S4_SCRIPTED → S5_PROMPTS_BUILT
 """
 
 from typing import Dict, Any
+
 from app.features.posts.schemas import VideoPrompt, AudioSection
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
+
+
+AUDIO_DIALOGUE_DIRECTIVE = (
+    "Audio: Recorded through modern smartphone mic — clear, front-facing voice with intimate presence and a soft, short living-room bloom (RT60 ≈ 0.3–0.4 s). Camera 20–30 cm from mouth, mic unobstructed. HVAC/appliances off; noise floor ≤ –55 dBFS with a faint, even room-tone bed. No music, one-take natural pacing."
+)
 
 logger = get_logger(__name__)
 
@@ -47,14 +53,18 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
             normalized_dialogue = normalized_dialogue[: -len(suffix)].rstrip()
             break
 
-    formatted_dialogue = f"Dialogue; {normalized_dialogue} ( stiller Halt)"
+    script_line = f"{normalized_dialogue} (stiller Halt)"
 
-    # Build audio config with dialogue
-    audio_section = AudioSection(dialogue=formatted_dialogue)
+    # Build audio config with distinct dialogue guidance to avoid duplication with capture notes
+    audio_section = AudioSection(dialogue=AUDIO_DIALOGUE_DIRECTIVE)
 
     # Assemble complete prompt using template defaults
-    video_prompt = VideoPrompt(audio=audio_section)
-    
+    base_prompt = VideoPrompt(audio=audio_section)
+    action_template = base_prompt.model_fields["action"].default  # type: ignore[attr-defined]
+    action_value = action_template.replace("ENTER SCRIPT FROM POST HERE", script_line)
+
+    video_prompt = base_prompt.model_copy(update={"action": action_value})
+
     # Convert to dict for storage and API submission
     prompt_dict = video_prompt.model_dump()
     
