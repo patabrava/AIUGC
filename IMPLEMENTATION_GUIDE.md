@@ -51,37 +51,32 @@ flow-forge/
 - PROMPT 1 (Research) + PROMPT 2 (Community Ads)
 - Deduplication (Jaccard, registry)
 - Vercel Cron endpoint
-- **Testscript:** Run agent, verify 10 unique topics, check registry
-
-### Phase 3: Script Management
-- Strict Extractor agent
-- Script validation (German, ≤32 words, ending, no hyphens)
 - Manual script override UI
-- Approve scripts → advance to S4
-- **Testscript:** Auto-generate scripts, edit manually, approve, verify state
+- Approve scripts → advance S2 to S4
+- **Testscript:** Run agent, verify 10 unique topics, check registry, approve scripts
 
-### Phase 4: Video Generation
+### Phase 3: Video Generation
 - ActionSynth + VeoPrompt agents
 - Provider adapters (Veo 3.1, Sora 2)
 - Video polling worker (Railway)
 - Upload to Supabase Storage
 - **Testscript:** Select provider, generate video, verify asset URL
 
-### Phase 5: QA Review
+### Phase 4: QA Review
 - Auto QA checks (duration, resolution, audio)
 - Manual review UI (video player, notes, checkboxes)
 - Approve → advance to S7
 - Regenerate paths (S6→S4 or S6→S5)
 - **Testscript:** Review video, approve, verify all posts qa_pass
 
-### Phase 6: Publish Planning
+### Phase 5: Publish Planning
 - Engagement Scheduler agent (time suggestions)
 - Publish plan UI (table, inline editing, datetime picker)
 - Validation (future times, spacing, overlaps)
 - Dispatch to TikTok/Instagram APIs
 - **Testscript:** Create plan, suggest times, confirm, verify platform IDs
 
-### Phase 7: Dashboard Polish
+### Phase 6: Dashboard Polish
 - Batch summary (S8_COMPLETE)
 - Duplicate/archive actions
 - Responsive design

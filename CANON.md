@@ -111,8 +111,8 @@ S1_SETUP → S2_SEEDED
 
 S2_SEEDED → S4_SCRIPTED
   Trigger: PUT /batches/{id}/approve-scripts
-  Actions: Validate all scripts
-  Guards: All posts have approved scripts
+  Actions: Manual script approval (optional override)
+  Guards: Batch in S2_SEEDED state
 
 S4_SCRIPTED → S5_PROMPTS_BUILT
   Trigger: POST /posts/{id}/build-prompt

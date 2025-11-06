@@ -94,16 +94,11 @@
 - Jaccard similarity deduplication
 - Topic registry integration
 - Vercel Cron endpoint (`/api/cron/topic-discovery`)
+- Manual script override UI
+- Script approval flow (S2_SEEDED → S4_SCRIPTED)
 - **Goal:** Generate 10 unique topics per batch
 
-### Phase 3: Script Management
-- Strict Extractor agent
-- German script validation (≤32 words, ending, no hyphens)
-- Manual script override UI
-- Script approval flow
-- Transition S2_SEEDED → S4_SCRIPTED
-
-### Phase 4: Video Generation
+### Phase 3: Video Generation
 - ActionSynth agent (action/scene generation)
 - VeoPrompt agent (video prompt JSON)
 - Veo 3.1 provider adapter
@@ -112,14 +107,14 @@
 - Supabase Storage upload
 - Transition S4_SCRIPTED → S5_PROMPTS_BUILT → S6_QA
 
-### Phase 5: QA Review
+### Phase 4: QA Review
 - Auto QA checks (duration, resolution, audio)
 - Manual review UI with video player
 - QA notes and checkboxes
 - Approve → S7_PUBLISH_PLAN
 - Regenerate paths (S6→S4 or S6→S5)
 
-### Phase 6: Publish Planning
+### Phase 5: Publish Planning
 - Engagement Scheduler agent
 - Publish plan UI (table, datetime picker)
 - Time validation (future, spacing, overlaps)
@@ -127,7 +122,7 @@
 - Instagram Graph API integration
 - Transition S7_PUBLISH_PLAN → S8_COMPLETE
 
-### Phase 7: Dashboard Polish
+### Phase 6: Dashboard Polish
 - Batch summary views
 - Duplicate/archive actions
 - Responsive design
@@ -179,11 +174,11 @@
 
 ## Next Steps
 
-1. Implement Phase 2: Topic Discovery
-2. Create LLM agent adapters (OpenAI/Anthropic)
-3. Implement deduplication logic
-4. Create Vercel Cron endpoint
-5. Run Phase 2 testscript
+1. Complete Phase 2: Topic Discovery
+2. Test manual script override UI
+3. Test approve-scripts endpoint (S2 → S4 transition)
+4. Run Phase 2 testscript with new approval flow
+5. Proceed to Phase 3: Video Generation
 
 ---
 

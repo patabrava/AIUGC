@@ -421,3 +421,46 @@ async def archive_batch_endpoint(batch_id: str, request: ArchiveBatchRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to archive batch"
         )
+
+
+@router.put("/{batch_id}/approve-scripts", response_model=SuccessResponse)
+async def approve_scripts_endpoint(batch_id: str, request: Request):
+    """
+    Approve scripts and advance batch from S2_SEEDED to S4_SCRIPTED.
+    Per Canon § 3.2: Manual script approval (optional override).
+    """
+    try:
+        batch = get_batch_by_id(batch_id)
+        
+        if batch["state"] != "S2_SEEDED":
+            raise FlowForgeException(
+                code="state_transition_error",
+                message=f"Cannot approve scripts from state {batch['state']}",
+                details={"current_state": batch["state"], "required_state": "S2_SEEDED"}
+            )
+        
+        updated_batch = update_batch_state(batch_id, "S4_SCRIPTED")
+        
+        logger.info(
+            "scripts_approved",
+            batch_id=batch_id,
+            previous_state="S2_SEEDED",
+            new_state="S4_SCRIPTED"
+        )
+        
+        if _wants_html(request):
+            return templates.TemplateResponse(
+                "batches/partials/approval_success.html",
+                {"request": request, "message": "Scripts approved! Batch advanced to S4_SCRIPTED."}
+            )
+        
+        return SuccessResponse(data=BatchResponse(**updated_batch))
+    
+    except FlowForgeException:
+        raise
+    except Exception as e:
+        logger.exception("approve_scripts_failed", batch_id=batch_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to approve scripts"
+        )
