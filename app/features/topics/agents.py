@@ -311,28 +311,50 @@ def build_seed_payload(
     strict_seed: SeedData,
     dialog_scripts: DialogScripts,
 ) -> Dict[str, Any]:
-    return {
+    # Normalize sources to a single entry
+    primary_source = item.sources[0] if item.sources else None
+
+    # Map framework to script category and select single script
+    framework_map = {
+        "PAL": "problem",
+        "Testimonial": "testimonial",
+        "Transformation": "transformation",
+    }
+    script_map = {
+        "problem": dialog_scripts.problem_agitate_solution[0],
+        "testimonial": dialog_scripts.testimonial[0],
+        "transformation": dialog_scripts.transformation[0],
+    }
+
+    script_category = framework_map.get(item.framework, "problem")
+    selected_script = script_map[script_category]
+
+    # Strict seed facts: take first fact as primary summary
+    seed_payload = strict_seed.model_dump()
+    facts = seed_payload.get("facts", [])
+    primary_fact = facts[0] if facts else None
+
+    payload: Dict[str, Any] = {
         "script": item.script,
         "framework": item.framework,
         "tone": item.tone,
         "estimated_duration_s": item.estimated_duration_s,
         "cta": extract_soft_cta(item.script),
-        "sources": [
-            {
-                "title": source.title,
-                "url": str(source.url)  # Convert HttpUrl to string
-            }
-            for source in item.sources
-        ],
-        "source_summary": item.source_summary,
-        "dialog_scripts": {
-            "problem": dialog_scripts.problem_agitate_solution,
-            "testimonial": dialog_scripts.testimonial,
-            "transformation": dialog_scripts.transformation,
-        },
-        "strict_seed": strict_seed.model_dump(),
+        "dialog_script": selected_script,
+        "script_category": script_category,
+        "strict_fact": primary_fact,
+        "strict_seed": seed_payload,
         "disclaimer": item.disclaimer,
     }
+
+    if primary_source:
+        payload["source"] = {
+            "title": primary_source.title,
+            "url": str(primary_source.url),
+            "summary": item.source_summary,
+        }
+
+    return payload
 
 
 def generate_topics_research_agent(

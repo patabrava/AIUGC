@@ -6,7 +6,7 @@ Per Constitution § V: Locality & Vertical Slices
 
 import asyncio
 import json
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.templating import Jinja2Templates
@@ -145,6 +145,75 @@ async def _run_discover_topics(batch_id: str) -> None:
         )
 
 
+def _normalize_seed_data(seed_data: Any) -> Dict[str, Any]:
+    if isinstance(seed_data, str):
+        try:
+            seed_data = json.loads(seed_data)
+        except json.JSONDecodeError:
+            logger.warning("seed_data_json_decode_failed", raw_value=seed_data)
+            return {}
+
+    if not isinstance(seed_data, dict):
+        return {}
+
+    data = dict(seed_data)
+
+    framework = data.get("framework")
+    framework_map = {
+        "PAL": "problem",
+        "Testimonial": "testimonial",
+        "Transformation": "transformation",
+    }
+    script_category = data.get("script_category") or framework_map.get(framework, "problem")
+    data["script_category"] = script_category
+
+    dialog_script = data.get("dialog_script")
+    if not dialog_script:
+        scripts = data.get("dialog_scripts") or {}
+        category_key_map = {
+            "problem": "problem_agitate_solution",
+            "testimonial": "testimonial",
+            "transformation": "transformation",
+        }
+        bucket_key = category_key_map.get(script_category)
+        if bucket_key and isinstance(scripts, dict):
+            bucket = scripts.get(bucket_key)
+            if isinstance(bucket, list) and bucket:
+                dialog_script = bucket[0]
+    if dialog_script:
+        data["dialog_script"] = dialog_script
+
+    source = data.get("source")
+    sources = data.get("sources")
+    if not source and isinstance(sources, list) and sources:
+        first_source = sources[0]
+        if isinstance(first_source, dict):
+            source = {
+                "title": first_source.get("title"),
+                "url": first_source.get("url"),
+            }
+            summary = data.get("source_summary")
+            if summary:
+                source["summary"] = summary
+            data["source"] = source
+
+    strict_seed = data.get("strict_seed")
+    if isinstance(strict_seed, str):
+        try:
+            strict_seed = json.loads(strict_seed)
+        except json.JSONDecodeError:
+            logger.warning("strict_seed_json_decode_failed")
+            strict_seed = None
+        data["strict_seed"] = strict_seed
+
+    if isinstance(strict_seed, dict):
+        facts = strict_seed.get("facts")
+        if isinstance(facts, list) and facts:
+            data.setdefault("strict_fact", facts[0])
+
+    return data
+
+
 @router.get("", response_model=SuccessResponse)
 async def list_batches_endpoint(
     request: Request,
@@ -208,19 +277,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         
         posts_list = []
         for p in posts_data:
-            seed_data = p.get("seed_data")
-            if isinstance(seed_data, str):
-                try:
-                    seed_data = json.loads(seed_data)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "post_seed_data_parse_failed",
-                        post_id=p.get("id"),
-                        batch_id=batch_id
-                    )
-                    seed_data = {
-                        "raw": p["seed_data"]
-                    }
+            normalized_seed = _normalize_seed_data(p.get("seed_data"))
 
             spoken_duration = p.get("spoken_duration")
             try:
@@ -242,7 +299,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     topic_cta=p["topic_cta"],
                     spoken_duration=spoken_duration_value,
                     state=p.get("state"),
-                    seed_data=seed_data,
+                    seed_data=normalized_seed,
                     created_at=p.get("created_at"),
                     updated_at=p.get("updated_at"),
                 )
