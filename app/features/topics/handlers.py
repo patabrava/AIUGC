@@ -5,7 +5,7 @@ Per Constitution § V: Locality & Vertical Slices
 """
 
 from fastapi import APIRouter, HTTPException, status, Header
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from app.features.topics.schemas import (
     DiscoverTopicsRequest,

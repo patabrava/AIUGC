@@ -3,7 +3,7 @@
 {% block title %}Batches - FLOW-FORGE{% endblock %}
 
 {% block content %}
-<div x-data="{ showCreateModal: false }">
+<div x-data="{ showCreateModal: false, batchProgress: {} }">
     <!-- Header -->
     <div class="flex justify-between items-center mb-6">
         <div>
@@ -19,6 +19,34 @@
             </svg>
             New Batch
         </button>
+    </div>
+
+    <!-- Progress Banner -->
+    <div
+        x-show="Object.keys(batchProgress).length > 0"
+        x-transition
+        class="mb-4 rounded-lg border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900"
+    >
+        <template x-for="(info, id) in batchProgress" :key="id">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <p class="font-semibold" x-text="`Seeding batch: ${info.brand}`"></p>
+                    <p class="mt-1 text-purple-800">
+                        <span>Generating topics and posts…</span>
+                        <template x-if="info.posts > 0">
+                            <span x-text="` ${info.posts}/${info.expected} posts ready.`"></span>
+                        </template>
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    class="text-xs font-medium text-purple-700 hover:text-purple-900"
+                    @click="delete batchProgress[id]"
+                >
+                    Dismiss
+                </button>
+            </div>
+        </template>
     </div>
 
     <!-- Filters -->
@@ -53,7 +81,18 @@
         hx-trigger="load"
         hx-target="#batches-list"
         hx-swap="innerHTML"
+        hx-indicator="#list-loading"
+        class="relative"
     >
+        <div id="list-loading" class="htmx-indicator absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
+            <div class="text-center">
+                <svg class="animate-spin h-8 w-8 text-purple-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="mt-2 text-sm text-gray-600">Loading batches...</p>
+            </div>
+        </div>
         {% include "batches/partials/list_content.html" %}
     </div>
 
@@ -70,6 +109,20 @@
             <form 
                 hx-post="/batches" 
                 hx-target="#batches-list"
+                hx-indicator="#batch-spinner"
+                @htmx:before-request="
+                    const brand = $event.detail.elt.querySelector('[name=brand]').value;
+                    const value = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.value\']').value) || 0;
+                    const lifestyle = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.lifestyle\']').value) || 0;
+                    const product = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.product\']').value) || 0;
+                    const tempId = 'temp-' + Date.now();
+                    batchProgress[tempId] = {
+                        brand: brand,
+                        expected: value + lifestyle + product,
+                        posts: 0
+                    };
+                    console.log('Batch creation started:', brand);
+                "
                 @htmx:after-request="showCreateModal = false"
             >
                 <div class="space-y-4">
@@ -133,9 +186,13 @@
                     </button>
                     <button 
                         type="submit"
-                        class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+                        class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 inline-flex items-center"
                     >
-                        Create Batch
+                        <span>Create Batch</span>
+                        <svg id="batch-spinner" class="htmx-indicator ml-2 animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
                     </button>
                 </div>
             </form>
@@ -145,5 +202,138 @@
 
 <style>
     [x-cloak] { display: none !important; }
+    .htmx-indicator {
+        display: none;
+    }
+    .htmx-request .htmx-indicator,
+    .htmx-request.htmx-indicator {
+        display: inline-block;
+    }
 </style>
+
+<script>
+    (function () {
+        const POLL_INTERVAL_MS = 5000;
+        const pollers = new Map();
+
+        function getComponent() {
+            const root = document.querySelector('[x-data]');
+            return root ? window.Alpine && window.Alpine.$data(root) : null;
+        }
+
+        async function fetchStatus(batchId) {
+            const response = await fetch(`/batches/${batchId}/status`, {
+                headers: { "Accept": "application/json" },
+            });
+
+            if (!response.ok) {
+                throw new Error(`Status fetch failed: ${response.status}`);
+            }
+
+            return response.json();
+        }
+
+        function refreshBatchList() {
+            if (window.htmx) {
+                window.htmx.ajax('GET', '/batches', {
+                    target: '#batches-list',
+                    swap: 'innerHTML',
+                });
+            } else {
+                window.location.reload();
+            }
+        }
+
+        function updateBanner(batchId, brand, expected, posts = 0) {
+            const component = getComponent();
+            if (!component) {
+                return;
+            }
+
+            component.batchProgress = component.batchProgress || {};
+            component.batchProgress[batchId] = {
+                brand,
+                expected,
+                posts,
+            };
+        }
+
+        function clearBanner(batchId) {
+            const component = getComponent();
+            if (!component || !component.batchProgress) {
+                return;
+            }
+            delete component.batchProgress[batchId];
+        }
+
+        function startPolling(batchId, expectedPosts, brand) {
+            if (pollers.has(batchId)) {
+                return;
+            }
+
+            const poller = window.setInterval(async () => {
+                try {
+                    const payload = await fetchStatus(batchId);
+                    if (!payload.ok) {
+                        return;
+                    }
+                    const data = payload.data || {};
+                    const postsReady = typeof expectedPosts === 'number' && data.posts_count >= expectedPosts;
+                    const stateAdvanced = data.state && data.state !== 'S1_SETUP';
+
+                    updateBanner(batchId, brand, expectedPosts, data.posts_count || 0);
+
+                    if (postsReady || stateAdvanced) {
+                        window.clearInterval(poller);
+                        pollers.delete(batchId);
+                        clearBanner(batchId);
+                        refreshBatchList();
+                    }
+                } catch (error) {
+                    console.error('Polling error for batch', batchId, error);
+                }
+            }, POLL_INTERVAL_MS);
+
+            pollers.set(batchId, poller);
+        }
+
+        document.body.addEventListener('batch_created', (event) => {
+            console.log('batch_created event received:', event.detail);
+            const detail = event.detail || {};
+            const batchId = detail.batch_id;
+            const expectedPosts = detail.expected_posts;
+            const brand = detail.brand || 'Unbenannte Marke';
+
+            if (!batchId) {
+                console.error('No batch_id in event detail');
+                return;
+            }
+
+            console.log('Starting polling for batch:', batchId);
+            updateBanner(batchId, brand, Number(expectedPosts), 0);
+            startPolling(batchId, Number(expectedPosts), brand);
+        });
+        
+        // Also listen on htmx:afterSwap to catch HX-Trigger events
+        document.body.addEventListener('htmx:afterSwap', (event) => {
+            console.log('htmx:afterSwap triggered');
+            const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
+            if (triggerHeader) {
+                console.log('HX-Trigger header found:', triggerHeader);
+                try {
+                    const triggers = JSON.parse(triggerHeader);
+                    if (triggers.batch_created) {
+                        console.log('Manually firing batch_created event');
+                        const customEvent = new CustomEvent('batch_created', {
+                            detail: triggers.batch_created
+                        });
+                        document.body.dispatchEvent(customEvent);
+                    }
+                } catch (e) {
+                    console.error('Failed to parse HX-Trigger:', e);
+                }
+            }
+        });
+    })();
+</script>
 {% endblock %}

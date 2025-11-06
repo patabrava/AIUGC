@@ -18,7 +18,8 @@ from app.features.batches.schemas import (
     BatchDetailResponse,
     AdvanceStateRequest,
     DuplicateBatchRequest,
-    ArchiveBatchRequest
+    ArchiveBatchRequest,
+    PostDetail,
 )
 from app.features.batches.queries import (
     create_batch,
@@ -98,7 +99,15 @@ async def create_batch_endpoint(request: Request):
                 "total": total,
                 "filters": {"archived": None, "limit": 50, "offset": 0}
             }
-            return templates.TemplateResponse("batches/partials/list_content.html", context)
+            response = templates.TemplateResponse("batches/partials/list_content.html", context)
+            response.headers["HX-Trigger"] = json.dumps({
+                "batch_created": {
+                    "batch_id": batch["id"],
+                    "brand": batch["brand"],
+                    "expected_posts": payload.post_type_counts.total,
+                }
+            })
+            return response
 
         return SuccessResponse(data=BatchResponse(**batch))
     
@@ -191,10 +200,55 @@ async def get_batch_endpoint(request: Request, batch_id: str):
     Get batch by ID with posts summary.
     """
     try:
+        from app.features.topics.queries import get_posts_by_batch
+        
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
+        posts_data = get_posts_by_batch(batch_id)
+        
+        posts_list = []
+        for p in posts_data:
+            seed_data = p.get("seed_data")
+            if isinstance(seed_data, str):
+                try:
+                    seed_data = json.loads(seed_data)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "post_seed_data_parse_failed",
+                        post_id=p.get("id"),
+                        batch_id=batch_id
+                    )
+                    seed_data = {
+                        "raw": p["seed_data"]
+                    }
 
-        batch_detail = {**batch, **posts_summary}
+            spoken_duration = p.get("spoken_duration")
+            try:
+                spoken_duration_value = float(spoken_duration) if spoken_duration is not None else 0.0
+            except (TypeError, ValueError):
+                logger.warning(
+                    "post_spoken_duration_parse_failed",
+                    post_id=p.get("id"),
+                    value=spoken_duration
+                )
+                spoken_duration_value = 0.0
+
+            posts_list.append(
+                PostDetail(
+                    id=p["id"],
+                    post_type=p["post_type"],
+                    topic_title=p["topic_title"],
+                    topic_rotation=p["topic_rotation"],
+                    topic_cta=p["topic_cta"],
+                    spoken_duration=spoken_duration_value,
+                    state=p.get("state"),
+                    seed_data=seed_data,
+                    created_at=p.get("created_at"),
+                    updated_at=p.get("updated_at"),
+                )
+            )
+
+        batch_detail = {**batch, **posts_summary, "posts": posts_list}
 
         if _wants_html(request):
             batch_model = BatchDetailResponse(**batch_detail)
@@ -213,6 +267,33 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get batch"
+        )
+
+
+@router.get("/{batch_id}/status", response_model=SuccessResponse)
+async def get_batch_status(batch_id: str):
+    """Return lightweight status payload for polling newly created batches."""
+    try:
+        batch = get_batch_by_id(batch_id)
+        posts_summary = get_batch_posts_summary(batch_id)
+
+        payload = {
+            "id": batch["id"],
+            "state": batch["state"],
+            "posts_count": posts_summary["posts_count"],
+            "posts_by_state": posts_summary["posts_by_state"],
+            "updated_at": batch["updated_at"],
+        }
+
+        return SuccessResponse(data=payload)
+
+    except FlowForgeException:
+        raise
+    except Exception as e:
+        logger.exception("get_batch_status_failed", batch_id=batch_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch batch status"
         )
 
 
