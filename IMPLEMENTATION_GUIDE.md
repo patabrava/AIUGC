@@ -55,28 +55,43 @@ flow-forge/
 - Approve scripts → advance S2 to S4
 - **Testscript:** Run agent, verify 10 unique topics, check registry, approve scripts
 
-### Phase 3: Video Generation
+### Phase 3: Prompt Build Workspace (S5_PROMPTS_BUILT)
+- Prompt configurator experience bridging approved scripts to validated prompt JSON
+- **Layout:**
+  - Left rail (sticky): script text, product thumbnail, provider selector with per-post persistence
+  - Center canvas: tabbed cards for Scene, Camera, Character, Additional Styling; each tab presents curated presets plus Alpine.js-powered advanced sliders
+  - Right rail: live preview summary JSON (read-only), validator status badges, correlation ID reference
+- **Flow:**
+  - Scene selection first with themed hero cards (studio, lifestyle, ambient) and descriptive visuals
+  - Camera settings next with stacked chips for angle, movement, lens, including quick combos (e.g., “Smooth dolly + 35mm lens”)
+  - Character selection with portrait cards (age, style, energy) plus "No talent" option for product-only shots
+  - Additional styling tab for lighting, mood, and overlay presets; sliders surface granular controls when toggled to advanced
+  - Each interaction triggers htmx requests for server-validated partials; no client-side rewriting without server confirmation
+- **Validation:** Pydantic models enforce prompt structure and selection completeness before enabling "Save Prompt"
+- **Testscript:** Open prompt builder, traverse tabs, capture layout screenshot, verify preview JSON updates after each selection and validation badge transitions to green
+
+### Phase 4: Video Generation
 - ActionSynth + VeoPrompt agents
 - Provider adapters (Veo 3.1, Sora 2)
 - Video polling worker (Railway)
 - Upload to Supabase Storage
 - **Testscript:** Select provider, generate video, verify asset URL
 
-### Phase 4: QA Review
+### Phase 5: QA Review
 - Auto QA checks (duration, resolution, audio)
 - Manual review UI (video player, notes, checkboxes)
 - Approve → advance to S7
 - Regenerate paths (S6→S4 or S6→S5)
 - **Testscript:** Review video, approve, verify all posts qa_pass
 
-### Phase 5: Publish Planning
+### Phase 6: Publish Planning
 - Engagement Scheduler agent (time suggestions)
 - Publish plan UI (table, inline editing, datetime picker)
 - Validation (future times, spacing, overlaps)
 - Dispatch to TikTok/Instagram APIs
 - **Testscript:** Create plan, suggest times, confirm, verify platform IDs
 
-### Phase 6: Dashboard Polish
+### Phase 7: Dashboard Polish
 - Batch summary (S8_COMPLETE)
 - Duplicate/archive actions
 - Responsive design

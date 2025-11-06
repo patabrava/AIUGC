@@ -1,7 +1,7 @@
 # FLOW-FORGE Implementation Progress
 
-**Last Updated:** 2025-11-05  
-**Current Phase:** Phase 2 Complete
+**Last Updated:** 2025-11-06  
+**Current Phase:** Phase 3 Complete
 
 ---
 
@@ -86,26 +86,88 @@
 
 ---
 
+## ✅ Phase 2: Topic Discovery (COMPLETE)
+
+### Implemented
+- **PROMPT 1 (Research) Agent**
+  - Research agent with chunking support
+  - Round-robin topic validation
+  - 8-second script normalization
+  - Jaccard similarity deduplication
+
+- **PROMPT 2 (Dialog Generation) Agent**
+  - OpenAI chat completions for dialogue generation
+  - Three script categories: Problem/Agitate/Solution, Testimonial, Transformation
+  - 5 scripts per category (configurable)
+  - Auto-trimming to respect time limits
+
+- **Topic Registry & Deduplication**
+  - Bigram Jaccard similarity (threshold 0.3)
+  - Topic registry table with dedup checks
+  - Lifecycle post types support
+
+- **State Transitions**
+  - S1_SETUP → S2_SEEDED (automatic on batch creation)
+  - S2_SEEDED → S4_SCRIPTED (manual script approval)
+  - Manual script override UI in batch detail view
+
+### Testscript Results
+✅ **Phase 2 tests passed**
+- Topics generated with deduplication
+- Dialog scripts created for all frameworks
+- Script approval flow working
+- Seed data properly stored in posts
+
+---
+
+## ✅ Phase 3: Video Prompt Assembly (COMPLETE)
+
+### Implemented
+- **Video Prompt Template**
+  - Complete template with all required fields per user specification
+  - Character definition, action, style, camera positioning
+  - Focus/lens effects, composition, ambiance
+  - Audio config with dialogue, SFX, ambient
+  - Style modifiers (dos/don'ts)
+  - Tech specs (720x1280, 30fps, 9:16, single take)
+
+- **Pydantic Schemas**
+  - `VideoPrompt` - Complete prompt structure validation
+  - `AudioConfig` - Audio configuration with dialogue
+  - `TechSpecs` - Technical specifications
+  - Full schema validation at boundaries
+
+- **Prompt Assembly Logic**
+  - `build_video_prompt_from_seed()` - Inserts Phase 2 dialogue into template
+  - `validate_video_prompt()` - Schema validation
+  - Simple, deterministic assembly (no LLM agents needed)
+
+- **API Endpoints**
+  - `POST /posts/{id}/build-prompt` - Build and store video prompt
+  - Transitions post to S5_PROMPTS_BUILT ready state
+  - Returns complete prompt JSON for video generation
+
+- **Database**
+  - Added `video_prompt_json` JSONB column to posts table
+  - Index for faster queries on posts with prompts built
+  - Migration 003 applied
+
+### Testscript
+- `testscript_phase3.py` - End-to-end prompt assembly test
+- Verifies dialogue insertion from Phase 2
+- Validates all required template fields
+- Confirms persistence to database
+
+---
+
 ## 📋 Remaining Phases
 
-### Phase 2: Topic Discovery
-- PROMPT 1 (Research) agent
-- PROMPT 2 (Community Ads) agent
-- Jaccard similarity deduplication
-- Topic registry integration
-- Vercel Cron endpoint (`/api/cron/topic-discovery`)
-- Manual script override UI
-- Script approval flow (S2_SEEDED → S4_SCRIPTED)
-- **Goal:** Generate 10 unique topics per batch
-
-### Phase 3: Video Generation
-- ActionSynth agent (action/scene generation)
-- VeoPrompt agent (video prompt JSON)
-- Veo 3.1 provider adapter
-- Sora 2 provider adapter
+### Phase 4: Video Generation
+- Provider adapters (Veo 3.1, Sora 2 API integration)
+- Video submission using assembled prompts
 - Video polling worker (Railway)
 - Supabase Storage upload
-- Transition S4_SCRIPTED → S5_PROMPTS_BUILT → S6_QA
+- Transition S5_PROMPTS_BUILT → S6_QA
 
 ### Phase 4: QA Review
 - Auto QA checks (duration, resolution, audio)

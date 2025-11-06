@@ -80,6 +80,7 @@ class PostDetail(BaseModel):
     spoken_duration: float
     state: Optional[str] = None
     seed_data: Optional[Dict[str, Any]] = None
+    video_prompt_json: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
 from app.features.batches.schemas import (
@@ -288,6 +289,17 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         for p in posts_data:
             normalized_seed = _normalize_seed_data(p.get("seed_data"))
 
+            video_prompt = p.get("video_prompt_json")
+            if isinstance(video_prompt, str):
+                try:
+                    video_prompt = json.loads(video_prompt)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "video_prompt_json_decode_failed",
+                        post_id=p.get("id")
+                    )
+                    video_prompt = None
+
             spoken_duration = p.get("spoken_duration")
             try:
                 spoken_duration_value = float(spoken_duration) if spoken_duration is not None else 0.0
@@ -309,6 +321,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     spoken_duration=spoken_duration_value,
                     state=p.get("state"),
                     seed_data=normalized_seed,
+                    video_prompt_json=video_prompt,
                     created_at=p.get("created_at"),
                     updated_at=p.get("updated_at"),
                 )
@@ -459,10 +472,10 @@ async def approve_scripts_endpoint(batch_id: str, request: Request):
         )
         
         if _wants_html(request):
-            return templates.TemplateResponse(
-                "batches/partials/approval_success.html",
-                {"request": request, "message": "Scripts approved! Batch advanced to S4_SCRIPTED."}
-            )
+            redirect_url = f"/batches/{batch_id}#prompt-dashboard"
+            response = PlainTextResponse("", status_code=status.HTTP_204_NO_CONTENT)
+            response.headers["HX-Redirect"] = redirect_url
+            return response
         
         return SuccessResponse(data=BatchResponse(**updated_batch))
     

@@ -1,7 +1,7 @@
 # FLOW-FORGE UGC System
 
 **Version:** 1.0  
-**Date:** 2025-11-05
+**Date:** 2025-11-06
 
 Deterministic UGC video production system for TikTok and Instagram.
 
@@ -81,6 +81,12 @@ python3 tests/testscript_phase0.py
 
 # Phase 1: Batch Management
 python3 tests/testscript_phase1.py
+
+# Phase 2: Topic Discovery
+python3 tests/testscript_phase2.py
+
+# Phase 3: Video Prompt Assembly
+python3 tests/testscript_phase3.py
 ```
 
 ### Debug Mode
@@ -134,6 +140,8 @@ Each feature phase has a whole-app testscript that:
 - **CANON.md** - Complete system specification
 - **IMPLEMENTATION_GUIDE.md** - Phase-by-phase implementation guide
 - **constitution.md** - Development rules and best practices
+- **docs/PHASE3_SETUP.md** - Phase 3 setup and usage guide
+- **PROGRESS.md** - Current implementation status
 
 ## License
 
