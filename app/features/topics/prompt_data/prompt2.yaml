@@ -22,16 +22,16 @@ length_rules: |
   Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
 
 headings: |
-  Gib die Ausgabe exakt in drei Abschnitten zurück – jeder Abschnitt eine Überschrift und darunter GENAU 5 VERSCHIEDENE SKRIPTE (5 separate Zeilen):
+  Gib die Ausgabe exakt in drei Abschnitten zurück – jeder Abschnitt eine Überschrift und darunter GENAU {scripts_per_category} VERSCHIEDENE SKRIPTE (jeweils separate Zeilen):
     Problem-Agitieren-Lösung Ads
     Testimonial Ads
     Transformations-Geschichten Ads
   
-  Jedes der 5 Skripte pro Abschnitt ist ein eigenständiger Dialog mit Hook + Einblick + Frage.
+  Jedes Skript pro Abschnitt ist ein eigenständiger Dialog mit Hook + Einblick + Frage.
 
 closing: |
   Antworte ausschließlich mit den Überschriften und Textzeilen, kein zusätzlicher Text oder Erklärungen.
-  WICHTIG: Schreibe GENAU 5 verschiedene Skripte unter jeder Überschrift (insgesamt 15 Zeilen).
+  WICHTIG: Schreibe GENAU {scripts_per_category} verschiedene Skripte unter jeder Überschrift (insgesamt {total_scripts} Zeilen).
 
 
 NOTE: The output cannot be in markdown format whatsoever

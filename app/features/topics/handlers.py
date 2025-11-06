@@ -18,6 +18,8 @@ from app.features.topics.agents import (
     extract_seed_strict_extractor,
     convert_research_item_to_topic,
     build_seed_payload,
+    generate_lifestyle_topics,
+    build_lifestyle_seed_payload,
 )
 from app.features.topics.deduplication import deduplicate_topics
 from app.features.topics.queries import (
@@ -63,71 +65,112 @@ async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
             count=count
         )
 
-        items = generate_topics_research_agent(
-            brand=batch["brand"],
-            post_type=post_type,
-            count=count * 2
-        )
-
-        topic_data = [convert_research_item_to_topic(item) for item in items]
-        topics_dict = [
-            {
-                "title": data.title,
-                "rotation": data.rotation,
-                "cta": data.cta,
-                "spoken_duration": float(data.spoken_duration),
-                "__item_index": idx,
-            }
-            for idx, data in enumerate(topic_data)
-        ]
-
-        unique_topics = deduplicate_topics(
-            topics_dict,
-            existing_topics + all_generated_topics,
-            threshold=0.35
-        )
-
-        selected_topics = unique_topics[:count]
-
-        for topic_dict in selected_topics:
-            original_item = items[topic_dict["__item_index"]]
-            topic_model = topic_data[topic_dict["__item_index"]]
-            dialog_scripts = generate_dialog_scripts(
+        # PIPELINE DISPATCH: lifestyle uses PROMPT_2 only, value/product use PROMPT_1+PROMPT_2
+        if post_type == "lifestyle":
+            # Lifestyle pipeline: PROMPT_2 direct (no web research)
+            lifestyle_topics = generate_lifestyle_topics(
                 brand=batch["brand"],
-                topic=original_item.topic
-            )
-            seed = extract_seed_strict_extractor(topic_model)
-
-            seed_payload = build_seed_payload(
-                original_item,
-                strict_seed=seed,
-                dialog_scripts=dialog_scripts
+                count=count
             )
 
-            add_topic_to_registry(
-                title=topic_model.title,
-                rotation=topic_model.rotation,
-                cta=topic_model.cta
-            )
+            for topic_data in lifestyle_topics:
+                dialog_scripts = topic_data["dialog_scripts"]
+                seed_payload = build_lifestyle_seed_payload(
+                    topic_data=topic_data,
+                    dialog_scripts=dialog_scripts
+                )
 
-            post = create_post_for_batch(
-                batch_id=batch_id,
+                add_topic_to_registry(
+                    title=topic_data["title"],
+                    rotation=topic_data["rotation"],
+                    cta=topic_data["cta"]
+                )
+
+                post = create_post_for_batch(
+                    batch_id=batch_id,
+                    post_type=post_type,
+                    topic_title=topic_data["title"],
+                    topic_rotation=topic_data["rotation"],
+                    topic_cta=topic_data["cta"],
+                    spoken_duration=float(topic_data["spoken_duration"]),
+                    seed_data=seed_payload
+                )
+
+                created_posts.append(post)
+                dedup_topic_record: Dict[str, Any] = {
+                    "title": topic_data["title"],
+                    "rotation": topic_data["rotation"],
+                    "cta": topic_data["cta"],
+                    "spoken_duration": float(topic_data["spoken_duration"]),
+                }
+                all_generated_topics.append(dedup_topic_record)
+        else:
+            # Value/Product pipeline: PROMPT_1 research + PROMPT_2 scripts
+            items = generate_topics_research_agent(
+                brand=batch["brand"],
                 post_type=post_type,
-                topic_title=topic_model.title,
-                topic_rotation=topic_model.rotation,
-                topic_cta=topic_model.cta,
-                spoken_duration=float(topic_model.spoken_duration),
-                seed_data=seed_payload
+                count=count * 2
             )
 
-            created_posts.append(post)
-            dedup_topic_record: Dict[str, Any] = {
-                "title": topic_model.title,
-                "rotation": topic_model.rotation,
-                "cta": topic_model.cta,
-                "spoken_duration": float(topic_model.spoken_duration),
-            }
-            all_generated_topics.append(dedup_topic_record)
+            topic_data = [convert_research_item_to_topic(item) for item in items]
+            topics_dict = [
+                {
+                    "title": data.title,
+                    "rotation": data.rotation,
+                    "cta": data.cta,
+                    "spoken_duration": float(data.spoken_duration),
+                    "__item_index": idx,
+                }
+                for idx, data in enumerate(topic_data)
+            ]
+
+            unique_topics = deduplicate_topics(
+                topics_dict,
+                existing_topics + all_generated_topics,
+                threshold=0.35
+            )
+
+            selected_topics = unique_topics[:count]
+
+            for topic_dict in selected_topics:
+                original_item = items[topic_dict["__item_index"]]
+                topic_model = topic_data[topic_dict["__item_index"]]
+                dialog_scripts = generate_dialog_scripts(
+                    brand=batch["brand"],
+                    topic=original_item.topic
+                )
+                seed = extract_seed_strict_extractor(topic_model)
+
+                seed_payload = build_seed_payload(
+                    original_item,
+                    strict_seed=seed,
+                    dialog_scripts=dialog_scripts
+                )
+
+                add_topic_to_registry(
+                    title=topic_model.title,
+                    rotation=topic_model.rotation,
+                    cta=topic_model.cta
+                )
+
+                post = create_post_for_batch(
+                    batch_id=batch_id,
+                    post_type=post_type,
+                    topic_title=topic_model.title,
+                    topic_rotation=topic_model.rotation,
+                    topic_cta=topic_model.cta,
+                    spoken_duration=float(topic_model.spoken_duration),
+                    seed_data=seed_payload
+                )
+
+                created_posts.append(post)
+                dedup_topic_record: Dict[str, Any] = {
+                    "title": topic_model.title,
+                    "rotation": topic_model.rotation,
+                    "cta": topic_model.cta,
+                    "spoken_duration": float(topic_model.spoken_duration),
+                }
+                all_generated_topics.append(dedup_topic_record)
 
     updated_batch = update_batch_state(batch_id, BatchState.S2_SEEDED)
 

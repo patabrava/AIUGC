@@ -33,6 +33,7 @@ from app.features.batches.queries import (
 from app.features.topics.handlers import discover_topics_for_batch
 from app.core.errors import FlowForgeException, SuccessResponse
 from app.core.logging import get_logger
+from app.core.states import BatchState
 
 logger = get_logger(__name__)
 
@@ -432,20 +433,29 @@ async def approve_scripts_endpoint(batch_id: str, request: Request):
     try:
         batch = get_batch_by_id(batch_id)
         
-        if batch["state"] != "S2_SEEDED":
+        try:
+            current_state = BatchState(batch["state"])
+        except ValueError:
+            raise FlowForgeException(
+                code="state_transition_error",
+                message=f"Unknown batch state {batch['state']}",
+                details={"current_state": batch["state"], "required_state": BatchState.S2_SEEDED.value}
+            )
+
+        if current_state != BatchState.S2_SEEDED:
             raise FlowForgeException(
                 code="state_transition_error",
                 message=f"Cannot approve scripts from state {batch['state']}",
-                details={"current_state": batch["state"], "required_state": "S2_SEEDED"}
+                details={"current_state": batch["state"], "required_state": BatchState.S2_SEEDED.value}
             )
-        
-        updated_batch = update_batch_state(batch_id, "S4_SCRIPTED")
-        
+
+        updated_batch = update_batch_state(batch_id, BatchState.S4_SCRIPTED)
+
         logger.info(
             "scripts_approved",
             batch_id=batch_id,
-            previous_state="S2_SEEDED",
-            new_state="S4_SCRIPTED"
+            previous_state=current_state.value,
+            new_state=BatchState.S4_SCRIPTED.value
         )
         
         if _wants_html(request):

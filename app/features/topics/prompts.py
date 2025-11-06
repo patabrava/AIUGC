@@ -57,10 +57,16 @@ def build_prompt1(
     )
 
 
-def build_prompt2(brand: str, topic: str) -> str:
+def build_prompt2(brand: str, topic: str, scripts_per_category: int = 5) -> str:
     """Render PROMPT_2 with brand/topic context from YAML template."""
     data = _load_prompt("prompt2")
-    format_kwargs = {"brand": brand, "topic": topic}
+    total_scripts = scripts_per_category * 3
+    format_kwargs = {
+        "brand": brand,
+        "topic": topic,
+        "scripts_per_category": scripts_per_category,
+        "total_scripts": total_scripts,
+    }
 
     return _join_sections(
         data.get("core", "").format(**format_kwargs),

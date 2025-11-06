@@ -245,7 +245,8 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
     return batch
 
 
-def parse_prompt2_response(raw: str) -> DialogScripts:
+def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts:
+    max_per_category = max(1, min(5, max_per_category))
     def normalize_heading(line: str) -> str:
         cleaned = line.strip()
         cleaned = re.sub(r"^#+\s*", "", cleaned)
@@ -253,7 +254,18 @@ def parse_prompt2_response(raw: str) -> DialogScripts:
         cleaned = cleaned.strip().strip("*").strip()
         return cleaned.lower()
 
-    # Split by double newlines to get script blocks, then filter empty
+    def looks_like_script_start(line: str) -> bool:
+        """Heuristic to detect the beginning of a new script sentence."""
+        patterns = [
+            r"^Kennst du",
+            r"^Schon erlebt",
+            r"^Ich dachte",
+            r"^Früher",
+            r"^Ich hab",
+            r"^Mein",
+        ]
+        return any(re.match(pattern, line, re.IGNORECASE) for pattern in patterns)
+
     lines = raw.splitlines()
     headers = {
         "problem-agitieren-lösung ads": "problem_agitate_solution",
@@ -288,6 +300,19 @@ def parse_prompt2_response(raw: str) -> DialogScripts:
                 current_script_lines = []
             continue
         
+        # Check if this is a new script starting without a blank line separator
+        if (
+            current
+            and current_script_lines
+            and len(current_script_lines) >= 2
+            and looks_like_script_start(stripped)
+        ):
+            # Save the previous script
+            script = " ".join(current_script_lines)
+            buckets[current].append(script)
+            current_script_lines = [stripped]
+            continue
+        
         # Accumulate script lines
         if current is None:
             raise ValidationError(
@@ -300,6 +325,17 @@ def parse_prompt2_response(raw: str) -> DialogScripts:
     if current and current_script_lines:
         script = " ".join(current_script_lines)
         buckets[current].append(script)
+
+    # Enforce maximum scripts per category before validation
+    for category, scripts in buckets.items():
+        if len(scripts) > max_per_category:
+            logger.warning(
+                "dialog_scripts_truncated",
+                category=category,
+                original_count=len(scripts),
+                truncated_to=max_per_category,
+            )
+            buckets[category] = scripts[:max_per_category]
 
     try:
         return DialogScripts(**buckets)
@@ -335,10 +371,11 @@ def build_seed_payload(
         "Testimonial": "testimonial",
         "Transformation": "transformation",
     }
+    default_script = dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else item.script
     script_map = {
-        "problem": dialog_scripts.problem_agitate_solution[0],
-        "testimonial": dialog_scripts.testimonial[0],
-        "transformation": dialog_scripts.transformation[0],
+        "problem": dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else default_script,
+        "testimonial": dialog_scripts.testimonial[0] if dialog_scripts.testimonial else default_script,
+        "transformation": dialog_scripts.transformation[0] if dialog_scripts.transformation else default_script,
     }
 
     script_category = framework_map.get(item.framework, "problem")
@@ -550,10 +587,11 @@ def _generate_prompt1_chunk(
     )
 
 
-def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
+def generate_dialog_scripts(brand: str, topic: str, scripts_required: int = 5) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
+    scripts_required = max(1, min(5, scripts_required))
     llm = get_llm_client()
-    prompt = build_prompt2(brand=brand, topic=topic)
+    prompt = build_prompt2(brand=brand, topic=topic, scripts_per_category=scripts_required)
 
     for attempt in range(3):
         response = llm.generate_chat(
@@ -562,13 +600,27 @@ def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
             max_tokens=900,
         )
         try:
-            scripts = parse_prompt2_response(response)
+            scripts = parse_prompt2_response(response, max_per_category=scripts_required)
+            if (
+                len(scripts.problem_agitate_solution) < scripts_required
+                or len(scripts.testimonial) < scripts_required
+                or len(scripts.transformation) < scripts_required
+            ):
+                raise ValidationError(
+                    message="PROMPT_2 returned fewer scripts than required",
+                    details={"required": scripts_required}
+                )
+            trimmed = DialogScripts(
+                problem_agitate_solution=scripts.problem_agitate_solution[:scripts_required],
+                testimonial=scripts.testimonial[:scripts_required],
+                transformation=scripts.transformation[:scripts_required],
+            )
             logger.info(
                 "dialog_scripts_success",
                 brand=brand,
                 topic=topic
             )
-            return scripts
+            return trimmed
         except ValidationError as exc:
             logger.warning(
                 "dialog_scripts_retry",
@@ -588,6 +640,111 @@ def generate_dialog_scripts(brand: str, topic: str) -> DialogScripts:
         last_response=response[:1000] if 'response' in locals() else None
     )
     raise ValidationError(message="Unable to produce dialog scripts", details={})
+
+
+def generate_lifestyle_topics(brand: str, count: int = 1) -> List[Dict[str, Any]]:
+    """
+    Generate lifestyle topics using PROMPT_2 directly (no web research).
+    Returns list of topic dicts with dialog scripts and metadata.
+    """
+    lifestyle_topic_templates = [
+        "Rollstuhl-Alltag – Tipps & Tricks",
+        "Barrierefreiheit im Alltag erleben",
+        "Community-Erfahrungen teilen",
+        "Freizeit mit Rollstuhl genießen",
+        "Alltägliche Herausforderungen meistern",
+    ]
+    
+    results = []
+    for i in range(count):
+        topic_template = lifestyle_topic_templates[i % len(lifestyle_topic_templates)]
+        
+        # Generate dialog scripts for this lifestyle topic
+        dialog_scripts = generate_dialog_scripts(
+            brand=brand,
+            topic=topic_template,
+            scripts_required=1
+        )
+        
+        # Use first script from problem_agitate_solution as the main content
+        main_script = dialog_scripts.problem_agitate_solution[0]
+        cta = extract_soft_cta(main_script)
+        rotation = strip_cta_from_script(main_script, cta)
+        
+        # Calculate duration
+        word_count = len(main_script.split())
+        duration = max(1, math.ceil(word_count / 2.6))
+        
+        topic_data = {
+            "title": topic_template,
+            "rotation": rotation,
+            "cta": cta,
+            "spoken_duration": duration,
+            "dialog_scripts": dialog_scripts,
+            "framework": "PAL",  # Default framework for lifestyle
+        }
+        
+        results.append(topic_data)
+        
+        logger.info(
+            "lifestyle_topic_generated",
+            brand=brand,
+            title=topic_template,
+            scripts_count=1
+        )
+    
+    return results
+
+
+def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: DialogScripts) -> Dict[str, Any]:
+    """
+    Build seed payload for lifestyle posts (no sources required).
+    """
+    # Select script based on framework
+    framework_map = {
+        "PAL": "problem",
+        "Testimonial": "testimonial",
+        "Transformation": "transformation",
+    }
+    
+    default_script = dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else topic_data["rotation"]
+    script_map = {
+        "problem": dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else default_script,
+        "testimonial": dialog_scripts.testimonial[0] if dialog_scripts.testimonial else default_script,
+        "transformation": dialog_scripts.transformation[0] if dialog_scripts.transformation else default_script,
+    }
+    
+    script_category = framework_map.get(topic_data.get("framework", "PAL"), "problem")
+    selected_script = script_map[script_category]
+    
+    # Create minimal seed with community-focused facts
+    seed_payload = {
+        "facts": [f"Community-basiertes Thema: {topic_data['title']}"],
+        "source_context": "Lifestyle content - community experiences"
+    }
+    
+    payload: Dict[str, Any] = {
+        "script": topic_data["rotation"],
+        "framework": topic_data.get("framework", "PAL"),
+        "tone": "direkt, freundlich, empowernd, du-Form",
+        "estimated_duration_s": topic_data["spoken_duration"],
+        "cta": topic_data["cta"],
+        "dialog_script": selected_script,
+        "script_category": script_category,
+        "strict_fact": seed_payload["facts"][0],
+        "strict_seed": seed_payload,
+        "description": f"Lifestyle-Beitrag zu: {topic_data['title']}",
+        "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+    }
+    
+    # No sources for lifestyle posts
+    logger.info(
+        "lifestyle_seed_payload_built",
+        title=topic_data["title"],
+        has_sources=False
+    )
+    
+    return payload
 
 
 STRICT_EXTRACTOR_SYSTEM_PROMPT = """You are a strict fact extractor for a UGC video system.

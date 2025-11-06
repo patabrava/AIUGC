@@ -81,9 +81,9 @@ class ResearchAgentBatch(BaseModel):
 
 class DialogScripts(BaseModel):
     """Structured set of dialog scripts from PROMPT_2."""
-    problem_agitate_solution: List[str] = Field(..., min_length=5, max_length=5)
-    testimonial: List[str] = Field(..., min_length=5, max_length=5)
-    transformation: List[str] = Field(..., min_length=5, max_length=5)
+    problem_agitate_solution: List[str] = Field(..., min_length=1, max_length=5)
+    testimonial: List[str] = Field(..., min_length=1, max_length=5)
+    transformation: List[str] = Field(..., min_length=1, max_length=5)
 
 
 class TopicResponse(BaseModel):
