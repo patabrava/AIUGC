@@ -14,30 +14,63 @@ Deterministic UGC video production system for TikTok and Instagram.
 
 ### Setup
 
-1. **Create & activate Python 3.11 virtualenv, install deps:**
+1. **Verify Python 3.11 is available (install if missing):**
 ```bash
-python3.11 -m venv .venv
+/opt/homebrew/bin/python3.11 -V  # should print Python 3.11.x
+# if not installed, run: brew install python@3.11
+```
+
+2. **Create the local virtual environment (one time):**
+```bash
+/opt/homebrew/bin/python3.11 -m venv .venv
+```
+
+3. **Activate the virtual environment (run in every new shell):**
+```bash
 source .venv/bin/activate
+```
+> After activation your shell prompt will show `(.venv)`.
+
+4. **Install pinned dependencies:**
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-2. **Configure environment:**
+5. **Create and populate environment variables:**
 ```bash
 cp .env.example .env
-# Edit .env with your credentials
+# Open .env in your editor and fill in the required keys described below
 ```
 
-3. **Run the application (FastAPI + worker):**
+6. **Run the FastAPI server (keep this terminal open for logs):**
 ```bash
-source .venv/bin/activate
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+> If `uvicorn` is not found, reactivate the virtualenv (step 3) or call it explicitly via `.venv/bin/uvicorn`.
 
-# in another shell (same venv) for the background poller
+7. **(Optional) Run the video poller worker in a second shell:**
+```bash
 source .venv/bin/activate
 python workers/video_poller.py
 ```
 
-The API will be available at `http://127.0.0.1:8000`
+8. **View runtime logs:**
+* __In-terminal__: watch the shell running `uvicorn` for structured log lines (startup, requests, adapter calls).
+* __Saved to file (optional)__:
+  ```bash
+  uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload \
+    > uvicorn.log 2>&1
+  tail -f uvicorn.log
+  ```
+
+9. **Stop services cleanly:**
+```bash
+# In each terminal that is running a service
+Ctrl+C
+```
+
+The API will be available at `http://127.0.0.1:8000` while the server is running.
 
 ### Environment Variables
 

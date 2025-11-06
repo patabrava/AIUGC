@@ -34,11 +34,14 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
     Per Constitution § XII: Schema-first validation
     """
     # Extract dialogue from seed_data
-    dialogue = seed_data.get("dialog_script")
+    dialogue = seed_data.get("script")
+    dialogue_source = "seed_script"
+
     if not dialogue:
-        # Fallback to script field if dialog_script not present
-        dialogue = seed_data.get("script")
-    
+        # Fallback to dialog_script (PROMPT_2) if PROMPT_1 script missing
+        dialogue = seed_data.get("dialog_script")
+        dialogue_source = "dialog_script" if dialogue else None
+
     if not dialogue:
         raise ValidationError(
             message="Missing dialogue in seed_data. Post must have dialog_script or script.",
@@ -71,7 +74,8 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(
         "video_prompt_assembled",
         dialogue_length=len(dialogue),
-        dialogue_preview=dialogue[:50] + "..." if len(dialogue) > 50 else dialogue
+        dialogue_preview=dialogue[:50] + "..." if len(dialogue) > 50 else dialogue,
+        dialogue_source=dialogue_source,
     )
     
     return prompt_dict

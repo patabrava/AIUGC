@@ -171,7 +171,7 @@
                 </dl>
             </div>
         </div>
-        <form class="mt-6" action="/videos/batch/{{ batch.id }}/generate-all" method="post" hx-post="/videos/batch/{{ batch.id }}/generate-all" hx-swap="none" hx-headers='{"X-Correlation-ID": "batch_video_settings_{{ batch.id }}"}'>
+        <form class="mt-6" action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
             <div class="grid gap-6 md:grid-cols-3">
                 <label class="flex flex-col text-sm" for="provider-select">
                     <span class="text-gray-700 font-medium">Model Provider</span>
@@ -215,15 +215,36 @@
                 Duration preferences inform QA expectations. Canon §7.2 currently validates 8-second clips 
                 (±0.5s); alternate durations remain disabled until spec revision.
             </p>
-            <div class="mt-6 flex flex-wrap items-center gap-3">
-                <button
-                    type="submit"
-                    class="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+            <div class="mt-4" aria-live="polite" x-show="submitError || submitSuccess" x-cloak>
+                <div
+                    x-show="submitSuccess"
+                    class="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 flex items-center gap-2"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    Apply to batch generation
+                    <span x-text="`Submitted ${submitSuccess} prompt(s) to Veo 3.1.`"></span>
+                </div>
+                <div
+                    x-show="submitError"
+                    class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 flex items-center gap-2"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.455 19h13.09A2.455 2.455 0 0021 16.545V7.455A2.455 2.455 0 0018.545 5H5.455A2.455 2.455 0 003 7.455v9.09A2.455 2.455 0 005.455 19z" />
+                    </svg>
+                    <span x-text="submitError"></span>
+                </div>
+            </div>
+            <div class="mt-6 flex flex-wrap items-center gap-3">
+                <button
+                    type="submit"
+                    class="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                    :disabled="isSubmitting"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span x-text="isSubmitting ? 'Submitting…' : 'Apply to batch generation'"></span>
                 </button>
                 <button
                     type="button"
@@ -261,6 +282,42 @@
                         resolution: this.resolution
                     });
                 },
+                async submitBatch(event) {
+                    if (this.isSubmitting) {
+                        return;
+                    }
+                    this.isSubmitting = true;
+                    this.submitError = null;
+                    this.submitSuccess = null;
+                    try {
+                        const response = await fetch(`/videos/batch/{{ batch.id }}/generate-all`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Correlation-ID': `batch_video_settings_{{ batch.id }}`
+                            },
+                            body: JSON.stringify({
+                                provider: this.provider,
+                                aspect_ratio: this.aspectRatio,
+                                resolution: this.resolution
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            throw new Error(errorText || `Submission failed (${response.status})`);
+                        }
+
+                        const payload = await response.json();
+                        const submittedCount = payload?.data?.submitted_count ?? 0;
+                        this.submitSuccess = submittedCount;
+                        this.dispatchPreview();
+                    } catch (error) {
+                        this.submitError = error instanceof Error ? error.message : 'Submission failed';
+                    } finally {
+                        this.isSubmitting = false;
+                    }
+                },
                 init() {
                     this.$watch('aspectRatio', (value) => {
                         if (value === '16:9') {
@@ -269,7 +326,10 @@
                             this.resolution = '720p';
                         }
                     });
-                }
+                },
+                isSubmitting: false,
+                submitError: null,
+                submitSuccess: null
             };
         };
     </script>

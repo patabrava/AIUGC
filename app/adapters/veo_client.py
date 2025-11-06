@@ -95,7 +95,9 @@ class VeoClient:
                 correlation_id=correlation_id,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
-                prompt_length=len(prompt)
+                request_payload=payload,
+                prompt_length=len(prompt),
+                prompt_preview=prompt[:400]
             )
 
             response = self._http_client.post(
@@ -116,7 +118,10 @@ class VeoClient:
                     "veo_submission_http_error",
                     correlation_id=correlation_id,
                     status_code=exc.response.status_code,
-                    response_text=exc.response.text
+                    response_text=exc.response.text,
+                    request_payload=payload,
+                    aspect_ratio=aspect_ratio,
+                    resolution=resolution
                 )
                 raise
 
@@ -126,7 +131,10 @@ class VeoClient:
                 logger.error(
                     "veo_submission_parse_error",
                     correlation_id=correlation_id,
-                    response_text=response.text
+                    response_text=response.text,
+                    request_payload=payload,
+                    aspect_ratio=aspect_ratio,
+                    resolution=resolution
                 )
                 raise
             operation_name = data.get("name")
@@ -152,7 +160,10 @@ class VeoClient:
             logger.exception(
                 "veo_submission_failed",
                 correlation_id=correlation_id,
-                error=str(e)
+                error=str(e),
+                request_payload=payload if 'payload' in locals() else None,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution
             )
             raise
     
