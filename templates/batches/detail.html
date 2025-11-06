@@ -218,33 +218,101 @@
                             <div class="w-full md:w-64 bg-gray-50 border border-gray-200 rounded-lg p-4 flex flex-col gap-3">
                                 {% if post.video_prompt_json %}
                                 {% set prompt = post.video_prompt_json %}
-                                <div class="text-sm text-gray-700 space-y-2">
-                                    <p class="font-semibold text-gray-900">Prompt Snapshot</p>
-                                    <div>
-                                        <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Character</p>
-                                        <p class="mt-1 text-xs text-gray-700">{{ prompt.character or '—' }}</p>
+                                {% set prompt_audio = prompt.audio if prompt and prompt.audio else {} %}
+                                {% set prompt_sections = [
+                                    ('Character', prompt.character),
+                                    ('Action', prompt.action),
+                                    ('Scene', prompt.scene),
+                                    ('Cinematography', prompt.cinematography),
+                                    ('Universal Negatives', prompt.universal_negatives)
+                                ] %}
+                                <div x-data="{ expanded: false }" class="relative">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p class="font-semibold text-gray-900">Prompt Snapshot</p>
+                                        {% for title, value in prompt_sections %}
+                                        <div>
+                                            <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">{{ title }}</p>
+                                            <p class="mt-1 text-xs text-gray-700" style="display:-webkit-box;-webkit-line-clamp:3;line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">{{ value or '—' }}</p>
+                                        </div>
+                                        {% endfor %}
+                                        <div>
+                                            <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Audio</p>
+                                            <p class="mt-1 text-xs text-gray-700 italic" style="display:-webkit-box;-webkit-line-clamp:4;line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;">{{ (prompt_audio.dialogue if prompt_audio and prompt_audio.dialogue else '—') }}</p>
+                                            <p class="mt-1 text-xs text-gray-500" style="display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ (prompt_audio.capture if prompt_audio and prompt_audio.capture else '') }}</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Action</p>
-                                        <p class="mt-1 text-xs text-gray-700">{{ prompt.action or '—' }}</p>
+                                    <div class="flex flex-col gap-2 mt-4">
+                                        <button
+                                            hx-post="/posts/{{ post.id }}/build-prompt"
+                                            hx-trigger="click"
+                                            hx-swap="none"
+                                            hx-headers='{"X-Correlation-ID": "prompt_{{ post.id }}"}'
+                                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                            class="w-full inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm transition
+                                                bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                        >
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                            Regenerate Prompt
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="w-full inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition"
+                                            @click="expanded = true"
+                                        >
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"/></svg>
+                                            Maximize Prompt
+                                        </button>
                                     </div>
-                                    <div>
-                                        <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Scene</p>
-                                        <p class="mt-1 text-xs text-gray-700">{{ prompt.scene or '—' }}</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Cinematography</p>
-                                        <p class="mt-1 text-xs text-gray-700">{{ prompt.cinematography or '—' }}</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Audio</p>
-                                        {% set prompt_audio = prompt.audio if prompt and prompt.audio else None %}
-                                        <p class="mt-1 text-xs text-gray-700 italic">{{ (prompt_audio.dialogue if prompt_audio and prompt_audio.dialogue else '—') }}</p>
-                                        <p class="mt-1 text-xs text-gray-500">{{ (prompt_audio.capture if prompt_audio and prompt_audio.capture else '') }}</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Universal Negatives</p>
-                                        <p class="mt-1 text-xs text-gray-700">{{ prompt.universal_negatives or '—' }}</p>
+                                    <div
+                                        x-cloak
+                                        x-show="expanded"
+                                        x-transition.opacity
+                                        @keydown.escape.window="expanded = false"
+                                        class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6"
+                                        role="dialog"
+                                        aria-modal="true"
+                                        aria-label="Expanded video prompt"
+                                    >
+                                        <div class="absolute inset-0 bg-gray-900/75" aria-hidden="true" @click="expanded = false"></div>
+                                        <div class="relative z-10 w-full max-w-3xl bg-white rounded-xl shadow-2xl border border-gray-200 p-6">
+                                            <div class="flex items-start justify-between gap-4">
+                                                <div>
+                                                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">Prompt Details</p>
+                                                    <h5 class="mt-1 text-lg font-semibold text-gray-900">Video prompt for {{ post.topic_title }}</h5>
+                                                    <p class="mt-2 text-sm text-gray-500">Same structure, expanded for verification and copy.</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    class="inline-flex items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    @click="expanded = false"
+                                                    aria-label="Close expanded prompt"
+                                                >
+                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                </button>
+                                            </div>
+                                            <div class="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                                                {% for title, value in prompt_sections %}
+                                                <div>
+                                                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">{{ title }}</p>
+                                                    <p class="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{{ value or '—' }}</p>
+                                                </div>
+                                                {% endfor %}
+                                                <div>
+                                                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Audio</p>
+                                                    <p class="mt-1 text-sm text-gray-800 italic whitespace-pre-wrap">{{ (prompt_audio.dialogue if prompt_audio and prompt_audio.dialogue else '—') }}</p>
+                                                    <p class="mt-1 text-sm text-gray-600 whitespace-pre-wrap">{{ (prompt_audio.capture if prompt_audio and prompt_audio.capture else '') }}</p>
+                                                </div>
+                                            </div>
+                                            <div class="mt-4 flex justify-end">
+                                                <button
+                                                    type="button"
+                                                    class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                                    @click="expanded = false"
+                                                >
+                                                    Close
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 {% else %}
@@ -252,8 +320,7 @@
                                     <p class="font-semibold text-gray-900">Awaiting Prompt</p>
                                     <p class="mt-1 text-xs text-gray-600">Generate to create the Veo/Sora-ready template using the fixed character, camera, and audio specs.</p>
                                 </div>
-                                {% endif %}
-                                <div class="flex flex-col gap-2">
+                                <div class="flex flex-col gap-2 mt-4">
                                     <button
                                         hx-post="/posts/{{ post.id }}/build-prompt"
                                         hx-trigger="click"
@@ -261,16 +328,13 @@
                                         hx-headers='{"X-Correlation-ID": "prompt_{{ post.id }}"}'
                                         hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
                                         class="w-full inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm transition
-                                            {% if post.video_prompt_json %}
-                                                bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500
-                                            {% else %}
-                                                bg-purple-600 text-white hover:bg-purple-700 focus:ring-2 focus-ring-offset-2 focus:ring-purple-500
-                                            {% endif %}"
-                                        >
+                                            bg-purple-600 text-white hover:bg-purple-700 focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+                                    >
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                                        {% if post.video_prompt_json %}Regenerate Prompt{% else %}Generate Prompt{% endif %}
+                                        Generate Prompt
                                     </button>
                                 </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
