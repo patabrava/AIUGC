@@ -11,23 +11,38 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
+import httpx
 import yaml
 
 from pydantic import ValidationError as PydanticValidationError
 
 from app.adapters.llm_client import get_llm_client
 from app.features.topics.schemas import (
-    TopicData,
-    SeedData,
-    ResearchAgentBatch,
+    DiscoverTopicsRequest,
+    TopicListResponse,
+    TopicResponse,
     ResearchAgentItem,
+    ResearchAgentBatch,
+    TopicData,
     DialogScripts,
+    SeedData,
 )
 from app.features.topics.prompts import build_prompt1, build_prompt2
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
 
 logger = get_logger(__name__)
+
+
+def _validate_url_accessible(url: str, timeout: float = 5.0) -> bool:
+    """Check if URL is accessible via HEAD request."""
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            response = client.head(url)
+            return response.status_code < 400
+    except Exception as e:
+        logger.debug("url_validation_failed", url=url, error=str(e))
+        return False
 
 
 def extract_soft_cta(script: str) -> str:
@@ -334,6 +349,8 @@ def build_seed_payload(
     facts = seed_payload.get("facts", [])
     primary_fact = facts[0] if facts else None
 
+    source_summary = item.source_summary.strip() if item.source_summary else None
+
     payload: Dict[str, Any] = {
         "script": item.script,
         "framework": item.framework,
@@ -344,15 +361,50 @@ def build_seed_payload(
         "script_category": script_category,
         "strict_fact": primary_fact,
         "strict_seed": seed_payload,
+        "description": source_summary,
         "disclaimer": item.disclaimer,
     }
 
     if primary_source:
-        payload["source"] = {
-            "title": primary_source.title,
-            "url": str(primary_source.url),
-            "summary": item.source_summary,
-        }
+        source_url = str(primary_source.url)
+        
+        # Validate URL format
+        if not source_url.startswith(("http://", "https://")):
+            logger.warning(
+                "research_source_invalid_url_format",
+                title=primary_source.title,
+                url=source_url,
+                topic=item.topic,
+            )
+            # Still store it but log warning
+            payload["source"] = {
+                "title": primary_source.title,
+                "url": source_url,
+                "summary": source_summary,
+                "accessible": False,
+            }
+        else:
+            # Validate URL is accessible
+            is_accessible = _validate_url_accessible(source_url)
+            if not is_accessible:
+                logger.warning(
+                    "research_source_url_not_accessible",
+                    title=primary_source.title,
+                    url=source_url,
+                    topic=item.topic,
+                )
+            
+            payload["source"] = {
+                "title": primary_source.title,
+                "url": source_url,
+                "summary": source_summary,
+                "accessible": is_accessible,
+            }
+    else:
+        logger.warning(
+            "research_source_missing",
+            topic=item.topic,
+        )
 
     return payload
 

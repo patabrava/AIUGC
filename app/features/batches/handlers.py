@@ -197,6 +197,14 @@ def _normalize_seed_data(seed_data: Any) -> Dict[str, Any]:
                 source["summary"] = summary
             data["source"] = source
 
+    if not data.get("description"):
+        summary = data.get("source_summary")
+        if summary:
+            data["description"] = summary
+
+    if data.get("source") and not data["source"].get("summary") and data.get("description"):
+        data["source"]["summary"] = data["description"]
+
     strict_seed = data.get("strict_seed")
     if isinstance(strict_seed, str):
         try:
