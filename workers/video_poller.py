@@ -268,6 +268,9 @@ def _store_completed_video(
         video_url=upload_result["url"],
         size_bytes=upload_result["size"]
     )
+    
+    # Check if all videos in batch are complete and transition to S6_QA
+    _check_and_transition_batch_to_qa(post_id, correlation_id)
 
 
 def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> None:
@@ -282,6 +285,95 @@ def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> No
         correlation_id=correlation_id,
         operation_id=operation_id
     )
+
+
+def _check_and_transition_batch_to_qa(post_id: str, correlation_id: str) -> None:
+    """
+    Check if all videos in batch are complete and transition to S6_QA.
+    Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition.
+    Per Constitution § VII: State Machine Discipline with explicit guards.
+    """
+    try:
+        supabase = get_supabase().client
+        
+        # Get batch_id from post
+        post_response = supabase.table("posts").select("batch_id").eq("id", post_id).execute()
+        if not post_response.data:
+            logger.warning("post_not_found_for_qa_check", post_id=post_id)
+            return
+        
+        batch_id = post_response.data[0]["batch_id"]
+        
+        # Get batch state
+        batch_response = supabase.table("batches").select("state").eq("id", batch_id).execute()
+        if not batch_response.data:
+            logger.warning("batch_not_found_for_qa_check", batch_id=batch_id)
+            return
+        
+        current_state = batch_response.data[0]["state"]
+        
+        # Only transition from S5_PROMPTS_BUILT
+        if current_state != "S5_PROMPTS_BUILT":
+            logger.debug(
+                "batch_not_in_prompts_built_state",
+                batch_id=batch_id,
+                current_state=current_state,
+                message="Skipping S6_QA transition check"
+            )
+            return
+        
+        # Get all posts in batch
+        posts_response = supabase.table("posts").select("id, video_status").eq("batch_id", batch_id).execute()
+        posts = posts_response.data
+        
+        if not posts:
+            logger.warning("no_posts_in_batch", batch_id=batch_id)
+            return
+        
+        # Check if all videos are completed
+        total_posts = len(posts)
+        completed_videos = sum(1 for p in posts if p.get("video_status") == "completed")
+        
+        logger.debug(
+            "batch_qa_transition_check",
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            total_posts=total_posts,
+            completed_videos=completed_videos
+        )
+        
+        if completed_videos == total_posts:
+            # All videos complete - transition to S6_QA
+            supabase.table("batches").update({
+                "state": "S6_QA"
+            }).eq("id", batch_id).execute()
+            
+            logger.info(
+                "batch_transitioned_to_qa",
+                batch_id=batch_id,
+                correlation_id=correlation_id,
+                previous_state="S5_PROMPTS_BUILT",
+                new_state="S6_QA",
+                total_posts=total_posts,
+                message="All videos completed - batch ready for QA review"
+            )
+        else:
+            logger.debug(
+                "batch_qa_transition_pending",
+                batch_id=batch_id,
+                correlation_id=correlation_id,
+                completed=completed_videos,
+                total=total_posts,
+                remaining=total_posts - completed_videos
+            )
+    
+    except Exception as e:
+        logger.exception(
+            "batch_qa_transition_check_failed",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            error=str(e)
+        )
 
 
 if __name__ == "__main__":

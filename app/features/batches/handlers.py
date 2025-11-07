@@ -300,6 +300,29 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     )
                     video_prompt = None
 
+            video_metadata = p.get("video_metadata")
+            if isinstance(video_metadata, str):
+                try:
+                    video_metadata = json.loads(video_metadata)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "video_metadata_json_decode_failed",
+                        post_id=p.get("id"),
+                        value=video_metadata
+                    )
+                    video_metadata = None
+
+            qa_auto_checks = p.get("qa_auto_checks")
+            if isinstance(qa_auto_checks, str):
+                try:
+                    qa_auto_checks = json.loads(qa_auto_checks)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "qa_auto_checks_json_decode_failed",
+                        post_id=p.get("id")
+                    )
+                    qa_auto_checks = None
+
             spoken_duration = p.get("spoken_duration")
             try:
                 spoken_duration_value = float(spoken_duration) if spoken_duration is not None else 0.0
@@ -322,6 +345,14 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     state=p.get("state"),
                     seed_data=normalized_seed,
                     video_prompt_json=video_prompt,
+                    video_status=p.get("video_status"),
+                    video_url=p.get("video_url"),
+                    video_metadata=video_metadata,
+                    video_operation_id=p.get("video_operation_id"),
+                    video_provider=p.get("video_provider"),
+                    qa_pass=p.get("qa_pass"),
+                    qa_notes=p.get("qa_notes"),
+                    qa_auto_checks=qa_auto_checks,
                     created_at=p.get("created_at"),
                     updated_at=p.get("updated_at"),
                 )
@@ -493,4 +524,87 @@ async def approve_scripts_endpoint(batch_id: str, request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to approve scripts"
+        )
+
+
+@router.put("/{batch_id}/advance-to-publish", response_model=SuccessResponse)
+async def advance_to_publish_endpoint(batch_id: str, request: Request):
+    """
+    Advance batch from S6_QA to S7_PUBLISH_PLAN.
+    Per Canon § 3.2: S6_QA → S7_PUBLISH_PLAN requires all posts qa_pass=true.
+    Per Constitution § VII: State Machine Discipline - explicit guards.
+    """
+    try:
+        from app.adapters.supabase_client import get_supabase
+        
+        batch = get_batch_by_id(batch_id)
+        
+        try:
+            current_state = BatchState(batch["state"])
+        except ValueError:
+            raise FlowForgeException(
+                code="state_transition_error",
+                message=f"Unknown batch state {batch['state']}",
+                details={"current_state": batch["state"], "required_state": BatchState.S6_QA.value}
+            )
+        
+        if current_state != BatchState.S6_QA:
+            raise FlowForgeException(
+                code="state_transition_error",
+                message=f"Cannot advance to publish from state {batch['state']}",
+                details={"current_state": batch["state"], "required_state": BatchState.S6_QA.value}
+            )
+        
+        # Guard: Verify all posts have qa_pass=true
+        supabase = get_supabase().client
+        posts_response = supabase.table("posts").select("id, qa_pass").eq("batch_id", batch_id).execute()
+        posts = posts_response.data
+        
+        if not posts:
+            raise FlowForgeException(
+                code="state_transition_error",
+                message="Cannot advance batch with no posts",
+                details={"batch_id": batch_id}
+            )
+        
+        posts_not_approved = [p["id"] for p in posts if p.get("qa_pass") is not True]
+        
+        if posts_not_approved:
+            raise FlowForgeException(
+                code="state_transition_error",
+                message=f"Cannot advance to publish. {len(posts_not_approved)} post(s) not approved.",
+                details={
+                    "batch_id": batch_id,
+                    "total_posts": len(posts),
+                    "approved_posts": len(posts) - len(posts_not_approved),
+                    "pending_posts": posts_not_approved[:5]  # Show first 5
+                }
+            )
+        
+        # All guards passed - advance state
+        updated_batch = update_batch_state(batch_id, BatchState.S7_PUBLISH_PLAN)
+        
+        logger.info(
+            "batch_advanced_to_publish",
+            batch_id=batch_id,
+            previous_state=current_state.value,
+            new_state=BatchState.S7_PUBLISH_PLAN.value,
+            total_posts=len(posts)
+        )
+        
+        if _wants_html(request):
+            redirect_url = f"/batches/{batch_id}"
+            response = PlainTextResponse("", status_code=status.HTTP_204_NO_CONTENT)
+            response.headers["HX-Redirect"] = redirect_url
+            return response
+        
+        return SuccessResponse(data=BatchResponse(**updated_batch))
+    
+    except FlowForgeException:
+        raise
+    except Exception as e:
+        logger.exception("advance_to_publish_failed", batch_id=batch_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to advance to publish"
         )

@@ -19,6 +19,7 @@ from app.features.batches.handlers import router as batches_router
 from app.features.topics.handlers import router as topics_router
 from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
+from app.features.qa.handlers import router as qa_router
 
 
 # Configure logging on module import
@@ -53,6 +54,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # Middleware for correlation IDs
@@ -145,6 +148,7 @@ app.include_router(batches_router)
 app.include_router(topics_router)
 app.include_router(posts_router)
 app.include_router(videos_router)
+app.include_router(qa_router)
 
 
 # Root endpoint

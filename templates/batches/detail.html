@@ -100,6 +100,37 @@
     </div>
     {% endif %}
 
+    {% if batch.state == 'S6_QA' %}
+    {% set qa_passed_count = (batch.posts | selectattr('qa_pass') | list | length) %}
+    {% set videos_ready_count = (batch.posts | selectattr('video_status', 'equalto', 'completed') | list | length) %}
+    <div id="qa-workflow" class="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-6 mb-6">
+        <div class="flex items-center justify-between">
+            <div class="flex-1">
+                <div class="flex items-center gap-3 mb-2">
+                    <h3 class="text-xl font-bold text-gray-900">Quality Assurance Review</h3>
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                        {{ qa_passed_count }}/{{ batch.posts | length }} Approved
+                    </span>
+                </div>
+                <p class="text-sm text-gray-700">
+                    Review each video for quality. Run auto-checks and approve manually when satisfied.
+                </p>
+            </div>
+            {% if qa_passed_count == batch.posts | length and batch.posts | length > 0 %}
+            <button
+                hx-put="/batches/{{ batch.id }}/advance-to-publish"
+                hx-confirm="All posts approved. Advance to Publish Planning?"
+                hx-swap="none"
+                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                class="px-6 py-3 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition shadow-sm"
+            >
+                Advance to Publish
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] %}
     <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6" x-data="videoSettingsComponent()">
         <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
@@ -556,6 +587,97 @@
                                         {% endif %}
                                     </div>
                                 </div>
+                                
+                                {% if batch.state == 'S6_QA' %}
+                                <div class="mt-4 border-t border-gray-200 pt-4">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <h5 class="text-sm font-semibold text-gray-900">Quality Assurance</h5>
+                                        {% if post.qa_pass %}
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                            ✓ Approved
+                                        </span>
+                                        {% else %}
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+                                            Pending Review
+                                        </span>
+                                        {% endif %}
+                                    </div>
+                                    
+                                    {% if post.qa_auto_checks %}
+                                    <div class="bg-gray-50 rounded-md p-3 mb-3">
+                                        <p class="text-xs font-semibold text-gray-600 mb-2">Auto Checks</p>
+                                        <div class="space-y-1 text-xs">
+                                            <div class="flex items-center gap-2">
+                                                {% if post.qa_auto_checks.duration_valid %}
+                                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                                {% else %}
+                                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                                {% endif %}
+                                                <span class="text-gray-700">Duration: {{ post.qa_auto_checks.duration_actual }}s (expected 8s ±0.5s)</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                {% if post.qa_auto_checks.resolution_valid %}
+                                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                                {% else %}
+                                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                                {% endif %}
+                                                <span class="text-gray-700">Resolution: {{ post.qa_auto_checks.resolution_actual }}</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                {% if post.qa_auto_checks.file_accessible %}
+                                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                                {% else %}
+                                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                                {% endif %}
+                                                <span class="text-gray-700">File accessible</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    {% if post.qa_notes %}
+                                    <div class="bg-blue-50 rounded-md p-3 mb-3">
+                                        <p class="text-xs font-semibold text-blue-900 mb-1">Review Notes</p>
+                                        <p class="text-xs text-blue-800">{{ post.qa_notes }}</p>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <div class="flex gap-2">
+                                        <button
+                                            hx-post="/qa/{{ post.id }}/auto-check"
+                                            hx-swap="none"
+                                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                            class="flex-1 inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition"
+                                        >
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+                                            Run Auto Check
+                                        </button>
+                                        {% if not post.qa_pass %}
+                                        <button
+                                            hx-put="/qa/{{ post.id }}/approve"
+                                            hx-vals='{"approved": true}'
+                                            hx-swap="none"
+                                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                            class="flex-1 inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition"
+                                        >
+                                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                            Approve
+                                        </button>
+                                        {% else %}
+                                        <button
+                                            hx-put="/qa/{{ post.id }}/approve"
+                                            hx-vals='{"approved": false}'
+                                            hx-swap="none"
+                                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                            class="flex-1 inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition"
+                                        >
+                                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                            Reject
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endif %}
                                 {% elif post.video_status in ['submitted', 'processing'] %}
                                 <div class="mt-2 text-sm text-gray-600">
                                     <p>Video is being generated. This typically takes 2-3 minutes.</p>

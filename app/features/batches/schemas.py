@@ -81,6 +81,14 @@ class PostDetail(BaseModel):
     state: Optional[str] = None
     seed_data: Optional[Dict[str, Any]] = None
     video_prompt_json: Optional[Dict[str, Any]] = None
+    video_status: Optional[str] = None
+    video_url: Optional[str] = None
+    video_metadata: Optional[Dict[str, Any]] = None
+    video_operation_id: Optional[str] = None
+    video_provider: Optional[str] = None
+    qa_pass: Optional[bool] = None
+    qa_notes: Optional[str] = None
+    qa_auto_checks: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

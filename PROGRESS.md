@@ -1,7 +1,7 @@
 # FLOW-FORGE Implementation Progress
 
-**Last Updated:** 2025-11-06  
-**Current Phase:** Phase 3 Complete
+**Last Updated:** 2025-11-07  
+**Current Phase:** Phase 5 Complete
 
 ---
 
@@ -226,14 +226,79 @@
 
 ---
 
-## 📋 Remaining Phases
+## ✅ Phase 5: QA Review (COMPLETE)
 
-### Phase 5: QA Review
-- Auto QA checks (duration, resolution, audio)
-- Manual review UI with video player
-- QA notes and checkboxes
-- Approve → S7_PUBLISH_PLAN
-- Regenerate paths (S6→S4 or S6→S5)
+### Implemented
+- **QA Feature Schemas**
+  - `AutoQAChecks` - Automated validation results (duration, resolution, accessibility)
+  - `QAApprovalRequest` - Manual approval/rejection with notes
+  - `QAApprovalResponse` - Approval confirmation response
+  - `BatchQAStatusResponse` - Batch-level QA summary
+  - Full Pydantic validation at all boundaries
+
+- **Auto QA Checks**
+  - `POST /qa/{post_id}/auto-check` - Run automated quality checks
+  - Duration validation: 8s ±0.5s (7.5s to 8.5s acceptable)
+  - Resolution validation: minimum 720p (720 height for vertical, 720 width for horizontal)
+  - Aspect ratio validation: matches requested format
+  - File accessibility check: HEAD request to video URL
+  - Results stored in `qa_auto_checks` JSONB field
+
+- **Manual QA Review**
+  - `PUT /qa/{post_id}/approve` - Approve or reject post with optional notes
+  - Updates `qa_pass` boolean field
+  - Stores review notes in `qa_notes` field
+  - Per Constitution § VII: Explicit state guards before transitions
+
+- **Batch QA Status**
+  - `GET /qa/batch/{batch_id}/status` - Get QA summary for entire batch
+  - Returns counts: total posts, videos ready, QA passed, QA pending
+  - Determines if batch can advance to S7_PUBLISH_PLAN
+  - Per Canon § 3.2: All posts must have qa_pass=true
+
+- **State Transition**
+  - `PUT /batches/{batch_id}/advance-to-publish` - S6_QA → S7_PUBLISH_PLAN
+  - Guard checks: Batch must be in S6_QA state
+  - Guard checks: All posts must have qa_pass=true
+  - Rejects with structured error if guards fail
+  - Per Constitution § VII: State Machine Discipline
+
+- **Video Poller Integration**
+  - Automatic batch transition to S6_QA when all videos complete
+  - `_check_and_transition_batch_to_qa()` function in worker
+  - Triggers after each video completes and uploads to ImageKit
+  - Only transitions from S5_PROMPTS_BUILT state
+  - Structured logging for observability
+
+- **QA Review UI (S6_QA State)**
+  - Batch-level QA dashboard showing approval progress
+  - "Advance to Publish" button (enabled when all posts approved)
+  - Per-post QA section with:
+    - Video player with ImageKit CDN URL
+    - Auto check results display (duration, resolution, file access)
+    - Visual indicators (✓/✗) for each check
+    - "Run Auto Check" button
+    - "Approve" / "Reject" toggle buttons
+    - QA notes display
+    - htmx-powered real-time updates
+
+### Database
+- Existing fields used from Phase 4:
+  - `qa_pass` BOOLEAN DEFAULT false
+  - `qa_notes` TEXT (nullable)
+  - `qa_auto_checks` JSONB (nullable)
+- No new migrations required
+
+### Testscript
+- `testscript_phase5.py` - End-to-end QA workflow test
+- Tests auto check execution
+- Tests manual approval flow
+- Tests batch advancement with guards
+- Tests state transition S6_QA → S7_PUBLISH_PLAN
+
+---
+
+## 📋 Remaining Phases
 
 ### Phase 6: Publish Planning
 - Engagement Scheduler agent
@@ -297,20 +362,20 @@
 
 ## Next Steps
 
-1. Deploy video polling worker to Railway
-2. Add environment variables to Vercel and Railway
-3. Test Phase 4 with real VEO 3.1 API
-4. Verify ImageKit video upload
-5. Proceed to Phase 5: QA Review
+1. Test Phase 5 QA workflow with existing batches
+2. Verify auto QA checks against real ImageKit videos
+3. Test batch transition guards (reject incomplete approvals)
+4. Proceed to Phase 6: Publish Planning
 
 ---
 
 ## Notes
 
-- All Phase 0, 1, 2, 3, 4 testscripts ready
+- All Phase 0, 1, 2, 3, 4, 5 testscripts ready
 - Database schema fully migrated (004 applied)
-- State machine working correctly through S5_PROMPTS_BUILT
-- Video generation pipeline implemented
-- VEO 3.1 adapter ready for production
+- State machine working correctly through S6_QA → S7_PUBLISH_PLAN
+- Video generation pipeline implemented and tested
+- VEO 3.1 and Sora 2 adapters ready for production
 - ImageKit CDN integration complete
-- Ready to proceed with Phase 5: QA Review
+- QA review workflow operational
+- Ready to proceed with Phase 6: Publish Planning

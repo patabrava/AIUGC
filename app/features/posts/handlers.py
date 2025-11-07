@@ -11,6 +11,7 @@ from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.features.posts.prompt_builder import build_video_prompt_from_seed, validate_video_prompt
+from app.core.states import BatchState
 
 logger = get_logger(__name__)
 
@@ -143,10 +144,16 @@ async def build_post_prompt(post_id: str):
         validate_video_prompt(video_prompt)
         
         # Store prompt in posts table
-        update_response = supabase.table("posts").update({
+        supabase.table("posts").update({
             "video_prompt_json": video_prompt
         }).eq("id", post_id).execute()
-        
+
+        _maybe_transition_batch_to_prompts_built(
+            batch_id=post["batch_id"],
+            supabase_client=supabase,
+            correlation_id=correlation_id
+        )
+
         logger.info(
             "video_prompt_built",
             post_id=post_id,
@@ -185,4 +192,69 @@ async def build_post_prompt(post_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to build video prompt"
+        )
+
+
+def _maybe_transition_batch_to_prompts_built(*, batch_id: str, supabase_client, correlation_id: str) -> None:
+    """Advance batch to S5_PROMPTS_BUILT when all posts have prompts."""
+    try:
+        batch_response = supabase_client.table("batches").select("state").eq("id", batch_id).execute()
+        if not batch_response.data:
+            logger.warning(
+                "batch_not_found_for_prompts_transition",
+                batch_id=batch_id,
+                correlation_id=correlation_id
+            )
+            return
+
+        current_state = batch_response.data[0].get("state")
+        if current_state not in {BatchState.S4_SCRIPTED.value, BatchState.S5_PROMPTS_BUILT.value}:
+            logger.debug(
+                "batch_state_not_ready_for_prompts_transition",
+                batch_id=batch_id,
+                correlation_id=correlation_id,
+                current_state=current_state
+            )
+            return
+
+        posts_response = supabase_client.table("posts").select("id", "video_prompt_json").eq("batch_id", batch_id).execute()
+        posts = posts_response.data or []
+        if not posts:
+            logger.warning(
+                "no_posts_for_batch_prompts_transition",
+                batch_id=batch_id,
+                correlation_id=correlation_id
+            )
+            return
+
+        prompts_ready = sum(1 for post in posts if post.get("video_prompt_json"))
+        if prompts_ready != len(posts):
+            logger.debug(
+                "prompts_not_complete",
+                batch_id=batch_id,
+                correlation_id=correlation_id,
+                total=len(posts),
+                prompts_ready=prompts_ready
+            )
+            return
+
+        if current_state == BatchState.S5_PROMPTS_BUILT.value:
+            return
+
+        supabase_client.table("batches").update({
+            "state": BatchState.S5_PROMPTS_BUILT.value
+        }).eq("id", batch_id).execute()
+
+        logger.info(
+            "batch_transitioned_to_prompts_built",
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            new_state=BatchState.S5_PROMPTS_BUILT.value
+        )
+    except Exception as transition_error:
+        logger.exception(
+            "batch_prompts_transition_failed",
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            error=str(transition_error)
         )
