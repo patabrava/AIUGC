@@ -250,12 +250,17 @@
                 return;
             }
 
-            component.batchProgress = component.batchProgress || {};
-            component.batchProgress[batchId] = {
-                brand,
-                expected,
-                posts,
+            const current = component.batchProgress || {};
+            const next = {
+                ...current,
+                [batchId]: {
+                    brand,
+                    expected,
+                    posts,
+                },
             };
+
+            component.batchProgress = next;
         }
 
         function clearBanner(batchId) {
@@ -263,7 +268,13 @@
             if (!component || !component.batchProgress) {
                 return;
             }
-            delete component.batchProgress[batchId];
+            const current = component.batchProgress;
+            if (!Object.prototype.hasOwnProperty.call(current, batchId)) {
+                return;
+            }
+
+            const { [batchId]: _removed, ...rest } = current;
+            component.batchProgress = rest;
         }
 
         function startPolling(batchId, expectedPosts, brand) {

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import re
+import secrets
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -642,7 +644,7 @@ def generate_dialog_scripts(brand: str, topic: str, scripts_required: int = 5) -
     raise ValidationError(message="Unable to produce dialog scripts", details={})
 
 
-def generate_lifestyle_topics(brand: str, count: int = 1) -> List[Dict[str, Any]]:
+def generate_lifestyle_topics(brand: str, count: int = 1, seed: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Generate lifestyle topics using PROMPT_2 directly (no web research).
     Returns list of topic dicts with dialog scripts and metadata.
@@ -654,11 +656,15 @@ def generate_lifestyle_topics(brand: str, count: int = 1) -> List[Dict[str, Any]
         "Freizeit mit Rollstuhl genießen",
         "Alltägliche Herausforderungen meistern",
     ]
-    
+
+    rng = random.Random(seed if seed is not None else secrets.randbits(64))
+    shuffled_templates = lifestyle_topic_templates[:]
+    rng.shuffle(shuffled_templates)
+
     results = []
     for i in range(count):
-        topic_template = lifestyle_topic_templates[i % len(lifestyle_topic_templates)]
-        
+        topic_template = shuffled_templates[i % len(shuffled_templates)]
+
         # Generate dialog scripts for this lifestyle topic
         dialog_scripts = generate_dialog_scripts(
             brand=brand,
@@ -690,7 +696,8 @@ def generate_lifestyle_topics(brand: str, count: int = 1) -> List[Dict[str, Any]
             "lifestyle_topic_generated",
             brand=brand,
             title=topic_template,
-            scripts_count=1
+            scripts_count=1,
+            seed=seed
         )
     
     return results

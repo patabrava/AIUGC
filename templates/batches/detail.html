@@ -37,6 +37,7 @@
                 ('S1_SETUP', 'Setup'),
                 ('S2_SEEDED', 'Seeded'),
                 ('S4_SCRIPTED', 'Scripted'),
+                ('S5_PROMPTS_BUILT', 'Prompts'),
                 ('S6_QA', 'QA'),
                 ('S7_PUBLISH_PLAN', 'Plan'),
                 ('S8_COMPLETE', 'Complete')
@@ -85,7 +86,7 @@
     </div>
     {% endif %}
 
-    {% if batch.state == 'S4_SCRIPTED' %}
+    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
     {% set prompt_ready_count = (batch.posts | selectattr('video_prompt_json') | list | length) %}
     <div id="video-workflow" class="bg-gradient-to-r from-blue-50 to-purple-50 border border-purple-200 rounded-lg p-6 mb-6">
         <div class="flex items-center justify-between">
@@ -97,14 +98,35 @@
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
-                    Generate prompts for each post below, then configure batch settings and submit to production.
+                    {% if batch.state == 'S4_SCRIPTED' %}
+                        Generate prompts for each post below, then configure batch settings and submit to production.
+                    {% else %}
+                        All prompts are ready. Configure batch settings and submit videos for generation when you are satisfied.
+                    {% endif %}
                 </p>
             </div>
         </div>
     </div>
     {% endif %}
 
-    {% if batch.state in ['S5_PROMPTS_BUILT', 'S6_QA'] %}
+    {% if batch.state == 'S5_PROMPTS_BUILT' %}
+    {% set prompt_ready_count = (batch.posts | selectattr('video_prompt_json') | list | length) %}
+    <div id="prompts-workflow" class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-6 mb-6">
+        <div class="flex items-center justify-between">
+            <div class="flex-1">
+                <div class="flex items-center gap-3 mb-2">
+                    <h3 class="text-xl font-bold text-gray-900">Prompts Ready</h3>
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                        {{ prompt_ready_count }}/{{ batch.posts | length }} Prepared
+                    </span>
+                </div>
+                <p class="text-sm text-gray-700">
+                    Review the prompt snapshots below as needed. Once your batch settings are configured, submit each post for video generation.
+                </p>
+            </div>
+        </div>
+    </div>
+    {% elif batch.state == 'S6_QA' %}
     {% set qa_passed_count = (batch.posts | selectattr('qa_pass') | list | length) %}
     {% set videos_ready_count = (batch.posts | selectattr('video_status', 'equalto', 'completed') | list | length) %}
     <div id="qa-workflow" class="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-6 mb-6">
@@ -548,7 +570,7 @@
     </div>
 
     <!-- Video Generation Settings (moved from top) -->
-    {% if batch.state == 'S4_SCRIPTED' %}
+    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
     <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6" x-data="videoSettingsComponent()">
         <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>
         <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
