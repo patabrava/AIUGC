@@ -3,7 +3,12 @@
 {% block title %}Batches - FLOW-FORGE{% endblock %}
 
 {% block content %}
-<div x-data="{ showCreateModal: false, batchProgress: {} }">
+<div
+    x-data="batchListComponent()"
+    data-batch-page
+    x-init="init()"
+    x-on:destroy="destroy()"
+>
     <!-- Header -->
     <div class="flex justify-between items-center mb-6">
         <div>
@@ -38,10 +43,10 @@
                         </template>
                     </p>
                 </div>
-                <button
+                <button 
                     type="button"
                     class="text-xs font-medium text-purple-700 hover:text-purple-900"
-                    @click="delete batchProgress[id]"
+                    @click="removeProgressEntry(id)"
                 >
                     Dismiss
                 </button>
@@ -116,11 +121,15 @@
                     const lifestyle = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.lifestyle\']').value) || 0;
                     const product = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.product\']').value) || 0;
                     const tempId = 'temp-' + Date.now();
-                    batchProgress[tempId] = {
-                        brand: brand,
-                        expected: value + lifestyle + product,
-                        posts: 0
-                    };
+                    window.dispatchEvent(new CustomEvent('batch-progress:update', {
+                        detail: {
+                            batchId: tempId,
+                            brand,
+                            expected: value + lifestyle + product,
+                            posts: 0,
+                            isTemp: true,
+                        }
+                    }));
                     console.log('Batch creation started:', brand);
                 "
                 @htmx:after-request="showCreateModal = false"
@@ -216,10 +225,87 @@
         const POLL_INTERVAL_MS = 5000;
         const pollers = new Map();
 
-        function getComponent() {
-            const root = document.querySelector('[x-data]');
-            return root ? window.Alpine && window.Alpine.$data(root) : null;
-        }
+        window.batchListComponent = function batchListComponent() {
+            return {
+                showCreateModal: false,
+                batchProgress: {},
+                cleanupHandlers: [],
+                init() {
+                    const updateHandler = (event) => {
+                        const detail = event.detail || {};
+                        const batchId = detail.batchId;
+                        if (!batchId) {
+                            return;
+                        }
+
+                        const brand = detail.brand;
+                        const expected = detail.expected ?? 0;
+                        const posts = detail.posts ?? 0;
+
+                        const current = this.batchProgress || {};
+                        const cleanedEntries = Object.entries(current).filter(([key, value]) => {
+                            if (!value) {
+                                return false;
+                            }
+                            if (!brand) {
+                                return true;
+                            }
+                            const isTempEntry = key.startsWith('temp-');
+                            return !(isTempEntry && value.brand === brand);
+                        });
+                        const cleaned = Object.fromEntries(cleanedEntries);
+
+                        this.batchProgress = {
+                            ...cleaned,
+                            [batchId]: {
+                                brand,
+                                expected,
+                                posts,
+                            },
+                        };
+                    };
+
+                    const clearHandler = (event) => {
+                        const detail = event.detail || {};
+                        const batchId = detail.batchId;
+
+                        if (!batchId) {
+                            this.batchProgress = {};
+                            return;
+                        }
+
+                        const current = this.batchProgress || {};
+                        if (!Object.prototype.hasOwnProperty.call(current, batchId)) {
+                            return;
+                        }
+
+                        const { [batchId]: _removed, ...rest } = current;
+                        this.batchProgress = rest;
+                    };
+
+                    window.addEventListener('batch-progress:update', updateHandler);
+                    window.addEventListener('batch-progress:clear', clearHandler);
+
+                    this.cleanupHandlers.push(() => {
+                        window.removeEventListener('batch-progress:update', updateHandler);
+                        window.removeEventListener('batch-progress:clear', clearHandler);
+                    });
+                },
+                destroy() {
+                    this.cleanupHandlers.forEach((dispose) => dispose());
+                    this.cleanupHandlers = [];
+                },
+                removeProgressEntry(id) {
+                    const current = this.batchProgress || {};
+                    if (!Object.prototype.hasOwnProperty.call(current, id)) {
+                        return;
+                    }
+
+                    const { [id]: _removed, ...rest } = current;
+                    this.batchProgress = rest;
+                },
+            };
+        };
 
         async function fetchStatus(batchId) {
             const response = await fetch(`/batches/${batchId}/status`, {
@@ -245,36 +331,22 @@
         }
 
         function updateBanner(batchId, brand, expected, posts = 0) {
-            const component = getComponent();
-            if (!component) {
-                return;
-            }
-
-            const current = component.batchProgress || {};
-            const next = {
-                ...current,
-                [batchId]: {
+            window.dispatchEvent(new CustomEvent('batch-progress:update', {
+                detail: {
+                    batchId,
                     brand,
                     expected,
                     posts,
-                },
-            };
-
-            component.batchProgress = next;
+                }
+            }));
         }
 
         function clearBanner(batchId) {
-            const component = getComponent();
-            if (!component || !component.batchProgress) {
-                return;
-            }
-            const current = component.batchProgress;
-            if (!Object.prototype.hasOwnProperty.call(current, batchId)) {
-                return;
-            }
-
-            const { [batchId]: _removed, ...rest } = current;
-            component.batchProgress = rest;
+            window.dispatchEvent(new CustomEvent('batch-progress:clear', {
+                detail: {
+                    batchId,
+                }
+            }));
         }
 
         function startPolling(batchId, expectedPosts, brand) {

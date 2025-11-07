@@ -4,11 +4,12 @@
 
 {% block content %}
 <div
+    id="batch-detail-root"
     {% if batch.state == 'S5_PROMPTS_BUILT' %}
     hx-get="/batches/{{ batch.id }}"
     hx-trigger="every 5s"
     hx-swap="outerHTML"
-    hx-select="body > div"
+    hx-select="#batch-detail-root"
     {% endif %}
 >
     <!-- Breadcrumb -->
