@@ -78,9 +78,7 @@
             <button 
                 hx-put="/batches/{{ batch.id }}/approve-scripts"
                 hx-confirm="Approve all scripts and advance to S4_SCRIPTED?"
-                hx-swap="outerHTML"
-                hx-target="closest div.bg-purple-50"
-                hx-on::after-request="if (event.detail.successful) { window.location.href='/batches/{{ batch.id }}#prompt-dashboard'; }"
+                hx-swap="none"
                 class="px-4 py-2 bg-purple-600 text-white font-medium rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition">
                 Approve Scripts
             </button>

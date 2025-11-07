@@ -8,12 +8,68 @@ brand_context: |
   Sprich locker-direkt, "du"-Anrede, keine Pity-Sprache.
 
 topic_pool: |
-  Themenrotation (immer variieren, kein Duplikat im Batch):
-    - Barrierefreiheit im Alltag (ÖPNV, Gebäude, Freizeit)
-    - Krankenkasse & Hilfsmittel (Kosten, Genehmigung, Einspruch)
-    - Rechte & Nachteilsausgleiche (Schwerbehindertenausweis, Merkzeichen, Reisebegleitung)
-    - Beruf & Bildung (Arbeitsplatz, Studium, Weiterbildung)
-    - Freizeit & Community (Sport, Reisen, Kultur, Selbsthilfe)
+  Themenrotation (immer variieren, kein Duplikat im Batch). Wähle pro Idee einen anderen Schwerpunkt:
+  Mobilität & Reisen:
+    - Barrierefreiheit / Alltag als Rollstuhlnutzer:in in Deutschland
+    - Companion travel (B-Marke) and when a Begleitperson rides free on ÖPNV
+    - Unentgeltliche Beförderung & Wertmarke rules on buses/trams/regional trains
+    - Booking DB Mobilitätsservice-Zentrale (MSZ) for lifts/boarding assistance
+    - Rights on rail (assistance, disruptions, info)
+    - Rights when flying (airport/airline assistance)
+    - Accessible tourism labels like “Reisen für Alle” and finding certified places
+    - Travel hacks: ferries, accessible taxis, hotel bathroom realities
+    - Cross-border travel with chairs (batteries, airline rules, damage claims)
+  Rechte, Gesellschaft & Finanzen:
+    - Gesellschaftliche/steuerliche Themen (Einordnung, mögliche Vorteile/Hinweise)
+    - Getting and using a Schwerbehindertenausweis (GdB & Merkzeichen)
+    - What each Merkzeichen means in daily life (B, G, aG, H, Bl, RF, Gl, TBl, etc.)
+    - What the BFSG changes for products & services (from 28 June 2025)
+    - BITV 2.0: why government websites/apps must be accessible
+    - Public-sector digital services and reporting barriers (BITV feedback)
+    - Consumer rights under BFSG (e-commerce, banking, ticketing)
+    - Municipal participation councils (Behindertenbeirat) & influencing planning
+    - Legal help paths (Schlichtungsstelle BGG, counseling centers)
+    - Parking permits (blue EU pass vs. orange permit), where to apply, rules
+    - Kfz-Steuer relief/exemption tied to Merkzeichen
+  Gesundheit, Pflege & Assistenz:
+    - Krankenkasse für Menschen im Rollstuhl
+    - Versicherung für Menschen im Rollstuhl
+    - Personal assistance models (Pflegedienst vs. Assistenzteam vs. family)
+    - The Persönliche Budget option to self-organize support
+    - Pflegegrade & what the Pflegeversicherung pays in 2025
+    - Finding accessible GPs, specialists, and rehab clinics
+    - Rehabilitation pathways (DRV vs. GKV), device trials, follow-ups
+    - Pressure sore prevention: seating, cushions, routines, wound care
+    - Bladder & bowel management (supplies, travel tips, privacy)
+    - Navigating sexual health, relationships, and intimacy with/access to care
+    - Mental health: counseling that understands disability barriers
+  Hilfsmittel, Technik & Fahrzeuge:
+    - The GKV Hilfsmittelverzeichnis: which chairs & accessories are covered
+    - Choosing between active, power, or hybrid wheelchairs (fit, cushions, setup)
+    - Repairs/loaners and typical Krankenkasse processes & pitfalls
+    - Choosing the right cushion/backrest (pressure mapping, insurer wording)
+    - Wheelchair maintenance routines & documentation to speed approvals
+    - Everyday accessibility tech (grippers, transfer boards, standing frames)
+    - Smart home as accessibility (door openers, voice control, sensors)
+    - Driving with adaptations: assessments, driving schools, cost carriers
+    - Vehicle conversions (hand controls, lifts, transfer aids) & funding
+  Wohnen & Lebensumfeld:
+    - Barrier-free housing basics (DIN 18040: flats, bathrooms, entries)
+    - Accessible housing search & retrofitting (ramps, doors, bathrooms, kitchens)
+    - City infrastructure: curb cuts, tactile paving, winter service that works
+    - Emergency preparedness (evac chairs, refuge areas, med lists)
+    - Funding shifts: status of KfW 455-B retrofitting grants & alternatives
+  Arbeit, Bildung & Beruf:
+    - Return-to-work support, job carving, reasonable accommodations
+    - Inklusionsbetriebe and jobs on the open labor market
+    - Role of Integrationsämter/BIH for workplace support & funding
+    - Workplace ergonomics (height-adjustable desks, accessible labs/shops)
+    - University & school accommodations (Nachteilsausgleich, accessible campus)
+  Community, Sport & Sichtbarkeit:
+    - Community & peer support: local groups, forums, mentoring
+    - Sports & movement via DRS clubs (basketball to WCMX)
+    - Following the Rollstuhlbasketball-Bundesliga (teams, fixtures, access)
+    - Staying active & visible: events, awareness days, media that “get it”
 
 output_schema: |
   OUTPUT FORMAT — JSON array mit GENAU {desired_topics} Objekten.

@@ -511,7 +511,7 @@ async def approve_scripts_endpoint(batch_id: str, request: Request):
         
         if _wants_html(request):
             redirect_url = f"/batches/{batch_id}#prompt-dashboard"
-            response = PlainTextResponse("", status_code=status.HTTP_204_NO_CONTENT)
+            response = PlainTextResponse("", status_code=status.HTTP_200_OK)
             response.headers["HX-Redirect"] = redirect_url
             return response
         
@@ -594,7 +594,7 @@ async def advance_to_publish_endpoint(batch_id: str, request: Request):
         
         if _wants_html(request):
             redirect_url = f"/batches/{batch_id}"
-            response = PlainTextResponse("", status_code=status.HTTP_204_NO_CONTENT)
+            response = PlainTextResponse("", status_code=status.HTTP_200_OK)
             response.headers["HX-Redirect"] = redirect_url
             return response
         
