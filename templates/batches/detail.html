@@ -3,7 +3,14 @@
 {% block title %}Batch {{ batch.brand }} - FLOW-FORGE{% endblock %}
 
 {% block content %}
-<div>
+<div
+    {% if batch.state == 'S5_PROMPTS_BUILT' %}
+    hx-get="/batches/{{ batch.id }}"
+    hx-trigger="every 5s"
+    hx-swap="outerHTML"
+    hx-select="body > div"
+    {% endif %}
+>
     <!-- Breadcrumb -->
     <nav class="mb-6">
         <ol class="flex items-center space-x-2 text-sm">
@@ -129,182 +136,6 @@
             {% endif %}
         </div>
     </div>
-    {% endif %}
-
-    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] %}
-    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6" x-data="videoSettingsComponent()">
-        <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
-            <div class="grid gap-4 md:grid-cols-3 mb-4">
-                <label class="flex flex-col text-sm" for="provider-select">
-                    <span class="text-gray-700 font-medium">Provider</span>
-                    <select
-                        id="provider-select"
-                        name="provider"
-                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        x-model="provider"
-                    >
-                        <option value="veo_3_1">Veo 3.1 (Recommended)</option>
-                        <option value="sora_2">Sora 2</option>
-                        <option value="sora_2_pro">Sora 2 Pro</option>
-                    </select>
-                    <p class="mt-2 text-xs text-gray-500" x-show="provider.startsWith('sora_2')">
-                        Sora 2 enforces 8s clips and supports 720x1280 or 1024x1792 (vertical) / 1280x720 or 1792x1024 (landscape).
-                    </p>
-                </label>
-                <label class="flex flex-col text-sm" for="aspect-select">
-                    <span class="text-gray-700 font-medium">Aspect Ratio</span>
-                    <select
-                        id="aspect-select"
-                        name="aspect_ratio"
-                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        x-model="aspectRatio"
-                    >
-                        <option value="9:16">9:16 Vertical</option>
-                        <option value="16:9">16:9 Landscape</option>
-                    </select>
-                </label>
-                <label class="flex flex-col text-sm" for="duration-select">
-                    <span class="text-gray-700 font-medium">Duration</span>
-                    <select
-                        id="duration-select"
-                        name="duration_seconds"
-                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        x-model="duration"
-                    >
-                        <option value="8">8 seconds (Canon)</option>
-                        <option value="4" x-bind:disabled="provider === 'veo_3_1'">4 seconds (Sora only)</option>
-                        <option value="12" x-bind:disabled="provider === 'veo_3_1'">12 seconds (Sora only)</option>
-                    </select>
-                    <p class="mt-1 text-xs text-gray-500">Sora currently supports 4, 8, or 12 second clips.</p>
-                </label>
-            </div>
-            <input type="hidden" name="resolution" x-model="resolution" />
-            <input type="hidden" name="seconds" x-model="duration" />
-            <div class="mt-4" aria-live="polite" x-show="submitError || submitSuccess" x-cloak>
-                <div
-                    x-show="submitSuccess"
-                    class="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 flex items-center gap-2"
-                >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span x-text="successMessage"></span>
-                </div>
-                <div
-                    x-show="submitError"
-                    class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 flex items-center gap-2"
-                >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.455 19h13.09A2.455 2.455 0 0021 16.545V7.455A2.455 2.455 0 0018.545 5H5.455A2.455 2.455 0 003 7.455v9.09A2.455 2.455 0 005.455 19z" />
-                    </svg>
-                    <span x-text="submitError"></span>
-                </div>
-            </div>
-            <div class="mt-4">
-                <button
-                    type="submit"
-                    class="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                    :disabled="isSubmitting"
-                >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span x-text="isSubmitting ? 'Submitting…' : 'Generate All Videos'"></span>
-                </button>
-            </div>
-        </form>
-    </div>
-    <script>
-        window.videoSettingsComponent = function () {
-            return {
-                provider: 'veo_3_1',
-                aspectRatio: '9:16',
-                duration: '8',
-                resolution: '720p',
-                supportedSizes: {
-                    'veo_3_1': {
-                        '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
-                        '16:9': { '720p': '1280x720', '1080p': '1920x1080' }
-                    },
-                    'sora_2': {
-                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
-                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
-                    },
-                    'sora_2_pro': {
-                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
-                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
-                    }
-                },
-                getProviderSize(aspect, resolution) {
-                    const providerMap = this.supportedSizes[this.provider] || {};
-                    const aspectMap = providerMap[aspect] || {};
-                    return aspectMap[resolution] || null;
-                },
-                successMessage: '',
-                async submitBatch(event) {
-                    if (this.isSubmitting) {
-                        return;
-                    }
-                    this.isSubmitting = true;
-                    this.submitError = null;
-                    this.submitSuccess = null;
-                    try {
-                        const response = await fetch(`/videos/batch/{{ batch.id }}/generate-all`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-Correlation-ID': `batch_video_settings_{{ batch.id }}`
-                            },
-                            body: JSON.stringify({
-                                provider: this.provider,
-                                aspect_ratio: this.aspectRatio,
-                                resolution: this.resolution,
-                                seconds: Number(this.duration),
-                                size: this.getProviderSize(this.aspectRatio, this.resolution)
-                            })
-                        });
-
-                        if (!response.ok) {
-                            const errorText = await response.text();
-                            throw new Error(errorText || `Submission failed (${response.status})`);
-                        }
-
-                        const payload = await response.json();
-                        const submittedCount = payload?.data?.submitted_count ?? 0;
-                        const providerLabel = this.provider === 'veo_3_1' ? 'Veo 3.1' : (this.provider === 'sora_2_pro' ? 'Sora 2 Pro' : 'Sora 2');
-                        this.submitSuccess = submittedCount;
-                        this.successMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
-                    } catch (error) {
-                        this.submitError = error instanceof Error ? error.message : 'Submission failed';
-                    } finally {
-                        this.isSubmitting = false;
-                    }
-                },
-                init() {
-                    this.$watch('provider', (value) => {
-                        if (value.startsWith('sora_2')) {
-                            if (!['4','8','12'].includes(this.duration)) {
-                                this.duration = '8';
-                            }
-                        } else if (value === 'veo_3_1') {
-                            if (this.duration !== '8') {
-                                this.duration = '8';
-                            }
-                        }
-                        const targetResolution = this.aspectRatio === '16:9' ? '1080p' : '720p';
-                        this.resolution = targetResolution;
-                    });
-                    this.$watch('aspectRatio', (value) => {
-                        const targetResolution = value === '16:9' ? '1080p' : '720p';
-                        this.resolution = targetResolution;
-                    });
-                },
-                isSubmitting: false,
-                submitError: null,
-                submitSuccess: null
-            };
-        };
-    </script>
     {% endif %}
 
     <!-- Posts List -->
@@ -718,5 +549,183 @@
             </div>
         {% endif %}
     </div>
+
+    <!-- Video Generation Settings (moved from top) -->
+    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] %}
+    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6" x-data="videoSettingsComponent()">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>
+        <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
+            <div class="grid gap-4 md:grid-cols-3 mb-4">
+                <label class="flex flex-col text-sm" for="provider-select">
+                    <span class="text-gray-700 font-medium">Provider</span>
+                    <select
+                        id="provider-select"
+                        name="provider"
+                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        x-model="provider"
+                    >
+                        <option value="veo_3_1">Veo 3.1 (Recommended)</option>
+                        <option value="sora_2">Sora 2</option>
+                        <option value="sora_2_pro">Sora 2 Pro</option>
+                    </select>
+                    <p class="mt-2 text-xs text-gray-500" x-show="provider.startsWith('sora_2')">
+                        Sora 2 enforces 8s clips and supports 720x1280 or 1024x1792 (vertical) / 1280x720 or 1792x1024 (landscape).
+                    </p>
+                </label>
+                <label class="flex flex-col text-sm" for="aspect-select">
+                    <span class="text-gray-700 font-medium">Aspect Ratio</span>
+                    <select
+                        id="aspect-select"
+                        name="aspect_ratio"
+                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        x-model="aspectRatio"
+                    >
+                        <option value="9:16">9:16 Vertical</option>
+                        <option value="16:9">16:9 Landscape</option>
+                    </select>
+                </label>
+                <label class="flex flex-col text-sm" for="duration-select">
+                    <span class="text-gray-700 font-medium">Duration</span>
+                    <select
+                        id="duration-select"
+                        name="duration_seconds"
+                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        x-model="duration"
+                    >
+                        <option value="8">8 seconds (Canon)</option>
+                        <option value="4" x-bind:disabled="provider === 'veo_3_1'">4 seconds (Sora only)</option>
+                        <option value="12" x-bind:disabled="provider === 'veo_3_1'">12 seconds (Sora only)</option>
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">Sora currently supports 4, 8, or 12 second clips.</p>
+                </label>
+            </div>
+            <input type="hidden" name="resolution" x-model="resolution" />
+            <input type="hidden" name="seconds" x-model="duration" />
+            <div class="mt-4" aria-live="polite" x-show="submitError || submitSuccess" x-cloak>
+                <div
+                    x-show="submitSuccess"
+                    class="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 flex items-center gap-2"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span x-text="successMessage"></span>
+                </div>
+                <div
+                    x-show="submitError"
+                    class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 flex items-center gap-2"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.455 19h13.09A2.455 2.455 0 0021 16.545V7.455A2.455 2.455 0 0018.545 5H5.455A2.455 2.455 0 003 7.455v9.09A2.455 2.455 0 005.455 19z" />
+                    </svg>
+                    <span x-text="submitError"></span>
+                </div>
+            </div>
+            <div class="mt-4">
+                <button
+                    type="submit"
+                    class="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                    :disabled="isSubmitting"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span x-text="isSubmitting ? 'Submitting…' : 'Generate All Videos'"></span>
+                </button>
+            </div>
+        </form>
+    </div>
+    <script>
+        window.videoSettingsComponent = function () {
+            return {
+                provider: 'veo_3_1',
+                aspectRatio: '9:16',
+                duration: '8',
+                resolution: '720p',
+                supportedSizes: {
+                    'veo_3_1': {
+                        '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
+                        '16:9': { '720p': '1280x720', '1080p': '1920x1080' }
+                    },
+                    'sora_2': {
+                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
+                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
+                    },
+                    'sora_2_pro': {
+                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
+                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
+                    }
+                },
+                getProviderSize(aspect, resolution) {
+                    const providerMap = this.supportedSizes[this.provider] || {};
+                    const aspectMap = providerMap[aspect] || {};
+                    return aspectMap[resolution] || null;
+                },
+                successMessage: '',
+                async submitBatch(event) {
+                    if (this.isSubmitting) {
+                        return;
+                    }
+                    this.isSubmitting = true;
+                    this.submitError = null;
+                    this.submitSuccess = null;
+                    try {
+                        const response = await fetch(`/videos/batch/{{ batch.id }}/generate-all`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Correlation-ID': `batch_video_settings_{{ batch.id }}`
+                            },
+                            body: JSON.stringify({
+                                provider: this.provider,
+                                aspect_ratio: this.aspectRatio,
+                                resolution: this.resolution,
+                                seconds: Number(this.duration),
+                                size: this.getProviderSize(this.aspectRatio, this.resolution)
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            throw new Error(errorText || `Submission failed (${response.status})`);
+                        }
+
+                        const payload = await response.json();
+                        const submittedCount = payload?.data?.submitted_count ?? 0;
+                        const providerLabel = this.provider === 'veo_3_1' ? 'Veo 3.1' : (this.provider === 'sora_2_pro' ? 'Sora 2 Pro' : 'Sora 2');
+                        this.submitSuccess = submittedCount;
+                        this.successMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
+                    } catch (error) {
+                        this.submitError = error instanceof Error ? error.message : 'Submission failed';
+                    } finally {
+                        this.isSubmitting = false;
+                    }
+                },
+                init() {
+                    this.$watch('provider', (value) => {
+                        if (value.startsWith('sora_2')) {
+                            if (!['4','8','12'].includes(this.duration)) {
+                                this.duration = '8';
+                            }
+                        } else if (value === 'veo_3_1') {
+                            if (this.duration !== '8') {
+                                this.duration = '8';
+                            }
+                        }
+                        const targetResolution = this.aspectRatio === '16:9' ? '1080p' : '720p';
+                        this.resolution = targetResolution;
+                    });
+                    this.$watch('aspectRatio', (value) => {
+                        const targetResolution = value === '16:9' ? '1080p' : '720p';
+                        this.resolution = targetResolution;
+                    });
+                },
+                isSubmitting: false,
+                submitError: null,
+                submitSuccess: null
+            };
+        };
+    </script>
+    {% endif %}
 </div>
 {% endblock %}

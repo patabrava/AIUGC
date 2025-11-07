@@ -49,11 +49,14 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 > If `uvicorn` is not found, reactivate the virtualenv (step 3) or call it explicitly via `.venv/bin/uvicorn`.
 
-7. **(Optional) Run the video poller worker in a second shell:**
+7. **Run the video poller worker in a second terminal:**
 ```bash
+# In a NEW terminal tab/window
+cd /Users/camiloecheverri/Documents/AI/AIUGC
 source .venv/bin/activate
-python workers/video_poller.py
+python3 workers/video_poller.py
 ```
+Keep this terminal open. You should see logs like `polling_videos` and `batch_transitioned_to_qa` when operations complete. Press `Ctrl+C` to stop the worker.
 
 8. **View runtime logs:**
 * __In-terminal__: watch the shell running `uvicorn` for structured log lines (startup, requests, adapter calls).
