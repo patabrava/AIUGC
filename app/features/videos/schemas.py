@@ -14,25 +14,35 @@ class VideoGenerationRequest(BaseModel):
     Request to generate video for a post.
     Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
     """
-    provider: Literal["veo_3_1", "sora_2"] = Field(
+    provider: Literal["veo_3_1", "sora_2", "sora_2_pro"] = Field(
         ..., 
-        description="Video generation provider (veo_3_1 or sora_2)"
+        description="Video generation provider (veo_3_1, sora_2, sora_2_pro)"
     )
     aspect_ratio: Literal["9:16", "16:9"] = Field(
         default="9:16",
-        description="Target video aspect ratio supported by VEO"
+        description="Target video aspect ratio"
     )
     resolution: Literal["720p", "1080p"] = Field(
         default="720p",
-        description="Output resolution supported by VEO (1080p requires 16:9)"
+        description="Output resolution (provider specific constraints apply)"
     )
-    
+    seconds: Literal[4, 8, 12] = Field(
+        default=8,
+        description="Target duration in seconds for the generated clip (Sora supports 4, 8, or 12)."
+    )
+    size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
+        default=None,
+        description="Provider-specific pixel dimensions override."
+    )
+
     class Config:
         json_schema_extra = {
             "example": {
-                "provider": "veo_3_1",
+                "provider": "sora_2_pro",
                 "aspect_ratio": "9:16",
-                "resolution": "720p"
+                "resolution": "1080p",
+                "seconds": 8,
+                "size": "1080x1920"
             }
         }
 
@@ -42,7 +52,13 @@ class VideoGenerationResponse(BaseModel):
     post_id: str = Field(..., description="Post UUID")
     operation_id: str = Field(..., description="Provider operation ID for polling")
     provider: str = Field(..., description="Video generation provider")
-    status: Literal["submitted", "processing"] = Field(..., description="Current status")
+    provider_model: Optional[str] = Field(
+        default=None,
+        description="Underlying model identifier returned by the provider"
+    )
+    status: Literal["submitted", "processing", "queued"] = Field(
+        ..., description="Current status"
+    )
     estimated_duration_seconds: Optional[int] = Field(
         None, 
         description="Estimated time to completion in seconds"
@@ -59,7 +75,14 @@ class VideoStatusResponse(BaseModel):
     """Response for video generation status check."""
     post_id: str = Field(..., description="Post UUID")
     operation_id: Optional[str] = Field(None, description="Provider operation ID")
-    status: Literal["pending", "submitted", "processing", "completed", "failed"] = Field(
+    status: Literal[
+        "pending",
+        "queued",
+        "submitted",
+        "processing",
+        "completed",
+        "failed"
+    ] = Field(
         ..., 
         description="Current video generation status"
     )
@@ -70,17 +93,25 @@ class VideoStatusResponse(BaseModel):
 
 class BatchVideoGenerationRequest(BaseModel):
     """Request to generate videos for all posts in a batch."""
-    provider: Literal["veo_3_1", "sora_2"] = Field(
+    provider: Literal["veo_3_1", "sora_2", "sora_2_pro"] = Field(
         ..., 
         description="Video generation provider for all posts"
     )
     aspect_ratio: Literal["9:16", "16:9"] = Field(
         default="9:16",
-        description="Target video aspect ratio supported by VEO"
+        description="Target video aspect ratio"
     )
     resolution: Literal["720p", "1080p"] = Field(
         default="720p",
-        description="Output resolution supported by VEO"
+        description="Output resolution"
+    )
+    seconds: Literal[4, 8, 12] = Field(
+        default=8,
+        description="Target duration in seconds for generated clips (Sora supports 4, 8, or 12)"
+    )
+    size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
+        default=None,
+        description="Provider-specific pixel dimensions override"
     )
 
 
@@ -93,3 +124,15 @@ class BatchVideoGenerationResponse(BaseModel):
     aspect_ratio: str = Field(..., description="Video aspect ratio")
     resolution: str = Field(..., description="Output resolution")
     post_ids: list[str] = Field(..., description="List of post IDs submitted")
+    provider_model: Optional[str] = Field(
+        default=None,
+        description="Underlying provider model identifier if uniform"
+    )
+    seconds: Optional[int] = Field(
+        default=None,
+        description="Target duration applied to submissions"
+    )
+    size: Optional[str] = Field(
+        default=None,
+        description="Pixel dimensions applied to submissions"
+    )

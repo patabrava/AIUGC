@@ -15,19 +15,9 @@
 
     <!-- Header -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-        <div class="flex justify-between items-start">
-            <div>
-                <h2 class="text-3xl font-bold text-gray-900">{{ batch.brand }}</h2>
-                <p class="mt-1 text-sm text-gray-500">Created {{ batch.created_at }}</p>
-            </div>
-            <div class="flex space-x-2">
-                <button class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                    Duplicate
-                </button>
-                <button class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                    Archive
-                </button>
-            </div>
+        <div>
+            <h2 class="text-3xl font-bold text-gray-900">{{ batch.brand }}</h2>
+            <p class="mt-1 text-sm text-gray-500">Created {{ batch.created_at }}</p>
         </div>
     </div>
 
@@ -40,7 +30,6 @@
                 ('S1_SETUP', 'Setup'),
                 ('S2_SEEDED', 'Seeded'),
                 ('S4_SCRIPTED', 'Scripted'),
-                ('S5_PROMPTS_BUILT', 'Prompts'),
                 ('S6_QA', 'QA'),
                 ('S7_PUBLISH_PLAN', 'Plan'),
                 ('S8_COMPLETE', 'Complete')
@@ -94,40 +83,18 @@
 
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
     {% set prompt_ready_count = (batch.posts | selectattr('video_prompt_json') | list | length) %}
-    <div id="prompt-dashboard" class="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6" data-prompt-callout>
-        <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div class="md:max-w-2xl">
-                <h3 class="text-lg font-medium text-blue-900 mb-2">Build Video Prompts</h3>
-                <p class="text-sm text-blue-800 mb-3">
-                    Every approved script now needs a video generation prompt. Generate prompts per post to advance from <span class="font-semibold">S4_SCRIPTED</span> to <span class="font-semibold">S5_PROMPTS_BUILT</span>. Each prompt automatically inserts the Phase&nbsp;2 dialogue into the hyper-detailed template.
+    <div id="video-workflow" class="bg-gradient-to-r from-blue-50 to-purple-50 border border-purple-200 rounded-lg p-6 mb-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="flex items-center gap-3 mb-2">
+                    <h3 class="text-xl font-bold text-gray-900">Video Production</h3>
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                        {{ prompt_ready_count }}/{{ batch.posts | length }} Ready
+                    </span>
+                </div>
+                <p class="text-sm text-gray-700">
+                    Generate prompts for each post below, then configure settings and submit to production.
                 </p>
-                <ul class="text-sm text-blue-800 space-y-1">
-                    <li class="flex items-start"><span class="mt-1 mr-2 text-blue-500">•</span><span>Review the script and seed facts in each card.</span></li>
-                    <li class="flex items-start"><span class="mt-1 mr-2 text-blue-500">•</span><span>Click <span class="font-semibold">Generate Prompt</span> to assemble the template. The result is saved to the post and can be regenerated anytime.</span></li>
-                    <li class="flex items-start"><span class="mt-1 mr-2 text-blue-500">•</span><span>Prompts marked <span class="font-semibold">Ready</span> are eligible for video generation in Phase&nbsp;4.</span></li>
-                </ul>
-                <div class="mt-6">
-                    <a
-                        href="#video-generation-settings"
-                        class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition"
-                    >
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                        </svg>
-                        Jump to Section 4 — Video Settings
-                    </a>
-                </div>
-            </div>
-            <div class="bg-white border border-blue-100 rounded-lg px-5 py-4 shadow-sm flex flex-col items-start">
-                <span class="text-xs font-semibold uppercase tracking-wide text-blue-500">Prompt Progress</span>
-                <span class="mt-2 text-3xl font-bold text-blue-900">{{ prompt_ready_count }}/{{ batch.posts | length }}</span>
-                <span class="text-sm text-blue-700">Prompts completed</span>
-                {% if batch.state == 'S4_SCRIPTED' and prompt_ready_count == batch.posts | length %}
-                <div class="mt-3 inline-flex items-center text-sm text-blue-600">
-                    <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-                    All prompts ready — advance batch to S5 when you are ready.
-                </div>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -135,62 +102,30 @@
 
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] %}
     <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6" x-data="videoSettingsComponent()">
-        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-            <div class="flex-1">
-                <p class="text-xs font-semibold uppercase tracking-wide text-purple-500">Section 4</p>
-                <h3 class="text-2xl font-bold text-gray-900 mt-1">Video Generation Settings</h3>
-                <p class="mt-2 text-sm text-gray-600">
-                    Confirm the provider, aspect ratio, and target duration before submitting prompts to production video renders.
-                    These selections will be applied to batch-level generate actions and surfaced to editors during QA.
-                </p>
-                <div class="mt-4 inline-flex items-center gap-2 rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Canon-compliant default: Veo 3.1 · 9:16 · 8s
-                </div>
-            </div>
-            <div class="w-full lg:w-96 bg-gray-50 border border-gray-200 rounded-lg p-5" aria-live="polite">
-                <dl class="space-y-3 text-sm text-gray-700">
-                    <div class="flex items-start justify-between gap-3">
-                        <dt class="font-medium text-gray-600">Provider</dt>
-                        <dd class="text-gray-900" x-text="providerLabel"></dd>
-                    </div>
-                    <div class="flex items-start justify-between gap-3">
-                        <dt class="font-medium text-gray-600">Aspect Ratio</dt>
-                        <dd class="text-gray-900" x-text="aspectRatio"></dd>
-                    </div>
-                    <div class="flex items-start justify-between gap-3">
-                        <dt class="font-medium text-gray-600">Target Duration</dt>
-                        <dd class="text-gray-900" x-text="durationLabel"></dd>
-                    </div>
-                    <div class="flex items-start justify-between gap-3">
-                        <dt class="font-medium text-gray-600">Resolution</dt>
-                        <dd class="text-gray-900" x-text="resolution"></dd>
-                    </div>
-                </dl>
-            </div>
-        </div>
-        <form class="mt-6" action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
-            <div class="grid gap-6 md:grid-cols-3">
+        <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
+            <div class="grid gap-4 md:grid-cols-3 mb-4">
                 <label class="flex flex-col text-sm" for="provider-select">
-                    <span class="text-gray-700 font-medium">Model Provider</span>
+                    <span class="text-gray-700 font-medium">Provider</span>
                     <select
                         id="provider-select"
                         name="provider"
-                        class="mt-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         x-model="provider"
                     >
                         <option value="veo_3_1">Veo 3.1 (Recommended)</option>
-                        <option value="sora_2" disabled>Sora 2 (Coming Soon)</option>
+                        <option value="sora_2">Sora 2</option>
+                        <option value="sora_2_pro">Sora 2 Pro</option>
                     </select>
+                    <p class="mt-2 text-xs text-gray-500" x-show="provider.startsWith('sora_2')">
+                        Sora 2 enforces 8s clips and supports 720x1280 or 1024x1792 (vertical) / 1280x720 or 1792x1024 (landscape).
+                    </p>
                 </label>
                 <label class="flex flex-col text-sm" for="aspect-select">
                     <span class="text-gray-700 font-medium">Aspect Ratio</span>
                     <select
                         id="aspect-select"
                         name="aspect_ratio"
-                        class="mt-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         x-model="aspectRatio"
                     >
                         <option value="9:16">9:16 Vertical</option>
@@ -198,23 +133,22 @@
                     </select>
                 </label>
                 <label class="flex flex-col text-sm" for="duration-select">
-                    <span class="text-gray-700 font-medium">Target Duration</span>
+                    <span class="text-gray-700 font-medium">Duration</span>
                     <select
                         id="duration-select"
                         name="duration_seconds"
-                        class="mt-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         x-model="duration"
                     >
                         <option value="8">8 seconds (Canon)</option>
-                        <option value="12" disabled>12 seconds (Needs Canon update)</option>
+                        <option value="4" x-bind:disabled="provider === 'veo_3_1'">4 seconds (Sora only)</option>
+                        <option value="12" x-bind:disabled="provider === 'veo_3_1'">12 seconds (Sora only)</option>
                     </select>
+                    <p class="mt-1 text-xs text-gray-500">Sora currently supports 4, 8, or 12 second clips.</p>
                 </label>
             </div>
             <input type="hidden" name="resolution" x-model="resolution" />
-            <p class="mt-4 text-xs text-gray-500">
-                Duration preferences inform QA expectations. Canon §7.2 currently validates 8-second clips 
-                (±0.5s); alternate durations remain disabled until spec revision.
-            </p>
+            <input type="hidden" name="seconds" x-model="duration" />
             <div class="mt-4" aria-live="polite" x-show="submitError || submitSuccess" x-cloak>
                 <div
                     x-show="submitSuccess"
@@ -223,7 +157,7 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    <span x-text="`Submitted ${submitSuccess} prompt(s) to Veo 3.1.`"></span>
+                    <span x-text="successMessage"></span>
                 </div>
                 <div
                     x-show="submitError"
@@ -235,7 +169,7 @@
                     <span x-text="submitError"></span>
                 </div>
             </div>
-            <div class="mt-6 flex flex-wrap items-center gap-3">
+            <div class="mt-4">
                 <button
                     type="submit"
                     class="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed"
@@ -244,20 +178,8 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    <span x-text="isSubmitting ? 'Submitting…' : 'Apply to batch generation'"></span>
+                    <span x-text="isSubmitting ? 'Submitting…' : 'Generate All Videos'"></span>
                 </button>
-                <button
-                    type="button"
-                    class="inline-flex items-center gap-2 rounded-md border border-purple-200 px-4 py-2 text-sm font-semibold text-purple-700 shadow-sm transition hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
-                    @click="dispatchPreview()"
-                >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h5l7 6-7 6H4z" />
-                    </svg>
-                    Preview selections
-                </button>
-                <span class="text-xs text-gray-500">Preview dispatch emits <code>batch-video-settings:preview</code> for downstream integrations.</span>
             </div>
         </form>
     </div>
@@ -268,20 +190,26 @@
                 aspectRatio: '9:16',
                 duration: '8',
                 resolution: '720p',
-                get providerLabel() {
-                    return this.provider === 'veo_3_1' ? 'Veo 3.1' : 'Sora 2';
+                supportedSizes: {
+                    'veo_3_1': {
+                        '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
+                        '16:9': { '720p': '1280x720', '1080p': '1920x1080' }
+                    },
+                    'sora_2': {
+                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
+                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
+                    },
+                    'sora_2_pro': {
+                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
+                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
+                    }
                 },
-                get durationLabel() {
-                    return `${this.duration} seconds`;
+                getProviderSize(aspect, resolution) {
+                    const providerMap = this.supportedSizes[this.provider] || {};
+                    const aspectMap = providerMap[aspect] || {};
+                    return aspectMap[resolution] || null;
                 },
-                dispatchPreview() {
-                    this.$dispatch('batch-video-settings:preview', {
-                        provider: this.provider,
-                        aspect_ratio: this.aspectRatio,
-                        duration_seconds: Number(this.duration),
-                        resolution: this.resolution
-                    });
-                },
+                successMessage: '',
                 async submitBatch(event) {
                     if (this.isSubmitting) {
                         return;
@@ -299,7 +227,9 @@
                             body: JSON.stringify({
                                 provider: this.provider,
                                 aspect_ratio: this.aspectRatio,
-                                resolution: this.resolution
+                                resolution: this.resolution,
+                                seconds: Number(this.duration),
+                                size: this.getProviderSize(this.aspectRatio, this.resolution)
                             })
                         });
 
@@ -310,8 +240,9 @@
 
                         const payload = await response.json();
                         const submittedCount = payload?.data?.submitted_count ?? 0;
+                        const providerLabel = this.provider === 'veo_3_1' ? 'Veo 3.1' : (this.provider === 'sora_2_pro' ? 'Sora 2 Pro' : 'Sora 2');
                         this.submitSuccess = submittedCount;
-                        this.dispatchPreview();
+                        this.successMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
                     } catch (error) {
                         this.submitError = error instanceof Error ? error.message : 'Submission failed';
                     } finally {
@@ -319,12 +250,22 @@
                     }
                 },
                 init() {
-                    this.$watch('aspectRatio', (value) => {
-                        if (value === '16:9') {
-                            this.resolution = '1080p';
-                        } else {
-                            this.resolution = '720p';
+                    this.$watch('provider', (value) => {
+                        if (value.startsWith('sora_2')) {
+                            if (!['4','8','12'].includes(this.duration)) {
+                                this.duration = '8';
+                            }
+                        } else if (value === 'veo_3_1') {
+                            if (this.duration !== '8') {
+                                this.duration = '8';
+                            }
                         }
+                        const targetResolution = this.aspectRatio === '16:9' ? '1080p' : '720p';
+                        this.resolution = targetResolution;
+                    });
+                    this.$watch('aspectRatio', (value) => {
+                        const targetResolution = value === '16:9' ? '1080p' : '720p';
+                        this.resolution = targetResolution;
                     });
                 },
                 isSubmitting: false,

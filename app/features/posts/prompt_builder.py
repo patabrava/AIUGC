@@ -11,8 +11,32 @@ from app.core.logging import get_logger
 from app.core.errors import ValidationError
 
 
+__all__ = ["build_video_prompt_from_seed", "validate_video_prompt", "build_optimized_prompt"]
+
+
 AUDIO_DIALOGUE_DIRECTIVE = (
     "Audio: Recorded through modern smartphone mic — clear, front-facing voice with intimate presence and a soft, short living-room bloom (RT60 ≈ 0.3–0.4 s). Camera 20–30 cm from mouth, mic unobstructed. HVAC/appliances off; noise floor ≤ –55 dBFS with a faint, even room-tone bed. No music, one-take natural pacing."
+)
+
+OPTIMIZED_PROMPT_TEMPLATE = (
+    "Subject & Look:\n"
+    "A 38-year-old German woman with long, slightly damp light-brown hair with natural blonde highlights; hazel almond-shaped eyes with faint crow’s feet; friendly oval face with soft expression lines; warm light-medium skin with neutral undertones. She faces camera with a neutral, friendly expression that softens into a gentle smile.\n\n"
+    "Setting:\n"
+    "A modern, tidy bedroom with blush-pink walls and minimal décor. Vertical frame.\n\n"
+    "Cinematography:\n"
+    "Camera shot: medium close-up, slightly high angle, centered; one continuous take, no cuts. Lens & DOF: smartphone front camera (~24 mm equiv.), deep DOF with subtle natural falloff. Camera motion: subtle handheld sway and micro-jitter consistent with selfie grip.\n\n"
+    "Lighting & Palette:\n"
+    "Key: soft vanity light frontal; Fill: window daylight camera-right; Rim: gentle ambient wrap. Palette anchors: blush pink, soft white, warm oak, brushed nickel.\n\n"
+    "Action (8 s):\n"
+    "0–2 s: seated in a wheelchair, steady head-and-shoulders, direct eye contact, neutral expression.\n"
+    "2–5 s: small natural hand gesture; slight upper-body nods.\n"
+    "5–8 s: expression warms into a gentle smile; brief 0.5 s pause after speaking.\n\n"
+    "Dialogue:\n"
+    "\"{dialogue}\"\n\n"
+    "Audio:\n"
+    "Clean smartphone voice, intimate presence, faint even room-tone; no music; no background HVAC.\n\n"
+    "Constraints — Avoid:\n"
+    "text overlays/subtitles, logos/branding, poor lighting, heavy compression, excessive shake, off-sync audio, changes to character identity, cuts or angle changes."
 )
 
 logger = get_logger(__name__)
@@ -58,6 +82,8 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
 
     script_line = f"{normalized_dialogue} (stiller Halt)"
 
+    optimized_prompt = build_optimized_prompt(normalized_dialogue)
+
     # Build audio config with distinct dialogue guidance to avoid duplication with capture notes
     audio_section = AudioSection(dialogue=AUDIO_DIALOGUE_DIRECTIVE)
 
@@ -70,12 +96,14 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Convert to dict for storage and API submission
     prompt_dict = video_prompt.model_dump()
+    prompt_dict["optimized_prompt"] = optimized_prompt
     
     logger.info(
         "video_prompt_assembled",
         dialogue_length=len(dialogue),
         dialogue_preview=dialogue[:50] + "..." if len(dialogue) > 50 else dialogue,
         dialogue_source=dialogue_source,
+        optimized_prompt_length=len(optimized_prompt),
     )
     
     return prompt_dict
@@ -102,3 +130,8 @@ def validate_video_prompt(prompt_data: Dict[str, Any]) -> bool:
             message=f"Video prompt validation failed: {str(e)}",
             details={"prompt_keys": list(prompt_data.keys())}
         )
+
+
+def build_optimized_prompt(dialogue: str) -> str:
+    cleaned_dialogue = dialogue.strip()
+    return OPTIMIZED_PROMPT_TEMPLATE.format(dialogue=cleaned_dialogue)

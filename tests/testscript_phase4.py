@@ -1,7 +1,8 @@
 """
-Phase 4 Testscript: Video Generation
+Phase 4 Testscript: Video Generation (Sora 2 Pro)
 Per Constitution § VIII: Whole-App Testscripts
 Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
+Targets Sora 2 Pro pathway per Canon § 2.1 Video Providers.
 """
 
 import requests
@@ -10,6 +11,11 @@ import sys
 import uuid
 
 BASE_URL = "http://localhost:8000"
+SORA_PROVIDER = "sora_2_pro"
+TARGET_ASPECT_RATIO = "9:16"
+TARGET_RESOLUTION = "1080p"
+TARGET_SECONDS = 8
+TARGET_SIZE = "1024x1792"
 
 
 def test_phase4_video_generation():
@@ -18,7 +24,7 @@ def test_phase4_video_generation():
     Prerequisites: Phase 0, 1, 2, 3 passing, dev server running.
     """
     print("=" * 60)
-    print("Phase 4 Testscript: Video Generation")
+    print("Phase 4 Testscript: Video Generation (Sora 2 Pro)")
     print("=" * 60)
     print()
     
@@ -99,12 +105,14 @@ def test_phase4_video_generation():
     print(f"   State ready: {prompt_data['state_ready']}")
     print()
     
-    # Step 7: Submit video generation
-    print("Step 7: Submit video generation")
+    # Step 7: Submit video generation via Sora 2 Pro
+    print("Step 7: Submit video generation via Sora 2 Pro")
     video_request = {
-        "provider": "veo_3_1",
-        "aspect_ratio": "9:16",
-        "resolution": "720p"
+        "provider": SORA_PROVIDER,
+        "aspect_ratio": TARGET_ASPECT_RATIO,
+        "resolution": TARGET_RESOLUTION,
+        "seconds": TARGET_SECONDS,
+        "size": TARGET_SIZE
     }
     response = requests.post(
         f"{BASE_URL}/videos/{post_id}/generate",
@@ -113,16 +121,18 @@ def test_phase4_video_generation():
     assert response.status_code == 200, f"Video generation failed: {response.status_code}"
     video_data = response.json()["data"]
     operation_id = video_data["operation_id"]
+    assert video_data["provider"] == SORA_PROVIDER, "Unexpected provider returned"
     print("✅ Video generation submitted")
     print(f"   Operation ID: {operation_id}")
     print(f"   Provider: {video_data['provider']}")
+    print(f"   Provider model: {video_data.get('provider_model', 'unknown')}")
     print(f"   Status: {video_data['status']}")
     print(f"   Estimated duration: {video_data.get('estimated_duration_seconds', 'N/A')}s")
     print()
-    
+
     # Step 8: Poll video status
     print("Step 8: Poll video status")
-    print("   Note: This may take 2-3 minutes for VEO 3.1")
+    print("   Note: Sora 2 Pro typically completes within ~2 minutes")
     max_polls = 40  # 40 * 10s = ~6.5 minutes max
     poll_interval = 10
     
@@ -134,7 +144,7 @@ def test_phase4_video_generation():
         
         current_status = status_data["status"]
         print(f"   Poll {i+1}/{max_polls}: Status = {current_status}")
-        
+
         if current_status == "completed":
             print("✅ Video generation completed!")
             print(f"   Video URL: {status_data['video_url']}")
@@ -143,6 +153,8 @@ def test_phase4_video_generation():
                 print(f"   File ID: {metadata.get('imagekit_file_id', 'N/A')}")
                 print(f"   Size: {metadata.get('size_bytes', 'N/A')} bytes")
                 print(f"   Provider: {metadata.get('provider', 'N/A')}")
+                print(f"   Provider model: {metadata.get('provider_model', 'N/A')}")
+                assert metadata.get("provider") == SORA_PROVIDER, "Metadata provider mismatch"
             break
         elif current_status == "failed":
             print(f"❌ Video generation failed")
@@ -151,17 +163,19 @@ def test_phase4_video_generation():
             sys.exit(1)
     else:
         print(f"⚠️  Video still processing after {max_polls * poll_interval} seconds")
-        print("   This is expected for VEO 3.1. Check manually or wait longer.")
+        print("   Sora 2 Pro may require additional time. Continue monitoring via worker logs.")
         print(f"   Operation ID: {operation_id}")
     
     print()
     
-    # Step 9: Verify batch-level generation endpoint
-    print("Step 9: Test batch-level video generation endpoint")
+    # Step 9: Verify batch-level generation endpoint for Sora 2 Pro
+    print("Step 9: Test batch-level video generation endpoint (Sora 2 Pro)")
     batch_video_request = {
-        "provider": "veo_3_1",
-        "aspect_ratio": "9:16",
-        "resolution": "720p"
+        "provider": SORA_PROVIDER,
+        "aspect_ratio": TARGET_ASPECT_RATIO,
+        "resolution": TARGET_RESOLUTION,
+        "seconds": TARGET_SECONDS,
+        "size": TARGET_SIZE
     }
     response = requests.post(
         f"{BASE_URL}/videos/batch/{batch_id}/generate-all",
@@ -172,23 +186,26 @@ def test_phase4_video_generation():
     print("✅ Batch video generation endpoint working")
     print(f"   Submitted: {batch_video_data['submitted_count']}")
     print(f"   Skipped: {batch_video_data['skipped_count']}")
+    print(f"   Provider model: {batch_video_data.get('provider_model', 'N/A')}")
     print()
-    
+
     print("=" * 60)
-    print("Phase 4 Testscript Complete!")
+    print("Phase 4 Testscript Complete! (Sora 2 Pro)")
     print("=" * 60)
     print()
     print("Summary:")
-    print("✅ Video generation submission working")
+    print("✅ Video generation submission (Sora 2 Pro) working")
     print("✅ Video status polling working")
+    print("✅ Provider metadata recorded")
     print("✅ Batch-level generation working")
     print("✅ All Phase 4 features operational")
     print()
     print("Next steps:")
-    print("1. Wait for video polling worker to complete video generation")
+    print("1. Wait for video polling worker to complete Sora 2 Pro rendering if still processing")
     print("2. Verify video appears in ImageKit CDN")
     print("3. Check video URL is accessible")
-    print("4. Proceed to Phase 5: QA Review")
+    print("4. Capture worker logs (`workers/video_poller.py`) showing completion")
+    print("5. Proceed to Phase 5: QA Review")
 
 
 if __name__ == "__main__":
