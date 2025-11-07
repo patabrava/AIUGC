@@ -88,7 +88,7 @@
     </div>
     {% endif %}
 
-    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
+    {% if batch.state == 'S4_SCRIPTED' %}
     {% set prompt_ready_count = (batch.posts | selectattr('video_prompt_json') | list | length) %}
     <div id="video-workflow" class="bg-gradient-to-r from-blue-50 to-purple-50 border border-purple-200 rounded-lg p-6 mb-6">
         <div class="flex items-center justify-between">
@@ -100,14 +100,14 @@
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
-                    Generate prompts for each post below, then configure settings and submit to production.
+                    Generate prompts for each post below, then configure batch settings and submit to production.
                 </p>
             </div>
         </div>
     </div>
     {% endif %}
 
-    {% if batch.state == 'S6_QA' %}
+    {% if batch.state in ['S5_PROMPTS_BUILT', 'S6_QA'] %}
     {% set qa_passed_count = (batch.posts | selectattr('qa_pass') | list | length) %}
     {% set videos_ready_count = (batch.posts | selectattr('video_status', 'equalto', 'completed') | list | length) %}
     <div id="qa-workflow" class="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-6 mb-6">
@@ -123,7 +123,7 @@
                     Review each video for quality. Run auto-checks and approve manually when satisfied.
                 </p>
             </div>
-            {% if qa_passed_count == batch.posts | length and batch.posts | length > 0 %}
+            {% if batch.state == 'S6_QA' and qa_passed_count == batch.posts | length and batch.posts | length > 0 %}
             <button
                 hx-put="/batches/{{ batch.id }}/advance-to-publish"
                 hx-confirm="All posts approved. Advance to Publish Planning?"
@@ -551,7 +551,7 @@
     </div>
 
     <!-- Video Generation Settings (moved from top) -->
-    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] %}
+    {% if batch.state == 'S4_SCRIPTED' %}
     <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6" x-data="videoSettingsComponent()">
         <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>
         <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
