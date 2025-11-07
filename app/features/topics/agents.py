@@ -48,9 +48,19 @@ def _validate_url_accessible(url: str, timeout: float = 5.0) -> bool:
 
 
 def extract_soft_cta(script: str) -> str:
-    words = script.strip().split()
-    if not words:
+    script = script.strip()
+    if not script:
         raise ValidationError(message="Script is empty", details={})
+
+    # Prefer the trailing sentence (captures full question for lifestyle scripts)
+    sentences = re.findall(r"[^.!?]*[.!?]", script)
+    for sentence in reversed(sentences):
+        candidate = sentence.strip()
+        if candidate:
+            return candidate
+
+    # Fallback: use up to the last four words
+    words = script.split()
     slice_length = min(4, len(words))
     return " ".join(words[-slice_length:])
 
