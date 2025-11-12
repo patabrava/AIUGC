@@ -68,7 +68,14 @@ class LLMClient:
             if tools:
                 payload["tools"] = tools
             if text_format is not None:
-                payload.setdefault("text", {})["format"] = text_format
+                if tools and any(tool.get("type") == "web_search" for tool in tools):
+                    logger.warning(
+                        "openai_text_format_unsupported_with_web_search",
+                        requested_format=text_format,
+                    )
+                    text_format = None
+                if text_format is not None:
+                    payload.setdefault("text", {})["format"] = text_format
             if reasoning is not None:
                 payload["reasoning"] = reasoning
             if tool_choice is not None:

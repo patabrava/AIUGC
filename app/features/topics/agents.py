@@ -562,7 +562,7 @@ def _generate_prompt1_chunk(
             system_prompt=None,
             tools=[{"type": "web_search", "external_web_access": True}],
             tool_choice="auto",
-            text_format={"type": "json"},
+            text_format={"type": "json_object"},
             include=[
                 "web_search_call.results",
                 "web_search_call.action.sources",
