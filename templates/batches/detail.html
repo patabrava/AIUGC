@@ -182,7 +182,6 @@
                         {% if post.updated_at %}<span>Updated {{ post.updated_at }}</span>{% endif %}
                     </div>
                     <h4 class="mt-2 text-lg font-semibold text-gray-900">{{ post.topic_title }}</h4>
-                    <p class="mt-1 text-sm text-gray-600 font-medium">CTA: {{ post.topic_cta }}</p>
                     {% if primary_script %}
                     <div class="mt-3">
                         {% if batch.state == 'S2_SEEDED' %}
@@ -751,5 +750,25 @@
         };
     </script>
     {% endif %}
+
+    <script>
+        // Alpine.js component for prompt modal
+        window.promptModalComponent = function(postId) {
+            return {
+                expanded: false,
+                postId: postId,
+                open() {
+                    this.expanded = true;
+                    window.batchDetailExpanded = true;
+                    document.body.style.overflow = 'hidden';
+                },
+                close() {
+                    this.expanded = false;
+                    window.batchDetailExpanded = false;
+                    document.body.style.overflow = '';
+                }
+            };
+        };
+    </script>
 </div>
 {% endblock %}

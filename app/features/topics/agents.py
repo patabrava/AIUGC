@@ -171,22 +171,43 @@ def _sanitize_json_text(text: str) -> str:
 
 def _parse_json_or_yaml(text: str) -> Any:
     text = _sanitize_json_text(text)
+    
+    # Try direct JSON parse first
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        pass
+    
+    # Try to extract JSON from text (handle cases where LLM adds preamble)
+    # Look for array or object start
+    json_start = -1
+    for i, char in enumerate(text):
+        if char in ['{', '[']:
+            json_start = i
+            break
+    
+    if json_start >= 0:
+        # Try parsing from the first JSON character
         try:
-            parsed_yaml = yaml.safe_load(text)
-        except yaml.YAMLError as yaml_error:
-            raise ValidationError(
-                message="PROMPT_1 response not JSON",
-                details={"error": str(yaml_error), "snippet": text[:200]}
-            ) from yaml_error
-        if parsed_yaml is None:
-            raise ValidationError(
-                message="PROMPT_1 response empty",
-                details={"snippet": text[:200]}
-            )
-        return parsed_yaml
+            return json.loads(text[json_start:])
+        except json.JSONDecodeError:
+            pass
+    
+    # Fall back to YAML parsing
+    try:
+        parsed_yaml = yaml.safe_load(text)
+    except yaml.YAMLError as yaml_error:
+        raise ValidationError(
+            message="PROMPT_1 response not JSON",
+            details={"error": str(yaml_error), "snippet": text[:200]}
+        ) from yaml_error
+    
+    if parsed_yaml is None:
+        raise ValidationError(
+            message="PROMPT_1 response empty",
+            details={"snippet": text[:200]}
+        )
+    return parsed_yaml
 
 
 def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
@@ -541,6 +562,7 @@ def _generate_prompt1_chunk(
             system_prompt=None,
             tools=[{"type": "web_search", "external_web_access": True}],
             tool_choice="auto",
+            text_format={"type": "json"},
             include=[
                 "web_search_call.results",
                 "web_search_call.action.sources",
@@ -741,7 +763,7 @@ def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: Dia
     }
     
     payload: Dict[str, Any] = {
-        "script": topic_data["rotation"],
+        "script": selected_script,
         "framework": topic_data.get("framework", "PAL"),
         "tone": "direkt, freundlich, empowernd, du-Form",
         "estimated_duration_s": topic_data["spoken_duration"],
