@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Batch {{ batch.brand }} - FLOW-FORGE{% endblock %}
+{% block title %}Batch Detail - FLOW-FORGE{% endblock %}
 
 {% block content %}
 <div
@@ -275,7 +275,7 @@
                                         </div>
                                         {% endfor %}
                                         <div>
-                                            <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Audio</p>
+                                            <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Batch Name</p>
                                             <p class="mt-1 text-xs text-gray-700 italic" style="display:-webkit-box;-webkit-line-clamp:4;line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;">{{ (prompt_audio.dialogue if prompt_audio and prompt_audio.dialogue else '—') }}</p>
                                             {% if prompt_audio and prompt_audio.capture and prompt_audio.capture != prompt_audio.dialogue %}
                                             <p class="mt-1 text-xs text-gray-500" style="display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ prompt_audio.capture }}</p>
@@ -339,7 +339,7 @@
                                                 </div>
                                                 {% endfor %}
                                                 <div>
-                                                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Audio</p>
+                                                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Batch Name</p>
                                                     <p class="mt-1 text-sm text-gray-800 italic whitespace-pre-wrap">{{ (prompt_audio.dialogue if prompt_audio and prompt_audio.dialogue else '—') }}</p>
                                                     {% if prompt_audio and prompt_audio.capture and prompt_audio.capture != prompt_audio.dialogue %}
                                                     <p class="mt-1 text-sm text-gray-600 whitespace-pre-wrap">{{ prompt_audio.capture }}</p>

@@ -24,7 +24,6 @@ def _join_sections(*sections: str) -> str:
 
 
 def build_prompt1(
-    brand: str,
     post_type: str,
     desired_topics: int,
     chunk_index: Optional[int] = None,
@@ -32,15 +31,8 @@ def build_prompt1(
 ) -> str:
     """Render PROMPT_1 with dynamic context from YAML template."""
     data = _load_prompt("prompt1")
-    post_type_context = {
-        "value": "Educational Mehrwert-Clips",
-        "lifestyle": "Lifestyle-Vibes mit Community-Touch",
-        "product": "Produktnahe Alltagshilfen",
-    }.get(post_type, post_type)
 
     format_kwargs = {
-        "brand": brand,
-        "post_type_context": post_type_context,
         "desired_topics": desired_topics,
         "chunk_index": chunk_index or 1,
         "total_chunks": total_chunks or 1,
@@ -48,7 +40,7 @@ def build_prompt1(
 
     return _join_sections(
         data.get("core", "").format(**format_kwargs),
-        data.get("brand_context", "").format(**format_kwargs),
+        data.get("audience_context", "").format(**format_kwargs),
         data.get("topic_pool", "").format(**format_kwargs),
         data.get("output_schema", "").format(**format_kwargs),
         data.get("chunk_rules", "").format(**format_kwargs),
@@ -57,12 +49,11 @@ def build_prompt1(
     )
 
 
-def build_prompt2(brand: str, topic: str, scripts_per_category: int = 5) -> str:
-    """Render PROMPT_2 with brand/topic context from YAML template."""
+def build_prompt2(topic: str, scripts_per_category: int = 5) -> str:
+    """Render PROMPT_2 with topic context from YAML template."""
     data = _load_prompt("prompt2")
     total_scripts = scripts_per_category * 3
     format_kwargs = {
-        "brand": brand,
         "topic": topic,
         "scripts_per_category": scripts_per_category,
         "total_scripts": total_scripts,
@@ -70,7 +61,7 @@ def build_prompt2(brand: str, topic: str, scripts_per_category: int = 5) -> str:
 
     return _join_sections(
         data.get("core", "").format(**format_kwargs),
-        data.get("brand_context", "").format(**format_kwargs),
+        data.get("audience_context", "").format(**format_kwargs),
         data.get("voice", "").format(**format_kwargs),
         data.get("structure", "").format(**format_kwargs),
         data.get("length_rules", "").format(**format_kwargs),

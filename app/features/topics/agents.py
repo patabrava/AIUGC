@@ -644,7 +644,6 @@ def build_seed_payload(
 
 
 def generate_topics_research_agent(
-    brand: str,
     post_type: str,
     count: int = 10
 ) -> List[ResearchAgentItem]:
@@ -662,7 +661,6 @@ def generate_topics_research_agent(
         desired_topics = min(chunk_size, remaining)
         items = _generate_prompt1_chunk(
             llm=llm,
-            brand=brand,
             post_type=post_type,
             desired_topics=desired_topics,
             chunk_index=chunk_index,
@@ -672,7 +670,6 @@ def generate_topics_research_agent(
 
         logger.info(
             "research_agent_chunk_complete",
-            brand=brand,
             post_type=post_type,
             chunk_index=chunk_index,
             total_chunks=total_chunks,
@@ -694,14 +691,12 @@ def generate_topics_research_agent(
 
 def _generate_prompt1_chunk(
     llm,
-    brand: str,
     post_type: str,
     desired_topics: int,
     chunk_index: int,
     total_chunks: int,
 ) -> List[ResearchAgentItem]:
     prompt = build_prompt1(
-        brand=brand,
         post_type=post_type,
         desired_topics=desired_topics,
         chunk_index=chunk_index,
@@ -713,7 +708,6 @@ def _generate_prompt1_chunk(
     for attempt in range(max_attempts):
         logger.debug(
             "research_agent_chunk_attempt",
-            brand=brand,
             post_type=post_type,
             desired_topics=desired_topics,
             chunk_index=chunk_index,
@@ -750,7 +744,6 @@ def _generate_prompt1_chunk(
                 )
             logger.info(
                 "research_agent_chunk_success",
-                brand=brand,
                 post_type=post_type,
                 desired_topics=desired_topics,
                 chunk_index=chunk_index,
@@ -762,7 +755,6 @@ def _generate_prompt1_chunk(
         except ValidationError as exc:
             logger.warning(
                 "research_agent_chunk_retry",
-                brand=brand,
                 post_type=post_type,
                 attempt=attempt + 1,
                 chunk_index=chunk_index,
@@ -804,11 +796,11 @@ def _generate_prompt1_chunk(
     )
 
 
-def generate_dialog_scripts(brand: str, topic: str, scripts_required: int = 5) -> DialogScripts:
+def generate_dialog_scripts(topic: str, scripts_required: int = 5) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
     scripts_required = max(1, min(5, scripts_required))
     llm = get_llm_client()
-    prompt = build_prompt2(brand=brand, topic=topic, scripts_per_category=scripts_required)
+    prompt = build_prompt2(topic=topic, scripts_per_category=scripts_required)
 
     for attempt in range(3):
         response = llm.generate_chat(
@@ -834,14 +826,12 @@ def generate_dialog_scripts(brand: str, topic: str, scripts_required: int = 5) -
             )
             logger.info(
                 "dialog_scripts_success",
-                brand=brand,
                 topic=topic
             )
             return trimmed
         except ValidationError as exc:
             logger.warning(
                 "dialog_scripts_retry",
-                brand=brand,
                 topic=topic,
                 attempt=attempt + 1,
                 error=exc.message,
@@ -852,14 +842,13 @@ def generate_dialog_scripts(brand: str, topic: str, scripts_required: int = 5) -
     
     logger.error(
         "dialog_scripts_failed_all_attempts",
-        brand=brand,
         topic=topic,
         last_response=response[:1000] if 'response' in locals() else None
     )
     raise ValidationError(message="Unable to produce dialog scripts", details={})
 
 
-def generate_lifestyle_topics(brand: str, count: int = 1, seed: Optional[int] = None) -> List[Dict[str, Any]]:
+def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Generate lifestyle topics using PROMPT_2 directly (no web research).
     Returns list of topic dicts with dialog scripts and metadata.
@@ -882,7 +871,6 @@ def generate_lifestyle_topics(brand: str, count: int = 1, seed: Optional[int] = 
 
         # Generate dialog scripts for this lifestyle topic
         dialog_scripts = generate_dialog_scripts(
-            brand=brand,
             topic=topic_template,
             scripts_required=1
         )
@@ -909,7 +897,6 @@ def generate_lifestyle_topics(brand: str, count: int = 1, seed: Optional[int] = 
         
         logger.info(
             "lifestyle_topic_generated",
-            brand=brand,
             title=topic_template,
             scripts_count=1,
             seed=seed

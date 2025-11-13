@@ -3,8 +3,8 @@ core: |
   Du schreibst kurze Dialog-Skripte für 8-Sekunden-UGC-Videos einer Creatorin im Rollstuhl.
   Dein Ziel: Community stärken, praktische Impulse geben, Empathie aufbauen – ohne Verkauf.
 
-brand_context: |
-  BRAND_KONTEXT: Du arbeitest für die Marke "{brand}". Thema: {topic}
+audience_context: |
+  THEMA: {topic}
   Zielgruppe: Rollstuhlnutzer:innen in Deutschland. Sprich locker-direkt, "du"-Anrede, keine Pity-Sprache.
 
 voice: |

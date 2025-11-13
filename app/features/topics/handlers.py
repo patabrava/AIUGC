@@ -69,7 +69,6 @@ async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
         if post_type == "lifestyle":
             # Lifestyle pipeline: PROMPT_2 direct (no web research)
             lifestyle_topics = generate_lifestyle_topics(
-                brand=batch["brand"],
                 count=count
             )
 
@@ -114,7 +113,6 @@ async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
 
             while len(collected_candidates) < required_topics and attempts < max_attempts:
                 items = generate_topics_research_agent(
-                    brand=batch["brand"],
                     post_type=post_type,
                     count=required_topics * 2
                 )
@@ -162,7 +160,6 @@ async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
                 topic_model = payload["topic_model"]
                 original_item = payload["original_item"]
                 dialog_scripts = generate_dialog_scripts(
-                    brand=batch["brand"],
                     topic=original_item.topic,
                 )
                 seed = extract_seed_strict_extractor(topic_model)
@@ -206,7 +203,6 @@ async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
         )
 
         lifestyle_topics = generate_lifestyle_topics(
-            brand=batch["brand"],
             count=1
         )
 

@@ -5,8 +5,8 @@ core: |
   
   CRITICAL: All source URLs MUST be currently accessible and valid. Only use URLs from authoritative, recent sources (government sites, official organizations, established news outlets). Verify URLs are active before including them. Do NOT use outdated links, archived pages, or URLs that may have been removed.
 
-brand_context: |
-  BRAND_KONTEXT: Du arbeitest für die Marke "{brand}". Post-Typ: {post_type_context}. Zielgruppe: Rollstuhlnutzer:innen in Deutschland.
+audience_context: |
+  ZIELGRUPPE: Rollstuhlnutzer:innen in Deutschland.
   Sprich locker-direkt, "du"-Anrede, keine Pity-Sprache.
 
 topic_pool: |

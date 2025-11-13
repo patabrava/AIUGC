@@ -72,12 +72,12 @@ class VideoPrompt(BaseModel):
         description="Authenticity modifiers"
     )
     universal_negatives: str = Field(
-        default="Universal Negatives (hard constraints): subtitles, captions, watermark, text overlays, words on screen, logo, branding, poor lighting, blurry footage, low resolution, artifacts, unwanted objects, inconsistent character appearance, audio sync issues, amateur quality, cartoon effects, unrealistic proportions, distorted hands, artificial lighting, oversaturation, compression noise, excessive camera shake.",
+        default="Universal Negatives (hard constraints): subtitles, captions, watermark, text overlays, words on screen, logo, branding, poor lighting, blurry footage, low resolution, artifacts, unwanted objects, inconsistent character appearance, audio sync issues, amateur quality, cartoon effects, unrealistic proportions, distorted hands, artificial lighting, oversaturation, compression noise, excessive camera shake background echo, noticeable reverb tail after speech, audible background noise, inconsistent room tone.",
         description="Universal negatives"
     )
     audio: AudioSection = Field(..., description="Audio section with dialogue and capture notes")
     post: str = Field(
-        default="Post: gentle HPF @ 80 Hz, light 3:1 compression (≈–3 dB GR), subtle de-ess around 6–8 kHz; peaks capped at –1 dBTP, delivery loudness around –14 LUFS integrated.",
+        default="Post: gentle HPF @ 80 Hz, light 3:1 compression (≈–3 dB GR), subtle de-ess around 6–8 kHz; peaks capped at –1 dBTP, delivery loudness around –14 LUFS integrated. After the dialogue concludes, the audio immediately cuts to a clean, silent background with no residual echo, reverb tail, or audible room noise ",
         description="Post-processing notes"
     )
     sound_effects: str = Field(
