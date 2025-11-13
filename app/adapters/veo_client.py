@@ -346,6 +346,31 @@ class VeoClient:
             )
             raise
 
+    def get_video_download_url(
+        self,
+        video_uri: str,
+        correlation_id: str
+    ) -> str:
+        """
+        Return download URL for generated video without fetching bytes.
+
+        Per Constitution § VI: Adapterize specialists.
+        Per Constitution § IX: Structured logging.
+
+        Args:
+            video_uri: VEO video URI from operation response
+            correlation_id: Unique correlation ID for tracking
+
+        Returns:
+            Direct download URL string
+        """
+        logger.info(
+            "veo_download_url_provided",
+            correlation_id=correlation_id,
+            video_uri=video_uri
+        )
+        return video_uri
+
     def _build_headers(self, include_json: bool = False) -> Dict[str, str]:
         headers = {
             "x-goog-api-key": self._api_key

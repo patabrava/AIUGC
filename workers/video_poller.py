@@ -8,7 +8,7 @@ Per Constitution § IX: Observable Implementation
 import time
 import sys
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -17,6 +17,7 @@ from app.adapters.supabase_client import get_supabase
 from app.adapters.sora_client import get_sora_client
 from app.adapters.imagekit_client import get_imagekit_client
 from app.core.logging import configure_logging, get_logger
+from app.core.config import get_settings
 
 try:  # pragma: no cover - allow worker to run without google-genai on Python 3.9
     from app.adapters.veo_client import get_veo_client  # type: ignore
@@ -159,15 +160,52 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
             )
             raise ValueError("Video data missing download URI")
 
+        video_uri = video_data["video_uri"]
+
+        settings = get_settings()
+
+        if settings.use_url_based_upload:
+            try:
+                logger.info(
+                    "attempting_url_based_upload",
+                    post_id=post_id,
+                    correlation_id=correlation_id,
+                    video_uri_preview=video_uri[:100]
+                )
+
+                download_url = veo_client.get_video_download_url(
+                    video_uri=video_uri,
+                    correlation_id=correlation_id
+                )
+
+                _store_completed_video(
+                    post_id=post_id,
+                    provider="veo_3_1",
+                    video_source=download_url,
+                    correlation_id=correlation_id,
+                    provider_metadata=video_data,
+                    existing_metadata=post.get("video_metadata") or {}
+                )
+
+                return
+
+            except Exception as url_upload_error:
+                logger.warning(
+                    "url_upload_failed_using_bytes_fallback",
+                    post_id=post_id,
+                    correlation_id=correlation_id,
+                    error=str(url_upload_error)
+                )
+
         video_bytes = veo_client.download_video(
-            video_uri=video_data["video_uri"],
+            video_uri=video_uri,
             correlation_id=correlation_id
         )
 
         _store_completed_video(
             post_id=post_id,
             provider="veo_3_1",
-            video_bytes=video_bytes,
+            video_source=video_bytes,
             correlation_id=correlation_id,
             provider_metadata=video_data,
             existing_metadata=post.get("video_metadata") or {}
@@ -206,7 +244,7 @@ def _handle_sora_video(post: Dict[str, Any], operation_id: str, correlation_id: 
         _store_completed_video(
             post_id=post_id,
             provider=provider,
-            video_bytes=video_bytes,
+            video_source=video_bytes,
             correlation_id=correlation_id,
             provider_metadata=status_result,
             existing_metadata=post.get("video_metadata") or {}
@@ -231,27 +269,55 @@ def _store_completed_video(
     *,
     post_id: str,
     provider: str,
-    video_bytes: bytes,
+    video_source: Union[bytes, str],
     correlation_id: str,
     provider_metadata: Dict[str, Any],
     existing_metadata: Dict[str, Any],
 ) -> None:
     imagekit_client = get_imagekit_client()
-    upload_result = imagekit_client.upload_video(
-        video_bytes=video_bytes,
-        file_name=f"post_{post_id}.mp4",
-        correlation_id=correlation_id
+
+    upload_method = "url" if isinstance(video_source, str) else "bytes"
+    upload_start = time.monotonic()
+
+    if upload_method == "url":
+        upload_result = imagekit_client.upload_video_from_url(
+            video_url=video_source,
+            file_name=f"post_{post_id}.mp4",
+            correlation_id=correlation_id
+        )
+    else:
+        upload_result = imagekit_client.upload_video(
+            video_bytes=video_source,
+            file_name=f"post_{post_id}.mp4",
+            correlation_id=correlation_id
+        )
+
+    upload_duration = time.monotonic() - upload_start
+
+    size_bytes = upload_result.get("size")
+    if size_bytes is None and isinstance(video_source, bytes):
+        size_bytes = len(video_source)
+
+    logger.info(
+        "video_upload_performance",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        provider=provider,
+        upload_method=upload_method,
+        upload_duration_seconds=upload_duration,
+        video_size_bytes=size_bytes
     )
 
     supabase = get_supabase().client
     merged_metadata = {
         **existing_metadata,
         "imagekit_file_id": upload_result["file_id"],
-        "size_bytes": upload_result["size"],
+        "size_bytes": size_bytes,
         "provider": provider,
         "file_path": upload_result["file_path"],
         "thumbnail_url": upload_result.get("thumbnail_url"),
         "provider_metadata": provider_metadata,
+        "upload_method": upload_method,
     }
 
     supabase.table("posts").update({
@@ -266,7 +332,9 @@ def _store_completed_video(
         correlation_id=correlation_id,
         provider=provider,
         video_url=upload_result["url"],
-        size_bytes=upload_result["size"]
+        size_bytes=size_bytes,
+        upload_method=upload_method,
+        upload_duration_seconds=upload_duration
     )
     
     # Check if all videos in batch are complete and transition to S6_QA

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     imagekit_public_key: str = Field(..., description="ImageKit public key")
     imagekit_private_key: str = Field(..., description="ImageKit private key")
     imagekit_url_endpoint: str = Field(..., description="ImageKit URL endpoint")
+    use_url_based_upload: bool = Field(
+        default=False,
+        description="Enable ImageKit video uploads via source URL instead of base64 encoding"
+    )
     
     # Social Media
     tiktok_client_key: str = Field(default="", description="TikTok client key")
