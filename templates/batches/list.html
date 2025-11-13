@@ -119,13 +119,12 @@
                     const brand = $event.detail.elt.querySelector('[name=brand]').value;
                     const value = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.value\']').value) || 0;
                     const lifestyle = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.lifestyle\']').value) || 0;
-                    const product = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.product\']').value) || 0;
                     const tempId = 'temp-' + Date.now();
                     window.dispatchEvent(new CustomEvent('batch-progress:update', {
                         detail: {
                             batchId: tempId,
                             brand,
-                            expected: value + lifestyle + product,
+                            expected: value + lifestyle,
                             posts: 0,
                             isTemp: true,
                         }
@@ -167,17 +166,6 @@
                                     min="0" 
                                     max="100" 
                                     value="4"
-                                    class="w-20 border border-gray-300 rounded-md py-1 px-2 text-center"
-                                >
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <label class="text-sm text-gray-600">Product Posts</label>
-                                <input 
-                                    type="number" 
-                                    name="post_type_counts.product" 
-                                    min="0" 
-                                    max="100" 
-                                    value="3"
                                     class="w-20 border border-gray-300 rounded-md py-1 px-2 text-center"
                                 >
                             </div>

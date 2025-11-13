@@ -36,12 +36,100 @@ from app.core.errors import ValidationError
 logger = get_logger(__name__)
 
 
+PROMPT1_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 execution agent.
+You must strictly follow the user's message instructions.
+
+CRITICAL SCRIPT REQUIREMENTS:
+- script must be ≤20 words, one sentence
+- Start with an engaging question using "Kennst du...?", "Weißt du...?", "Hast du...?" OR make a bold direct statement
+- Use du-Form (informal you), be direct, friendly, empowering
+- NO passive declarations like "Ab 2025 gibt's..."
+- Example good scripts:
+  * "Kennst du das Hilfsmittelverzeichnis? Es zeigt dir, welche Rollstühle die Kasse zahlen muss."
+  * "Weißt du, dass deine Begleitperson im ÖPNV oft gratis mitfährt?"
+  * "Hast du schon mal die B-Marke im Ausweis gecheckt? Die spart dir richtig Geld beim Reisen."
+
+CRITICAL SOURCE URL REQUIREMENTS:
+- ALL source URLs MUST be currently accessible and valid (not 404, not archived, not removed)
+- ONLY use URLs from authoritative, recent sources: government sites (.de domains), official organizations, established news outlets
+- VERIFY URLs are active and current before including them
+- DO NOT use outdated links, blog posts that may have been deleted, or URLs from unreliable sources
+- If web search returns dead links, find alternative authoritative sources
+
+Always respond with a valid JSON array whose length exactly matches the requested number of topics.
+Each element must include all required keys: topic, framework, sources, script, source_summary, estimated_duration_s, tone, disclaimer.
+Responses must be valid JSON only (no Markdown, no backticks, no commentary)."""
+
+
+PROMPT1_NORMALIZER_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 normalization agent.
+You receive a raw assistant reply that failed validation because it was not valid JSON.
+Rewrite it into a valid JSON array with exactly the requested number of items.
+Never invent additional information beyond what is present in the raw reply.
+Return JSON only (no Markdown, no comments)."""
+
+
+def _should_attempt_json_normalization(error: ValidationError) -> bool:
+    if "not JSON" in (error.message or ""):
+        return True
+    details = error.details
+    if isinstance(details, list):
+        for item in details:
+            if isinstance(item, dict) and item.get("type") == "list_type":
+                return True
+    return False
+
+
+def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: int) -> str:
+    prompt = (
+        "Konvertiere die folgende Antwort in ein valides JSON-Array mit genau "
+        f"{desired_topics} Objekten. Jedes Objekt muss alle geforderten Felder beinhalten."
+        "Nutze nur Informationen aus der Rohantwort. Keine Kommentare oder Markdown."
+        "\n<<<ROHANTWORT>>>\n"
+        f"{raw_response.strip()}"
+        "\n<<<ENDE>>>"
+    )
+
+    logger.info("research_agent_normalizing_response", desired_topics=desired_topics)
+
+    return llm.generate_openai(
+        prompt=prompt,
+        system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
+        text_format={"type": "json_object"},
+        max_tokens=3500,
+    )
+
+
+def _parse_prompt1_with_normalization(llm, raw_response: str, desired_topics: int) -> tuple[ResearchAgentBatch, str]:
+    try:
+        batch = parse_prompt1_response(raw_response)
+        return batch, raw_response
+    except ValidationError as exc:
+        if not _should_attempt_json_normalization(exc):
+            raise
+
+        normalized = _normalize_prompt1_response_to_json(llm, raw_response, desired_topics)
+        batch = parse_prompt1_response(normalized)
+        return batch, normalized
+
+
 def _validate_url_accessible(url: str, timeout: float = 5.0) -> bool:
-    """Check if URL is accessible via HEAD request."""
+    """Check if URL is accessible via HEAD request, fallback to GET if HEAD fails."""
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            response = client.head(url)
-            return response.status_code < 400
+            # Try HEAD first (faster)
+            try:
+                response = client.head(url)
+                if response.status_code < 400:
+                    return True
+                # Some servers don't support HEAD, try GET
+                if response.status_code == 405:
+                    response = client.get(url)
+                    return response.status_code < 400
+                return False
+            except httpx.HTTPStatusError:
+                # Try GET as fallback
+                response = client.get(url)
+                return response.status_code < 400
     except Exception as e:
         logger.debug("url_validation_failed", url=url, error=str(e))
         return False
@@ -73,6 +161,22 @@ def strip_cta_from_script(script: str, cta: str) -> str:
         trimmed = script[: -len(cta)].rstrip()
         return trimmed.rstrip("-–—,:;")
     return script
+
+
+def build_social_description(script: str, source_summary: Optional[str]) -> str:
+    """
+    Compose a social caption-style description for social media.
+    Uses ONLY the source_summary (additional facts), NOT the script.
+    The script is the video voiceover; description provides context for social posts.
+    """
+    if source_summary:
+        stripped_summary = source_summary.strip()
+        if stripped_summary:
+            # Collapse extra whitespace to keep output tidy
+            return re.sub(r"\s+", " ", stripped_summary).strip()
+    
+    # Fallback if no source_summary (shouldn't happen with validation)
+    return script.strip()
 
 
 def compute_bigram_jaccard(a: str, b: str) -> float:
@@ -137,11 +241,33 @@ def validate_duration(item: ResearchAgentItem) -> None:
 
 def validate_summary(item: ResearchAgentItem) -> None:
     overlap = compute_bigram_jaccard(item.script, item.source_summary)
-    if overlap > 0.35:
+    if overlap > 0.25:
         raise ValidationError(
-            message="Source summary overlaps too much with script",
-            details={"jaccard": overlap}
+            message="Source summary overlaps too much with script (must provide additional facts, not repeat script)",
+            details={"jaccard": overlap, "threshold": 0.25}
         )
+
+
+def validate_sources_accessible(item: ResearchAgentItem) -> None:
+    """Validate that all source URLs are accessible. Logs warnings but does not fail."""
+    inaccessible_sources = []
+    for source in item.sources:
+        url = str(source.url)
+        if not _validate_url_accessible(url, timeout=8.0):
+            inaccessible_sources.append({
+                "title": source.title,
+                "url": url
+            })
+    
+    if inaccessible_sources:
+        logger.warning(
+            "research_source_urls_not_accessible",
+            topic=item.topic,
+            inaccessible_count=len(inaccessible_sources),
+            inaccessible_sources=inaccessible_sources,
+            guidance="URLs may be outdated or temporarily unavailable"
+        )
+        # Do not raise - allow processing to continue with warning logged
 
 
 def normalize_framework(value: str) -> str:
@@ -157,10 +283,21 @@ def normalize_framework(value: str) -> str:
 
 def _sanitize_json_text(text: str) -> str:
     replacements = {
-        "\u201c": '"',
-        "\u201d": '"',
-        "\u2018": "'",
-        "\u2019": "'",
+        # English curly quotes
+        "\u201c": '"',  # Left double quotation mark
+        "\u201d": '"',  # Right double quotation mark
+        "\u2018": "'",  # Left single quotation mark
+        "\u2019": "'",  # Right single quotation mark
+        # German curly quotes
+        "\u201e": '"',  # Double low-9 quotation mark „
+        "\u201f": '"',  # Double high-reversed-9 quotation mark ‟
+        "\u201a": "'",  # Single low-9 quotation mark ‚
+        "\u201b": "'",  # Single high-reversed-9 quotation mark ‛
+        # Other problematic quotes
+        "\u00ab": '"',  # Left-pointing double angle quotation mark «
+        "\u00bb": '"',  # Right-pointing double angle quotation mark »
+        "\u2039": "'",  # Single left-pointing angle quotation mark ‹
+        "\u203a": "'",  # Single right-pointing angle quotation mark ›
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -170,42 +307,43 @@ def _sanitize_json_text(text: str) -> str:
 
 
 def _parse_json_or_yaml(text: str) -> Any:
-    text = _sanitize_json_text(text)
+    # Sanitize first - this handles curly quotes and other problematic characters
+    sanitized = _sanitize_json_text(text)
     
     # Try direct JSON parse first
     try:
-        return json.loads(text)
+        return json.loads(sanitized)
     except json.JSONDecodeError:
         pass
     
     # Try to extract JSON from text (handle cases where LLM adds preamble)
     # Look for array or object start
     json_start = -1
-    for i, char in enumerate(text):
+    for i, char in enumerate(sanitized):
         if char in ['{', '[']:
             json_start = i
             break
     
     if json_start >= 0:
-        # Try parsing from the first JSON character
+        # Try parsing from the first JSON character (use sanitized text)
         try:
-            return json.loads(text[json_start:])
+            return json.loads(sanitized[json_start:])
         except json.JSONDecodeError:
             pass
     
-    # Fall back to YAML parsing
+    # Fall back to YAML parsing (use sanitized text)
     try:
-        parsed_yaml = yaml.safe_load(text)
+        parsed_yaml = yaml.safe_load(sanitized)
     except yaml.YAMLError as yaml_error:
         raise ValidationError(
             message="PROMPT_1 response not JSON",
-            details={"error": str(yaml_error), "snippet": text[:200]}
+            details={"error": str(yaml_error), "snippet": sanitized[:200]}
         ) from yaml_error
     
     if parsed_yaml is None:
         raise ValidationError(
             message="PROMPT_1 response empty",
-            details={"snippet": text[:200]}
+            details={"snippet": sanitized[:200]}
         )
     return parsed_yaml
 
@@ -273,6 +411,7 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
     for item in batch.items:
         validate_duration(item)
         validate_summary(item)
+        validate_sources_accessible(item)
     validate_round_robin(batch.items)
     validate_unique_ctas(batch.items)
     return batch
@@ -382,6 +521,17 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
 def convert_research_item_to_topic(item: ResearchAgentItem) -> TopicData:
     cta = extract_soft_cta(item.script)
     rotation = strip_cta_from_script(item.script, cta)
+    
+    # Guard: if stripping CTA leaves empty rotation, use full script as rotation
+    # and extract a shorter CTA from the last few words
+    if not rotation or not rotation.strip():
+        rotation = item.script.strip()
+        words = rotation.split()
+        if len(words) > 4:
+            cta = " ".join(words[-4:])
+        else:
+            cta = rotation
+    
     return TopicData(
         title=item.topic,
         rotation=rotation,
@@ -420,6 +570,7 @@ def build_seed_payload(
     primary_fact = facts[0] if facts else None
 
     source_summary = item.source_summary.strip() if item.source_summary else None
+    description_text = build_social_description(item.script, source_summary)
 
     payload: Dict[str, Any] = {
         "script": item.script,
@@ -431,7 +582,7 @@ def build_seed_payload(
         "script_category": script_category,
         "strict_fact": primary_fact,
         "strict_seed": seed_payload,
-        "description": source_summary,
+        "description": description_text,
         "disclaimer": item.disclaimer,
     }
 
@@ -559,7 +710,7 @@ def _generate_prompt1_chunk(
         )
         response = llm.generate_openai(
             prompt=prompt_with_feedback,
-            system_prompt=None,
+            system_prompt=PROMPT1_SYSTEM_PROMPT,
             tools=[{"type": "web_search", "external_web_access": True}],
             tool_choice="auto",
             text_format={"type": "json_object"},
@@ -606,10 +757,29 @@ def _generate_prompt1_chunk(
                 error=exc.message,
                 details=exc.details
             )
-            prompt_with_feedback = (
-                f"{prompt}\n\nFEEDBACK: {exc.message}. Details: "
-                f"{json.dumps(exc.details, default=str)[:500]}"
-            )
+            
+            # Build detailed feedback for URL validation failures
+            feedback_parts = [f"FEEDBACK: {exc.message}"]
+            
+            if "not accessible" in exc.message.lower():
+                # Provide specific guidance for URL failures
+                details_str = json.dumps(exc.details, default=str, indent=2)
+                feedback_parts.append(f"\nDetails: {details_str}")
+                feedback_parts.append(
+                    "\nIMPORTANT: The URLs you provided are not accessible (404, timeout, or connection error)."
+                    "\nPlease use ONLY currently accessible URLs from authoritative sources:"
+                    "\n- German government sites (.de domains)"
+                    "\n- Official organizations (e.g., GKV-Spitzenverband, Deutsche Bahn)"
+                    "\n- Established news outlets"
+                    "\nVerify URLs are active and current before including them."
+                )
+            else:
+                feedback_parts.append(f"\nDetails: {json.dumps(exc.details, default=str)[:500]}")
+                feedback_parts.append(
+                    "\nRemember: Output must be a valid JSON array only, with double-quoted keys and no prose."
+                )
+            
+            prompt_with_feedback = prompt + "\n\n" + "".join(feedback_parts)
 
     raise ValidationError(
         message="Unable to produce valid topics for chunk",
@@ -847,3 +1017,4 @@ Extract facts now:"""
             error=str(e)
         )
         raise
+
