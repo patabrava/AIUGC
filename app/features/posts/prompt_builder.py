@@ -74,13 +74,13 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
     
     # Normalize dialogue to avoid duplicate ending markers
     normalized_dialogue = dialogue.strip()
-    suffix_variants = ["(stiller Halt)", "( stiller Halt)"]
+    suffix_variants = ["(After delivering the dialogue, the character maintains a still, gentle smile with no further facial or mouth movements)", "( After delivering the dialogue, the character maintains a still, gentle smile with no further facial or mouth movements)"]
     for suffix in suffix_variants:
         if normalized_dialogue.endswith(suffix):
             normalized_dialogue = normalized_dialogue[: -len(suffix)].rstrip()
             break
 
-    script_line = f"{normalized_dialogue} (stiller Halt)"
+    script_line = f"{normalized_dialogue} (After delivering the dialogue, the character maintains a still, gentle smile with no further facial or mouth movements)"
 
     optimized_prompt = build_optimized_prompt(normalized_dialogue)
 

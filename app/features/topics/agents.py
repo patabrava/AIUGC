@@ -40,14 +40,16 @@ PROMPT1_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 execution agent.
 You must strictly follow the user's message instructions.
 
 CRITICAL SCRIPT REQUIREMENTS:
-- script must be ≤20 words, one sentence
+- script must be 16-20 words, one sentence (≈7-8 Sekunden Sprechzeit)
 - Start with an engaging question using "Kennst du...?", "Weißt du...?", "Hast du...?" OR make a bold direct statement
 - Use du-Form (informal you), be direct, friendly, empowering
 - NO passive declarations like "Ab 2025 gibt's..."
+- If script is shorter than 16 words or estimated_duration_s unter 7, ergänze konkrete, quellenbasierte Details.
+- estimated_duration_s must equal CEIL(word_count(script)/2.6) and be 7 or 8.
 - Example good scripts:
-  * "Kennst du das Hilfsmittelverzeichnis? Es zeigt dir, welche Rollstühle die Kasse zahlen muss."
-  * "Weißt du, dass deine Begleitperson im ÖPNV oft gratis mitfährt?"
-  * "Hast du schon mal die B-Marke im Ausweis gecheckt? Die spart dir richtig Geld beim Reisen."
+  * "Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktiven und elektrischen Rollstühle die Kasse aktuell übernehmen muss."
+  * "Weißt du, dass deine Begleitperson im ÖPNV oft gratis mitfährt, wenn du im Ausweis die B-Marke aktiviert hast?"
+  * "Hast du schon die B-Marke geprüft? Sie spart dir auf Reisen Geld, Sitzplatzreservierungen und erleichtert richtig spontane Ausflüge."
 
 CRITICAL SOURCE URL REQUIREMENTS:
 - ALL source URLs MUST be currently accessible and valid (not 404, not archived, not removed)
@@ -234,6 +236,11 @@ def validate_duration(item: ResearchAgentItem) -> None:
             message="Script exceeds 8 seconds",
             details={"word_count": item.word_count(), "calculated": calculated}
         )
+    if calculated < 7:
+        raise ValidationError(
+            message="Script under 7 seconds",
+            details={"word_count": item.word_count(), "calculated": calculated}
+        )
     # Auto-correct estimated_duration_s if LLM calculated it wrong
     if calculated != item.estimated_duration_s:
         item.estimated_duration_s = calculated
@@ -395,9 +402,15 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
                         )
                     item["script"] = trimmed_script
                     item["estimated_duration_s"] = max(
-                        1,
+                        7,
                         math.ceil(len(script_words) / 2.6)
                     )
+                    # Validate minimum aligns with 7-second floor: CEIL(16/2.6) = 7
+                    if len(script_words) < 16:
+                        raise ValidationError(
+                            message="PROMPT_1 script too short (requires ≥16 words for 7-second minimum)",
+                            details={"word_count": len(script_words)}
+                        )
 
     payload = parsed if isinstance(parsed, dict) else {"items": parsed}
     try:

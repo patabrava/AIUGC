@@ -80,14 +80,14 @@ output_schema: |
     topic  – höchstens 10 Wörter
     framework  – einer von "PAL", "Testimonial", "Transformation"
     sources  – 1-2 Einträge, jeder Eintrag liefert title und url
-    script  – ein Satz, ≤ 20 Wörter (≈ ≤ 8 Sekunden)
+    script  – ein Satz, 16-20 Wörter (≈ 7-8 Sekunden Sprechzeit)
       CRITICAL: Script MUSS mit einer fesselnden Frage beginnen ("Kennst du...?", "Weißt du...?", "Hast du...?") 
       ODER eine direkte, aktivierende Aussage sein. NIEMALS passive Ankündigungen wie "Ab 2025 gibt's..." oder "Es gibt..."
-      Immer du-Form, direkt, freundlich, empowernd.
+      Immer du-Form, direkt, freundlich, empowernd. Ergänze konkrete Fakten oder Vorteile, bis die Länge passt.
     source_summary  – 35-80 Wörter, basiert ausschließlich auf sources[0]
       CRITICAL: Source summary MUSS zusätzliche Fakten/Details aus der Quelle enthalten, die NICHT im Script vorkommen.
       NIEMALS den Script-Text wiederholen oder paraphrasieren. Liefere ergänzende Informationen aus der Quelle.
-    estimated_duration_s  – Integer = CEIL(word_count(script)/2.6) und ≤ 8
+    estimated_duration_s  – Integer = CEIL(word_count(script)/2.6) und MUSS 7 oder 8 sein
     tone  – "direkt, freundlich, empowernd, du-Form"
     disclaimer  – "Keine Rechts- oder medizinische Beratung."
 
@@ -102,9 +102,9 @@ example: |
   sources:
     - title: GKV Hilfsmittelverzeichnis
       url: https://www.gkv-spitzenverband.de/hilfsmittel/
-  script: Kennst du das Hilfsmittelverzeichnis? Es zeigt dir, welche Rollstühle die Kasse zahlen muss.
+  script: Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktive und elektrische Rollstühle die Kasse heute übernehmen muss.
   source_summary: Das GKV-Hilfsmittelverzeichnis wird regelmäßig aktualisiert und enthält detaillierte Produktnummern für verschiedene Rollstuhltypen. Ärzte und Sanitätshäuser nutzen es zur Verordnung. Bei Ablehnung kannst du auf Verzeichnis-Einträge verweisen.
-  estimated_duration_s: 6
+  estimated_duration_s: 7
   tone: direkt, freundlich, empowernd, du-Form
   disclaimer: Keine Rechts- oder medizinische Beratung.
   
