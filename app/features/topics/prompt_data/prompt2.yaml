@@ -12,35 +12,41 @@ voice: |
   Maximal ein passendes Emoji, keine Hashtags oder Links.
 
 structure: |
-  Struktur pro Skript:
-    1. Empathischer Einstieg / Hook ("Kennst du das…?", "Schon erlebt…?", "Ich dachte früher…")
+  Struktur des Skripts:
+    1. Empathischer Einstieg / Hook – VARIIERE STARK zwischen:
+       • "Schon mal erlebt…?"
+       • "Ich dachte früher…"
+       • "Neulich ist mir aufgefallen…"
+       • "Wusstest du…?"
+       • "Manchmal frage ich mich…"
+       • "Ehrlich gesagt…"
+       (VERMEIDE "Kennst du das" – nutze andere Formulierungen)
     2. Kurzer persönlicher Einblick (1 Satz)
-    3. Eine offene Frage, jedes Mal unterschiedlich ("Was hilft dir?", "Wie löst du's?", usw.)
+    3. Eine offene Frage, jedes Mal unterschiedlich ("Was hilft dir?", "Wie machst du's?", "Hast du Tipps?", usw.)
 
 length_rules: |
   LÄNGE: 16-22 Wörter, ein Satz pro Zeile, keine Regieanweisungen.
   Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
 
 headings: |
-  Gib die Ausgabe exakt in drei Abschnitten zurück – jeder Abschnitt eine Überschrift und darunter GENAU {scripts_per_category} VERSCHIEDENE SKRIPTE (jeweils separate Zeilen):
+  Gib die Ausgabe mit EINER Überschrift und darunter GENAU 1 SKRIPT zurück:
     Problem-Agitieren-Lösung Ads
-    Testimonial Ads
-    Transformations-Geschichten Ads
   
-  Jedes Skript pro Abschnitt ist ein eigenständiger Dialog mit Hook + Einblick + Frage.
+  Das Skript folgt der Struktur: variabler Hook (NICHT "Kennst du das") + persönlicher Einblick + offene Frage.
 
 description_section: |
   BESCHREIBUNG FÜR SOCIAL MEDIA:
-  Nach den drei Skript-Abschnitten füge eine vierte Sektion hinzu:
+  Nach dem Skript füge eine zweite Sektion hinzu:
     Beschreibung
   
   Darunter schreibe EINEN zusammenhängenden Text (35-80 Wörter), der zusätzlichen Kontext zum Thema "{topic}" liefert.
-  Diese Beschreibung wird als Social-Media-Caption verwendet und MUSS ergänzende Fakten/Details enthalten, die NICHT in den Dialog-Skripten vorkommen.
-  Stil: direkt, freundlich, empowernd, du-Form – wie die Skripte, aber informativer und kontextreicher.
+  Diese Beschreibung wird als Social-Media-Caption verwendet und MUSS ergänzende Fakten/Details enthalten, die NICHT im Dialog-Skript vorkommen.
+  Schließe den Text mit GENAU drei thematisch passenden Hashtags ab (Format: #BeispielOhneLeerzeichen, getrennt durch Leerzeichen). Keine zusätzlichen Hashtags.
+  Stil: direkt, freundlich, empowernd, du-Form – wie das Skript, aber informativer und kontextreicher.
 
 closing: |
-  Antworte ausschließlich mit den Überschriften und Textzeilen, kein zusätzlicher Text oder Erklärungen.
-  WICHTIG: Schreibe GENAU {scripts_per_category} verschiedene Skripte unter jeder Überschrift (insgesamt {total_scripts} Zeilen).
+  Antworte ausschließlich mit der Überschrift und dem Skript, kein zusätzlicher Text oder Erklärungen.
+  WICHTIG: Schreibe GENAU 1 Skript unter der Überschrift "Problem-Agitieren-Lösung Ads".
   Vergiss nicht die "Beschreibung"-Sektion am Ende mit einem zusammenhängenden Text von 35-80 Wörtern.
 
 

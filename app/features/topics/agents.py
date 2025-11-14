@@ -459,7 +459,12 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         "transformations-geschichten ads": "transformation",
         "beschreibung": "description",
     }
-    buckets: Dict[str, List[str]] = {value: [] for value in headers.values() if value != "description"}
+    # Initialize all buckets (may remain empty for new single-category format)
+    buckets: Dict[str, List[str]] = {
+        "problem_agitate_solution": [],
+        "testimonial": [],
+        "transformation": [],
+    }
     description_text: Optional[str] = None
     current: Optional[str] = None
     current_script_lines: List[str] = []
@@ -534,6 +539,16 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
                 truncated_to=max_per_category,
             )
             buckets[category] = scripts[:max_per_category]
+    
+    # For new single-category format, fill empty categories with first script as fallback
+    if buckets["problem_agitate_solution"] and not buckets["testimonial"] and not buckets["transformation"]:
+        fallback_script = buckets["problem_agitate_solution"][0]
+        buckets["testimonial"] = [fallback_script]
+        buckets["transformation"] = [fallback_script]
+        logger.info(
+            "single_category_format_detected",
+            message="Using Problem-Agitieren-Lösung script as fallback for other categories"
+        )
 
     # Add description to payload
     payload = {**buckets, "description": description_text}
@@ -812,11 +827,16 @@ def _generate_prompt1_chunk(
     )
 
 
-def generate_dialog_scripts(topic: str, scripts_required: int = 5) -> DialogScripts:
+def generate_dialog_scripts(topic: str, scripts_required: int = 5, previously_used_hooks: Optional[List[str]] = None) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
     scripts_required = max(1, min(5, scripts_required))
     llm = get_llm_client()
     prompt = build_prompt2(topic=topic, scripts_per_category=scripts_required)
+    
+    # Add constraint to avoid repeating hooks if we have previous ones
+    if previously_used_hooks:
+        hooks_list = ", ".join([f'"{hook}"' for hook in previously_used_hooks])
+        prompt += f"\n\nWICHTIG: Die folgenden Hooks wurden bereits verwendet: {hooks_list}\nNutze einen ANDEREN Hook-Start für dieses Skript."
 
     for attempt in range(3):
         response = llm.generate_chat(
@@ -839,6 +859,7 @@ def generate_dialog_scripts(topic: str, scripts_required: int = 5) -> DialogScri
                 problem_agitate_solution=scripts.problem_agitate_solution[:scripts_required],
                 testimonial=scripts.testimonial[:scripts_required],
                 transformation=scripts.transformation[:scripts_required],
+                description=scripts.description,
             )
             logger.info(
                 "dialog_scripts_success",
@@ -882,19 +903,26 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
     rng.shuffle(shuffled_templates)
 
     results = []
+    used_hooks = []  # Track hooks to ensure variety
+    
     for i in range(count):
         topic_template = shuffled_templates[i % len(shuffled_templates)]
 
-        # Generate dialog scripts for this lifestyle topic
+        # Generate dialog scripts for this lifestyle topic, avoiding previous hooks
         dialog_scripts = generate_dialog_scripts(
             topic=topic_template,
-            scripts_required=1
+            scripts_required=1,
+            previously_used_hooks=used_hooks if used_hooks else None
         )
         
         # Use first script from problem_agitate_solution as the main content
         main_script = dialog_scripts.problem_agitate_solution[0]
         cta = extract_soft_cta(main_script)
         rotation = strip_cta_from_script(main_script, cta)
+        
+        # Extract the hook (first 3-5 words) to track for next iteration
+        hook = " ".join(main_script.split()[:4])  # First 4 words typically capture the hook
+        used_hooks.append(hook)
         
         # Calculate duration
         word_count = len(main_script.split())
@@ -948,6 +976,9 @@ def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: Dia
         "source_context": "Lifestyle content - community experiences"
     }
     
+    # Use description from dialog_scripts if available, otherwise fallback to template
+    description_text = dialog_scripts.description if dialog_scripts.description else f"Lifestyle-Beitrag zu: {topic_data['title']}"
+    
     payload: Dict[str, Any] = {
         "script": selected_script,
         "framework": topic_data.get("framework", "PAL"),
@@ -958,7 +989,7 @@ def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: Dia
         "script_category": script_category,
         "strict_fact": seed_payload["facts"][0],
         "strict_seed": seed_payload,
-        "description": f"Lifestyle-Beitrag zu: {topic_data['title']}",
+        "description": description_text,
         "disclaimer": "Keine Rechts- oder medizinische Beratung.",
     }
     
