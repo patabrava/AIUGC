@@ -10,14 +10,14 @@
     x-on:destroy="destroy()"
 >
     <!-- Header -->
-    <div class="flex justify-between items-center mb-6">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
         <div>
-            <h2 class="text-3xl font-bold text-gray-900">Batches</h2>
+            <h2 class="text-2xl sm:text-3xl font-bold text-gray-900">Batches</h2>
             <p class="mt-1 text-sm text-gray-500">Manage your UGC video production batches</p>
         </div>
         <button 
             @click="showCreateModal = true"
-            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+            class="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition sm:w-auto w-full"
         >
             <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -55,25 +55,25 @@
     </div>
 
     <!-- Filters -->
-    <div class="mb-6 flex space-x-4">
+    <div class="mb-6 flex flex-wrap gap-2 sm:gap-4">
         <button 
             hx-get="/batches?archived=false" 
             hx-target="#batches-list"
-            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             Active
         </button>
         <button 
             hx-get="/batches?archived=true" 
             hx-target="#batches-list"
-            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             Archived
         </button>
         <button 
             hx-get="/batches" 
             hx-target="#batches-list"
-            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             All
         </button>
@@ -105,10 +105,10 @@
     <div 
         x-show="showCreateModal" 
         x-cloak
-        class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50"
+        class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50 px-4"
         @click.self="showCreateModal = false"
     >
-        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
             <h3 class="text-lg font-medium text-gray-900 mb-4">Create New Batch</h3>
             
             <form 

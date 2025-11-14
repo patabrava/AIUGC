@@ -19,8 +19,17 @@
       {% set total_posts = value_count + lifestyle_count + product_count %}
       <tr class="hover:bg-purple-50">
         <td class="px-6 py-4 whitespace-nowrap">
-          <div class="text-sm font-medium text-gray-900">{{ batch.brand }}</div>
-          <div class="text-sm text-gray-500">ID: {{ batch.id }}</div>
+          <a
+            href="/batches/{{ batch.id }}"
+            class="block rounded-md px-3 py-2 -mx-3 -my-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white hover:bg-purple-50"
+          >
+            <span class="text-sm font-medium text-gray-900 block">
+              {{ batch.brand }}
+            </span>
+            <span class="text-sm text-gray-500 block">
+              ID: {{ batch.id }}
+            </span>
+          </a>
         </td>
         <td class="px-6 py-4 whitespace-nowrap">
           <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold bg-purple-100 text-purple-700">
