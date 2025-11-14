@@ -20,6 +20,7 @@ from app.features.topics.handlers import router as topics_router
 from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
+from app.features.publish.handlers import router as publish_router
 
 
 # Configure logging on module import
@@ -149,6 +150,7 @@ app.include_router(topics_router)
 app.include_router(posts_router)
 app.include_router(videos_router)
 app.include_router(qa_router)
+app.include_router(publish_router)
 
 
 # Root endpoint

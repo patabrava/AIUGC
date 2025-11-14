@@ -294,9 +294,12 @@ def _store_completed_video(
 
     upload_duration = time.monotonic() - upload_start
 
-    size_bytes = upload_result.get("size")
-    if size_bytes is None and isinstance(video_source, bytes):
+    # Always use actual byte length for binary uploads, not ImageKit metadata
+    # ImageKit's size field can be incorrect (e.g., returns 122 instead of actual size)
+    if isinstance(video_source, bytes):
         size_bytes = len(video_source)
+    else:
+        size_bytes = upload_result.get("size")
 
     logger.info(
         "video_upload_performance",

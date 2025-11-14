@@ -89,6 +89,10 @@ class PostDetail(BaseModel):
     qa_pass: Optional[bool] = None
     qa_notes: Optional[str] = None
     qa_auto_checks: Optional[Dict[str, Any]] = None
+    scheduled_at: Optional[datetime] = None
+    social_networks: Optional[List[str]] = None
+    publish_status: Optional[str] = None
+    platform_ids: Optional[Dict[str, str]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

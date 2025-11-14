@@ -334,6 +334,18 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                 )
                 spoken_duration_value = 0.0
 
+            # Parse platform_ids if it's a string
+            platform_ids = p.get("platform_ids")
+            if isinstance(platform_ids, str):
+                try:
+                    platform_ids = json.loads(platform_ids)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "platform_ids_json_decode_failed",
+                        post_id=p.get("id")
+                    )
+                    platform_ids = None
+
             posts_list.append(
                 PostDetail(
                     id=p["id"],
@@ -353,6 +365,10 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     qa_pass=p.get("qa_pass"),
                     qa_notes=p.get("qa_notes"),
                     qa_auto_checks=qa_auto_checks,
+                    scheduled_at=p.get("scheduled_at"),
+                    social_networks=p.get("social_networks"),
+                    publish_status=p.get("publish_status"),
+                    platform_ids=platform_ids,
                     created_at=p.get("created_at"),
                     updated_at=p.get("updated_at"),
                 )

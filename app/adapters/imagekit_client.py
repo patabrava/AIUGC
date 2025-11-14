@@ -108,7 +108,7 @@ class ImageKitClient:
                 "url": result.url,
                 "thumbnail_url": result.thumbnail_url,
                 "file_path": result.file_path,
-                "size": getattr(result, "size", len(video_bytes)),
+                "size": len(video_bytes),  # Always use actual byte length, not ImageKit metadata
                 "file_type": result.file_type
             }
         

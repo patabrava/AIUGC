@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import httpx
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Request
 
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ErrorCode
@@ -117,7 +117,7 @@ async def run_auto_qa_checks(post_id: str):
 
 
 @router.put("/{post_id}/approve", response_model=SuccessResponse)
-async def approve_qa(post_id: str, request: QAApprovalRequest):
+async def approve_qa(post_id: str, req: Request):
     """
     Approve or reject a post's QA review.
     Updates qa_pass and qa_notes fields.
@@ -138,6 +138,44 @@ async def approve_qa(post_id: str, request: QAApprovalRequest):
     correlation_id = f"qa_approve_{post_id}"
     
     try:
+        # Parse payload supporting both JSON (application/json) and form submissions (HTMX default)
+        payload: dict[str, Any] = {}
+        try:
+            if req.headers.get("content-type", "").startswith("application/json"):
+                payload = await req.json()
+            else:
+                form = await req.form()
+                payload = dict(form.multi_items())
+        except Exception as parse_error:
+            logger.warning(
+                "qa_approval_payload_parse_failed",
+                post_id=post_id,
+                correlation_id=correlation_id,
+                error=str(parse_error)
+            )
+            payload = {}
+
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Missing approval payload"
+            )
+
+        # Normalize payload values for Pydantic model
+        approved_value = payload.get("approved")
+        if isinstance(approved_value, str):
+            approved_lower = approved_value.strip().lower()
+            if approved_lower in {"true", "1", "yes", "on"}:
+                approved_value = True
+            elif approved_lower in {"false", "0", "no", "off"}:
+                approved_value = False
+        payload_normalized = {
+            "approved": approved_value,
+            "notes": payload.get("notes")
+        }
+
+        qa_request = QAApprovalRequest(**payload_normalized)
+
         supabase = get_supabase().client
         response = supabase.table("posts").select("*").eq("id", post_id).execute()
         
@@ -149,11 +187,12 @@ async def approve_qa(post_id: str, request: QAApprovalRequest):
             )
         
         post = response.data[0]
+        batch_id = post.get("batch_id")
         
         # Update QA fields
         update_data = {
-            "qa_pass": request.approved,
-            "qa_notes": request.notes or ""
+            "qa_pass": qa_request.approved,
+            "qa_notes": qa_request.notes or ""
         }
         
         supabase.table("posts").update(update_data).eq("id", post_id).execute()
@@ -161,21 +200,66 @@ async def approve_qa(post_id: str, request: QAApprovalRequest):
         logger.info(
             "qa_approval_recorded",
             post_id=post_id,
+            batch_id=batch_id,
             correlation_id=correlation_id,
-            approved=request.approved,
-            has_notes=bool(request.notes)
+            approved=qa_request.approved,
+            has_notes=bool(qa_request.notes)
         )
         
+        # Check if all posts in batch are now approved
+        # If so, automatically advance batch to S7_PUBLISH_PLAN
+        should_advance = False
+        if qa_request.approved and batch_id:
+            # Get all posts in batch
+            all_posts_response = supabase.table("posts").select("id, qa_pass").eq(
+                "batch_id", batch_id
+            ).execute()
+            
+            if all_posts_response.data:
+                all_posts = all_posts_response.data
+                all_approved = all(p.get("qa_pass") is True for p in all_posts)
+                
+                if all_approved and len(all_posts) > 0:
+                    # Check if batch is in S6_QA state
+                    batch_response = supabase.table("batches").select("state").eq(
+                        "id", batch_id
+                    ).execute()
+                    
+                    if batch_response.data:
+                        current_state = batch_response.data[0].get("state")
+                        
+                        if current_state == "S6_QA":
+                            # Advance batch to S7_PUBLISH_PLAN
+                            supabase.table("batches").update({
+                                "state": "S7_PUBLISH_PLAN",
+                                "updated_at": datetime.now(timezone.utc).isoformat()
+                            }).eq("id", batch_id).execute()
+                            
+                            should_advance = True
+                            
+                            logger.info(
+                                "batch_auto_advanced_to_publish",
+                                batch_id=batch_id,
+                                post_id=post_id,
+                                correlation_id=correlation_id,
+                                total_posts=len(all_posts)
+                            )
+        
         return SuccessResponse(
-            data=QAApprovalResponse(
-                post_id=post_id,
-                qa_pass=request.approved,
-                qa_notes=request.notes,
-                qa_auto_checks=post.get("qa_auto_checks")
-            ).model_dump()
+            data={
+                **QAApprovalResponse(
+                    post_id=post_id,
+                    qa_pass=qa_request.approved,
+                    qa_notes=qa_request.notes,
+                    qa_auto_checks=post.get("qa_auto_checks")
+                ).model_dump(),
+                "batch_advanced": should_advance
+            }
         )
     
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception(

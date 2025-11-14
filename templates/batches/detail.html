@@ -157,6 +157,35 @@
             {% endif %}
         </div>
     </div>
+    {% elif batch.state == 'S7_PUBLISH_PLAN' %}
+    {% set scheduled_count = (batch.posts | selectattr('scheduled_at') | list | length) %}
+    <div id="publish-plan-workflow" class="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-6 mb-6">
+        <div class="flex items-center justify-between">
+            <div class="flex-1">
+                <div class="flex items-center gap-3 mb-2">
+                    <h3 class="text-xl font-bold text-gray-900">Publish Planning</h3>
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                        {{ scheduled_count }}/{{ batch.posts | length }} Scheduled
+                    </span>
+                </div>
+                <p class="text-sm text-gray-700">
+                    Schedule each post for optimal engagement times and select target social networks.
+                </p>
+            </div>
+            {% if scheduled_count == batch.posts | length and batch.posts | length > 0 %}
+            <button
+                hx-post="/publish/batches/{{ batch.id }}/confirm"
+                hx-vals='{"confirm": true}'
+                hx-confirm="All posts scheduled. Confirm and dispatch to social platforms?"
+                hx-swap="none"
+                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition shadow-sm"
+            >
+                Confirm & Publish
+            </button>
+            {% endif %}
+        </div>
+    </div>
     {% endif %}
 
     <!-- Posts List -->
@@ -563,6 +592,136 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- Publish Planning (S7_PUBLISH_PLAN state) -->
+                    {% if batch.state == 'S7_PUBLISH_PLAN' %}
+                    <div class="mt-6 border-t border-gray-200 pt-4">
+                        <div 
+                            x-data="publishSchedulerComponent('{{ post.id }}', {{ post.scheduled_at | tojson if post.scheduled_at else 'null' }}, {{ post.social_networks | tojson }})"
+                            class="space-y-4"
+                        >
+                            <div class="flex items-center justify-between">
+                                <h5 class="text-sm font-semibold text-gray-900">Publish Schedule</h5>
+                                {% if post.scheduled_at %}
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                                    ✓ Scheduled
+                                </span>
+                                {% else %}
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                                    Pending
+                                </span>
+                                {% endif %}
+                            </div>
+
+                            <!-- Datetime Picker -->
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">
+                                    Scheduled Time (Europe/Berlin)
+                                </label>
+                                <input
+                                    type="datetime-local"
+                                    x-model="scheduledDateTime"
+                                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    :min="minDateTime"
+                                />
+                                <p class="mt-1 text-xs text-gray-500" x-show="scheduledDateTime">
+                                    UTC: <span x-text="getUTCDisplay()"></span>
+                                </p>
+                            </div>
+
+                            <!-- Social Network Selection -->
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-2">
+                                    Social Networks
+                                </label>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <!-- TikTok -->
+                                    <label
+                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
+                                        :class="selectedNetworks.includes('tiktok') ? 'bg-pink-50 border-pink-500 ring-2 ring-pink-500' : 'bg-white border-gray-300 hover:border-pink-300'"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            value="tiktok"
+                                            x-model="selectedNetworks"
+                                            class="sr-only"
+                                        />
+                                        <div class="flex items-center gap-2">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('tiktok') ? 'text-pink-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
+                                                <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
+                                            </svg>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('tiktok') ? 'text-pink-700' : 'text-gray-600'">TikTok</span>
+                                        </div>
+                                    </label>
+
+                                    <!-- Instagram -->
+                                    <label
+                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
+                                        :class="selectedNetworks.includes('instagram') ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-500' : 'bg-white border-gray-300 hover:border-purple-300'"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            value="instagram"
+                                            x-model="selectedNetworks"
+                                            class="sr-only"
+                                        />
+                                        <div class="flex items-center gap-2">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
+                                                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                                            </svg>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : 'text-gray-600'">Instagram</span>
+                                        </div>
+                                    </label>
+
+                                    <!-- Facebook -->
+                                    <label
+                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
+                                        :class="selectedNetworks.includes('facebook') ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500' : 'bg-white border-gray-300 hover:border-blue-300'"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            value="facebook"
+                                            x-model="selectedNetworks"
+                                            class="sr-only"
+                                        />
+                                        <div class="flex items-center gap-2">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
+                                                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                                            </svg>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : 'text-gray-600'">Facebook</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <p class="mt-2 text-xs text-gray-500" x-show="selectedNetworks.length === 0">
+                                    ⚠ Please select at least one social network
+                                </p>
+                            </div>
+
+                            <!-- Save Button -->
+                            <div class="flex gap-2">
+                                <button
+                                    @click="saveSchedule()"
+                                    :disabled="!canSave()"
+                                    class="flex-1 inline-flex justify-center items-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white transition"
+                                    :class="canSave() ? 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500' : 'bg-gray-300 cursor-not-allowed'"
+                                >
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span x-text="saving ? 'Saving...' : 'Save Schedule'"></span>
+                                </button>
+                            </div>
+
+                            <!-- Success/Error Messages -->
+                            <div x-show="successMessage" x-transition class="rounded-md bg-green-50 border border-green-200 p-3">
+                                <p class="text-xs text-green-800" x-text="successMessage"></p>
+                            </div>
+                            <div x-show="errorMessage" x-transition class="rounded-md bg-red-50 border border-red-200 p-3">
+                                <p class="text-xs text-red-800" x-text="errorMessage"></p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
@@ -766,6 +925,108 @@
                     this.expanded = false;
                     window.batchDetailExpanded = false;
                     document.body.style.overflow = '';
+                }
+            };
+        };
+
+        // Alpine.js component for publish scheduler
+        window.publishSchedulerComponent = function(postId, initialScheduledAt, initialNetworks) {
+            return {
+                postId: postId,
+                scheduledDateTime: '',
+                selectedNetworks: initialNetworks || [],
+                minDateTime: '',
+                saving: false,
+                successMessage: '',
+                errorMessage: '',
+                
+                init() {
+                    // Set minimum datetime to now + 1 hour
+                    const now = new Date();
+                    now.setHours(now.getHours() + 1);
+                    this.minDateTime = this.formatDateTimeLocal(now);
+                    
+                    // Initialize scheduled datetime if exists
+                    if (initialScheduledAt) {
+                        const scheduledDate = new Date(initialScheduledAt);
+                        // Convert from UTC to Europe/Berlin for display
+                        const berlinDate = new Date(scheduledDate.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
+                        this.scheduledDateTime = this.formatDateTimeLocal(berlinDate);
+                    }
+                },
+                
+                formatDateTimeLocal(date) {
+                    // Format: YYYY-MM-DDTHH:mm
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const hours = String(date.getHours()).padStart(2, '0');
+                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                    return `${year}-${month}-${day}T${hours}:${minutes}`;
+                },
+                
+                getUTCDisplay() {
+                    if (!this.scheduledDateTime) return '';
+                    
+                    // Parse as Europe/Berlin time
+                    const localDate = new Date(this.scheduledDateTime);
+                    
+                    // Convert to UTC
+                    const utcDate = new Date(localDate.toLocaleString('en-US', { timeZone: 'UTC' }));
+                    
+                    return utcDate.toISOString().replace('T', ' ').substring(0, 16) + ' UTC';
+                },
+                
+                canSave() {
+                    return this.scheduledDateTime && 
+                           this.selectedNetworks.length > 0 && 
+                           !this.saving;
+                },
+                
+                async saveSchedule() {
+                    if (!this.canSave()) return;
+                    
+                    this.saving = true;
+                    this.successMessage = '';
+                    this.errorMessage = '';
+                    
+                    try {
+                        // Convert local datetime to UTC
+                        const localDate = new Date(this.scheduledDateTime);
+                        const utcDate = new Date(localDate.toLocaleString('en-US', { timeZone: 'UTC' }));
+                        
+                        const response = await fetch(`/publish/posts/${this.postId}/schedule`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Correlation-ID': `schedule_${this.postId}`
+                            },
+                            body: JSON.stringify({
+                                post_id: this.postId,
+                                scheduled_at: utcDate.toISOString(),
+                                social_networks: this.selectedNetworks
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.message || `Failed to save schedule (${response.status})`);
+                        }
+                        
+                        const result = await response.json();
+                        this.successMessage = 'Schedule saved successfully!';
+                        
+                        // Reload page after 1 second to show updated status
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                        
+                    } catch (error) {
+                        this.errorMessage = error.message || 'Failed to save schedule';
+                        console.error('Save schedule error:', error);
+                    } finally {
+                        this.saving = false;
+                    }
                 }
             };
         };
