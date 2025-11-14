@@ -15,7 +15,7 @@ __all__ = ["build_video_prompt_from_seed", "validate_video_prompt", "build_optim
 
 
 AUDIO_DIALOGUE_DIRECTIVE = (
-    "Audio: Recorded through modern smartphone mic — clear, front-facing voice with intimate presence and a soft, short living-room bloom (RT60 ≈ 0.3–0.4 s). Camera 20–30 cm from mouth, mic unobstructed. HVAC/appliances off; noise floor ≤ –55 dBFS with a faint, even room-tone bed. No music, one-take natural pacing."
+    "Audio: Recorded through modern smartphone mic — clear, front-facing voice with intimate presence and a soft, short living-room bloom (RT60 ≈ 0.3–0.4 s). Camera 20–30 cm from mouth, mic unobstructed. HVAC/appliances off; noise floor ≤ –55 dBFS with zero room-tone bed. After the final word, capture a dead-silent tail — no reverb, breaths, or background noise — for the closing pause. No music, one-take natural pacing."
 )
 
 OPTIMIZED_PROMPT_TEMPLATE = (
@@ -34,7 +34,7 @@ OPTIMIZED_PROMPT_TEMPLATE = (
     "Dialogue:\n"
     "\"{dialogue}\"\n\n"
     "Audio:\n"
-    "Clean smartphone voice, intimate presence, faint even room-tone; no music; no background HVAC.\n\n"
+    "Clean smartphone voice, intimate presence, zero room-tone bed; after the final word the space stays dead quiet with no reverb, breaths, or environmental sounds; no music; no background HVAC.\n\n"
     "Constraints — Avoid:\n"
     "text overlays/subtitles, logos/branding, poor lighting, heavy compression, excessive shake, off-sync audio, changes to character identity, cuts or angle changes."
 )
