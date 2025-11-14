@@ -84,6 +84,7 @@ class DialogScripts(BaseModel):
     problem_agitate_solution: List[str] = Field(..., min_length=1, max_length=5)
     testimonial: List[str] = Field(..., min_length=1, max_length=5)
     transformation: List[str] = Field(..., min_length=1, max_length=5)
+    description: Optional[str] = Field(None, min_length=35, max_length=500, description="Social media description (35-80 words)")
 
 
 class TopicResponse(BaseModel):

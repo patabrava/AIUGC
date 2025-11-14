@@ -29,9 +29,19 @@ headings: |
   
   Jedes Skript pro Abschnitt ist ein eigenständiger Dialog mit Hook + Einblick + Frage.
 
+description_section: |
+  BESCHREIBUNG FÜR SOCIAL MEDIA:
+  Nach den drei Skript-Abschnitten füge eine vierte Sektion hinzu:
+    Beschreibung
+  
+  Darunter schreibe EINEN zusammenhängenden Text (35-80 Wörter), der zusätzlichen Kontext zum Thema "{topic}" liefert.
+  Diese Beschreibung wird als Social-Media-Caption verwendet und MUSS ergänzende Fakten/Details enthalten, die NICHT in den Dialog-Skripten vorkommen.
+  Stil: direkt, freundlich, empowernd, du-Form – wie die Skripte, aber informativer und kontextreicher.
+
 closing: |
   Antworte ausschließlich mit den Überschriften und Textzeilen, kein zusätzlicher Text oder Erklärungen.
   WICHTIG: Schreibe GENAU {scripts_per_category} verschiedene Skripte unter jeder Überschrift (insgesamt {total_scripts} Zeilen).
+  Vergiss nicht die "Beschreibung"-Sektion am Ende mit einem zusammenhängenden Text von 35-80 Wörtern.
 
 
 NOTE: The output cannot be in markdown format whatsoever

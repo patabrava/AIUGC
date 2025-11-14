@@ -457,8 +457,10 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         "testimonial ads": "testimonial",
         "testimonial-stil ads": "testimonial",  # Legacy support
         "transformations-geschichten ads": "transformation",
+        "beschreibung": "description",
     }
-    buckets: Dict[str, List[str]] = {value: [] for value in headers.values()}
+    buckets: Dict[str, List[str]] = {value: [] for value in headers.values() if value != "description"}
+    description_text: Optional[str] = None
     current: Optional[str] = None
     current_script_lines: List[str] = []
 
@@ -471,8 +473,11 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         if key:
             # Save any accumulated script before switching sections
             if current and current_script_lines:
-                script = " ".join(current_script_lines)
-                buckets[current].append(script)
+                if current == "description":
+                    description_text = " ".join(current_script_lines)
+                else:
+                    script = " ".join(current_script_lines)
+                    buckets[current].append(script)
                 current_script_lines = []
             current = key
             continue
@@ -480,14 +485,19 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         # Skip empty lines - they separate scripts
         if not stripped:
             if current and current_script_lines:
-                script = " ".join(current_script_lines)
-                buckets[current].append(script)
+                if current == "description":
+                    description_text = " ".join(current_script_lines)
+                else:
+                    script = " ".join(current_script_lines)
+                    buckets[current].append(script)
                 current_script_lines = []
             continue
         
         # Check if this is a new script starting without a blank line separator
+        # (only for script sections, not description)
         if (
             current
+            and current != "description"
             and current_script_lines
             and len(current_script_lines) >= 2
             and looks_like_script_start(stripped)
@@ -498,7 +508,7 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
             current_script_lines = [stripped]
             continue
         
-        # Accumulate script lines
+        # Accumulate script lines or description lines
         if current is None:
             raise ValidationError(
                 message="PROMPT_2 output missing headings",
@@ -506,10 +516,13 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
             )
         current_script_lines.append(stripped)
     
-    # Don't forget the last script
+    # Don't forget the last script or description
     if current and current_script_lines:
-        script = " ".join(current_script_lines)
-        buckets[current].append(script)
+        if current == "description":
+            description_text = " ".join(current_script_lines)
+        else:
+            script = " ".join(current_script_lines)
+            buckets[current].append(script)
 
     # Enforce maximum scripts per category before validation
     for category, scripts in buckets.items():
@@ -522,8 +535,11 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
             )
             buckets[category] = scripts[:max_per_category]
 
+    # Add description to payload
+    payload = {**buckets, "description": description_text}
+
     try:
-        return DialogScripts(**buckets)
+        return DialogScripts(**payload)
     except PydanticValidationError as exc:
         raise ValidationError(
             message="PROMPT_2 response invalid",

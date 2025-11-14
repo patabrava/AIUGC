@@ -66,5 +66,6 @@ def build_prompt2(topic: str, scripts_per_category: int = 5) -> str:
         data.get("structure", "").format(**format_kwargs),
         data.get("length_rules", "").format(**format_kwargs),
         data.get("headings", "").format(**format_kwargs),
+        data.get("description_section", "").format(**format_kwargs),
         data.get("closing", "").format(**format_kwargs),
     )
