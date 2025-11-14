@@ -110,3 +110,98 @@ class DeduplicationResult(BaseModel):
     similarity_score: float
     matched_topic_id: Optional[str] = None
     reason: Optional[str] = None
+
+
+# JSON Schema for PROMPT_1 Structured Outputs
+# Per Constitution § XII: Agent Prompt Discipline - Schema-first validation
+PROMPT1_JSON_SCHEMA = {
+    "name": "research_topics",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "topic": {
+                            "type": "string",
+                            "description": "Topic title, max 10 words"
+                        },
+                        "framework": {
+                            "type": "string",
+                            "enum": ["PAL", "Testimonial", "Transformation"]
+                        },
+                        "sources": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 2,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "url": {"type": "string"}
+                                },
+                                "required": ["title", "url"],
+                                "additionalProperties": False
+                            }
+                        },
+                        "script": {
+                            "type": "string",
+                            "description": "MUST be EXACTLY 16-20 words, one sentence"
+                        },
+                        "source_summary": {
+                            "type": "string",
+                            "description": "35-80 words with 3 hashtags at end"
+                        },
+                        "estimated_duration_s": {
+                            "type": "integer",
+                            "minimum": 7,
+                            "maximum": 8
+                        },
+                        "tone": {"type": "string"},
+                        "disclaimer": {"type": "string"}
+                    },
+                    "required": [
+                        "topic", "framework", "sources", "script",
+                        "source_summary", "estimated_duration_s", "tone", "disclaimer"
+                    ],
+                    "additionalProperties": False
+                }
+            }
+        },
+        "required": ["items"],
+        "additionalProperties": False
+    }
+}
+
+
+# JSON Schema for PROMPT_2 Structured Outputs
+PROMPT2_JSON_SCHEMA = {
+    "name": "dialog_scripts",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "problem_agitate_solution": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "testimonial": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "transformation": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "description": {
+                "type": "string",
+                "description": "35-80 words with 3 hashtags"
+            }
+        },
+        "required": ["problem_agitate_solution", "testimonial", "transformation", "description"],
+        "additionalProperties": False
+    }
+}

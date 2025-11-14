@@ -28,6 +28,8 @@ from app.features.topics.schemas import (
     TopicData,
     DialogScripts,
     SeedData,
+    PROMPT1_JSON_SCHEMA,
+    PROMPT2_JSON_SCHEMA,
 )
 from app.features.topics.prompts import build_prompt1, build_prompt2
 from app.core.logging import get_logger
@@ -750,12 +752,15 @@ def _generate_prompt1_chunk(
             attempt=attempt + 1,
             prompt_characters=len(prompt_with_feedback),
         )
-        response = llm.generate_openai(
+        
+        # Use structured outputs instead of json_object format
+        # This works with web_search tools and guarantees valid JSON
+        parsed_response = llm.generate_structured(
             prompt=prompt_with_feedback,
+            json_schema=PROMPT1_JSON_SCHEMA,
             system_prompt=PROMPT1_SYSTEM_PROMPT,
             tools=[{"type": "web_search", "external_web_access": True}],
             tool_choice="auto",
-            text_format={"type": "json_object"},
             include=[
                 "web_search_call.results",
                 "web_search_call.action.sources",
@@ -769,14 +774,29 @@ def _generate_prompt1_chunk(
             },
             max_tokens=3500,
         )
+        
         try:
-            batch = parse_prompt1_response(response)
+            # Response is already parsed JSON from structured outputs
+            # Just need to validate with Pydantic
+            batch = ResearchAgentBatch(**parsed_response)
             items = batch.items
+            
             if len(items) != desired_topics:
                 raise ValidationError(
                     message="PROMPT_1 chunk produced unexpected count",
                     details={"expected": desired_topics, "actual": len(items)}
                 )
+            
+            # Validate each item
+            for item in items:
+                validate_duration(item)
+                validate_summary(item)
+                validate_sources_accessible(item)
+            
+            # Validate batch constraints
+            validate_round_robin(items)
+            validate_unique_ctas(items)
+            
             logger.info(
                 "research_agent_chunk_success",
                 post_type=post_type,
@@ -784,25 +804,33 @@ def _generate_prompt1_chunk(
                 chunk_index=chunk_index,
                 total_chunks=total_chunks,
                 attempt=attempt + 1,
-                response_length=len(response),
+                response_length=len(str(parsed_response)),
             )
             return items
+            
         except ValidationError as exc:
             logger.warning(
                 "research_agent_chunk_retry",
                 post_type=post_type,
                 attempt=attempt + 1,
                 chunk_index=chunk_index,
-                response_preview=response[:500],
+                response_preview=str(parsed_response)[:500],
                 error=exc.message,
                 details=exc.details
             )
             
-            # Build detailed feedback for URL validation failures
+            # Build detailed feedback
             feedback_parts = [f"FEEDBACK: {exc.message}"]
             
-            if "not accessible" in exc.message.lower():
-                # Provide specific guidance for URL failures
+            if "too short" in exc.message.lower() or "under 7 seconds" in exc.message.lower():
+                feedback_parts.append(
+                    f"\nDetails: {json.dumps(exc.details, default=str)}"
+                    "\n\nIMPORTANT: Scripts MUST be EXACTLY 16-20 words (NO LESS than 16, NO MORE than 20)."
+                    "\nCOUNT YOUR WORDS CAREFULLY before submitting."
+                    "\nIf a script is too short, ADD concrete source-based details until it reaches 16-20 words."
+                    "\nExample good length: 'Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktiven und elektrischen Rollstühle die Kasse aktuell übernehmen muss.' (18 words)"
+                )
+            elif "not accessible" in exc.message.lower():
                 details_str = json.dumps(exc.details, default=str, indent=2)
                 feedback_parts.append(f"\nDetails: {details_str}")
                 feedback_parts.append(
@@ -815,9 +843,6 @@ def _generate_prompt1_chunk(
                 )
             else:
                 feedback_parts.append(f"\nDetails: {json.dumps(exc.details, default=str)[:500]}")
-                feedback_parts.append(
-                    "\nRemember: Output must be a valid JSON array only, with double-quoted keys and no prose."
-                )
             
             prompt_with_feedback = prompt + "\n\n" + "".join(feedback_parts)
 
@@ -1087,4 +1112,3 @@ Extract facts now:"""
             error=str(e)
         )
         raise
-

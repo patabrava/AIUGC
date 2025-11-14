@@ -176,6 +176,129 @@ class LLMClient:
                 details={"error": str(e), "model": target_model}
             )
     
+    def generate_structured(
+        self,
+        prompt: str,
+        json_schema: Dict[str, Any],
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Any] = None,
+        include: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate structured JSON output using OpenAI's json_schema format.
+        This works with web_search tools (unlike json_object format).
+        Per Constitution § XII: Schema-first validation.
+        
+        Args:
+            json_schema: JSON schema dict with "name", "strict", and "schema" keys
+        
+        Returns:
+            Parsed JSON dict matching the schema
+        """
+        try:
+            target_model = model or self.default_openai_model
+
+            payload: Dict[str, Any] = {
+                "model": target_model,
+                "store": False,
+            }
+
+            if system_prompt:
+                payload["instructions"] = system_prompt
+            if temperature is not None:
+                payload["temperature"] = temperature
+            if max_tokens is not None:
+                payload["max_output_tokens"] = max_tokens
+            if tools:
+                payload["tools"] = tools
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
+            if include is not None:
+                payload["include"] = include
+            if metadata is not None:
+                payload["metadata"] = metadata
+
+            # Use json_schema format (works with web_search!)
+            # Unpack the json_schema dict directly into format (per OpenAI docs)
+            payload.setdefault("text", {})["format"] = {
+                "type": "json_schema",
+                "name": json_schema["name"],
+                "schema": json_schema["schema"],
+                "strict": json_schema.get("strict", True),
+            }
+
+            payload["input"] = [{"role": "user", "content": prompt}]
+
+            logger.debug(
+                "openai_structured_request",
+                model=target_model,
+                schema_name=json_schema.get("name"),
+                tools_configured=bool(tools),
+                prompt_length=len(prompt),
+            )
+
+            response = self.http_client.post("/responses", json=payload)
+
+            if response.status_code >= 400:
+                logger.error(
+                    "openai_structured_http_error",
+                    status_code=response.status_code,
+                    response_text=response.text,
+                )
+                raise ThirdPartyError(
+                    message="OpenAI Structured Outputs API call failed",
+                    details={
+                        "status_code": response.status_code,
+                        "body": response.text,
+                        "model": target_model,
+                    }
+                )
+
+            data = response.json()
+            content = self._extract_output_text(data)
+
+            # Parse the JSON response (guaranteed valid by schema)
+            parsed = json.loads(content)
+
+            logger.info(
+                "openai_structured_success",
+                model=target_model,
+                schema_name=json_schema.get("name"),
+                prompt_length=len(prompt),
+                response_length=len(content)
+            )
+
+            return parsed
+
+        except ThirdPartyError:
+            raise
+        except json.JSONDecodeError as exc:
+            # This should never happen with structured outputs, but log if it does
+            logger.error(
+                "openai_structured_json_parse_failed",
+                error=str(exc),
+                content_preview=content[:500] if 'content' in locals() else None
+            )
+            raise ValidationError(
+                message="Structured output produced invalid JSON",
+                details={"error": str(exc)}
+            ) from exc
+        except Exception as e:
+            logger.error(
+                "openai_structured_failed",
+                error=str(e),
+                model=target_model
+            )
+            raise ThirdPartyError(
+                message="OpenAI Structured Outputs API call failed",
+                details={"error": str(e), "model": target_model}
+            )
+    
     def generate_chat(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: Optional[int] = None) -> str:
         """Generate text using OpenAI Chat Completions API (for non-web-search requests)."""
         try:
