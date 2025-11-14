@@ -25,7 +25,7 @@ structure: |
     3. Eine offene Frage, jedes Mal unterschiedlich ("Was hilft dir?", "Wie machst du's?", "Hast du Tipps?", usw.)
 
 length_rules: |
-  LÄNGE: 16-22 Wörter, ein Satz pro Zeile, keine Regieanweisungen.
+  LÄNGE: 16-20 Wörter (max. 8 Sekunden Sprechzeit), ein Satz pro Zeile, keine Regieanweisungen.
   Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
 
 headings: |

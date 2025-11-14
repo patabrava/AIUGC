@@ -405,7 +405,7 @@
                                             <div class="mt-4 flex justify-end">
                                                 <button
                                                     type="button"
-                                                    class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                                    class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                                                     @click="close()"
                                                 >
                                                     Close
@@ -603,7 +603,7 @@
                                 {% endif %}
                             </div>
                             
-                            {% if batch.state == 'S5_PROMPTS_BUILT' and post.video_status in ['pending', 'failed'] %}
+                            {% if batch.state in ['S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_status in ['pending', 'failed'] %}
                             <div>
                                 <button
                                     hx-post="/videos/{{ post.id }}/generate"

@@ -31,7 +31,7 @@ from app.features.topics.schemas import (
     PROMPT1_JSON_SCHEMA,
     PROMPT2_JSON_SCHEMA,
 )
-from app.features.topics.prompts import build_prompt1, build_prompt2
+from app.features.topics.prompts import build_prompt1, build_prompt2, get_topic_pool_candidates
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
 
@@ -682,7 +682,8 @@ def build_seed_payload(
 
 def generate_topics_research_agent(
     post_type: str,
-    count: int = 10
+    count: int = 10,
+    seed: Optional[int] = None,
 ) -> List[ResearchAgentItem]:
     """Execute PROMPT_1 and return validated items."""
     llm = get_llm_client()
@@ -693,15 +694,41 @@ def generate_topics_research_agent(
     total_chunks = math.ceil(count / chunk_size)
     collected: List[ResearchAgentItem] = []
 
+    topic_candidates = get_topic_pool_candidates()
+    assigned_seed = seed if seed is not None else secrets.randbits(64)
+    rng = random.Random(assigned_seed)
+    shuffled_topics: List[str] = []
+    if topic_candidates:
+        shuffled_topics = topic_candidates[:]
+        rng.shuffle(shuffled_topics)
+
+    topic_cursor = 0
+
+    logger.info(
+        "research_agent_topic_pool_seed",
+        post_type=post_type,
+        seed=assigned_seed,
+        candidate_count=len(shuffled_topics),
+    )
+
     for chunk_index in range(1, total_chunks + 1):
         remaining = count - len(collected)
         desired_topics = min(chunk_size, remaining)
+        assigned_topics: List[str] = []
+        if shuffled_topics:
+            for _ in range(desired_topics):
+                if topic_cursor >= len(shuffled_topics):
+                    rng.shuffle(shuffled_topics)
+                    topic_cursor = 0
+                assigned_topics.append(shuffled_topics[topic_cursor])
+                topic_cursor += 1
         items = _generate_prompt1_chunk(
             llm=llm,
             post_type=post_type,
             desired_topics=desired_topics,
             chunk_index=chunk_index,
             total_chunks=total_chunks,
+            assigned_topics=assigned_topics or None,
         )
         collected.extend(items)
 
@@ -732,12 +759,14 @@ def _generate_prompt1_chunk(
     desired_topics: int,
     chunk_index: int,
     total_chunks: int,
+    assigned_topics: Optional[List[str]] = None,
 ) -> List[ResearchAgentItem]:
     prompt = build_prompt1(
         post_type=post_type,
         desired_topics=desired_topics,
         chunk_index=chunk_index,
         total_chunks=total_chunks,
+        assigned_topics=assigned_topics,
     )
     prompt_with_feedback = prompt
 
@@ -771,6 +800,7 @@ def _generate_prompt1_chunk(
                 "chunk_index": str(chunk_index),
                 "total_chunks": str(total_chunks),
                 "desired_outputs": str(desired_topics),
+                "assigned_topics": json.dumps(assigned_topics or []),
             },
             max_tokens=3500,
         )
