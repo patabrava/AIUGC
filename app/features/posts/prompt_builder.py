@@ -20,7 +20,7 @@ AUDIO_DIALOGUE_DIRECTIVE = (
 
 OPTIMIZED_PROMPT_TEMPLATE = (
     "Subject & Look:\n"
-    "A 38-year-old German woman with long, slightly damp light-brown hair with natural blonde highlights; hazel almond-shaped eyes with faint crow’s feet; friendly oval face with soft expression lines; warm light-medium skin with neutral undertones. She faces camera with a neutral, friendly expression that softens into a gentle smile.\n\n"
+    "38-year-old German woman with long, damp, light brown hair with natural blonde highlights; captivating hazel, almond-shaped eyes that softly crinkle at the outer corners when she smiles; a friendly oval face with a smooth forehead; subtle, gentle lines naturally accentuating her mouth when she expresses; natural medium-brown eyebrows that are moderately thick with a soft, unplucked arch and visible individual hairs; and a warm light-medium skin tone with neutral undertones. She is looking directly at the camera with a neutral, friendly expression.\n\n"
     "Setting:\n"
     "A modern, tidy bedroom with blush-pink walls and minimal décor. Vertical frame.\n\n"
     "Cinematography:\n"
