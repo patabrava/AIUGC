@@ -12,61 +12,116 @@ audience_context: |
 topic_pool: |
   Themenrotation (immer variieren, kein Duplikat im Batch). Wähle pro Idee einen anderen Schwerpunkt:
   Mobilität & Reisen:
-    - Barrierefreiheit / Alltag als Rollstuhlnutzer:in in Deutschland
-    - Companion travel (B-Marke) and when a Begleitperson rides free on ÖPNV
-    - Unentgeltliche Beförderung & Wertmarke rules on buses/trams/regional trains
-    - Booking DB Mobilitätsservice-Zentrale (MSZ) for lifts/boarding assistance
-    - Rights on rail (assistance, disruptions, info)
-    - Rights when flying (airport/airline assistance)
-    - Accessible tourism labels like “Reisen für Alle” and finding certified places
-    - Travel hacks: ferries, accessible taxis, hotel bathroom realities
-    - Cross-border travel with chairs (batteries, airline rules, damage claims)
+    - Barrierefreiheit im ÖPNV-Alltag: Einstieg mit Rampe, Rollstuhlplätze, Ansagen, Begleitservice.
+    - Begleitperson im Nahverkehr mit Merkzeichen B/B-Marke: Freifahrt, Nachweispflicht, aktuelle Regeln.
+    - Unentgeltliche Beförderung & Wertmarke in ÖPNV und Regionalverkehr: Anspruch, Beantragung, Gültigkeit.
+    - BahnCard & weitere Ermäßigungen für Menschen mit Schwerbehindertenausweis.
+    - Mobilitätsservice-Zentrale der Deutschen Bahn: Unterstützung buchen, Fristen, Ablauf vor Ort.
+    - Rechte bei Bahnreisen: barrierefreie Bahnhöfe, reservierte Plätze, Entschädigung bei Störungen.
+    - Rollstuhltransport im Zug und Flugzeug: Anmeldung, Boarding-Hilfen, Schadensmeldungen.
+    - Fluggastrechte mit Rollstuhl: Sicherheitskontrollen, Akku/Batterie-Regeln, Airline-Service.
+    - Inlandsreisen: Hotels & Ferienwohnungen mit „Reisen für Alle“ oder anderen Barrierefrei-Siegeln.
+    - Städtereisen mit Rollstuhl: Kopfsteinpflaster, Gehsteige, Stadtbusse, U-Bahn-Zugänge.
+    - Roadtrips & Mietwagen: Fahrzeuganpassung, barrierefreie Raststätten, Mitnahme von Hilfsmitteln.
+    - Kreuzfahrten & Bootsreisen: barrierefreie Kabinen, Boarding, Ausflüge.
+    - Barrierefreie Naturreisen: Nationalparks, Wanderwege, Aussichtspunkte mit Rollstuhlzugang.
+    - Urlaub mit Familie oder Freund:innen: Bedürfnisse abstimmen, Zimmerwahl, gemeinsame Aktivitäten.
+    - Reisen mit Assistenz: Vertragsgestaltung, Logistik, Kostenerstattung unterwegs.
+    - Reiseplanungstools für Barrierefreiheit (ÖPNV, Toiletten, Hotels).
+    - Rollstuhl und Fahrradtouren: Handbike, Tandem, Anhängerlösungen.
+    - Reisen ins Ausland: Grenzkontrollen, Versicherungen, Ersatzteile, Akkus.
+    - Barrierefrei wohnen unterwegs: Wohnmobile, temporäre Umbauten, Ferienhäuser.
   Rechte, Gesellschaft & Finanzen:
-    - Gesellschaftliche/steuerliche Themen (Einordnung, mögliche Vorteile/Hinweise)
-    - Getting and using a Schwerbehindertenausweis (GdB & Merkzeichen)
-    - What each Merkzeichen means in daily life (B, G, aG, H, Bl, RF, Gl, TBl, etc.)
-    - What the BFSG changes for products & services (from 28 June 2025)
-    - BITV 2.0: why government websites/apps must be accessible
-    - Public-sector digital services and reporting barriers (BITV feedback)
-    - Consumer rights under BFSG (e-commerce, banking, ticketing)
-    - Municipal participation councils (Behindertenbeirat) & influencing planning
-    - Legal help paths (Schlichtungsstelle BGG, counseling centers)
-    - Parking permits (blue EU pass vs. orange permit), where to apply, rules
-    - Kfz-Steuer relief/exemption tied to Merkzeichen
+    - Antrag auf Schwerbehindertenausweis: Voraussetzungen, Fristen, Unterlagen.
+    - Schwerbehindertenausweis nutzen: Merkzeichen verstehen, Vorteile im Alltag sichern.
+    - Merkzeichen im Detail (B, G, aG, H, Bl, RF, Gl, TBl): Mobilität, Begleitperson, Gebühren.
+    - Steuerliche Vorteile: Behinderten-Pauschbetrag, außergewöhnliche Belastungen, Fahrtkosten.
+    - Kfz-Steuerbefreiung oder -ermäßigung bei Merkzeichen aG, Bl, H und notwendige Nachweise.
+    - Bundesteilhabegesetz-Updates 2025: neue Leistungsregeln, Auswirkungen auf Teilhabebudget.
+    - Barrierefreiheits-Stärkungsgesetz (BFSG): Anforderungen an Produkte & Dienstleistungen ab 28.06.2025.
+    - Barrierefreiheit von Behörden-Websites & Apps (BITV 2.0, Feedback-Stellen, Fristen).
+    - Verbraucherrechte im E-Commerce und Bankwesen unter dem Blick von Menschen mit Behinderung.
+    - Öffentliche Mobilitätsanbieter: Pflichten zur Barrierefreiheit, Beschwerdewege, Sanktionen.
+    - Kommunale Teilhabe: Behindertenbeirat, Beteiligungsverfahren, Stadtplanung beeinflussen.
+    - Rechtlicher Weg bei Barrieren: Beratung, Widerspruch, Klage, Schlichtungsstelle BGG.
+    - Parkausweis (EU-Blau vs. Orange): Antrag, Nutzung, Parkregeln, Sonderrechte.
+    - Versicherungsschutz: Haftpflicht, Unfall, Pflege sowie Zusatzpolicen für Rollstuhlnutzer:innen.
+    - Assistenzleistungen vs. Pflegeleistungen: rechtliche Einordnung und Kostenträger.
+    - Teilhaberecht im Wohnungs- und Arbeitsmarkt: Diskriminierungsschutz, Gleichstellung, Fristen.
+    - Inklusion im Arbeitsleben: Arbeitgeberpflichten, Integrationsamt, technische Arbeitshilfen.
+    - Barrierefrei ins Wahlrecht: Wahllokal-Zugang, Briefwahl, Hilfspersonenregelungen.
+    - Selbsthilfegruppen & Verbände (z. B. VdK): Beratung, Lobbyarbeit, Peer-Support.
+    - Barrierefreie Kommunikation: Gebärdensprache, Leichte Sprache, verständliche Behördenpost.
+    - Bildungs- und Weiterbildungsangebote für Menschen mit Behinderung: Rechte, Fördermittel.
+    - Digitalisierung & Teilhabe: Online-Dienste, Telemedizin, digitale Identitäten, eID.
   Gesundheit, Pflege & Assistenz:
-    - Krankenkasse für Menschen im Rollstuhl
-    - Versicherung für Menschen im Rollstuhl
-    - Personal assistance models (Pflegedienst vs. Assistenzteam vs. family)
-    - The Persönliche Budget option to self-organize support
-    - Pflegegrade & what the Pflegeversicherung pays in 2025
-    - Finding accessible GPs, specialists, and rehab clinics
-    - Rehabilitation pathways (DRV vs. GKV), device trials, follow-ups
-    - Pressure sore prevention: seating, cushions, routines, wound care
-    - Bladder & bowel management (supplies, travel tips, privacy)
-    - Navigating sexual health, relationships, and intimacy with/access to care
-    - Mental health: counseling that understands disability barriers
+    - Gesetzliche Krankenkasse und Zusatzleistungen für Rollstuhlnutzer:innen: Anträge, Zuzahlungen, Hilfsmittel.
+    - Pflegegrad beantragen und Leistungen der Pflegeversicherung 2025 optimal nutzen.
+    - Personal assistance models (Pflegedienst vs. Assistenzteam vs. Familie): Verträge, Vertretungen, Schulungen.
+    - Persönliches Budget: Assistenz selbst organisieren, Nachweise, Budgetverwaltung.
+    - Spezialist:innen und barrierefreie Praxen finden: Ärzt:innen, Reha-Kliniken, Therapien.
+    - Rehabilitation (DRV vs. GKV): Antrag, Verlängerung, Nachsorge, Hilfsmitteltests.
+    - Hilfsmittelversorgung: Rollstuhl, Sitzsysteme, Wartung, Ersatzbeschaffung.
+    - Druckgeschwür-/Dekubitus-Prävention: Sitzsysteme, Routinen, Dokumentation.
+    - Blasen- und Darmmanagement: Produkte, Schulungen, Reisefreigaben, Diskretion.
+    - Inkontinenzversorgung: Hilfsmittel, Kostenträger, Alltagstipps.
+    - Sexualität & Beziehung mit Behinderung: Beratung, Barrieren, Privatsphäre.
+    - Psychische Gesundheit: Therapieangebote, Peer-Support, Umgang mit Isolation oder Frust.
+    - Assistenz im Alltag: Arbeitgebermodell, Arbeitsrecht, Notfallplanung.
+    - Hilfsmittelverzeichnis der GKV: Auswahl, Formulare, Widerspruchsstrategien.
+    - Medikamentenversorgung: Wechselwirkungen, Spezialapotheken, Reisebedarf.
+    - Ernährung & Bewegung im Rollstuhl: Trainingsprogramme, Fitness, Prävention.
+    - Transfertechniken: selbständig oder mit Hilfe sicher umsetzen, Hilfsmittel einsetzen.
+    - Ergotherapie & Physiotherapie: Ziele, Finanzierung, Alltagstraining.
+    - Frühwarnzeichen für gesundheitliche Komplikationen: Haut, Atmung, Kreislauf, Spastik.
+    - Pandemie- und Infektionsschutz: Impfungen, Hygienekonzepte, Zugänge im Gesundheitssystem.
   Hilfsmittel, Technik & Fahrzeuge:
-    - The GKV Hilfsmittelverzeichnis: which chairs & accessories are covered
-    - Choosing between active, power, or hybrid wheelchairs (fit, cushions, setup)
-    - Repairs/loaners and typical Krankenkasse processes & pitfalls
-    - Choosing the right cushion/backrest (pressure mapping, insurer wording)
-    - Wheelchair maintenance routines & documentation to speed approvals
-    - Everyday accessibility tech (grippers, transfer boards, standing frames)
-    - Smart home as accessibility (door openers, voice control, sensors)
-    - Driving with adaptations: assessments, driving schools, cost carriers
-    - Vehicle conversions (hand controls, lifts, transfer aids) & funding
+    - GKV-Hilfsmittelverzeichnis: welche Rollstühle und Zubehör abrechenbar sind.
+    - Aktiv-, Elektro- oder Hybridrollstuhl wählen: Anpassung, Gutachten, Probefahrten.
+    - Sitz- und Rückenkissenwahl: Druckverteilung, Atteste, Formulierungen für die Kasse.
+    - Wartung, Reparatur und Leihservice: Abläufe, Serviceverträge, Dokumentation.
+    - Alltagshilfen: Greifzangen, Transferbretter, Stehrahmen, smarte Assistenzgeräte.
+    - Smart-Home-Lösungen: Türöffner, Sprachsteuerung, Sensorik für Barrierefreiheit.
+    - Assistenzroboter & Exoskelette: Einsatzgebiete, Finanzierung, Grenzen.
+    - Fahrzeuganpassung: Handbedienung, Hebebühnen, Kostenübernahme.
+    - Autofahren mit Behinderung: Fahrtests, Umschulung, Finanzierung durch Kostenträger.
+    - Behindertengerechte Taxi- und Fahrdienste: Buchung, Kostenerstattung, regionale Unterschiede.
+    - Elektrorollstuhl-Akkus im Flugverkehr: Sicherheitsregeln, Ersatzakkus, Transportboxen.
+    - Barrierefreies Wohnen mit Technik: Rampen, Türautomaten, bodengleiche Duschen.
+    - Apps für Barrierefreiheit: Toilettenfinder, Restaurantbewertungen, ÖPNV-Echtzeiten.
+    - Dokumentation & Fotografie: Beweise für Hilfsmittel-Anträge und Mangelmeldungen.
+    - Second-Life-Hilfsmittel & Spendenbörsen: rechtliche Rahmen, Sicherheit, Aufarbeitung.
+    - Digitale Barrierefreiheit von Hilfsmitteln: Software-Updates, App-Anbindung, Datenschutz.
   Wohnen & Lebensumfeld:
-    - Barrier-free housing basics (DIN 18040: flats, bathrooms, entries)
-    - Accessible housing search & retrofitting (ramps, doors, bathrooms, kitchens)
-    - City infrastructure: curb cuts, tactile paving, winter service that works
-    - Emergency preparedness (evac chairs, refuge areas, med lists)
-    - Funding shifts: status of KfW 455-B retrofitting grants & alternatives
+    - Barrierefreie Wohnung nach DIN 18040: Planung, Maße, Ausstattung.
+    - Finanzierung von Umbauten: KfW 455-B, Pflegekassen, regionale Zuschüsse.
+    - Wohnraumsuche: rollstuhlgerechte Wohnungen finden, Beratung, Immobilienportale.
+    - Bestehende Wohnungen anpassen: Rampen, Türen, Badezimmer, Küchenlösungen.
+    - Stadtinfrastruktur: Bordsteinkanten, Gehwege, Winterdienst und Barrierefreiheit.
+    - Nachbarschaft & Gemeinschaft: Einfluss barrierefreier Quartiere auf Lebensqualität.
+    - Notfall-Vorbereitung: Evakuierungspläne, Notruf-Apps, Hilfsmittel-Listen.
+    - Haustiere und Assistenzhunde: Rechte, Training, Vermieterzustimmung.
+    - Smart-Home-Integration: Licht, Heizung, Fenster via Sprache oder App.
+    - Gemeinschaftsräume & Hausverwaltung: Aufzüge, Müllraum, Briefkästen barrierefrei gestalten.
+    - Altersgerechtes Wohnen: langfristige Planung, Mehrgenerationen- und Pflegearrangements.
+    - Innenraumgestaltung: Küche, Bad, Arbeits- und Wohnraum für Rollstuhlnutzung optimieren.
+    - Budgetplanung für barrierefreie Ausstattung: Kostenübersicht, Rücklagen, Fördermix.
+    - Soziales Umfeld stärken: Familie, Freund:innen, Nachbarschaft sensibilisieren.
+    - Garten & Außenbereich: barrierefreie Wege, Terrassen, Hochbeete.
+    - Barrierefreie Freizeit zu Hause: Hobbys, Gästebarrierefreiheit, Technik.
   Arbeit, Bildung & Beruf:
-    - Return-to-work support, job carving, reasonable accommodations
-    - Inklusionsbetriebe and jobs on the open labor market
-    - Role of Integrationsämter/BIH for workplace support & funding
-    - Workplace ergonomics (height-adjustable desks, accessible labs/shops)
-    - University & school accommodations (Nachteilsausgleich, accessible campus)
+    - Rückkehr ins Berufsleben nach Krankheit oder Unfall: stufenweise Wiedereingliederung, Reha-Management.
+    - Inklusionsbetriebe vs. offener Arbeitsmarkt: Chancen, Förderprogramme, Erfahrungsberichte.
+    - Integrationsamt & BIH: Leistungen für Arbeitsplatzsicherung, technische Arbeitshilfen.
+    - Arbeitsplatzgestaltung: Höhenverstellung, barrierefreie Wege, digitale Assistenzsysteme.
+    - Assistive Technik & digitale Arbeitsplätze: Homeoffice, Softwarebarrierefreiheit, Ergonomie.
+    - Arbeitsrecht: Kündigungsschutz, Teilzeit, Schwerbehindertenvertretung, Gleichstellung.
+    - Förderprogramme: Eingliederungszuschuss, Budget für Arbeit, Bildungsprämien.
+    - Studium & Weiterbildung mit Behinderung: Nachteilsausgleich, barrierefreier Campus, Prüfungsrechte.
+    - Selbstständigkeit mit Behinderung: Geschäftsmodelle, Fördermittel, Netzwerkaufbau.
+    - Netzwerke & Mentoring: Austausch mit anderen Rollstuhlnutzer:innen im Beruf.
+    - Sichtbarkeit & Vorbilder: Frauen mit Behinderung im Beruf, Role Models, Öffentlichkeitsarbeit.
+    - Digitale Kompetenzen & Weiterbildung: Online-Kurse, barrierefreie Lernplattformen, Zertifikate.
   Community, Sport & Sichtbarkeit:
     - Community & peer support: local groups, forums, mentoring
     - Sports & movement via DRS clubs (basketball to WCMX)
@@ -80,13 +135,20 @@ output_schema: |
     topic  – höchstens 10 Wörter
     framework  – einer von "PAL", "Testimonial", "Transformation"
     sources  – 1-2 Einträge, jeder Eintrag liefert title und url
-    script  – ein Satz, 16-20 Wörter (≈ 7-8 Sekunden Sprechzeit)
-      CRITICAL: Script MUSS mit einer fesselnden Frage beginnen ("Kennst du...?", "Weißt du...?", "Hast du...?") 
-      ODER eine direkte, aktivierende Aussage sein. NIEMALS passive Ankündigungen wie "Ab 2025 gibt's..." oder "Es gibt..."
+  CRITICAL SCRIPT REQUIREMENTS:
+  - script must be EXACTLY 16-20 words (NO LESS than 16, NO MORE than 20), one sentence (≈7-8 Sekunden Sprechzeit)
+  - COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <16 words will be REJECTED.
+  - Start with a VARIED, engaging opening. Rotate between different patterns:
+      • Fragen: "Kennst du...?", "Weißt du...?", "Hast du...?", "Brauchst du...?", "Suchst du...?"
+      • Direkte Aussagen: "Check mal...", "Schau dir an...", "Hier kommt...", "Das musst du wissen..."
+      • Empathische Hooks: "Stell dir vor...", "Ich zeig dir...", "Lass mich dir zeigen..."
+      NIEMALS passive Ankündigungen wie "Ab 2025 gibt's..." oder "Es gibt..."
       Immer du-Form, direkt, freundlich, empowernd. Ergänze konkrete Fakten oder Vorteile, bis die Länge passt.
+    script  – ein Satz, 16-20 Wörter (≈ 7-8 Sekunden Sprechzeit)
     source_summary  – 35-80 Wörter, basiert ausschließlich auf sources[0]
       CRITICAL: Source summary MUSS zusätzliche Fakten/Details aus der Quelle enthalten, die NICHT im Script vorkommen.
       NIEMALS den Script-Text wiederholen oder paraphrasieren. Liefere ergänzende Informationen aus der Quelle.
+      Beende die Source Summary mit GENAU drei thematisch passenden Hashtags (Format: #BeispielOhneLeerzeichen, getrennt durch Leerzeichen). Keine zusätzlichen Hashtags.
     estimated_duration_s  – Integer = CEIL(word_count(script)/2.6) und MUSS 7 oder 8 sein
     tone  – "direkt, freundlich, empowernd, du-Form"
     disclaimer  – "Keine Rechts- oder medizinische Beratung."
@@ -96,24 +158,20 @@ chunk_rules: |
   Prüfe vor Ausgabe, dass Wörterlimit, Felder und Variationen eingehalten sind. Korrigiere dich selbst, falls nicht.
 
 example: |
-  GUTES BEISPIEL (so machen!):
-  topic: Krankenkasse – Aktivrollstuhl beantragen
-  framework: PAL
-  sources:
-    - title: GKV Hilfsmittelverzeichnis
-      url: https://www.gkv-spitzenverband.de/hilfsmittel/
+  GUTE BEISPIELE (variiere zwischen diesen Stilen!):
+  
+  Beispiel 1 (Frage-Einstieg):
   script: Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktive und elektrische Rollstühle die Kasse heute übernehmen muss.
-  source_summary: Das GKV-Hilfsmittelverzeichnis wird regelmäßig aktualisiert und enthält detaillierte Produktnummern für verschiedene Rollstuhltypen. Ärzte und Sanitätshäuser nutzen es zur Verordnung. Bei Ablehnung kannst du auf Verzeichnis-Einträge verweisen.
-  estimated_duration_s: 7
-  tone: direkt, freundlich, empowernd, du-Form
-  disclaimer: Keine Rechts- oder medizinische Beratung.
+  
+  Beispiel 2 (Direkte Aussage):
+  script: Check mal die B-Marke in deinem Ausweis – damit fährt deine Begleitperson im ÖPNV komplett gratis mit.
+  
+  Beispiel 3 (Empathischer Hook):
+  script: Stell dir vor, du bekommst mehr Pflegegeld ab 2025 – ich zeig dir, wie du deinen Anspruch prüfst.
   
   SCHLECHTES BEISPIEL (NIEMALS so!):
   script: Ab 2025 gibt's mehr Geld für Pflegegrade – damit du leichter gute Pflege bekommst.
-  ❌ FALSCH! Passive Ankündigung, keine Frage, kein direkter Engage.
-  
-  RICHTIG wäre:
-  script: Weißt du, dass die Pflegeversicherung 2025 mehr zahlt? Check deinen Anspruch jetzt!
+  ❌ FALSCH! Passive Ankündigung, kein direkter Engage, kein variierender Einstieg.
 
 closing: |
   Antworte ausschließlich mit validem JSON-Array, ohne Zusatztext.

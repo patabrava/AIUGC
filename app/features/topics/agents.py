@@ -40,16 +40,20 @@ PROMPT1_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 execution agent.
 You must strictly follow the user's message instructions.
 
 CRITICAL SCRIPT REQUIREMENTS:
-- script must be 16-20 words, one sentence (≈7-8 Sekunden Sprechzeit)
-- Start with an engaging question using "Kennst du...?", "Weißt du...?", "Hast du...?" OR make a bold direct statement
+- script must be EXACTLY 16-20 words (NO LESS than 16, NO MORE than 20), one sentence (≈7-8 Sekunden Sprechzeit)
+- COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <16 words will be REJECTED.
+- Start with a VARIED, engaging opening. Rotate between different patterns:
+  * Questions: "Kennst du...?", "Weißt du...?", "Hast du...?", "Brauchst du...?", "Suchst du...?"
+  * Direct statements: "Check mal...", "Schau dir an...", "Hier kommt...", "Das musst du wissen..."
+  * Empathetic hooks: "Stell dir vor...", "Ich zeig dir...", "Lass mich dir zeigen..."
 - Use du-Form (informal you), be direct, friendly, empowering
 - NO passive declarations like "Ab 2025 gibt's..."
 - If script is shorter than 16 words or estimated_duration_s unter 7, ergänze konkrete, quellenbasierte Details.
 - estimated_duration_s must equal CEIL(word_count(script)/2.6) and be 7 or 8.
-- Example good scripts:
+- Example good scripts with VARIED openings:
   * "Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktiven und elektrischen Rollstühle die Kasse aktuell übernehmen muss."
-  * "Weißt du, dass deine Begleitperson im ÖPNV oft gratis mitfährt, wenn du im Ausweis die B-Marke aktiviert hast?"
-  * "Hast du schon die B-Marke geprüft? Sie spart dir auf Reisen Geld, Sitzplatzreservierungen und erleichtert richtig spontane Ausflüge."
+  * "Check mal die B-Marke in deinem Ausweis – damit fährt deine Begleitperson im ÖPNV komplett gratis mit."
+  * "Stell dir vor, du bekommst mehr Pflegegeld ab 2025 – ich zeig dir, wie du deinen Anspruch prüfst."
 
 CRITICAL SOURCE URL REQUIREMENTS:
 - ALL source URLs MUST be currently accessible and valid (not 404, not archived, not removed)
@@ -827,7 +831,7 @@ def _generate_prompt1_chunk(
     )
 
 
-def generate_dialog_scripts(topic: str, scripts_required: int = 5, previously_used_hooks: Optional[List[str]] = None) -> DialogScripts:
+def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks: Optional[List[str]] = None) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
     scripts_required = max(1, min(5, scripts_required))
     llm = get_llm_client()
@@ -846,14 +850,33 @@ def generate_dialog_scripts(topic: str, scripts_required: int = 5, previously_us
         )
         try:
             scripts = parse_prompt2_response(response, max_per_category=scripts_required)
+            
+            # Check if single-category fallback was applied
+            # (testimonial and transformation have same script as problem_agitate_solution[0])
+            single_category_fallback_applied = (
+                scripts.problem_agitate_solution
+                and scripts.testimonial
+                and scripts.transformation
+                and scripts.testimonial[0] == scripts.problem_agitate_solution[0]
+                and scripts.transformation[0] == scripts.problem_agitate_solution[0]
+            )
+            
+            # If fallback was applied, accept 1 script per category (the duplicated one)
+            # Otherwise, validate that we have enough scripts
+            if single_category_fallback_applied:
+                # Fallback provides 1 script per category - accept it
+                min_required = 1
+            else:
+                min_required = scripts_required
+            
             if (
-                len(scripts.problem_agitate_solution) < scripts_required
-                or len(scripts.testimonial) < scripts_required
-                or len(scripts.transformation) < scripts_required
+                len(scripts.problem_agitate_solution) < min_required
+                or len(scripts.testimonial) < min_required
+                or len(scripts.transformation) < min_required
             ):
                 raise ValidationError(
                     message="PROMPT_2 returned fewer scripts than required",
-                    details={"required": scripts_required}
+                    details={"required": scripts_required, "min_required": min_required}
                 )
             trimmed = DialogScripts(
                 problem_agitate_solution=scripts.problem_agitate_solution[:scripts_required],
