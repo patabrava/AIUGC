@@ -13,16 +13,29 @@ voice: |
 
 structure: |
   Struktur des Skripts:
-    1. Empathischer Einstieg / Hook – VARIIERE STARK zwischen:
+    1. Hook – VARIIERE STARK zwischen sanfteren Community-Hooks und stärkeren Aufmerksamkeits-Hooks:
        • "Schon mal erlebt…?"
        • "Ich dachte früher…"
        • "Neulich ist mir aufgefallen…"
        • "Wusstest du…?"
        • "Manchmal frage ich mich…"
        • "Ehrlich gesagt…"
-       (VERMEIDE "Kennst du das" – nutze andere Formulierungen)
-    2. Kurzer persönlicher Einblick (1 Satz)
-    3. Eine offene Frage, jedes Mal unterschiedlich ("Was hilft dir?", "Wie machst du's?", "Hast du Tipps?", usw.)
+       • "Von außen wirkt ... , aber ..."
+       • "Was viele an ... unterschätzen, ..."
+       • "Kaum jemand sieht, ..."
+       • "Dieser eine Alltagsfehler ..."
+       • "Niemand sagt dir, ..."
+       • "Alle denken bei ... , ich eher an ..."
+       • "Was meinen Alltag mit ... wirklich leichter macht, ..."
+       • "Seit ich bei ... anders denke, ..."
+       • "Wenn du ... ignorierst, ..."
+       • "Was dir bei ... niemand klar sagt: ..."
+       • "Bevor du ... , ..."
+       • "Die größte Lüge über ... ist, dass ..."
+       • "Fast alle denken, ... , bis ..."
+    2. Danach ein kurzer persönlicher Einblick, eine konkrete Beobachtung oder eine alltagsnahe Konsequenz.
+    3. Eine offene Frage ist erlaubt, wenn sie natürlich wirkt, aber nicht Pflicht in jedem Skript.
+    4. Vermeide billigen Klickköder wie "Du wirst nicht glauben ...", reine Schockformeln und unfaire Panikmache.
 
 length_rules: |
   LÄNGE: 16-20 Wörter (max. 8 Sekunden Sprechzeit), ein Satz pro Zeile, keine Regieanweisungen.
@@ -32,7 +45,7 @@ headings: |
   Gib die Ausgabe mit EINER Überschrift und darunter GENAU {scripts_per_category} SKRIPTE zurück:
     Problem-Agitieren-Lösung Ads
   
-  Jedes Skript folgt der Struktur: variabler Hook (NICHT "Kennst du das") + persönlicher Einblick + offene Frage.
+  Jedes Skript folgt der Struktur: variabler Hook + persönlicher Einblick oder konkrete Beobachtung/Konsequenz.
   Trenne die Skripte durch Leerzeilen.
 
 description_section: |

@@ -135,24 +135,31 @@ topic_pool: |
     - Aktiv und sichtbar bleiben: Events, Aktionstage, Medien mit gutem Behinderungsverständnis.
 
 output_schema: |
-  OUTPUT FORMAT — JSON array mit GENAU {desired_topics} Objekten.
-  Keine Markdown-Fences, keine Kommentare.
+  OUTPUT FORMAT — Liefere einen ausführlichen Recherche-Report auf Deutsch.
+  Strukturiere den Report so:
+  1. ANALYSE: Kurze Zusammenfassung der aktuellen Situation/Trends.
+  2. TOPICS: Für jede der {desired_topics} Ideen: Details und Quellen.
+  3. JSON-BLOCK: Am Ende des Reports, gib alle Ideen in einem validen JSON-Array aus.
   SPRACHE: Jedes Feld der Antwort MUSS vollständig auf Deutsch sein.
-  Wenn auch nur ein Objekt englische oder gemischtsprachige Formulierungen enthält, ist die Antwort ungültig und muss vor der Ausgabe korrigiert werden.
+  Wenn auch nur ein Objekt englische oder gemischtsprachigen Formulierungen enthält, ist die Antwort ungültig.
   Jedes Objekt MUSS enthalten:
     topic  – höchstens 10 Wörter
     framework  – einer von "PAL", "Testimonial", "Transformation"
-    sources  – 1-2 Einträge, jeder Eintrag liefert title und url
+    sources  – 1-2 Einträge (title und url)
       Nutze bevorzugt deutschsprachige oder in Deutschland relevante Quellen.
+
   CRITICAL SCRIPT REQUIREMENTS:
   - script must be EXACTLY 16-20 words (NO LESS than 16, NO MORE than 20), one sentence (≈7-8 Sekunden Sprechzeit)
   - COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <16 words will be REJECTED.
   - script MUSS vollständig auf Deutsch sein
-  - Start with a VARIED, engaging opening. Rotate between different patterns:
+  - Start with a VARIED, aufmerksamkeitsstarken opening. Rotate between mehreren Hook-Familien und wiederhole keine Familie zu oft:
       • Fragen: "Kennst du...?", "Weißt du...?", "Hast du...?", "Brauchst du...?", "Suchst du...?"
       • Direkte Aussagen: "Check mal...", "Schau dir an...", "Hier kommt...", "Das musst du wissen..."
       • Empathische Hooks: "Stell dir vor...", "Ich zeig dir...", "Lass mich dir zeigen..."
-      NIEMALS passive Ankündigungen wie "Ab 2025 gibt's..." oder "Es gibt..."
+      • Kontrast- und Mythos-Hooks: "Die größte Lüge über ... ist, dass ...", "Fast alle denken, ...", "Alle reden über ..., aber ..."
+      • Konsequenz- und Friktions-Hooks: "Wenn du ... ignorierst, ...", "Der unangenehme Grund, warum ...", "Dieser kleine Fehler macht ..."
+      • Aha- und Handlungs-Hooks: "Bevor du ...", "Alles verändert sich, wenn du ...", "Was dir bei ... niemand klar sagt: ..."
+      NIEMALS billige Schock-Formeln wie "Du wirst nicht glauben ..." oder passive Ankündigungen wie "Ab 2025 gibt's..." / "Es gibt...".
       Immer du-Form, direkt, freundlich, empowernd. Ergänze konkrete Fakten oder Vorteile, bis die Länge passt.
     script  – ein Satz, 16-20 Wörter (≈ 7-8 Sekunden Sprechzeit)
     source_summary  – 35-80 Wörter, basiert ausschließlich auf sources[0]
@@ -183,7 +190,13 @@ example: |
   Beispiel 2 (Direkte Aussage):
   script: Check mal die B-Marke in deinem Ausweis – damit fährt deine Begleitperson im ÖPNV komplett gratis mit.
   
-  Beispiel 3 (Empathischer Hook):
+  Beispiel 3 (Kontrast-/Mythos-Hook):
+  script: Die größte Lüge über Hilfsmittelanträge ist, dass ein Rezept reicht – oft fehlen dir noch Begründung und genaue Unterlagen.
+
+  Beispiel 4 (Aha-/Handlungs-Hook):
+  script: Bevor du den Parkausweis beantragst, prüf dieses Detail genau, sonst verlierst du unnötig Zeit mit Rückfragen und Nachweisen.
+
+  Beispiel 5 (Empathischer Hook):
   script: Stell dir vor, du bekommst mehr Pflegegeld ab 2025 – ich zeig dir, wie du deinen Anspruch prüfst.
   
   SCHLECHTES BEISPIEL (NIEMALS so!):
