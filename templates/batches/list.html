@@ -30,26 +30,83 @@
     <div
         x-show="Object.keys(batchProgress).length > 0"
         x-transition
-        class="mb-4 rounded-lg border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900"
+        class="mb-4 space-y-3"
     >
         <template x-for="(info, id) in batchProgress" :key="id">
-            <div class="flex items-start justify-between gap-4">
-                <div>
-                    <p class="font-semibold" x-text="`Seeding batch: ${info.brand}`"></p>
-                    <p class="mt-1 text-purple-800">
-                        <span>Generating topics and posts…</span>
-                        <template x-if="info.posts > 0">
-                            <span x-text="` ${info.posts}/${info.expected} posts ready.`"></span>
-                        </template>
-                    </p>
+            <div class="rounded-xl border p-4 shadow-sm transition" :class="progressCardClasses(info)">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-3">
+                            <div class="flex h-10 w-10 items-center justify-center rounded-full border" :class="progressIconClasses(info)">
+                                <template x-if="info.stage === 'completed'">
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="info.stage === 'failed'">
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-10.293a1 1 0 00-1.414-1.414L10 8.586 7.707 6.293a1 1 0 00-1.414 1.414L8.586 10l-2.293 2.293a1 1 0 101.414 1.414L10 11.414l2.293 2.293a1 1 0 001.414-1.414L11.414 10l2.293-2.293z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="info.stage !== 'completed' && info.stage !== 'failed'">
+                                    <div class="h-3 w-3 rounded-full bg-current animate-pulse"></div>
+                                </template>
+                            </div>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-75">Batch Seeding</p>
+                                <p class="text-base font-semibold leading-tight" x-text="info.brand"></p>
+                            </div>
+                        </div>
+                        <div class="mt-4" aria-live="polite">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <p class="text-sm font-semibold" x-text="info.stageLabel || 'Generating topics and posts'"></p>
+                                <template x-if="info.isRetrying">
+                                    <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide" :class="progressBadgeClasses(info)">
+                                        Retry in progress
+                                    </span>
+                                </template>
+                            </div>
+                            <p class="mt-1 text-sm leading-6 opacity-90" x-text="info.detailMessage || 'Generating topics and posts from the current batch mix.'"></p>
+                        </div>
+                    </div>
+                    <button 
+                        type="button"
+                        class="text-xs font-medium opacity-75 transition hover:opacity-100"
+                        @click="removeProgressEntry(id)"
+                    >
+                        Dismiss
+                    </button>
                 </div>
-                <button 
-                    type="button"
-                    class="text-xs font-medium text-purple-700 hover:text-purple-900"
-                    @click="removeProgressEntry(id)"
-                >
-                    Dismiss
-                </button>
+
+                <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                    <div class="rounded-lg bg-white/60 p-3 ring-1 ring-black/5">
+                        <div class="flex items-center justify-between text-xs font-medium uppercase tracking-wide opacity-70">
+                            <span>Live checkpoints</span>
+                            <span x-text="progressSummary(info)"></span>
+                        </div>
+                        <div class="mt-3 flex flex-wrap gap-2">
+                            <template x-for="step in checkpointSteps(info)" :key="step.key">
+                                <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition" :class="checkpointClasses(step)">
+                                    <span class="inline-block h-2 w-2 rounded-full" :class="checkpointDotClasses(step)"></span>
+                                    <span x-text="step.label"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                    <div class="rounded-lg bg-black/5 p-3 text-xs leading-5">
+                        <div class="flex items-center justify-between">
+                            <span class="font-semibold uppercase tracking-wide opacity-70">Status</span>
+                            <span x-text="formatRelativeTime(info.lastUpdatedAt)"></span>
+                        </div>
+                        <p class="mt-2 font-medium" x-text="postCountLabel(info)"></p>
+                        <template x-if="info.retryMessage">
+                            <p class="mt-1 opacity-80" x-text="info.retryMessage"></p>
+                        </template>
+                        <template x-if="info.state">
+                            <p class="mt-2 opacity-80" x-text="`Batch state: ${info.state}`"></p>
+                        </template>
+                    </div>
+                </div>
             </div>
         </template>
     </div>
@@ -211,7 +268,37 @@
 <script>
     (function () {
         const POLL_INTERVAL_MS = 5000;
+        const COMPLETION_HOLD_MS = 3200;
         const pollers = new Map();
+        const completionTimers = new Map();
+        const CHECKPOINTS = [
+            { key: 'booting', label: 'Starting' },
+            { key: 'researching', label: 'Researching' },
+            { key: 'collecting', label: 'Filtering' },
+            { key: 'writing_posts', label: 'Writing posts' },
+            { key: 'finalizing', label: 'Finalizing' },
+            { key: 'completed', label: 'Complete' },
+        ];
+        const STAGE_ORDER = CHECKPOINTS.reduce((acc, item, index) => {
+            acc[item.key] = index;
+            return acc;
+        }, {});
+
+        function normalizeProgress(detail = {}) {
+            return {
+                brand: detail.brand || 'Unbenannte Marke',
+                expected: Number(detail.expected ?? detail.expectedPosts ?? 0),
+                posts: Number(detail.posts ?? detail.postsCreated ?? 0),
+                state: detail.state || 'S1_SETUP',
+                stage: detail.stage || 'booting',
+                stageLabel: detail.stageLabel || 'Preparing topic generation',
+                detailMessage: detail.detailMessage || 'Opening the research run and preparing the first posts.',
+                retryMessage: detail.retryMessage || null,
+                lastUpdatedAt: detail.lastUpdatedAt || new Date().toISOString(),
+                isRetrying: Boolean(detail.isRetrying),
+                completed: Boolean(detail.completed || detail.stage === 'completed'),
+            };
+        }
 
         window.batchListComponent = function batchListComponent() {
             return {
@@ -226,9 +313,8 @@
                             return;
                         }
 
-                        const brand = detail.brand;
-                        const expected = detail.expected ?? 0;
-                        const posts = detail.posts ?? 0;
+                        const next = normalizeProgress(detail);
+                        const brand = next.brand;
 
                         const current = this.batchProgress || {};
                         const cleanedEntries = Object.entries(current).filter(([key, value]) => {
@@ -245,11 +331,7 @@
 
                         this.batchProgress = {
                             ...cleaned,
-                            [batchId]: {
-                                brand,
-                                expected,
-                                posts,
-                            },
+                            [batchId]: next,
                         };
                     };
 
@@ -292,6 +374,63 @@
                     const { [id]: _removed, ...rest } = current;
                     this.batchProgress = rest;
                 },
+                checkpointSteps(info) {
+                    const activeIndex = STAGE_ORDER[info.stage] ?? 0;
+                    return CHECKPOINTS.map((step, index) => ({
+                        ...step,
+                        status: info.stage === 'failed'
+                            ? (index === activeIndex ? 'failed' : index < activeIndex ? 'complete' : 'pending')
+                            : (index < activeIndex ? 'complete' : index === activeIndex ? 'active' : 'pending')
+                    }));
+                },
+                checkpointClasses(step) {
+                    if (step.status === 'complete') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+                    if (step.status === 'active') return 'border-violet-300 bg-violet-100 text-violet-900';
+                    if (step.status === 'failed') return 'border-rose-200 bg-rose-50 text-rose-800';
+                    return 'border-slate-200 bg-white/80 text-slate-500';
+                },
+                checkpointDotClasses(step) {
+                    if (step.status === 'complete') return 'bg-emerald-500';
+                    if (step.status === 'active') return 'bg-violet-600 animate-pulse';
+                    if (step.status === 'failed') return 'bg-rose-500';
+                    return 'bg-slate-300';
+                },
+                progressCardClasses(info) {
+                    if (info.stage === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-950';
+                    if (info.stage === 'failed') return 'border-rose-200 bg-rose-50 text-rose-950';
+                    if (info.isRetrying || info.stage === 'retry_wait') return 'border-amber-200 bg-amber-50 text-amber-950';
+                    return 'border-violet-200 bg-violet-50 text-violet-950';
+                },
+                progressIconClasses(info) {
+                    if (info.stage === 'completed') return 'border-emerald-300 bg-emerald-100 text-emerald-700';
+                    if (info.stage === 'failed') return 'border-rose-300 bg-rose-100 text-rose-700';
+                    if (info.isRetrying || info.stage === 'retry_wait') return 'border-amber-300 bg-amber-100 text-amber-700';
+                    return 'border-violet-300 bg-violet-100 text-violet-700';
+                },
+                progressBadgeClasses(info) {
+                    if (info.stage === 'failed') return 'border-rose-300 bg-rose-100 text-rose-800';
+                    return 'border-amber-300 bg-amber-100 text-amber-800';
+                },
+                postCountLabel(info) {
+                    if (!info.expected) {
+                        return info.posts > 0 ? `${info.posts} posts ready so far.` : 'No posts written yet.';
+                    }
+                    return `${info.posts}/${info.expected} posts ready`;
+                },
+                progressSummary(info) {
+                    const status = this.postCountLabel(info);
+                    if (info.stage === 'completed') return 'Ready for review';
+                    if (info.stage === 'failed') return 'Needs attention';
+                    return status;
+                },
+                formatRelativeTime(isoString) {
+                    if (!isoString) return 'Awaiting update';
+                    const diff = Math.max(0, Math.round((Date.now() - new Date(isoString).getTime()) / 1000));
+                    if (diff < 5) return 'Updated just now';
+                    if (diff < 60) return `Updated ${diff}s ago`;
+                    const minutes = Math.round(diff / 60);
+                    return `Updated ${minutes}m ago`;
+                },
             };
         };
 
@@ -318,13 +457,11 @@
             }
         }
 
-        function updateBanner(batchId, brand, expected, posts = 0) {
+        function updateBanner(batchId, detail) {
             window.dispatchEvent(new CustomEvent('batch-progress:update', {
                 detail: {
                     batchId,
-                    brand,
-                    expected,
-                    posts,
+                    ...detail,
                 }
             }));
         }
@@ -335,6 +472,19 @@
                     batchId,
                 }
             }));
+        }
+
+        function scheduleCompletion(batchId) {
+            const existing = completionTimers.get(batchId);
+            if (existing) {
+                window.clearTimeout(existing);
+            }
+            const timer = window.setTimeout(() => {
+                completionTimers.delete(batchId);
+                clearBanner(batchId);
+                refreshBatchList();
+            }, COMPLETION_HOLD_MS);
+            completionTimers.set(batchId, timer);
         }
 
         function startPolling(batchId, expectedPosts, brand) {
@@ -351,14 +501,30 @@
                     const data = payload.data || {};
                     const postsReady = typeof expectedPosts === 'number' && data.posts_count >= expectedPosts;
                     const stateAdvanced = data.state && data.state !== 'S1_SETUP';
+                    const progress = data.progress || {};
 
-                    updateBanner(batchId, brand, expectedPosts, data.posts_count || 0);
+                    updateBanner(batchId, {
+                        brand,
+                        expected: expectedPosts,
+                        posts: data.posts_count || 0,
+                        state: data.state || 'S1_SETUP',
+                        stage: progress.stage || (stateAdvanced ? 'completed' : 'booting'),
+                        stageLabel: progress.stage_label || (stateAdvanced ? 'Topic generation complete' : 'Preparing topic generation'),
+                        detailMessage: progress.detail_message || (
+                            stateAdvanced
+                                ? `${data.posts_count || 0} posts are ready. Opening script review next.`
+                                : 'Opening the research run and preparing the first posts.'
+                        ),
+                        retryMessage: progress.retry_message || null,
+                        lastUpdatedAt: progress.last_updated_at || data.updated_at || new Date().toISOString(),
+                        isRetrying: Boolean(progress.is_retrying),
+                        completed: progress.stage === 'completed' || stateAdvanced || postsReady,
+                    });
 
                     if (postsReady || stateAdvanced) {
                         window.clearInterval(poller);
                         pollers.delete(batchId);
-                        clearBanner(batchId);
-                        refreshBatchList();
+                        scheduleCompletion(batchId);
                     }
                 } catch (error) {
                     console.error('Polling error for batch', batchId, error);
@@ -381,7 +547,19 @@
             }
 
             console.log('Starting polling for batch:', batchId);
-            updateBanner(batchId, brand, Number(expectedPosts), 0);
+            updateBanner(batchId, {
+                brand,
+                expected: Number(expectedPosts),
+                posts: 0,
+                state: 'S1_SETUP',
+                stage: 'booting',
+                stageLabel: 'Preparing topic generation',
+                detailMessage: 'Opening the batch and starting the research session.',
+                retryMessage: null,
+                lastUpdatedAt: new Date().toISOString(),
+                isRetrying: false,
+                completed: false,
+            });
             startPolling(batchId, Number(expectedPosts), brand);
         });
         

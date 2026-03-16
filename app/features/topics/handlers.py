@@ -5,6 +5,8 @@ Per Constitution § V: Locality & Vertical Slices
 """
 
 import asyncio
+from datetime import datetime, timezone
+from threading import Lock
 from fastapi import APIRouter, HTTPException, status, Header
 from typing import Optional, Dict, Any, List
 
@@ -37,6 +39,50 @@ from app.core.config import get_settings
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/topics", tags=["topics"])
+_SEEDING_PROGRESS: Dict[str, Dict[str, Any]] = {}
+_SEEDING_PROGRESS_LOCK = Lock()
+_PROGRESS_TTL_SECONDS = 45
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def update_seeding_progress(batch_id: str, **progress: Any) -> Dict[str, Any]:
+    """Persist the latest seeding progress snapshot for polling clients."""
+    with _SEEDING_PROGRESS_LOCK:
+        current = dict(_SEEDING_PROGRESS.get(batch_id) or {})
+        current.update(progress)
+        current["last_updated_at"] = _utc_now_iso()
+        _SEEDING_PROGRESS[batch_id] = current
+        return dict(current)
+
+
+def get_seeding_progress(batch_id: str) -> Optional[Dict[str, Any]]:
+    """Return current seeding progress if it has not expired."""
+    with _SEEDING_PROGRESS_LOCK:
+        progress = _SEEDING_PROGRESS.get(batch_id)
+        if not progress:
+            return None
+
+        stage = progress.get("stage")
+        if stage in {"completed", "failed"}:
+            try:
+                updated_at = datetime.fromisoformat(progress["last_updated_at"])
+            except (KeyError, TypeError, ValueError):
+                _SEEDING_PROGRESS.pop(batch_id, None)
+                return None
+            age_seconds = (datetime.now(timezone.utc) - updated_at).total_seconds()
+            if age_seconds > _PROGRESS_TTL_SECONDS:
+                _SEEDING_PROGRESS.pop(batch_id, None)
+                return None
+
+        return dict(progress)
+
+
+def clear_seeding_progress(batch_id: str) -> None:
+    with _SEEDING_PROGRESS_LOCK:
+        _SEEDING_PROGRESS.pop(batch_id, None)
 
 
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
@@ -52,12 +98,49 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     post_type_counts = batch["post_type_counts"]
     existing_topics = get_all_topics_from_registry()
 
+    expected_posts = sum(post_type_counts.values())
     all_generated_topics: List[Dict[str, Any]] = []
     created_posts = []
+
+    update_seeding_progress(
+        batch_id,
+        state=batch["state"],
+        stage="booting",
+        stage_label="Preparing topic discovery",
+        detail_message="Opening the research run and reading the batch mix before generating any posts.",
+        posts_created=0,
+        expected_posts=expected_posts,
+        current_post_type=None,
+        attempt=None,
+        max_attempts=None,
+        is_retrying=False,
+        retry_message=None,
+    )
 
     for post_type, count in post_type_counts.items():
         if count == 0:
             continue
+
+        update_seeding_progress(
+            batch_id,
+            state=batch["state"],
+            stage="researching" if post_type != "lifestyle" else "writing_posts",
+            stage_label=(
+                "Researching current source-backed topics"
+                if post_type != "lifestyle"
+                else "Drafting lifestyle concepts"
+            ),
+            detail_message=(
+                f"Working on {count} {post_type} posts and preparing the first pass of usable concepts."
+            ),
+            posts_created=len(created_posts),
+            expected_posts=expected_posts,
+            current_post_type=post_type,
+            attempt=0 if post_type != "lifestyle" else None,
+            max_attempts=5 if post_type != "lifestyle" else None,
+            is_retrying=False,
+            retry_message=None,
+        )
 
         logger.info(
             "generating_topics",
@@ -74,6 +157,22 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             )
 
             for topic_data in lifestyle_topics:
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="writing_posts",
+                    stage_label="Writing posts from generated concepts",
+                    detail_message=(
+                        f"Turning {post_type} concepts into post records and seed payloads."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=None,
+                    max_attempts=None,
+                    is_retrying=False,
+                    retry_message=None,
+                )
                 dialog_scripts = topic_data["dialog_scripts"]
                 seed_payload = build_lifestyle_seed_payload(
                     topic_data=topic_data,
@@ -97,6 +196,22 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
 
                 created_posts.append(post)
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="writing_posts",
+                    stage_label="Writing posts from generated concepts",
+                    detail_message=(
+                        f"{len(created_posts)} of {expected_posts} posts are now ready for script review."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=None,
+                    max_attempts=None,
+                    is_retrying=False,
+                    retry_message=None,
+                )
                 dedup_topic_record: Dict[str, Any] = {
                     "title": topic_data["title"],
                     "rotation": topic_data["rotation"],
@@ -115,11 +230,47 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             while len(collected_candidates) < required_topics and attempts < max_attempts:
                 remaining_topics = required_topics - len(collected_candidates)
                 request_count = remaining_topics if attempts == 0 else min(required_topics, remaining_topics + 2)
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="researching",
+                    stage_label="Researching current source-backed topics",
+                    detail_message=(
+                        f"Fetching {request_count} fresh {post_type} topic candidates from the research model."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts + 1,
+                    max_attempts=max_attempts,
+                    is_retrying=attempts > 0,
+                    retry_message=(
+                        "Retrying with extra candidates because earlier results overlapped."
+                        if attempts > 0
+                        else None
+                    ),
+                )
                 items = generate_topics_research_agent(
                     post_type=post_type,
                     count=request_count
                 )
 
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="collecting",
+                    stage_label="Collecting distinct topic candidates",
+                    detail_message=(
+                        f"Comparing new {post_type} findings against the registry and current batch to keep topics distinct."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts + 1,
+                    max_attempts=max_attempts,
+                    is_retrying=False,
+                    retry_message=None,
+                )
                 topic_data = [convert_research_item_to_topic(item) for item in items]
                 candidate_dicts: List[Dict[str, Any]] = []
 
@@ -169,10 +320,53 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     required=required_topics,
                 )
 
+                remaining_after = max(required_topics - len(collected_candidates), 0)
+                should_retry = remaining_after > 0 and attempts < max_attempts
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="retry_wait" if should_retry else "collecting",
+                    stage_label=(
+                        "Requesting another research pass"
+                        if should_retry
+                        else "Candidate collection complete"
+                    ),
+                    detail_message=(
+                        f"Collected {len(collected_candidates)} of {required_topics} distinct {post_type} topics so far."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts,
+                    max_attempts=max_attempts,
+                    is_retrying=should_retry,
+                    retry_message=(
+                        "Still working. Duplicates were filtered out, so another pass is running."
+                        if should_retry
+                        else None
+                    ),
+                )
+
             for candidate in collected_candidates[:required_topics]:
                 payload = candidate["__payload"]
                 topic_model = payload["topic_model"]
                 original_item = payload["original_item"]
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="writing_posts",
+                    stage_label="Writing posts from approved topic candidates",
+                    detail_message=(
+                        f"Building scripts and seed payloads for the collected {post_type} topics."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts,
+                    max_attempts=max_attempts,
+                    is_retrying=False,
+                    retry_message=None,
+                )
                 dialog_scripts = generate_dialog_scripts(
                     topic=original_item.topic,
                 )
@@ -201,6 +395,22 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
 
                 created_posts.append(post)
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="writing_posts",
+                    stage_label="Writing posts from approved topic candidates",
+                    detail_message=(
+                        f"{len(created_posts)} of {expected_posts} posts are now ready for script review."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts,
+                    max_attempts=max_attempts,
+                    is_retrying=False,
+                    retry_message=None,
+                )
                 dedup_topic_record = {
                     "title": topic_model.title,
                     "rotation": topic_model.rotation,
@@ -221,6 +431,20 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
         )
 
         if lifestyle_topics:
+            update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="writing_posts",
+                stage_label="Recovering with a fallback topic",
+                detail_message="No unique researched posts survived filtering, so a fallback post is being created.",
+                posts_created=len(created_posts),
+                expected_posts=expected_posts,
+                current_post_type="lifestyle",
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
             fallback_topic = lifestyle_topics[0]
             dialog_scripts = fallback_topic["dialog_scripts"]
 
@@ -246,6 +470,20 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             )
 
             created_posts.append(fallback_post)
+            update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="writing_posts",
+                stage_label="Recovered with a fallback topic",
+                detail_message=f"{len(created_posts)} of {expected_posts} posts are now ready for script review.",
+                posts_created=len(created_posts),
+                expected_posts=expected_posts,
+                current_post_type="lifestyle",
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
             dedup_topic_record = {
                 "title": fallback_topic["title"],
                 "rotation": fallback_topic["rotation"],
@@ -266,7 +504,37 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 batch_id=batch_id
             )
 
+    update_seeding_progress(
+        batch_id,
+        state=batch["state"],
+        stage="finalizing",
+        stage_label="Finalizing batch state",
+        detail_message="Finishing post creation and moving the batch into script review.",
+        posts_created=len(created_posts),
+        expected_posts=expected_posts,
+        current_post_type=None,
+        attempt=None,
+        max_attempts=None,
+        is_retrying=False,
+        retry_message=None,
+    )
     updated_batch = update_batch_state(batch_id, BatchState.S2_SEEDED)
+    update_seeding_progress(
+        batch_id,
+        state=updated_batch["state"],
+        stage="completed",
+        stage_label="Topic generation complete",
+        detail_message=(
+            f"{len(created_posts)} posts are ready. Opening script review next."
+        ),
+        posts_created=len(created_posts),
+        expected_posts=expected_posts,
+        current_post_type=None,
+        attempt=None,
+        max_attempts=None,
+        is_retrying=False,
+        retry_message=None,
+    )
 
     logger.info(
         "topic_discovery_complete",

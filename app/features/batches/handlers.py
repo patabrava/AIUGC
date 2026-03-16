@@ -32,6 +32,7 @@ from app.features.batches.queries import (
     get_batch_posts_summary
 )
 from app.features.topics.handlers import discover_topics_for_batch
+from app.features.topics.handlers import get_seeding_progress, update_seeding_progress
 from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
 from app.core.logging import get_logger
 from app.core.states import BatchState
@@ -133,6 +134,14 @@ async def _run_discover_topics(batch_id: str) -> None:
             new_state=result["state"]
         )
     except FlowForgeException as exc:
+        update_seeding_progress(
+            batch_id,
+            stage="failed",
+            stage_label="Topic generation stopped",
+            detail_message=exc.message,
+            is_retrying=False,
+            retry_message=None,
+        )
         logger.error(
             "batch_autoseed_failed",
             batch_id=batch_id,
@@ -140,6 +149,14 @@ async def _run_discover_topics(batch_id: str) -> None:
             details=exc.details
         )
     except Exception as exc:
+        update_seeding_progress(
+            batch_id,
+            stage="failed",
+            stage_label="Topic generation stopped",
+            detail_message="The seeding run failed before script review could start.",
+            is_retrying=False,
+            retry_message=None,
+        )
         logger.exception(
             "batch_autoseed_unexpected_error",
             batch_id=batch_id,
@@ -405,6 +422,7 @@ async def get_batch_status(batch_id: str):
     try:
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
+        progress = get_seeding_progress(batch_id)
 
         payload = {
             "id": batch["id"],
@@ -412,6 +430,7 @@ async def get_batch_status(batch_id: str):
             "posts_count": posts_summary["posts_count"],
             "posts_by_state": posts_summary["posts_by_state"],
             "updated_at": batch["updated_at"],
+            "progress": progress,
         }
 
         return SuccessResponse(data=payload)
