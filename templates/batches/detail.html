@@ -153,14 +153,13 @@
     {% endif %}
 
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
-    {% set prompt_ready_count = (batch.posts | selectattr('video_prompt_json') | list | length) %}
     <div id="video-workflow" class="bg-gradient-to-r from-blue-50 to-purple-50 border border-purple-200 rounded-lg p-4 sm:p-6 mb-6">
         <div class="flex items-center justify-between">
             <div>
                 <div class="flex items-center gap-3 mb-2">
                     <h3 class="text-xl font-bold text-gray-900">Video Production</h3>
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
-                        {{ prompt_ready_count }}/{{ batch.posts | length }} Ready
+                        {{ post_metrics.prompt_ready }}/{{ post_metrics.active_count }} Ready
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
@@ -176,14 +175,13 @@
     {% endif %}
 
     {% if batch.state == 'S5_PROMPTS_BUILT' %}
-    {% set prompt_ready_count = (batch.posts | selectattr('video_prompt_json') | list | length) %}
     <div id="prompts-workflow" class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4 sm:p-6 mb-6">
         <div class="flex items-center justify-between">
             <div class="flex-1">
                 <div class="flex items-center gap-3 mb-2">
                     <h3 class="text-xl font-bold text-gray-900">Prompts Ready</h3>
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
-                        {{ prompt_ready_count }}/{{ batch.posts | length }} Prepared
+                        {{ post_metrics.prompt_ready }}/{{ post_metrics.active_count }} Prepared
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
@@ -193,22 +191,20 @@
         </div>
     </div>
     {% elif batch.state == 'S6_QA' %}
-    {% set qa_passed_count = (batch.posts | selectattr('qa_pass') | list | length) %}
-    {% set videos_ready_count = (batch.posts | selectattr('video_status', 'equalto', 'completed') | list | length) %}
     <div id="qa-workflow" class="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-4 sm:p-6 mb-6">
         <div class="flex items-center justify-between">
             <div class="flex-1">
                 <div class="flex items-center gap-3 mb-2">
                     <h3 class="text-xl font-bold text-gray-900">Quality Assurance Review</h3>
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                        {{ qa_passed_count }}/{{ batch.posts | length }} Approved
+                        {{ post_metrics.qa_passed }}/{{ post_metrics.active_count }} Approved
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
                     Review each video for quality. Run auto-checks and approve manually when satisfied.
                 </p>
             </div>
-            {% if batch.state == 'S6_QA' and qa_passed_count == batch.posts | length and batch.posts | length > 0 %}
+            {% if batch.state == 'S6_QA' and post_metrics.qa_passed == post_metrics.active_count and post_metrics.active_count > 0 %}
             <button
                 hx-put="/batches/{{ batch.id }}/advance-to-publish"
                 hx-confirm="All posts approved. Advance to Publish Planning?"
@@ -222,21 +218,20 @@
         </div>
     </div>
     {% elif batch.state == 'S7_PUBLISH_PLAN' %}
-    {% set scheduled_count = (batch.posts | selectattr('scheduled_at') | list | length) %}
     <div id="publish-plan-workflow" class="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
         <div class="flex items-center justify-between">
             <div class="flex-1">
                 <div class="flex items-center gap-3 mb-2">
                     <h3 class="text-xl font-bold text-gray-900">Publish Planning</h3>
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
-                        {{ scheduled_count }}/{{ batch.posts | length }} Scheduled
+                        {{ post_metrics.scheduled }}/{{ post_metrics.active_count }} Scheduled
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
                     Schedule each post for optimal engagement times and select target social networks.
                 </p>
             </div>
-            {% if scheduled_count == batch.posts | length and batch.posts | length > 0 %}
+            {% if post_metrics.scheduled == post_metrics.active_count and post_metrics.active_count > 0 %}
             <button
                 hx-post="/publish/batches/{{ batch.id }}/confirm"
                 hx-vals='{"confirm": true}'
@@ -256,12 +251,18 @@
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-medium text-gray-900">Posts</h3>
-            <span class="text-sm text-gray-500">{{ batch.posts_count }} total</span>
+            <span class="text-sm text-gray-500">
+                {% if batch.state == 'S2_SEEDED' %}
+                    {{ batch.posts_count }} total
+                {% else %}
+                    {{ post_metrics.active_count }} active
+                {% endif %}
+            </span>
         </div>
 
-        {% if batch.posts %}
+        {% if post_metrics.visible_posts %}
             <div class="space-y-4">
-                {% for post in batch.posts %}
+                {% for post in post_metrics.visible_posts %}
                 {% set seed = post.seed_data or {} %}
                 {% set source = seed.source %}
                 {% set primary_script = seed.script or post.topic_rotation %}
@@ -300,9 +301,10 @@
                             This script has been removed and will not move into prompt or video generation unless restored.
                         </p>
                         {% else %}
+                        {% set script_rows = [3, (((primary_script | length) // 40) + 1)] | max %}
                         <textarea 
                             class="w-full px-3 py-2 text-sm text-gray-800 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                            rows="3"
+                            rows="{{ script_rows }}"
                             hx-put="/posts/{{ post.id }}/script"
                             hx-trigger="blur"
                             hx-swap="none"
