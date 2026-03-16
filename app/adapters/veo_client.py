@@ -73,15 +73,16 @@ class VeoClient:
             Exception: If submission fails
         """
         try:
-            # Note: veo-3.1-generate-preview REST API only accepts prompt
-            # Config parameters (aspect_ratio, resolution, duration) are not supported in REST
-            # They work in SDK clients but return 400 "config isn't supported" in REST
             payload: Dict[str, Any] = {
                 "instances": [
                     {
                         "prompt": prompt
                     }
-                ]
+                ],
+                "parameters": {
+                    "aspectRatio": aspect_ratio,
+                    "resolution": resolution,
+                },
             }
 
             if reference_images:

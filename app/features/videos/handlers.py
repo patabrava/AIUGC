@@ -5,8 +5,6 @@ Per Constitution § V: Locality & Vertical Slices
 Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
 """
 
-import json
-
 from fastapi import APIRouter, HTTPException, Request, status
 from typing import Dict, Any, Optional
 import json
@@ -71,7 +69,19 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         
         post = response.data[0]
         video_prompt = post.get("video_prompt_json")
-        
+        seed_data = post.get("seed_data") or {}
+        if isinstance(seed_data, str):
+            try:
+                seed_data = json.loads(seed_data)
+            except json.JSONDecodeError:
+                seed_data = {}
+
+        if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
+            raise ValidationError(
+                "Removed posts cannot be submitted for video generation.",
+                {"post_id": post_id}
+            )
+
         if not video_prompt:
             raise FlowForgeException(
                 code=ErrorCode.VALIDATION_ERROR,
@@ -293,8 +303,23 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         for post in posts:
             post_id = post["id"]
             video_prompt = post.get("video_prompt_json")
+            seed_data = post.get("seed_data") or {}
+            if isinstance(seed_data, str):
+                try:
+                    seed_data = json.loads(seed_data)
+                except json.JSONDecodeError:
+                    seed_data = {}
             
             # Skip posts without prompts or already submitted
+            if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
+                logger.info(
+                    "post_skipped_removed_from_batch",
+                    post_id=post_id,
+                    batch_id=batch_id
+                )
+                skipped_count += 1
+                continue
+
             if not video_prompt:
                 logger.warning(
                     "post_skipped_no_prompt",
@@ -530,16 +555,6 @@ def _submit_video_request(
     """Submit a video generation request to the selected provider."""
 
     if provider == "veo_3_1":
-        if resolution == "1080p" and aspect_ratio != "16:9":
-            raise FlowForgeException(
-                code=ErrorCode.VALIDATION_ERROR,
-                message="1080p resolution requires 16:9 aspect ratio",
-                details={
-                    "aspect_ratio": aspect_ratio,
-                    "resolution": resolution,
-                },
-            )
-
         veo_client = get_veo_client()
         try:
             result = veo_client.submit_video_generation(
