@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+import httpx
 
 from app.adapters import llm_client as llm_client_module
 from app.core.config import Settings
@@ -31,6 +32,36 @@ class FakeHttpClient:
     def get(self, url, params=None):
         self.calls.append(("GET", url, params))
         return self.responses.pop(0)
+
+
+class FakeStreamResponse:
+    def __init__(self, status_code, lines, text="", error_after_lines=None):
+        self.status_code = status_code
+        self._lines = list(lines)
+        self.text = text or "\n".join(lines)
+        self.error_after_lines = error_after_lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def iter_lines(self):
+        for index, line in enumerate(self._lines, start=1):
+            yield line
+            if self.error_after_lines is not None and index >= self.error_after_lines:
+                raise httpx.ReadTimeout("idle stream timeout")
+
+
+class FakeStreamingHttpClient(FakeHttpClient):
+    def __init__(self, responses, stream_responses):
+        super().__init__(responses)
+        self.stream_responses = list(stream_responses)
+
+    def stream(self, method, url, params=None, json=None, headers=None, timeout=None):
+        self.calls.append(("STREAM", method, url, params, json, headers, timeout))
+        return self.stream_responses.pop(0)
 
 
 class FakeTopicLLM:
@@ -137,12 +168,148 @@ def test_generate_gemini_deep_research_polls_until_done(monkeypatch):
     monkeypatch.setattr(llm_client_module, "get_settings", lambda: fake_settings)
     monkeypatch.setattr(llm_client_module.httpx, "Client", lambda *args, **kwargs: clients.pop(0))
     client = llm_client_module.LLMClient()
+    progress_updates = []
 
-    result = client.generate_gemini_deep_research("Find current wheelchair topics")
+    result = client.generate_gemini_deep_research(
+        "Find current wheelchair topics",
+        progress_callback=progress_updates.append,
+    )
 
     assert result == "research complete"
     assert fake_gemini.calls[0][0] == "POST"
     assert fake_gemini.calls[1][0] == "GET"
+    assert progress_updates[0]["provider_status"] == "SUBMITTED"
+    assert any(update["provider_status"] == "RUNNING" for update in progress_updates)
+    assert any(update["provider_status"] == "DONE" for update in progress_updates)
+
+
+def test_generate_gemini_deep_research_streams_thought_summaries(monkeypatch):
+    fake_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_model="gpt-4o-mini",
+        gemini_api_key="gemini-key",
+        gemini_topic_model="gemini-2.5-flash",
+        gemini_deep_research_agent="deep-research-pro-preview",
+        gemini_topic_timeout_seconds=30,
+        gemini_topic_poll_seconds=0,
+    )
+    fake_openai = FakeHttpClient([])
+    fake_gemini = FakeStreamingHttpClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "name": "interactions/abc123",
+                    "status": "DONE",
+                    "outputs": [{"text": "research complete"}],
+                },
+            )
+        ],
+        [
+            FakeStreamResponse(
+                200,
+                [
+                    'id: evt-1',
+                    'event: interaction.start',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"in_progress"}}',
+                    "",
+                    'id: evt-2',
+                    'event: content.delta',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"in_progress"},"delta":{"type":"thought_summary","content":{"text":"Planning the research approach."}}}',
+                    "",
+                    'id: evt-3',
+                    'event: content.delta',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"in_progress"},"delta":{"type":"text","text":"research complete"}}',
+                    "",
+                    'id: evt-4',
+                    'event: interaction.complete',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"completed"}}',
+                    "",
+                ],
+            )
+        ],
+    )
+    clients = [fake_openai, fake_gemini]
+
+    monkeypatch.setattr(llm_client_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(llm_client_module.httpx, "Client", lambda *args, **kwargs: clients.pop(0))
+    client = llm_client_module.LLMClient()
+    progress_updates = []
+
+    result = client.generate_gemini_deep_research(
+        "Find current wheelchair topics",
+        progress_callback=progress_updates.append,
+    )
+
+    assert result == "research complete"
+    assert fake_gemini.calls[0][0] == "STREAM"
+    assert any(update["provider_status"] == "SUBMITTED" for update in progress_updates)
+    assert any(update["detail_message"] == "Planning the research approach." for update in progress_updates)
+    assert any(update["provider_status"] == "COMPLETED" for update in progress_updates)
+
+
+def test_generate_gemini_deep_research_resumes_after_idle_timeout(monkeypatch):
+    fake_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_model="gpt-4o-mini",
+        gemini_api_key="gemini-key",
+        gemini_topic_model="gemini-2.5-flash",
+        gemini_deep_research_agent="deep-research-pro-preview",
+        gemini_topic_timeout_seconds=30,
+        gemini_topic_poll_seconds=0,
+    )
+    fake_openai = FakeHttpClient([])
+    fake_gemini = FakeStreamingHttpClient(
+        [],
+        [
+            FakeStreamResponse(
+                200,
+                [
+                    'event: interaction.start',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"in_progress"},"event_type":"interaction.start"}',
+                    "",
+                    'event: interaction.status_update',
+                    'data: {"interaction_id":"interactions/abc123","status":"in_progress","event_type":"interaction.status_update"}',
+                    "",
+                ],
+                error_after_lines=6,
+            ),
+            FakeStreamResponse(
+                200,
+                [
+                    'event: content.delta',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"in_progress"},"event_type":"content.delta","delta":{"type":"thought_summary","content":{"text":"Comparing new topic angles against live sources."}}}',
+                    "",
+                    'event: content.delta',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"in_progress"},"event_type":"content.delta","delta":{"type":"text","text":"research complete"}}',
+                    "",
+                    'event: interaction.complete',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"completed"},"event_type":"interaction.complete"}',
+                    "",
+                ],
+            ),
+        ],
+    )
+    clients = [fake_openai, fake_gemini]
+
+    monkeypatch.setattr(llm_client_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(llm_client_module.httpx, "Client", lambda *args, **kwargs: clients.pop(0))
+    monkeypatch.setattr(llm_client_module.time, "sleep", lambda _seconds: None)
+    client = llm_client_module.LLMClient()
+    progress_updates = []
+
+    result = client.generate_gemini_deep_research(
+        "Find current wheelchair topics",
+        progress_callback=progress_updates.append,
+    )
+
+    assert result == "research complete"
+    stream_calls = [call for call in fake_gemini.calls if call[0] == "STREAM"]
+    assert stream_calls[0][1] == "POST"
+    assert stream_calls[1][1] == "GET"
+    assert any("still reports the research interaction as in progress" in update["detail_message"] for update in progress_updates)
+    assert any("paused event delivery" in update["detail_message"] for update in progress_updates)
+    assert any(update["detail_message"] == "Comparing new topic angles against live sources." for update in progress_updates)
 
 
 def test_generate_gemini_deep_research_retries_transient_poll_503(monkeypatch):
@@ -229,3 +396,22 @@ def test_validate_german_content_allows_peer_support_loan_phrase():
     )
 
     topic_agents.validate_german_content(item)
+
+
+def test_parse_prompt2_response_splits_consecutive_one_line_scripts_for_new_hooks():
+    raw = """Problem-Agitieren-Lösung Ads
+Was viele an barrierefreien Eingängen unterschätzen, merkst du erst, wenn schon eine kleine Stufe alles blockiert.
+Von außen wirkt Umsteigen simpel, aber im Alltag kostet mich schlechte Planung oft viel mehr Energie als gedacht.
+
+Beschreibung
+
+Barrierefreiheit scheitert im Alltag oft an kleinen Details wie Schwellen, Türbreiten und fehlenden Alternativen bei Ausfällen. Gerade unterwegs spart dir gute Vorbereitung Stress, Kraft und unnötige Umwege. #Barrierefreiheit #Rollstuhlalltag #Mobilität"""
+
+    scripts = topic_agents.parse_prompt2_response(raw, max_per_category=5)
+
+    assert scripts.problem_agitate_solution == [
+        "Was viele an barrierefreien Eingängen unterschätzen, merkst du erst, wenn schon eine kleine Stufe alles blockiert.",
+        "Von außen wirkt Umsteigen simpel, aber im Alltag kostet mich schlechte Planung oft viel mehr Energie als gedacht.",
+    ]
+    assert scripts.testimonial == [scripts.problem_agitate_solution[0]]
+    assert scripts.transformation == [scripts.problem_agitate_solution[0]]

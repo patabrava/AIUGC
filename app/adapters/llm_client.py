@@ -4,7 +4,7 @@ Wrapper for OpenAI and Gemini clients.
 Per Constitution § VI: Adapterize Specialists
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Iterator, Tuple
 import httpx
 import json
 import time
@@ -64,6 +64,18 @@ class LLMClient:
                 details={"provider": "gemini"},
             )
         return {"key": self.gemini_api_key}
+
+    def _gemini_stream_params(self, **extra: Any) -> Dict[str, str]:
+        params = self._gemini_params()
+        params["alt"] = "sse"
+        for key, value in extra.items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                params[key] = "true" if value else "false"
+            else:
+                params[key] = str(value)
+        return params
     
     def generate_openai(
         self,
@@ -622,6 +634,7 @@ class LLMClient:
         timeout_seconds: Optional[int] = None,
         poll_interval_seconds: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Any] = None,
     ) -> str:
         """Run Gemini Deep Research via the Interactions API and return final text."""
         target_agent = agent or self.gemini_deep_research_agent
@@ -644,6 +657,43 @@ class LLMClient:
         )
 
         try:
+            if progress_callback and hasattr(self.gemini_http_client, "stream"):
+                streamed = self._generate_gemini_deep_research_streamed(
+                    payload=payload,
+                    agent=target_agent,
+                    timeout_seconds=effective_timeout,
+                    poll_interval_seconds=effective_poll,
+                    progress_callback=progress_callback,
+                )
+                if streamed is not None:
+                    return streamed
+
+            return self._generate_gemini_deep_research_polled(
+                payload=payload,
+                agent=target_agent,
+                timeout_seconds=effective_timeout,
+                poll_interval_seconds=effective_poll,
+                progress_callback=progress_callback,
+            )
+        except ThirdPartyError:
+            raise
+        except Exception as exc:
+            logger.error("gemini_deep_research_failed", agent=target_agent, error=str(exc))
+            raise ThirdPartyError(
+                message="Gemini Deep Research failed",
+                details={"error": str(exc), "agent": target_agent},
+            ) from exc
+
+    def _generate_gemini_deep_research_polled(
+        self,
+        *,
+        payload: Dict[str, Any],
+        agent: str,
+        timeout_seconds: int,
+        poll_interval_seconds: int,
+        progress_callback: Optional[Any],
+    ) -> str:
+        try:
             submit_response = self.gemini_http_client.post(
                 "/interactions",
                 params=self._gemini_params(),
@@ -661,7 +711,7 @@ class LLMClient:
                     details={
                         "status_code": submit_response.status_code,
                         "body": submit_response.text,
-                        "agent": target_agent,
+                        "agent": agent,
                     },
                 )
 
@@ -670,15 +720,23 @@ class LLMClient:
             if not interaction_id:
                 raise ThirdPartyError(
                     message="Gemini Deep Research did not return an interaction id",
-                    details={"agent": target_agent, "response": interaction},
+                    details={"agent": agent, "response": interaction},
                 )
             logger.info(
                 "gemini_deep_research_submitted",
                 interaction_id=interaction_id,
-                agent=target_agent,
+                agent=agent,
             )
+            if progress_callback:
+                progress_callback(
+                    {
+                        "provider_interaction_id": interaction_id,
+                        "provider_status": "SUBMITTED",
+                        "detail_message": "Gemini accepted the research task and is preparing the first planning step.",
+                    }
+                )
 
-            deadline = time.monotonic() + effective_timeout
+            deadline = time.monotonic() + timeout_seconds
             started_at = time.monotonic()
             last_status: Optional[str] = None
             consecutive_retryable_poll_errors = 0
@@ -709,7 +767,22 @@ class LLMClient:
                                     "consecutive_errors": consecutive_retryable_poll_errors,
                                 },
                             )
-                        backoff_seconds = min(max(effective_poll, 1) * consecutive_retryable_poll_errors, 15)
+                        if progress_callback:
+                            progress_callback(
+                                {
+                                    "provider_interaction_id": interaction_id,
+                                    "provider_status": f"HTTP_{poll_response.status_code}",
+                                    "detail_message": (
+                                        f"Gemini returned a temporary {poll_response.status_code} response. "
+                                        f"Retry {consecutive_retryable_poll_errors} is running automatically."
+                                    ),
+                                    "retry_message": (
+                                        f"Gemini {poll_response.status_code} while polling. Waiting before reconnect."
+                                    ),
+                                    "is_retrying": True,
+                                }
+                            )
+                        backoff_seconds = min(max(poll_interval_seconds, 1) * consecutive_retryable_poll_errors, 15)
                         time.sleep(backoff_seconds)
                         continue
 
@@ -741,6 +814,20 @@ class LLMClient:
                         done=bool(poll_data.get("done")),
                     )
                     last_status = status
+                if progress_callback:
+                    status_label = status or "RUNNING"
+                    progress_callback(
+                        {
+                            "provider_interaction_id": interaction_id,
+                            "provider_status": status_label,
+                            "detail_message": (
+                                f"Gemini research is {status_label.lower()} after {elapsed_seconds}s. "
+                                "Planning, searching, reading, and drafting are still in progress."
+                            ),
+                            "retry_message": None,
+                            "is_retrying": False,
+                        }
+                    )
                 if status in {"DONE", "COMPLETED", "SUCCEEDED"}:
                     content = self._extract_gemini_interaction_text(poll_data)
                     logger.info(
@@ -750,27 +837,459 @@ class LLMClient:
                         elapsed_seconds=elapsed_seconds,
                         content_characters=len(content),
                     )
+                    if progress_callback:
+                        progress_callback(
+                            {
+                                "provider_interaction_id": interaction_id,
+                                "provider_status": status,
+                                "detail_message": (
+                                    f"Gemini finished the research interaction after {elapsed_seconds}s and returned the final draft."
+                                ),
+                                "retry_message": None,
+                                "is_retrying": False,
+                            }
+                        )
                     return content
                 if status in {"FAILED", "CANCELLED", "ERROR"}:
+                    if progress_callback:
+                        progress_callback(
+                            {
+                                "provider_interaction_id": interaction_id,
+                                "provider_status": status,
+                                "detail_message": (
+                                    f"Gemini ended the research interaction with status {status.lower()}."
+                                ),
+                                "retry_message": None,
+                                "is_retrying": False,
+                            }
+                        )
                     raise ThirdPartyError(
                         message="Gemini Deep Research failed",
                         details={"interaction_id": interaction_id, "status": status, "response": poll_data},
                     )
 
-                time.sleep(effective_poll)
+                time.sleep(poll_interval_seconds)
 
             raise ThirdPartyError(
                 message="Gemini Deep Research timed out",
-                details={"interaction_id": interaction_id, "timeout_seconds": effective_timeout},
+                details={"interaction_id": interaction_id, "timeout_seconds": timeout_seconds},
             )
         except ThirdPartyError:
             raise
         except Exception as exc:
-            logger.error("gemini_deep_research_failed", agent=target_agent, error=str(exc))
-            raise ThirdPartyError(
-                message="Gemini Deep Research failed",
-                details={"error": str(exc), "agent": target_agent},
-            ) from exc
+            logger.error("gemini_deep_research_polling_failed", agent=agent, error=str(exc))
+            raise
+
+    def _generate_gemini_deep_research_streamed(
+        self,
+        *,
+        payload: Dict[str, Any],
+        agent: str,
+        timeout_seconds: int,
+        poll_interval_seconds: int,
+        progress_callback: Any,
+    ) -> Optional[str]:
+        deadline = time.monotonic() + timeout_seconds
+        started_at = time.monotonic()
+        interaction_id: Optional[str] = None
+        last_event_id: Optional[str] = None
+        last_summary: Optional[str] = None
+        last_status_bucket: Optional[int] = None
+        final_text_parts: List[str] = []
+        is_complete = False
+        resume_attempt = 0
+        idle_stream_timeout_seconds = max(8, min(max(poll_interval_seconds, 1) * 2, 20))
+
+        def handle_stream_event(event: Dict[str, Any]) -> None:
+            nonlocal interaction_id, last_event_id, last_summary, last_status_bucket, is_complete
+
+            event_type = str(event.get("event_type") or "").strip()
+            event_id = event.get("event_id")
+            if event_id:
+                last_event_id = str(event_id)
+
+            interaction = event.get("interaction") or {}
+            interaction_id = str(
+                interaction.get("id")
+                or event.get("interaction_id")
+                or interaction_id
+                or ""
+            ) or interaction_id
+            provider_status = str(
+                interaction.get("status")
+                or event.get("status")
+                or event.get("state")
+                or ("COMPLETED" if event_type == "interaction.complete" else "RUNNING")
+            ).upper()
+            elapsed_seconds = round(time.monotonic() - started_at, 1)
+
+            if event_type == "interaction.start":
+                progress_callback(
+                    {
+                        "provider_interaction_id": interaction_id,
+                        "provider_event_id": last_event_id,
+                        "provider_status": "SUBMITTED",
+                        "detail_message": "Gemini opened the Deep Research session and started planning the work.",
+                        "is_retrying": False,
+                        "retry_message": None,
+                    }
+                )
+                return
+
+            if event_type == "interaction.status_update":
+                bucket = int(elapsed_seconds // 20)
+                if bucket != last_status_bucket:
+                    last_status_bucket = bucket
+                    status_text = provider_status.lower().replace("_", " ")
+                    progress_callback(
+                        {
+                            "provider_interaction_id": interaction_id,
+                            "provider_event_id": last_event_id,
+                            "provider_status": provider_status or "IN_PROGRESS",
+                            "detail_message": (
+                                f"Gemini still reports the research interaction as {status_text} after {int(elapsed_seconds)}s."
+                            ),
+                            "is_retrying": False,
+                            "retry_message": None,
+                        }
+                    )
+                return
+
+            if event_type == "content.delta":
+                delta = event.get("delta") or {}
+                delta_type = delta.get("type")
+                if delta_type == "thought_summary":
+                    text = ((delta.get("content") or {}).get("text") or "").strip()
+                    if text and text != last_summary:
+                        last_summary = text
+                        progress_callback(
+                            {
+                                "provider_interaction_id": interaction_id,
+                                "provider_event_id": last_event_id,
+                                "provider_status": provider_status or "RUNNING",
+                                "detail_message": text,
+                                "is_retrying": False,
+                                "retry_message": None,
+                            }
+                        )
+                    return
+                if delta_type == "text":
+                    text = (delta.get("text") or "").strip()
+                    if text:
+                        final_text_parts.append(text)
+                    return
+
+            if event_type == "interaction.complete":
+                is_complete = True
+                progress_callback(
+                    {
+                        "provider_interaction_id": interaction_id,
+                        "provider_event_id": last_event_id,
+                        "provider_status": "COMPLETED",
+                        "detail_message": f"Gemini finished the research interaction after {elapsed_seconds}s.",
+                        "is_retrying": False,
+                        "retry_message": None,
+                    }
+                )
+                return
+
+            if event_type in {"interaction.failed", "error"}:
+                is_complete = True
+                raise ThirdPartyError(
+                    message="Gemini Deep Research failed",
+                    details={
+                        "interaction_id": interaction_id,
+                        "event_id": last_event_id,
+                        "event_type": event_type,
+                        "response": event,
+                    },
+                )
+
+        try:
+            with self.gemini_http_client.stream(
+                "POST",
+                "/interactions",
+                params=self._gemini_stream_params(stream=True),
+                json={
+                    **payload,
+                    "stream": True,
+                    "agent_config": {
+                        "type": "deep-research",
+                        "thinking_summaries": "auto",
+                    },
+                },
+                headers={"Accept": "text/event-stream"},
+                timeout=httpx.Timeout(connect=15.0, read=idle_stream_timeout_seconds, write=60.0, pool=None),
+            ) as response:
+                if response.status_code >= 400:
+                    logger.warning(
+                        "gemini_deep_research_stream_submit_http_error",
+                        status_code=response.status_code,
+                        response_text=response.text,
+                        agent=agent,
+                    )
+                    return None
+                for event in self._iter_gemini_sse_events(response):
+                    handle_stream_event(event)
+                    if is_complete:
+                        break
+        except ThirdPartyError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "gemini_deep_research_stream_interrupted",
+                agent=agent,
+                interaction_id=interaction_id,
+                last_event_id=last_event_id,
+                error=str(exc),
+            )
+            if not interaction_id:
+                return None
+            progress_callback(
+                {
+                    "provider_interaction_id": interaction_id,
+                    "provider_event_id": last_event_id,
+                    "provider_status": "IN_PROGRESS",
+                    "detail_message": (
+                        f"Gemini kept the research run open but paused event delivery after {int(time.monotonic() - started_at)}s. Reopening the stream."
+                    ),
+                    "is_retrying": False,
+                    "retry_message": None,
+                }
+            )
+
+        while not is_complete and interaction_id and time.monotonic() < deadline:
+            resume_attempt += 1
+            time.sleep(min(max(poll_interval_seconds, 1), 2))
+            try:
+                with self.gemini_http_client.stream(
+                    "GET",
+                    f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
+                    params=self._gemini_stream_params(stream=True, last_event_id=last_event_id),
+                    headers={"Accept": "text/event-stream"},
+                    timeout=httpx.Timeout(connect=15.0, read=idle_stream_timeout_seconds, write=60.0, pool=None),
+                ) as response:
+                    if response.status_code >= 400:
+                        if response.status_code in {429, 500, 502, 503, 504}:
+                            progress_callback(
+                                {
+                                    "provider_interaction_id": interaction_id,
+                                    "provider_event_id": last_event_id,
+                                    "provider_status": f"HTTP_{response.status_code}",
+                                    "detail_message": (
+                                        f"Gemini returned a temporary {response.status_code} while resuming the research stream."
+                                    ),
+                                    "is_retrying": True,
+                                    "retry_message": "Waiting briefly before reopening the Deep Research stream.",
+                                }
+                            )
+                            continue
+                        raise ThirdPartyError(
+                            message="Gemini Deep Research stream resume failed",
+                            details={
+                                "status_code": response.status_code,
+                                "body": response.text,
+                                "interaction_id": interaction_id,
+                                "last_event_id": last_event_id,
+                            },
+                        )
+                    for event in self._iter_gemini_sse_events(response):
+                        handle_stream_event(event)
+                        if is_complete:
+                            break
+            except ThirdPartyError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "gemini_deep_research_stream_resume_failed",
+                    interaction_id=interaction_id,
+                    last_event_id=last_event_id,
+                    attempt=resume_attempt,
+                    error=str(exc),
+                )
+                progress_callback(
+                    {
+                        "provider_interaction_id": interaction_id,
+                        "provider_event_id": last_event_id,
+                        "provider_status": "IN_PROGRESS",
+                        "detail_message": (
+                            f"Gemini kept the research run open but paused event delivery after {int(time.monotonic() - started_at)}s. Reopening the stream."
+                        ),
+                        "is_retrying": False,
+                        "retry_message": None,
+                    }
+                )
+
+        if not is_complete and interaction_id:
+            poll_result = self._generate_gemini_deep_research_poll_result(
+                interaction_id=interaction_id,
+                deadline=deadline,
+                started_at=started_at,
+                poll_interval_seconds=poll_interval_seconds,
+                progress_callback=progress_callback,
+            )
+            if poll_result:
+                return poll_result
+
+        if final_text_parts:
+            return "".join(final_text_parts).strip()
+
+        if interaction_id:
+            final_snapshot = self.gemini_http_client.get(
+                f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
+                params=self._gemini_params(),
+            )
+            if final_snapshot.status_code < 400:
+                return self._extract_gemini_interaction_text(final_snapshot.json())
+
+        return None
+
+    def _generate_gemini_deep_research_poll_result(
+        self,
+        *,
+        interaction_id: str,
+        deadline: float,
+        started_at: float,
+        poll_interval_seconds: int,
+        progress_callback: Any,
+    ) -> Optional[str]:
+        last_status: Optional[str] = None
+        consecutive_retryable_poll_errors = 0
+        max_retryable_poll_errors = 5
+
+        while time.monotonic() < deadline:
+            poll_response = self.gemini_http_client.get(
+                f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
+                params=self._gemini_params(),
+            )
+            if poll_response.status_code >= 400:
+                if poll_response.status_code in {429, 500, 502, 503, 504}:
+                    consecutive_retryable_poll_errors += 1
+                    if consecutive_retryable_poll_errors >= max_retryable_poll_errors:
+                        raise ThirdPartyError(
+                            message="Gemini Deep Research polling failed",
+                            details={
+                                "status_code": poll_response.status_code,
+                                "body": poll_response.text,
+                                "interaction_id": interaction_id,
+                                "consecutive_errors": consecutive_retryable_poll_errors,
+                            },
+                        )
+                    progress_callback(
+                        {
+                            "provider_interaction_id": interaction_id,
+                            "provider_status": f"HTTP_{poll_response.status_code}",
+                            "detail_message": (
+                                f"Gemini returned a temporary {poll_response.status_code} while resuming the research run."
+                            ),
+                            "retry_message": "Retrying the Deep Research poll after a temporary provider response.",
+                            "is_retrying": True,
+                        }
+                    )
+                    backoff_seconds = min(max(poll_interval_seconds, 1) * consecutive_retryable_poll_errors, 15)
+                    time.sleep(backoff_seconds)
+                    continue
+                raise ThirdPartyError(
+                    message="Gemini Deep Research polling failed",
+                    details={
+                        "status_code": poll_response.status_code,
+                        "body": poll_response.text,
+                        "interaction_id": interaction_id,
+                    },
+                )
+
+            poll_data = poll_response.json()
+            consecutive_retryable_poll_errors = 0
+            status = (poll_data.get("state") or poll_data.get("status") or "").upper()
+            elapsed_seconds = round(time.monotonic() - started_at, 1)
+            if status != last_status:
+                logger.info(
+                    "gemini_deep_research_resume_status",
+                    interaction_id=interaction_id,
+                    status=status or "UNKNOWN",
+                    elapsed_seconds=elapsed_seconds,
+                    done=bool(poll_data.get("done")),
+                )
+                last_status = status
+            if status in {"DONE", "COMPLETED", "SUCCEEDED"}:
+                progress_callback(
+                    {
+                        "provider_interaction_id": interaction_id,
+                        "provider_status": status,
+                        "detail_message": (
+                            f"Gemini finished the research interaction after {elapsed_seconds}s and returned the final draft."
+                        ),
+                        "retry_message": None,
+                        "is_retrying": False,
+                    }
+                )
+                return self._extract_gemini_interaction_text(poll_data)
+            if status in {"FAILED", "CANCELLED", "ERROR"}:
+                raise ThirdPartyError(
+                    message="Gemini Deep Research failed",
+                    details={"interaction_id": interaction_id, "status": status, "response": poll_data},
+                )
+            time.sleep(poll_interval_seconds)
+
+        raise ThirdPartyError(
+            message="Gemini Deep Research timed out",
+            details={"interaction_id": interaction_id, "timeout_seconds": round(deadline - started_at, 1)},
+        )
+
+    def _iter_gemini_sse_events(self, response: Any) -> Iterator[Dict[str, Any]]:
+        event_id: Optional[str] = None
+        event_type: Optional[str] = None
+        data_lines: List[str] = []
+
+        def flush_event() -> Optional[Dict[str, Any]]:
+            nonlocal event_id, event_type, data_lines
+            if not data_lines:
+                event_id = None
+                event_type = None
+                return None
+            payload_text = "\n".join(data_lines).strip()
+            data_lines = []
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "gemini_deep_research_stream_event_parse_failed",
+                    event_id=event_id,
+                    event_type=event_type,
+                    payload_preview=payload_text[:400],
+                )
+                event_id = None
+                event_type = None
+                return None
+            if event_id and "event_id" not in payload:
+                payload["event_id"] = event_id
+            if event_type and "event_type" not in payload:
+                payload["event_type"] = event_type
+            event_id = None
+            event_type = None
+            return payload
+
+        for raw_line in response.iter_lines():
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else str(raw_line)
+            if not line:
+                event = flush_event()
+                if event is not None:
+                    yield event
+                continue
+            if line.startswith(":"):
+                continue
+            field, _, value = line.partition(":")
+            value = value.lstrip(" ")
+            if field == "id":
+                event_id = value
+            elif field == "event":
+                event_type = value
+            elif field == "data":
+                data_lines.append(value)
+
+        event = flush_event()
+        if event is not None:
+            yield event
 
     def _extract_output_text(self, data: Dict[str, Any]) -> str:
         """Extract concatenated output text from Responses API payload."""
