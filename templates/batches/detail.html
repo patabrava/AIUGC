@@ -30,6 +30,28 @@
         </div>
     </div>
 
+    {% set post_metrics = namespace(visible_posts=[], active_count=0, prompt_ready=0, qa_passed=0, scheduled=0) %}
+    {% for post in batch.posts %}
+        {% set seed = post.seed_data or {} %}
+        {% set review_status = seed.script_review_status or 'pending' %}
+        {% set post_removed = review_status == 'removed' or seed.video_excluded == True %}
+        {% if batch.state == 'S2_SEEDED' or not post_removed %}
+            {% set post_metrics.visible_posts = post_metrics.visible_posts + [post] %}
+        {% endif %}
+        {% if not post_removed %}
+            {% set post_metrics.active_count = post_metrics.active_count + 1 %}
+            {% if post.video_prompt_json %}
+                {% set post_metrics.prompt_ready = post_metrics.prompt_ready + 1 %}
+            {% endif %}
+            {% if post.qa_pass %}
+                {% set post_metrics.qa_passed = post_metrics.qa_passed + 1 %}
+            {% endif %}
+            {% if post.scheduled_at %}
+                {% set post_metrics.scheduled = post_metrics.scheduled + 1 %}
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+
     <!-- State Stepper -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
         <h3 class="text-lg font-medium text-gray-900 mb-4">Progress</h3>
