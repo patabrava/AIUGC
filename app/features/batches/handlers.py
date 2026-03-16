@@ -32,7 +32,7 @@ from app.features.batches.queries import (
     get_batch_posts_summary
 )
 from app.features.topics.handlers import discover_topics_for_batch
-from app.core.errors import FlowForgeException, SuccessResponse
+from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
 from app.core.logging import get_logger
 from app.core.states import BatchState
 
@@ -220,6 +220,9 @@ def _normalize_seed_data(seed_data: Any) -> Dict[str, Any]:
         facts = strict_seed.get("facts")
         if isinstance(facts, list) and facts:
             data.setdefault("strict_fact", facts[0])
+
+    if not data.get("script_review_status"):
+        data["script_review_status"] = "pending"
 
     return data
 
@@ -516,6 +519,41 @@ async def approve_scripts_endpoint(batch_id: str, request: Request):
                 details={"current_state": batch["state"], "required_state": BatchState.S2_SEEDED.value}
             )
         else:
+            from app.adapters.supabase_client import get_supabase
+
+            supabase = get_supabase().client
+            posts_response = supabase.table("posts").select("id", "seed_data").eq("batch_id", batch_id).execute()
+            posts = posts_response.data or []
+            if not posts:
+                raise StateTransitionError("Cannot approve scripts without posts", {"batch_id": batch_id})
+
+            approved_count = 0
+            pending_post_ids = []
+            for post in posts:
+                seed_data = post.get("seed_data") or {}
+                if isinstance(seed_data, str):
+                    try:
+                        seed_data = json.loads(seed_data)
+                    except json.JSONDecodeError:
+                        seed_data = {}
+                review_status = seed_data.get("script_review_status") or "pending"
+                if review_status == "approved":
+                    approved_count += 1
+                elif review_status != "removed":
+                    pending_post_ids.append(post["id"])
+
+            if pending_post_ids:
+                raise StateTransitionError(
+                    "Every post must be approved or removed before advancing.",
+                    {"pending_post_ids": pending_post_ids}
+                )
+
+            if approved_count == 0:
+                raise StateTransitionError(
+                    "At least one approved script is required before advancing.",
+                    {"batch_id": batch_id}
+                )
+
             updated_batch = update_batch_state(batch_id, BatchState.S4_SCRIPTED)
 
         logger.info(
