@@ -9,6 +9,12 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
     restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=websecure
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.tls.certresolver=letsencrypt
+      - traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000
     healthcheck:
       test:
         [
