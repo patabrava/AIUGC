@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from app.core.config import get_settings  # noqa: E402
 from app.core.logging import configure_logging, get_logger  # noqa: E402
 from app.features.posts.prompt_text import build_full_prompt_text  # noqa: E402
-from app.features.posts.prompt_builder import build_video_prompt_from_seed  # noqa: E402
+from app.features.posts.prompt_builder import VEO_NEGATIVE_PROMPT, build_video_prompt_from_seed  # noqa: E402
 
 VEO_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning"
 DEFAULT_ASPECT_RATIO = "9:16"
@@ -49,21 +49,31 @@ def _load_seed(seed_path: Optional[str]) -> Optional[Dict[str, Any]]:
         return json.load(fh)
 
 
-def build_prompt(seed_data: Optional[Dict[str, Any]]) -> str:
+def build_prompt(seed_data: Optional[Dict[str, Any]]) -> Dict[str, str]:
     if not seed_data:
-        return build_full_prompt_text(CANONICAL_SEED_PROMPT)
+        return {
+            "prompt": build_full_prompt_text(CANONICAL_SEED_PROMPT),
+            "negative_prompt": VEO_NEGATIVE_PROMPT,
+        }
     prompt = build_video_prompt_from_seed(seed_data)
-    return build_full_prompt_text(prompt)
+    return {
+        "prompt": prompt.get("veo_prompt") or build_full_prompt_text(prompt),
+        "negative_prompt": prompt.get("veo_negative_prompt") or VEO_NEGATIVE_PROMPT,
+    }
 
 
-def build_request_body(prompt: str) -> Dict[str, Any]:
-    # REST endpoint only accepts the prompt in instances per VEO doc.
+def build_request_body(prompt: str, negative_prompt: str) -> Dict[str, Any]:
     return {
         "instances": [
             {
                 "prompt": prompt
             }
-        ]
+        ],
+        "parameters": {
+            "aspectRatio": DEFAULT_ASPECT_RATIO,
+            "resolution": DEFAULT_RESOLUTION,
+            "negativePrompt": negative_prompt,
+        },
     }
 
 
@@ -86,8 +96,8 @@ def main() -> int:
         return 1
 
     seed_data = _load_seed(args.seed)
-    prompt_text = build_prompt(seed_data)
-    payload = build_request_body(prompt_text)
+    prompt_bundle = build_prompt(seed_data)
+    payload = build_request_body(prompt_bundle["prompt"], prompt_bundle["negative_prompt"])
 
     print("=== VEO Payload Preview ===")
     print(_format_json(payload))
@@ -106,7 +116,7 @@ def main() -> int:
     logger.info(
         "veo_preflight_submission",
         has_seed=bool(seed_data),
-        prompt_length=len(prompt_text),
+        prompt_length=len(prompt_bundle["prompt"]),
     )
 
     with httpx.Client(headers=headers, timeout=timeout) as client:

@@ -89,11 +89,12 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 details={"post_id": post_id}
             )
         
-        prompt_text = _build_provider_prompt_text(video_prompt, request.provider)
+        prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
 
         submission_result = _submit_video_request(
             provider=request.provider,
-            prompt_text=prompt_text,
+            prompt_text=prompt_request["prompt_text"] or "",
+            negative_prompt=prompt_request.get("negative_prompt"),
             aspect_ratio=request.aspect_ratio,
             resolution=request.resolution,
             seconds=request.seconds,
@@ -341,11 +342,12 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             
             # Build prompt and submit
             try:
-                prompt_text = _build_provider_prompt_text(video_prompt, request.provider)
+                prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
 
                 submission_result = _submit_video_request(
                     provider=request.provider,
-                    prompt_text=prompt_text,
+                    prompt_text=prompt_request["prompt_text"] or "",
+                    negative_prompt=prompt_request.get("negative_prompt"),
                     aspect_ratio=request.aspect_ratio,
                     resolution=request.resolution,
                     seconds=request.seconds,
@@ -485,7 +487,34 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
 
 def _build_veo_prompt_text(video_prompt: Dict[str, Any]) -> str:
     """Build VEO-compatible prompt text from video_prompt_json."""
+    veo_prompt = video_prompt.get("veo_prompt")
+    if veo_prompt:
+        logger.debug(
+            "veo_prompt_selected",
+            prompt_length=len(veo_prompt)
+        )
+        return veo_prompt
+
+    optimized_prompt = video_prompt.get("optimized_prompt")
+    if optimized_prompt:
+        logger.debug(
+            "veo_optimized_prompt_fallback_selected",
+            prompt_length=len(optimized_prompt)
+        )
+        return optimized_prompt
     return build_full_prompt_text(video_prompt)
+
+
+def _build_veo_negative_prompt(video_prompt: Dict[str, Any]) -> Optional[str]:
+    """Build VEO negativePrompt text from stored prompt metadata."""
+    negative_prompt = video_prompt.get("veo_negative_prompt")
+    if negative_prompt:
+        logger.debug(
+            "veo_negative_prompt_selected",
+            prompt_length=len(negative_prompt)
+        )
+        return negative_prompt
+    return None
 
 
 def _write_recovery_record(post_id: str, operation_id: str, provider: str, correlation_id: str) -> None:
@@ -542,10 +571,21 @@ def _build_provider_prompt_text(video_prompt: Dict[str, Any], provider: str) -> 
     return build_full_prompt_text(video_prompt)
 
 
+def _build_provider_prompt_request(video_prompt: Dict[str, Any], provider: str) -> Dict[str, Optional[str]]:
+    """Build provider-specific prompt payload pieces."""
+    prompt_text = _build_provider_prompt_text(video_prompt, provider)
+    negative_prompt = _build_veo_negative_prompt(video_prompt) if provider == "veo_3_1" else None
+    return {
+        "prompt_text": prompt_text,
+        "negative_prompt": negative_prompt,
+    }
+
+
 def _submit_video_request(
     *,
     provider: str,
     prompt_text: str,
+    negative_prompt: Optional[str],
     aspect_ratio: str,
     resolution: str,
     seconds: int,
@@ -559,6 +599,7 @@ def _submit_video_request(
         try:
             result = veo_client.submit_video_generation(
                 prompt=prompt_text,
+                negative_prompt=negative_prompt,
                 correlation_id=correlation_id,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,

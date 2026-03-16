@@ -222,6 +222,7 @@ def diagnose_veo_adapter() -> Dict[str, Any]:
         # Test minimal submission
         test_result = veo_client.submit_video_generation(
             prompt="Diagnostic test prompt for adapter verification",
+            negative_prompt="subtitles, watermark, text overlays",
             correlation_id="diagnostic_test",
             aspect_ratio="9:16",
             resolution="720p"

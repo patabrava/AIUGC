@@ -4,39 +4,71 @@ Simple prompt builder that inserts Phase 2 dialogue into video generation templa
 Per Canon Phase 3: S4_SCRIPTED → S5_PROMPTS_BUILT
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.features.posts.schemas import VideoPrompt, AudioSection
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
 
 
-__all__ = ["build_video_prompt_from_seed", "validate_video_prompt", "build_optimized_prompt"]
+__all__ = [
+    "STANDARD_AUDIO_BLOCK",
+    "SORA_NEGATIVE_CONSTRAINTS",
+    "VEO_NEGATIVE_PROMPT",
+    "build_video_prompt_from_seed",
+    "validate_video_prompt",
+    "build_optimized_prompt",
+]
 
 
-AUDIO_DIALOGUE_DIRECTIVE = (
-    "Audio: Recorded through modern smartphone mic — clear, front-facing voice with intimate presence and a soft, short living-room bloom (RT60 ≈ 0.3–0.4 s). Camera 20–30 cm from mouth, mic unobstructed. HVAC/appliances off; noise floor ≤ –55 dBFS with zero room-tone bed. After the final word, capture a dead-silent tail — no reverb, breaths, or background noise — for the closing pause. No music, one-take natural pacing."
+STANDARD_AUDIO_BLOCK = (
+    "Audio: Recorded with a modern smartphone microphone in a quiet indoor bedroom. "
+    "The voice is clear, natural, and close to the microphone. No music and no "
+    "background voices. Subtle natural room acoustics typical of a small bedroom. "
+    "After the final word, the audio gently settles into a quiet room tone for a "
+    "brief moment before the clip ends."
+)
+
+ENDING_HOLD_DIRECTIVE = (
+    "(After delivering the line, she holds a gentle smile and remains still for a brief "
+    "moment while the audio naturally settles into the quiet room ambience before the clip ends.)"
+)
+
+SORA_NEGATIVE_CONSTRAINTS = (
+    "Universal Negatives (hard constraints): subtitles, captions, watermark, text overlays, "
+    "words on screen, logo, branding, poor lighting, blurry footage, low resolution, unwanted "
+    "objects, inconsistent character appearance, audio sync issues, amateur quality, cartoon "
+    "effects, unrealistic proportions, distorted hands, artificial lighting, oversaturation, "
+    "excessive camera shake, no audible audio artifacts, no background voices, no music."
+)
+
+VEO_NEGATIVE_PROMPT = (
+    "subtitles, captions, watermark, text overlays, words on screen, logos, branding, poor lighting, "
+    "blurry footage, low resolution, unwanted objects, character inconsistency, lip-sync drift, "
+    "cartoon styling, unrealistic proportions, distorted hands, artificial lighting, oversaturation, "
+    "excessive camera shake, background voices, music bed, audio hiss, static, clipping, abrupt cuts, angle changes"
 )
 
 OPTIMIZED_PROMPT_TEMPLATE = (
-    "Subject & Look:\n"
-    "38-year-old German woman with long, damp, light brown hair with natural blonde highlights; captivating hazel, almond-shaped eyes that softly crinkle at the outer corners when she smiles; a friendly oval face with a smooth forehead; subtle, gentle lines naturally accentuating her mouth when she expresses; natural medium-brown eyebrows that are moderately thick with a soft, unplucked arch and visible individual hairs; and a warm light-medium skin tone with neutral undertones. She is looking directly at the camera with a neutral, friendly expression.\n\n"
-    "Setting:\n"
-    "A modern, tidy bedroom with blush-pink walls and minimal décor. Vertical frame.\n\n"
+    "Character:\n"
+    "38-year-old German woman with long, damp, light brown hair with natural blonde highlights, "
+    "hazel almond-shaped eyes, a friendly oval face, natural medium-brown eyebrows, and a warm "
+    "light-medium skin tone. She looks directly at the camera with a neutral expression that "
+    "softens into a gentle smile.\n\n"
+    "Action:\n"
+    "Seated in a wheelchair, she delivers the line directly to camera in one continuous take. "
+    "Her head-and-shoulders framing stays steady, with only small natural hand gestures and "
+    "subtle upper-body nods while speaking. After finishing the sentence, she holds a gentle "
+    "smile and remains still for a brief moment before the clip ends.\n\n"
+    "Scene:\n"
+    "A modern, tidy bedroom with blush-pink walls and minimal decor. Bright soft vanity light "
+    "and natural daylight from camera-right create an even, flattering indoor look.\n\n"
     "Cinematography:\n"
-    "Camera shot: medium close-up, slightly high angle, centered; one continuous take, no cuts. Lens & DOF: smartphone front camera (~24 mm equiv.), deep DOF with subtle natural falloff. Camera motion: subtle handheld sway and micro-jitter consistent with selfie grip.\n\n"
-    "Lighting & Palette:\n"
-    "Key: soft vanity light frontal; Fill: window daylight camera-right; Rim: gentle ambient wrap. Palette anchors: blush pink, soft white, warm oak, brushed nickel.\n\n"
-    "Action (8 s):\n"
-    "0–2 s: seated in a wheelchair, steady head-and-shoulders, direct eye contact, neutral expression.\n"
-    "2–5 s: small natural hand gesture; slight upper-body nods.\n"
-    "5–8 s: expression warms into a gentle smile; brief 0.5 s pause after speaking.\n\n"
+    "Smartphone selfie framing, medium close-up, slightly high angle, centered composition, "
+    "single continuous handheld take, no cuts or angle changes.\n\n"
     "Dialogue:\n"
     "\"{dialogue}\"\n\n"
-    "Audio:\n"
-    "Clean smartphone voice, intimate presence, zero room-tone bed; after the final word the space stays dead quiet with no reverb, breaths, or environmental sounds; no music; no background HVAC.\n\n"
-    "Constraints — Avoid:\n"
-    "text overlays/subtitles, logos/branding, poor lighting, heavy compression, excessive shake, off-sync audio, changes to character identity, cuts or angle changes."
+    "{audio}{negatives_section}"
 )
 
 logger = get_logger(__name__)
@@ -80,15 +112,27 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
             normalized_dialogue = normalized_dialogue[: -len(suffix)].rstrip()
             break
 
-    script_line = f"{normalized_dialogue} (After delivering the dialogue, the character maintains a still, gentle smile with no further facial or mouth movements)"
+    script_line = f"{normalized_dialogue} {ENDING_HOLD_DIRECTIVE}"
 
-    optimized_prompt = build_optimized_prompt(normalized_dialogue)
+    optimized_prompt = build_optimized_prompt(
+        normalized_dialogue,
+        negative_constraints=SORA_NEGATIVE_CONSTRAINTS,
+    )
+    veo_prompt = build_optimized_prompt(normalized_dialogue, negative_constraints=None)
 
-    # Build audio config with distinct dialogue guidance to avoid duplication with capture notes
-    audio_section = AudioSection(dialogue=AUDIO_DIALOGUE_DIRECTIVE)
+    # Keep a single audio block in the final prompt to avoid contradictory synthesis cues.
+    audio_section = AudioSection(dialogue=STANDARD_AUDIO_BLOCK, capture="")
 
     # Assemble complete prompt using template defaults
-    base_prompt = VideoPrompt(audio=audio_section)
+    base_prompt = VideoPrompt(
+        audio=audio_section,
+        universal_negatives=SORA_NEGATIVE_CONSTRAINTS,
+        post="",
+        sound_effects="",
+        optimized_prompt=optimized_prompt,
+        veo_prompt=veo_prompt,
+        veo_negative_prompt=VEO_NEGATIVE_PROMPT,
+    )
     action_template = base_prompt.model_fields["action"].default  # type: ignore[attr-defined]
     action_value = action_template.replace("ENTER SCRIPT FROM POST HERE", script_line)
 
@@ -97,6 +141,8 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
     # Convert to dict for storage and API submission
     prompt_dict = video_prompt.model_dump()
     prompt_dict["optimized_prompt"] = optimized_prompt
+    prompt_dict["veo_prompt"] = veo_prompt
+    prompt_dict["veo_negative_prompt"] = VEO_NEGATIVE_PROMPT
     
     logger.info(
         "video_prompt_assembled",
@@ -132,6 +178,10 @@ def validate_video_prompt(prompt_data: Dict[str, Any]) -> bool:
         )
 
 
-def build_optimized_prompt(dialogue: str) -> str:
+def build_optimized_prompt(dialogue: str, negative_constraints: Optional[str] = SORA_NEGATIVE_CONSTRAINTS) -> str:
     cleaned_dialogue = dialogue.strip()
-    return OPTIMIZED_PROMPT_TEMPLATE.format(dialogue=cleaned_dialogue)
+    return OPTIMIZED_PROMPT_TEMPLATE.format(
+        dialogue=cleaned_dialogue,
+        audio=STANDARD_AUDIO_BLOCK,
+        negatives_section=f"\n\n{negative_constraints}" if negative_constraints else "",
+    )

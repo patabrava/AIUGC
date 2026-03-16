@@ -23,7 +23,7 @@ class FakeHttpClient:
         )
 
 
-def test_veo_submission_includes_aspect_ratio_and_resolution(monkeypatch):
+def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(monkeypatch):
     monkeypatch.setattr(
         veo_module,
         "get_settings",
@@ -42,6 +42,7 @@ def test_veo_submission_includes_aspect_ratio_and_resolution(monkeypatch):
 
     submission = client.submit_video_generation(
         prompt="portrait product demo",
+        negative_prompt="subtitles, watermark",
         correlation_id="test-correlation",
         aspect_ratio="9:16",
         resolution="720p",
@@ -50,6 +51,7 @@ def test_veo_submission_includes_aspect_ratio_and_resolution(monkeypatch):
     payload = fake_http_client.post_calls[0]["json"]
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
+    assert payload["parameters"]["negativePrompt"] == "subtitles, watermark"
     assert payload["instances"][0]["prompt"] == "portrait product demo"
     assert submission["operation_id"] == "operations/test-operation"
 

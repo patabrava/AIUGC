@@ -12,7 +12,7 @@ class AudioSection(BaseModel):
     """Audio section for video prompt."""
     dialogue: str = Field(..., description="Spoken dialogue text from Phase 2")
     capture: str = Field(
-        default="Audio: Recorded through modern smartphone mic — clear, front-facing voice with intimate presence and a soft, short living-room bloom (RT60 ≈ 0.3–0.4 s). Camera 20–30 cm from mouth, mic unobstructed. HVAC/appliances off; noise floor ≤ –55 dBFS with a faint, even room-tone bed. No music, one-take natural pacing.",
+        default="",
         description="Audio capture description"
     )
 
@@ -72,17 +72,29 @@ class VideoPrompt(BaseModel):
         description="Authenticity modifiers"
     )
     universal_negatives: str = Field(
-        default="Universal Negatives (hard constraints): subtitles, captions, watermark, text overlays, words on screen, logo, branding, poor lighting, blurry footage, low resolution, artifacts, unwanted objects, inconsistent character appearance, audio sync issues, amateur quality, cartoon effects, unrealistic proportions, distorted hands, artificial lighting, oversaturation, compression noise, excessive camera shake background echo, noticeable reverb tail after speech, audible background noise, inconsistent room tone.",
+        default="Universal Negatives (hard constraints): subtitles, captions, watermark, text overlays, words on screen, logo, branding, poor lighting, blurry footage, low resolution, unwanted objects, inconsistent character appearance, audio sync issues, amateur quality, cartoon effects, unrealistic proportions, distorted hands, artificial lighting, oversaturation, excessive camera shake, no audible audio artifacts, no background voices, no music.",
         description="Universal negatives"
     )
     audio: AudioSection = Field(..., description="Audio section with dialogue and capture notes")
     post: str = Field(
-        default="Post: gentle HPF @ 80 Hz, light 3:1 compression (≈–3 dB GR), subtle de-ess around 6–8 kHz; peaks capped at –1 dBTP, delivery loudness around –14 LUFS integrated. After the dialogue concludes, the audio immediately cuts to a clean, silent background with no residual echo, reverb tail, or audible room noise ",
+        default="",
         description="Post-processing notes"
     )
     sound_effects: str = Field(
-        default="Sound effects (SFX): Recorded through modern smartphone mic — clear, front-facing voice with intimate presence. Post notes: gentle HPF @ 80 Hz, light 3:1 compression (≈–3 dB GR), subtle de-ess around 6–8 kHz; peaks capped at –1 dBTP, delivery loudness around –14 LUFS integrated.",
+        default="",
         description="Sound effects notes"
+    )
+    optimized_prompt: Optional[str] = Field(
+        default=None,
+        description="Sora-optimized prompt text with inline negatives",
+    )
+    veo_prompt: Optional[str] = Field(
+        default=None,
+        description="Veo prompt text without inline exclusions",
+    )
+    veo_negative_prompt: Optional[str] = Field(
+        default=None,
+        description="Veo negativePrompt string for exclusions",
     )
 
     @field_validator('audio', mode='before')

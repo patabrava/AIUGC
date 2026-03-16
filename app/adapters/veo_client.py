@@ -47,6 +47,7 @@ class VeoClient:
     def submit_video_generation(
         self,
         prompt: str,
+        negative_prompt: Optional[str],
         correlation_id: str,
         aspect_ratio: str,
         resolution: str,
@@ -60,7 +61,8 @@ class VeoClient:
         Per Constitution § IX: Structured logging with correlation IDs.
         
         Args:
-            prompt: Text prompt for video generation
+            prompt: Positive text prompt for video generation
+            negative_prompt: Optional exclusions for VEO negativePrompt
             correlation_id: Unique correlation ID for tracking
             aspect_ratio: Aspect ratio for video generation
             resolution: Resolution for video generation
@@ -85,6 +87,9 @@ class VeoClient:
                 },
             }
 
+            if negative_prompt:
+                payload["parameters"]["negativePrompt"] = negative_prompt
+
             if reference_images:
                 logger.warning(
                     "veo_reference_images_not_supported_rest",
@@ -96,9 +101,11 @@ class VeoClient:
                 correlation_id=correlation_id,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
+                negative_prompt_length=len(negative_prompt) if negative_prompt else 0,
                 request_payload=payload,
                 prompt_length=len(prompt),
-                prompt_preview=prompt[:400]
+                prompt_preview=prompt[:400],
+                negative_prompt_preview=negative_prompt[:200] if negative_prompt else None,
             )
 
             response = self._http_client.post(
