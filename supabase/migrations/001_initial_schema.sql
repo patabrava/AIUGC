@@ -145,12 +145,16 @@ BEFORE UPDATE ON public.posts
 FOR EACH ROW
 EXECUTE FUNCTION public.touch_updated_at();
 
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+ALTER TABLE public.batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.topic_registry ENABLE ROW LEVEL SECURITY;
+
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO service_role;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-GRANT USAGE, SELECT ON SEQUENCES TO anon, authenticated, service_role;
+GRANT USAGE, SELECT ON SEQUENCES TO service_role;

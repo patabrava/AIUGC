@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     supabase_url: str = Field(..., description="Supabase project URL")
     supabase_key: str = Field(
         ...,
-        validation_alias=AliasChoices("SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
+        validation_alias=AliasChoices("SUPABASE_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
         description="Supabase anon key or service role key fallback",
     )
     supabase_service_key: str = Field(
@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_supabase_credentials(self) -> "Settings":
         if not self.supabase_key:
-            raise ValueError("SUPABASE_KEY or SUPABASE_SERVICE_ROLE_KEY must be set")
+            raise ValueError("SUPABASE_KEY, SUPABASE_SERVICE_KEY, or SUPABASE_SERVICE_ROLE_KEY must be set")
         if not self.supabase_service_key:
             raise ValueError("SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY must be set")
         return self

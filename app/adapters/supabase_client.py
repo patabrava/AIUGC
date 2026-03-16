@@ -29,7 +29,7 @@ class SupabaseAdapter:
             settings = get_settings()
             self._client = create_client(
                 supabase_url=settings.supabase_url,
-                supabase_key=settings.supabase_key
+                supabase_key=settings.supabase_service_key
             )
             logger.info(
                 "supabase_client_initialized",
