@@ -113,9 +113,11 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             dedupe_reference = existing_topics + all_generated_topics
 
             while len(collected_candidates) < required_topics and attempts < max_attempts:
+                remaining_topics = required_topics - len(collected_candidates)
+                request_count = remaining_topics if attempts == 0 else min(required_topics, remaining_topics + 2)
                 items = generate_topics_research_agent(
                     post_type=post_type,
-                    count=required_topics * 2
+                    count=request_count
                 )
 
                 topic_data = [convert_research_item_to_topic(item) for item in items]
@@ -155,6 +157,17 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     )
 
                 attempts += 1
+
+                logger.info(
+                    "topic_candidate_collection_progress",
+                    batch_id=batch_id,
+                    post_type=post_type,
+                    attempt=attempts,
+                    requested=request_count,
+                    remaining=max(required_topics - len(collected_candidates), 0),
+                    collected=len(collected_candidates),
+                    required=required_topics,
+                )
 
             for candidate in collected_candidates[:required_topics]:
                 payload = candidate["__payload"]

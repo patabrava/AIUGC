@@ -100,13 +100,55 @@ def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: 
 
     logger.info("research_agent_normalizing_response", desired_topics=desired_topics)
 
-    parsed = llm.generate_gemini_json(
-        prompt=prompt,
-        system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
-        json_schema=PROMPT1_JSON_SCHEMA,
-        max_tokens=3500,
+    max_tokens_attempts = [
+        max(4000, desired_topics * 900),
+        max(6000, desired_topics * 1200),
+    ]
+    last_error: Optional[Exception] = None
+    for max_tokens in max_tokens_attempts:
+        try:
+            parsed = llm.generate_gemini_json(
+                prompt=prompt,
+                system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
+                json_schema=PROMPT1_JSON_SCHEMA,
+                max_tokens=max_tokens,
+            )
+            return json.dumps(parsed, ensure_ascii=False)
+        except ValidationError as exc:
+            last_error = exc
+            logger.warning(
+                "research_agent_normalizing_retry",
+                desired_topics=desired_topics,
+                max_tokens=max_tokens,
+                error=exc.message,
+                details=exc.details,
+            )
+
+    for max_tokens in max_tokens_attempts:
+        try:
+            fallback_text = llm.generate_gemini_text(
+                prompt=prompt,
+                system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
+                max_tokens=max_tokens,
+            )
+            fallback_batch = parse_prompt1_response(fallback_text)
+            return json.dumps([item.model_dump(mode="json") for item in fallback_batch.items], ensure_ascii=False)
+        except ValidationError as exc:
+            last_error = exc
+            logger.warning(
+                "research_agent_normalizing_text_retry",
+                desired_topics=desired_topics,
+                max_tokens=max_tokens,
+                error=exc.message,
+                details=exc.details,
+            )
+
+    if last_error is not None:
+        raise last_error
+    raise ValidationError(
+        message="PROMPT_1 normalization failed without a detailed error",
+        details={"desired_topics": desired_topics},
     )
-    return json.dumps(parsed, ensure_ascii=False)
 
 
 def _parse_prompt1_with_normalization(llm, raw_response: str, desired_topics: int) -> tuple[ResearchAgentBatch, str]:
@@ -301,6 +343,11 @@ ENGLISH_SIGNAL_WORDS = {
     "visible", "vocational", "wheelchair", "with",
 }
 
+ACCEPTED_GERMAN_LOAN_PHRASES = {
+    "peer-support",
+    "peer support",
+}
+
 
 def _tokenize_language_words(text: str) -> List[str]:
     return re.findall(r"[a-zA-ZäöüÄÖÜß]+", text.lower())
@@ -308,7 +355,11 @@ def _tokenize_language_words(text: str) -> List[str]:
 
 def _find_english_markers(text: str) -> List[str]:
     tokens = _tokenize_language_words(text)
-    return sorted({token for token in tokens if token in ENGLISH_SIGNAL_WORDS})
+    lowered = text.lower()
+    filtered_signals = set(ENGLISH_SIGNAL_WORDS)
+    if any(phrase in lowered for phrase in ACCEPTED_GERMAN_LOAN_PHRASES):
+        filtered_signals -= {"peer", "support"}
+    return sorted({token for token in tokens if token in filtered_signals})
 
 
 def _count_german_markers(text: str) -> int:
@@ -352,6 +403,8 @@ def validate_german_content(item: ResearchAgentItem) -> None:
 
 def normalize_framework(value: str) -> str:
     """Normalize framework value to match schema literals."""
+    if not isinstance(value, str) or not value.strip():
+        return "PAL"
     value_lower = value.lower().strip()
     if "pal" in value_lower or "problem" in value_lower or "agit" in value_lower or "lösung" in value_lower:
         return "PAL"
@@ -450,6 +503,8 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
                 # Normalize framework
                 if "framework" in item:
                     item["framework"] = normalize_framework(item["framework"])
+                else:
+                    item["framework"] = "PAL"
                 
                 # Add missing required fields with defaults
                 if "estimated_duration_s" not in item and "script" in item:
@@ -753,14 +808,8 @@ def generate_topics_research_agent(
     count: int = 10,
     seed: Optional[int] = None,
 ) -> List[ResearchAgentItem]:
-    """Execute PROMPT_1 and return validated items."""
+    """Execute one PROMPT_1 batch request and return validated items."""
     llm = get_llm_client()
-    if count <= 2:
-        chunk_size = count
-    else:
-        chunk_size = 2
-    total_chunks = math.ceil(count / chunk_size)
-    collected: List[ResearchAgentItem] = []
 
     topic_candidates = get_topic_pool_candidates()
     assigned_seed = seed if seed is not None else secrets.randbits(64)
@@ -770,8 +819,6 @@ def generate_topics_research_agent(
         shuffled_topics = topic_candidates[:]
         rng.shuffle(shuffled_topics)
 
-    topic_cursor = 0
-
     logger.info(
         "research_agent_topic_pool_seed",
         post_type=post_type,
@@ -779,85 +826,71 @@ def generate_topics_research_agent(
         candidate_count=len(shuffled_topics),
     )
 
-    for chunk_index in range(1, total_chunks + 1):
-        remaining = count - len(collected)
-        desired_topics = min(chunk_size, remaining)
-        assigned_topics: List[str] = []
-        if shuffled_topics:
-            for _ in range(desired_topics):
-                if topic_cursor >= len(shuffled_topics):
-                    rng.shuffle(shuffled_topics)
-                    topic_cursor = 0
-                assigned_topics.append(shuffled_topics[topic_cursor])
-                topic_cursor += 1
-        items = _generate_prompt1_chunk(
-            llm=llm,
-            post_type=post_type,
-            desired_topics=desired_topics,
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            assigned_topics=assigned_topics or None,
-        )
-        collected.extend(items)
+    assigned_topics: List[str] = []
+    if shuffled_topics:
+        while len(assigned_topics) < count:
+            remaining = count - len(assigned_topics)
+            if remaining >= len(shuffled_topics):
+                assigned_topics.extend(shuffled_topics)
+                rng.shuffle(shuffled_topics)
+            else:
+                assigned_topics.extend(shuffled_topics[:remaining])
 
-        logger.info(
-            "research_agent_chunk_complete",
-            post_type=post_type,
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            chunk_items=len(items),
-            collected=len(collected)
-        )
+    items = _generate_prompt1_batch(
+        llm=llm,
+        post_type=post_type,
+        desired_topics=count,
+        assigned_topics=assigned_topics or None,
+    )
 
-        if len(collected) >= count:
-            break
-
-    if len(collected) < count:
+    if len(items) < count:
         raise ValidationError(
             message="Unable to produce sufficient topics",
-            details={"requested": count, "produced": len(collected)}
+            details={"requested": count, "produced": len(items)}
         )
 
-    return collected[:count]
+    logger.info(
+        "research_agent_batch_complete",
+        post_type=post_type,
+        requested=count,
+        produced=len(items)
+    )
+
+    return items[:count]
 
 
-def _generate_prompt1_chunk(
+def _generate_prompt1_batch(
     llm,
     post_type: str,
     desired_topics: int,
-    chunk_index: int,
-    total_chunks: int,
     assigned_topics: Optional[List[str]] = None,
 ) -> List[ResearchAgentItem]:
     prompt = build_prompt1(
         post_type=post_type,
         desired_topics=desired_topics,
-        chunk_index=chunk_index,
-        total_chunks=total_chunks,
         assigned_topics=assigned_topics,
     )
     prompt_with_feedback = prompt
 
     max_attempts = 4
+    timeout_seconds = max(getattr(llm, "gemini_topic_timeout_seconds", 600), min(1800, desired_topics * 90))
     for attempt in range(max_attempts):
         logger.debug(
-            "research_agent_chunk_attempt",
+            "research_agent_batch_attempt",
             post_type=post_type,
             desired_topics=desired_topics,
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
             attempt=attempt + 1,
             prompt_characters=len(prompt_with_feedback),
+            timeout_seconds=timeout_seconds,
         )
         
         raw_response = llm.generate_gemini_deep_research(
             prompt=prompt_with_feedback,
             system_prompt=PROMPT1_SYSTEM_PROMPT,
+            timeout_seconds=timeout_seconds,
             metadata={
                 "feature": "topics.prompts_1",
                 "attempt": str(attempt + 1),
-                "chunk_index": str(chunk_index),
-                "total_chunks": str(total_chunks),
                 "desired_outputs": str(desired_topics),
                 "assigned_topics": json.dumps(assigned_topics or []),
             },
@@ -873,7 +906,7 @@ def _generate_prompt1_chunk(
             
             if len(items) != desired_topics:
                 raise ValidationError(
-                    message="PROMPT_1 chunk produced unexpected count",
+                    message="PROMPT_1 batch produced unexpected count",
                     details={"expected": desired_topics, "actual": len(items)}
                 )
             
@@ -889,11 +922,9 @@ def _generate_prompt1_chunk(
             validate_unique_ctas(items)
             
             logger.info(
-                "research_agent_chunk_success",
+                "research_agent_batch_success",
                 post_type=post_type,
                 desired_topics=desired_topics,
-                chunk_index=chunk_index,
-                total_chunks=total_chunks,
                 attempt=attempt + 1,
                 response_length=len(normalized_response),
             )
@@ -901,10 +932,9 @@ def _generate_prompt1_chunk(
             
         except ValidationError as exc:
             logger.warning(
-                "research_agent_chunk_retry",
+                "research_agent_batch_retry",
                 post_type=post_type,
                 attempt=attempt + 1,
-                chunk_index=chunk_index,
                 response_preview=raw_response[:500],
                 error=exc.message,
                 details=exc.details
@@ -946,10 +976,8 @@ def _generate_prompt1_chunk(
             prompt_with_feedback = prompt + "\n\n" + "".join(feedback_parts)
 
     raise ValidationError(
-        message="Unable to produce valid topics for chunk",
+        message="Unable to produce valid topics for batch",
         details={
-            "chunk_index": chunk_index,
-            "total_chunks": total_chunks,
             "desired": desired_topics,
         },
     )

@@ -52,6 +52,26 @@ class FakeTopicLLM:
             "estimated_duration_s": 7,
             "tone": "direkt, freundlich, empowernd, du-Form",
             "disclaimer": "Keine Rechts- oder medizinische Beratung."
+          },
+          {
+            "topic": "Hilfsmittel richtig beantragen",
+            "framework": "Testimonial",
+            "sources": [{"title": "GKV Hilfsmittel", "url": "https://www.gkv-spitzenverband.de/krankenversicherung/hilfsmittel/hilfsmittel.jsp"}],
+            "script": "Check mal dein Hilfsmittelrezept genau, so vermeidest du Rückfragen und kommst schneller an passende Versorgung für deinen Alltag.",
+            "source_summary": "Der GKV-Spitzenverband erläutert, wie Hilfsmittel gelistet sind, welche Nachweise oft nötig werden und warum genaue Produktbeschreibungen den Antrag beschleunigen können. Gerade bei Rollstuhlversorgung hilft dir das, Ärzt:innen und Kostenträger sauber zu koordinieren. #Hilfsmittel #Rollstuhlversorgung #Krankenkasse",
+            "estimated_duration_s": 8,
+            "tone": "direkt, freundlich, empowernd, du-Form",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung."
+          },
+          {
+            "topic": "Begleitperson im Nahverkehr",
+            "framework": "Transformation",
+            "sources": [{"title": "DB Barrierefrei reisen", "url": "https://www.bahn.de/service/individuelle-reise/barrierefrei"}],
+            "script": "Weißt du, wann deine Begleitperson gratis mitfährt? Mit Merkzeichen B nutzt du viele Fahrten deutlich entspannter.",
+            "source_summary": "Die Bahn beschreibt Unterstützungsangebote, Buchungswege und Voraussetzungen für barrierefreies Reisen. Für viele Fahrten lohnt sich der Blick auf Nachweise, Voranmeldung und Servicezeiten, damit du unterwegs weniger Stress hast und Begleitung sicher einplanen kannst. #Begleitperson #BarrierefreiReisen #Nahverkehr",
+            "estimated_duration_s": 8,
+            "tone": "direkt, freundlich, empowernd, du-Form",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung."
           }
         ]
         """
@@ -125,19 +145,52 @@ def test_generate_gemini_deep_research_polls_until_done(monkeypatch):
     assert fake_gemini.calls[1][0] == "GET"
 
 
+def test_generate_gemini_deep_research_retries_transient_poll_503(monkeypatch):
+    fake_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_model="gpt-4o-mini",
+        gemini_api_key="gemini-key",
+        gemini_topic_model="gemini-2.5-flash",
+        gemini_deep_research_agent="deep-research-pro-preview",
+        gemini_topic_timeout_seconds=30,
+        gemini_topic_poll_seconds=0,
+    )
+    fake_openai = FakeHttpClient([])
+    fake_gemini = FakeHttpClient(
+        [
+            FakeResponse(200, {"name": "interactions/abc123"}),
+            FakeResponse(503, {"error": {"message": "temporarily unavailable"}}),
+            FakeResponse(200, {"name": "interactions/abc123", "status": "DONE", "outputs": [{"text": "research complete"}]}),
+        ]
+    )
+    clients = [fake_openai, fake_gemini]
+
+    monkeypatch.setattr(llm_client_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(llm_client_module.httpx, "Client", lambda *args, **kwargs: clients.pop(0))
+    monkeypatch.setattr(llm_client_module.time, "sleep", lambda _seconds: None)
+    client = llm_client_module.LLMClient()
+
+    result = client.generate_gemini_deep_research("Find current wheelchair topics")
+
+    assert result == "research complete"
+    get_calls = [call for call in fake_gemini.calls if call[0] == "GET"]
+    assert len(get_calls) == 2
+
+
 def test_topics_feature_uses_gemini_methods(monkeypatch):
     fake_llm = FakeTopicLLM()
 
     monkeypatch.setattr(topic_agents, "get_llm_client", lambda: fake_llm)
     monkeypatch.setattr(topic_agents, "_validate_url_accessible", lambda url, timeout=5.0: True)
 
-    items = topic_agents.generate_topics_research_agent(post_type="value", count=1)
+    items = topic_agents.generate_topics_research_agent(post_type="value", count=3)
     scripts = topic_agents.generate_dialog_scripts(topic="Pflegegrad 2025 prüfen", scripts_required=1)
     topic = topic_agents.convert_research_item_to_topic(items[0])
     seed = topic_agents.extract_seed_strict_extractor(topic)
 
-    assert len(items) == 1
+    assert len(items) == 3
     assert fake_llm.deep_research_prompts, "PROMPT_1 should use Gemini Deep Research"
+    assert len(fake_llm.deep_research_prompts) == 1, "PROMPT_1 should use one deep research request per post type batch"
     assert fake_llm.text_prompts, "PROMPT_2 should use Gemini text generation"
     assert fake_llm.json_prompts, "Strict extractor or normalizer should use Gemini JSON generation"
     assert scripts.problem_agitate_solution
@@ -161,3 +214,18 @@ def test_discover_topics_for_batch_runs_off_event_loop(monkeypatch):
 
     assert calls == ["batch-123"]
     assert result["state"] == "S2_SEEDED"
+
+
+def test_validate_german_content_allows_peer_support_loan_phrase():
+    item = topic_agents.ResearchAgentItem(
+        topic="Austausch im Alltag",
+        framework="PAL",
+        sources=[{"title": "Beispiel", "url": "https://example.com"}],
+        script="Weißt du, wie Peer-Support hilft? Andere Betroffene unterstützen dich bei Frust und neuen Hürden wirklich auf Augenhöhe.",
+        source_summary="Peer-Support Gruppen stärken Austausch, Zugehörigkeit und Mut im Alltag. Viele Betroffene erleben dadurch mehr Sicherheit, Orientierung und gegenseitige Hilfe. #Austausch #Mut #Rollstuhlalltag",
+        estimated_duration_s=8,
+        tone="direkt, freundlich, empowernd, du-Form",
+        disclaimer="Keine Rechts- oder medizinische Beratung.",
+    )
+
+    topic_agents.validate_german_content(item)

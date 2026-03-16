@@ -681,12 +681,38 @@ class LLMClient:
             deadline = time.monotonic() + effective_timeout
             started_at = time.monotonic()
             last_status: Optional[str] = None
+            consecutive_retryable_poll_errors = 0
+            max_retryable_poll_errors = 5
             while time.monotonic() < deadline:
                 poll_response = self.gemini_http_client.get(
                     f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
                     params=self._gemini_params(),
                 )
                 if poll_response.status_code >= 400:
+                    if poll_response.status_code in {429, 500, 502, 503, 504}:
+                        consecutive_retryable_poll_errors += 1
+                        logger.warning(
+                            "gemini_deep_research_poll_retryable_http_error",
+                            status_code=poll_response.status_code,
+                            response_text=poll_response.text,
+                            interaction_id=interaction_id,
+                            consecutive_errors=consecutive_retryable_poll_errors,
+                            max_retryable_errors=max_retryable_poll_errors,
+                        )
+                        if consecutive_retryable_poll_errors >= max_retryable_poll_errors:
+                            raise ThirdPartyError(
+                                message="Gemini Deep Research polling failed",
+                                details={
+                                    "status_code": poll_response.status_code,
+                                    "body": poll_response.text,
+                                    "interaction_id": interaction_id,
+                                    "consecutive_errors": consecutive_retryable_poll_errors,
+                                },
+                            )
+                        backoff_seconds = min(max(effective_poll, 1) * consecutive_retryable_poll_errors, 15)
+                        time.sleep(backoff_seconds)
+                        continue
+
                     logger.error(
                         "gemini_deep_research_poll_http_error",
                         status_code=poll_response.status_code,
@@ -703,6 +729,7 @@ class LLMClient:
                     )
 
                 poll_data = poll_response.json()
+                consecutive_retryable_poll_errors = 0
                 status = (poll_data.get("state") or poll_data.get("status") or "").upper()
                 elapsed_seconds = round(time.monotonic() - started_at, 1)
                 if status != last_status:

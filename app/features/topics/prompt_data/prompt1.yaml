@@ -165,7 +165,7 @@ output_schema: |
     disclaimer  – "Keine Rechts- oder medizinische Beratung."
 
 chunk_rules: |
-  BATCH STEUERUNG: Durchlauf {chunk_index} von {total_chunks}. Liefere GENAU {desired_topics} neue Ideen.
+  BATCH STEUERUNG: Liefere den kompletten Satz in EINER Antwort. Liefere GENAU {desired_topics} neue Ideen.
   Prüfe vor Ausgabe, dass Wörterlimit, Felder und Variationen eingehalten sind. Korrigiere dich selbst, falls nicht.
   Prüfe zusätzlich vor Ausgabe explizit:
     - Ist jedes topic auf Deutsch?
