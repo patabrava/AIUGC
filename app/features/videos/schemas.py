@@ -86,7 +86,7 @@ class VideoStatusResponse(BaseModel):
         ..., 
         description="Current video generation status"
     )
-    video_url: Optional[str] = Field(None, description="ImageKit URL of generated video")
+    video_url: Optional[str] = Field(None, description="Public URL of generated video asset")
     error_message: Optional[str] = Field(None, description="Error message if failed")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
 

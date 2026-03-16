@@ -4,6 +4,7 @@ FastAPI route handlers for topic discovery.
 Per Constitution § V: Locality & Vertical Slices
 """
 
+import asyncio
 from fastapi import APIRouter, HTTPException, status, Header
 from typing import Optional, Dict, Any, List
 
@@ -38,8 +39,8 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/topics", tags=["topics"])
 
 
-async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
-    """Core topic discovery workflow reusable outside HTTP context."""
+def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
+    """Synchronous topic discovery workflow executed off the request event loop."""
     batch = get_batch_by_id(batch_id)
 
     if batch["state"] != BatchState.S1_SETUP.value:
@@ -267,6 +268,11 @@ async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
         "state": updated_batch["state"],
         "topics": all_generated_topics
     }
+
+
+async def discover_topics_for_batch(batch_id: str) -> Dict[str, Any]:
+    """Core topic discovery workflow reusable outside HTTP context."""
+    return await asyncio.to_thread(_discover_topics_for_batch_sync, batch_id)
 
 
 @router.post("/discover", response_model=SuccessResponse)

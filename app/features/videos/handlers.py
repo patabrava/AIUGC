@@ -541,12 +541,43 @@ def _submit_video_request(
             )
 
         veo_client = get_veo_client()
-        result = veo_client.submit_video_generation(
-            prompt=prompt_text,
-            correlation_id=correlation_id,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-        )
+        try:
+            result = veo_client.submit_video_generation(
+                prompt=prompt_text,
+                correlation_id=correlation_id,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+            )
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            try:
+                error_payload = exc.response.json()
+            except ValueError:
+                error_payload = {"body": exc.response.text[:500]}
+
+            error_message = error_payload.get("error", {}).get("message") if isinstance(error_payload, dict) else None
+            if status_code == 429:
+                raise FlowForgeException(
+                    code=ErrorCode.RATE_LIMIT,
+                    message=error_message or "VEO quota exhausted",
+                    details={
+                        "provider": provider,
+                        "status_code": status_code,
+                        "response": error_payload,
+                    },
+                    status_code=429,
+                ) from exc
+
+            raise FlowForgeException(
+                code=ErrorCode.THIRD_PARTY_FAIL,
+                message=error_message or "VEO video submission failed",
+                details={
+                    "provider": provider,
+                    "status_code": status_code,
+                    "response": error_payload,
+                },
+                status_code=503,
+            ) from exc
         requested_size = _map_size_from_aspect_ratio(aspect_ratio, resolution)
         return {
             "operation_id": result["operation_id"],
