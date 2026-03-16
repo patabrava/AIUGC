@@ -73,6 +73,7 @@ PROMPT1_NORMALIZER_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 normalizat
 You receive a raw assistant reply that failed validation because it was not valid JSON.
 Rewrite it into a valid JSON array with exactly the requested number of items.
 Never invent additional information beyond what is present in the raw reply.
+Preserve German wording and keep all content fully in German.
 Return JSON only (no Markdown, no comments)."""
 
 
@@ -284,6 +285,71 @@ def validate_sources_accessible(item: ResearchAgentItem) -> None:
         # Do not raise - allow processing to continue with warning logged
 
 
+GERMAN_SIGNAL_WORDS = {
+    "und", "oder", "mit", "ohne", "für", "deutschland", "deutsche", "deutschen",
+    "rollstuhl", "rollstuhlnutzer", "rollstuhlnutzerinnen", "alltag", "pflege",
+    "recht", "leistungen", "anspruch", "barrierefrei", "barrierefreiheit",
+    "hilfsmittel", "krankenkasse", "begleitperson", "beratung", "quelle",
+    "quellen", "freundlich", "direkt", "keine", "nicht", "dein", "deine", "du",
+}
+
+ENGLISH_SIGNAL_WORDS = {
+    "advanced", "and", "awareness", "care", "challenge", "challenges", "community",
+    "days", "events", "following", "for", "forums", "groups", "in", "local",
+    "media", "mentoring", "movement", "patient", "peer", "rehabilitation",
+    "sports", "staying", "support", "systems", "training", "transfer", "users",
+    "visible", "vocational", "wheelchair", "with",
+}
+
+
+def _tokenize_language_words(text: str) -> List[str]:
+    return re.findall(r"[a-zA-ZäöüÄÖÜß]+", text.lower())
+
+
+def _find_english_markers(text: str) -> List[str]:
+    tokens = _tokenize_language_words(text)
+    return sorted({token for token in tokens if token in ENGLISH_SIGNAL_WORDS})
+
+
+def _count_german_markers(text: str) -> int:
+    tokens = _tokenize_language_words(text)
+    return sum(1 for token in tokens if token in GERMAN_SIGNAL_WORDS)
+
+
+def validate_german_content(item: ResearchAgentItem) -> None:
+    fields_to_check = {
+        "topic": item.topic,
+        "script": item.script,
+        "source_summary": item.source_summary,
+        "tone": item.tone,
+        "disclaimer": item.disclaimer,
+    }
+
+    violations: List[Dict[str, Any]] = []
+    for field_name, value in fields_to_check.items():
+        english_markers = _find_english_markers(value)
+        german_markers = _count_german_markers(value)
+        if not english_markers:
+            continue
+
+        # Short fields like topic/tone/disclaimer should not contain English markers at all.
+        is_short_field = field_name in {"topic", "tone", "disclaimer"}
+        if is_short_field or len(english_markers) >= 2 or german_markers == 0:
+            violations.append(
+                {
+                    "field": field_name,
+                    "english_markers": english_markers,
+                    "value": value[:200],
+                }
+            )
+
+    if violations:
+        raise ValidationError(
+            message="PROMPT_1 output must be fully in German",
+            details={"violations": violations},
+        )
+
+
 def normalize_framework(value: str) -> str:
     """Normalize framework value to match schema literals."""
     value_lower = value.lower().strip()
@@ -431,6 +497,7 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
     for item in batch.items:
         validate_duration(item)
         validate_summary(item)
+        validate_german_content(item)
         validate_sources_accessible(item)
     validate_round_robin(batch.items)
     validate_unique_ctas(batch.items)
@@ -814,6 +881,7 @@ def _generate_prompt1_chunk(
             for item in items:
                 validate_duration(item)
                 validate_summary(item)
+                validate_german_content(item)
                 validate_sources_accessible(item)
             
             # Validate batch constraints
@@ -852,6 +920,14 @@ def _generate_prompt1_chunk(
                     "\nCOUNT YOUR WORDS CAREFULLY before submitting."
                     "\nIf a script is too short, ADD concrete source-based details until it reaches 16-20 words."
                     "\nExample good length: 'Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktiven und elektrischen Rollstühle die Kasse aktuell übernehmen muss.' (18 words)"
+                )
+            elif "fully in german" in exc.message.lower():
+                details_str = json.dumps(exc.details, default=str, ensure_ascii=False, indent=2)
+                feedback_parts.append(f"\nDetails: {details_str}")
+                feedback_parts.append(
+                    "\nWICHTIG: Die komplette Ausgabe MUSS auf Deutsch sein."
+                    "\nTopic, Script, Source Summary, Tone und Disclaimer dürfen keine englischen oder gemischtsprachigen Formulierungen enthalten."
+                    "\nWenn die Quelle englische Begriffe nutzt, übersetze das Thema und die Beschreibung idiomatisch ins Deutsche."
                 )
             elif "not accessible" in exc.message.lower():
                 details_str = json.dumps(exc.details, default=str, indent=2)

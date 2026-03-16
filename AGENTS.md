@@ -44,3 +44,5 @@ END_LLM_FRIENDLY_PLAN_TEST_DEBUG
 2) Specific repo rules
 - Gemini Interactions accepts `background` Deep Research requests but its follow-up `responseSchema` rejects OpenAI-style `additionalProperties`; strip unsupported schema fields before Gemini JSON generation and log interaction-id/status transitions until completion.
 - Async batch background tasks must not run blocking Gemini poll loops on the request event loop; offload long Deep Research waits, and always translate VEO HTTP 429/quota responses into structured `RATE_LIMIT` errors instead of generic 500s.
+- In `S2_SEEDED`, treat script review as per-post state in `seed_data`: any script edit resets review to pending, batch advance must require every post marked approved or removed plus at least one approved, and removed posts must be excluded from later prompt/video transitions.
+- Topic Deep Research for German audiences must enforce German-only output twice: prompt-level in `prompt1.yaml` and validation-level in `app/features/topics/agents.py`, rejecting and retrying any English or mixed-language `topic/script/source_summary/tone/disclaimer` before persistence.
