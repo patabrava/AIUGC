@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from app.adapters.supabase_client import get_supabase
 from app.adapters.sora_client import get_sora_client
-from app.adapters.imagekit_client import get_imagekit_client
+from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
 
@@ -274,19 +274,19 @@ def _store_completed_video(
     provider_metadata: Dict[str, Any],
     existing_metadata: Dict[str, Any],
 ) -> None:
-    imagekit_client = get_imagekit_client()
+    storage_client = get_storage_client()
 
     upload_method = "url" if isinstance(video_source, str) else "bytes"
     upload_start = time.monotonic()
 
     if upload_method == "url":
-        upload_result = imagekit_client.upload_video_from_url(
+        upload_result = storage_client.upload_video_from_url(
             video_url=video_source,
             file_name=f"post_{post_id}.mp4",
             correlation_id=correlation_id
         )
     else:
-        upload_result = imagekit_client.upload_video(
+        upload_result = storage_client.upload_video(
             video_bytes=video_source,
             file_name=f"post_{post_id}.mp4",
             correlation_id=correlation_id
@@ -294,8 +294,6 @@ def _store_completed_video(
 
     upload_duration = time.monotonic() - upload_start
 
-    # Always use actual byte length for binary uploads, not ImageKit metadata
-    # ImageKit's size field can be incorrect (e.g., returns 122 instead of actual size)
     if isinstance(video_source, bytes):
         size_bytes = len(video_source)
     else:
@@ -306,6 +304,7 @@ def _store_completed_video(
         post_id=post_id,
         correlation_id=correlation_id,
         provider=provider,
+        storage_provider=upload_result["storage_provider"],
         upload_method=upload_method,
         upload_duration_seconds=upload_duration,
         video_size_bytes=size_bytes
@@ -314,7 +313,8 @@ def _store_completed_video(
     supabase = get_supabase().client
     merged_metadata = {
         **existing_metadata,
-        "imagekit_file_id": upload_result["file_id"],
+        "storage_provider": upload_result["storage_provider"],
+        "storage_key": upload_result["storage_key"],
         "size_bytes": size_bytes,
         "provider": provider,
         "file_path": upload_result["file_path"],
@@ -334,6 +334,7 @@ def _store_completed_video(
         post_id=post_id,
         correlation_id=correlation_id,
         provider=provider,
+        storage_provider=upload_result["storage_provider"],
         video_url=upload_result["url"],
         size_bytes=size_bytes,
         upload_method=upload_method,

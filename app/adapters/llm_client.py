@@ -1,12 +1,14 @@
 """
 FLOW-FORGE LLM Client Adapter
-Wrapper for OpenAI and Anthropic clients.
+Wrapper for OpenAI and Gemini clients.
 Per Constitution § VI: Adapterize Specialists
 """
 
 from typing import Optional, Dict, Any, List
 import httpx
 import json
+import time
+from copy import deepcopy
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -16,23 +18,52 @@ logger = get_logger(__name__)
 
 
 class LLMClient:
-    """Unified LLM client for OpenAI and Anthropic."""
+    """Unified LLM client for OpenAI and Gemini."""
     
     def __init__(self):
         settings = get_settings()
         self.openai_api_key = settings.openai_api_key
         self.default_openai_model = settings.openai_model
-        self.http_client = httpx.Client(
+        self.gemini_api_key = settings.gemini_api_key
+        self.default_gemini_model = settings.gemini_topic_model
+        self.gemini_deep_research_agent = settings.gemini_deep_research_agent
+        self.gemini_topic_timeout_seconds = settings.gemini_topic_timeout_seconds
+        self.gemini_topic_poll_seconds = settings.gemini_topic_poll_seconds
+        self.openai_http_client = httpx.Client(
             base_url="https://api.openai.com/v1",
             timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=None),
             follow_redirects=True,
+        )
+        self.gemini_http_client = httpx.Client(
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=None),
+            follow_redirects=True,
             headers={
-                "Authorization": f"Bearer {self.openai_api_key}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "OpenAI-Beta": "tools=v1",
             },
         )
+
+    def _openai_headers(self) -> Dict[str, str]:
+        if not self.openai_api_key:
+            raise ThirdPartyError(
+                message="OpenAI API key not configured",
+                details={"provider": "openai"},
+            )
+        return {
+            "Authorization": f"Bearer {self.openai_api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "OpenAI-Beta": "tools=v1",
+        }
+
+    def _gemini_params(self) -> Dict[str, str]:
+        if not self.gemini_api_key:
+            raise ThirdPartyError(
+                message="Gemini API key not configured",
+                details={"provider": "gemini"},
+            )
+        return {"key": self.gemini_api_key}
     
     def generate_openai(
         self,
@@ -103,9 +134,10 @@ class LLMClient:
                 metadata=metadata or {},
             )
 
-            response = self.http_client.post(
+            response = self.openai_http_client.post(
                 "/responses",
                 json=payload,
+                headers=self._openai_headers(),
             )
 
             if response.status_code >= 400:
@@ -148,7 +180,7 @@ class LLMClient:
             logger.error(
                 "openai_generation_timeout",
                 model=target_model,
-                timeout=str(self.http_client.timeout),
+                timeout=str(self.openai_http_client.timeout),
                 error=str(exc)
             )
             raise ThirdPartyError(
@@ -242,7 +274,7 @@ class LLMClient:
                 prompt_length=len(prompt),
             )
 
-            response = self.http_client.post("/responses", json=payload)
+            response = self.openai_http_client.post("/responses", json=payload, headers=self._openai_headers())
 
             if response.status_code >= 400:
                 logger.error(
@@ -323,7 +355,7 @@ class LLMClient:
                 prompt_preview=prompt[:400],
             )
 
-            response = self.http_client.post("/chat/completions", json=payload)
+            response = self.openai_http_client.post("/chat/completions", json=payload, headers=self._openai_headers())
             
             if response.status_code >= 400:
                 logger.error(
@@ -435,6 +467,284 @@ class LLMClient:
             details={"max_retries": max_retries}
         )
 
+    def generate_gemini_text(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> str:
+        """Generate plain text using Gemini generateContent."""
+        target_model = model or self.default_gemini_model
+        full_prompt = self._merge_prompts(system_prompt, prompt)
+        payload: Dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": full_prompt}],
+                }
+            ]
+        }
+        if max_tokens is not None or temperature is not None:
+            payload["generationConfig"] = {}
+            if max_tokens is not None:
+                payload["generationConfig"]["maxOutputTokens"] = max_tokens
+            if temperature is not None:
+                payload["generationConfig"]["temperature"] = temperature
+
+        logger.debug(
+            "gemini_generate_text_request",
+            model=target_model,
+            prompt_length=len(full_prompt),
+            prompt_preview=full_prompt[:400],
+        )
+
+        try:
+            response = self.gemini_http_client.post(
+                f"/models/{target_model}:generateContent",
+                params=self._gemini_params(),
+                json=payload,
+            )
+            if response.status_code >= 400:
+                logger.error(
+                    "gemini_generate_text_http_error",
+                    status_code=response.status_code,
+                    response_text=response.text,
+                    model=target_model,
+                )
+                raise ThirdPartyError(
+                    message="Gemini generateContent failed",
+                    details={"status_code": response.status_code, "body": response.text, "model": target_model},
+                )
+
+            data = response.json()
+            content = self._extract_gemini_candidate_text(data)
+            logger.info(
+                "gemini_generate_text_success",
+                model=target_model,
+                response_length=len(content),
+            )
+            return content
+        except ThirdPartyError:
+            raise
+        except Exception as exc:
+            logger.error("gemini_generate_text_failed", model=target_model, error=str(exc))
+            raise ThirdPartyError(
+                message="Gemini generateContent failed",
+                details={"error": str(exc), "model": target_model},
+            ) from exc
+
+    def generate_gemini_json(
+        self,
+        prompt: str,
+        json_schema: Dict[str, Any],
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Generate structured JSON using Gemini responseSchema."""
+        target_model = model or self.default_gemini_model
+        full_prompt = self._merge_prompts(system_prompt, prompt)
+        schema_payload = self._to_gemini_response_schema(json_schema.get("schema", json_schema))
+        payload: Dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": full_prompt}],
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": schema_payload,
+            },
+        }
+        if max_tokens is not None:
+            payload["generationConfig"]["maxOutputTokens"] = max_tokens
+        if temperature is not None:
+            payload["generationConfig"]["temperature"] = temperature
+
+        logger.debug(
+            "gemini_generate_json_request",
+            model=target_model,
+            prompt_length=len(full_prompt),
+            schema_keys=list(schema_payload.keys()) if isinstance(schema_payload, dict) else None,
+        )
+
+        try:
+            response = self.gemini_http_client.post(
+                f"/models/{target_model}:generateContent",
+                params=self._gemini_params(),
+                json=payload,
+            )
+            if response.status_code >= 400:
+                logger.error(
+                    "gemini_generate_json_http_error",
+                    status_code=response.status_code,
+                    response_text=response.text,
+                    model=target_model,
+                )
+                raise ThirdPartyError(
+                    message="Gemini structured generation failed",
+                    details={"status_code": response.status_code, "body": response.text, "model": target_model},
+                )
+
+            data = response.json()
+            content = self._extract_gemini_candidate_text(data)
+            parsed = json.loads(content)
+            logger.info(
+                "gemini_generate_json_success",
+                model=target_model,
+                response_length=len(content),
+            )
+            return parsed
+        except ThirdPartyError:
+            raise
+        except json.JSONDecodeError as exc:
+            logger.error("gemini_generate_json_parse_failed", error=str(exc), model=target_model)
+            raise ValidationError(
+                message="Gemini structured output produced invalid JSON",
+                details={"error": str(exc), "model": target_model},
+            ) from exc
+        except Exception as exc:
+            logger.error("gemini_generate_json_failed", model=target_model, error=str(exc))
+            raise ThirdPartyError(
+                message="Gemini structured generation failed",
+                details={"error": str(exc), "model": target_model},
+            ) from exc
+
+    def generate_gemini_deep_research(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        agent: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+        poll_interval_seconds: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Run Gemini Deep Research via the Interactions API and return final text."""
+        target_agent = agent or self.gemini_deep_research_agent
+        effective_timeout = timeout_seconds or self.gemini_topic_timeout_seconds
+        effective_poll = poll_interval_seconds or self.gemini_topic_poll_seconds
+        full_prompt = self._merge_prompts(system_prompt, prompt)
+        payload: Dict[str, Any] = {
+            "input": full_prompt,
+            "agent": target_agent,
+            "background": True,
+            "store": True,
+        }
+
+        logger.info(
+            "gemini_deep_research_submit",
+            agent=target_agent,
+            timeout_seconds=effective_timeout,
+            poll_interval_seconds=effective_poll,
+            metadata_present=bool(metadata),
+        )
+
+        try:
+            submit_response = self.gemini_http_client.post(
+                "/interactions",
+                params=self._gemini_params(),
+                json=payload,
+            )
+            if submit_response.status_code >= 400:
+                logger.error(
+                    "gemini_deep_research_submit_http_error",
+                    status_code=submit_response.status_code,
+                    response_text=submit_response.text,
+                    agent=target_agent,
+                )
+                raise ThirdPartyError(
+                    message="Gemini Deep Research submission failed",
+                    details={
+                        "status_code": submit_response.status_code,
+                        "body": submit_response.text,
+                        "agent": target_agent,
+                    },
+                )
+
+            interaction = submit_response.json()
+            interaction_id = interaction.get("id") or interaction.get("name")
+            if not interaction_id:
+                raise ThirdPartyError(
+                    message="Gemini Deep Research did not return an interaction id",
+                    details={"agent": target_agent, "response": interaction},
+                )
+            logger.info(
+                "gemini_deep_research_submitted",
+                interaction_id=interaction_id,
+                agent=target_agent,
+            )
+
+            deadline = time.monotonic() + effective_timeout
+            started_at = time.monotonic()
+            last_status: Optional[str] = None
+            while time.monotonic() < deadline:
+                poll_response = self.gemini_http_client.get(
+                    f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
+                    params=self._gemini_params(),
+                )
+                if poll_response.status_code >= 400:
+                    logger.error(
+                        "gemini_deep_research_poll_http_error",
+                        status_code=poll_response.status_code,
+                        response_text=poll_response.text,
+                        interaction_id=interaction_id,
+                    )
+                    raise ThirdPartyError(
+                        message="Gemini Deep Research polling failed",
+                        details={
+                            "status_code": poll_response.status_code,
+                            "body": poll_response.text,
+                            "interaction_id": interaction_id,
+                        },
+                    )
+
+                poll_data = poll_response.json()
+                status = (poll_data.get("state") or poll_data.get("status") or "").upper()
+                elapsed_seconds = round(time.monotonic() - started_at, 1)
+                if status != last_status:
+                    logger.info(
+                        "gemini_deep_research_status",
+                        interaction_id=interaction_id,
+                        status=status or "UNKNOWN",
+                        elapsed_seconds=elapsed_seconds,
+                        done=bool(poll_data.get("done")),
+                    )
+                    last_status = status
+                if status in {"DONE", "COMPLETED", "SUCCEEDED"}:
+                    content = self._extract_gemini_interaction_text(poll_data)
+                    logger.info(
+                        "gemini_deep_research_success",
+                        interaction_id=interaction_id,
+                        status=status,
+                        elapsed_seconds=elapsed_seconds,
+                        content_characters=len(content),
+                    )
+                    return content
+                if status in {"FAILED", "CANCELLED", "ERROR"}:
+                    raise ThirdPartyError(
+                        message="Gemini Deep Research failed",
+                        details={"interaction_id": interaction_id, "status": status, "response": poll_data},
+                    )
+
+                time.sleep(effective_poll)
+
+            raise ThirdPartyError(
+                message="Gemini Deep Research timed out",
+                details={"interaction_id": interaction_id, "timeout_seconds": effective_timeout},
+            )
+        except ThirdPartyError:
+            raise
+        except Exception as exc:
+            logger.error("gemini_deep_research_failed", agent=target_agent, error=str(exc))
+            raise ThirdPartyError(
+                message="Gemini Deep Research failed",
+                details={"error": str(exc), "agent": target_agent},
+            ) from exc
+
     def _extract_output_text(self, data: Dict[str, Any]) -> str:
         """Extract concatenated output text from Responses API payload."""
         if not data:
@@ -459,6 +769,59 @@ class LLMClient:
                     collected.append(part["text"])
 
         return "".join(collected).strip()
+
+    def _extract_gemini_candidate_text(self, data: Dict[str, Any]) -> str:
+        candidates = data.get("candidates") or []
+        collected: List[str] = []
+        for candidate in candidates:
+            content = candidate.get("content") or {}
+            for part in content.get("parts", []) or []:
+                text = part.get("text")
+                if text:
+                    collected.append(text)
+        if collected:
+            return "".join(collected).strip()
+        raise ThirdPartyError(message="Gemini response missing text output", details={"response": data})
+
+    def _extract_gemini_interaction_text(self, data: Dict[str, Any]) -> str:
+        outputs = data.get("outputs") or data.get("output") or []
+        if isinstance(outputs, dict):
+            outputs = [outputs]
+
+        collected: List[str] = []
+        for output in outputs:
+            if not isinstance(output, dict):
+                continue
+            text = output.get("text")
+            if text:
+                collected.append(text)
+            content = output.get("content") or {}
+            for part in content.get("parts", []) or []:
+                part_text = part.get("text")
+                if part_text:
+                    collected.append(part_text)
+
+        if collected:
+            return "\n".join(collected).strip()
+        raise ThirdPartyError(message="Gemini interaction missing text output", details={"response": data})
+
+    def _merge_prompts(self, system_prompt: Optional[str], prompt: str) -> str:
+        if system_prompt:
+            return f"{system_prompt.strip()}\n\nUSER TASK:\n{prompt.strip()}"
+        return prompt.strip()
+
+    def _to_gemini_response_schema(self, schema: Any) -> Any:
+        """Remove JSON Schema fields unsupported by Gemini responseSchema."""
+        if isinstance(schema, dict):
+            cleaned = {}
+            for key, value in schema.items():
+                if key in {"additionalProperties", "strict", "name", "$schema"}:
+                    continue
+                cleaned[key] = self._to_gemini_response_schema(value)
+            return cleaned
+        if isinstance(schema, list):
+            return [self._to_gemini_response_schema(item) for item in schema]
+        return deepcopy(schema)
 
 
 # Singleton instance

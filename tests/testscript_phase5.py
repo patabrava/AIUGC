@@ -17,7 +17,7 @@ async def test_phase5_qa_workflow():
     Test Phase 5: QA Review workflow.
     
     Prerequisites:
-    - Phase 4 passing (videos generated and uploaded to ImageKit)
+    - Phase 4 passing (videos generated and uploaded to Cloudflare R2)
     - At least one batch in S6_QA state with completed videos
     - Or manually create a batch with completed videos
     

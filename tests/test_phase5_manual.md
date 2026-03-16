@@ -10,7 +10,7 @@
 1. ✅ Dev server running on `http://localhost:8000`
 2. ✅ At least one batch with completed videos (from Phase 4)
 3. ✅ Video poller worker running (or batch manually set to S6_QA state)
-4. ✅ Videos uploaded to ImageKit CDN
+4. ✅ Videos uploaded to Cloudflare R2 public delivery URL
 
 ---
 
@@ -241,7 +241,7 @@ python tests/testscript_phase5.py
 **Solution:**
 - Verify video URL is accessible
 - Check video metadata has duration and resolution fields
-- Ensure ImageKit URLs are not expired
+- Ensure Cloudflare R2 public URLs are still reachable
 
 ### Issue: Cannot advance to publish
 

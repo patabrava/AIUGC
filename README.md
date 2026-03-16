@@ -82,8 +82,9 @@ See `.env.example` for all required variables:
 - `SUPABASE_KEY`: Supabase anon key
 - `SUPABASE_SERVICE_KEY`: Supabase service role key
 - `OPENAI_API_KEY`: OpenAI API key
+- `GEMINI_API_KEY`: Gemini API key for topic research and generation
 - `ANTHROPIC_API_KEY`: Anthropic API key
-- Additional keys for video providers and social platforms
+- Additional keys for video providers, Cloudflare R2, and social platforms
 
 ## Architecture
 
@@ -91,7 +92,7 @@ See `.env.example` for all required variables:
 
 **Pattern:** Vanilla Vertical-Slice Monolith with State Machine Core
 
-**Deployment:** Vercel (API) + Railway (Worker)
+**Deployment:** VPS-capable app host (API + Worker) + Cloudflare R2
 
 ## Project Structure
 
@@ -169,6 +170,20 @@ vercel --prod
 3. Set root directory: `/workers`
 4. Add environment variables
 5. Deploy
+
+### Hostinger VPS with Docker
+Use a Hostinger VPS product with Docker access, not shared hosting.
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+This repository runs as two long-lived services:
+- `web`: FastAPI app on port `8000`
+- `worker`: `workers/video_poller.py`
+
+Both services use the same image and the same `.env` file. The worker is mandatory because video completion is asynchronous and polling-driven.
 
 ## Testing Strategy
 

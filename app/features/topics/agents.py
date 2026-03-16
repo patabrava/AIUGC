@@ -99,12 +99,13 @@ def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: 
 
     logger.info("research_agent_normalizing_response", desired_topics=desired_topics)
 
-    return llm.generate_openai(
+    parsed = llm.generate_gemini_json(
         prompt=prompt,
         system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
-        text_format={"type": "json_object"},
+        json_schema=PROMPT1_JSON_SCHEMA,
         max_tokens=3500,
     )
+    return json.dumps(parsed, ensure_ascii=False)
 
 
 def _parse_prompt1_with_normalization(llm, raw_response: str, desired_topics: int) -> tuple[ResearchAgentBatch, str]:
@@ -782,18 +783,9 @@ def _generate_prompt1_chunk(
             prompt_characters=len(prompt_with_feedback),
         )
         
-        # Use structured outputs instead of json_object format
-        # This works with web_search tools and guarantees valid JSON
-        parsed_response = llm.generate_structured(
+        raw_response = llm.generate_gemini_deep_research(
             prompt=prompt_with_feedback,
-            json_schema=PROMPT1_JSON_SCHEMA,
             system_prompt=PROMPT1_SYSTEM_PROMPT,
-            tools=[{"type": "web_search", "external_web_access": True}],
-            tool_choice="auto",
-            include=[
-                "web_search_call.results",
-                "web_search_call.action.sources",
-            ],
             metadata={
                 "feature": "topics.prompts_1",
                 "attempt": str(attempt + 1),
@@ -802,13 +794,14 @@ def _generate_prompt1_chunk(
                 "desired_outputs": str(desired_topics),
                 "assigned_topics": json.dumps(assigned_topics or []),
             },
-            max_tokens=3500,
         )
         
         try:
-            # Response is already parsed JSON from structured outputs
-            # Just need to validate with Pydantic
-            batch = ResearchAgentBatch(**parsed_response)
+            batch, normalized_response = _parse_prompt1_with_normalization(
+                llm=llm,
+                raw_response=raw_response,
+                desired_topics=desired_topics,
+            )
             items = batch.items
             
             if len(items) != desired_topics:
@@ -834,7 +827,7 @@ def _generate_prompt1_chunk(
                 chunk_index=chunk_index,
                 total_chunks=total_chunks,
                 attempt=attempt + 1,
-                response_length=len(str(parsed_response)),
+                response_length=len(normalized_response),
             )
             return items
             
@@ -844,7 +837,7 @@ def _generate_prompt1_chunk(
                 post_type=post_type,
                 attempt=attempt + 1,
                 chunk_index=chunk_index,
-                response_preview=str(parsed_response)[:500],
+                response_preview=raw_response[:500],
                 error=exc.message,
                 details=exc.details
             )
@@ -898,7 +891,7 @@ def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_us
         prompt += f"\n\nWICHTIG: Die folgenden Hooks wurden bereits verwendet: {hooks_list}\nNutze einen ANDEREN Hook-Start für dieses Skript."
 
     for attempt in range(3):
-        response = llm.generate_chat(
+        response = llm.generate_gemini_text(
             prompt=prompt,
             system_prompt=None,
             max_tokens=900,
@@ -1119,10 +1112,22 @@ Return JSON format:
 Extract facts now:"""
     
     try:
-        response = llm.generate_json(
+        response = llm.generate_gemini_json(
             prompt=prompt,
             system_prompt=STRICT_EXTRACTOR_SYSTEM_PROMPT,
-            provider="openai"
+            json_schema={
+                "type": "object",
+                "properties": {
+                    "facts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "source_context": {"type": "string"},
+                },
+                "required": ["facts"],
+                "additionalProperties": False,
+            },
         )
         
         seed = SeedData(**response)

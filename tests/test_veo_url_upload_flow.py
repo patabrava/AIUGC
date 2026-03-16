@@ -1,7 +1,4 @@
-"""
-Integration test for VEO URL-based upload flow.
-Per Constitution § VIII: Whole-app testscripts.
-"""
+"""Integration-style test for VEO URL ingestion into Cloudflare R2."""
 
 import os
 import sys
@@ -11,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.adapters.veo_client import get_veo_client
-from app.adapters.imagekit_client import get_imagekit_client
+from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
 
 
@@ -20,8 +17,8 @@ logger = get_logger(__name__)
 
 
 @pytest.mark.integration
-def test_veo_to_imagekit_url_flow():
-    """Test end-to-end flow from VEO URL to ImageKit upload."""
+def test_veo_to_r2_url_flow():
+    """Test end-to-end flow from VEO URL to Cloudflare R2 ingestion."""
     operation_id = os.getenv("TEST_VEO_OPERATION_ID")
     if not operation_id:
         pytest.skip("TEST_VEO_OPERATION_ID not set; skipping integration test")
@@ -29,7 +26,7 @@ def test_veo_to_imagekit_url_flow():
     correlation_id = "test_veo_url_flow_001"
 
     veo_client = get_veo_client()
-    imagekit_client = get_imagekit_client()
+    storage_client = get_storage_client()
 
     status = veo_client.check_operation_status(
         operation_id=operation_id,
@@ -46,7 +43,7 @@ def test_veo_to_imagekit_url_flow():
         correlation_id=correlation_id
     )
 
-    result = imagekit_client.upload_video_from_url(
+    result = storage_client.upload_video_from_url(
         video_url=download_url,
         file_name="test_veo_url_upload.mp4",
         correlation_id=correlation_id
@@ -54,7 +51,7 @@ def test_veo_to_imagekit_url_flow():
 
     logger.info("test_veo_url_upload_result", result=result)
 
-    assert result["file_id"], "ImageKit did not return file_id"
-    assert result["url"], "ImageKit did not return url"
+    assert result["storage_key"], "Cloudflare R2 did not return storage_key"
+    assert result["url"], "Cloudflare R2 did not return url"
 
     print(f"✅ Success! Video URL: {result['url']}")

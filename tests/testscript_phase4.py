@@ -150,7 +150,7 @@ def test_phase4_video_generation():
             print(f"   Video URL: {status_data['video_url']}")
             if status_data.get("metadata"):
                 metadata = status_data["metadata"]
-                print(f"   File ID: {metadata.get('imagekit_file_id', 'N/A')}")
+                print(f"   Storage key: {metadata.get('storage_key', metadata.get('imagekit_file_id', 'N/A'))}")
                 print(f"   Size: {metadata.get('size_bytes', 'N/A')} bytes")
                 print(f"   Provider: {metadata.get('provider', 'N/A')}")
                 print(f"   Provider model: {metadata.get('provider_model', 'N/A')}")
@@ -202,7 +202,7 @@ def test_phase4_video_generation():
     print()
     print("Next steps:")
     print("1. Wait for video polling worker to complete Sora 2 Pro rendering if still processing")
-    print("2. Verify video appears in ImageKit CDN")
+    print("2. Verify video appears in Cloudflare R2 public delivery URL")
     print("3. Check video URL is accessible")
     print("4. Capture worker logs (`workers/video_poller.py`) showing completion")
     print("5. Proceed to Phase 5: QA Review")

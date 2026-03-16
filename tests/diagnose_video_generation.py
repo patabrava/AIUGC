@@ -62,10 +62,15 @@ def diagnose_environment() -> Dict[str, Any]:
                    f"URL: {settings.supabase_url[:30]}...")
         results["checks"].append({"name": "supabase_config", "passed": has_supabase})
         
-        # Check ImageKit configuration
-        has_imagekit = bool(settings.imagekit_private_key)
-        print_check(has_imagekit, "ImageKit configuration present")
-        results["checks"].append({"name": "imagekit_config", "passed": has_imagekit})
+        # Check Cloudflare R2 configuration
+        has_r2 = bool(
+            settings.cloudflare_r2_access_key_id
+            and settings.cloudflare_r2_secret_access_key
+            and settings.cloudflare_r2_bucket_name
+            and settings.cloudflare_r2_public_base_url
+        )
+        print_check(has_r2, "Cloudflare R2 configuration present")
+        results["checks"].append({"name": "cloudflare_r2_config", "passed": has_r2})
         
     except Exception as e:
         print_check(False, f"Environment check failed: {str(e)}")
