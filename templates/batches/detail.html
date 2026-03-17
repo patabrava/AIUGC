@@ -11,7 +11,7 @@
     hx-swap="outerHTML"
     hx-select="#batch-detail-root"
     {% endif %}
-    hx-on::before-request="if (window.batchDetailExpanded) { event.preventDefault(); }"
+    hx-on::before-request="if (window.batchDetailExpanded || window.isBatchDetailPlaybackActive?.()) { event.preventDefault(); }"
 >
     <!-- Breadcrumb -->
     <nav class="mb-6">
@@ -1042,6 +1042,12 @@
     {% endif %}
 
     <script>
+        window.isBatchDetailPlaybackActive = function() {
+            return Array.from(document.querySelectorAll('#batch-detail-root video')).some((video) => {
+                return !video.paused && !video.ended && video.currentTime > 0;
+            });
+        };
+
         // Alpine.js component for prompt modal
         window.promptModalComponent = function(postId) {
             return {
