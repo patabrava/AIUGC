@@ -8,6 +8,7 @@ Per Constitution § IX: Observable Implementation
 import time
 import sys
 import os
+import json
 from typing import List, Dict, Any, Union
 
 # Add parent directory to path for imports
@@ -61,6 +62,8 @@ def poll_pending_videos():
         
         for post in posts:
             process_video_operation(post)
+
+        _reconcile_batches_ready_for_qa()
     
     except Exception as e:
         logger.exception("poll_cycle_failed", error=str(e))
@@ -375,69 +378,8 @@ def _check_and_transition_batch_to_qa(post_id: str, correlation_id: str) -> None
             return
         
         batch_id = post_response.data[0]["batch_id"]
-        
-        # Get batch state
-        batch_response = supabase.table("batches").select("state").eq("id", batch_id).execute()
-        if not batch_response.data:
-            logger.warning("batch_not_found_for_qa_check", batch_id=batch_id)
-            return
-        
-        current_state = batch_response.data[0]["state"]
-        
-        # Only transition from S5_PROMPTS_BUILT
-        if current_state != "S5_PROMPTS_BUILT":
-            logger.debug(
-                "batch_not_in_prompts_built_state",
-                batch_id=batch_id,
-                current_state=current_state,
-                message="Skipping S6_QA transition check"
-            )
-            return
-        
-        # Get all posts in batch
-        posts_response = supabase.table("posts").select("id, video_status").eq("batch_id", batch_id).execute()
-        posts = posts_response.data
-        
-        if not posts:
-            logger.warning("no_posts_in_batch", batch_id=batch_id)
-            return
-        
-        # Check if all videos are completed
-        total_posts = len(posts)
-        completed_videos = sum(1 for p in posts if p.get("video_status") == "completed")
-        
-        logger.debug(
-            "batch_qa_transition_check",
-            batch_id=batch_id,
-            correlation_id=correlation_id,
-            total_posts=total_posts,
-            completed_videos=completed_videos
-        )
-        
-        if completed_videos == total_posts:
-            # All videos complete - transition to S6_QA
-            supabase.table("batches").update({
-                "state": "S6_QA"
-            }).eq("id", batch_id).execute()
-            
-            logger.info(
-                "batch_transitioned_to_qa",
-                batch_id=batch_id,
-                correlation_id=correlation_id,
-                previous_state="S5_PROMPTS_BUILT",
-                new_state="S6_QA",
-                total_posts=total_posts,
-                message="All videos completed - batch ready for QA review"
-            )
-        else:
-            logger.debug(
-                "batch_qa_transition_pending",
-                batch_id=batch_id,
-                correlation_id=correlation_id,
-                completed=completed_videos,
-                total=total_posts,
-                remaining=total_posts - completed_videos
-            )
+
+        _check_and_transition_batch_to_qa_by_batch_id(batch_id, correlation_id)
     
     except Exception as e:
         logger.exception(
@@ -445,6 +387,105 @@ def _check_and_transition_batch_to_qa(post_id: str, correlation_id: str) -> None
             post_id=post_id,
             correlation_id=correlation_id,
             error=str(e)
+        )
+
+
+def _check_and_transition_batch_to_qa_by_batch_id(batch_id: str, correlation_id: str) -> None:
+    """Check whether an S5 batch is now ready for QA and advance it if so."""
+    supabase = get_supabase().client
+
+    batch_response = supabase.table("batches").select("state").eq("id", batch_id).execute()
+    if not batch_response.data:
+        logger.warning("batch_not_found_for_qa_check", batch_id=batch_id)
+        return
+
+    current_state = batch_response.data[0]["state"]
+    if current_state != "S5_PROMPTS_BUILT":
+        logger.debug(
+            "batch_not_in_prompts_built_state",
+            batch_id=batch_id,
+            current_state=current_state,
+            message="Skipping S6_QA transition check"
+        )
+        return
+
+    posts_response = supabase.table("posts").select("id, video_status, seed_data").eq("batch_id", batch_id).execute()
+    posts = posts_response.data
+
+    if not posts:
+        logger.warning("no_posts_in_batch", batch_id=batch_id)
+        return
+
+    active_posts = []
+    for post in posts:
+        seed_data = post.get("seed_data") or {}
+        if isinstance(seed_data, str):
+            try:
+                seed_data = json.loads(seed_data)
+            except json.JSONDecodeError:
+                seed_data = {}
+        if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
+            continue
+        active_posts.append(post)
+
+    if not active_posts:
+        logger.warning("no_active_posts_for_qa_check", batch_id=batch_id)
+        return
+
+    total_posts = len(active_posts)
+    completed_videos = sum(1 for post in active_posts if post.get("video_status") == "completed")
+
+    logger.debug(
+        "batch_qa_transition_check",
+        batch_id=batch_id,
+        correlation_id=correlation_id,
+        total_posts=total_posts,
+        completed_videos=completed_videos
+    )
+
+    if completed_videos == total_posts:
+        supabase.table("batches").update({
+            "state": "S6_QA"
+        }).eq("id", batch_id).execute()
+
+        logger.info(
+            "batch_transitioned_to_qa",
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            previous_state="S5_PROMPTS_BUILT",
+            new_state="S6_QA",
+            total_posts=total_posts,
+            message="All videos completed - batch ready for QA review"
+        )
+    else:
+        logger.debug(
+            "batch_qa_transition_pending",
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            completed=completed_videos,
+            total=total_posts,
+            remaining=total_posts - completed_videos
+        )
+
+
+def _reconcile_batches_ready_for_qa() -> None:
+    """
+    Re-check S5 batches every poll cycle so batches that missed the original
+    completion edge can still advance once all active videos are complete.
+    """
+    supabase = get_supabase().client
+    response = supabase.table("batches").select("id").eq("state", "S5_PROMPTS_BUILT").execute()
+    batches = response.data or []
+
+    logger.debug("reconciling_batches_ready_for_qa", count=len(batches))
+
+    for batch in batches:
+        batch_id = batch.get("id")
+        if not batch_id:
+            continue
+        _check_and_transition_batch_to_qa_by_batch_id(
+            batch_id,
+            correlation_id=f"reconcile_{batch_id}"
         )
 
 
