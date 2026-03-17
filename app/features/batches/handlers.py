@@ -9,7 +9,7 @@ import json
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from app.features.batches.schemas import (
@@ -32,7 +32,12 @@ from app.features.batches.queries import (
     get_batch_posts_summary
 )
 from app.features.topics.handlers import discover_topics_for_batch
-from app.features.topics.handlers import get_seeding_progress, update_seeding_progress
+from app.features.topics.handlers import (
+    get_seeding_events,
+    get_seeding_progress,
+    start_seeding_interaction,
+    update_seeding_progress,
+)
 from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
 from app.core.logging import get_logger
 from app.core.states import BatchState
@@ -89,6 +94,11 @@ async def create_batch_endpoint(request: Request):
         batch = create_batch(
             brand=payload.brand,
             post_type_counts=payload.post_type_counts.model_dump()
+        )
+        start_seeding_interaction(
+            batch_id=batch["id"],
+            brand=batch["brand"],
+            expected_posts=payload.post_type_counts.total,
         )
 
         asyncio.get_running_loop().create_task(_run_discover_topics(batch["id"]))
@@ -445,6 +455,46 @@ async def get_batch_status(batch_id: str):
         )
 
 
+@router.get("/{batch_id}/progress/stream")
+async def stream_batch_progress(request: Request, batch_id: str, last_event_id: Optional[str] = None):
+    """Stream live seeding progress events with resumable replay."""
+
+    async def event_stream():
+        last_seen = last_event_id or request.headers.get("last-event-id")
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            events = get_seeding_events(batch_id, last_seen)
+            if events:
+                for event in events:
+                    payload = json.dumps(event)
+                    yield f"id: {event['event_id']}\ndata: {payload}\n\n"
+                    last_seen = event["event_id"]
+
+                terminal = events[-1]["event_type"]
+                if terminal in {"interaction.complete", "interaction.failed"}:
+                    break
+            else:
+                progress = get_seeding_progress(batch_id)
+                if progress and progress.get("stage") in {"completed", "failed"}:
+                    break
+
+            yield ": keep-alive\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.put("/{batch_id}/state", response_model=SuccessResponse)
 async def advance_batch_state_endpoint(batch_id: str, request: AdvanceStateRequest):
     """
@@ -627,9 +677,9 @@ async def advance_to_publish_endpoint(batch_id: str, request: Request):
                 details={"current_state": batch["state"], "required_state": BatchState.S6_QA.value}
             )
         
-        # Guard: Verify all posts have qa_pass=true
+        # Guard: Verify all active posts have qa_pass=true
         supabase = get_supabase().client
-        posts_response = supabase.table("posts").select("id, qa_pass").eq("batch_id", batch_id).execute()
+        posts_response = supabase.table("posts").select("id, qa_pass, seed_data").eq("batch_id", batch_id).execute()
         posts = posts_response.data
         
         if not posts:
@@ -638,8 +688,27 @@ async def advance_to_publish_endpoint(batch_id: str, request: Request):
                 message="Cannot advance batch with no posts",
                 details={"batch_id": batch_id}
             )
-        
-        posts_not_approved = [p["id"] for p in posts if p.get("qa_pass") is not True]
+
+        active_posts = []
+        for post in posts:
+            seed_data = post.get("seed_data") or {}
+            if isinstance(seed_data, str):
+                try:
+                    seed_data = json.loads(seed_data)
+                except json.JSONDecodeError:
+                    seed_data = {}
+            if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
+                continue
+            active_posts.append(post)
+
+        if not active_posts:
+            raise FlowForgeException(
+                code="state_transition_error",
+                message="Cannot advance batch with no active posts",
+                details={"batch_id": batch_id}
+            )
+
+        posts_not_approved = [p["id"] for p in active_posts if p.get("qa_pass") is not True]
         
         if posts_not_approved:
             raise FlowForgeException(
@@ -647,8 +716,8 @@ async def advance_to_publish_endpoint(batch_id: str, request: Request):
                 message=f"Cannot advance to publish. {len(posts_not_approved)} post(s) not approved.",
                 details={
                     "batch_id": batch_id,
-                    "total_posts": len(posts),
-                    "approved_posts": len(posts) - len(posts_not_approved),
+                    "total_posts": len(active_posts),
+                    "approved_posts": len(active_posts) - len(posts_not_approved),
                     "pending_posts": posts_not_approved[:5]  # Show first 5
                 }
             )
@@ -661,7 +730,7 @@ async def advance_to_publish_endpoint(batch_id: str, request: Request):
             batch_id=batch_id,
             previous_state=current_state.value,
             new_state=BatchState.S7_PUBLISH_PLAN.value,
-            total_posts=len(posts)
+            total_posts=len(active_posts)
         )
         
         if _wants_html(request):

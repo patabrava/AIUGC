@@ -7,6 +7,7 @@ Per Canon § 3.2: S6_QA state management
 
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
+import json
 import httpx
 
 from fastapi import APIRouter, HTTPException, status, Request
@@ -309,10 +310,22 @@ async def get_batch_qa_status(batch_id: str):
         # Fetch all posts in batch
         posts_response = supabase.table("posts").select("*").eq("batch_id", batch_id).execute()
         posts = posts_response.data
-        
-        total_posts = len(posts)
-        posts_with_videos = sum(1 for p in posts if p.get("video_status") == "completed")
-        posts_qa_passed = sum(1 for p in posts if p.get("qa_pass") is True)
+
+        active_posts = []
+        for post in posts:
+            seed_data = post.get("seed_data") or {}
+            if isinstance(seed_data, str):
+                try:
+                    seed_data = json.loads(seed_data)
+                except json.JSONDecodeError:
+                    seed_data = {}
+            if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
+                continue
+            active_posts.append(post)
+
+        total_posts = len(active_posts)
+        posts_with_videos = sum(1 for p in active_posts if p.get("video_status") == "completed")
+        posts_qa_passed = sum(1 for p in active_posts if p.get("qa_pass") is True)
         posts_qa_pending = posts_with_videos - posts_qa_passed
         
         all_passed = (total_posts > 0 and posts_qa_passed == total_posts)
