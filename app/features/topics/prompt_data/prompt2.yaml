@@ -40,6 +40,7 @@ structure: |
 length_rules: |
   LÄNGE: 16-20 Wörter (max. 8 Sekunden Sprechzeit), ein Satz pro Zeile, keine Regieanweisungen.
   Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
+  Jeder Skript-Satz muss als vollständige, zusammenhängende Zeile stehen; hänge keinen abgeschnittenen Rest oder ausgelagerte Schlussphrase an.
 
 headings: |
   Gib die Ausgabe mit EINER Überschrift und darunter GENAU {scripts_per_category} SKRIPTE zurück:

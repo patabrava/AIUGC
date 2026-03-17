@@ -6,7 +6,8 @@ Per Constitution § V: Locality & Vertical Slices
 
 import asyncio
 from datetime import datetime, timezone
-from threading import Lock
+from threading import RLock
+from uuid import uuid4
 from fastapi import APIRouter, HTTPException, status, Header
 from typing import Optional, Dict, Any, List
 
@@ -40,7 +41,9 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/topics", tags=["topics"])
 _SEEDING_PROGRESS: Dict[str, Dict[str, Any]] = {}
-_SEEDING_PROGRESS_LOCK = Lock()
+_SEEDING_EVENTS: Dict[str, List[Dict[str, Any]]] = {}
+_SEEDING_EVENT_COUNTERS: Dict[str, int] = {}
+_SEEDING_PROGRESS_LOCK = RLock()
 _PROGRESS_TTL_SECONDS = 45
 
 
@@ -48,13 +51,185 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def update_seeding_progress(batch_id: str, **progress: Any) -> Dict[str, Any]:
-    """Persist the latest seeding progress snapshot for polling clients."""
+def _next_event_id_locked(batch_id: str) -> str:
+    current = _SEEDING_EVENT_COUNTERS.get(batch_id, 0) + 1
+    _SEEDING_EVENT_COUNTERS[batch_id] = current
+    return str(current)
+
+
+def _append_event_locked(batch_id: str, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    event = {
+        "event_id": _next_event_id_locked(batch_id),
+        "event_type": event_type,
+        "created_at": _utc_now_iso(),
+        **payload,
+    }
+    events = _SEEDING_EVENTS.setdefault(batch_id, [])
+    events.append(event)
+    if len(events) > 80:
+        del events[:-80]
+    return dict(event)
+
+
+def start_seeding_interaction(batch_id: str, brand: str, expected_posts: int) -> Dict[str, Any]:
+    """Initialize a resumable interaction id and seed event log for a new batch."""
     with _SEEDING_PROGRESS_LOCK:
         current = dict(_SEEDING_PROGRESS.get(batch_id) or {})
+        if current.get("interaction_id"):
+            return dict(current)
+
+        interaction_id = f"seed_{uuid4().hex[:12]}"
+        current.update(
+            {
+                "brand": brand,
+                "expected_posts": expected_posts,
+                "posts_created": 0,
+                "state": BatchState.S1_SETUP.value,
+                "stage": "booting",
+                "stage_label": "Preparing topic generation",
+                "detail_message": "Opening the batch and starting the research session.",
+                "retry_message": None,
+                "is_retrying": False,
+                "interaction_id": interaction_id,
+                "status": "in_progress",
+                "last_updated_at": _utc_now_iso(),
+            }
+        )
+        _SEEDING_PROGRESS[batch_id] = current
+        _SEEDING_EVENTS[batch_id] = []
+        _SEEDING_EVENT_COUNTERS[batch_id] = 0
+        _append_event_locked(
+            batch_id,
+            "interaction.start",
+            {
+                "interaction": {
+                    "id": interaction_id,
+                    "status": "in_progress",
+                },
+                "summary": f"Research session started for {brand}.",
+                "progress": dict(current),
+            },
+        )
+        return dict(current)
+
+
+def update_seeding_progress(batch_id: str, **progress: Any) -> Dict[str, Any]:
+    """Persist the latest seeding progress snapshot and emit resumable feed events."""
+    with _SEEDING_PROGRESS_LOCK:
+        current = dict(_SEEDING_PROGRESS.get(batch_id) or {})
+        if not current.get("interaction_id"):
+            current = start_seeding_interaction(
+                batch_id=batch_id,
+                brand=progress.get("brand") or current.get("brand") or batch_id,
+                expected_posts=int(progress.get("expected_posts") or current.get("expected_posts") or 0),
+            )
+            current = dict(_SEEDING_PROGRESS.get(batch_id) or current)
+
+        previous = dict(current)
         current.update(progress)
         current["last_updated_at"] = _utc_now_iso()
+        current["status"] = (
+            "completed"
+            if current.get("stage") == "completed"
+            else "failed"
+            if current.get("stage") == "failed"
+            else "reconnecting"
+            if current.get("stage") == "retry_wait"
+            else "in_progress"
+        )
         _SEEDING_PROGRESS[batch_id] = current
+
+        progress_changed = any(
+            previous.get(key) != current.get(key)
+            for key in (
+                "stage",
+                "stage_label",
+                "detail_message",
+                "posts_created",
+                "expected_posts",
+                "current_post_type",
+                "attempt",
+                "max_attempts",
+                "is_retrying",
+                "retry_message",
+                "state",
+                "status",
+            )
+        )
+        if progress_changed:
+            _append_event_locked(
+                batch_id,
+                "progress.update",
+                {
+                    "interaction": {
+                        "id": current["interaction_id"],
+                        "status": current["status"],
+                    },
+                    "progress": dict(current),
+                },
+            )
+
+            if previous.get("detail_message") != current.get("detail_message") and current.get("detail_message"):
+                _append_event_locked(
+                    batch_id,
+                    "content.delta",
+                    {
+                        "interaction": {
+                            "id": current["interaction_id"],
+                            "status": current["status"],
+                        },
+                        "delta": {
+                            "type": "thought_summary",
+                            "content": {"text": current["detail_message"]},
+                        },
+                        "stage": current.get("stage"),
+                    },
+                )
+
+            if current.get("posts_created", 0) > previous.get("posts_created", 0):
+                _append_event_locked(
+                    batch_id,
+                    "progress.post_created",
+                    {
+                        "interaction": {
+                            "id": current["interaction_id"],
+                            "status": current["status"],
+                        },
+                        "summary": (
+                            f"{current['posts_created']} of {current.get('expected_posts', 0)} posts ready for review."
+                        ),
+                        "progress": dict(current),
+                    },
+                )
+
+            if current.get("stage") == "completed" and previous.get("stage") != "completed":
+                _append_event_locked(
+                    batch_id,
+                    "interaction.complete",
+                    {
+                        "interaction": {
+                            "id": current["interaction_id"],
+                            "status": "completed",
+                        },
+                        "summary": "Research complete",
+                        "progress": dict(current),
+                    },
+                )
+
+            if current.get("stage") == "failed" and previous.get("stage") != "failed":
+                _append_event_locked(
+                    batch_id,
+                    "interaction.failed",
+                    {
+                        "interaction": {
+                            "id": current["interaction_id"],
+                            "status": "failed",
+                        },
+                        "summary": current.get("detail_message") or "Research failed",
+                        "progress": dict(current),
+                    },
+                )
+
         return dict(current)
 
 
@@ -80,9 +255,27 @@ def get_seeding_progress(batch_id: str) -> Optional[Dict[str, Any]]:
         return dict(progress)
 
 
+def get_seeding_events(batch_id: str, last_event_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return feed events after the provided event id."""
+    with _SEEDING_PROGRESS_LOCK:
+        events = list(_SEEDING_EVENTS.get(batch_id) or [])
+
+    if not last_event_id:
+        return events
+
+    try:
+        last_seen = int(last_event_id)
+    except (TypeError, ValueError):
+        return events
+
+    return [event for event in events if int(event["event_id"]) > last_seen]
+
+
 def clear_seeding_progress(batch_id: str) -> None:
     with _SEEDING_PROGRESS_LOCK:
         _SEEDING_PROGRESS.pop(batch_id, None)
+        _SEEDING_EVENTS.pop(batch_id, None)
+        _SEEDING_EVENT_COUNTERS.pop(batch_id, None)
 
 
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
@@ -151,12 +344,90 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
 
         # PIPELINE DISPATCH: lifestyle uses PROMPT_2 only, value/product use PROMPT_1+PROMPT_2
         if post_type == "lifestyle":
-            # Lifestyle pipeline: PROMPT_2 direct (no web research)
-            lifestyle_topics = generate_lifestyle_topics(
-                count=count
-            )
+            # Lifestyle pipeline: PROMPT_2 direct (no web research), but still dedupe
+            required_topics = count
+            collected_candidates: List[Dict[str, Any]] = []
+            attempts = 0
+            max_attempts = 5
+            dedupe_reference = existing_topics + all_generated_topics
 
-            for topic_data in lifestyle_topics:
+            while len(collected_candidates) < required_topics and attempts < max_attempts:
+                remaining_topics = required_topics - len(collected_candidates)
+                request_count = remaining_topics if attempts == 0 else min(required_topics, remaining_topics + 2)
+
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="collecting",
+                    stage_label="Collecting distinct lifestyle concepts",
+                    detail_message=(
+                        f"Generating {request_count} lifestyle candidates and comparing them against the registry and current batch."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts + 1,
+                    max_attempts=max_attempts,
+                    is_retrying=attempts > 0,
+                    retry_message=(
+                        "Retrying lifestyle generation because earlier concepts overlapped."
+                        if attempts > 0
+                        else None
+                    ),
+                )
+
+                lifestyle_topics = generate_lifestyle_topics(
+                    count=request_count
+                )
+
+                unique_candidates = deduplicate_topics(
+                    lifestyle_topics,
+                    dedupe_reference,
+                    threshold=0.35,
+                )
+
+                for candidate in unique_candidates:
+                    if len(collected_candidates) >= required_topics:
+                        break
+                    collected_candidates.append(candidate)
+                    dedupe_reference.append(
+                        {
+                            "title": candidate["title"],
+                            "rotation": candidate["rotation"],
+                            "cta": candidate["cta"],
+                            "spoken_duration": float(candidate["spoken_duration"]),
+                        }
+                    )
+
+                attempts += 1
+                remaining_after = max(required_topics - len(collected_candidates), 0)
+                should_retry = remaining_after > 0 and attempts < max_attempts
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="retry_wait" if should_retry else "collecting",
+                    stage_label=(
+                        "Requesting another lifestyle pass"
+                        if should_retry
+                        else "Lifestyle candidate collection complete"
+                    ),
+                    detail_message=(
+                        f"Collected {len(collected_candidates)} of {required_topics} distinct lifestyle topics so far."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts,
+                    max_attempts=max_attempts,
+                    is_retrying=should_retry,
+                    retry_message=(
+                        "Still working. Duplicate lifestyle concepts were filtered out, so another pass is running."
+                        if should_retry
+                        else None
+                    ),
+                )
+
+            for topic_data in collected_candidates[:required_topics]:
                 update_seeding_progress(
                     batch_id,
                     state=batch["state"],
@@ -227,6 +498,34 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             max_attempts = 5
             dedupe_reference = existing_topics + all_generated_topics
 
+            def progress_callback(update: Dict[str, Any]) -> None:
+                provider_status = str(update.get("provider_status") or "").upper()
+                stage = "retry_wait" if update.get("is_retrying") else "researching"
+                stage_label = (
+                    "Retrying the Gemini research interaction"
+                    if update.get("is_retrying")
+                    else "Gemini deep research is running"
+                )
+                if provider_status in {"DONE", "COMPLETED", "SUCCEEDED"}:
+                    stage_label = "Gemini deep research finished"
+
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage=stage,
+                    stage_label=stage_label,
+                    detail_message=update.get("detail_message") or f"Gemini is still researching {post_type} topics.",
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=attempts + 1,
+                    max_attempts=max_attempts,
+                    is_retrying=bool(update.get("is_retrying")),
+                    retry_message=update.get("retry_message"),
+                    provider_interaction_id=update.get("provider_interaction_id"),
+                    provider_status=provider_status or None,
+                )
+
             while len(collected_candidates) < required_topics and attempts < max_attempts:
                 remaining_topics = required_topics - len(collected_candidates)
                 request_count = remaining_topics if attempts == 0 else min(required_topics, remaining_topics + 2)
@@ -252,7 +551,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
                 items = generate_topics_research_agent(
                     post_type=post_type,
-                    count=request_count
+                    count=request_count,
+                    progress_callback=progress_callback,
                 )
 
                 update_seeding_progress(

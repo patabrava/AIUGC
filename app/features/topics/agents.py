@@ -37,25 +37,40 @@ from app.core.errors import ValidationError
 
 logger = get_logger(__name__)
 
+MIN_SCRIPT_WORDS = 12
+MAX_SCRIPT_WORDS = 15
+MIN_SCRIPT_SECONDS = 5
+MAX_SCRIPT_SECONDS = 6
+MAX_SCRIPT_CHARS_NO_SPACES = 90
+CHARS_PER_SECOND_ESTIMATE = 17.0
+
 
 PROMPT1_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 execution agent.
 You must strictly follow the user's message instructions.
 
 CRITICAL SCRIPT REQUIREMENTS:
-- script must be EXACTLY 16-20 words (NO LESS than 16, NO MORE than 20), one sentence (≈7-8 Sekunden Sprechzeit)
-- COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <16 words will be REJECTED.
-- Start with a VARIED, engaging opening. Rotate between different patterns:
+- script must be EXACTLY 12-15 words (NO LESS than 12, NO MORE than 15), one sentence (≈5-6 Sekunden Sprechzeit)
+- COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <12 words will be REJECTED.
+- Keep the script under 90 non-space characters for natural delivery in an 8-second Veo talking-head clip.
+- Prefer short, speakable wording. Avoid stacking multiple long institutional or compound nouns in one sentence.
+- If you must mention a long institution name, simplify the rest of the sentence aggressively.
+- Start with a VARIED, scroll-stopping opening. Rotate between multiple hook families:
   * Questions: "Kennst du...?", "Weißt du...?", "Hast du...?", "Brauchst du...?", "Suchst du...?"
   * Direct statements: "Check mal...", "Schau dir an...", "Hier kommt...", "Das musst du wissen..."
   * Empathetic hooks: "Stell dir vor...", "Ich zeig dir...", "Lass mich dir zeigen..."
+  * Contrast/myth hooks: "Die größte Lüge über ... ist, dass ...", "Fast alle denken, ...", "Alle reden über ..., aber ..."
+  * Consequence/friction hooks: "Wenn du ... ignorierst, ...", "Der unangenehme Grund, warum ...", "Dieser kleine Fehler macht ..."
+  * Aha/action hooks: "Bevor du ...", "Alles verändert sich, wenn du ...", "Was dir bei ... niemand klar sagt: ..."
 - Use du-Form (informal you), be direct, friendly, empowering
-- NO passive declarations like "Ab 2025 gibt's..."
-- If script is shorter than 16 words or estimated_duration_s unter 7, ergänze konkrete, quellenbasierte Details.
-- estimated_duration_s must equal CEIL(word_count(script)/2.6) and be 7 or 8.
+- NO passive declarations like "Ab 2025 gibt's..." and NO cheap clickbait like "Du wirst nicht glauben ..."
+- If script is shorter than 12 words or estimated_duration_s unter 5, ergänze konkrete, quellenbasierte Details.
+- estimated_duration_s must be a conservative natural-speech estimate and be 5 or 6.
 - Example good scripts with VARIED openings:
-  * "Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktiven und elektrischen Rollstühle die Kasse aktuell übernehmen muss."
-  * "Check mal die B-Marke in deinem Ausweis – damit fährt deine Begleitperson im ÖPNV komplett gratis mit."
-  * "Stell dir vor, du bekommst mehr Pflegegeld ab 2025 – ich zeig dir, wie du deinen Anspruch prüfst."
+  * "Kennst du das Hilfsmittelverzeichnis? Dort prüfst du schnell, welche Rollstühle die Kasse übernimmt."
+  * "Check mal die B-Marke im Ausweis, dann fährt deine Begleitperson oft kostenlos mit."
+  * "Die größte Lüge über Hilfsmittelanträge: Ein Rezept allein reicht oft nicht aus."
+  * "Bevor du den Parkausweis beantragst, prüf die Nachweise, sonst verlierst du Zeit."
+  * "Stell dir vor, du prüfst mehr Pflegegeld ab 2025 jetzt deutlich einfacher."
 
 CRITICAL SOURCE URL REQUIREMENTS:
 - ALL source URLs MUST be currently accessible and valid (not 404, not archived, not removed)
@@ -279,17 +294,50 @@ def validate_unique_ctas(items: List[ResearchAgentItem]) -> None:
         seen[cta] = idx
 
 
+def _script_non_space_char_count(text: str) -> int:
+    return len(re.sub(r"\s+", "", text.strip()))
+
+
+def estimate_script_duration_seconds(text: str) -> int:
+    words = text.strip().split()
+    if not words:
+        return 0
+
+    word_estimate = math.ceil(len(words) / 2.6)
+    char_estimate = math.ceil(_script_non_space_char_count(text) / CHARS_PER_SECOND_ESTIMATE)
+    return max(word_estimate, char_estimate)
+
+
 def validate_duration(item: ResearchAgentItem) -> None:
-    calculated = math.ceil(item.word_count() / 2.6)
-    if calculated > 8:
+    calculated = estimate_script_duration_seconds(item.script)
+    char_count = _script_non_space_char_count(item.script)
+    if char_count > MAX_SCRIPT_CHARS_NO_SPACES:
         raise ValidationError(
-            message="Script exceeds 8 seconds",
-            details={"word_count": item.word_count(), "calculated": calculated}
+            message="Script too dense for natural Veo speech delivery",
+            details={
+                "word_count": item.word_count(),
+                "char_count_no_spaces": char_count,
+                "max_char_count_no_spaces": MAX_SCRIPT_CHARS_NO_SPACES,
+                "calculated": calculated,
+            }
         )
-    if calculated < 7:
+    if calculated > MAX_SCRIPT_SECONDS:
         raise ValidationError(
-            message="Script under 7 seconds",
-            details={"word_count": item.word_count(), "calculated": calculated}
+            message="Script exceeds 6 seconds",
+            details={
+                "word_count": item.word_count(),
+                "char_count_no_spaces": char_count,
+                "calculated": calculated,
+            }
+        )
+    if calculated < MIN_SCRIPT_SECONDS:
+        raise ValidationError(
+            message="Script under 5 seconds",
+            details={
+                "word_count": item.word_count(),
+                "char_count_no_spaces": char_count,
+                "calculated": calculated,
+            }
         )
     # Auto-correct estimated_duration_s if LLM calculated it wrong
     if calculated != item.estimated_duration_s:
@@ -508,8 +556,7 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
                 
                 # Add missing required fields with defaults
                 if "estimated_duration_s" not in item and "script" in item:
-                    word_count = len(item["script"].split())
-                    item["estimated_duration_s"] = math.ceil(word_count / 2.6)
+                    item["estimated_duration_s"] = estimate_script_duration_seconds(item["script"])
 
                 if "tone" not in item:
                     item["tone"] = "direkt, freundlich, empowernd, du-Form"
@@ -517,10 +564,13 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
                 if "disclaimer" not in item:
                     item["disclaimer"] = "Keine Rechts- oder medizinische Beratung."
 
-                # Ensure scripts respect 8-second / 20-word ceiling
+                # Ensure scripts respect the conservative Veo speech-density ceiling while reserving tail time.
                 script_words = item.get("script", "").split()
                 if script_words:
-                    while script_words and math.ceil(len(script_words) / 2.6) > 8:
+                    while script_words and (
+                        estimate_script_duration_seconds(" ".join(script_words)) > MAX_SCRIPT_SECONDS
+                        or _script_non_space_char_count(" ".join(script_words)) > MAX_SCRIPT_CHARS_NO_SPACES
+                    ):
                         script_words.pop()
                     trimmed_script = " ".join(script_words).strip()
                     if not trimmed_script:
@@ -530,14 +580,16 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
                         )
                     item["script"] = trimmed_script
                     item["estimated_duration_s"] = max(
-                        7,
-                        math.ceil(len(script_words) / 2.6)
+                        MIN_SCRIPT_SECONDS,
+                        estimate_script_duration_seconds(trimmed_script)
                     )
-                    # Validate minimum aligns with 7-second floor: CEIL(16/2.6) = 7
-                    if len(script_words) < 16:
+                    if len(script_words) < MIN_SCRIPT_WORDS:
                         raise ValidationError(
-                            message="PROMPT_1 script too short (requires ≥16 words for 7-second minimum)",
-                            details={"word_count": len(script_words)}
+                            message="PROMPT_1 script too short (requires ≥12 words for 5-second minimum)",
+                            details={
+                                "word_count": len(script_words),
+                                "char_count_no_spaces": _script_non_space_char_count(trimmed_script),
+                            }
                         )
 
     payload = parsed if isinstance(parsed, dict) else {"items": parsed}
@@ -561,6 +613,53 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
 
 def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts:
     max_per_category = max(1, min(5, max_per_category))
+    hook_prefixes = (
+        "kennst du",
+        "weißt du",
+        "hast du",
+        "brauchst du",
+        "suchst du",
+        "check mal",
+        "schau dir",
+        "hier kommt",
+        "das musst",
+        "stell dir",
+        "ich zeig",
+        "lass mich",
+        "die größte",
+        "wenn du",
+        "fast alle",
+        "der unangenehme",
+        "die meisten",
+        "was dir",
+        "bevor du",
+        "alles verändert",
+        "dieser kleine",
+        "viele verlassen",
+        "alle reden",
+        "die harte",
+        "schon mal erlebt",
+        "ich dachte früher",
+        "ich dachte lange",
+        "neulich ist mir",
+        "wusstest du",
+        "manchmal frage ich",
+        "ehrlich gesagt",
+        "von außen",
+        "was viele",
+        "kaum jemand",
+        "dieser eine",
+        "niemand sagt",
+        "alle denken",
+        "was meinen alltag",
+        "seit ich",
+        "viele meinen",
+        "der moment",
+        "erst wenn",
+        "das frustigste",
+        "eine sache",
+    )
+
     def normalize_heading(line: str) -> str:
         cleaned = line.strip()
         cleaned = re.sub(r"^#+\s*", "", cleaned)
@@ -570,15 +669,8 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
 
     def looks_like_script_start(line: str) -> bool:
         """Heuristic to detect the beginning of a new script sentence."""
-        patterns = [
-            r"^Kennst du",
-            r"^Schon erlebt",
-            r"^Ich dachte",
-            r"^Früher",
-            r"^Ich hab",
-            r"^Mein",
-        ]
-        return any(re.match(pattern, line, re.IGNORECASE) for pattern in patterns)
+        normalized = line.strip().lower()
+        return normalized.startswith(hook_prefixes)
 
     lines = raw.splitlines()
     headers = {
@@ -633,7 +725,6 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
             current
             and current != "description"
             and current_script_lines
-            and len(current_script_lines) >= 2
             and looks_like_script_start(stripped)
         ):
             # Save the previous script
@@ -807,6 +898,7 @@ def generate_topics_research_agent(
     post_type: str,
     count: int = 10,
     seed: Optional[int] = None,
+    progress_callback: Optional[Any] = None,
 ) -> List[ResearchAgentItem]:
     """Execute one PROMPT_1 batch request and return validated items."""
     llm = get_llm_client()
@@ -841,6 +933,7 @@ def generate_topics_research_agent(
         post_type=post_type,
         desired_topics=count,
         assigned_topics=assigned_topics or None,
+        progress_callback=progress_callback,
     )
 
     if len(items) < count:
@@ -864,6 +957,7 @@ def _generate_prompt1_batch(
     post_type: str,
     desired_topics: int,
     assigned_topics: Optional[List[str]] = None,
+    progress_callback: Optional[Any] = None,
 ) -> List[ResearchAgentItem]:
     prompt = build_prompt1(
         post_type=post_type,
@@ -894,6 +988,7 @@ def _generate_prompt1_batch(
                 "desired_outputs": str(desired_topics),
                 "assigned_topics": json.dumps(assigned_topics or []),
             },
+            progress_callback=progress_callback,
         )
         
         try:
@@ -943,13 +1038,22 @@ def _generate_prompt1_batch(
             # Build detailed feedback
             feedback_parts = [f"FEEDBACK: {exc.message}"]
             
-            if "too short" in exc.message.lower() or "under 7 seconds" in exc.message.lower():
+            if "too short" in exc.message.lower() or "under 5 seconds" in exc.message.lower():
                 feedback_parts.append(
                     f"\nDetails: {json.dumps(exc.details, default=str)}"
-                    "\n\nIMPORTANT: Scripts MUST be EXACTLY 16-20 words (NO LESS than 16, NO MORE than 20)."
+                    "\n\nIMPORTANT: Scripts MUST be EXACTLY 12-15 words (NO LESS than 12, NO MORE than 15)."
                     "\nCOUNT YOUR WORDS CAREFULLY before submitting."
-                    "\nIf a script is too short, ADD concrete source-based details until it reaches 16-20 words."
-                    "\nExample good length: 'Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktiven und elektrischen Rollstühle die Kasse aktuell übernehmen muss.' (18 words)"
+                    "\nIf a script is too short, ADD concrete source-based details until it reaches 12-15 words."
+                    "\nExample good length: 'Kennst du das Hilfsmittelverzeichnis? Dort prüfst du schnell, welche Rollstühle die Kasse übernimmt.' (13 words)"
+                )
+            elif "too dense for natural veo speech delivery" in exc.message.lower() or "exceeds 6 seconds" in exc.message.lower():
+                feedback_parts.append(
+                    f"\nDetails: {json.dumps(exc.details, default=str)}"
+                    "\n\nIMPORTANT: Keep the script under 90 non-space characters."
+                    "\nUse shorter, more speakable wording and avoid stacking long compound or institutional nouns."
+                    "\nIf you mention a long institution name, simplify the rest of the sentence."
+                    "\nBad density example: 'Weißt du eigentlich, dass das Integrationsamt deine kompletten technischen Arbeitshilfen im Job vollständig bezahlt?'"
+                    "\nBetter density example: 'Weißt du, dass das Integrationsamt deine Hilfen im Job oft komplett bezahlt?'"
                 )
             elif "fully in german" in exc.message.lower():
                 details_str = json.dumps(exc.details, default=str, ensure_ascii=False, indent=2)
@@ -1094,6 +1198,16 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
         main_script = dialog_scripts.problem_agitate_solution[0]
         cta = extract_soft_cta(main_script)
         rotation = strip_cta_from_script(main_script, cta)
+
+        # Guard: single-sentence lifestyle scripts can be mistaken for a full CTA.
+        # Keep the full script as rotation instead of collapsing it to empty text.
+        if not rotation or not rotation.strip():
+            rotation = main_script.strip()
+            words = rotation.split()
+            if len(words) > 4:
+                cta = " ".join(words[-4:])
+            else:
+                cta = rotation
         
         # Extract the hook (first 3-5 words) to track for next iteration
         hook = " ".join(main_script.split()[:4])  # First 4 words typically capture the hook
