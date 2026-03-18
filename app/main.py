@@ -22,7 +22,11 @@ from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
 from app.features.publish.handlers import router as publish_router, run_scheduled_publish_job
-from app.features.publish.tiktok import router as tiktok_router
+
+try:
+    from app.features.publish.tiktok import router as tiktok_router
+except ModuleNotFoundError:
+    tiktok_router = None
 
 
 # Configure logging on module import
@@ -168,7 +172,8 @@ app.include_router(posts_router)
 app.include_router(videos_router)
 app.include_router(qa_router)
 app.include_router(publish_router)
-app.include_router(tiktok_router)
+if tiktok_router is not None:
+    app.include_router(tiktok_router)
 
 
 # Root endpoint
