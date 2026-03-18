@@ -50,7 +50,12 @@ from app.features.publish.schemas import (
     SuggestTimesResponse,
     UpdatePostScheduleRequest,
 )
-from app.features.publish.tiktok import get_tiktok_public_account
+try:
+    from app.features.publish.tiktok import get_tiktok_public_account
+except ModuleNotFoundError:
+    def get_tiktok_public_account() -> Dict[str, Any]:
+        """Keep Meta/account-hub startup resilient when TikTok code is not deployed yet."""
+        return {"status": "unavailable"}
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/publish", tags=["publish"])
