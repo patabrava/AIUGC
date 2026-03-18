@@ -91,8 +91,10 @@ class PostDetail(BaseModel):
     qa_auto_checks: Optional[Dict[str, Any]] = None
     scheduled_at: Optional[datetime] = None
     social_networks: Optional[List[str]] = None
+    publish_caption: Optional[str] = None
     publish_status: Optional[str] = None
     platform_ids: Optional[Dict[str, str]] = None
+    publish_results: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -106,6 +108,8 @@ class BatchDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived: bool
+    meta_connection: Optional[Dict[str, Any]] = None
+    tiktok_connection: Optional[Dict[str, Any]] = None
     posts_count: int
     posts_by_state: Dict[str, int]
     posts: List[PostDetail]

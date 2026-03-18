@@ -87,7 +87,20 @@ class Settings(BaseSettings):
     # Social Media
     tiktok_client_key: str = Field(default="", description="TikTok client key")
     tiktok_client_secret: str = Field(default="", description="TikTok client secret")
+    tiktok_redirect_uri: str = Field(default="", description="TikTok OAuth callback URL")
+    tiktok_environment: Literal["sandbox", "production"] = Field(
+        default="sandbox",
+        description="TikTok environment for app integrations",
+    )
+    tiktok_sandbox_account: str = Field(default="", description="Authorized TikTok sandbox account handle")
     instagram_access_token: str = Field(default="", description="Instagram access token")
+    meta_app_id: str = Field(default="", description="Meta app ID for Facebook Login for Business")
+    meta_app_secret: str = Field(default="", description="Meta app secret")
+    meta_redirect_uri: str = Field(default="", description="OAuth callback URL for Meta login")
+    app_url: str = Field(default="", description="Public application base URL")
+    privacy_policy_url: str = Field(default="", description="Privacy policy URL")
+    terms_url: str = Field(default="", description="Terms URL")
+    token_encryption_key: str = Field(default="", description="Secret for provider token encryption at rest")
     
     # Cron Security
     cron_secret: str = Field(..., description="Secret for cron endpoint authentication")
@@ -112,6 +125,15 @@ class Settings(BaseSettings):
     def validate_r2_public_base_url(cls, v):
         if not v.startswith("https://"):
             raise ValueError("Cloudflare R2 public base URL must start with https://")
+        return v.rstrip("/")
+
+    @field_validator("app_url", "privacy_policy_url", "terms_url", "tiktok_redirect_uri")
+    @classmethod
+    def validate_optional_urls(cls, v):
+        if not v:
+            return v
+        if not (v.startswith("https://") or v.startswith("http://localhost")):
+            raise ValueError("Integration URLs must start with https:// or use localhost for local callbacks")
         return v.rstrip("/")
     
     @property

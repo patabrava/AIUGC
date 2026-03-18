@@ -38,6 +38,7 @@ from app.features.topics.handlers import (
     start_seeding_interaction,
     update_seeding_progress,
 )
+from app.features.publish.tiktok import get_tiktok_public_account
 from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
 from app.core.logging import get_logger
 from app.core.states import BatchState
@@ -254,6 +255,51 @@ def _normalize_seed_data(seed_data: Any) -> Dict[str, Any]:
     return data
 
 
+def _normalize_json_object(value: Any, *, field_name: str, post_id: Optional[str] = None) -> Dict[str, Any]:
+    """Defensively parse JSON-like post fields into dictionaries."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning(
+                "post_json_decode_failed",
+                field_name=field_name,
+                post_id=post_id,
+            )
+            return {}
+
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    """Normalize list-like publish fields into plain string lists."""
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def _sanitize_meta_connection(meta_connection: Any) -> Dict[str, Any]:
+    """Strip token material before Meta connection data reaches the browser."""
+    sanitized = _normalize_json_object(meta_connection, field_name="meta_connection")
+    if not sanitized:
+        return {}
+
+    sanitized.pop("user_access_token", None)
+    sanitized.pop("page_access_token", None)
+
+    for page in sanitized.get("available_pages") or []:
+        if isinstance(page, dict):
+            page.pop("access_token", None)
+
+    selected_page = sanitized.get("selected_page")
+    if isinstance(selected_page, dict):
+        selected_page.pop("access_token", None)
+
+    return sanitized
+
+
 @router.get("", response_model=SuccessResponse)
 async def list_batches_endpoint(
     request: Request,
@@ -364,17 +410,17 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                 )
                 spoken_duration_value = 0.0
 
-            # Parse platform_ids if it's a string
-            platform_ids = p.get("platform_ids")
-            if isinstance(platform_ids, str):
-                try:
-                    platform_ids = json.loads(platform_ids)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "platform_ids_json_decode_failed",
-                        post_id=p.get("id")
-                    )
-                    platform_ids = None
+            platform_ids = _normalize_json_object(
+                p.get("platform_ids"),
+                field_name="platform_ids",
+                post_id=p.get("id"),
+            )
+            publish_results = _normalize_json_object(
+                p.get("publish_results"),
+                field_name="publish_results",
+                post_id=p.get("id"),
+            )
+            social_networks = _normalize_string_list(p.get("social_networks"))
 
             posts_list.append(
                 PostDetail(
@@ -396,15 +442,23 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     qa_notes=p.get("qa_notes"),
                     qa_auto_checks=qa_auto_checks,
                     scheduled_at=p.get("scheduled_at"),
-                    social_networks=p.get("social_networks"),
+                    social_networks=social_networks,
+                    publish_caption=p.get("publish_caption") or normalized_seed.get("description"),
                     publish_status=p.get("publish_status"),
                     platform_ids=platform_ids,
+                    publish_results=publish_results,
                     created_at=p.get("created_at"),
                     updated_at=p.get("updated_at"),
                 )
             )
 
-        batch_detail = {**batch, **posts_summary, "posts": posts_list}
+        batch_detail = {
+            **batch,
+            **posts_summary,
+            "meta_connection": _sanitize_meta_connection(batch.get("meta_connection")),
+            "tiktok_connection": get_tiktok_public_account(),
+            "posts": posts_list,
+        }
 
         if _wants_html(request):
             batch_model = BatchDetailResponse(**batch_detail)
