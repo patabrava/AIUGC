@@ -39,7 +39,13 @@ from app.features.topics.handlers import (
     update_seeding_progress,
 )
 from app.features.publish.handlers import _effective_meta_connection
-from app.features.publish.tiktok import get_tiktok_public_account
+
+try:
+    from app.features.publish.tiktok import get_tiktok_public_account
+except ModuleNotFoundError:
+    def get_tiktok_public_account() -> Dict[str, Any]:
+        """Keep batch detail rendering alive when TikTok code is not deployed yet."""
+        return {"status": "unavailable"}
 from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
 from app.core.logging import get_logger
 from app.core.states import BatchState
