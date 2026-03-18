@@ -40,7 +40,9 @@ structure: |
 length_rules: |
   LÄNGE: 16-20 Wörter (max. 8 Sekunden Sprechzeit), ein Satz pro Zeile, keine Regieanweisungen.
   Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
-  Jeder Skript-Satz muss als vollständige, zusammenhängende Zeile stehen; hänge keinen abgeschnittenen Rest oder ausgelagerte Schlussphrase an.
+  Jeder Skript-Satz muss als vollständige, zusammenhängende Zeile stehen und mit ".", "!" oder "?" enden.
+  Hänge keinen abgeschnittenen Rest, keine halbe zweite Aussage und keine ausgelagerte Schlussphrase an.
+  Wenn du eine Zeile nicht vollständig beenden kannst, schreibe sie kürzer statt sie abzuschneiden.
 
 headings: |
   Gib die Ausgabe mit EINER Überschrift und darunter GENAU {scripts_per_category} SKRIPTE zurück:
@@ -64,6 +66,7 @@ closing: |
   WICHTIG: Schreibe GENAU {scripts_per_category} SKRIPTE unter der Überschrift "Problem-Agitieren-Lösung Ads".
   Jedes Skript muss einen ANDEREN Hook verwenden.
   Vergiss nicht die "Beschreibung"-Sektion am Ende mit einem zusammenhängenden Text von 35-80 Wörtern.
+  KEIN Skript darf unvollständig enden; jede Zeile muss ein vollständiger, abgeschlossener Satz sein.
 
 
 NOTE: The output cannot be in markdown format whatsoever

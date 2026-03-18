@@ -135,19 +135,15 @@ topic_pool: |
     - Aktiv und sichtbar bleiben: Events, Aktionstage, Medien mit gutem Behinderungsverständnis.
 
 output_schema: |
-  OUTPUT FORMAT — Liefere einen ausführlichen Recherche-Report auf Deutsch.
-  Strukturiere den Report so:
-  1. ANALYSE: Kurze Zusammenfassung der aktuellen Situation/Trends.
-  2. TOPICS: Für jede der {desired_topics} Ideen: Details und Quellen.
-  3. JSON-BLOCK: Am Ende des Reports, gib alle Ideen in einem validen JSON-Array aus.
+  OUTPUT FORMAT — JSON array mit GENAU {desired_topics} Objekten.
+  Keine Markdown-Fences, keine Kommentare.
   SPRACHE: Jedes Feld der Antwort MUSS vollständig auf Deutsch sein.
-  Wenn auch nur ein Objekt englische oder gemischtsprachigen Formulierungen enthält, ist die Antwort ungültig.
+  Wenn auch nur ein Objekt englische oder gemischtsprachige Formulierungen enthält, ist die Antwort ungültig und muss vor der Ausgabe korrigiert werden.
   Jedes Objekt MUSS enthalten:
     topic  – höchstens 10 Wörter
     framework  – einer von "PAL", "Testimonial", "Transformation"
-    sources  – 1-2 Einträge (title und url)
+    sources  – 1-2 Einträge, jeder Eintrag liefert title und url
       Nutze bevorzugt deutschsprachige oder in Deutschland relevante Quellen.
-
   CRITICAL SCRIPT REQUIREMENTS:
   - script must be EXACTLY 12-15 words (NO LESS than 12, NO MORE than 15), one sentence (≈5-6 Sekunden Sprechzeit)
   - COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <12 words will be REJECTED.
