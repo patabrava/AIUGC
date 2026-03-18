@@ -3,6 +3,7 @@
 import asyncio
 from types import SimpleNamespace
 import httpx
+import pytest
 
 from app.adapters import llm_client as llm_client_module
 from app.core.config import Settings
@@ -78,9 +79,9 @@ class FakeTopicLLM:
             "topic": "Pflegegrad 2025 prüfen",
             "framework": "PAL",
             "sources": [{"title": "Bundesgesundheitsministerium Pflege", "url": "https://www.bundesgesundheitsministerium.de/themen/pflege.html"}],
-            "script": "Kennst du deinen Pflegegrad schon genau? So prüfst du 2025 schneller, welche Leistungen dir wirklich konkret zustehen.",
+            "script": "Kennst du deinen Pflegegrad? So prüfst du 2025 deine Leistungen deutlich schneller.",
             "source_summary": "Das Bundesgesundheitsministerium erklärt, welche Leistungen die Pflegeversicherung umfasst, wie du Anträge stellst und welche Fristen wichtig sind. Gerade bei Pflegegrad-Änderungen lohnt sich ein genauer Blick auf Voraussetzungen, Nachweise und Beratungsangebote. #Pflegegrad #Pflegeversicherung #Rollstuhlalltag",
-            "estimated_duration_s": 7,
+            "estimated_duration_s": 5,
             "tone": "direkt, freundlich, empowernd, du-Form",
             "disclaimer": "Keine Rechts- oder medizinische Beratung."
           },
@@ -88,9 +89,9 @@ class FakeTopicLLM:
             "topic": "Hilfsmittel richtig beantragen",
             "framework": "Testimonial",
             "sources": [{"title": "GKV Hilfsmittel", "url": "https://www.gkv-spitzenverband.de/krankenversicherung/hilfsmittel/hilfsmittel.jsp"}],
-            "script": "Check mal dein Hilfsmittelrezept genau, so vermeidest du Rückfragen und kommst schneller an passende Versorgung für deinen Alltag.",
+            "script": "Check dein Hilfsmittelrezept genau, dann vermeidest du Rückfragen und Versorgungslücken im Alltag.",
             "source_summary": "Der GKV-Spitzenverband erläutert, wie Hilfsmittel gelistet sind, welche Nachweise oft nötig werden und warum genaue Produktbeschreibungen den Antrag beschleunigen können. Gerade bei Rollstuhlversorgung hilft dir das, Ärzt:innen und Kostenträger sauber zu koordinieren. #Hilfsmittel #Rollstuhlversorgung #Krankenkasse",
-            "estimated_duration_s": 8,
+            "estimated_duration_s": 5,
             "tone": "direkt, freundlich, empowernd, du-Form",
             "disclaimer": "Keine Rechts- oder medizinische Beratung."
           },
@@ -98,9 +99,9 @@ class FakeTopicLLM:
             "topic": "Begleitperson im Nahverkehr",
             "framework": "Transformation",
             "sources": [{"title": "DB Barrierefrei reisen", "url": "https://www.bahn.de/service/individuelle-reise/barrierefrei"}],
-            "script": "Weißt du, wann deine Begleitperson gratis mitfährt? Mit Merkzeichen B nutzt du viele Fahrten deutlich entspannter.",
+            "script": "Weißt du, wann Begleitpersonen gratis mitfahren? Mit Merkzeichen B reist du entspannter.",
             "source_summary": "Die Bahn beschreibt Unterstützungsangebote, Buchungswege und Voraussetzungen für barrierefreies Reisen. Für viele Fahrten lohnt sich der Blick auf Nachweise, Voranmeldung und Servicezeiten, damit du unterwegs weniger Stress hast und Begleitung sicher einplanen kannst. #Begleitperson #BarrierefreiReisen #Nahverkehr",
-            "estimated_duration_s": 8,
+            "estimated_duration_s": 5,
             "tone": "direkt, freundlich, empowernd, du-Form",
             "disclaimer": "Keine Rechts- oder medizinische Beratung."
           }
@@ -388,14 +389,30 @@ def test_validate_german_content_allows_peer_support_loan_phrase():
         topic="Austausch im Alltag",
         framework="PAL",
         sources=[{"title": "Beispiel", "url": "https://example.com"}],
-        script="Weißt du, wie Peer-Support hilft? Andere Betroffene unterstützen dich bei Frust und neuen Hürden wirklich auf Augenhöhe.",
+        script="Weißt du, wie Peer-Support hilft? Andere Betroffene unterstützen dich bei neuen Hürden.",
         source_summary="Peer-Support Gruppen stärken Austausch, Zugehörigkeit und Mut im Alltag. Viele Betroffene erleben dadurch mehr Sicherheit, Orientierung und gegenseitige Hilfe. #Austausch #Mut #Rollstuhlalltag",
-        estimated_duration_s=8,
+        estimated_duration_s=5,
         tone="direkt, freundlich, empowernd, du-Form",
         disclaimer="Keine Rechts- oder medizinische Beratung.",
     )
 
     topic_agents.validate_german_content(item)
+
+
+def test_validate_duration_rejects_dense_compound_script():
+    item = topic_agents.ResearchAgentItem(
+        topic="Arbeitshilfen im Job",
+        framework="PAL",
+        sources=[{"title": "Beispiel", "url": "https://example.com"}],
+        script="Weißt du eigentlich, dass das Integrationsamt deine kompletten technischen Arbeitshilfen im Job vollständig bezahlt?",
+        source_summary="Das Integrationsamt kann technische Hilfen im Beruf finanzieren, wenn sie deine Teilhabe am Arbeitsleben sichern. Wichtig sind Antrag, Zuständigkeit und eine klare Begründung für den Arbeitsplatz. #Integrationsamt #Arbeitshilfe #Teilhabe",
+        estimated_duration_s=6,
+        tone="direkt, freundlich, empowernd, du-Form",
+        disclaimer="Keine Rechts- oder medizinische Beratung.",
+    )
+
+    with pytest.raises(topic_agents.ValidationError, match="too dense for natural Veo speech delivery"):
+        topic_agents.validate_duration(item)
 
 
 def test_parse_prompt2_response_splits_consecutive_one_line_scripts_for_new_hooks():

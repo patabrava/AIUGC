@@ -149,8 +149,11 @@ output_schema: |
       Nutze bevorzugt deutschsprachige oder in Deutschland relevante Quellen.
 
   CRITICAL SCRIPT REQUIREMENTS:
-  - script must be EXACTLY 16-20 words (NO LESS than 16, NO MORE than 20), one sentence (≈7-8 Sekunden Sprechzeit)
-  - COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <16 words will be REJECTED.
+  - script must be EXACTLY 12-15 words (NO LESS than 12, NO MORE than 15), one sentence (≈5-6 Sekunden Sprechzeit)
+  - COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <12 words will be REJECTED.
+  - Halte das Script unter 90 Zeichen ohne Leerzeichen, damit es in Veo natürlich aussprechbar bleibt.
+  - Nutze kurze, gut sprechbare Formulierungen. Vermeide mehrere lange Behörden- oder Kompositawörter in einem Satz.
+  - Wenn ein langer Institutionsname nötig ist, vereinfache den Rest des Satzes konsequent.
   - script MUSS vollständig auf Deutsch sein
   - Start with a VARIED, aufmerksamkeitsstarken opening. Rotate between mehreren Hook-Familien und wiederhole keine Familie zu oft:
       • Fragen: "Kennst du...?", "Weißt du...?", "Hast du...?", "Brauchst du...?", "Suchst du...?"
@@ -161,13 +164,13 @@ output_schema: |
       • Aha- und Handlungs-Hooks: "Bevor du ...", "Alles verändert sich, wenn du ...", "Was dir bei ... niemand klar sagt: ..."
       NIEMALS billige Schock-Formeln wie "Du wirst nicht glauben ..." oder passive Ankündigungen wie "Ab 2025 gibt's..." / "Es gibt...".
       Immer du-Form, direkt, freundlich, empowernd. Ergänze konkrete Fakten oder Vorteile, bis die Länge passt.
-    script  – ein Satz, 16-20 Wörter (≈ 7-8 Sekunden Sprechzeit)
+    script  – ein Satz, 12-15 Wörter (≈ 5-6 Sekunden Sprechzeit)
     source_summary  – 35-80 Wörter, basiert ausschließlich auf sources[0]
       MUSS vollständig auf Deutsch sein.
       CRITICAL: Source summary MUSS zusätzliche Fakten/Details aus der Quelle enthalten, die NICHT im Script vorkommen.
       NIEMALS den Script-Text wiederholen oder paraphrasieren. Liefere ergänzende Informationen aus der Quelle.
       Beende die Source Summary mit GENAU drei thematisch passenden Hashtags (Format: #BeispielOhneLeerzeichen, getrennt durch Leerzeichen). Keine zusätzlichen Hashtags.
-    estimated_duration_s  – Integer = CEIL(word_count(script)/2.6) und MUSS 7 oder 8 sein
+    estimated_duration_s  – Integer = konservative Schätzung für natürliche Sprechdauer und MUSS 5 oder 6 sein
     tone  – "direkt, freundlich, empowernd, du-Form"
     disclaimer  – "Keine Rechts- oder medizinische Beratung."
 

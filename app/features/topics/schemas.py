@@ -14,7 +14,7 @@ class TopicData(BaseModel):
     title: str = Field(..., min_length=1, max_length=200, description="Topic title")
     rotation: str = Field(..., min_length=1, max_length=500, description="Rotation/hook text")
     cta: str = Field(..., min_length=1, max_length=200, description="Call to action")
-    spoken_duration: Decimal = Field(..., ge=0, le=8, description="Spoken duration in seconds (≤8s)")
+    spoken_duration: Decimal = Field(..., ge=0, le=6, description="Spoken duration in seconds (≤6s)")
     
     @validator('title', 'rotation', 'cta')
     def validate_not_empty(cls, v):
@@ -24,8 +24,8 @@ class TopicData(BaseModel):
     
     @validator('spoken_duration')
     def validate_duration(cls, v):
-        if v > 8:
-            raise ValueError("Spoken duration must be ≤8 seconds")
+        if v > 6:
+            raise ValueError("Spoken duration must be ≤6 seconds")
         return v
 
 
@@ -58,9 +58,9 @@ class ResearchAgentItem(BaseModel):
     topic: str = Field(..., min_length=2, max_length=400, description="Chosen topic from pool")
     framework: Literal["PAL", "Testimonial", "Transformation"]
     sources: List[ResearchAgentSource] = Field(..., min_length=1, max_length=2, description="Supporting sources")
-    script: str = Field(..., min_length=10, max_length=400, description="Spoken script (≤8s)")
+    script: str = Field(..., min_length=10, max_length=400, description="Spoken script (≤6s)")
     source_summary: str = Field(..., min_length=35, max_length=500, description="Summary for IG caption")
-    estimated_duration_s: int = Field(..., ge=1, le=8, description="Ceiling of word_count/2.6")
+    estimated_duration_s: int = Field(..., ge=1, le=6, description="Ceiling of word_count/2.6")
     tone: str = Field(..., min_length=5, max_length=120, description="Tone descriptor")
     disclaimer: str = Field(..., min_length=5, max_length=200, description="Compliance disclaimer")
 
@@ -149,7 +149,7 @@ PROMPT1_JSON_SCHEMA = {
                         },
                         "script": {
                             "type": "string",
-                            "description": "MUST be EXACTLY 16-20 words, one sentence"
+                            "description": "MUST be EXACTLY 12-15 words, one sentence"
                         },
                         "source_summary": {
                             "type": "string",
@@ -157,8 +157,8 @@ PROMPT1_JSON_SCHEMA = {
                         },
                         "estimated_duration_s": {
                             "type": "integer",
-                            "minimum": 7,
-                            "maximum": 8
+                            "minimum": 5,
+                            "maximum": 6
                         },
                         "tone": {"type": "string"},
                         "disclaimer": {"type": "string"}
