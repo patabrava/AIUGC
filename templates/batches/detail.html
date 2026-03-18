@@ -5,6 +5,8 @@
 {% block content %}
 <div
     id="batch-detail-root"
+    data-batch-id="{{ batch.id }}"
+    data-batch-state="{{ batch.state }}"
     {% if batch.state == 'S5_PROMPTS_BUILT' %}
     hx-get="/batches/{{ batch.id }}"
     hx-trigger="every 5s"
@@ -51,6 +53,11 @@
             {% endif %}
         {% endif %}
     {% endfor %}
+    {% set meta = batch.meta_connection or {} %}
+    {% set tiktok = batch.tiktok_connection or {} %}
+    {% set selected_page = meta.selected_page or {} %}
+    {% set selected_instagram = meta.selected_instagram or {} %}
+    {% set available_pages = meta.available_pages or [] %}
 
     <!-- State Stepper -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
@@ -218,11 +225,6 @@
         </div>
     </div>
     {% elif batch.state == 'S7_PUBLISH_PLAN' %}
-    {% set meta = batch.meta_connection or {} %}
-    {% set tiktok = batch.tiktok_connection or {} %}
-    {% set selected_page = meta.selected_page or {} %}
-    {% set selected_instagram = meta.selected_instagram or {} %}
-    {% set available_pages = meta.available_pages or [] %}
     <div id="publish-plan-workflow" class="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
         <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div class="flex-1">
@@ -233,62 +235,10 @@
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
-                    Connect one Meta business workflow, bind a Page plus Instagram account, and schedule each video with one editable caption.
+                    Use the navbar Meta login, then bind a Page plus Instagram account here and schedule each video with one editable caption.
                 </p>
             </div>
             <div class="w-full lg:w-[30rem] space-y-4">
-                <div class="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
-                    <div class="flex items-start justify-between gap-4">
-                        <div>
-                            <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Meta Connection</p>
-                            <h4 class="mt-1 text-sm font-semibold text-gray-900">
-                                {% if meta.status == 'connected' %}
-                                {{ meta.user.name if meta.user else 'Connected account' }}
-                                {% elif meta.status == 'error' %}
-                                Connection needs attention
-                                {% else %}
-                                No account connected
-                                {% endif %}
-                            </h4>
-                            <p class="mt-1 text-xs text-gray-600">
-                                {% if meta.status == 'connected' %}
-                                Standard Facebook Login is active for this workflow.
-                                {% elif meta.status == 'error' %}
-                                {{ meta.error or 'The last Meta connection attempt failed.' }}
-                                {% else %}
-                                Connect your Meta account to unlock Facebook Page and Instagram publishing.
-                                {% endif %}
-                            </p>
-                        </div>
-                        {% if meta.status == 'connected' %}
-                        <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">Connected</span>
-                        {% elif meta.status == 'error' %}
-                        <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">Error</span>
-                        {% else %}
-                        <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Required</span>
-                        {% endif %}
-                    </div>
-                    <div class="mt-4 flex flex-wrap gap-2">
-                        <a
-                            href="/publish/batches/{{ batch.id }}/meta/connect"
-                            class="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        >
-                            {% if meta.status == 'connected' %}Reconnect Meta{% else %}Connect Meta{% endif %}
-                        </a>
-                        {% if meta.status == 'connected' %}
-                        <button
-                            hx-post="/publish/batches/{{ batch.id }}/meta/disconnect"
-                            hx-confirm="Disconnect the Meta account from this workflow?"
-                            hx-swap="none"
-                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                            class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        >
-                            Disconnect
-                        </button>
-                        {% endif %}
-                    </div>
-                </div>
-
                 {% if meta.status == 'connected' %}
                 <div class="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
                     <div class="flex items-center justify-between gap-3">
@@ -435,7 +385,7 @@
                 {% set description = seed.description %}
                 {% set review_status = seed.script_review_status or 'pending' %}
                 {% set post_removed = review_status == 'removed' or seed.video_excluded == True %}
-                <div class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-purple-300 transition" data-post-card="post-{{ post.id }}">
+                <div id="post-{{ post.id }}" class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-purple-300 transition" data-post-card="post-{{ post.id }}">
                     <div class="flex items-center space-x-3 text-xs text-gray-500">
                         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 uppercase tracking-wide">
                             {{ post.post_type }}
@@ -898,7 +848,7 @@
                         {% set instagram_result = publish_results.instagram or {} %}
                         {% set tiktok_result = publish_results.tiktok or {} %}
                         <div 
-                            x-data="publishSchedulerComponent('{{ post.id }}', {{ post.scheduled_at | tojson if post.scheduled_at else 'null' }}, {{ post.social_networks | tojson }}, {{ post.publish_caption | tojson if post.publish_caption else '\"\"' }}, {{ (batch.meta_connection.selected_page.id if batch.meta_connection and batch.meta_connection.selected_page else None) | tojson }}, {{ (batch.meta_connection.selected_instagram.id if batch.meta_connection and batch.meta_connection.selected_instagram else None) | tojson }}, {{ (batch.tiktok_connection.status == 'connected') | tojson }}, {{ post.video_url | tojson if post.video_url else 'null' }})"
+                            x-data="publishSchedulerComponent('{{ post.id }}', {{ post.scheduled_at | tojson if post.scheduled_at else 'null' }}, {{ post.social_networks | tojson }}, {{ post.publish_caption | tojson if post.publish_caption else '\"\"' }}, {{ (batch.meta_connection.selected_page.id if batch.meta_connection and batch.meta_connection.selected_page else None) | tojson }}, {{ (batch.meta_connection.selected_instagram.id if batch.meta_connection and batch.meta_connection.selected_instagram else None) | tojson }}, {{ (batch.tiktok_connection.status == 'connected') | tojson }}, {{ post.video_url | tojson if post.video_url else 'null' }}, {{ ('/publish/meta/connect?batch_id=' ~ batch.id ~ '&post_id=' ~ post.id) | tojson }})"
                             class="space-y-4"
                         >
                             <div class="flex items-center justify-between">
@@ -953,49 +903,44 @@
                                     Meta Networks
                                 </label>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <label
-                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
-                                        :class="selectedNetworks.includes('instagram') ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-500' : 'bg-white border-gray-300 hover:border-purple-300'"
+                                    <button
+                                        type="button"
+                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md transition"
+                                        :class="networkButtonClass('instagram')"
+                                        @click="toggleNetwork('instagram')"
+                                        @keydown.enter.prevent="toggleNetwork('instagram')"
                                     >
-                                        <input
-                                            type="checkbox"
-                                            value="instagram"
-                                            x-model="selectedNetworks"
-                                            :disabled="!instagramAvailable"
-                                            class="sr-only"
-                                        />
                                         <div class="flex items-center gap-2">
-                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : (instagramAvailable ? 'text-gray-400' : 'text-indigo-400')" fill="currentColor" viewBox="0 0 24 24">
                                                 <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
                                             </svg>
-                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : 'text-gray-600'">Instagram</span>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : (instagramAvailable ? 'text-gray-600' : 'text-indigo-700')">Instagram</span>
                                         </div>
-                                    </label>
+                                    </button>
 
-                                    <label
-                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
-                                        :class="selectedNetworks.includes('facebook') ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500' : 'bg-white border-gray-300 hover:border-blue-300'"
+                                    <button
+                                        type="button"
+                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md transition"
+                                        :class="networkButtonClass('facebook')"
+                                        @click="toggleNetwork('facebook')"
+                                        @keydown.enter.prevent="toggleNetwork('facebook')"
                                     >
-                                        <input
-                                            type="checkbox"
-                                            value="facebook"
-                                            x-model="selectedNetworks"
-                                            :disabled="!facebookAvailable"
-                                            class="sr-only"
-                                        />
                                         <div class="flex items-center gap-2">
-                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : (facebookAvailable ? 'text-gray-400' : 'text-indigo-400')" fill="currentColor" viewBox="0 0 24 24">
                                                 <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
                                             </svg>
-                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : 'text-gray-600'">Facebook</span>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : (facebookAvailable ? 'text-gray-600' : 'text-indigo-700')">Facebook</span>
                                         </div>
-                                    </label>
+                                    </button>
                                 </div>
                                 <p class="mt-2 text-xs text-gray-500" x-show="selectedNetworks.length === 0">
                                     Select at least one Meta network for this post.
                                 </p>
                                 <p class="mt-2 text-xs text-red-700" x-show="!facebookAvailable || !instagramAvailable">
-                                    This batch needs a connected Meta Page and linked Instagram business account before both networks can be enabled.
+                                    Click a locked Meta network to connect Facebook + Instagram and return to this post.
+                                </p>
+                                <p class="mt-2 text-xs text-red-700" x-show="!videoUrl">
+                                    Generate the video before saving a publish schedule.
                                 </p>
                             </div>
 
@@ -1394,7 +1339,7 @@
         };
 
         // Alpine.js component for publish scheduler
-        window.publishSchedulerComponent = function(postId, initialScheduledAt, initialNetworks, initialCaption, selectedPageId, selectedInstagramId, tiktokAvailable, videoUrl) {
+        window.publishSchedulerComponent = function(postId, initialScheduledAt, initialNetworks, initialCaption, selectedPageId, selectedInstagramId, tiktokAvailable, videoUrl, metaConnectUrl) {
             return {
                 postId: postId,
                 scheduledDateTime: '',
@@ -1404,6 +1349,7 @@
                 instagramAvailable: Boolean(selectedInstagramId),
                 tiktokAvailable: Boolean(tiktokAvailable),
                 videoUrl: videoUrl,
+                metaConnectUrl: metaConnectUrl,
                 minDateTime: '',
                 saving: false,
                 tiktokUploading: false,
@@ -1418,6 +1364,16 @@
                     if (initialScheduledAt) {
                         this.scheduledDateTime = window.zoneDateToLocalValue(new Date(initialScheduledAt), BERLIN_TIME_ZONE);
                     }
+
+                    if (window.location.hash === `#post-${this.postId}`) {
+                        const card = document.getElementById(`post-${this.postId}`);
+                        if (card) {
+                            card.classList.add('ring-2', 'ring-indigo-400', 'ring-offset-2');
+                            setTimeout(() => {
+                                card.classList.remove('ring-2', 'ring-indigo-400', 'ring-offset-2');
+                            }, 2500);
+                        }
+                    }
                 },
 
                 getUTCDisplay() {
@@ -1427,10 +1383,54 @@
                     return utcDate.toISOString().replace('T', ' ').substring(0, 16) + ' UTC';
                 },
                 
+                networkAvailable(network) {
+                    if (network === 'facebook') return this.facebookAvailable;
+                    if (network === 'instagram') return this.instagramAvailable;
+                    return false;
+                },
+
+                networkButtonClass(network) {
+                    if (this.selectedNetworks.includes(network)) {
+                        return network === 'facebook'
+                            ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500 cursor-pointer'
+                            : 'bg-purple-50 border-purple-500 ring-2 ring-purple-500 cursor-pointer';
+                    }
+                    if (!this.networkAvailable(network)) {
+                        return 'bg-indigo-50 border-indigo-300 cursor-pointer hover:border-indigo-400';
+                    }
+                    return network === 'facebook'
+                        ? 'bg-white border-gray-300 hover:border-blue-300 cursor-pointer'
+                        : 'bg-white border-gray-300 hover:border-purple-300 cursor-pointer';
+                },
+
+                toggleNetwork(network) {
+                    if (!this.networkAvailable(network)) {
+                        this.openAccountsHub();
+                        return;
+                    }
+
+                    if (this.selectedNetworks.includes(network)) {
+                        this.selectedNetworks = this.selectedNetworks.filter((value) => value !== network);
+                        return;
+                    }
+                    this.selectedNetworks = [...this.selectedNetworks, network];
+                },
+
+                openAccountsHub() {
+                    const accountsHub = window.Alpine?.store('accountsHub');
+                    if (accountsHub) {
+                        accountsHub.open('meta', { postId: this.postId });
+                        return;
+                    }
+                    window.location.assign(this.metaConnectUrl);
+                },
+
                 canSave() {
                     return this.scheduledDateTime && 
+                           Boolean(this.videoUrl) &&
                            this.publishCaption.trim().length > 0 &&
-                           this.selectedNetworks.length > 0 && 
+                           this.selectedNetworks.length > 0 &&
+                           this.selectedNetworks.every((network) => this.networkAvailable(network)) &&
                            !this.saving;
                 },
 

@@ -38,6 +38,7 @@ from app.features.topics.handlers import (
     start_seeding_interaction,
     update_seeding_progress,
 )
+from app.features.publish.handlers import _effective_meta_connection
 from app.features.publish.tiktok import get_tiktok_public_account
 from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
 from app.core.logging import get_logger
@@ -455,7 +456,9 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         batch_detail = {
             **batch,
             **posts_summary,
-            "meta_connection": _sanitize_meta_connection(batch.get("meta_connection")),
+            "meta_connection": _sanitize_meta_connection(
+                _effective_meta_connection(batch_id, batch.get("meta_connection"))
+            ),
             "tiktok_connection": get_tiktok_public_account(),
             "posts": posts_list,
         }

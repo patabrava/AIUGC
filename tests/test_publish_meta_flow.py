@@ -2,11 +2,14 @@
 
 import asyncio
 from copy import deepcopy
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+from fastapi import HTTPException
 
 from app.core.states import BatchState
 from app.core.errors import ValidationError
 from app.features.publish import handlers as publish_handlers
-from app.features.publish.schemas import ConfirmPublishRequest
+from app.features.publish.schemas import ConfirmPublishRequest, PostScheduleRequest, SocialNetwork
 
 
 class _FakeResponse:
@@ -108,6 +111,7 @@ def test_confirm_publish_arms_dispatch_without_completing_batch(monkeypatch):
     }
 
     monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(publish_handlers, "_list_batch_rows", lambda fields="id,meta_connection": [])
     monkeypatch.setattr(
         publish_handlers,
         "_load_batch",
@@ -175,6 +179,7 @@ def test_dispatch_due_posts_records_network_results_individually(monkeypatch):
 
     touched_batches = []
     monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(publish_handlers, "_list_batch_rows", lambda fields="id,meta_connection": [])
     monkeypatch.setattr(
         publish_handlers,
         "_load_batch",
@@ -213,3 +218,164 @@ def test_dispatch_due_posts_records_network_results_individually(monkeypatch):
     assert post["publish_results"]["facebook"]["status"] == "published"
     assert post["publish_results"]["instagram"]["status"] == "failed"
     assert post["publish_results"]["instagram"]["error_code"] == "validation_error"
+
+
+def test_workspace_meta_connection_prefers_connected_state(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_list_batch_rows",
+        lambda fields="id,meta_connection": [
+            {
+                "id": "batch-1",
+                "meta_connection": {
+                    "status": "disconnected",
+                    "updated_at": "2026-03-17T10:00:00",
+                },
+            },
+            {
+                "id": "batch-2",
+                "meta_connection": {
+                    "status": "connected",
+                    "updated_at": "2026-03-17T12:00:00",
+                    "selected_page": {"id": "page-1"},
+                },
+            },
+        ],
+    )
+
+    resolved = publish_handlers._effective_meta_connection("batch-1", {})
+
+    assert resolved["status"] == "connected"
+    assert resolved["selected_page"]["id"] == "page-1"
+
+
+def test_schedule_post_rejects_missing_video_before_save(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_load_post",
+        lambda post_id, fields="id,batch_id,video_url": {
+            "id": post_id,
+            "batch_id": "batch-1",
+            "video_url": None,
+        },
+    )
+
+    request = PostScheduleRequest(
+        post_id="post-1",
+        scheduled_at=datetime.utcnow() + timedelta(hours=2),
+        publish_caption="Caption",
+        social_networks=[SocialNetwork.FACEBOOK],
+    )
+
+    try:
+        asyncio.run(publish_handlers.schedule_post("post-1", request))
+        assert False, "schedule_post should reject missing video"
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert exc.detail == "Generate the video before saving a publish schedule."
+
+
+def test_connect_meta_account_allows_pre_s7_batches(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_load_batch",
+        lambda batch_id, fields="id,state,meta_connection": {
+            "id": batch_id,
+            "state": BatchState.S1_SETUP.value,
+        },
+    )
+    monkeypatch.setattr(
+        publish_handlers,
+        "_require_meta_settings",
+        lambda: SimpleNamespace(
+            meta_app_id="meta-app-id",
+            meta_app_secret="meta-app-secret",
+            meta_redirect_uri="https://example.com/publish/meta/callback",
+        ),
+    )
+
+    response = asyncio.run(publish_handlers.connect_meta_account("batch-1"))
+
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert "client_id=meta-app-id" in location
+    assert "redirect_uri=https%3A%2F%2Fexample.com%2Fpublish%2Fmeta%2Fcallback" in location
+
+
+def test_connect_meta_account_can_resolve_batch_for_navbar(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_list_batch_rows",
+        lambda fields="id,updated_at,created_at": [
+            {"id": "batch-old", "updated_at": "2026-03-17T10:00:00"},
+            {"id": "batch-new", "updated_at": "2026-03-18T09:00:00"},
+        ],
+    )
+    monkeypatch.setattr(
+        publish_handlers,
+        "_require_meta_settings",
+        lambda: SimpleNamespace(
+            meta_app_id="meta-app-id",
+            meta_app_secret="meta-app-secret",
+            meta_redirect_uri="https://example.com/publish/meta/callback",
+        ),
+    )
+
+    response = asyncio.run(publish_handlers.connect_meta_account())
+
+    assert response.status_code == 302
+    assert "client_id=meta-app-id" in response.headers["location"]
+
+
+def test_get_meta_status_returns_sanitized_workspace_state(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_get_workspace_meta_connection",
+        lambda preferred_batch_id=None: {
+            "status": "connected",
+            "user": {"name": "Operator"},
+            "user_access_token": "secret",
+            "selected_page": {"id": "page-1", "name": "Page Name", "access_token": "page-secret"},
+            "selected_instagram": {"id": "ig-1", "username": "brand"},
+            "available_pages": [
+                {"id": "page-1", "name": "Page Name", "access_token": "page-secret"},
+            ],
+        },
+    )
+
+    response = asyncio.run(publish_handlers.get_meta_status())
+
+    assert response.data["is_connected"] is True
+    assert response.data["has_selected_target"] is True
+    assert response.data["meta_connection"]["user"]["name"] == "Operator"
+    assert "user_access_token" not in response.data["meta_connection"]
+
+
+def test_get_accounts_status_includes_meta_and_tiktok(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_get_workspace_meta_connection",
+        lambda preferred_batch_id=None: {
+            "status": "connected",
+            "user": {"name": "Operator"},
+            "user_access_token": "secret",
+            "selected_page": {"id": "page-1", "name": "Page Name", "access_token": "page-secret"},
+            "selected_instagram": {"id": "ig-1", "username": "brand"},
+        },
+    )
+    monkeypatch.setattr(
+        publish_handlers,
+        "get_tiktok_public_account",
+        lambda: {
+            "status": "connected",
+            "display_name": "Sandbox Creator",
+            "open_id": "open-123",
+        },
+    )
+
+    response = asyncio.run(publish_handlers.get_accounts_status())
+
+    assert response.data["providers"]["meta"]["connected"] is True
+    assert response.data["providers"]["tiktok"]["connected"] is True
+    assert response.data["tiktok_connection"]["display_name"] == "Sandbox Creator"
+    assert "user_access_token" not in response.data["meta_connection"]

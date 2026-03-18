@@ -50,6 +50,7 @@ from app.features.publish.schemas import (
     SuggestTimesResponse,
     UpdatePostScheduleRequest,
 )
+from app.features.publish.tiktok import get_tiktok_public_account
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/publish", tags=["publish"])
@@ -145,10 +146,14 @@ def _require_meta_settings() -> Any:
     return settings
 
 
-def _build_meta_state(batch_id: str, secret: str) -> str:
-    """Create a signed state token so the callback can return to the right batch."""
+def _build_meta_state(batch_id: str, secret: str, post_id: Optional[str] = None) -> str:
+    """Create a signed state token so the callback can return to the right batch and post."""
     payload = json.dumps(
-        {"batch_id": batch_id, "issued_at": datetime.utcnow().isoformat()},
+        {
+            "batch_id": batch_id,
+            "post_id": post_id,
+            "issued_at": datetime.utcnow().isoformat(),
+        },
         separators=(",", ":"),
     ).encode("utf-8")
     encoded = base64.urlsafe_b64encode(payload).decode("utf-8").rstrip("=")
@@ -175,6 +180,28 @@ def _decode_meta_state(state: str, secret: str) -> Dict[str, Any]:
     if not payload.get("batch_id"):
         raise ValidationError("Meta OAuth state missing batch id.")
     return payload
+
+
+def _meta_updated_at(meta_connection: Dict[str, Any]) -> datetime:
+    """Sort workspace Meta connections by their last meaningful update."""
+    raw = meta_connection.get("updated_at") or meta_connection.get("connected_at")
+    if not raw:
+        return datetime.min
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return datetime.min
+
+
+def _row_updated_at(row: Dict[str, Any]) -> datetime:
+    """Sort generic batch rows by their freshest timestamp."""
+    raw = row.get("updated_at") or row.get("created_at")
+    if not raw:
+        return datetime.min
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return datetime.min
 
 
 async def _meta_request(
@@ -307,6 +334,82 @@ def _update_batch_meta_connection(batch_id: str, meta_connection: Dict[str, Any]
     return response.data[0]
 
 
+def _list_batch_rows(fields: str = "id,meta_connection") -> List[Dict[str, Any]]:
+    """Load batch rows used to resolve or propagate workspace-wide Meta connection state."""
+    supabase = get_supabase().client
+    response = supabase.table("batches").select(fields).execute()
+    return response.data or []
+
+
+def _get_workspace_meta_connection(preferred_batch_id: Optional[str] = None) -> Dict[str, Any]:
+    """Resolve the current workspace Meta connection for any batch."""
+    rows = _list_batch_rows("id,meta_connection")
+    candidates: List[Tuple[datetime, bool, Dict[str, Any]]] = []
+    for row in rows:
+        meta_connection = _load_json_object(row.get("meta_connection"))
+        if not meta_connection:
+            continue
+        candidates.append(
+            (
+                _meta_updated_at(meta_connection),
+                row.get("id") == preferred_batch_id,
+                meta_connection,
+            )
+        )
+
+    connected = [
+        candidate for candidate in candidates if candidate[2].get("status") == "connected"
+    ]
+    if connected:
+        connected.sort(key=lambda item: (item[1], item[0]), reverse=True)
+        return deepcopy(connected[0][2])
+
+    if candidates:
+        candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
+        return deepcopy(candidates[0][2])
+    return {}
+
+
+def _effective_meta_connection(batch_id: str, batch_meta_connection: Any) -> Dict[str, Any]:
+    """Prefer the live workspace Meta connection over stale batch-local state."""
+    local = _load_json_object(batch_meta_connection)
+    if local.get("status") == "connected":
+        return local
+
+    workspace = _get_workspace_meta_connection(preferred_batch_id=batch_id)
+    if workspace.get("status") == "connected":
+        return workspace
+    if local:
+        return local
+    return workspace
+
+
+def _resolve_meta_connect_batch_id(batch_id: Optional[str]) -> str:
+    """Pick a batch id for navbar-triggered Meta login when no batch is provided."""
+    if batch_id:
+        _load_batch(batch_id, fields="id")
+        return batch_id
+
+    rows = _list_batch_rows("id,updated_at,created_at")
+    viable_rows = [row for row in rows if row.get("id")]
+    if not viable_rows:
+        raise ValidationError("Create a batch before connecting Meta.")
+
+    viable_rows.sort(key=_row_updated_at, reverse=True)
+    return str(viable_rows[0]["id"])
+
+
+def _set_workspace_meta_connection(meta_connection: Dict[str, Any], *, source_batch_id: Optional[str] = None) -> None:
+    """Propagate one Meta connection across all existing batches."""
+    rows = _list_batch_rows("id")
+    batch_ids = [row.get("id") for row in rows if row.get("id")]
+    if source_batch_id and source_batch_id not in batch_ids:
+        batch_ids.append(source_batch_id)
+
+    for batch_id in batch_ids:
+        _update_batch_meta_connection(str(batch_id), deepcopy(meta_connection))
+
+
 def _get_selected_meta_targets(meta_connection: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Return the selected Page and Instagram targets from a stored connection."""
     selected_page = meta_connection.get("selected_page") or {}
@@ -392,15 +495,12 @@ def update_post_schedule(
     return {}
 
 
-@router.get("/batches/{batch_id}/meta/connect")
-async def connect_meta_account(batch_id: str):
-    """Start standard server-side Facebook Login for one batch-scoped workflow."""
-    batch = _load_batch(batch_id)
-    if batch.get("state") != BatchState.S7_PUBLISH_PLAN.value:
-        raise HTTPException(status_code=409, detail="Meta connection is only available in S7_PUBLISH_PLAN")
-
+@router.get("/meta/connect")
+async def connect_meta_account(batch_id: Optional[str] = None, post_id: Optional[str] = None):
+    """Start standard server-side Facebook Login and remember batch/post return context."""
+    batch_id = _resolve_meta_connect_batch_id(batch_id)
     settings = _require_meta_settings()
-    state = _build_meta_state(batch_id, settings.meta_app_secret)
+    state = _build_meta_state(batch_id, settings.meta_app_secret, post_id=post_id)
     query = urlencode(
         {
             "client_id": settings.meta_app_id,
@@ -413,6 +513,64 @@ async def connect_meta_account(batch_id: str):
     return RedirectResponse(url=f"{META_OAUTH_URL}?{query}", status_code=302)
 
 
+@router.get("/meta/status", response_model=SuccessResponse)
+async def get_meta_status(batch_id: Optional[str] = None):
+    """Return the current workspace Meta connection state for shared UI surfaces."""
+    if batch_id:
+        batch = _load_batch(batch_id)
+        meta_connection = _effective_meta_connection(batch_id, batch.get("meta_connection"))
+    else:
+        meta_connection = _get_workspace_meta_connection()
+
+    sanitized = _sanitize_meta_connection(meta_connection)
+    return SuccessResponse(
+        data={
+            "meta_connection": sanitized,
+            "is_connected": sanitized.get("status") == "connected",
+            "has_selected_target": bool(
+                (sanitized.get("selected_page") or {}).get("id")
+                and (sanitized.get("selected_instagram") or {}).get("id")
+            ),
+        }
+    )
+
+
+@router.get("/accounts/status", response_model=SuccessResponse)
+async def get_accounts_status(batch_id: Optional[str] = None):
+    """Return the shared account hub status for all publish providers."""
+    if batch_id:
+        batch = _load_batch(batch_id)
+        meta_connection = _effective_meta_connection(batch_id, batch.get("meta_connection"))
+    else:
+        meta_connection = _get_workspace_meta_connection()
+
+    sanitized_meta = _sanitize_meta_connection(meta_connection)
+    tiktok_connection = get_tiktok_public_account()
+
+    return SuccessResponse(
+        data={
+            "meta_connection": sanitized_meta,
+            "tiktok_connection": tiktok_connection,
+            "providers": {
+                "meta": {
+                    "connected": sanitized_meta.get("status") == "connected",
+                    "needs_attention": sanitized_meta.get("status") == "error",
+                },
+                "tiktok": {
+                    "connected": tiktok_connection.get("status") == "connected",
+                    "needs_attention": tiktok_connection.get("status") == "reconnect_required",
+                },
+            },
+        }
+    )
+
+
+@router.get("/batches/{batch_id}/meta/connect")
+async def connect_batch_meta_account(batch_id: str, post_id: Optional[str] = None):
+    """Backwards-compatible wrapper for batch-relative Meta connect links."""
+    return await connect_meta_account(batch_id=batch_id, post_id=post_id)
+
+
 @router.get("/meta/callback")
 async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     """Handle the standard Facebook Login callback and persist the batch connection."""
@@ -422,17 +580,21 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
 
     state_payload = _decode_meta_state(state, settings.meta_app_secret)
     batch_id = state_payload["batch_id"]
+    post_id = state_payload.get("post_id")
+    redirect_target = f"/batches/{batch_id}"
+    if post_id:
+        redirect_target = f"{redirect_target}#post-{post_id}"
 
     if error:
-        _update_batch_meta_connection(
-            batch_id,
+        _set_workspace_meta_connection(
             {
                 "status": "error",
                 "error": error,
                 "updated_at": datetime.utcnow().isoformat(),
             },
+            source_batch_id=batch_id,
         )
-        return RedirectResponse(url=f"/batches/{batch_id}", status_code=302)
+        return RedirectResponse(url=redirect_target, status_code=302)
 
     if not code:
         raise HTTPException(status_code=400, detail="Missing Meta OAuth code")
@@ -456,7 +618,7 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
                 "expires_in": token_payload.get("expires_in"),
             },
         }
-        _update_batch_meta_connection(batch_id, connection)
+        _set_workspace_meta_connection(connection, source_batch_id=batch_id)
         logger.info(
             "meta_connection_created",
             batch_id=batch_id,
@@ -464,17 +626,17 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
             available_pages=len(available_pages),
         )
     except FlowForgeException as exc:
-        _update_batch_meta_connection(
-            batch_id,
+        _set_workspace_meta_connection(
             {
                 "status": "error",
                 "error": exc.message,
                 "details": exc.details,
                 "updated_at": datetime.utcnow().isoformat(),
             },
+            source_batch_id=batch_id,
         )
 
-    return RedirectResponse(url=f"/batches/{batch_id}", status_code=302)
+    return RedirectResponse(url=redirect_target, status_code=302)
 
 
 @router.post("/batches/{batch_id}/meta/select-target", response_model=SuccessResponse)
@@ -488,7 +650,7 @@ async def select_meta_target(batch_id: str, request: Request):
         payload = MetaTargetSelectionRequest(page_id=str(form.get("page_id", "")).strip())
 
     batch = _load_batch(batch_id)
-    meta_connection = _load_json_object(batch.get("meta_connection"))
+    meta_connection = _effective_meta_connection(batch_id, batch.get("meta_connection"))
     available_pages = meta_connection.get("available_pages") or []
 
     selected_page = None
@@ -507,7 +669,7 @@ async def select_meta_target(batch_id: str, request: Request):
     meta_connection["selected_page"] = selected_page
     meta_connection["selected_instagram"] = instagram_account
     meta_connection["updated_at"] = datetime.utcnow().isoformat()
-    _update_batch_meta_connection(batch_id, meta_connection)
+    _set_workspace_meta_connection(meta_connection, source_batch_id=batch_id)
 
     logger.info(
         "meta_targets_selected",
@@ -520,7 +682,7 @@ async def select_meta_target(batch_id: str, request: Request):
 
 @router.post("/batches/{batch_id}/meta/disconnect", response_model=SuccessResponse)
 async def disconnect_meta_account(batch_id: str):
-    """Clear the stored Meta connection for a batch-scoped workflow."""
+    """Clear the stored Meta connection for the whole workspace."""
     _load_batch(batch_id)
     connection = {
         "status": "disconnected",
@@ -529,9 +691,18 @@ async def disconnect_meta_account(batch_id: str):
         "selected_page": {},
         "selected_instagram": {},
     }
-    _update_batch_meta_connection(batch_id, connection)
+    _set_workspace_meta_connection(connection, source_batch_id=batch_id)
     logger.info("meta_connection_cleared", batch_id=batch_id)
     return SuccessResponse(data={"batch_id": batch_id, "meta_connection": connection})
+
+
+def _load_post(post_id: str, fields: str = "id,batch_id,video_url") -> Dict[str, Any]:
+    """Load a single post row for schedule and dispatch validation."""
+    supabase = get_supabase().client
+    response = supabase.table("posts").select(fields).eq("id", post_id).execute()
+    if not response.data:
+        raise NotFoundError("Post not found", details={"post_id": post_id})
+    return response.data[0]
 
 
 @router.post("/posts/{post_id}/schedule", response_model=SuccessResponse)
@@ -539,6 +710,14 @@ async def schedule_post(post_id: str, request: PostScheduleRequest):
     """Save the publish plan for a single post."""
     if post_id != request.post_id:
         raise HTTPException(status_code=409, detail="Post id mismatch between route and body")
+
+    post = _load_post(post_id)
+    if not post.get("video_url"):
+        raise HTTPException(status_code=422, detail="Generate the video before saving a publish schedule.")
+
+    batch = _load_batch(post["batch_id"])
+    meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
+    _ensure_meta_targets_for_networks([n.value for n in request.social_networks], meta_connection)
 
     updated_post = update_post_schedule(
         post_id=post_id,
@@ -570,6 +749,15 @@ async def update_schedule(post_id: str, request: UpdatePostScheduleRequest):
     social_networks = None
     if request.social_networks is not None:
         social_networks = [n.value for n in request.social_networks]
+
+    post = _load_post(post_id, fields="id,batch_id,video_url,social_networks")
+    networks_to_validate = social_networks or _load_string_list(post.get("social_networks"))
+    if networks_to_validate:
+        if not post.get("video_url"):
+            raise HTTPException(status_code=422, detail="Generate the video before saving a publish schedule.")
+        batch = _load_batch(post["batch_id"])
+        meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
+        _ensure_meta_targets_for_networks(networks_to_validate, meta_connection)
 
     updated_post = update_post_schedule(
         post_id=post_id,
@@ -687,7 +875,7 @@ async def confirm_publish(batch_id: str, request: ConfirmPublishRequest):
             detail=f"Batch must be in S7_PUBLISH_PLAN state (current: {batch.get('state')})",
         )
 
-    meta_connection = _load_json_object(batch.get("meta_connection"))
+    meta_connection = _effective_meta_connection(batch_id, batch.get("meta_connection"))
     schedules = get_post_schedules(batch_id)
     if not schedules:
         raise HTTPException(status_code=400, detail="No active posts are available for publish scheduling")
@@ -904,7 +1092,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
         publish_results = _load_json_object(post.get("publish_results"))
         platform_ids = _load_json_object(post.get("platform_ids"))
         batch = _load_batch(post["batch_id"], fields="id,meta_connection,state")
-        meta_connection = _load_json_object(batch.get("meta_connection"))
+        meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
 
         try:
             _ensure_meta_targets_for_networks(post["social_networks"], meta_connection)
