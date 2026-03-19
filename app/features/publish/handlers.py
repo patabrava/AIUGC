@@ -67,12 +67,8 @@ META_TIMEOUT_SECONDS = 30.0
 INSTAGRAM_POLL_ATTEMPTS = 10
 INSTAGRAM_POLL_SECONDS = 2
 META_LOGIN_SCOPES = [
-    "pages_show_list",
-    "pages_read_engagement",
-    "pages_manage_posts",
-    "instagram_basic",
-    "instagram_content_publish",
-    "business_management",
+    "instagram_business_basic",
+    "instagram_business_content_publish",
 ]
 
 
@@ -578,7 +574,7 @@ async def connect_batch_meta_account(batch_id: str, post_id: Optional[str] = Non
 
 @router.get("/meta/callback")
 async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
-    """Handle the standard Facebook Login callback and persist the batch connection."""
+    """Handle the Instagram Login callback and persist the batch connection."""
     settings = _require_meta_settings()
     if not state:
         raise HTTPException(status_code=400, detail="Missing Meta OAuth state")
@@ -614,7 +610,7 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
             "user": {"id": user.get("id"), "name": user.get("name")},
             "user_access_token": token_meta["access_token"],
             "token_expires_at": token_meta["expires_at"],
-            "token_scope_source": "facebook_login",
+            "token_scope_source": "instagram_login",
             "available_pages": available_pages,
             "selected_page": {},
             "selected_instagram": {},

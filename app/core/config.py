@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     )
     tiktok_sandbox_account: str = Field(default="", description="Authorized TikTok sandbox account handle")
     instagram_access_token: str = Field(default="", description="Instagram access token")
-    meta_app_id: str = Field(default="", description="Meta app ID for Facebook Login for Business")
+    meta_app_id: str = Field(default="", description="Meta app ID for Instagram Login")
     meta_app_secret: str = Field(default="", description="Meta app secret")
     meta_redirect_uri: str = Field(default="", description="OAuth callback URL for Meta login")
     app_url: str = Field(default="", description="Public application base URL")
