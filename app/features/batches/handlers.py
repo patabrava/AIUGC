@@ -41,7 +41,10 @@ from app.features.topics.handlers import (
     start_seeding_interaction,
     update_seeding_progress,
 )
-from app.features.publish.handlers import _effective_meta_connection
+from app.features.publish.handlers import (
+    _effective_meta_connection,
+    _sanitize_meta_connection as _publish_sanitize_meta_connection,
+)
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -295,22 +298,8 @@ def _normalize_string_list(value: Any) -> list[str]:
 
 def _sanitize_meta_connection(meta_connection: Any) -> Dict[str, Any]:
     """Strip token material before Meta connection data reaches the browser."""
-    sanitized = _normalize_json_object(meta_connection, field_name="meta_connection")
-    if not sanitized:
-        return {}
-
-    sanitized.pop("user_access_token", None)
-    sanitized.pop("page_access_token", None)
-
-    for page in sanitized.get("available_pages") or []:
-        if isinstance(page, dict):
-            page.pop("access_token", None)
-
-    selected_page = sanitized.get("selected_page")
-    if isinstance(selected_page, dict):
-        selected_page.pop("access_token", None)
-
-    return sanitized
+    normalized = _normalize_json_object(meta_connection, field_name="meta_connection")
+    return _publish_sanitize_meta_connection(normalized)
 
 
 @router.get("", response_model=SuccessResponse)

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.core.states import BatchState
 from app.core.errors import ValidationError
+from app.features.batches import handlers as batch_handlers
 from app.features.publish import handlers as publish_handlers
 from app.features.publish.schemas import ConfirmPublishRequest, PostScheduleRequest, SocialNetwork
 
@@ -631,6 +632,35 @@ def test_effective_meta_connection_auto_selects_only_publishable_page(monkeypatc
 
     assert resolved["selected_page"]["id"] == "page-1"
     assert resolved["selected_instagram"]["id"] == "ig-1"
+
+
+def test_batch_meta_connection_sanitizer_preserves_publish_readiness():
+    sanitized = batch_handlers._sanitize_meta_connection(
+        {
+            "status": "connected",
+            "user_access_token": "user-secret",
+            "selected_page": {
+                "id": "page-1",
+                "name": "Page Name",
+                "access_token": "page-secret",
+            },
+            "selected_instagram": {"id": "ig-1", "username": "brand"},
+            "available_pages": [
+                {
+                    "id": "page-1",
+                    "name": "Page Name",
+                    "access_token": "page-secret",
+                    "instagram_business_account": {"id": "ig-1", "username": "brand"},
+                }
+            ],
+        }
+    )
+
+    assert sanitized["publish_ready"] is True
+    assert sanitized["readiness_status"] == "publish_ready"
+    assert sanitized["readiness_reason"] == "Facebook and Instagram are ready to publish from this workspace."
+    assert "user_access_token" not in sanitized
+    assert "access_token" not in sanitized["selected_page"]
 
 
 def test_derive_publish_status_does_not_treat_tiktok_inbox_as_published():
