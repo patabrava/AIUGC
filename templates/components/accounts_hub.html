@@ -67,6 +67,7 @@
                     <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <button
                             type="button"
+                            x-show="!$store.accountsHub?.isProviderConnected('meta')"
                             class="inline-flex items-center justify-center rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
                             @click="$store.accountsHub?.continueToProvider('meta')"
                         >
@@ -115,10 +116,19 @@
                     <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <button
                             type="button"
+                            x-show="!$store.accountsHub?.isProviderConnected('tiktok')"
                             class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
                             @click="$store.accountsHub?.continueToProvider('tiktok')"
                         >
                             <span x-text="$store.accountsHub?.providerPrimaryCta('tiktok') || 'Connect TikTok'"></span>
+                        </button>
+                        <button
+                            type="button"
+                            x-show="$store.accountsHub?.isProviderConnected('tiktok')"
+                            class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+                            @click="$store.accountsHub?.disconnectTiktok()"
+                        >
+                            Disconnect
                         </button>
                     </div>
                 </section>
@@ -270,10 +280,10 @@
 
             providerPrimaryCta(provider) {
                 if (provider === 'meta') {
-                    return this.isProviderConnected('meta') ? 'Reconnect Meta' : 'Connect Meta';
+                    return 'Connect Meta';
                 }
                 if (provider === 'tiktok') {
-                    return this.isProviderConnected('tiktok') ? 'Reconnect TikTok' : 'Connect TikTok';
+                    return 'Connect TikTok';
                 }
                 return 'Connect';
             },
@@ -377,6 +387,18 @@
                 const response = await fetch(`/publish/batches/${this.batchId}/meta/disconnect`, {
                     method: 'POST',
                     headers: { 'X-Correlation-ID': 'accounts_hub_disconnect_meta' }
+                });
+                if (response.ok) {
+                    await this.refreshStatus();
+                }
+            },
+
+            async disconnectTiktok() {
+                const confirmed = window.confirm('Disconnect TikTok from the entire workspace?');
+                if (!confirmed) return;
+                const response = await fetch('/api/auth/tiktok/disconnect', {
+                    method: 'POST',
+                    headers: { 'X-Correlation-ID': 'accounts_hub_disconnect_tiktok' }
                 });
                 if (response.ok) {
                     await this.refreshStatus();

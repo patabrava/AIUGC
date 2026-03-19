@@ -844,6 +844,22 @@ async def tiktok_oauth_callback(
     return RedirectResponse(url=redirect_target, status_code=302)
 
 
+@router.post("/api/auth/tiktok/disconnect", response_model=SuccessResponse)
+async def disconnect_tiktok_account():
+    """Remove the connected TikTok account from the workspace."""
+    settings = _require_tiktok_settings()
+    response = (
+        get_supabase()
+        .client.table("connected_accounts")
+        .delete()
+        .eq("platform", "tiktok")
+        .eq("environment", settings.tiktok_environment)
+        .execute()
+    )
+    logger.info("tiktok_account_disconnected", environment=settings.tiktok_environment)
+    return SuccessResponse(data={"status": "disconnected", "deleted": len(response.data or [])})
+
+
 @router.get("/api/tiktok/account", response_model=SuccessResponse)
 async def get_tiktok_account():
     """Return the current TikTok sandbox account without token material."""
