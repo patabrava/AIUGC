@@ -185,25 +185,34 @@ async def _tiktok_request(
         payload = {"message": response.text}
 
     error = payload.get("error") if isinstance(payload, dict) else None
-    error_code = str((error or {}).get("code") or "")
-    error_message = str((error or {}).get("message") or payload.get("message") or response.text or "TikTok request failed")
+    error_description = payload.get("error_description") if isinstance(payload, dict) else None
+    log_id = payload.get("log_id") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        error_code = str(error.get("code") or error.get("error") or "")
+        error_message = str(error.get("message") or error_description or payload.get("message") or response.text or "TikTok request failed")
+    elif isinstance(error, str):
+        error_code = error
+        error_message = str(error_description or payload.get("message") or response.text or "TikTok request failed")
+    else:
+        error_code = ""
+        error_message = str(payload.get("message") or response.text or "TikTok request failed")
 
     if response.status_code == 429 or error_code == "rate_limit_exceeded":
         raise RateLimitError(
             message="TikTok rate limit exceeded.",
-            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload)},
+            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload), "log_id": log_id},
         )
 
     if response.status_code == 401 or error_code in {"access_token_invalid", "scope_not_authorized"}:
         raise AuthenticationError(
             message="TikTok access token is invalid or missing required scope.",
-            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload)},
+            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload), "log_id": log_id},
         )
 
     if response.is_error or (error and error_code and error_code != "ok"):
         raise ThirdPartyError(
             message=error_message,
-            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload), "url": url},
+            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload), "url": url, "log_id": log_id},
         )
 
     return payload if isinstance(payload, dict) else {}
@@ -498,6 +507,7 @@ async def start_tiktok_oauth(batch_id: Optional[str] = None):
 
 
 @router.get("/api/auth/tiktok/callback")
+@router.get("/publish/tiktok/callback")
 async def tiktok_oauth_callback(
     code: Optional[str] = None,
     state: Optional[str] = None,

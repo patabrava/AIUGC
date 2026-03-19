@@ -53,6 +53,35 @@ class _FakeSupabase:
         self.client = _FakeClient(storage)
 
 
+class _ErrorResponse:
+    def __init__(self, payload, status_code=400):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = str(payload)
+        self.is_error = True
+
+    def json(self):
+        return self._payload
+
+
+class _ErrorClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def request(self, *args, **kwargs):
+        return _ErrorResponse(
+            {
+                "error": "invalid_grant",
+                "error_description": "redirect_uri mismatch",
+                "log_id": "log-123",
+            },
+            status_code=400,
+        )
+
+
 def _settings():
     return SimpleNamespace(
         tiktok_client_key="client-key",
@@ -132,3 +161,21 @@ def test_tiktok_callback_persists_connected_account(monkeypatch):
     assert params["p_open_id"] == "open-123"
     assert params["p_display_name"] == "Sandbox Creator"
     assert params["p_access_token_plain"] == "access-token"
+
+
+def test_tiktok_request_handles_oauth_error_payload(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(tiktok.httpx, "AsyncClient", lambda *args, **kwargs: _ErrorClient())
+
+    async def run():
+        try:
+            await tiktok._tiktok_request("POST", "/v2/oauth/token/", data={})
+        except Exception as exc:
+            return exc
+        raise AssertionError("Expected TikTok request to raise")
+
+    exc = asyncio.run(run())
+    assert exc.code.value == "third_party_fail"
+    assert "redirect_uri mismatch" in exc.message
+    assert exc.details["log_id"] == "log-123"
