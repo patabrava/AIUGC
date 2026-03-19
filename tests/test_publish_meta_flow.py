@@ -663,6 +663,29 @@ def test_batch_meta_connection_sanitizer_preserves_publish_readiness():
     assert "access_token" not in sanitized["selected_page"]
 
 
+def test_post_schedule_request_accepts_utc_iso_timestamp():
+    request = PostScheduleRequest(
+        post_id="post-1",
+        scheduled_at="2026-03-20T02:00:00Z",
+        publish_caption="Caption",
+        social_networks=[SocialNetwork.FACEBOOK],
+    )
+
+    assert request.scheduled_at.isoformat() == "2026-03-20T02:00:00+00:00"
+
+
+def test_update_post_schedule_request_accepts_utc_iso_timestamp():
+    from app.features.publish.schemas import UpdatePostScheduleRequest
+
+    request = UpdatePostScheduleRequest(
+        scheduled_at="2026-03-20T02:00:00Z",
+        publish_caption="Caption",
+        social_networks=[SocialNetwork.INSTAGRAM],
+    )
+
+    assert request.scheduled_at.isoformat() == "2026-03-20T02:00:00+00:00"
+
+
 def test_derive_publish_status_does_not_treat_tiktok_inbox_as_published():
     status = publish_handlers._derive_publish_status(
         ["tiktok"],

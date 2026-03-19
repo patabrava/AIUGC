@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -29,6 +29,13 @@ class PublishStatus(str, Enum):
     FAILED = "failed"
 
 
+def _normalize_utc_datetime(value: datetime) -> datetime:
+    """Normalize schedule timestamps to UTC-aware datetimes for safe comparisons."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class PostScheduleRequest(BaseModel):
     """Request to schedule a single post."""
     post_id: str = Field(..., description="Post ID to schedule")
@@ -44,9 +51,10 @@ class PostScheduleRequest(BaseModel):
     @classmethod
     def validate_future_time(cls, v: datetime) -> datetime:
         """Ensure scheduled time is in the future."""
-        if v <= datetime.utcnow():
+        normalized = _normalize_utc_datetime(v)
+        if normalized <= datetime.now(timezone.utc):
             raise ValueError("Scheduled time must be in the future")
-        return v
+        return normalized
     
     @field_validator('social_networks')
     @classmethod
@@ -101,9 +109,12 @@ class UpdatePostScheduleRequest(BaseModel):
     @classmethod
     def validate_future_time(cls, v: Optional[datetime]) -> Optional[datetime]:
         """Ensure scheduled time is in the future."""
-        if v is not None and v <= datetime.utcnow():
+        if v is None:
+            return v
+        normalized = _normalize_utc_datetime(v)
+        if normalized <= datetime.now(timezone.utc):
             raise ValueError("Scheduled time must be in the future")
-        return v
+        return normalized
 
 
 class MetaTargetSelectionRequest(BaseModel):
