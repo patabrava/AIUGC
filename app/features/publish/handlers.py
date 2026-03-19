@@ -67,11 +67,8 @@ META_TIMEOUT_SECONDS = 30.0
 INSTAGRAM_POLL_ATTEMPTS = 10
 INSTAGRAM_POLL_SECONDS = 2
 META_LOGIN_SCOPES = [
-    "pages_show_list",
-    "pages_read_engagement",
-    "pages_manage_posts",
-    "instagram_basic",
-    "instagram_content_publish",
+    "instagram_business_basic",
+    "instagram_business_content_publish",
 ]
 
 
@@ -501,7 +498,7 @@ def update_post_schedule(
 
 @router.get("/meta/connect")
 async def connect_meta_account(batch_id: Optional[str] = None, post_id: Optional[str] = None):
-    """Start standard server-side Facebook Login and remember batch/post return context."""
+    """Start Instagram Login and remember batch/post return context."""
     batch_id = _resolve_meta_connect_batch_id(batch_id)
     settings = _require_meta_settings()
     state = _build_meta_state(batch_id, settings.meta_app_secret, post_id=post_id)
