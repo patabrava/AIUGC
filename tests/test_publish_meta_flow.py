@@ -390,7 +390,60 @@ def test_connect_meta_account_allows_pre_s7_batches(monkeypatch):
     location = response.headers["location"]
     assert "client_id=meta-app-id" in location
     assert "redirect_uri=https%3A%2F%2Fexample.com%2Fpublish%2Fmeta%2Fcallback" in location
-    assert "scope=pages_show_list%2Cpages_read_engagement%2Cpages_manage_posts%2Cinstagram_basic%2Cinstagram_content_publish" in location
+    assert "scope=pages_show_list%2Cpages_read_engagement%2Cpages_manage_posts%2Cbusiness_management%2Cinstagram_basic%2Cinstagram_content_publish" in location
+
+
+def test_meta_callback_uses_assigned_pages_when_accounts_is_empty(monkeypatch):
+    import asyncio
+
+    captured = {}
+    monkeypatch.setattr(
+        publish_handlers,
+        "get_settings",
+        lambda: SimpleNamespace(
+            meta_app_id="meta-app-id",
+            meta_app_secret="meta-secret",
+            meta_redirect_uri="https://example.com/publish/meta/callback",
+        ),
+    )
+    monkeypatch.setattr(
+        publish_handlers,
+        "_set_workspace_meta_connection",
+        lambda meta_connection, source_batch_id=None: captured.update(meta_connection=deepcopy(meta_connection), source_batch_id=source_batch_id),
+    )
+
+    async def _fake_meta_request(method, url, *, params=None, data=None):
+        if url.endswith("/oauth/access_token"):
+            return {"access_token": "user-token", "expires_in": 3600}
+        if url.endswith("/me"):
+            return {"id": "user-1", "name": "Camilo"}
+        if url.endswith("/me/accounts"):
+            return {"data": []}
+        if url.endswith("/me/assigned_pages"):
+            return {
+                "data": [
+                    {
+                        "id": "page-1",
+                        "name": "Lippe Lift",
+                        "tasks": ["ADVERTISE", "CREATE_CONTENT"],
+                        "access_token": "page-token",
+                        "instagram_business_account": {"id": "ig-1", "username": "lippe_test"},
+                    }
+                ]
+            }
+        raise AssertionError(f"Unexpected Meta URL: {url}")
+
+    monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
+
+    state = publish_handlers._build_meta_state("batch-1", "meta-secret")
+    response = asyncio.run(publish_handlers.meta_oauth_callback(code="auth-code", state=state))
+
+    assert response.status_code == 302
+    assert captured["source_batch_id"] == "batch-1"
+    assert captured["meta_connection"]["status"] == "connected"
+    assert len(captured["meta_connection"]["available_pages"]) == 1
+    assert captured["meta_connection"]["available_pages"][0]["id"] == "page-1"
+    assert captured["meta_connection"]["available_pages"][0]["instagram_business_account"]["id"] == "ig-1"
 
 
 def test_connect_meta_account_can_resolve_batch_for_navbar(monkeypatch):

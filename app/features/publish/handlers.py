@@ -96,6 +96,7 @@ META_LOGIN_SCOPES = [
     "pages_show_list",
     "pages_read_engagement",
     "pages_manage_posts",
+    "business_management",
     "instagram_basic",
     "instagram_content_publish",
 ]
@@ -371,19 +372,45 @@ async def _fetch_meta_user_and_pages(user_token: str) -> Tuple[Dict[str, Any], L
         },
     )
 
-    available_pages: List[Dict[str, Any]] = []
-    for page in pages_payload.get("data", []) or []:
-        if not isinstance(page, dict):
-            continue
-        available_pages.append(
-            {
-                "id": str(page.get("id", "")),
-                "name": page.get("name") or "Untitled Page",
-                "tasks": page.get("tasks") or [],
-                "access_token": page.get("access_token", ""),
-                "instagram_business_account": page.get("instagram_business_account"),
-            }
+    async def _fetch_assigned_pages() -> Dict[str, Any]:
+        return await _meta_request(
+            "GET",
+            f"{META_GRAPH_BASE}/me/assigned_pages",
+            params={
+                "fields": "id,name,tasks,access_token,instagram_business_account{id,username}",
+                "access_token": user_token,
+            },
         )
+
+    pages_sources = [pages_payload]
+    try:
+        pages_sources.append(await _fetch_assigned_pages())
+    except FlowForgeException as exc:
+        logger.info(
+            "meta_assigned_pages_lookup_failed",
+            error=exc.message,
+            details=exc.details,
+        )
+
+    available_pages: List[Dict[str, Any]] = []
+    seen_page_ids: set[str] = set()
+    for payload in pages_sources:
+        for page in payload.get("data", []) or []:
+            if not isinstance(page, dict):
+                continue
+            page_id = str(page.get("id", "")).strip()
+            if not page_id or page_id in seen_page_ids:
+                continue
+            seen_page_ids.add(page_id)
+            available_pages.append(
+                {
+                    "id": page_id,
+                    "name": page.get("name") or "Untitled Page",
+                    "tasks": page.get("tasks") or [],
+                    "access_token": page.get("access_token", ""),
+                    "instagram_business_account": page.get("instagram_business_account"),
+                }
+            )
     return user, available_pages
 
 
