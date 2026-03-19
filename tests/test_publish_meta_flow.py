@@ -300,7 +300,7 @@ def test_connect_meta_account_allows_pre_s7_batches(monkeypatch):
     location = response.headers["location"]
     assert "client_id=meta-app-id" in location
     assert "redirect_uri=https%3A%2F%2Fexample.com%2Fpublish%2Fmeta%2Fcallback" in location
-    assert "scope=instagram_business_basic%2Cinstagram_business_content_publish" in location
+    assert "scope=pages_show_list%2Cpages_read_engagement%2Cpages_manage_posts%2Cinstagram_basic%2Cinstagram_content_publish" in location
 
 
 def test_connect_meta_account_can_resolve_batch_for_navbar(monkeypatch):

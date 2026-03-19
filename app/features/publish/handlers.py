@@ -67,8 +67,11 @@ META_TIMEOUT_SECONDS = 30.0
 INSTAGRAM_POLL_ATTEMPTS = 10
 INSTAGRAM_POLL_SECONDS = 2
 META_LOGIN_SCOPES = [
-    "instagram_business_basic",
-    "instagram_business_content_publish",
+    "pages_show_list",
+    "pages_read_engagement",
+    "pages_manage_posts",
+    "instagram_basic",
+    "instagram_content_publish",
 ]
 
 
