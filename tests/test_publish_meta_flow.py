@@ -605,6 +605,34 @@ def test_meta_publish_readiness_reports_missing_publishable_page():
     assert readiness["readiness_status"] == "missing_instagram_business"
 
 
+def test_effective_meta_connection_auto_selects_only_publishable_page(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_get_workspace_meta_connection",
+        lambda preferred_batch_id=None: {},
+    )
+
+    resolved = publish_handlers._effective_meta_connection(
+        "batch-1",
+        {
+            "status": "connected",
+            "available_pages": [
+                {
+                    "id": "page-1",
+                    "name": "Lippe Lift",
+                    "access_token": "page-token",
+                    "instagram_business_account": {"id": "ig-1", "username": "lippe_test"},
+                }
+            ],
+            "selected_page": {},
+            "selected_instagram": {},
+        },
+    )
+
+    assert resolved["selected_page"]["id"] == "page-1"
+    assert resolved["selected_instagram"]["id"] == "ig-1"
+
+
 def test_derive_publish_status_does_not_treat_tiktok_inbox_as_published():
     status = publish_handlers._derive_publish_status(
         ["tiktok"],

@@ -218,6 +218,26 @@ def _get_publishable_meta_pages(available_pages: List[Dict[str, Any]]) -> List[D
     return publishable_pages
 
 
+def _apply_default_meta_target(meta_connection: Dict[str, Any]) -> Dict[str, Any]:
+    """Auto-bind the only valid Meta target so existing connections recover without a forced reconnect."""
+    if not meta_connection or meta_connection.get("status") != "connected":
+        return meta_connection
+
+    selected_page = meta_connection.get("selected_page") or {}
+    selected_instagram = meta_connection.get("selected_instagram") or {}
+    if selected_page.get("id") and selected_instagram.get("id"):
+        return meta_connection
+
+    publishable_pages = _get_publishable_meta_pages(meta_connection.get("available_pages") or [])
+    if len(publishable_pages) != 1:
+        return meta_connection
+
+    normalized = deepcopy(meta_connection)
+    normalized["selected_page"] = deepcopy(publishable_pages[0])
+    normalized["selected_instagram"] = deepcopy(_get_page_instagram_account(publishable_pages[0]))
+    return normalized
+
+
 def _require_meta_settings() -> Any:
     """Validate that standard Meta OAuth settings are present before starting the flow."""
     settings = get_settings()
@@ -492,17 +512,17 @@ def _get_workspace_meta_connection(preferred_batch_id: Optional[str] = None) -> 
     ]
     if connected:
         connected.sort(key=lambda item: (item[1], item[0]), reverse=True)
-        return deepcopy(connected[0][2])
+        return _apply_default_meta_target(deepcopy(connected[0][2]))
 
     if candidates:
         candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
-        return deepcopy(candidates[0][2])
+        return _apply_default_meta_target(deepcopy(candidates[0][2]))
     return {}
 
 
 def _effective_meta_connection(batch_id: str, batch_meta_connection: Any) -> Dict[str, Any]:
     """Prefer the live workspace Meta connection over stale batch-local state."""
-    local = _load_json_object(batch_meta_connection)
+    local = _apply_default_meta_target(_load_json_object(batch_meta_connection))
     if local.get("status") == "connected":
         return local
 
