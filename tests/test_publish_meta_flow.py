@@ -300,6 +300,7 @@ def test_connect_meta_account_allows_pre_s7_batches(monkeypatch):
     location = response.headers["location"]
     assert "client_id=meta-app-id" in location
     assert "redirect_uri=https%3A%2F%2Fexample.com%2Fpublish%2Fmeta%2Fcallback" in location
+    assert "scope=pages_show_list%2Cpages_read_engagement%2Cpages_manage_posts%2Cinstagram_basic%2Cinstagram_content_publish" in location
 
 
 def test_connect_meta_account_can_resolve_batch_for_navbar(monkeypatch):
@@ -379,3 +380,40 @@ def test_get_accounts_status_includes_meta_and_tiktok(monkeypatch):
     assert response.data["providers"]["tiktok"]["connected"] is True
     assert response.data["tiktok_connection"]["display_name"] == "Sandbox Creator"
     assert "user_access_token" not in response.data["meta_connection"]
+
+
+def test_publish_instagram_reel_uses_selected_page_token(monkeypatch):
+    calls = []
+
+    async def _fake_meta_request(method, url, *, params=None, data=None):
+        calls.append({"method": method, "url": url, "params": params, "data": data})
+        if url.endswith("/media"):
+            return {"id": "container-1"}
+        if url.endswith("/media_publish"):
+            return {"id": "ig-media-1"}
+        if url.endswith("/container-1"):
+            return {"status_code": "FINISHED"}
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
+
+    remote_id = asyncio.run(
+        publish_handlers._publish_instagram_reel(
+            {
+                "video_url": "https://cdn.example.com/reel.mp4",
+                "publish_caption": "Caption",
+            },
+            {
+                "selected_page": {"id": "page-1", "access_token": "page-token"},
+                "selected_instagram": {"id": "ig-1"},
+                "user_access_token": "user-token",
+            },
+        )
+    )
+
+    assert remote_id == "ig-media-1"
+    assert calls[0]["data"]["access_token"] == "page-token"
+    assert calls[1]["params"]["access_token"] == "page-token"
+    assert calls[2]["data"]["access_token"] == "page-token"
+    assert calls[0]["url"].endswith("/ig-1/media")
+    assert calls[2]["url"].endswith("/ig-1/media_publish")

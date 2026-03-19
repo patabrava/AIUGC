@@ -67,8 +67,11 @@ META_TIMEOUT_SECONDS = 30.0
 INSTAGRAM_POLL_ATTEMPTS = 10
 INSTAGRAM_POLL_SECONDS = 2
 META_LOGIN_SCOPES = [
-    "instagram_business_basic",
-    "instagram_business_content_publish",
+    "pages_show_list",
+    "pages_read_engagement",
+    "pages_manage_posts",
+    "instagram_basic",
+    "instagram_content_publish",
 ]
 
 
@@ -426,7 +429,7 @@ def _ensure_meta_targets_for_networks(networks: List[str], meta_connection: Dict
         if not selected_page.get("id") or not selected_page.get("access_token"):
             raise ValidationError("Facebook Page target is not selected for this batch.")
     if SocialNetwork.INSTAGRAM.value in networks:
-        if not selected_instagram.get("id") or not meta_connection.get("user_access_token"):
+        if not selected_instagram.get("id") or not selected_page.get("access_token"):
             raise ValidationError("Instagram target is not selected for this batch.")
 
 
@@ -951,13 +954,13 @@ async def _publish_facebook_video(post: Dict[str, Any], meta_connection: Dict[st
     return str(remote_id)
 
 
-async def _wait_for_instagram_container(container_id: str, user_token: str) -> None:
+async def _wait_for_instagram_container(container_id: str, page_token: str) -> None:
     """Poll a container until Instagram says it is ready to publish."""
     for _ in range(INSTAGRAM_POLL_ATTEMPTS):
         payload = await _meta_request(
             "GET",
-            f"{META_IG_BASE}/{container_id}",
-            params={"fields": "status_code", "access_token": user_token},
+            f"{META_GRAPH_BASE}/{container_id}",
+            params={"fields": "status_code", "access_token": page_token},
         )
         status_code = str(payload.get("status_code", "")).upper()
         if status_code == "FINISHED":
@@ -977,34 +980,34 @@ async def _wait_for_instagram_container(container_id: str, user_token: str) -> N
 
 async def _publish_instagram_reel(post: Dict[str, Any], meta_connection: Dict[str, Any]) -> str:
     """Publish a reel to the selected Instagram business account."""
-    _, selected_instagram = _get_selected_meta_targets(meta_connection)
+    selected_page, selected_instagram = _get_selected_meta_targets(meta_connection)
     ig_id = selected_instagram.get("id")
-    user_token = meta_connection.get("user_access_token")
-    if not ig_id or not user_token:
+    page_token = selected_page.get("access_token")
+    if not ig_id or not page_token:
         raise ValidationError("Instagram target is unavailable for this batch.")
     if not post.get("video_url"):
         raise ValidationError("Post has no video_url for Instagram publishing.")
 
     container = await _meta_request(
         "POST",
-        f"{META_IG_BASE}/{ig_id}/media",
+        f"{META_GRAPH_BASE}/{ig_id}/media",
         data={
             "media_type": "REELS",
             "video_url": post["video_url"],
             "caption": post["publish_caption"],
             "share_to_feed": "true",
-            "access_token": user_token,
+            "access_token": page_token,
         },
     )
     container_id = container.get("id")
     if not container_id:
         raise ThirdPartyError("Instagram did not return a media container id.", details={"payload": container})
 
-    await _wait_for_instagram_container(str(container_id), user_token)
+    await _wait_for_instagram_container(str(container_id), page_token)
     published = await _meta_request(
         "POST",
-        f"{META_IG_BASE}/{ig_id}/media_publish",
-        data={"creation_id": container_id, "access_token": user_token},
+        f"{META_GRAPH_BASE}/{ig_id}/media_publish",
+        data={"creation_id": container_id, "access_token": page_token},
     )
     remote_id = published.get("id")
     if not remote_id:
