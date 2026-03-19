@@ -94,12 +94,16 @@ class _FakeSupabase:
 
 
 class _FakeRequest:
-    def __init__(self, *, headers=None, form_data=None):
+    def __init__(self, *, headers=None, form_data=None, json_data=None):
         self.headers = headers or {}
         self._form_data = form_data or {}
+        self._json_data = json_data
 
     async def form(self):
         return self._form_data
+
+    async def json(self):
+        return self._json_data
 
 
 def test_confirm_publish_arms_dispatch_without_completing_batch(monkeypatch):
@@ -157,8 +161,10 @@ def test_confirm_publish_arms_dispatch_without_completing_batch(monkeypatch):
     response = asyncio.run(
         publish_handlers.confirm_publish(
             "batch-1",
-            _FakeRequest(headers={}),
-            ConfirmPublishRequest(batch_id="batch-1", confirm=True),
+            _FakeRequest(
+                headers={"content-type": "application/json"},
+                json_data={"batch_id": "batch-1", "confirm": True},
+            ),
         )
     )
 
@@ -216,7 +222,6 @@ def test_confirm_publish_accepts_htmx_form_payload(monkeypatch):
                 headers={"content-type": "application/x-www-form-urlencoded"},
                 form_data={"batch_id": "batch-1", "confirm": "true"},
             ),
-            None,
         )
     )
 

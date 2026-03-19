@@ -1026,10 +1026,9 @@ async def suggest_publish_times(batch_id: str, request: SuggestTimesRequest):
 async def confirm_publish(
     batch_id: str,
     http_request: Request,
-    request: Optional[ConfirmPublishRequest] = None,
 ):
     """Arm dispatch for all active posts in the batch without faking any publish result."""
-    request = await _resolve_confirm_publish_request(http_request, batch_id, request)
+    request = await _resolve_confirm_publish_request(http_request, batch_id)
     if batch_id != request.batch_id:
         raise HTTPException(status_code=409, detail="Batch id mismatch between route and body")
 
@@ -1203,28 +1202,34 @@ def _default_tiktok_privacy_level(tiktok_connection: Dict[str, Any]) -> str:
     return "SELF_ONLY"
 
 
+def _coerce_publish_confirm(value: Any, *, default: bool = True) -> bool:
+    """Parse booleans from JSON/form payloads without depending on transport details."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in {"1", "true", "yes", "on"}
+
+
 async def _resolve_confirm_publish_request(
     http_request: Request,
     batch_id: str,
-    payload: Optional[ConfirmPublishRequest],
 ) -> ConfirmPublishRequest:
     """Accept both JSON API clients and HTMX form posts for publish arming."""
-    if payload is not None:
-        return payload
-
     content_type = (http_request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        payload = await http_request.json()
+        if isinstance(payload, dict):
+            return ConfirmPublishRequest(
+                batch_id=str(payload.get("batch_id") or batch_id),
+                confirm=_coerce_publish_confirm(payload.get("confirm"), default=True),
+            )
+
     if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
         form = await http_request.form()
-        raw_confirm = form.get("confirm", True)
-        confirm = raw_confirm if isinstance(raw_confirm, bool) else str(raw_confirm).lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
         return ConfirmPublishRequest(
             batch_id=str(form.get("batch_id") or batch_id),
-            confirm=confirm,
+            confirm=_coerce_publish_confirm(form.get("confirm"), default=True),
         )
 
     return ConfirmPublishRequest(batch_id=batch_id, confirm=True)
