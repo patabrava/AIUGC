@@ -163,14 +163,7 @@ def _meta_publish_readiness(meta_connection: Dict[str, Any]) -> Dict[str, Any]:
     selected_page = meta_connection.get("selected_page") or {}
     selected_instagram = meta_connection.get("selected_instagram") or {}
     available_pages = meta_connection.get("available_pages") or []
-    publishable_pages = [
-        page
-        for page in available_pages
-        if isinstance(page, dict)
-        and page.get("id")
-        and isinstance(page.get("instagram_business_account"), dict)
-        and page["instagram_business_account"].get("id")
-    ]
+    publishable_pages = _get_publishable_meta_pages(available_pages)
 
     readiness_status = "disconnected"
     readiness_reason = "Connect Meta before scheduling Facebook or Instagram."
@@ -198,6 +191,31 @@ def _meta_publish_readiness(meta_connection: Dict[str, Any]) -> Dict[str, Any]:
         "readiness_reason": readiness_reason,
         "publishable_page_count": len(publishable_pages),
     }
+
+
+def _get_page_instagram_account(page: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize Meta's page-linked Instagram shape across login variants."""
+    instagram_account = page.get("instagram_business_account")
+    if isinstance(instagram_account, dict) and instagram_account.get("id"):
+        return instagram_account
+
+    connected_account = page.get("connected_instagram_account")
+    if isinstance(connected_account, dict) and connected_account.get("id"):
+        return connected_account
+    return {}
+
+
+def _get_publishable_meta_pages(available_pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return only Pages that can drive Facebook+Instagram publishing."""
+    publishable_pages: List[Dict[str, Any]] = []
+    for page in available_pages:
+        if not isinstance(page, dict) or not page.get("id"):
+            continue
+        instagram_account = _get_page_instagram_account(page)
+        if not instagram_account.get("id"):
+            continue
+        publishable_pages.append(page)
+    return publishable_pages
 
 
 def _require_meta_settings() -> Any:
@@ -358,6 +376,16 @@ async def _exchange_code_for_meta_tokens(code: str) -> Tuple[Dict[str, Any], Dic
 
 async def _fetch_meta_user_and_pages(user_token: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Fetch the connected user plus reachable Pages and connected Instagram accounts."""
+    page_fields = ",".join(
+        [
+            "id",
+            "name",
+            "tasks",
+            "access_token",
+            "instagram_business_account{id,username}",
+            "connected_instagram_account{id,username}",
+        ]
+    )
     user = await _meta_request(
         "GET",
         f"{META_GRAPH_BASE}/me",
@@ -367,7 +395,7 @@ async def _fetch_meta_user_and_pages(user_token: str) -> Tuple[Dict[str, Any], L
         "GET",
         f"{META_GRAPH_BASE}/me/accounts",
         params={
-            "fields": "id,name,tasks,access_token,instagram_business_account{id,username}",
+            "fields": page_fields,
             "access_token": user_token,
         },
     )
@@ -377,7 +405,7 @@ async def _fetch_meta_user_and_pages(user_token: str) -> Tuple[Dict[str, Any], L
             "GET",
             f"{META_GRAPH_BASE}/me/assigned_pages",
             params={
-                "fields": "id,name,tasks,access_token,instagram_business_account{id,username}",
+                "fields": page_fields,
                 "access_token": user_token,
             },
         )
@@ -402,13 +430,15 @@ async def _fetch_meta_user_and_pages(user_token: str) -> Tuple[Dict[str, Any], L
             if not page_id or page_id in seen_page_ids:
                 continue
             seen_page_ids.add(page_id)
+            instagram_account = _get_page_instagram_account(page)
             available_pages.append(
                 {
                     "id": page_id,
                     "name": page.get("name") or "Untitled Page",
                     "tasks": page.get("tasks") or [],
                     "access_token": page.get("access_token", ""),
-                    "instagram_business_account": page.get("instagram_business_account"),
+                    "instagram_business_account": instagram_account,
+                    "connected_instagram_account": page.get("connected_instagram_account"),
                 }
             )
     return user, available_pages
@@ -706,6 +736,12 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
     try:
         token_payload, token_meta = await _exchange_code_for_meta_tokens(code)
         user, available_pages = await _fetch_meta_user_and_pages(token_meta["access_token"])
+        publishable_pages = _get_publishable_meta_pages(available_pages)
+        auto_selected_page: Dict[str, Any] = {}
+        auto_selected_instagram: Dict[str, Any] = {}
+        if len(publishable_pages) == 1:
+            auto_selected_page = deepcopy(publishable_pages[0])
+            auto_selected_instagram = deepcopy(_get_page_instagram_account(publishable_pages[0]))
         connection = {
             "status": "connected",
             "connected_at": datetime.utcnow().isoformat(),
@@ -715,8 +751,8 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
             "token_expires_at": token_meta["expires_at"],
             "token_scope_source": "instagram_login",
             "available_pages": available_pages,
-            "selected_page": {},
-            "selected_instagram": {},
+            "selected_page": auto_selected_page,
+            "selected_instagram": auto_selected_instagram,
             "oauth_debug": {
                 "token_type": token_payload.get("token_type"),
                 "expires_in": token_payload.get("expires_in"),
@@ -766,7 +802,7 @@ async def select_meta_target(batch_id: str, request: Request):
     if not selected_page:
         raise HTTPException(status_code=404, detail="Selected Meta Page is not available for this batch")
 
-    instagram_account = selected_page.get("instagram_business_account") or {}
+    instagram_account = _get_page_instagram_account(selected_page)
     if not instagram_account.get("id"):
         raise HTTPException(status_code=422, detail="Selected Page does not have a connected Instagram business account")
 
