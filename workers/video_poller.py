@@ -9,7 +9,7 @@ import time
 import sys
 import os
 import json
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Union
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -19,25 +19,13 @@ from app.adapters.sora_client import get_sora_client
 from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
-from app.core.video_profiles import (
-    VEO_EXTENDED_VIDEO_ROUTE,
-    get_pollable_video_statuses,
-    get_processing_video_status,
-    get_submitted_video_status,
-)
-from app.features.posts.prompt_builder import (
-    VEO_NEGATIVE_PROMPT,
-    build_veo_prompt_segment,
-    split_dialogue_sentences,
-)
 
 try:  # pragma: no cover - allow worker to run without google-genai on Python 3.9
-    from app.adapters.veo_client import VeoRateLimitError, get_veo_client  # type: ignore
+    from app.adapters.veo_client import get_veo_client  # type: ignore
     _veo_available = True
     _veo_import_error = None
 except Exception as import_error:  # noqa: BLE001
     get_veo_client = None  # type: ignore
-    VeoRateLimitError = None  # type: ignore
     _veo_available = False
     _veo_import_error = import_error
 
@@ -54,81 +42,6 @@ if not _veo_available:
 
 POLL_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
-DEFAULT_VEO_EXTENSION_RETRY_SECONDS = 65
-DURATION_TOLERANCE_SECONDS = 2.0
-
-
-def _normalize_json_dict(value: Any) -> Dict[str, Any]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _build_veo_extension_prompt(post: Dict[str, Any], *, segment_index: Optional[int] = None) -> Dict[str, Optional[str]]:
-    seed_data = _normalize_json_dict(post.get("seed_data"))
-    approved_script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
-    segments = split_dialogue_sentences(approved_script)
-    metadata = _normalize_json_dict(post.get("video_metadata"))
-    raw_segment_index = metadata.get("veo_current_segment_index") if segment_index is None else segment_index
-    current_segment_index = int(raw_segment_index or 0)
-    if segments:
-        current_segment_index = max(0, min(current_segment_index, len(segments) - 1))
-    current_segment = ""
-    if segments:
-        current_segment = segments[current_segment_index]
-    elif approved_script:
-        current_segment = approved_script
-
-    is_final_segment = bool(current_segment) and current_segment_index >= max(len(segments) - 1, 0)
-    prompt_text = build_veo_prompt_segment(
-        current_segment,
-        include_quotes=False,
-        include_ending=is_final_segment,
-    )
-
-    return {
-        "prompt_text": prompt_text,
-        "negative_prompt": VEO_NEGATIVE_PROMPT,
-    }
-
-
-def _is_waiting_for_veo_retry(metadata: Dict[str, Any]) -> bool:
-    retry_at = metadata.get("next_retry_at")
-    if retry_at is None:
-        return False
-    try:
-        return float(retry_at) > time.time()
-    except (TypeError, ValueError):
-        return False
-
-
-def _parse_mp4_duration_seconds(video_bytes: bytes) -> Optional[float]:
-    marker = b"mvhd"
-    idx = video_bytes.find(marker)
-    if idx == -1 or idx + 16 >= len(video_bytes):
-        return None
-    version = video_bytes[idx + 4]
-    if version == 0 and idx + 24 < len(video_bytes):
-        # mvhd v0 layout: version/flags (4), creation (4), modification (4), timescale (4), duration (4)
-        timescale = int.from_bytes(video_bytes[idx + 16:idx + 20], "big")
-        duration = int.from_bytes(video_bytes[idx + 20:idx + 24], "big")
-    elif version == 1 and idx + 32 < len(video_bytes):
-        timescale = int.from_bytes(video_bytes[idx + 20:idx + 24], "big")
-        duration = int.from_bytes(video_bytes[idx + 24:idx + 32], "big")
-    else:
-        return None
-    if timescale <= 0:
-        return None
-    return duration / timescale
-
-
-def _duration_within_tolerance(actual_seconds: Optional[float], target_seconds: int) -> bool:
-    if actual_seconds is None:
-        return False
-    return abs(actual_seconds - float(target_seconds)) <= DURATION_TOLERANCE_SECONDS
 
 
 def poll_pending_videos():
@@ -141,7 +54,7 @@ def poll_pending_videos():
         
         # Fetch posts awaiting video completion
         response = supabase.table("posts").select("*").in_(
-            "video_status", list(get_pollable_video_statuses())
+            "video_status", ["submitted", "processing"]
         ).execute()
         
         posts = response.data
@@ -176,21 +89,6 @@ def process_video_operation(post: Dict[str, Any]):
         return
     
     try:
-        existing_metadata = _normalize_json_dict(post.get("video_metadata"))
-        if (
-            provider == "veo_3_1"
-            and existing_metadata.get("video_pipeline_route") == VEO_EXTENDED_VIDEO_ROUTE
-            and _is_waiting_for_veo_retry(existing_metadata)
-        ):
-            logger.info(
-                "veo_extension_retry_deferred",
-                post_id=post_id,
-                correlation_id=correlation_id,
-                operation_id=operation_id,
-                next_retry_at=existing_metadata.get("next_retry_at"),
-            )
-            return
-
         if provider == "veo_3_1":
             if not _veo_available or get_veo_client is None:
                 logger.warning(
@@ -226,7 +124,6 @@ def process_video_operation(post: Dict[str, Any]):
             supabase.table("posts").update({
                 "video_status": "failed",
                 "video_metadata": {
-                    **_normalize_json_dict(post.get("video_metadata")),
                     "error": str(e),
                     "provider": provider,
                     "operation_id": operation_id
@@ -249,7 +146,6 @@ def process_video_operation(post: Dict[str, Any]):
 def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:
     post_id = post["id"]
     veo_client = get_veo_client()
-    existing_metadata = _normalize_json_dict(post.get("video_metadata"))
     status_result = veo_client.check_operation_status(
         operation_id=operation_id,
         correlation_id=correlation_id
@@ -268,16 +164,6 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
             raise ValueError("Video data missing download URI")
 
         video_uri = video_data["video_uri"]
-        if existing_metadata.get("video_pipeline_route") == VEO_EXTENDED_VIDEO_ROUTE:
-            _handle_veo_extended_video(
-                post=post,
-                operation_id=operation_id,
-                correlation_id=correlation_id,
-                video_uri=video_uri,
-                video_data=video_data,
-                existing_metadata=existing_metadata,
-            )
-            return
 
         settings = get_settings()
 
@@ -301,7 +187,7 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
                     video_source=download_url,
                     correlation_id=correlation_id,
                     provider_metadata=video_data,
-                    existing_metadata=existing_metadata
+                    existing_metadata=post.get("video_metadata") or {}
                 )
 
                 return
@@ -325,177 +211,10 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
             video_source=video_bytes,
             correlation_id=correlation_id,
             provider_metadata=video_data,
-            existing_metadata=existing_metadata
+            existing_metadata=post.get("video_metadata") or {}
         )
     else:
-        _mark_processing(
-            post_id,
-            correlation_id,
-            operation_id,
-            route=existing_metadata.get("video_pipeline_route"),
-        )
-
-
-def _handle_veo_extended_video(
-    *,
-    post: Dict[str, Any],
-    operation_id: str,
-    correlation_id: str,
-    video_uri: str,
-    video_data: Dict[str, Any],
-    existing_metadata: Dict[str, Any],
-) -> None:
-    post_id = post["id"]
-    veo_client = get_veo_client()
-    generated_seconds = int(existing_metadata.get("generated_seconds") or 0)
-    base_seconds = int(existing_metadata.get("veo_base_seconds") or 4)
-    extension_seconds = int(existing_metadata.get("veo_extension_seconds") or 7)
-    provider_target_seconds = int(
-        existing_metadata.get("provider_target_seconds")
-        or existing_metadata.get("requested_seconds")
-        or 8
-    )
-    operation_ids = list(existing_metadata.get("operation_ids") or [])
-    if not operation_ids or operation_ids[-1] != operation_id:
-        operation_ids.append(operation_id)
-
-    if generated_seconds <= 0:
-        next_generated_seconds = base_seconds
-        next_extension_hops_completed = int(existing_metadata.get("veo_extension_hops_completed") or 0)
-        next_segment_index = 1
-    else:
-        next_generated_seconds = generated_seconds + extension_seconds
-        next_extension_hops_completed = int(existing_metadata.get("veo_extension_hops_completed") or 0) + 1
-        next_segment_index = int(existing_metadata.get("veo_current_segment_index") or 0) + 1
-
-    logger.info(
-        "veo_extended_segment_completed",
-        post_id=post_id,
-        correlation_id=correlation_id,
-        operation_id=operation_id,
-        next_generated_seconds=next_generated_seconds,
-        provider_target_seconds=provider_target_seconds,
-    )
-
-    if next_generated_seconds >= provider_target_seconds:
-        video_bytes = veo_client.download_video(video_uri=video_uri, correlation_id=correlation_id)
-        actual_seconds = _parse_mp4_duration_seconds(video_bytes)
-        if not _duration_within_tolerance(actual_seconds, provider_target_seconds):
-            supabase = get_supabase().client
-            supabase.table("posts").update(
-                {
-                    "video_status": "failed",
-                    "video_metadata": {
-                        **existing_metadata,
-                        "error": "duration_mismatch",
-                        "actual_seconds": actual_seconds,
-                        "duration_seconds": actual_seconds,
-                        "provider_target_seconds": provider_target_seconds,
-                        "chain_status": "duration_mismatch",
-                    },
-                }
-            ).eq("id", post_id).execute()
-            logger.error(
-                "veo_extended_duration_mismatch",
-                post_id=post_id,
-                correlation_id=correlation_id,
-                actual_seconds=actual_seconds,
-                provider_target_seconds=provider_target_seconds,
-            )
-            return
-
-        final_metadata = {
-            **existing_metadata,
-            "generated_seconds": actual_seconds,
-            "actual_seconds": actual_seconds,
-            "duration_seconds": actual_seconds,
-            "chain_status": "completed",
-            "next_retry_at": None,
-            "last_rate_limit_error": None,
-            "operation_ids": operation_ids,
-            "veo_extension_hops_completed": next_extension_hops_completed,
-            "veo_current_segment_index": next_segment_index,
-        }
-        _store_completed_video(
-            post_id=post_id,
-            provider="veo_3_1",
-            video_source=video_bytes,
-            correlation_id=correlation_id,
-            provider_metadata=video_data,
-            existing_metadata=final_metadata,
-        )
-        return
-
-    next_prompt = _build_veo_extension_prompt(post, segment_index=next_segment_index)
-    try:
-        extension_submission = veo_client.submit_video_extension(
-            prompt=next_prompt["prompt_text"],
-            negative_prompt=next_prompt.get("negative_prompt"),
-            correlation_id=f"{correlation_id}_extend_{next_generated_seconds}",
-            video_uri=video_uri,
-            aspect_ratio=str(existing_metadata.get("requested_aspect_ratio") or post.get("video_format") or "9:16"),
-        )
-    except VeoRateLimitError as exc:
-        retry_after_seconds = getattr(exc, "retry_after_seconds", DEFAULT_VEO_EXTENSION_RETRY_SECONDS)
-        retry_at = int(time.time()) + int(retry_after_seconds)
-        updated_metadata = {
-            **existing_metadata,
-            "chain_status": "rate_limited",
-            "next_retry_at": retry_at,
-            "last_rate_limit_error": str(exc),
-            "provider_metadata": video_data,
-            "last_completed_video_uri": video_uri,
-            "operation_ids": operation_ids,
-        }
-        supabase = get_supabase().client
-        supabase.table("posts").update(
-            {
-                "video_status": get_processing_video_status(VEO_EXTENDED_VIDEO_ROUTE),
-                "video_metadata": updated_metadata,
-            }
-        ).eq("id", post_id).execute()
-        logger.warning(
-            "veo_extension_rate_limited_waiting",
-            post_id=post_id,
-            correlation_id=correlation_id,
-            operation_id=operation_id,
-            retry_after_seconds=retry_after_seconds,
-            next_retry_at=retry_at,
-        )
-        return
-
-    next_operation_id = extension_submission["operation_id"]
-    updated_metadata = {
-        **existing_metadata,
-        "generated_seconds": next_generated_seconds,
-        "chain_status": "submitted",
-        "next_retry_at": None,
-        "last_rate_limit_error": None,
-        "operation_ids": [*operation_ids, next_operation_id],
-        "veo_extension_hops_completed": next_extension_hops_completed,
-        "veo_current_segment_index": next_segment_index,
-        "provider_metadata": video_data,
-        "last_completed_video_uri": video_uri,
-    }
-
-    supabase = get_supabase().client
-    supabase.table("posts").update(
-        {
-            "video_operation_id": next_operation_id,
-            "video_status": get_submitted_video_status(VEO_EXTENDED_VIDEO_ROUTE),
-            "video_metadata": updated_metadata,
-        }
-    ).eq("id", post_id).execute()
-
-    logger.info(
-        "veo_extended_next_segment_submitted",
-        post_id=post_id,
-        correlation_id=correlation_id,
-        previous_operation_id=operation_id,
-        next_operation_id=next_operation_id,
-        generated_seconds=next_generated_seconds,
-        provider_target_seconds=provider_target_seconds,
-    )
+        _mark_processing(post_id, correlation_id, operation_id)
 
 
 def _handle_sora_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:
@@ -605,11 +324,6 @@ def _store_completed_video(
         "thumbnail_url": upload_result.get("thumbnail_url"),
         "provider_metadata": provider_metadata,
         "upload_method": upload_method,
-        "duration_seconds": (
-            existing_metadata.get("actual_seconds")
-            or existing_metadata.get("provider_target_seconds")
-            or existing_metadata.get("requested_seconds")
-        ),
     }
 
     supabase.table("posts").update({
@@ -634,10 +348,10 @@ def _store_completed_video(
     _check_and_transition_batch_to_qa(post_id, correlation_id)
 
 
-def _mark_processing(post_id: str, correlation_id: str, operation_id: str, route: Optional[str] = None) -> None:
+def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> None:
     supabase = get_supabase().client
     supabase.table("posts").update({
-        "video_status": get_processing_video_status(route)
+        "video_status": "processing"
     }).eq("id", post_id).execute()
 
     logger.debug(

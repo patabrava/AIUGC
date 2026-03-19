@@ -1,0 +1,354 @@
+<div
+    x-data="{}"
+    x-cloak
+    x-show="$store.accountsHub?.modalOpen"
+    x-transition.opacity
+    @keydown.escape.window="$store.accountsHub?.close()"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-gray-500 bg-opacity-75 px-4 py-6"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Accounts hub"
+>
+    <div class="absolute inset-0" aria-hidden="true" @click="$store.accountsHub?.close()"></div>
+    <div class="relative z-10 w-full max-w-4xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
+        <div class="border-b border-gray-200 bg-white px-6 py-5">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-purple-600">Workspace Accounts</p>
+                    <h3 class="mt-1 text-xl font-semibold text-gray-900">Accounts</h3>
+                    <p class="mt-2 max-w-2xl text-sm text-gray-600">
+                        Connect provider accounts once, reuse them across batches, and manage login state before you reach publish planning.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    @click="$store.accountsHub?.close()"
+                    aria-label="Close accounts hub"
+                >
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="space-y-6 px-6 py-6">
+            <div class="grid gap-4 lg:grid-cols-2">
+                <section class="rounded-lg border p-5 shadow-sm" :class="$store.accountsHub?.cardClass('meta')">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex items-start gap-3">
+                            <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm">
+                                <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Meta</p>
+                                <h4 class="mt-1 text-lg font-semibold text-gray-900">Facebook + Instagram</h4>
+                                <p class="mt-2 text-sm text-gray-600">
+                                    One login for the Facebook Page and linked Instagram business account you publish from.
+                                </p>
+                            </div>
+                        </div>
+                        <span class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide" :class="$store.accountsHub?.badgeClass('meta')">
+                            <span x-text="$store.accountsHub?.providerStatusLabel('meta') || 'Not connected'"></span>
+                        </span>
+                    </div>
+
+                    <div class="mt-5 rounded-md border border-gray-200 bg-gray-50 p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Current Login</p>
+                        <p class="mt-2 text-sm font-semibold text-gray-900" x-text="$store.accountsHub?.metaAccountName() || 'No Meta login connected yet'"></p>
+                        <p class="mt-2 text-xs text-gray-600" x-text="$store.accountsHub?.metaStatusCopy()"></p>
+                        <p class="mt-3 text-xs text-gray-500" x-show="$store.accountsHub?.metaTargetName()" x-text="`Target: ${$store.accountsHub?.metaTargetName()}`"></p>
+                    </div>
+
+                    <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+                            @click="$store.accountsHub?.continueToProvider('meta')"
+                        >
+                            <span x-text="$store.accountsHub?.providerPrimaryCta('meta') || 'Connect Meta'"></span>
+                        </button>
+                        <button
+                            type="button"
+                            x-show="$store.accountsHub?.isProviderConnected('meta')"
+                            class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+                            @click="$store.accountsHub?.disconnectMeta()"
+                        >
+                            Disconnect
+                        </button>
+                    </div>
+                </section>
+
+                <section class="rounded-lg border p-5 shadow-sm" :class="$store.accountsHub?.cardClass('tiktok')">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex items-start gap-3">
+                            <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-black text-white shadow-sm">
+                                <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 48 48" aria-hidden="true">
+                                    <path d="M33.5 6c1.1 4.2 3.8 7.6 8 9v6.1c-3.4-.1-6.6-1.1-9.5-3v12.7c0 7-5.7 12.7-12.7 12.7S6.6 37.8 6.6 30.8s5.7-12.7 12.7-12.7c.8 0 1.5.1 2.2.2v6.6c-.7-.2-1.4-.3-2.2-.3-3.4 0-6.2 2.8-6.2 6.2S15.9 37 19.3 37s6.2-2.8 6.2-6.2V6h8z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">TikTok</p>
+                                <h4 class="mt-1 text-lg font-semibold text-gray-900">TikTok</h4>
+                                <p class="mt-2 text-sm text-gray-600">
+                                    Connect the TikTok account you use for draft uploads.
+                                </p>
+                            </div>
+                        </div>
+                        <span class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide" :class="$store.accountsHub?.badgeClass('tiktok')">
+                            <span x-text="$store.accountsHub?.providerStatusLabel('tiktok') || 'Not connected'"></span>
+                        </span>
+                    </div>
+
+                    <div class="mt-5 rounded-md border border-gray-200 bg-gray-50 p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Current Login</p>
+                        <p class="mt-2 text-sm font-semibold text-gray-900" x-text="$store.accountsHub?.tiktokAccountName() || 'No TikTok login connected yet'"></p>
+                        <p class="mt-2 text-xs text-gray-600" x-text="$store.accountsHub?.tiktokStatusCopy()"></p>
+                        <p class="mt-3 text-xs text-gray-500" x-show="$store.accountsHub?.tiktokOpenId()" x-text="`Open ID: ${$store.accountsHub?.tiktokOpenId()}`"></p>
+                    </div>
+
+                    <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+                            @click="$store.accountsHub?.continueToProvider('tiktok')"
+                        >
+                            <span x-text="$store.accountsHub?.providerPrimaryCta('tiktok') || 'Connect TikTok'"></span>
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4">
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Flow</p>
+                <div class="mt-3 grid gap-2 text-sm text-gray-700 sm:grid-cols-3">
+                    <p>1. Open the provider card you want to connect.</p>
+                    <p>2. Complete the provider login and permissions flow.</p>
+                    <p>3. Return to FLOW-FORGE and keep publishing from the same workspace identity.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.store('accountsHub', {
+            ready: false,
+            bootstrapped: false,
+            modalOpen: false,
+            batchId: null,
+            batchState: null,
+            metaConnection: {},
+            tiktokConnection: {},
+            preferredProvider: null,
+            preferredPostId: null,
+
+            bootstrap() {
+                if (this.bootstrapped) return;
+                this.bootstrapped = true;
+                this.refreshStatus();
+                document.body.addEventListener('htmx:afterSwap', () => {
+                    this.refreshStatus();
+                });
+            },
+
+            syncContext() {
+                const detailRoot = document.getElementById('batch-detail-root');
+                this.batchId = detailRoot?.dataset.batchId || null;
+                this.batchState = detailRoot?.dataset.batchState || null;
+            },
+
+            async refreshStatus() {
+                this.syncContext();
+                const params = new URLSearchParams();
+                if (this.batchId) {
+                    params.set('batch_id', this.batchId);
+                }
+                const url = params.toString() ? `/publish/accounts/status?${params.toString()}` : '/publish/accounts/status';
+                try {
+                    const response = await fetch(url, {
+                        headers: { 'X-Correlation-ID': 'accounts_hub_status' }
+                    });
+                    if (!response.ok) {
+                        throw new Error(`Accounts status request failed (${response.status})`);
+                    }
+                    const payload = await response.json();
+                    this.metaConnection = payload?.data?.meta_connection || {};
+                    this.tiktokConnection = payload?.data?.tiktok_connection || {};
+                } catch (_error) {
+                    this.metaConnection = {};
+                    this.tiktokConnection = {};
+                } finally {
+                    this.ready = true;
+                }
+            },
+
+            open(provider = null, options = {}) {
+                this.syncContext();
+                this.preferredProvider = provider;
+                this.preferredPostId = options.postId || null;
+                this.modalOpen = true;
+                document.body.style.overflow = 'hidden';
+            },
+
+            close() {
+                this.modalOpen = false;
+                this.preferredProvider = null;
+                this.preferredPostId = null;
+                document.body.style.overflow = '';
+            },
+
+            providerDot(provider) {
+                if (this.providerNeedsAttention(provider)) return 'bg-red-500';
+                if (this.isProviderConnected(provider)) return 'bg-green-500';
+                return 'bg-amber-400';
+            },
+
+            desktopLabel() {
+                return 'Accounts';
+            },
+
+            mobileLabel() {
+                return 'Accounts';
+            },
+
+            cardClass(provider) {
+                if (this.preferredProvider === provider) {
+                    return 'border-purple-300 bg-purple-50';
+                }
+                return 'border-gray-200 bg-white';
+            },
+
+            badgeClass(provider) {
+                if (this.providerNeedsAttention(provider)) return 'bg-red-100 text-red-700';
+                if (this.isProviderConnected(provider)) return 'bg-green-100 text-green-700';
+                return 'bg-amber-100 text-amber-700';
+            },
+
+            providerStatusLabel(provider) {
+                if (provider === 'meta') {
+                    if (this.metaConnection?.status === 'error') return 'Needs attention';
+                    if (this.metaConnection?.status === 'connected') return 'Connected';
+                    return 'Not connected';
+                }
+                if (provider === 'tiktok') {
+                    if (this.tiktokConnection?.status === 'reconnect_required') return 'Reconnect';
+                    if (this.tiktokConnection?.status === 'connected') return 'Connected';
+                    return 'Not connected';
+                }
+                return 'Not connected';
+            },
+
+            isProviderConnected(provider) {
+                if (provider === 'meta') return this.metaConnection?.status === 'connected';
+                if (provider === 'tiktok') return this.tiktokConnection?.status === 'connected';
+                return false;
+            },
+
+            providerNeedsAttention(provider) {
+                if (provider === 'meta') return this.metaConnection?.status === 'error';
+                if (provider === 'tiktok') return this.tiktokConnection?.status === 'reconnect_required';
+                return false;
+            },
+
+            providerPrimaryCta(provider) {
+                if (provider === 'meta') {
+                    return this.isProviderConnected('meta') ? 'Reconnect Meta' : 'Connect Meta';
+                }
+                if (provider === 'tiktok') {
+                    return this.isProviderConnected('tiktok') ? 'Reconnect TikTok' : 'Connect TikTok';
+                }
+                return 'Connect';
+            },
+
+            metaAccountName() {
+                return this.metaConnection?.user?.name || null;
+            },
+
+            metaStatusCopy() {
+                if (this.metaConnection?.status === 'connected') {
+                    return 'This Meta login is available across all batches in the workspace.';
+                }
+                if (this.metaConnection?.status === 'error') {
+                    return this.metaConnection?.error || 'The last Meta login attempt failed.';
+                }
+                return 'Use the one Facebook user that manages your Facebook Page and linked Instagram business account.';
+            },
+
+            metaTargetName() {
+                const page = this.metaConnection?.selected_page || {};
+                const instagram = this.metaConnection?.selected_instagram || {};
+                if (page.id && instagram.id) {
+                    return `${page.name} + @${instagram.username || instagram.id}`;
+                }
+                return null;
+            },
+
+            tiktokAccountName() {
+                return this.tiktokConnection?.display_name || this.tiktokConnection?.open_id || null;
+            },
+
+            tiktokStatusCopy() {
+                if (this.tiktokConnection?.status === 'connected') {
+                    return 'This TikTok login is available across all batches in the workspace.';
+                }
+                if (this.tiktokConnection?.status === 'reconnect_required') {
+                    return 'The TikTok token expired and needs to be reconnected.';
+                }
+                return 'Use the authorized TikTok account for draft uploads.';
+            },
+
+            tiktokOpenId() {
+                return this.tiktokConnection?.open_id || null;
+            },
+
+            metaConnectUrl() {
+                const params = new URLSearchParams();
+                if (this.batchId) {
+                    params.set('batch_id', this.batchId);
+                }
+                if (this.preferredPostId) {
+                    params.set('post_id', this.preferredPostId);
+                }
+                const query = params.toString();
+                return query ? `/publish/meta/connect?${query}` : '/publish/meta/connect';
+            },
+
+            tiktokConnectUrl() {
+                const params = new URLSearchParams();
+                if (this.batchId) {
+                    params.set('batch_id', this.batchId);
+                }
+                const query = params.toString();
+                return query ? `/api/auth/tiktok/start?${query}` : '/api/auth/tiktok/start';
+            },
+
+            continueToProvider(provider) {
+                if (provider === 'meta') {
+                    window.location.assign(this.metaConnectUrl());
+                    return;
+                }
+                if (provider === 'tiktok') {
+                    window.location.assign(this.tiktokConnectUrl());
+                }
+            },
+
+            async disconnectMeta() {
+                if (!this.batchId) return;
+                const confirmed = window.confirm('Disconnect Meta from the entire workspace?');
+                if (!confirmed) return;
+                const response = await fetch(`/publish/batches/${this.batchId}/meta/disconnect`, {
+                    method: 'POST',
+                    headers: { 'X-Correlation-ID': 'accounts_hub_disconnect_meta' }
+                });
+                if (response.ok) {
+                    await this.refreshStatus();
+                }
+            }
+        });
+    });
+</script>

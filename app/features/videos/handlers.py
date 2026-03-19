@@ -19,20 +19,7 @@ from app.adapters.veo_client import get_veo_client
 from app.adapters.sora_client import get_sora_client
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
-from app.core.video_profiles import (
-    VIDEO_STATUS_COMPLETED,
-    VIDEO_STATUS_EXTENDED_PROCESSING,
-    VIDEO_STATUS_EXTENDED_SUBMITTED,
-    VEO_EXTENDED_VIDEO_ROUTE,
-    VEO_PROVIDER,
-    DurationProfile,
-    get_submission_video_status,
-    get_duration_profile,
-    uses_duration_routing,
-)
-from app.features.batches.queries import get_batch_by_id
 from app.features.posts.prompt_text import build_full_prompt_text
-from app.features.posts.prompt_builder import split_dialogue_sentences, build_veo_prompt_segment
 from app.features.videos.schemas import (
     VideoGenerationRequest,
     VideoGenerationResponse,
@@ -43,104 +30,6 @@ from app.features.videos.schemas import (
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
-
-
-def _resolve_video_submission_plan(
-    *,
-    batch: Dict[str, Any],
-    requested_provider: Optional[str],
-    requested_seconds: Optional[int],
-    aspect_ratio: str,
-    resolution: str,
-    size: Optional[str],
-) -> Dict[str, Any]:
-    if uses_duration_routing(batch):
-        profile = get_duration_profile(batch.get("target_length_tier"))
-        resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
-        return {
-            "provider": VEO_PROVIDER,
-            "seconds": profile.requested_seconds,
-            "provider_target_seconds": profile.provider_target_seconds,
-            "aspect_ratio": aspect_ratio,
-            "resolution": resolved_resolution,
-            "size": size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution),
-            "profile": profile,
-            "duration_routed": True,
-        }
-
-    provider = requested_provider or VEO_PROVIDER
-    seconds = requested_seconds or 8
-    return {
-        "provider": provider,
-        "seconds": seconds,
-        "provider_target_seconds": seconds,
-        "aspect_ratio": aspect_ratio,
-        "resolution": resolution,
-        "size": size,
-        "profile": None,
-        "duration_routed": False,
-    }
-
-
-def _build_submission_metadata(
-    *,
-    existing_metadata: Dict[str, Any],
-    submission_plan: Dict[str, Any],
-    submission_result: Dict[str, Any],
-    segment_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    requested_size = submission_result.get("requested_size")
-    metadata = {
-        **existing_metadata,
-        "requested_aspect_ratio": submission_plan["aspect_ratio"],
-        "requested_resolution": submission_plan["resolution"],
-        "requested_seconds": submission_plan["seconds"],
-        "requested_size": requested_size,
-    }
-
-    profile: Optional[DurationProfile] = submission_plan.get("profile")
-    if profile is not None:
-        metadata.update(
-            {
-                "target_length_tier": profile.target_length_tier,
-                "video_pipeline_route": profile.route,
-                "provider_target_seconds": profile.provider_target_seconds,
-                "generated_seconds": 0,
-                "actual_seconds": None,
-                "chain_status": "submitted",
-                "operation_ids": [submission_result["operation_id"]],
-                "veo_base_seconds": profile.veo_base_seconds,
-                "veo_extension_seconds": profile.veo_extension_seconds,
-                "veo_extension_hops_target": profile.veo_extension_hops,
-                "veo_extension_hops_completed": 0,
-            }
-        )
-    if profile is not None and profile.route != VEO_EXTENDED_VIDEO_ROUTE:
-        metadata["duration_seconds"] = profile.provider_target_seconds
-
-    provider_model = submission_result.get("provider_model")
-    if provider_model:
-        metadata["provider_model"] = provider_model
-    if submission_result.get("provider_metadata"):
-        metadata["provider_metadata"] = submission_result["provider_metadata"]
-    if segment_metadata:
-        metadata.update(segment_metadata)
-
-    return metadata
-
-
-def _build_veo_extended_base_prompt(seed_data: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
-    script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
-    segments = split_dialogue_sentences(script) if script else []
-    if not segments and script:
-        segments = [script]
-    base_segment = segments[0] if segments else ""
-    segment_metadata = {
-        "veo_segments": segments,
-        "veo_segments_total": len(segments),
-        "veo_current_segment_index": 0,
-    }
-    return build_veo_prompt_segment(base_segment, include_quotes=False, include_ending=False), segment_metadata
 
 
 @router.post("/{post_id}/generate", response_model=SuccessResponse)
@@ -179,7 +68,6 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             )
         
         post = response.data[0]
-        batch = get_batch_by_id(post["batch_id"])
         video_prompt = post.get("video_prompt_json")
         seed_data = post.get("seed_data") or {}
         if isinstance(seed_data, str):
@@ -201,62 +89,54 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 details={"post_id": post_id}
             )
         
-        submission_plan = _resolve_video_submission_plan(
-            batch=batch,
-            requested_provider=request.provider,
-            requested_seconds=request.seconds,
-            aspect_ratio=request.aspect_ratio,
-            resolution=request.resolution,
-            size=request.size,
-        )
-        prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
-        segment_metadata: Optional[Dict[str, Any]] = None
-        if submission_plan.get("profile") is not None and submission_plan["profile"].route == VEO_EXTENDED_VIDEO_ROUTE:
-            prompt_request["prompt_text"], segment_metadata = _build_veo_extended_base_prompt(seed_data)
+        prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
 
         submission_result = _submit_video_request(
-            provider=submission_plan["provider"],
+            provider=request.provider,
             prompt_text=prompt_request["prompt_text"] or "",
             negative_prompt=prompt_request.get("negative_prompt"),
-            aspect_ratio=submission_plan["aspect_ratio"],
-            resolution=submission_plan["resolution"],
-            seconds=submission_plan["seconds"],
-            size=submission_plan["size"],
+            aspect_ratio=request.aspect_ratio,
+            resolution=request.resolution,
+            seconds=request.seconds,
+            size=request.size,
             correlation_id=correlation_id,
-            profile=submission_plan.get("profile"),
         )
 
         operation_id = submission_result["operation_id"]
         provider_model = submission_result.get("provider_model")
+        requested_size = submission_result.get("requested_size")
+
         existing_metadata = post.get("video_metadata") or {}
-        submission_metadata = _build_submission_metadata(
-            existing_metadata=existing_metadata,
-            submission_plan=submission_plan,
-            submission_result=submission_result,
-            segment_metadata=segment_metadata,
-        )
+        submission_metadata = {
+            **existing_metadata,
+            "requested_aspect_ratio": request.aspect_ratio,
+            "requested_resolution": request.resolution,
+            "requested_seconds": request.seconds,
+            "requested_size": requested_size,
+        }
+        if provider_model:
+            submission_metadata["provider_model"] = provider_model
+        if submission_result.get("provider_metadata"):
+            submission_metadata["provider_metadata"] = submission_result["provider_metadata"]
 
         # Normalize provider status to DB-compatible values
         provider_status = submission_result.get("status", "submitted")
-        db_status = get_submission_video_status(
-            submission_plan.get("profile").route if submission_plan.get("profile") is not None else None,
-            provider_status,
-        )
+        db_status = "submitted" if provider_status == "queued" else provider_status
 
         # CRITICAL: Log operation_id before DB update to enable recovery if update fails
         logger.warning(
             "video_operation_id_paid_request",
             post_id=post_id,
             operation_id=operation_id,
-            provider=submission_plan["provider"],
+            provider=request.provider,
             correlation_id=correlation_id,
             message="PAID VIDEO SUBMITTED - Operation ID logged for recovery"
         )
 
         try:
             supabase.table("posts").update({
-                "video_provider": submission_plan["provider"],
-                "video_format": submission_plan["aspect_ratio"],
+                "video_provider": request.provider,
+                "video_format": request.aspect_ratio,
                 "video_operation_id": operation_id,
                 "video_status": db_status,
                 "video_metadata": submission_metadata
@@ -266,25 +146,25 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 "video_db_update_failed_but_video_submitted",
                 post_id=post_id,
                 operation_id=operation_id,
-                provider=submission_plan["provider"],
+                provider=request.provider,
                 correlation_id=correlation_id,
                 error=str(db_error),
                 message="DATABASE UPDATE FAILED - Video is still processing at provider. Use operation_id to recover."
             )
             # Write to fallback recovery file
-            _write_recovery_record(post_id, operation_id, submission_plan["provider"], correlation_id)
+            _write_recovery_record(post_id, operation_id, request.provider, correlation_id)
             raise
 
         logger.info(
             "video_generation_submitted",
             post_id=post_id,
             correlation_id=correlation_id,
-            provider=submission_plan["provider"],
+            provider=request.provider,
             provider_model=provider_model,
-            aspect_ratio=submission_plan["aspect_ratio"],
-            resolution=submission_plan["resolution"],
-            seconds=submission_plan["seconds"],
-            size=submission_result.get("requested_size"),
+            aspect_ratio=request.aspect_ratio,
+            resolution=request.resolution,
+            seconds=request.seconds,
+            size=requested_size,
             operation_id=operation_id
         )
 
@@ -292,12 +172,12 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             data=VideoGenerationResponse(
                 post_id=post_id,
                 operation_id=operation_id,
-                provider=submission_plan["provider"],
+                provider=request.provider,
                 provider_model=provider_model,
                 status=submission_result.get("status", "submitted"),
                 estimated_duration_seconds=submission_result.get("estimated_duration_seconds"),
-                aspect_ratio=submission_plan["aspect_ratio"],
-                resolution=submission_plan["resolution"]
+                aspect_ratio=request.aspect_ratio,
+                resolution=request.resolution
             ).model_dump()
         )
     
@@ -403,15 +283,6 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
     
     try:
         supabase = get_supabase().client
-        batch = get_batch_by_id(batch_id)
-        submission_plan = _resolve_video_submission_plan(
-            batch=batch,
-            requested_provider=request.provider,
-            requested_seconds=request.seconds,
-            aspect_ratio=request.aspect_ratio,
-            resolution=request.resolution,
-            size=request.size,
-        )
         
         # Fetch all posts in batch with video_prompt_json
         response = supabase.table("posts").select("*").eq("batch_id", batch_id).execute()
@@ -459,13 +330,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 skipped_count += 1
                 continue
             
-            if post.get("video_status") in [
-                "submitted",
-                "processing",
-                VIDEO_STATUS_EXTENDED_SUBMITTED,
-                VIDEO_STATUS_EXTENDED_PROCESSING,
-                VIDEO_STATUS_COMPLETED,
-            ]:
+            if post.get("video_status") in ["submitted", "processing", "completed"]:
                 logger.info(
                     "post_skipped_already_submitted",
                     post_id=post_id,
@@ -477,55 +342,54 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             
             # Build prompt and submit
             try:
-                prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
-                segment_metadata: Optional[Dict[str, Any]] = None
-                if submission_plan.get("profile") is not None and submission_plan["profile"].route == VEO_EXTENDED_VIDEO_ROUTE:
-                    prompt_request["prompt_text"], segment_metadata = _build_veo_extended_base_prompt(seed_data)
+                prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
 
                 submission_result = _submit_video_request(
-                    provider=submission_plan["provider"],
+                    provider=request.provider,
                     prompt_text=prompt_request["prompt_text"] or "",
                     negative_prompt=prompt_request.get("negative_prompt"),
-                    aspect_ratio=submission_plan["aspect_ratio"],
-                    resolution=submission_plan["resolution"],
-                    seconds=submission_plan["seconds"],
-                    size=submission_plan["size"],
+                    aspect_ratio=request.aspect_ratio,
+                    resolution=request.resolution,
+                    seconds=request.seconds,
+                    size=request.size,
                     correlation_id=f"{correlation_id}_{post_id}",
-                    profile=submission_plan.get("profile"),
                 )
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
+                requested_size = submission_result.get("requested_size")
                 
                 # Update post
                 existing_metadata = post.get("video_metadata") or {}
-                submission_metadata = _build_submission_metadata(
-                    existing_metadata=existing_metadata,
-                    submission_plan=submission_plan,
-                    submission_result=submission_result,
-                    segment_metadata=segment_metadata,
-                )
+                submission_metadata = {
+                    **existing_metadata,
+                    "requested_aspect_ratio": request.aspect_ratio,
+                    "requested_resolution": request.resolution,
+                    "requested_seconds": request.seconds,
+                    "requested_size": requested_size,
+                }
+                if provider_model:
+                    submission_metadata["provider_model"] = provider_model
+                if submission_result.get("provider_metadata"):
+                    submission_metadata["provider_metadata"] = submission_result["provider_metadata"]
 
                 # Normalize provider status to DB-compatible values
                 provider_status = submission_result.get("status", "submitted")
-                db_status = get_submission_video_status(
-                    submission_plan.get("profile").route if submission_plan.get("profile") is not None else None,
-                    provider_status,
-                )
+                db_status = "submitted" if provider_status == "queued" else provider_status
 
                 # CRITICAL: Log operation_id before DB update to enable recovery if update fails
                 logger.warning(
                     "video_operation_id_paid_request",
                     post_id=post_id,
                     operation_id=operation_id,
-                    provider=submission_plan["provider"],
+                    provider=request.provider,
                     correlation_id=correlation_id,
                     message="PAID VIDEO SUBMITTED - Operation ID logged for recovery"
                 )
 
                 try:
                     supabase.table("posts").update({
-                        "video_provider": submission_plan["provider"],
-                        "video_format": submission_plan["aspect_ratio"],
+                        "video_provider": request.provider,
+                        "video_format": request.aspect_ratio,
                         "video_operation_id": operation_id,
                         "video_status": db_status,
                         "video_metadata": submission_metadata
@@ -535,14 +399,14 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         "batch_video_db_update_failed_but_video_submitted",
                         post_id=post_id,
                         operation_id=operation_id,
-                        provider=submission_plan["provider"],
+                        provider=request.provider,
                         batch_id=batch_id,
                         correlation_id=correlation_id,
                         error=str(db_error),
                         message="DATABASE UPDATE FAILED - Video is still processing at provider. Use operation_id to recover."
                     )
                     # Write to fallback recovery file
-                    _write_recovery_record(post_id, operation_id, submission_plan["provider"], correlation_id)
+                    _write_recovery_record(post_id, operation_id, request.provider, correlation_id)
                     # Don't raise in batch mode - continue with other posts
                     skipped_count += 1
                     continue
@@ -556,10 +420,10 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     "batch_video_submitted",
                     post_id=post_id,
                     batch_id=batch_id,
-                    provider=submission_plan["provider"],
+                    provider=request.provider,
                     provider_model=provider_model,
-                    seconds=submission_plan["seconds"],
-                    size=submission_result.get("requested_size"),
+                    seconds=request.seconds,
+                    size=requested_size,
                     operation_id=operation_id
                 )
                 
@@ -588,7 +452,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             correlation_id=correlation_id,
             submitted_count=submitted_count,
             skipped_count=skipped_count,
-            provider=submission_plan["provider"]
+            provider=request.provider
         )
         
         return SuccessResponse(
@@ -596,13 +460,13 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 batch_id=batch_id,
                 submitted_count=submitted_count,
                 skipped_count=skipped_count,
-                provider=submission_plan["provider"],
-                aspect_ratio=submission_plan["aspect_ratio"],
-                resolution=submission_plan["resolution"],
+                provider=request.provider,
+                aspect_ratio=request.aspect_ratio,
+                resolution=request.resolution,
                 post_ids=submitted_post_ids,
                 provider_model=last_provider_model,
-                seconds=submission_plan["seconds"],
-                size=submission_plan["size"] or _map_size_from_aspect_ratio(submission_plan["aspect_ratio"], submission_plan["resolution"])
+                seconds=request.seconds,
+                size=request.size or _map_size_from_aspect_ratio(request.aspect_ratio, request.resolution)
             ).model_dump()
         )
     
@@ -727,15 +591,11 @@ def _submit_video_request(
     seconds: int,
     size: Optional[str],
     correlation_id: str,
-    profile: Optional[DurationProfile] = None,
 ) -> Dict[str, Any]:
     """Submit a video generation request to the selected provider."""
 
     if provider == "veo_3_1":
         veo_client = get_veo_client()
-        veo_duration_seconds = seconds
-        if profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE:
-            veo_duration_seconds = profile.veo_base_seconds
         try:
             result = veo_client.submit_video_generation(
                 prompt=prompt_text,
@@ -743,7 +603,6 @@ def _submit_video_request(
                 correlation_id=correlation_id,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
-                duration_seconds=veo_duration_seconds,
             )
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
@@ -783,7 +642,6 @@ def _submit_video_request(
             "requested_size": requested_size,
             "estimated_duration_seconds": 180,
             "provider_metadata": result,
-            "submitted_duration_seconds": veo_duration_seconds,
         }
 
     if provider in {"sora_2", "sora_2_pro"}:

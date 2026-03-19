@@ -145,9 +145,9 @@ output_schema: |
     sources  – 1-2 Einträge, jeder Eintrag liefert title und url
       Nutze bevorzugt deutschsprachige oder in Deutschland relevante Quellen.
   CRITICAL SCRIPT REQUIREMENTS:
-  - script must be EXACTLY {prompt1_min_words}-{prompt1_max_words} words, {prompt1_sentence_guidance} (≈{prompt1_min_seconds}-{prompt1_max_seconds} Sekunden Sprechzeit)
-  - COUNT YOUR WORDS BEFORE SUBMITTING. Scripts outside that word range will be REJECTED.
-  - Halte das Script unter {prompt1_max_chars_no_spaces} Zeichen ohne Leerzeichen, damit es in Veo natürlich aussprechbar bleibt.
+  - script must be EXACTLY 12-15 words (NO LESS than 12, NO MORE than 15), one sentence (≈5-6 Sekunden Sprechzeit)
+  - COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <12 words will be REJECTED.
+  - Halte das Script unter 90 Zeichen ohne Leerzeichen, damit es in Veo natürlich aussprechbar bleibt.
   - Nutze kurze, gut sprechbare Formulierungen. Vermeide mehrere lange Behörden- oder Kompositawörter in einem Satz.
   - Wenn ein langer Institutionsname nötig ist, vereinfache den Rest des Satzes konsequent.
   - script MUSS vollständig auf Deutsch sein
@@ -160,13 +160,13 @@ output_schema: |
       • Aha- und Handlungs-Hooks: "Bevor du ...", "Alles verändert sich, wenn du ...", "Was dir bei ... niemand klar sagt: ..."
       NIEMALS billige Schock-Formeln wie "Du wirst nicht glauben ..." oder passive Ankündigungen wie "Ab 2025 gibt's..." / "Es gibt...".
       Immer du-Form, direkt, freundlich, empowernd. Ergänze konkrete Fakten oder Vorteile, bis die Länge passt.
-    script  – {prompt1_sentence_guidance}, {prompt1_min_words}-{prompt1_max_words} Wörter (≈ {prompt1_min_seconds}-{prompt1_max_seconds} Sekunden Sprechzeit)
+    script  – ein Satz, 12-15 Wörter (≈ 5-6 Sekunden Sprechzeit)
     source_summary  – 35-80 Wörter, basiert ausschließlich auf sources[0]
       MUSS vollständig auf Deutsch sein.
       CRITICAL: Source summary MUSS zusätzliche Fakten/Details aus der Quelle enthalten, die NICHT im Script vorkommen.
       NIEMALS den Script-Text wiederholen oder paraphrasieren. Liefere ergänzende Informationen aus der Quelle.
       Beende die Source Summary mit GENAU drei thematisch passenden Hashtags (Format: #BeispielOhneLeerzeichen, getrennt durch Leerzeichen). Keine zusätzlichen Hashtags.
-    estimated_duration_s  – Integer = konservative Schätzung für natürliche Sprechdauer und MUSS zwischen {prompt1_min_seconds} und {prompt1_max_seconds} liegen
+    estimated_duration_s  – Integer = konservative Schätzung für natürliche Sprechdauer und MUSS 5 oder 6 sein
     tone  – "direkt, freundlich, empowernd, du-Form"
     disclaimer  – "Keine Rechts- oder medizinische Beratung."
 
@@ -182,7 +182,6 @@ chunk_rules: |
 
 example: |
   GUTE BEISPIELE (variiere zwischen diesen Stilen!):
-  Die folgenden Beispiele zeigen vor allem Hook-Stil und Tonalität. Für längere Zielstufen ({target_length_tier}s) musst du danach zusätzliche konkrete, quellenbasierte Details ergänzen, bis das geforderte Wort- und Sekundenfenster erreicht ist.
   
   Beispiel 1 (Frage-Einstieg):
   script: Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktive und elektrische Rollstühle die Kasse heute übernehmen muss.

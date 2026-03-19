@@ -14,8 +14,8 @@ class VideoGenerationRequest(BaseModel):
     Request to generate video for a post.
     Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
     """
-    provider: Optional[Literal["veo_3_1", "sora_2", "sora_2_pro"]] = Field(
-        default=None,
+    provider: Literal["veo_3_1", "sora_2", "sora_2_pro"] = Field(
+        ..., 
         description="Video generation provider (veo_3_1, sora_2, sora_2_pro)"
     )
     aspect_ratio: Literal["9:16", "16:9"] = Field(
@@ -26,11 +26,9 @@ class VideoGenerationRequest(BaseModel):
         default="720p",
         description="Output resolution (provider specific constraints apply)"
     )
-    seconds: Optional[int] = Field(
-        default=None,
-        ge=4,
-        le=32,
-        description="Target duration in seconds for the generated clip."
+    seconds: Literal[4, 8, 12] = Field(
+        default=8,
+        description="Target duration in seconds for the generated clip (Sora supports 4, 8, or 12)."
     )
     size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
         default=None,
@@ -82,8 +80,6 @@ class VideoStatusResponse(BaseModel):
         "queued",
         "submitted",
         "processing",
-        "extended_submitted",
-        "extended_processing",
         "completed",
         "failed"
     ] = Field(
@@ -97,8 +93,8 @@ class VideoStatusResponse(BaseModel):
 
 class BatchVideoGenerationRequest(BaseModel):
     """Request to generate videos for all posts in a batch."""
-    provider: Optional[Literal["veo_3_1", "sora_2", "sora_2_pro"]] = Field(
-        default=None,
+    provider: Literal["veo_3_1", "sora_2", "sora_2_pro"] = Field(
+        ..., 
         description="Video generation provider for all posts"
     )
     aspect_ratio: Literal["9:16", "16:9"] = Field(
@@ -109,11 +105,9 @@ class BatchVideoGenerationRequest(BaseModel):
         default="720p",
         description="Output resolution"
     )
-    seconds: Optional[int] = Field(
-        default=None,
-        ge=4,
-        le=32,
-        description="Requested target duration in seconds for generated clips"
+    seconds: Literal[4, 8, 12] = Field(
+        default=8,
+        description="Target duration in seconds for generated clips (Sora supports 4, 8, or 12)"
     )
     size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
         default=None,

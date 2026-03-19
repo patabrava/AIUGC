@@ -414,16 +414,9 @@ async def _perform_auto_qa_checks(
         )
         file_accessible = False
     
-    # Check 2: Duration validation
-    duration_actual = (
-        video_metadata.get("actual_seconds")
-        or video_metadata.get("duration_seconds")
-    )
-    duration_expected = float(
-        video_metadata.get("provider_target_seconds")
-        or video_metadata.get("requested_seconds")
-        or 8.0
-    )
+    # Check 2: Duration validation (8s ±0.5s = 7.5s to 8.5s)
+    duration_actual = video_metadata.get("duration_seconds")
+    duration_expected = 8.0
     duration_tolerance = 0.5
     duration_valid = False
     

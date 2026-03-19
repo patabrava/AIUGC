@@ -19,14 +19,6 @@ logger = get_logger(__name__)
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
-class VeoRateLimitError(Exception):
-    """Retryable Veo quota/rate-limit response."""
-
-    def __init__(self, message: str, *, retry_after_seconds: int = 65):
-        super().__init__(message)
-        self.retry_after_seconds = retry_after_seconds
-
-
 class VeoClient:
     """
     Singleton adapter for Google VEO 3.1 API.
@@ -59,8 +51,7 @@ class VeoClient:
         correlation_id: str,
         aspect_ratio: str,
         resolution: str,
-        reference_images: Optional[list] = None,
-        duration_seconds: int = 8,
+        reference_images: Optional[list] = None
     ) -> Dict[str, Any]:
         """
         Submit video generation request to VEO 3.1.
@@ -93,7 +84,6 @@ class VeoClient:
                 "parameters": {
                     "aspectRatio": aspect_ratio,
                     "resolution": resolution,
-                    "durationSeconds": duration_seconds,
                 },
             }
 
@@ -118,15 +108,61 @@ class VeoClient:
                 negative_prompt_preview=negative_prompt[:200] if negative_prompt else None,
             )
 
-            return self._submit_long_running_request(
-                payload=payload,
-                correlation_id=correlation_id,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                duration_seconds=duration_seconds,
-                request_kind="base",
-                has_reference_images=bool(reference_images),
+            response = self._http_client.post(
+                f"{_GEMINI_API_BASE}/models/veo-3.1-generate-preview:predictLongRunning",
+                headers=self._build_headers(include_json=True),
+                json=payload
             )
+            logger.info(
+                "veo_submission_raw_response",
+                correlation_id=correlation_id,
+                status_code=response.status_code,
+                text=response.text
+            )
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                logger.error(
+                    "veo_submission_http_error",
+                    correlation_id=correlation_id,
+                    status_code=exc.response.status_code,
+                    response_text=exc.response.text,
+                    request_payload=payload,
+                    aspect_ratio=aspect_ratio,
+                    resolution=resolution
+                )
+                raise
+
+            try:
+                data = response.json()
+            except ValueError:
+                logger.error(
+                    "veo_submission_parse_error",
+                    correlation_id=correlation_id,
+                    response_text=response.text,
+                    request_payload=payload,
+                    aspect_ratio=aspect_ratio,
+                    resolution=resolution
+                )
+                raise
+            operation_name = data.get("name")
+
+            if not operation_name:
+                raise ValueError("VEO submission response missing operation name")
+
+            logger.info(
+                "veo_video_submitted",
+                correlation_id=correlation_id,
+                operation_id=operation_name,
+                prompt_length=len(prompt),
+                has_reference_images=bool(reference_images)
+            )
+
+            return {
+                "operation_id": operation_name,
+                "status": "submitted",
+                "done": False
+            }
 
         except Exception as e:
             logger.exception(
@@ -138,42 +174,6 @@ class VeoClient:
                 resolution=resolution
             )
             raise
-
-    def submit_video_extension(
-        self,
-        *,
-        prompt: str,
-        correlation_id: str,
-        video_uri: str,
-        aspect_ratio: str,
-        negative_prompt: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "instances": [
-                {
-                    "prompt": prompt,
-                    "video": {
-                        "uri": video_uri,
-                    },
-                }
-            ],
-            "parameters": {
-                "aspectRatio": aspect_ratio,
-                "resolution": "720p",
-            },
-        }
-        if negative_prompt:
-            payload["parameters"]["negativePrompt"] = negative_prompt
-
-        return self._submit_long_running_request(
-            payload=payload,
-            correlation_id=correlation_id,
-            aspect_ratio=aspect_ratio,
-            resolution="720p",
-            duration_seconds=7,
-            request_kind="extension",
-            has_reference_images=False,
-        )
     
     def check_operation_status(
         self,
@@ -386,105 +386,6 @@ class VeoClient:
         if include_json:
             headers["Content-Type"] = "application/json"
         return headers
-
-    def _submit_long_running_request(
-        self,
-        *,
-        payload: Dict[str, Any],
-        correlation_id: str,
-        aspect_ratio: str,
-        resolution: str,
-        duration_seconds: int,
-        request_kind: str,
-        has_reference_images: bool,
-    ) -> Dict[str, Any]:
-        response = self._http_client.post(
-            f"{_GEMINI_API_BASE}/models/veo-3.1-generate-preview:predictLongRunning",
-            headers=self._build_headers(include_json=True),
-            json=payload
-        )
-        logger.info(
-            "veo_submission_raw_response",
-            correlation_id=correlation_id,
-            request_kind=request_kind,
-            status_code=response.status_code,
-            text=response.text
-        )
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
-                retry_after_header = exc.response.headers.get("retry-after")
-                try:
-                    retry_after_seconds = max(1, int(retry_after_header)) if retry_after_header else 65
-                except ValueError:
-                    retry_after_seconds = 65
-                logger.warning(
-                    "veo_submission_rate_limited",
-                    correlation_id=correlation_id,
-                    request_kind=request_kind,
-                    status_code=exc.response.status_code,
-                    retry_after_seconds=retry_after_seconds,
-                    response_text=exc.response.text,
-                    request_payload=payload,
-                    aspect_ratio=aspect_ratio,
-                    resolution=resolution,
-                    duration_seconds=duration_seconds,
-                )
-                raise VeoRateLimitError(
-                    "Veo extension rate limited",
-                    retry_after_seconds=retry_after_seconds,
-                ) from exc
-            logger.error(
-                "veo_submission_http_error",
-                correlation_id=correlation_id,
-                request_kind=request_kind,
-                status_code=exc.response.status_code,
-                response_text=exc.response.text,
-                request_payload=payload,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                duration_seconds=duration_seconds,
-            )
-            raise
-
-        try:
-            data = response.json()
-        except ValueError:
-            logger.error(
-                "veo_submission_parse_error",
-                correlation_id=correlation_id,
-                request_kind=request_kind,
-                response_text=response.text,
-                request_payload=payload,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                duration_seconds=duration_seconds,
-            )
-            raise
-        operation_name = data.get("name")
-
-        if not operation_name:
-            raise ValueError("VEO submission response missing operation name")
-
-        logger.info(
-            "veo_video_submitted",
-            correlation_id=correlation_id,
-            request_kind=request_kind,
-            operation_id=operation_name,
-            has_reference_images=has_reference_images,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-            duration_seconds=duration_seconds,
-        )
-
-        return {
-            "operation_id": operation_name,
-            "status": "submitted",
-            "done": False,
-            "request_kind": request_kind,
-            "duration_seconds": duration_seconds,
-        }
 
 
 def get_veo_client() -> VeoClient:

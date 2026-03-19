@@ -7,7 +7,6 @@ Per Constitution § II: Validated Boundaries
 from pydantic import BaseModel, Field, validator, HttpUrl
 from typing import List, Optional, Literal
 from decimal import Decimal
-from app.core.video_profiles import DurationProfile, get_duration_profile
 
 
 class TopicData(BaseModel):
@@ -15,7 +14,7 @@ class TopicData(BaseModel):
     title: str = Field(..., min_length=1, max_length=200, description="Topic title")
     rotation: str = Field(..., min_length=1, max_length=500, description="Rotation/hook text")
     cta: str = Field(..., min_length=1, max_length=200, description="Call to action")
-    spoken_duration: Decimal = Field(..., ge=0, le=32, description="Spoken duration in seconds")
+    spoken_duration: Decimal = Field(..., ge=0, le=6, description="Spoken duration in seconds (≤6s)")
     
     @validator('title', 'rotation', 'cta')
     def validate_not_empty(cls, v):
@@ -25,8 +24,8 @@ class TopicData(BaseModel):
     
     @validator('spoken_duration')
     def validate_duration(cls, v):
-        if v > 32:
-            raise ValueError("Spoken duration must be ≤32 seconds")
+        if v > 6:
+            raise ValueError("Spoken duration must be ≤6 seconds")
         return v
 
 
@@ -59,9 +58,9 @@ class ResearchAgentItem(BaseModel):
     topic: str = Field(..., min_length=2, max_length=400, description="Chosen topic from pool")
     framework: Literal["PAL", "Testimonial", "Transformation"]
     sources: List[ResearchAgentSource] = Field(..., min_length=1, max_length=2, description="Supporting sources")
-    script: str = Field(..., min_length=10, max_length=1600, description="Spoken script")
-    source_summary: str = Field(..., min_length=35, max_length=800, description="Summary for IG caption")
-    estimated_duration_s: int = Field(..., ge=1, le=32, description="Ceiling of word_count/2.6")
+    script: str = Field(..., min_length=10, max_length=400, description="Spoken script (≤6s)")
+    source_summary: str = Field(..., min_length=35, max_length=500, description="Summary for IG caption")
+    estimated_duration_s: int = Field(..., ge=1, le=6, description="Ceiling of word_count/2.6")
     tone: str = Field(..., min_length=5, max_length=120, description="Tone descriptor")
     disclaimer: str = Field(..., min_length=5, max_length=200, description="Compliance disclaimer")
 
@@ -115,76 +114,67 @@ class DeduplicationResult(BaseModel):
 
 # JSON Schema for PROMPT_1 Structured Outputs
 # Per Constitution § XII: Agent Prompt Discipline - Schema-first validation
-def build_prompt1_json_schema(profile: Optional[DurationProfile] = None) -> dict:
-    active_profile = profile or get_duration_profile(None)
-    return {
-        "name": "research_topics",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
+PROMPT1_JSON_SCHEMA = {
+    "name": "research_topics",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
                 "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "topic": {
-                                "type": "string",
-                                "description": "Topic title, max 10 words"
-                            },
-                            "framework": {
-                                "type": "string",
-                                "enum": ["PAL", "Testimonial", "Transformation"]
-                            },
-                            "sources": {
-                                "type": "array",
-                                "minItems": 1,
-                                "maxItems": 2,
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "title": {"type": "string"},
-                                        "url": {"type": "string"}
-                                    },
-                                    "required": ["title", "url"],
-                                    "additionalProperties": False
-                                }
-                            },
-                            "script": {
-                                "type": "string",
-                                "description": (
-                                    "Spoken script following the duration profile: "
-                                    f"{active_profile.prompt1_min_words}-{active_profile.prompt1_max_words} words, "
-                                    f"{active_profile.prompt1_sentence_guidance}"
-                                )
-                            },
-                            "source_summary": {
-                                "type": "string",
-                                "description": "35-80 words with 3 hashtags at end"
-                            },
-                            "estimated_duration_s": {
-                                "type": "integer",
-                                "minimum": active_profile.prompt1_min_seconds,
-                                "maximum": active_profile.prompt1_max_seconds
-                            },
-                            "tone": {"type": "string"},
-                            "disclaimer": {"type": "string"}
+                    "type": "object",
+                    "properties": {
+                        "topic": {
+                            "type": "string",
+                            "description": "Topic title, max 10 words"
                         },
-                        "required": [
-                            "topic", "framework", "sources", "script",
-                            "source_summary", "estimated_duration_s", "tone", "disclaimer"
-                        ],
-                        "additionalProperties": False
-                    }
+                        "framework": {
+                            "type": "string",
+                            "enum": ["PAL", "Testimonial", "Transformation"]
+                        },
+                        "sources": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 2,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "url": {"type": "string"}
+                                },
+                                "required": ["title", "url"],
+                                "additionalProperties": False
+                            }
+                        },
+                        "script": {
+                            "type": "string",
+                            "description": "MUST be EXACTLY 12-15 words, one sentence"
+                        },
+                        "source_summary": {
+                            "type": "string",
+                            "description": "35-80 words with 3 hashtags at end"
+                        },
+                        "estimated_duration_s": {
+                            "type": "integer",
+                            "minimum": 5,
+                            "maximum": 6
+                        },
+                        "tone": {"type": "string"},
+                        "disclaimer": {"type": "string"}
+                    },
+                    "required": [
+                        "topic", "framework", "sources", "script",
+                        "source_summary", "estimated_duration_s", "tone", "disclaimer"
+                    ],
+                    "additionalProperties": False
                 }
-            },
-            "required": ["items"],
-            "additionalProperties": False
-        }
+            }
+        },
+        "required": ["items"],
+        "additionalProperties": False
     }
-
-
-PROMPT1_JSON_SCHEMA = build_prompt1_json_schema()
+}
 
 
 # JSON Schema for PROMPT_2 Structured Outputs

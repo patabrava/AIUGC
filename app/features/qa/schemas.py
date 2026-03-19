@@ -12,9 +12,9 @@ from pydantic import BaseModel, Field
 class AutoQAChecks(BaseModel):
     """
     Automated QA check results.
-    Per Canon § 7.2: Duration validated against the batch/provider target, Resolution 1080p min, Aspect ratio 9:16
+    Per Canon § 7.2: Duration 8s (±0.5s), Resolution 1080p min, Aspect ratio 9:16
     """
-    duration_valid: bool = Field(..., description="Duration within the expected tolerance window")
+    duration_valid: bool = Field(..., description="Duration within 7.5s - 8.5s range")
     duration_actual: Optional[float] = Field(None, description="Actual duration in seconds")
     duration_expected: float = Field(8.0, description="Expected duration in seconds")
     
@@ -36,8 +36,8 @@ class AutoQAChecks(BaseModel):
         json_schema_extra = {
             "example": {
                 "duration_valid": True,
-                "duration_actual": 18.0,
-                "duration_expected": 18.0,
+                "duration_actual": 8.1,
+                "duration_expected": 8.0,
                 "resolution_valid": True,
                 "resolution_actual": "720x1280",
                 "resolution_expected": "720x1280 minimum",

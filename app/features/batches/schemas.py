@@ -7,10 +7,9 @@ Per Constitution § II: Validated Boundaries
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, validator
-from typing import Dict, Optional, List, Any, Literal
+from typing import Dict, Optional, List, Any
 from datetime import datetime
 from app.core.states import BatchState
-from app.core.video_profiles import DEFAULT_TARGET_LENGTH_TIER
 
 
 class PostTypeCounts(BaseModel):
@@ -35,10 +34,6 @@ class CreateBatchRequest(BaseModel):
     """Request to create a new batch."""
     brand: str = Field(..., min_length=1, max_length=100, description="Brand name")
     post_type_counts: PostTypeCounts = Field(..., description="Post type distribution")
-    target_length_tier: Literal[8, 16, 32] = Field(
-        default=DEFAULT_TARGET_LENGTH_TIER,
-        description="Requested target video duration tier in seconds",
-    )
     
     @validator('brand')
     def validate_brand(cls, v):
@@ -61,8 +56,6 @@ class BatchResponse(BaseModel):
     brand: str
     state: BatchState
     post_type_counts: Dict[str, int]
-    target_length_tier: Optional[int] = None
-    video_pipeline_route: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     archived: bool
@@ -98,8 +91,10 @@ class PostDetail(BaseModel):
     qa_auto_checks: Optional[Dict[str, Any]] = None
     scheduled_at: Optional[datetime] = None
     social_networks: Optional[List[str]] = None
+    publish_caption: Optional[str] = None
     publish_status: Optional[str] = None
     platform_ids: Optional[Dict[str, str]] = None
+    publish_results: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -110,11 +105,11 @@ class BatchDetailResponse(BaseModel):
     brand: str
     state: BatchState
     post_type_counts: Dict[str, int]
-    target_length_tier: Optional[int] = None
-    video_pipeline_route: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     archived: bool
+    meta_connection: Optional[Dict[str, Any]] = None
+    tiktok_connection: Optional[Dict[str, Any]] = None
     posts_count: int
     posts_by_state: Dict[str, int]
     posts: List[PostDetail]

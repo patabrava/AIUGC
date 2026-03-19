@@ -5,6 +5,8 @@
 {% block content %}
 <div
     id="batch-detail-root"
+    data-batch-id="{{ batch.id }}"
+    data-batch-state="{{ batch.state }}"
     {% if batch.state == 'S5_PROMPTS_BUILT' %}
     hx-get="/batches/{{ batch.id }}"
     hx-trigger="every 5s"
@@ -24,27 +26,9 @@
 
     <!-- Header -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
+        <div>
             <h2 class="text-2xl sm:text-3xl font-bold text-gray-900 break-words">{{ batch.brand }}</h2>
             <p class="mt-1 text-sm text-gray-500">Created {{ batch.created_at }}</p>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-                {% if batch.target_length_tier %}
-                <span class="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
-                    {{ batch.target_length_tier }}s batch
-                </span>
-                {% endif %}
-                {% if batch.video_pipeline_route == 'veo_extended' %}
-                <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-                    Veo extended pipeline
-                </span>
-                {% elif batch.video_pipeline_route == 'short' %}
-                <span class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                    Short Veo pipeline
-                </span>
-                {% endif %}
-            </div>
         </div>
     </div>
 
@@ -69,6 +53,11 @@
             {% endif %}
         {% endif %}
     {% endfor %}
+    {% set meta = batch.meta_connection or {} %}
+    {% set tiktok = batch.tiktok_connection or {} %}
+    {% set selected_page = meta.selected_page or {} %}
+    {% set selected_instagram = meta.selected_instagram or {} %}
+    {% set available_pages = meta.available_pages or [] %}
 
     <!-- State Stepper -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
@@ -237,7 +226,7 @@
     </div>
     {% elif batch.state == 'S7_PUBLISH_PLAN' %}
     <div id="publish-plan-workflow" class="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div class="flex-1">
                 <div class="flex items-center gap-3 mb-2">
                     <h3 class="text-xl font-bold text-gray-900">Publish Planning</h3>
@@ -246,21 +235,130 @@
                     </span>
                 </div>
                 <p class="text-sm text-gray-700">
-                    Schedule each post for optimal engagement times and select target social networks.
+                    Use the navbar Meta login, then bind a Page plus Instagram account here and schedule each video with one editable caption.
                 </p>
             </div>
-            {% if post_metrics.scheduled == post_metrics.active_count and post_metrics.active_count > 0 %}
-            <button
-                hx-post="/publish/batches/{{ batch.id }}/confirm"
-                hx-vals='{"confirm": true}'
-                hx-confirm="All posts scheduled. Confirm and dispatch to social platforms?"
-                hx-swap="none"
-                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition shadow-sm"
-            >
-                Confirm & Publish
-            </button>
-            {% endif %}
+            <div class="w-full lg:w-[30rem] space-y-4">
+                {% if meta.status == 'connected' %}
+                <div class="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Publishing Target</p>
+                            <h4 class="mt-1 text-sm font-semibold text-gray-900">
+                                {% if selected_page.id and selected_instagram.id %}
+                                {{ selected_page.name }} + @{{ selected_instagram.username or selected_instagram.id }}
+                                {% else %}
+                                Choose the Page and connected Instagram account
+                                {% endif %}
+                            </h4>
+                        </div>
+                        {% if selected_page.id and selected_instagram.id %}
+                        <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">Bound</span>
+                        {% else %}
+                        <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Select</span>
+                        {% endif %}
+                    </div>
+                    {% if available_pages %}
+                    <form
+                        class="mt-4 space-y-3"
+                        hx-post="/publish/batches/{{ batch.id }}/meta/select-target"
+                        hx-swap="none"
+                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                    >
+                        <label class="block text-xs font-medium text-gray-700" for="meta-page-select">
+                            Facebook Page with connected Instagram business account
+                        </label>
+                        <select
+                            id="meta-page-select"
+                            name="page_id"
+                            class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                            <option value="">Select a Page</option>
+                            {% for page in available_pages %}
+                            {% set page_instagram = page.instagram_business_account or {} %}
+                            <option value="{{ page.id }}" {% if selected_page.id == page.id %}selected{% endif %}>
+                                {{ page.name }}{% if page_instagram.username %} -> @{{ page_instagram.username }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <p class="text-xs text-gray-500">
+                            This workflow binds exactly one Page and its connected Instagram business account.
+                        </p>
+                        <button
+                            type="submit"
+                            class="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        >
+                            Save Target
+                        </button>
+                    </form>
+                    {% else %}
+                    <p class="mt-3 text-xs text-red-700">
+                        No manageable Pages were returned for this Meta connection. The app needs a Page that has an Instagram business account attached.
+                    </p>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <div class="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-900">TikTok Sandbox</p>
+                            <h4 class="mt-1 text-sm font-semibold text-gray-900">
+                                {% if tiktok.status == 'connected' %}
+                                {{ tiktok.display_name or tiktok.open_id or 'Connected sandbox account' }}
+                                {% elif tiktok.status == 'reconnect_required' %}
+                                Reconnect required
+                                {% else %}
+                                No TikTok account connected
+                                {% endif %}
+                            </h4>
+                            <p class="mt-1 text-xs text-gray-600">
+                                {% if tiktok.status == 'connected' %}
+                                Manual draft uploads are available for the authorized sandbox account.
+                                {% elif tiktok.status == 'reconnect_required' %}
+                                The TikTok sandbox token expired. Reconnect before uploading a draft.
+                                {% else %}
+                                Connect the authorized TikTok sandbox account to upload drafts from generated videos.
+                                {% endif %}
+                            </p>
+                            {% if tiktok.open_id %}
+                            <p class="mt-2 text-[11px] text-gray-500">Open ID: {{ tiktok.open_id }}</p>
+                            {% endif %}
+                        </div>
+                        {% if tiktok.status == 'connected' %}
+                        <span class="inline-flex items-center rounded-full bg-black px-2.5 py-1 text-xs font-semibold text-white">Connected</span>
+                        {% elif tiktok.status == 'reconnect_required' %}
+                        <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">Reconnect</span>
+                        {% else %}
+                        <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Required</span>
+                        {% endif %}
+                    </div>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <a
+                            href="/api/auth/tiktok/start?batch_id={{ batch.id }}"
+                            class="inline-flex items-center justify-center rounded-md bg-black px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-800 focus:ring-offset-2"
+                        >
+                            {% if tiktok.status == 'connected' %}Reconnect TikTok{% else %}Connect TikTok{% endif %}
+                        </a>
+                    </div>
+                    <p class="mt-3 text-xs text-gray-500">
+                        TikTok sandbox v1 uploads drafts manually per post. It does not use the Meta scheduling queue.
+                    </p>
+                </div>
+
+                {% if post_metrics.scheduled == post_metrics.active_count and post_metrics.active_count > 0 %}
+                <button
+                    hx-post="/publish/batches/{{ batch.id }}/confirm"
+                    hx-vals='{"batch_id":"{{ batch.id }}","confirm": true}'
+                    hx-confirm="All posts are planned. Arm Meta dispatch for their scheduled times?"
+                    hx-swap="none"
+                    hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                    class="w-full px-6 py-3 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition shadow-sm"
+                >
+                    Confirm & Arm Dispatch
+                </button>
+                {% endif %}
+            </div>
         </div>
     </div>
     {% endif %}
@@ -287,7 +385,7 @@
                 {% set description = seed.description %}
                 {% set review_status = seed.script_review_status or 'pending' %}
                 {% set post_removed = review_status == 'removed' or seed.video_excluded == True %}
-                <div class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-purple-300 transition" data-post-card="post-{{ post.id }}">
+                <div id="post-{{ post.id }}" class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-purple-300 transition" data-post-card="post-{{ post.id }}">
                     <div class="flex items-center space-x-3 text-xs text-gray-500">
                         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 uppercase tracking-wide">
                             {{ post.post_type }}
@@ -617,11 +715,6 @@
                                             {{ (post.video_metadata.size_bytes / 1024 / 1024) | round(2) }} MB
                                         </span>
                                         {% endif %}
-                                        {% if post.video_metadata and (post.video_metadata.actual_seconds or post.video_metadata.duration_seconds) %}
-                                        <span class="text-xs text-gray-500">
-                                            {{ (post.video_metadata.actual_seconds or post.video_metadata.duration_seconds) }}s actual
-                                        </span>
-                                        {% endif %}
                                     </div>
                                 </div>
                                 
@@ -650,7 +743,7 @@
                                                 {% else %}
                                                 <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
                                                 {% endif %}
-                                                <span class="text-gray-700">Duration: {{ post.qa_auto_checks.duration_actual }}s (expected {{ post.qa_auto_checks.duration_expected }}s ±0.5s)</span>
+                                                <span class="text-gray-700">Duration: {{ post.qa_auto_checks.duration_actual }}s (expected 8s ±0.5s)</span>
                                             </div>
                                             <div class="flex items-center gap-2">
                                                 {% if post.qa_auto_checks.resolution_valid %}
@@ -750,8 +843,12 @@
                     <!-- Publish Planning (S7_PUBLISH_PLAN state) -->
                     {% if batch.state == 'S7_PUBLISH_PLAN' %}
                     <div class="mt-6 border-t border-gray-200 pt-4">
+                        {% set publish_results = post.publish_results or {} %}
+                        {% set facebook_result = publish_results.facebook or {} %}
+                        {% set instagram_result = publish_results.instagram or {} %}
+                        {% set tiktok_result = publish_results.tiktok or {} %}
                         <div 
-                            x-data="publishSchedulerComponent('{{ post.id }}', {{ post.scheduled_at | tojson if post.scheduled_at else 'null' }}, {{ post.social_networks | tojson }})"
+                            x-data="publishSchedulerComponent('{{ post.id }}', {{ post.scheduled_at | tojson if post.scheduled_at else 'null' }}, {{ post.social_networks | tojson }}, {{ post.publish_caption | tojson if post.publish_caption else '\"\"' }}, {{ (batch.meta_connection.selected_page.id if batch.meta_connection and batch.meta_connection.selected_page else None) | tojson }}, {{ (batch.meta_connection.selected_instagram.id if batch.meta_connection and batch.meta_connection.selected_instagram else None) | tojson }}, {{ (batch.tiktok_connection.status == 'connected') | tojson }}, {{ post.video_url | tojson if post.video_url else 'null' }}, {{ ('/publish/meta/connect?batch_id=' ~ batch.id ~ '&post_id=' ~ post.id) | tojson }})"
                             class="space-y-4"
                         >
                             <div class="flex items-center justify-between">
@@ -783,73 +880,141 @@
                                 </p>
                             </div>
 
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">
+                                    Shared Caption
+                                </label>
+                                <textarea
+                                    x-model="publishCaption"
+                                    rows="4"
+                                    maxlength="2200"
+                                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="Write the caption/description that should be sent to Facebook and Instagram."
+                                ></textarea>
+                                <div class="mt-1 flex items-center justify-between text-xs text-gray-500">
+                                    <span>This caption is shared across Facebook and Instagram, but editable per post.</span>
+                                    <span x-text="`${publishCaption.length}/2200`"></span>
+                                </div>
+                            </div>
+
                             <!-- Social Network Selection -->
                             <div>
                                 <label class="block text-xs font-medium text-gray-700 mb-2">
-                                    Social Networks
+                                    Meta Networks
                                 </label>
-                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                    <!-- TikTok -->
-                                    <label
-                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
-                                        :class="selectedNetworks.includes('tiktok') ? 'bg-pink-50 border-pink-500 ring-2 ring-pink-500' : 'bg-white border-gray-300 hover:border-pink-300'"
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md transition"
+                                        :class="networkButtonClass('instagram')"
+                                        @click="toggleNetwork('instagram')"
+                                        @keydown.enter.prevent="toggleNetwork('instagram')"
                                     >
-                                        <input
-                                            type="checkbox"
-                                            value="tiktok"
-                                            x-model="selectedNetworks"
-                                            class="sr-only"
-                                        />
                                         <div class="flex items-center gap-2">
-                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('tiktok') ? 'text-pink-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
-                                                <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
-                                            </svg>
-                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('tiktok') ? 'text-pink-700' : 'text-gray-600'">TikTok</span>
-                                        </div>
-                                    </label>
-
-                                    <!-- Instagram -->
-                                    <label
-                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
-                                        :class="selectedNetworks.includes('instagram') ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-500' : 'bg-white border-gray-300 hover:border-purple-300'"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            value="instagram"
-                                            x-model="selectedNetworks"
-                                            class="sr-only"
-                                        />
-                                        <div class="flex items-center gap-2">
-                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : (instagramAvailable ? 'text-gray-400' : 'text-indigo-400')" fill="currentColor" viewBox="0 0 24 24">
                                                 <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
                                             </svg>
-                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : 'text-gray-600'">Instagram</span>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : (instagramAvailable ? 'text-gray-600' : 'text-indigo-700')">Instagram</span>
                                         </div>
-                                    </label>
+                                    </button>
 
-                                    <!-- Facebook -->
-                                    <label
-                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md cursor-pointer transition"
-                                        :class="selectedNetworks.includes('facebook') ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500' : 'bg-white border-gray-300 hover:border-blue-300'"
+                                    <button
+                                        type="button"
+                                        class="relative flex items-center justify-center px-3 py-2 border rounded-md transition"
+                                        :class="networkButtonClass('facebook')"
+                                        @click="toggleNetwork('facebook')"
+                                        @keydown.enter.prevent="toggleNetwork('facebook')"
                                     >
-                                        <input
-                                            type="checkbox"
-                                            value="facebook"
-                                            x-model="selectedNetworks"
-                                            class="sr-only"
-                                        />
                                         <div class="flex items-center gap-2">
-                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : (facebookAvailable ? 'text-gray-400' : 'text-indigo-400')" fill="currentColor" viewBox="0 0 24 24">
                                                 <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
                                             </svg>
-                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : 'text-gray-600'">Facebook</span>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : (facebookAvailable ? 'text-gray-600' : 'text-indigo-700')">Facebook</span>
                                         </div>
-                                    </label>
+                                    </button>
                                 </div>
                                 <p class="mt-2 text-xs text-gray-500" x-show="selectedNetworks.length === 0">
-                                    ⚠ Please select at least one social network
+                                    Select at least one Meta network for this post.
+                                </p>
+                                <p class="mt-2 text-xs text-red-700" x-show="!facebookAvailable || !instagramAvailable">
+                                    Click a locked Meta network to connect Facebook + Instagram and return to this post.
+                                </p>
+                                <p class="mt-2 text-xs text-red-700" x-show="!videoUrl">
+                                    Generate the video before saving a publish schedule.
                                 </p>
                             </div>
+
+                            <div class="rounded-md border border-gray-200 bg-gray-50 p-3">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">TikTok Draft Upload</p>
+                                        <p class="mt-1 text-xs text-gray-500">
+                                            Upload this generated video as a sandbox draft without affecting the Meta schedule.
+                                        </p>
+                                    </div>
+                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold {% if tiktok_result.status == 'draft_uploaded' %}bg-green-100 text-green-700{% elif tiktok_result.status == 'failed' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
+                                        {{ tiktok_result.status or 'idle' }}
+                                    </span>
+                                </div>
+                                {% if tiktok_result.remote_id %}
+                                <p class="mt-2 text-xs text-gray-600">Draft Publish ID: {{ tiktok_result.remote_id }}</p>
+                                {% endif %}
+                                {% if tiktok_result.error_message %}
+                                <p class="mt-2 text-xs text-red-700">{{ tiktok_result.error_message }}</p>
+                                {% endif %}
+                                <div class="mt-3 flex flex-wrap items-center gap-2">
+                                    <button
+                                        @click="uploadTikTokDraft()"
+                                        :disabled="!canUploadTikTok()"
+                                        class="inline-flex items-center justify-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition"
+                                        :class="canUploadTikTok() ? 'hover:bg-gray-900 focus:ring-2 focus:ring-gray-800 focus:ring-offset-2' : 'opacity-50 cursor-not-allowed'"
+                                    >
+                                        <span x-text="tiktokUploading ? 'Uploading…' : 'Upload Draft to TikTok'"></span>
+                                    </button>
+                                    <p class="text-xs text-gray-500" x-show="!tiktokAvailable">
+                                        Connect TikTok sandbox first.
+                                    </p>
+                                    <p class="text-xs text-gray-500" x-show="tiktokAvailable && !videoUrl">
+                                        Generate the video first.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {% if facebook_result or instagram_result %}
+                            <div class="rounded-md border border-gray-200 bg-gray-50 p-3">
+                                <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Latest Publish Results</p>
+                                <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                    <div class="rounded-md border border-gray-200 bg-white p-3">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="text-xs font-semibold text-blue-700">Facebook</span>
+                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold {% if facebook_result.status == 'published' %}bg-green-100 text-green-700{% elif facebook_result.status == 'failed' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
+                                                {{ facebook_result.status or 'pending' }}
+                                            </span>
+                                        </div>
+                                        {% if facebook_result.remote_id %}
+                                        <p class="mt-1 text-xs text-gray-600">Remote ID: {{ facebook_result.remote_id }}</p>
+                                        {% endif %}
+                                        {% if facebook_result.error_message %}
+                                        <p class="mt-1 text-xs text-red-700">{{ facebook_result.error_message }}</p>
+                                        {% endif %}
+                                    </div>
+                                    <div class="rounded-md border border-gray-200 bg-white p-3">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="text-xs font-semibold text-purple-700">Instagram</span>
+                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold {% if instagram_result.status == 'published' %}bg-green-100 text-green-700{% elif instagram_result.status == 'failed' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
+                                                {{ instagram_result.status or 'pending' }}
+                                            </span>
+                                        </div>
+                                        {% if instagram_result.remote_id %}
+                                        <p class="mt-1 text-xs text-gray-600">Remote ID: {{ instagram_result.remote_id }}</p>
+                                        {% endif %}
+                                        {% if instagram_result.error_message %}
+                                        <p class="mt-1 text-xs text-red-700">{{ instagram_result.error_message }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
 
                             <!-- Save Button -->
                             <div class="flex gap-2">
@@ -888,10 +1053,10 @@
 
     <!-- Video Generation Settings (moved from top) -->
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
-    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mt-6" x-data='videoSettingsComponent({ targetLengthTier: {{ batch.target_length_tier | tojson }}, pipelineRoute: {{ batch.video_pipeline_route | tojson }} })'>
+    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mt-6" x-data="videoSettingsComponent()">
         <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>
         <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4" x-show="!isDurationRouted">
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4">
                 <label class="flex flex-col text-sm" for="provider-select">
                     <span class="text-gray-700 font-medium">Provider</span>
                     <select
@@ -935,70 +1100,17 @@
                     <p class="mt-1 text-xs text-gray-500">Sora currently supports 4, 8, or 12 second clips.</p>
                 </label>
             </div>
-            <div class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4" x-show="isDurationRouted" x-cloak>
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                        <p class="text-sm font-semibold text-indigo-900">Duration-routed batch</p>
-                        <p class="mt-1 text-sm text-indigo-800">
-                            <span x-text="`${targetLengthTier}s selected at batch setup.`"></span>
-                            <span x-show="pipelineRoute === 'short'"> This stays on the short Veo path.</span>
-                            <span x-show="pipelineRoute === 'veo_extended'"> This batch uses the Veo extended chain automatically.</span>
-                        </p>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200">
-                            Veo 3.1
-                        </span>
-                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200" x-text="`${targetLengthTier}s target`"></span>
-                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200" x-show="pipelineRoute === 'veo_extended'">
-                            720p chain
-                        </span>
-                    </div>
-                </div>
-                <div class="mt-4 max-w-xs">
-                    <label class="flex flex-col text-sm" for="aspect-select-routed">
-                        <span class="text-gray-700 font-medium">Aspect Ratio</span>
-                        <select
-                            id="aspect-select-routed"
-                            name="aspect_ratio"
-                            class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            x-model="aspectRatio"
-                        >
-                            <option value="9:16">9:16 Vertical</option>
-                            <option value="16:9">16:9 Landscape</option>
-                        </select>
-                    </label>
-                </div>
-            </div>
             <input type="hidden" name="resolution" x-model="resolution" />
             <input type="hidden" name="seconds" x-model="duration" />
-            <div class="mt-4" aria-live="polite" x-show="submitError || submitStatusMessage" x-cloak>
+            <div class="mt-4" aria-live="polite" x-show="submitError || submitSuccess" x-cloak>
                 <div
-                    x-show="submitStatusMessage && submitStatusKind === 'info'"
-                    class="rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-800 flex items-center gap-2"
-                >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01" />
-                    </svg>
-                    <span x-text="submitStatusMessage"></span>
-                </div>
-                <div
-                    x-show="submitStatusMessage && submitStatusKind === 'success'"
+                    x-show="submitSuccess"
                     class="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 flex items-center gap-2"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    <span x-text="submitStatusMessage"></span>
-                </div>
-                <div
-                    x-show="submitStatusMessage && submitStatusKind === 'warning'"
-                    class="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 flex items-center gap-2"
-                >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86l-7.98 13.8A1.5 1.5 0 003.59 20h16.82a1.5 1.5 0 001.3-2.34l-7.98-13.8a1.5 1.5 0 00-2.58 0z" />
-                    </svg>
-                    <span x-text="submitStatusMessage"></span>
+                    <span x-text="successMessage"></span>
                 </div>
                 <div
                     x-show="submitError"
@@ -1025,16 +1137,11 @@
         </form>
     </div>
     <script>
-        window.videoSettingsComponent = function (options = {}) {
+        window.videoSettingsComponent = function () {
             return {
-                targetLengthTier: options.targetLengthTier || null,
-                pipelineRoute: options.pipelineRoute || null,
-                get isDurationRouted() {
-                    return this.targetLengthTier !== null;
-                },
-                provider: options.targetLengthTier ? 'veo_3_1' : 'veo_3_1',
+                provider: 'veo_3_1',
                 aspectRatio: '9:16',
-                duration: String(options.targetLengthTier || 8),
+                duration: '8',
                 resolution: '720p',
                 supportedSizes: {
                     'veo_3_1': {
@@ -1055,16 +1162,14 @@
                     const aspectMap = providerMap[aspect] || {};
                     return aspectMap[resolution] || null;
                 },
-                submitStatusMessage: '',
-                submitStatusKind: 'info',
+                successMessage: '',
                 async submitBatch(event) {
                     if (this.isSubmitting) {
                         return;
                     }
                     this.isSubmitting = true;
                     this.submitError = null;
-                    this.submitStatusKind = 'info';
-                    this.submitStatusMessage = 'Submitting request to the video provider…';
+                    this.submitSuccess = null;
                     try {
                         const response = await fetch(`/videos/batch/{{ batch.id }}/generate-all`, {
                             method: 'POST',
@@ -1081,58 +1186,24 @@
                             })
                         });
 
-                        const rawBody = await response.text();
-                        let payload = null;
-                        if (rawBody) {
-                            try {
-                                payload = JSON.parse(rawBody);
-                            } catch (error) {
-                                payload = null;
-                            }
-                        }
-
                         if (!response.ok) {
-                            const errorMessage = payload?.message
-                                || payload?.detail?.message
-                                || payload?.error?.message
-                                || rawBody
-                                || `Submission failed (${response.status})`;
-                            const errorCode = payload?.code ? ` [${payload.code}]` : '';
-                            throw new Error(`${errorMessage}${errorCode}`);
+                            const errorText = await response.text();
+                            throw new Error(errorText || `Submission failed (${response.status})`);
                         }
 
+                        const payload = await response.json();
                         const submittedCount = payload?.data?.submitted_count ?? 0;
-                        const skippedCount = payload?.data?.skipped_count ?? 0;
                         const providerLabel = this.provider === 'veo_3_1' ? 'Veo 3.1' : (this.provider === 'sora_2_pro' ? 'Sora 2 Pro' : 'Sora 2');
-                        if (submittedCount > 0) {
-                            this.submitStatusKind = 'success';
-                            this.submitStatusMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
-                        } else {
-                            this.submitStatusKind = 'warning';
-                            this.submitStatusMessage = payload?.message
-                                || `No prompts were submitted to ${providerLabel}.${skippedCount ? ` ${skippedCount} post(s) were skipped.` : ''} Check the batch details or retry later.`;
-                        }
+                        this.submitSuccess = submittedCount;
+                        this.successMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
                     } catch (error) {
-                        this.submitStatusKind = 'warning';
-                        this.submitStatusMessage = error instanceof Error ? error.message : 'Submission failed. Check the server logs or quota status.';
                         this.submitError = error instanceof Error ? error.message : 'Submission failed';
                     } finally {
                         this.isSubmitting = false;
                     }
                 },
                 init() {
-                    if (this.isDurationRouted) {
-                        this.provider = 'veo_3_1';
-                        this.duration = String(this.targetLengthTier || 8);
-                        this.resolution = this.pipelineRoute === 'veo_extended'
-                            ? '720p'
-                            : (this.aspectRatio === '16:9' ? '1080p' : '720p');
-                    }
                     this.$watch('provider', (value) => {
-                        if (this.isDurationRouted) {
-                            this.provider = 'veo_3_1';
-                            return;
-                        }
                         if (value.startsWith('sora_2')) {
                             if (!['4','8','12'].includes(this.duration)) {
                                 this.duration = '8';
@@ -1146,16 +1217,13 @@
                         this.resolution = targetResolution;
                     });
                     this.$watch('aspectRatio', (value) => {
-                        const targetResolution = this.pipelineRoute === 'veo_extended'
-                            ? '720p'
-                            : value === '16:9' ? '1080p' : '720p';
+                        const targetResolution = value === '16:9' ? '1080p' : '720p';
                         this.resolution = targetResolution;
                     });
                 },
                 isSubmitting: false,
                 submitError: null,
-                submitStatusMessage: '',
-                submitStatusKind: 'info'
+                submitSuccess: null
             };
         };
     </script>
@@ -1186,58 +1254,191 @@
             };
         };
 
+        const BERLIN_TIME_ZONE = 'Europe/Berlin';
+
+        window.timeZoneParts = function(date, timeZone) {
+            const formatter = new Intl.DateTimeFormat('en-CA', {
+                timeZone,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hourCycle: 'h23'
+            });
+            const parts = Object.fromEntries(
+                formatter.formatToParts(date)
+                    .filter((part) => part.type !== 'literal')
+                    .map((part) => [part.type, part.value])
+            );
+            return {
+                year: Number(parts.year),
+                month: Number(parts.month),
+                day: Number(parts.day),
+                hour: Number(parts.hour),
+                minute: Number(parts.minute)
+            };
+        };
+
+        window.partsToLocalValue = function(parts) {
+            const pad = (value) => String(value).padStart(2, '0');
+            return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+        };
+
+        window.zoneDateToLocalValue = function(date, timeZone) {
+            return window.partsToLocalValue(window.timeZoneParts(date, timeZone));
+        };
+
+        window.zonedLocalValueToUtcDate = function(localValue, timeZone) {
+            const [datePart, timePart] = localValue.split('T');
+            if (!datePart || !timePart) {
+                return null;
+            }
+
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hour, minute] = timePart.split(':').map(Number);
+            const desiredParts = { year, month, day, hour, minute };
+            const desiredMinutes = Date.UTC(year, month - 1, day, hour, minute) / 60000;
+
+            let candidate = new Date(Date.UTC(year, month - 1, day, hour, minute));
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const actualParts = window.timeZoneParts(candidate, timeZone);
+                const actualMinutes = Date.UTC(
+                    actualParts.year,
+                    actualParts.month - 1,
+                    actualParts.day,
+                    actualParts.hour,
+                    actualParts.minute
+                ) / 60000;
+                const deltaMinutes = desiredMinutes - actualMinutes;
+                if (deltaMinutes === 0) {
+                    break;
+                }
+                candidate = new Date(candidate.getTime() + (deltaMinutes * 60 * 1000));
+            }
+
+            return candidate;
+        };
+
+        window.extractApiError = async function(response) {
+            try {
+                const payload = await response.json();
+                if (payload?.message) {
+                    return payload.message;
+                }
+                if (typeof payload?.detail === 'string') {
+                    return payload.detail;
+                }
+                if (payload?.detail?.message) {
+                    return payload.detail.message;
+                }
+            } catch (error) {
+                return `Request failed (${response.status})`;
+            }
+            return `Request failed (${response.status})`;
+        };
+
         // Alpine.js component for publish scheduler
-        window.publishSchedulerComponent = function(postId, initialScheduledAt, initialNetworks) {
+        window.publishSchedulerComponent = function(postId, initialScheduledAt, initialNetworks, initialCaption, selectedPageId, selectedInstagramId, tiktokAvailable, videoUrl, metaConnectUrl) {
             return {
                 postId: postId,
                 scheduledDateTime: '',
-                selectedNetworks: initialNetworks || [],
+                selectedNetworks: (initialNetworks || []).filter((network) => ['facebook', 'instagram'].includes(network)),
+                publishCaption: initialCaption || '',
+                facebookAvailable: Boolean(selectedPageId),
+                instagramAvailable: Boolean(selectedInstagramId),
+                tiktokAvailable: Boolean(tiktokAvailable),
+                videoUrl: videoUrl,
+                metaConnectUrl: metaConnectUrl,
                 minDateTime: '',
                 saving: false,
+                tiktokUploading: false,
                 successMessage: '',
                 errorMessage: '',
                 
                 init() {
-                    // Set minimum datetime to now + 1 hour
                     const now = new Date();
-                    now.setHours(now.getHours() + 1);
-                    this.minDateTime = this.formatDateTimeLocal(now);
+                    const minDate = new Date(now.getTime() + (60 * 60 * 1000));
+                    this.minDateTime = window.zoneDateToLocalValue(minDate, BERLIN_TIME_ZONE);
                     
-                    // Initialize scheduled datetime if exists
                     if (initialScheduledAt) {
-                        const scheduledDate = new Date(initialScheduledAt);
-                        // Convert from UTC to Europe/Berlin for display
-                        const berlinDate = new Date(scheduledDate.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
-                        this.scheduledDateTime = this.formatDateTimeLocal(berlinDate);
+                        this.scheduledDateTime = window.zoneDateToLocalValue(new Date(initialScheduledAt), BERLIN_TIME_ZONE);
+                    }
+
+                    if (window.location.hash === `#post-${this.postId}`) {
+                        const card = document.getElementById(`post-${this.postId}`);
+                        if (card) {
+                            card.classList.add('ring-2', 'ring-indigo-400', 'ring-offset-2');
+                            setTimeout(() => {
+                                card.classList.remove('ring-2', 'ring-indigo-400', 'ring-offset-2');
+                            }, 2500);
+                        }
                     }
                 },
-                
-                formatDateTimeLocal(date) {
-                    // Format: YYYY-MM-DDTHH:mm
-                    const year = date.getFullYear();
-                    const month = String(date.getMonth() + 1).padStart(2, '0');
-                    const day = String(date.getDate()).padStart(2, '0');
-                    const hours = String(date.getHours()).padStart(2, '0');
-                    const minutes = String(date.getMinutes()).padStart(2, '0');
-                    return `${year}-${month}-${day}T${hours}:${minutes}`;
-                },
-                
+
                 getUTCDisplay() {
                     if (!this.scheduledDateTime) return '';
-                    
-                    // Parse as Europe/Berlin time
-                    const localDate = new Date(this.scheduledDateTime);
-                    
-                    // Convert to UTC
-                    const utcDate = new Date(localDate.toLocaleString('en-US', { timeZone: 'UTC' }));
-                    
+                    const utcDate = window.zonedLocalValueToUtcDate(this.scheduledDateTime, BERLIN_TIME_ZONE);
+                    if (!utcDate) return '';
                     return utcDate.toISOString().replace('T', ' ').substring(0, 16) + ' UTC';
                 },
                 
+                networkAvailable(network) {
+                    if (network === 'facebook') return this.facebookAvailable;
+                    if (network === 'instagram') return this.instagramAvailable;
+                    return false;
+                },
+
+                networkButtonClass(network) {
+                    if (this.selectedNetworks.includes(network)) {
+                        return network === 'facebook'
+                            ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500 cursor-pointer'
+                            : 'bg-purple-50 border-purple-500 ring-2 ring-purple-500 cursor-pointer';
+                    }
+                    if (!this.networkAvailable(network)) {
+                        return 'bg-indigo-50 border-indigo-300 cursor-pointer hover:border-indigo-400';
+                    }
+                    return network === 'facebook'
+                        ? 'bg-white border-gray-300 hover:border-blue-300 cursor-pointer'
+                        : 'bg-white border-gray-300 hover:border-purple-300 cursor-pointer';
+                },
+
+                toggleNetwork(network) {
+                    if (!this.networkAvailable(network)) {
+                        this.openAccountsHub();
+                        return;
+                    }
+
+                    if (this.selectedNetworks.includes(network)) {
+                        this.selectedNetworks = this.selectedNetworks.filter((value) => value !== network);
+                        return;
+                    }
+                    this.selectedNetworks = [...this.selectedNetworks, network];
+                },
+
+                openAccountsHub() {
+                    const accountsHub = window.Alpine?.store('accountsHub');
+                    if (accountsHub) {
+                        accountsHub.open('meta', { postId: this.postId });
+                        return;
+                    }
+                    window.location.assign(this.metaConnectUrl);
+                },
+
                 canSave() {
                     return this.scheduledDateTime && 
-                           this.selectedNetworks.length > 0 && 
+                           Boolean(this.videoUrl) &&
+                           this.publishCaption.trim().length > 0 &&
+                           this.selectedNetworks.length > 0 &&
+                           this.selectedNetworks.every((network) => this.networkAvailable(network)) &&
                            !this.saving;
+                },
+
+                canUploadTikTok() {
+                    return this.tiktokAvailable &&
+                           Boolean(this.videoUrl) &&
+                           this.publishCaption.trim().length > 0 &&
+                           !this.tiktokUploading;
                 },
                 
                 async saveSchedule() {
@@ -1248,9 +1449,10 @@
                     this.errorMessage = '';
                     
                     try {
-                        // Convert local datetime to UTC
-                        const localDate = new Date(this.scheduledDateTime);
-                        const utcDate = new Date(localDate.toLocaleString('en-US', { timeZone: 'UTC' }));
+                        const utcDate = window.zonedLocalValueToUtcDate(this.scheduledDateTime, BERLIN_TIME_ZONE);
+                        if (!utcDate) {
+                            throw new Error('Invalid scheduled time');
+                        }
                         
                         const response = await fetch(`/publish/posts/${this.postId}/schedule`, {
                             method: 'POST',
@@ -1261,19 +1463,17 @@
                             body: JSON.stringify({
                                 post_id: this.postId,
                                 scheduled_at: utcDate.toISOString(),
+                                publish_caption: this.publishCaption.trim(),
                                 social_networks: this.selectedNetworks
                             })
                         });
                         
                         if (!response.ok) {
-                            const errorData = await response.json();
-                            throw new Error(errorData.message || `Failed to save schedule (${response.status})`);
+                            throw new Error(await window.extractApiError(response));
                         }
                         
-                        const result = await response.json();
-                        this.successMessage = 'Schedule saved successfully!';
+                        this.successMessage = 'Publish plan saved successfully.';
                         
-                        // Reload page after 1 second to show updated status
                         setTimeout(() => {
                             window.location.reload();
                         }, 1000);
@@ -1283,6 +1483,43 @@
                         console.error('Save schedule error:', error);
                     } finally {
                         this.saving = false;
+                    }
+                },
+
+                async uploadTikTokDraft() {
+                    if (!this.canUploadTikTok()) {
+                        return;
+                    }
+
+                    this.tiktokUploading = true;
+                    this.successMessage = '';
+                    this.errorMessage = '';
+
+                    try {
+                        const response = await fetch('/api/tiktok/upload-draft', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Correlation-ID': `tiktok_${this.postId}`
+                            },
+                            body: JSON.stringify({
+                                post_id: this.postId,
+                                caption: this.publishCaption.trim()
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(await window.extractApiError(response));
+                        }
+
+                        this.successMessage = 'TikTok draft upload submitted successfully.';
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } catch (error) {
+                        this.errorMessage = error.message || 'TikTok draft upload failed';
+                    } finally {
+                        this.tiktokUploading = false;
                     }
                 }
             };

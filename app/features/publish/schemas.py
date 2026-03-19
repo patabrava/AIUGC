@@ -33,10 +33,11 @@ class PostScheduleRequest(BaseModel):
     """Request to schedule a single post."""
     post_id: str = Field(..., description="Post ID to schedule")
     scheduled_at: datetime = Field(..., description="Scheduled publish time in UTC")
+    publish_caption: str = Field(..., min_length=1, max_length=2200, description="Shared caption/description")
     social_networks: List[SocialNetwork] = Field(
         ..., 
         min_length=1,
-        description="Selected social networks (TikTok, Instagram, Facebook)"
+        description="Selected social networks (Instagram, Facebook)"
     )
     
     @field_validator('scheduled_at')
@@ -93,6 +94,7 @@ class BatchPublishPlanRequest(BaseModel):
 class UpdatePostScheduleRequest(BaseModel):
     """Request to update schedule for a single post."""
     scheduled_at: Optional[datetime] = Field(None, description="New scheduled time in UTC")
+    publish_caption: Optional[str] = Field(None, min_length=1, max_length=2200, description="Updated shared caption")
     social_networks: Optional[List[SocialNetwork]] = Field(None, description="Updated social networks")
     
     @field_validator('scheduled_at')
@@ -104,14 +106,21 @@ class UpdatePostScheduleRequest(BaseModel):
         return v
 
 
+class MetaTargetSelectionRequest(BaseModel):
+    """Request to select the Page/Instagram pair for a batch."""
+    page_id: str = Field(..., min_length=1, description="Facebook Page ID to bind to the batch")
+
+
 class PostScheduleResponse(BaseModel):
     """Response for post schedule."""
     post_id: str
     topic_title: str
     scheduled_at: Optional[datetime]
+    publish_caption: str = ""
     social_networks: List[str]
     publish_status: str
     platform_ids: Optional[Dict[str, str]] = None
+    publish_results: Optional[Dict[str, Any]] = None
     
     class Config:
         from_attributes = True
@@ -153,7 +162,7 @@ class SuggestTimesResponse(BaseModel):
 
 
 class ConfirmPublishRequest(BaseModel):
-    """Request to confirm and dispatch batch to social platforms."""
+    """Request to confirm and arm batch dispatch."""
     batch_id: str = Field(..., description="Batch ID to publish")
     confirm: bool = Field(default=True, description="Confirmation flag")
 
@@ -173,3 +182,42 @@ class ConfirmPublishResponse(BaseModel):
     published_count: int
     failed_count: int
     results: List[PublishResult]
+
+
+class TikTokAccountResponse(BaseModel):
+    """Public TikTok account state for the sandbox operator."""
+    id: Optional[str] = None
+    platform: Optional[str] = None
+    open_id: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    scope: Optional[str] = None
+    environment: Optional[str] = None
+    access_token_expires_at: Optional[datetime] = None
+    refresh_token_expires_at: Optional[datetime] = None
+    status: str = "disconnected"
+    updated_at: Optional[datetime] = None
+
+
+class TikTokUploadDraftRequest(BaseModel):
+    """Upload one generated post as a TikTok draft."""
+    post_id: str = Field(..., min_length=1, description="Post id for the generated video")
+    caption: Optional[str] = Field(default=None, max_length=2200, description="Optional TikTok draft caption")
+
+
+class TikTokPublishJobResponse(BaseModel):
+    """Public TikTok publish job state."""
+    id: str
+    connected_account_id: str
+    media_asset_id: str
+    platform: str
+    caption: str
+    post_mode: str
+    tiktok_publish_id: Optional[str] = None
+    status: str
+    request_payload_json: Dict[str, Any]
+    response_payload_json: Dict[str, Any]
+    error_message: str
+    created_at: datetime
+    updated_at: datetime
+    published_at: Optional[datetime] = None

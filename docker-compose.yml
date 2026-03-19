@@ -1,17 +1,58 @@
+x-flow-forge-env: &flow-forge-env
+  SUPABASE_URL: ${SUPABASE_URL:-https://qnvgiihzbihkedakggth.supabase.co}
+  SUPABASE_KEY: ${SUPABASE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFudmdpaWh6Ymloa2VkYWtnZ3RoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzY2MTgwNywiZXhwIjoyMDg5MjM3ODA3fQ.RgV1ErVD4nWfT3e-cyHWMgTNFFJPKBcCzKIF9VyERyI}
+  SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFudmdpaWh6Ymloa2VkYWtnZ3RoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzY2MTgwNywiZXhwIjoyMDg5MjM3ODA3fQ.RgV1ErVD4nWfT3e-cyHWMgTNFFJPKBcCzKIF9VyERyI}
+  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFudmdpaWh6Ymloa2VkYWtnZ3RoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzY2MTgwNywiZXhwIjoyMDg5MjM3ODA3fQ.RgV1ErVD4nWfT3e-cyHWMgTNFFJPKBcCzKIF9VyERyI}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+  GEMINI_API_KEY: ${GEMINI_API_KEY}
+  GEMINI_TOPIC_MODEL: ${GEMINI_TOPIC_MODEL:-gemini-2.5-flash}
+  GEMINI_DEEP_RESEARCH_AGENT: ${GEMINI_DEEP_RESEARCH_AGENT:-deep-research-pro-preview-12-2025}
+  GEMINI_TOPIC_TIMEOUT_SECONDS: ${GEMINI_TOPIC_TIMEOUT_SECONDS:-600}
+  GEMINI_TOPIC_POLL_SECONDS: ${GEMINI_TOPIC_POLL_SECONDS:-5}
+  GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY}
+  GOOGLE_AI_PROJECT_ID: ${GOOGLE_AI_PROJECT_ID}
+  CLOUDFLARE_R2_ACCOUNT_ID: ${CLOUDFLARE_R2_ACCOUNT_ID}
+  CLOUDFLARE_R2_ACCESS_KEY_ID: ${CLOUDFLARE_R2_ACCESS_KEY_ID}
+  CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${CLOUDFLARE_R2_SECRET_ACCESS_KEY}
+  CLOUDFLARE_R2_BUCKET_NAME: ${CLOUDFLARE_R2_BUCKET_NAME}
+  CLOUDFLARE_R2_PUBLIC_BASE_URL: ${CLOUDFLARE_R2_PUBLIC_BASE_URL}
+  CLOUDFLARE_R2_REGION: ${CLOUDFLARE_R2_REGION:-auto}
+  CLOUDFLARE_R2_ENDPOINT_URL: ${CLOUDFLARE_R2_ENDPOINT_URL}
+  CLOUDFLARE_R2_VIDEO_PREFIX: ${CLOUDFLARE_R2_VIDEO_PREFIX:-flow-forge/videos}
+  USE_URL_BASED_UPLOAD: ${USE_URL_BASED_UPLOAD:-false}
+  TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY}
+  TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET}
+  TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI}
+  TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-sandbox}
+  TIKTOK_SANDBOX_ACCOUNT: ${TIKTOK_SANDBOX_ACCOUNT}
+  INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN}
+  META_APP_ID: ${META_APP_ID}
+  META_APP_SECRET: ${META_APP_SECRET}
+  META_REDIRECT_URI: ${META_REDIRECT_URI}
+  APP_URL: ${APP_URL:-https://aiugc-prod.srv1498567.hstgr.cloud}
+  APP_HOST: ${APP_HOST:-aiugc-prod.srv1498567.hstgr.cloud}
+  PRIVACY_POLICY_URL: ${PRIVACY_POLICY_URL}
+  TERMS_URL: ${TERMS_URL}
+  TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+  CRON_SECRET: ${CRON_SECRET}
+  DEBUG: ${DEBUG:-0}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+
 services:
   web:
     build:
       context: .
       dockerfile: Dockerfile
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    env_file:
-      - .env
+    environment: *flow-forge-env
     ports:
       - "${APP_PORT:-8000}:8000"
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${APP_HOST:-aiugc-prod.srv1498567.hstgr.cloud}`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=websecure
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.tls.certresolver=letsencrypt
       - traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000
@@ -33,8 +74,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["python", "workers/video_poller.py"]
-    env_file:
-      - .env
+    environment: *flow-forge-env
     restart: unless-stopped
     depends_on:
       web:

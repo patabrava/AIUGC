@@ -6,6 +6,7 @@ Per Constitution § I: Canon Supremacy
 
 import uuid
 from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +21,12 @@ from app.features.topics.handlers import router as topics_router
 from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
-from app.features.publish.handlers import router as publish_router
+from app.features.publish.handlers import router as publish_router, run_scheduled_publish_job
+
+try:
+    from app.features.publish.tiktok import router as tiktok_router
+except ModuleNotFoundError:
+    tiktok_router = None
 
 
 # Configure logging on module import
@@ -32,6 +38,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     settings = get_settings()
+    scheduler = AsyncIOScheduler(timezone="UTC")
     logger.info(
         "application_startup",
         environment=settings.environment,
@@ -42,9 +49,23 @@ async def lifespan(app: FastAPI):
     supabase = get_supabase()
     if not supabase.health_check():
         logger.error("supabase_connection_failed_on_startup")
+
+    scheduler.add_job(
+        run_scheduled_publish_job,
+        "interval",
+        minutes=1,
+        id="meta_publish_dispatch",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
+    scheduler.start()
+    logger.info("publish_scheduler_started", interval_minutes=1)
     
     yield
-    
+
+    scheduler.shutdown(wait=False)
+    logger.info("publish_scheduler_stopped")
     logger.info("application_shutdown")
 
 
@@ -151,6 +172,8 @@ app.include_router(posts_router)
 app.include_router(videos_router)
 app.include_router(qa_router)
 app.include_router(publish_router)
+if tiktok_router is not None:
+    app.include_router(tiktok_router)
 
 
 # Root endpoint
