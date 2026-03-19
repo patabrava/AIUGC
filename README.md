@@ -5,6 +5,11 @@
 
 Deterministic UGC video production system for TikTok and Instagram.
 
+Current social publishing support:
+- Meta publish scheduling and dispatch in `S7_PUBLISH_PLAN`
+- TikTok sandbox OAuth plus manual draft upload in `S7_PUBLISH_PLAN`
+- TikTok direct posting via `video.publish` is not implemented yet
+
 ## Quick Start
 
 ### Prerequisites
@@ -85,6 +90,16 @@ See `.env.example` for all required variables:
 - `GEMINI_API_KEY`: Gemini API key for topic research and generation
 - `ANTHROPIC_API_KEY`: Anthropic API key
 - Additional keys for video providers, Cloudflare R2, and social platforms
+- TikTok sandbox requires:
+  - `TIKTOK_CLIENT_KEY`
+  - `TIKTOK_CLIENT_SECRET`
+  - `TIKTOK_REDIRECT_URI`
+  - `TIKTOK_ENVIRONMENT=sandbox`
+  - `TIKTOK_SANDBOX_ACCOUNT`
+  - `APP_URL`
+  - `PRIVACY_POLICY_URL`
+  - `TERMS_URL`
+  - `TOKEN_ENCRYPTION_KEY`
 
 ## Architecture
 

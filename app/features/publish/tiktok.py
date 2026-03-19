@@ -1,0 +1,669 @@
+"""
+TikTok publish integration.
+Implements sandbox OAuth and draft upload without disturbing the Meta scheduling flow.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlencode, urlparse
+
+import httpx
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import RedirectResponse
+
+from app.adapters.supabase_client import get_supabase
+from app.core.config import get_settings
+from app.core.errors import (
+    AuthenticationError,
+    ErrorCode,
+    NotFoundError,
+    RateLimitError,
+    SuccessResponse,
+    ThirdPartyError,
+    ValidationError,
+)
+from app.core.logging import get_logger
+from app.core.states import BatchState
+from app.features.publish.schemas import (
+    TikTokAccountResponse,
+    TikTokPublishJobResponse,
+    TikTokUploadDraftRequest,
+)
+from app.features.publish.tiktok_crypto import (
+    build_code_challenge,
+    build_signed_state,
+    decode_signed_state,
+    generate_code_verifier,
+    redact_secret_payload,
+)
+
+logger = get_logger(__name__)
+router = APIRouter(tags=["tiktok"])
+
+TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
+TIKTOK_API_BASE = "https://open.tiktokapis.com"
+TIKTOK_TIMEOUT_SECONDS = 60.0
+DEFAULT_SCOPE = "user.info.basic,video.upload"
+DEFAULT_PRIVACY_LEVEL = "SELF_ONLY"
+MAX_SINGLE_CHUNK_BYTES = 64 * 1024 * 1024
+MIN_CHUNK_BYTES = 5 * 1024 * 1024
+MAX_FINAL_CHUNK_BYTES = 128 * 1024 * 1024
+
+
+def _load_json_object(value: Any) -> Dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _state_secret() -> str:
+    settings = get_settings()
+    if not settings.token_encryption_key:
+        raise ValidationError("TikTok token encryption key is not configured.")
+    return settings.token_encryption_key
+
+
+def _require_tiktok_settings() -> Any:
+    settings = get_settings()
+    missing = [
+        name
+        for name, value in [
+            ("TIKTOK_CLIENT_KEY", settings.tiktok_client_key),
+            ("TIKTOK_CLIENT_SECRET", settings.tiktok_client_secret),
+            ("TIKTOK_REDIRECT_URI", settings.tiktok_redirect_uri),
+            ("TOKEN_ENCRYPTION_KEY", settings.token_encryption_key),
+            ("APP_URL", settings.app_url),
+            ("PRIVACY_POLICY_URL", settings.privacy_policy_url),
+            ("TERMS_URL", settings.terms_url),
+            ("TIKTOK_SANDBOX_ACCOUNT", settings.tiktok_sandbox_account),
+        ]
+        if not value
+    ]
+    if missing:
+        raise ValidationError(
+            "TikTok sandbox integration is not configured.",
+            details={"missing_env": missing},
+        )
+    return settings
+
+
+def _sanitize_connected_account(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not row:
+        return {"status": "disconnected"}
+
+    sanitized = dict(row)
+    sanitized.pop("access_token", None)
+    sanitized.pop("refresh_token", None)
+    status = "connected"
+    expires_at = sanitized.get("access_token_expires_at")
+    if expires_at:
+        try:
+            expires_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            if expires_dt.tzinfo is None:
+                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+            if expires_dt <= datetime.now(timezone.utc):
+                status = "reconnect_required"
+        except ValueError:
+            status = "reconnect_required"
+    sanitized["status"] = status
+    return sanitized
+
+
+def get_tiktok_public_account() -> Dict[str, Any]:
+    """Return the latest connected TikTok account without token material."""
+    try:
+        settings = get_settings()
+        response = (
+            get_supabase()
+            .client.table("connected_accounts")
+            .select("*")
+            .eq("platform", "tiktok")
+            .eq("environment", settings.tiktok_environment)
+            .order("updated_at")
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+    except Exception:
+        return {"status": "disconnected"}
+    if not rows:
+        return {"status": "disconnected"}
+    return _sanitize_connected_account(rows[-1])
+
+
+def _load_tiktok_account_secret() -> Dict[str, Any]:
+    settings = _require_tiktok_settings()
+    response = get_supabase().client.rpc(
+        "get_tiktok_connected_account_secret",
+        {
+            "p_environment": settings.tiktok_environment,
+            "p_encryption_key": settings.token_encryption_key,
+        },
+    ).execute()
+    rows = response.data or []
+    if not rows:
+        raise AuthenticationError("No TikTok sandbox account is connected.")
+
+    account = dict(rows[0])
+    expires_at = account.get("access_token_expires_at")
+    if expires_at:
+        expires_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        if expires_dt.tzinfo is None:
+            expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+        if expires_dt <= datetime.now(timezone.utc):
+            raise AuthenticationError("TikTok access token expired. Reconnect the sandbox account.")
+    return account
+
+
+async def _tiktok_request(
+    method: str,
+    path: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    url = path if path.startswith("http") else f"{TIKTOK_API_BASE}{path}"
+    async with httpx.AsyncClient(timeout=TIKTOK_TIMEOUT_SECONDS) as client:
+        response = await client.request(method, url, headers=headers, params=params, data=data, json=json_body)
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {"message": response.text}
+
+    error = payload.get("error") if isinstance(payload, dict) else None
+    error_code = str((error or {}).get("code") or "")
+    error_message = str((error or {}).get("message") or payload.get("message") or response.text or "TikTok request failed")
+
+    if response.status_code == 429 or error_code == "rate_limit_exceeded":
+        raise RateLimitError(
+            message="TikTok rate limit exceeded.",
+            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload)},
+        )
+
+    if response.status_code == 401 or error_code in {"access_token_invalid", "scope_not_authorized"}:
+        raise AuthenticationError(
+            message="TikTok access token is invalid or missing required scope.",
+            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload)},
+        )
+
+    if response.is_error or (error and error_code and error_code != "ok"):
+        raise ThirdPartyError(
+            message=error_message,
+            details={"status_code": response.status_code, "error": redact_secret_payload(error or payload), "url": url},
+        )
+
+    return payload if isinstance(payload, dict) else {}
+
+
+async def _exchange_code_for_tokens(code: str, code_verifier: str) -> Dict[str, Any]:
+    settings = _require_tiktok_settings()
+    payload = await _tiktok_request(
+        "POST",
+        "/v2/oauth/token/",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "client_key": settings.tiktok_client_key,
+            "client_secret": settings.tiktok_client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": settings.tiktok_redirect_uri,
+            "code_verifier": code_verifier,
+        },
+    )
+    return payload.get("data") if isinstance(payload.get("data"), dict) else payload
+
+
+async def _fetch_user_profile(access_token: str) -> Dict[str, Any]:
+    payload = await _tiktok_request(
+        "GET",
+        "/v2/user/info/",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={"fields": "open_id,display_name,avatar_url"},
+    )
+    return ((payload.get("data") or {}).get("user")) or {}
+
+
+def _upsert_connected_account(
+    *,
+    open_id: str,
+    display_name: str,
+    avatar_url: str,
+    access_token: str,
+    refresh_token: str,
+    access_token_expires_at: Optional[str],
+    refresh_token_expires_at: Optional[str],
+    scope: str,
+) -> Dict[str, Any]:
+    settings = _require_tiktok_settings()
+    response = get_supabase().client.rpc(
+        "upsert_tiktok_connected_account",
+        {
+            "p_user_id": None,
+            "p_open_id": open_id,
+            "p_display_name": display_name,
+            "p_avatar_url": avatar_url,
+            "p_access_token_plain": access_token,
+            "p_refresh_token_plain": refresh_token or "",
+            "p_access_token_expires_at": access_token_expires_at,
+            "p_refresh_token_expires_at": refresh_token_expires_at,
+            "p_scope": scope,
+            "p_environment": settings.tiktok_environment,
+            "p_encryption_key": settings.token_encryption_key,
+        },
+    ).execute()
+    rows = response.data or []
+    if not rows:
+        raise ThirdPartyError("TikTok account persistence failed.")
+    return dict(rows[0])
+
+
+def _storage_key_from_url(video_url: str) -> str:
+    parsed = urlparse(video_url)
+    return parsed.path.lstrip("/")
+
+
+def _upsert_media_asset(
+    *,
+    source_url: str,
+    storage_key: str,
+    mime_type: str,
+    file_size: int,
+    duration_seconds: Optional[float],
+    status: str,
+) -> Dict[str, Any]:
+    client = get_supabase().client
+    existing = client.table("media_assets").select("*").eq("source_url", source_url).limit(1).execute().data or []
+    payload = {
+        "user_id": None,
+        "source_url": source_url,
+        "storage_key": storage_key,
+        "mime_type": mime_type,
+        "file_size": file_size,
+        "duration_seconds": duration_seconds,
+        "status": status,
+    }
+    if existing:
+        response = client.table("media_assets").update(payload).eq("id", existing[0]["id"]).execute()
+    else:
+        response = client.table("media_assets").insert(payload).execute()
+    rows = response.data or []
+    if not rows:
+        raise ThirdPartyError("Media asset persistence failed.")
+    return dict(rows[0])
+
+
+def _create_publish_job(
+    *,
+    connected_account_id: str,
+    media_asset_id: str,
+    caption: str,
+    request_payload_json: Dict[str, Any],
+) -> Dict[str, Any]:
+    now = datetime.utcnow().isoformat()
+    response = get_supabase().client.table("publish_jobs").insert(
+        {
+            "user_id": None,
+            "connected_account_id": connected_account_id,
+            "platform": "tiktok",
+            "media_asset_id": media_asset_id,
+            "caption": caption,
+            "post_mode": "draft",
+            "status": "uploading",
+            "request_payload_json": request_payload_json,
+            "response_payload_json": {},
+            "error_message": "",
+            "created_at": now,
+            "updated_at": now,
+        }
+    ).execute()
+    rows = response.data or []
+    if not rows:
+        raise ThirdPartyError("TikTok publish job creation failed.")
+    return dict(rows[0])
+
+
+def _update_publish_job(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    response = get_supabase().client.table("publish_jobs").update(
+        {**payload, "updated_at": datetime.utcnow().isoformat()}
+    ).eq("id", job_id).execute()
+    rows = response.data or []
+    if not rows:
+        raise NotFoundError("TikTok publish job not found.", details={"job_id": job_id})
+    return dict(rows[0])
+
+
+def _update_post_tiktok_result(post: Dict[str, Any], job: Dict[str, Any], *, success: bool, error_message: str = "") -> None:
+    publish_results = _load_json_object(post.get("publish_results"))
+    platform_ids = _load_json_object(post.get("platform_ids"))
+    result = {
+        "status": "draft_uploaded" if success else "failed",
+        "publish_job_id": job["id"],
+        "remote_id": job.get("tiktok_publish_id"),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    if error_message:
+        result["error_message"] = error_message
+
+    publish_results["tiktok"] = result
+    if job.get("tiktok_publish_id"):
+        platform_ids["tiktok"] = job["tiktok_publish_id"]
+
+    get_supabase().client.table("posts").update(
+        {"publish_results": publish_results, "platform_ids": platform_ids}
+    ).eq("id", post["id"]).execute()
+
+
+async def _download_video_bytes(video_url: str) -> Tuple[bytes, str]:
+    async with httpx.AsyncClient(timeout=TIKTOK_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        response = await client.get(video_url)
+    if response.is_error:
+        raise ThirdPartyError(
+            "Video download for TikTok upload failed.",
+            details={"status_code": response.status_code, "video_url": video_url},
+        )
+    content_type = response.headers.get("content-type", "video/mp4").split(";")[0].strip() or "video/mp4"
+    return response.content, content_type
+
+
+def _calculate_upload_plan(video_size: int) -> Tuple[int, int]:
+    if video_size <= 0:
+        raise ValidationError("TikTok upload requires a non-empty video file.")
+    if video_size <= MAX_SINGLE_CHUNK_BYTES:
+        return video_size, 1
+
+    chunk_size = MAX_SINGLE_CHUNK_BYTES
+    full_chunks, remainder = divmod(video_size, chunk_size)
+    if remainder == 0:
+        return chunk_size, full_chunks
+    if remainder >= MIN_CHUNK_BYTES:
+        return chunk_size, full_chunks + 1
+    if full_chunks < 1:
+        return video_size, 1
+    if chunk_size + remainder > MAX_FINAL_CHUNK_BYTES:
+        raise ValidationError("TikTok upload video is too large for the sandbox file-upload flow.")
+    return chunk_size, full_chunks
+
+
+async def _initialize_inbox_video_upload(access_token: str, video_size: int) -> Dict[str, Any]:
+    chunk_size, total_chunk_count = _calculate_upload_plan(video_size)
+    payload = await _tiktok_request(
+        "POST",
+        "/v2/post/publish/inbox/video/init/",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+        },
+        json_body={
+            "source_info": {
+                "source": "FILE_UPLOAD",
+                "video_size": video_size,
+                "chunk_size": chunk_size,
+                "total_chunk_count": total_chunk_count,
+            }
+        },
+    )
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not data.get("upload_url") or not data.get("publish_id"):
+        raise ThirdPartyError("TikTok upload init did not return publish_id and upload_url.", details=redact_secret_payload(data))
+    data["chunk_size"] = chunk_size
+    data["total_chunk_count"] = total_chunk_count
+    return data
+
+
+async def _upload_video_chunks(upload_url: str, video_bytes: bytes, content_type: str, chunk_size: int, total_chunk_count: int) -> None:
+    async with httpx.AsyncClient(timeout=TIKTOK_TIMEOUT_SECONDS) as client:
+        total_size = len(video_bytes)
+        for index in range(total_chunk_count):
+            start = index * chunk_size
+            end = min(total_size, start + chunk_size)
+            chunk = video_bytes[start:end]
+            response = await client.put(
+                upload_url,
+                headers={
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(chunk)),
+                    "Content-Range": f"bytes {start}-{end - 1}/{total_size}",
+                },
+                content=chunk,
+            )
+            if response.is_error:
+                raise ThirdPartyError(
+                    "TikTok chunk upload failed.",
+                    details={
+                        "status_code": response.status_code,
+                        "chunk_index": index,
+                        "response_text": response.text[:500],
+                    },
+                )
+
+
+def _load_post_for_tiktok(post_id: str) -> Dict[str, Any]:
+    response = get_supabase().client.table("posts").select(
+        "id,batch_id,topic_title,seed_data,video_url,video_metadata,publish_caption,publish_results,platform_ids"
+    ).eq("id", post_id).execute()
+    rows = response.data or []
+    if not rows:
+        raise NotFoundError("Post not found.", details={"post_id": post_id})
+    post = dict(rows[0])
+    seed_data = _load_json_object(post.get("seed_data"))
+    if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
+        raise ValidationError("Removed posts cannot be uploaded to TikTok.", details={"post_id": post_id})
+    if not post.get("video_url"):
+        raise ValidationError("Post has no generated video for TikTok upload.", details={"post_id": post_id})
+
+    batch = get_supabase().client.table("batches").select("id,state").eq("id", post["batch_id"]).execute().data or []
+    if not batch:
+        raise NotFoundError("Batch not found for TikTok upload.", details={"post_id": post_id})
+    if batch[0].get("state") != BatchState.S7_PUBLISH_PLAN.value:
+        raise ValidationError(
+            "TikTok draft upload is only available in S7_PUBLISH_PLAN.",
+            details={"batch_id": post["batch_id"], "state": batch[0].get("state")},
+        )
+    return post
+
+
+@router.get("/api/auth/tiktok/start")
+async def start_tiktok_oauth(batch_id: Optional[str] = None):
+    """Start TikTok OAuth and redirect the browser to Login Kit."""
+    settings = _require_tiktok_settings()
+    code_verifier = generate_code_verifier()
+    state = build_signed_state(_state_secret(), batch_id=batch_id, code_verifier=code_verifier)
+    query = urlencode(
+        {
+            "client_key": settings.tiktok_client_key,
+            "redirect_uri": settings.tiktok_redirect_uri,
+            "response_type": "code",
+            "scope": DEFAULT_SCOPE,
+            "state": state,
+            "code_challenge": build_code_challenge(code_verifier),
+            "code_challenge_method": "S256",
+        }
+    )
+    logger.info("tiktok_oauth_started", batch_id=batch_id, environment=settings.tiktok_environment)
+    return RedirectResponse(url=f"{TIKTOK_AUTH_URL}?{query}", status_code=302)
+
+
+@router.get("/api/auth/tiktok/callback")
+async def tiktok_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    """Handle the TikTok OAuth callback and persist the connected sandbox account."""
+    _require_tiktok_settings()
+    if not state:
+        raise ValidationError("Missing TikTok OAuth state.")
+
+    state_payload = decode_signed_state(state, _state_secret())
+    batch_id = state_payload.get("batch_id")
+    redirect_target = f"/batches/{batch_id}" if batch_id else "/batches"
+
+    if error:
+        logger.error(
+            "tiktok_oauth_callback_failed",
+            batch_id=batch_id,
+            error=error,
+            error_description=error_description,
+        )
+        return RedirectResponse(url=redirect_target, status_code=302)
+
+    if not code:
+        raise ValidationError("Missing TikTok OAuth code.")
+
+    token_payload = await _exchange_code_for_tokens(code, state_payload["code_verifier"])
+    access_token = str(token_payload.get("access_token") or "").strip()
+    if not access_token:
+        raise ThirdPartyError("TikTok token exchange did not return an access token.", details=redact_secret_payload(token_payload))
+
+    profile = await _fetch_user_profile(access_token)
+    open_id = str(profile.get("open_id") or token_payload.get("open_id") or "").strip()
+    if not open_id:
+        raise ThirdPartyError("TikTok user profile did not return open_id.", details=redact_secret_payload(profile))
+
+    expires_in = int(token_payload.get("expires_in") or 0)
+    refresh_expires_in = int(token_payload.get("refresh_expires_in") or 0)
+    access_token_expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    ).isoformat() if expires_in > 0 else None
+    refresh_token_expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=refresh_expires_in)
+    ).isoformat() if refresh_expires_in > 0 else None
+
+    account = _upsert_connected_account(
+        open_id=open_id,
+        display_name=str(profile.get("display_name") or "TikTok Account"),
+        avatar_url=str(profile.get("avatar_url") or ""),
+        access_token=access_token,
+        refresh_token=str(token_payload.get("refresh_token") or ""),
+        access_token_expires_at=access_token_expires_at,
+        refresh_token_expires_at=refresh_token_expires_at,
+        scope=str(token_payload.get("scope") or DEFAULT_SCOPE),
+    )
+    logger.info(
+        "tiktok_account_connected",
+        batch_id=batch_id,
+        open_id=open_id,
+        environment=account.get("environment"),
+    )
+    return RedirectResponse(url=redirect_target, status_code=302)
+
+
+@router.get("/api/tiktok/account", response_model=SuccessResponse)
+async def get_tiktok_account():
+    """Return the current TikTok sandbox account without token material."""
+    return SuccessResponse(data=TikTokAccountResponse(**get_tiktok_public_account()).model_dump())
+
+
+@router.post("/api/tiktok/upload-draft", response_model=SuccessResponse)
+async def upload_tiktok_draft(request: TikTokUploadDraftRequest):
+    """Upload a generated FLOW-FORGE video as a TikTok draft."""
+    post = _load_post_for_tiktok(request.post_id)
+    account = _load_tiktok_account_secret()
+    video_bytes, content_type = await _download_video_bytes(str(post["video_url"]))
+    video_size = len(video_bytes)
+
+    video_metadata = _load_json_object(post.get("video_metadata"))
+    duration_seconds = video_metadata.get("duration_seconds") or video_metadata.get("requested_seconds")
+    media_asset = _upsert_media_asset(
+        source_url=str(post["video_url"]),
+        storage_key=_storage_key_from_url(str(post["video_url"])),
+        mime_type=content_type,
+        file_size=video_size,
+        duration_seconds=float(duration_seconds) if duration_seconds is not None else None,
+        status="ready",
+    )
+
+    caption = (request.caption or post.get("publish_caption") or (_load_json_object(post.get("seed_data")).get("description")) or post.get("topic_title") or "").strip()
+    init_payload = await _initialize_inbox_video_upload(account["access_token_plain"], video_size)
+    request_payload = {
+        "post_id": post["id"],
+        "caption": caption,
+        "source_info": {
+            "source": "FILE_UPLOAD",
+            "video_size": video_size,
+            "chunk_size": init_payload["chunk_size"],
+            "total_chunk_count": init_payload["total_chunk_count"],
+        },
+    }
+    job = _create_publish_job(
+        connected_account_id=str(account["id"]),
+        media_asset_id=str(media_asset["id"]),
+        caption=caption,
+        request_payload_json=request_payload,
+    )
+
+    try:
+        await _upload_video_chunks(
+            str(init_payload["upload_url"]),
+            video_bytes,
+            content_type,
+            int(init_payload["chunk_size"]),
+            int(init_payload["total_chunk_count"]),
+        )
+        updated_job = _update_publish_job(
+            str(job["id"]),
+            {
+                "status": "submitted",
+                "tiktok_publish_id": init_payload.get("publish_id"),
+                "response_payload_json": redact_secret_payload(
+                    {
+                        "publish_id": init_payload.get("publish_id"),
+                        "chunk_size": init_payload.get("chunk_size"),
+                        "total_chunk_count": init_payload.get("total_chunk_count"),
+                    }
+                ),
+                "error_message": "",
+            },
+        )
+        _update_post_tiktok_result(post, updated_job, success=True)
+        logger.info(
+            "tiktok_upload_submitted",
+            post_id=post["id"],
+            publish_job_id=updated_job["id"],
+            publish_id=updated_job.get("tiktok_publish_id"),
+        )
+        return SuccessResponse(data=TikTokPublishJobResponse(**_sanitize_publish_job(updated_job)).model_dump())
+    except Exception as exc:
+        error_message = exc.message if isinstance(exc, (ThirdPartyError, AuthenticationError, ValidationError)) else str(exc)
+        updated_job = _update_publish_job(
+            str(job["id"]),
+            {
+                "status": "failed",
+                "response_payload_json": {},
+                "error_message": error_message,
+            },
+        )
+        _update_post_tiktok_result(post, updated_job, success=False, error_message=error_message)
+        raise
+
+
+def _sanitize_publish_job(row: Dict[str, Any]) -> Dict[str, Any]:
+    sanitized = dict(row)
+    sanitized["request_payload_json"] = redact_secret_payload(_load_json_object(sanitized.get("request_payload_json")))
+    sanitized["response_payload_json"] = redact_secret_payload(_load_json_object(sanitized.get("response_payload_json")))
+    return sanitized
+
+
+@router.get("/api/tiktok/publish-jobs/{job_id}", response_model=SuccessResponse)
+async def get_tiktok_publish_job(job_id: str):
+    """Return a persisted TikTok publish job by id."""
+    response = get_supabase().client.table("publish_jobs").select("*").eq("id", job_id).execute()
+    rows = response.data or []
+    if not rows:
+        raise NotFoundError("TikTok publish job not found.", details={"job_id": job_id})
+    return SuccessResponse(data=TikTokPublishJobResponse(**_sanitize_publish_job(dict(rows[0]))).model_dump())

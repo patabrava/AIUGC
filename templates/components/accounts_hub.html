@@ -92,9 +92,9 @@
                             </div>
                             <div>
                                 <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">TikTok</p>
-                                <h4 class="mt-1 text-lg font-semibold text-gray-900">Sandbox</h4>
+                                <h4 class="mt-1 text-lg font-semibold text-gray-900">TikTok</h4>
                                 <p class="mt-2 text-sm text-gray-600">
-                                    Sandbox-only login for manual draft uploads while the provider stays in development mode.
+                                    Connect the TikTok account you use for draft uploads.
                                 </p>
                             </div>
                         </div>
@@ -105,7 +105,7 @@
 
                     <div class="mt-5 rounded-md border border-gray-200 bg-gray-50 p-4">
                         <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Current Login</p>
-                        <p class="mt-2 text-sm font-semibold text-gray-900" x-text="$store.accountsHub?.tiktokAccountName() || 'No TikTok sandbox account connected yet'"></p>
+                        <p class="mt-2 text-sm font-semibold text-gray-900" x-text="$store.accountsHub?.tiktokAccountName() || 'No TikTok login connected yet'"></p>
                         <p class="mt-2 text-xs text-gray-600" x-text="$store.accountsHub?.tiktokStatusCopy()"></p>
                         <p class="mt-3 text-xs text-gray-500" x-show="$store.accountsHub?.tiktokOpenId()" x-text="`Open ID: ${$store.accountsHub?.tiktokOpenId()}`"></p>
                     </div>
@@ -116,7 +116,7 @@
                             class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
                             @click="$store.accountsHub?.continueToProvider('tiktok')"
                         >
-                            <span x-text="$store.accountsHub?.providerPrimaryCta('tiktok') || 'Connect TikTok Sandbox'"></span>
+                            <span x-text="$store.accountsHub?.providerPrimaryCta('tiktok') || 'Connect TikTok'"></span>
                         </button>
                     </div>
                 </section>
@@ -260,7 +260,7 @@
                     return this.isProviderConnected('meta') ? 'Reconnect Meta' : 'Connect Meta';
                 }
                 if (provider === 'tiktok') {
-                    return this.isProviderConnected('tiktok') ? 'Reconnect TikTok Sandbox' : 'Connect TikTok Sandbox';
+                    return this.isProviderConnected('tiktok') ? 'Reconnect TikTok' : 'Connect TikTok';
                 }
                 return 'Connect';
             },
@@ -294,12 +294,12 @@
 
             tiktokStatusCopy() {
                 if (this.tiktokConnection?.status === 'connected') {
-                    return 'TikTok sandbox is ready for manual draft uploads from generated videos.';
+                    return 'This TikTok login is available across all batches in the workspace.';
                 }
                 if (this.tiktokConnection?.status === 'reconnect_required') {
-                    return 'The TikTok sandbox token expired and needs to be reconnected.';
+                    return 'The TikTok token expired and needs to be reconnected.';
                 }
-                return 'Connect the sandbox account used for TikTok draft uploads.';
+                return 'Use the authorized TikTok account for draft uploads.';
             },
 
             tiktokOpenId() {
