@@ -19,6 +19,7 @@ import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from app.adapters.llm_client import get_llm_client
+from app.features.posts.prompt_builder import split_dialogue_sentences
 from app.features.topics.schemas import (
     DiscoverTopicsRequest,
     TopicListResponse,
@@ -28,30 +29,43 @@ from app.features.topics.schemas import (
     TopicData,
     DialogScripts,
     SeedData,
-    PROMPT1_JSON_SCHEMA,
-    PROMPT2_JSON_SCHEMA,
+    build_prompt1_json_schema,
 )
 from app.features.topics.prompts import build_prompt1, build_prompt2, get_topic_pool_candidates
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
+from app.core.video_profiles import (
+    DurationProfile,
+    build_seed_duration_metadata,
+    get_duration_profile,
+)
 
 logger = get_logger(__name__)
 
-MIN_SCRIPT_WORDS = 12
-MAX_SCRIPT_WORDS = 15
-MIN_SCRIPT_SECONDS = 5
-MAX_SCRIPT_SECONDS = 6
-MAX_SCRIPT_CHARS_NO_SPACES = 90
+DEFAULT_DURATION_PROFILE = get_duration_profile(None)
+MIN_SCRIPT_WORDS = DEFAULT_DURATION_PROFILE.prompt1_min_words
+MAX_SCRIPT_WORDS = DEFAULT_DURATION_PROFILE.prompt1_max_words
+MIN_SCRIPT_SECONDS = DEFAULT_DURATION_PROFILE.prompt1_min_seconds
+MAX_SCRIPT_SECONDS = DEFAULT_DURATION_PROFILE.prompt1_max_seconds
+MAX_SCRIPT_CHARS_NO_SPACES = DEFAULT_DURATION_PROFILE.prompt1_max_chars_no_spaces
 CHARS_PER_SECOND_ESTIMATE = 17.0
 
 
-PROMPT1_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 execution agent.
+def _build_prompt1_system_prompt(profile: DurationProfile) -> str:
+    multiline_guidance = ""
+    if profile.target_length_tier > 8:
+        multiline_guidance = (
+            f'\n- For the {profile.target_length_tier}-second tier, the script may span {profile.prompt1_sentence_guidance}.'
+            "\n- Keep the pacing natural, structured, and easy to speak. Avoid rushed wording and filler."
+        )
+
+    return f"""You are the Flow Forge PROMPT_1 execution agent.
 You must strictly follow the user's message instructions.
 
 CRITICAL SCRIPT REQUIREMENTS:
-- script must be EXACTLY 12-15 words (NO LESS than 12, NO MORE than 15), one sentence (≈5-6 Sekunden Sprechzeit)
-- COUNT YOUR WORDS BEFORE SUBMITTING. Scripts with <12 words will be REJECTED.
-- Keep the script under 90 non-space characters for natural delivery in an 8-second Veo talking-head clip.
+- script must be EXACTLY {profile.prompt1_min_words}-{profile.prompt1_max_words} words, {profile.prompt1_sentence_guidance} (≈{profile.prompt1_min_seconds}-{profile.prompt1_max_seconds} Sekunden Sprechzeit)
+- COUNT YOUR WORDS BEFORE SUBMITTING. Scripts outside that word range will be REJECTED.
+- Keep the script under {profile.prompt1_max_chars_no_spaces} non-space characters for natural Veo speech delivery.
 - Prefer short, speakable wording. Avoid stacking multiple long institutional or compound nouns in one sentence.
 - If you must mention a long institution name, simplify the rest of the sentence aggressively.
 - Start with a VARIED, scroll-stopping opening. Rotate between multiple hook families:
@@ -63,14 +77,8 @@ CRITICAL SCRIPT REQUIREMENTS:
   * Aha/action hooks: "Bevor du ...", "Alles verändert sich, wenn du ...", "Was dir bei ... niemand klar sagt: ..."
 - Use du-Form (informal you), be direct, friendly, empowering
 - NO passive declarations like "Ab 2025 gibt's..." and NO cheap clickbait like "Du wirst nicht glauben ..."
-- If script is shorter than 12 words or estimated_duration_s unter 5, ergänze konkrete, quellenbasierte Details.
-- estimated_duration_s must be a conservative natural-speech estimate and be 5 or 6.
-- Example good scripts with VARIED openings:
-  * "Kennst du das Hilfsmittelverzeichnis? Dort prüfst du schnell, welche Rollstühle die Kasse übernimmt."
-  * "Check mal die B-Marke im Ausweis, dann fährt deine Begleitperson oft kostenlos mit."
-  * "Die größte Lüge über Hilfsmittelanträge: Ein Rezept allein reicht oft nicht aus."
-  * "Bevor du den Parkausweis beantragst, prüf die Nachweise, sonst verlierst du Zeit."
-  * "Stell dir vor, du prüfst mehr Pflegegeld ab 2025 jetzt deutlich einfacher."
+- If script is shorter than {profile.prompt1_min_words} words or estimated_duration_s unter {profile.prompt1_min_seconds}, ergänze konkrete, quellenbasierte Details.
+- estimated_duration_s must be a conservative natural-speech estimate between {profile.prompt1_min_seconds} and {profile.prompt1_max_seconds}.{multiline_guidance}
 
 CRITICAL SOURCE URL REQUIREMENTS:
 - ALL source URLs MUST be currently accessible and valid (not 404, not archived, not removed)
@@ -82,6 +90,9 @@ CRITICAL SOURCE URL REQUIREMENTS:
 Always respond with a valid JSON array whose length exactly matches the requested number of topics.
 Each element must include all required keys: topic, framework, sources, script, source_summary, estimated_duration_s, tone, disclaimer.
 Responses must be valid JSON only (no Markdown, no backticks, no commentary)."""
+
+
+PROMPT1_SYSTEM_PROMPT = _build_prompt1_system_prompt(DEFAULT_DURATION_PROFILE)
 
 
 PROMPT1_NORMALIZER_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 normalization agent.
@@ -103,7 +114,12 @@ def _should_attempt_json_normalization(error: ValidationError) -> bool:
     return False
 
 
-def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: int) -> str:
+def _normalize_prompt1_response_to_json(
+    llm,
+    raw_response: str,
+    desired_topics: int,
+    profile: DurationProfile,
+) -> str:
     prompt = (
         "Konvertiere die folgende Antwort in ein valides JSON-Array mit genau "
         f"{desired_topics} Objekten. Jedes Objekt muss alle geforderten Felder beinhalten."
@@ -125,7 +141,7 @@ def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: 
             parsed = llm.generate_gemini_json(
                 prompt=prompt,
                 system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
-                json_schema=PROMPT1_JSON_SCHEMA,
+                json_schema=build_prompt1_json_schema(profile),
                 max_tokens=max_tokens,
             )
             return json.dumps(parsed, ensure_ascii=False)
@@ -146,7 +162,7 @@ def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: 
                 system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
                 max_tokens=max_tokens,
             )
-            fallback_batch = parse_prompt1_response(fallback_text)
+            fallback_batch = parse_prompt1_response(fallback_text, profile=profile)
             return json.dumps([item.model_dump(mode="json") for item in fallback_batch.items], ensure_ascii=False)
         except ValidationError as exc:
             last_error = exc
@@ -166,16 +182,26 @@ def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: 
     )
 
 
-def _parse_prompt1_with_normalization(llm, raw_response: str, desired_topics: int) -> tuple[ResearchAgentBatch, str]:
+def _parse_prompt1_with_normalization(
+    llm,
+    raw_response: str,
+    desired_topics: int,
+    profile: DurationProfile,
+) -> tuple[ResearchAgentBatch, str]:
     try:
-        batch = parse_prompt1_response(raw_response)
+        batch = parse_prompt1_response(raw_response, profile=profile)
         return batch, raw_response
     except ValidationError as exc:
         if not _should_attempt_json_normalization(exc):
             raise
 
-        normalized = _normalize_prompt1_response_to_json(llm, raw_response, desired_topics)
-        batch = parse_prompt1_response(normalized)
+        normalized = _normalize_prompt1_response_to_json(
+            llm,
+            raw_response,
+            desired_topics,
+            profile=profile,
+        )
+        batch = parse_prompt1_response(normalized, profile=profile)
         return batch, normalized
 
 
@@ -298,6 +324,47 @@ def _script_non_space_char_count(text: str) -> int:
     return len(re.sub(r"\s+", "", text.strip()))
 
 
+def _validate_prompt1_script(text: str, profile: DurationProfile) -> str:
+    cleaned = " ".join(str(text or "").split()).strip()
+    if not cleaned:
+        raise ValidationError(
+            message="PROMPT_1 script empty",
+            details={},
+        )
+
+    sentence_chunks = split_dialogue_sentences(cleaned)
+    if not sentence_chunks:
+        raise ValidationError(
+            message="PROMPT_1 script contains no complete sentences",
+            details={"script": cleaned[:200]},
+        )
+
+    normalized_sentences = " ".join(sentence_chunks).strip()
+    if normalized_sentences != cleaned:
+        raise ValidationError(
+            message="PROMPT_1 script ends with an incomplete fragment",
+            details={
+                "script": cleaned[:200],
+                "normalized_sentences": normalized_sentences[:200],
+            },
+        )
+
+    char_count = _script_non_space_char_count(cleaned)
+    estimated_seconds = estimate_script_duration_seconds(cleaned)
+    if char_count > profile.prompt1_max_chars_no_spaces or estimated_seconds > profile.prompt1_max_seconds:
+        raise ValidationError(
+            message="PROMPT_1 script exceeds tier without cutting a sentence",
+            details={
+                "char_count_no_spaces": char_count,
+                "estimated_duration_s": estimated_seconds,
+                "max_seconds": profile.prompt1_max_seconds,
+                "max_char_count_no_spaces": profile.prompt1_max_chars_no_spaces,
+            },
+        )
+
+    return cleaned
+
+
 def estimate_script_duration_seconds(text: str) -> int:
     words = text.strip().split()
     if not words:
@@ -308,31 +375,32 @@ def estimate_script_duration_seconds(text: str) -> int:
     return max(word_estimate, char_estimate)
 
 
-def validate_duration(item: ResearchAgentItem) -> None:
+def validate_duration(item: ResearchAgentItem, profile: Optional[DurationProfile] = None) -> None:
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     calculated = estimate_script_duration_seconds(item.script)
     char_count = _script_non_space_char_count(item.script)
-    if char_count > MAX_SCRIPT_CHARS_NO_SPACES:
+    if char_count > active_profile.prompt1_max_chars_no_spaces:
         raise ValidationError(
             message="Script too dense for natural Veo speech delivery",
             details={
                 "word_count": item.word_count(),
                 "char_count_no_spaces": char_count,
-                "max_char_count_no_spaces": MAX_SCRIPT_CHARS_NO_SPACES,
+                "max_char_count_no_spaces": active_profile.prompt1_max_chars_no_spaces,
                 "calculated": calculated,
             }
         )
-    if calculated > MAX_SCRIPT_SECONDS:
+    if calculated > active_profile.prompt1_max_seconds:
         raise ValidationError(
-            message="Script exceeds 6 seconds",
+            message=f"Script exceeds {active_profile.prompt1_max_seconds} seconds",
             details={
                 "word_count": item.word_count(),
                 "char_count_no_spaces": char_count,
                 "calculated": calculated,
             }
         )
-    if calculated < MIN_SCRIPT_SECONDS:
+    if calculated < active_profile.prompt1_min_seconds:
         raise ValidationError(
-            message="Script under 5 seconds",
+            message=f"Script under {active_profile.prompt1_min_seconds} seconds",
             details={
                 "word_count": item.word_count(),
                 "char_count_no_spaces": char_count,
@@ -529,7 +597,8 @@ def _parse_json_or_yaml(text: str) -> Any:
     return parsed_yaml
 
 
-def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
+def parse_prompt1_response(raw: str, profile: Optional[DurationProfile] = None) -> ResearchAgentBatch:
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     # Strip markdown code fences if present
     cleaned = raw.strip()
     if cleaned.startswith("```json"):
@@ -564,33 +633,25 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
                 if "disclaimer" not in item:
                     item["disclaimer"] = "Keine Rechts- oder medizinische Beratung."
 
-                # Ensure scripts respect the conservative Veo speech-density ceiling while reserving tail time.
-                script_words = item.get("script", "").split()
-                if script_words:
-                    while script_words and (
-                        estimate_script_duration_seconds(" ".join(script_words)) > MAX_SCRIPT_SECONDS
-                        or _script_non_space_char_count(" ".join(script_words)) > MAX_SCRIPT_CHARS_NO_SPACES
-                    ):
-                        script_words.pop()
-                    trimmed_script = " ".join(script_words).strip()
-                    if not trimmed_script:
-                        raise ValidationError(
-                            message="PROMPT_1 script empty after trimming",
-                            details={"original": item.get("script", "")}
-                        )
-                    item["script"] = trimmed_script
-                    item["estimated_duration_s"] = max(
-                        MIN_SCRIPT_SECONDS,
-                        estimate_script_duration_seconds(trimmed_script)
+                # Ensure scripts respect the conservative Veo speech-density ceiling without chopping tails.
+                validated_script = _validate_prompt1_script(item.get("script", ""), active_profile)
+                script_words = validated_script.split()
+                if len(script_words) < active_profile.prompt1_min_words:
+                    raise ValidationError(
+                        message=(
+                            "PROMPT_1 script too short "
+                            f"(requires ≥{active_profile.prompt1_min_words} words for the selected tier)"
+                        ),
+                        details={
+                            "word_count": len(script_words),
+                            "char_count_no_spaces": _script_non_space_char_count(validated_script),
+                        }
                     )
-                    if len(script_words) < MIN_SCRIPT_WORDS:
-                        raise ValidationError(
-                            message="PROMPT_1 script too short (requires ≥12 words for 5-second minimum)",
-                            details={
-                                "word_count": len(script_words),
-                                "char_count_no_spaces": _script_non_space_char_count(trimmed_script),
-                            }
-                        )
+                item["script"] = validated_script
+                item["estimated_duration_s"] = max(
+                    active_profile.prompt1_min_seconds,
+                    estimate_script_duration_seconds(validated_script)
+                )
 
     payload = parsed if isinstance(parsed, dict) else {"items": parsed}
     try:
@@ -602,7 +663,7 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
         ) from exc
 
     for item in batch.items:
-        validate_duration(item)
+        validate_duration(item, active_profile)
         validate_summary(item)
         validate_german_content(item)
         validate_sources_accessible(item)
@@ -808,7 +869,9 @@ def build_seed_payload(
     item: ResearchAgentItem,
     strict_seed: SeedData,
     dialog_scripts: DialogScripts,
+    profile: Optional[DurationProfile] = None,
 ) -> Dict[str, Any]:
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     # Normalize sources to a single entry
     primary_source = item.sources[0] if item.sources else None
 
@@ -848,6 +911,7 @@ def build_seed_payload(
         "strict_seed": seed_payload,
         "description": description_text,
         "disclaimer": item.disclaimer,
+        **build_seed_duration_metadata(active_profile),
     }
 
     if primary_source:
@@ -899,8 +963,10 @@ def generate_topics_research_agent(
     count: int = 10,
     seed: Optional[int] = None,
     progress_callback: Optional[Any] = None,
+    profile: Optional[DurationProfile] = None,
 ) -> List[ResearchAgentItem]:
     """Execute one PROMPT_1 batch request and return validated items."""
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     llm = get_llm_client()
 
     topic_candidates = get_topic_pool_candidates()
@@ -934,6 +1000,7 @@ def generate_topics_research_agent(
         desired_topics=count,
         assigned_topics=assigned_topics or None,
         progress_callback=progress_callback,
+        profile=active_profile,
     )
 
     if len(items) < count:
@@ -958,11 +1025,14 @@ def _generate_prompt1_batch(
     desired_topics: int,
     assigned_topics: Optional[List[str]] = None,
     progress_callback: Optional[Any] = None,
+    profile: Optional[DurationProfile] = None,
 ) -> List[ResearchAgentItem]:
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     prompt = build_prompt1(
         post_type=post_type,
         desired_topics=desired_topics,
         assigned_topics=assigned_topics,
+        profile=active_profile,
     )
     prompt_with_feedback = prompt
 
@@ -980,13 +1050,14 @@ def _generate_prompt1_batch(
         
         raw_response = llm.generate_gemini_deep_research(
             prompt=prompt_with_feedback,
-            system_prompt=PROMPT1_SYSTEM_PROMPT,
+            system_prompt=_build_prompt1_system_prompt(active_profile),
             timeout_seconds=timeout_seconds,
             metadata={
                 "feature": "topics.prompts_1",
                 "attempt": str(attempt + 1),
                 "desired_outputs": str(desired_topics),
                 "assigned_topics": json.dumps(assigned_topics or []),
+                "target_length_tier": str(active_profile.target_length_tier),
             },
             progress_callback=progress_callback,
         )
@@ -996,6 +1067,7 @@ def _generate_prompt1_batch(
                 llm=llm,
                 raw_response=raw_response,
                 desired_topics=desired_topics,
+                profile=active_profile,
             )
             items = batch.items
             
@@ -1007,7 +1079,7 @@ def _generate_prompt1_batch(
             
             # Validate each item
             for item in items:
-                validate_duration(item)
+                validate_duration(item, active_profile)
                 validate_summary(item)
                 validate_german_content(item)
                 validate_sources_accessible(item)
@@ -1038,18 +1110,17 @@ def _generate_prompt1_batch(
             # Build detailed feedback
             feedback_parts = [f"FEEDBACK: {exc.message}"]
             
-            if "too short" in exc.message.lower() or "under 5 seconds" in exc.message.lower():
+            if "too short" in exc.message.lower() or f"under {active_profile.prompt1_min_seconds} seconds" in exc.message.lower():
                 feedback_parts.append(
                     f"\nDetails: {json.dumps(exc.details, default=str)}"
-                    "\n\nIMPORTANT: Scripts MUST be EXACTLY 12-15 words (NO LESS than 12, NO MORE than 15)."
+                    f"\n\nIMPORTANT: Scripts MUST be EXACTLY {active_profile.prompt1_min_words}-{active_profile.prompt1_max_words} words."
                     "\nCOUNT YOUR WORDS CAREFULLY before submitting."
-                    "\nIf a script is too short, ADD concrete source-based details until it reaches 12-15 words."
-                    "\nExample good length: 'Kennst du das Hilfsmittelverzeichnis? Dort prüfst du schnell, welche Rollstühle die Kasse übernimmt.' (13 words)"
+                    f"\nIf a script is too short, ADD concrete source-based details until it reaches {active_profile.prompt1_min_words}-{active_profile.prompt1_max_words} words."
                 )
-            elif "too dense for natural veo speech delivery" in exc.message.lower() or "exceeds 6 seconds" in exc.message.lower():
+            elif "too dense for natural veo speech delivery" in exc.message.lower() or f"exceeds {active_profile.prompt1_max_seconds} seconds" in exc.message.lower():
                 feedback_parts.append(
                     f"\nDetails: {json.dumps(exc.details, default=str)}"
-                    "\n\nIMPORTANT: Keep the script under 90 non-space characters."
+                    f"\n\nIMPORTANT: Keep the script under {active_profile.prompt1_max_chars_no_spaces} non-space characters."
                     "\nUse shorter, more speakable wording and avoid stacking long compound or institutional nouns."
                     "\nIf you mention a long institution name, simplify the rest of the sentence."
                     "\nBad density example: 'Weißt du eigentlich, dass das Integrationsamt deine kompletten technischen Arbeitshilfen im Job vollständig bezahlt?'"
@@ -1087,11 +1158,17 @@ def _generate_prompt1_batch(
     )
 
 
-def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks: Optional[List[str]] = None) -> DialogScripts:
+def generate_dialog_scripts(
+    topic: str,
+    scripts_required: int = 1,
+    previously_used_hooks: Optional[List[str]] = None,
+    profile: Optional[DurationProfile] = None,
+) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     scripts_required = max(1, min(5, scripts_required))
     llm = get_llm_client()
-    prompt = build_prompt2(topic=topic, scripts_per_category=scripts_required)
+    prompt = build_prompt2(topic=topic, scripts_per_category=scripts_required, profile=active_profile)
     
     # Add constraint to avoid repeating hooks if we have previous ones
     if previously_used_hooks:
@@ -1164,11 +1241,16 @@ def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_us
     raise ValidationError(message="Unable to produce dialog scripts", details={})
 
 
-def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> List[Dict[str, Any]]:
+def generate_lifestyle_topics(
+    count: int = 1,
+    seed: Optional[int] = None,
+    profile: Optional[DurationProfile] = None,
+) -> List[Dict[str, Any]]:
     """
     Generate lifestyle topics using PROMPT_2 directly (no web research).
     Returns list of topic dicts with dialog scripts and metadata.
     """
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     lifestyle_topic_templates = [
         "Rollstuhl-Alltag – Tipps & Tricks",
         "Barrierefreiheit im Alltag erleben",
@@ -1191,7 +1273,8 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
         dialog_scripts = generate_dialog_scripts(
             topic=topic_template,
             scripts_required=1,
-            previously_used_hooks=used_hooks if used_hooks else None
+            previously_used_hooks=used_hooks if used_hooks else None,
+            profile=active_profile,
         )
         
         # Use first script from problem_agitate_solution as the main content
@@ -1214,8 +1297,7 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
         used_hooks.append(hook)
         
         # Calculate duration
-        word_count = len(main_script.split())
-        duration = max(1, math.ceil(word_count / 2.6))
+        duration = estimate_script_duration_seconds(main_script)
         
         topic_data = {
             "title": topic_template,
@@ -1238,10 +1320,15 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
     return results
 
 
-def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: DialogScripts) -> Dict[str, Any]:
+def build_lifestyle_seed_payload(
+    topic_data: Dict[str, Any],
+    dialog_scripts: DialogScripts,
+    profile: Optional[DurationProfile] = None,
+) -> Dict[str, Any]:
     """
     Build seed payload for lifestyle posts (no sources required).
     """
+    active_profile = profile or DEFAULT_DURATION_PROFILE
     # Select script based on framework
     framework_map = {
         "PAL": "problem",
@@ -1280,6 +1367,7 @@ def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: Dia
         "strict_seed": seed_payload,
         "description": description_text,
         "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+        **build_seed_duration_metadata(active_profile),
     }
     
     # No sources for lifestyle posts

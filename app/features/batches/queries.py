@@ -10,21 +10,29 @@ from app.adapters.supabase_client import get_supabase
 from app.core.states import BatchState, validate_state_transition
 from app.core.errors import NotFoundError, StateTransitionError
 from app.core.logging import get_logger
+from app.core.video_profiles import derive_pipeline_route, normalize_target_length_tier
 
 logger = get_logger(__name__)
 
 
-def create_batch(brand: str, post_type_counts: Dict[str, int]) -> Dict[str, Any]:
+def create_batch(
+    brand: str,
+    post_type_counts: Dict[str, int],
+    target_length_tier: int,
+) -> Dict[str, Any]:
     """
     Create a new batch in S1_SETUP state.
     Per Canon § 3.2: S1_SETUP is initial state.
     """
     supabase = get_supabase()
     
+    normalized_tier = normalize_target_length_tier(target_length_tier)
     batch_data = {
         "brand": brand,
         "state": BatchState.S1_SETUP.value,
         "post_type_counts": post_type_counts,
+        "target_length_tier": normalized_tier,
+        "video_pipeline_route": derive_pipeline_route(normalized_tier),
         "archived": False
     }
     
@@ -39,7 +47,9 @@ def create_batch(brand: str, post_type_counts: Dict[str, int]) -> Dict[str, Any]
         "batch_created",
         batch_id=batch["id"],
         brand=brand,
-        state=batch["state"]
+        state=batch["state"],
+        target_length_tier=normalized_tier,
+        video_pipeline_route=batch_data["video_pipeline_route"],
     )
     
     return batch
@@ -143,7 +153,11 @@ def duplicate_batch(batch_id: str, new_brand: Optional[str] = None) -> Dict[str,
     
     # Create new batch
     brand = new_brand or f"{original['brand']} (Copy)"
-    new_batch = create_batch(brand, original["post_type_counts"])
+    new_batch = create_batch(
+        brand,
+        original["post_type_counts"],
+        original.get("target_length_tier") or 8,
+    )
     
     logger.info(
         "batch_duplicated",

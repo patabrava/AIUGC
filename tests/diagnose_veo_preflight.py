@@ -19,7 +19,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from app.core.config import get_settings  # noqa: E402
 from app.core.logging import configure_logging, get_logger  # noqa: E402
 from app.features.posts.prompt_text import build_full_prompt_text  # noqa: E402
-from app.features.posts.prompt_builder import VEO_NEGATIVE_PROMPT, build_video_prompt_from_seed  # noqa: E402
+from app.features.posts.prompt_builder import (
+    VEO_NEGATIVE_PROMPT,
+    build_video_prompt_from_seed,
+    split_dialogue_sentences,
+    build_veo_prompt_segment,
+)  # noqa: E402
 
 VEO_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning"
 DEFAULT_ASPECT_RATIO = "9:16"
@@ -77,6 +82,42 @@ def build_request_body(prompt: str, negative_prompt: str) -> Dict[str, Any]:
     }
 
 
+def build_extension_request_body(prompt: str, negative_prompt: str, video_uri: str) -> Dict[str, Any]:
+    return {
+        "instances": [
+            {
+                "prompt": prompt,
+                "video": {"uri": video_uri},
+            }
+        ],
+        "parameters": {
+            "aspectRatio": DEFAULT_ASPECT_RATIO,
+            "resolution": "720p",
+            "negativePrompt": negative_prompt,
+        },
+    }
+
+
+def build_extended_preview_payloads(script: str, video_uri: str) -> list[Dict[str, Any]]:
+    segments = split_dialogue_sentences(script)
+    if not segments and script.strip():
+        segments = [script.strip()]
+
+    payloads: list[Dict[str, Any]] = []
+    for index, segment in enumerate(segments):
+        is_first = index == 0
+        prompt = build_veo_prompt_segment(
+            segment,
+            include_quotes=False,
+            include_ending=not is_first and index == len(segments) - 1,
+        )
+        if is_first:
+            payloads.append(build_request_body(prompt, VEO_NEGATIVE_PROMPT))
+        else:
+            payloads.append(build_extension_request_body(prompt, VEO_NEGATIVE_PROMPT, video_uri))
+    return payloads
+
+
 def maybe_submit_request(client: httpx.Client, payload: Dict[str, Any]) -> httpx.Response:
     return client.post(VEO_ENDPOINT, json=payload)
 
@@ -84,6 +125,9 @@ def maybe_submit_request(client: httpx.Client, payload: Dict[str, Any]) -> httpx
 def main() -> int:
     parser = argparse.ArgumentParser(description="Preflight Google VEO 3.1 video generation payload")
     parser.add_argument("--seed", type=str, help="Path to seed JSON to reconstruct full prompt")
+    parser.add_argument("--script", type=str, help="Inline script string for extended preview")
+    parser.add_argument("--extended-preview", action="store_true", help="Print base + extension payload preview")
+    parser.add_argument("--video-uri", type=str, default="https://generativelanguage.googleapis.com/v1beta/files/example:download?alt=media")
     parser.add_argument("--submit", action="store_true", help="Actually call the VEO endpoint (paid request)")
     args = parser.parse_args()
 
@@ -99,8 +143,20 @@ def main() -> int:
     prompt_bundle = build_prompt(seed_data)
     payload = build_request_body(prompt_bundle["prompt"], prompt_bundle["negative_prompt"])
 
-    print("=== VEO Payload Preview ===")
-    print(_format_json(payload))
+    if args.extended_preview and args.script:
+        payloads = build_extended_preview_payloads(args.script, args.video_uri)
+        for index, preview_payload in enumerate(payloads, start=1):
+            label = "Base" if index == 1 else f"Extension Hop {index - 1}"
+            print(f"=== VEO Extended Payload Preview ({label}) ===")
+            print(_format_json(preview_payload))
+            if index < len(payloads):
+                print("")
+        if not args.submit:
+            print("\n✅ Dry run complete. Use --submit to call the VEO API.")
+            return 0
+    else:
+        print("=== VEO Payload Preview ===")
+        print(_format_json(payload))
 
     if not args.submit:
         print("\n✅ Dry run complete. Use --submit to call the VEO API.")

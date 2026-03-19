@@ -46,13 +46,52 @@ def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(mon
         correlation_id="test-correlation",
         aspect_ratio="9:16",
         resolution="720p",
+        duration_seconds=4,
     )
 
     payload = fake_http_client.post_calls[0]["json"]
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
+    assert payload["parameters"]["durationSeconds"] == 4
     assert payload["parameters"]["negativePrompt"] == "subtitles, watermark"
     assert payload["instances"][0]["prompt"] == "portrait product demo"
+    assert submission["operation_id"] == "operations/test-operation"
+
+    veo_module.VeoClient._instance = None
+
+
+def test_veo_extension_submission_includes_inline_video_and_fixed_extension_settings(monkeypatch):
+    monkeypatch.setattr(
+        veo_module,
+        "get_settings",
+        lambda: SimpleNamespace(google_ai_api_key="test-key"),
+    )
+    monkeypatch.setattr(
+        veo_module.genai,
+        "Client",
+        lambda api_key: SimpleNamespace(api_key=api_key),
+    )
+
+    fake_http_client = FakeHttpClient()
+    veo_module.VeoClient._instance = None
+    client = veo_module.VeoClient()
+    client._http_client = fake_http_client
+
+    submission = client.submit_video_extension(
+        prompt="continue the same talking-head performance naturally",
+        negative_prompt="subtitles, watermark",
+        correlation_id="test-extension",
+        video_uri="https://generativelanguage.googleapis.com/v1beta/files/example:download?alt=media",
+        aspect_ratio="9:16",
+    )
+
+    payload = fake_http_client.post_calls[0]["json"]
+    assert payload["parameters"]["resolution"] == "720p"
+    assert payload["parameters"]["aspectRatio"] == "9:16"
+    assert payload["parameters"]["negativePrompt"] == "subtitles, watermark"
+    assert "numberOfVideos" not in payload["parameters"]
+    assert "durationSeconds" not in payload["parameters"]
+    assert payload["instances"][0]["video"]["uri"] == "https://generativelanguage.googleapis.com/v1beta/files/example:download?alt=media"
     assert submission["operation_id"] == "operations/test-operation"
 
     veo_module.VeoClient._instance = None

@@ -899,6 +899,7 @@ class LLMClient:
         is_complete = False
         resume_attempt = 0
         idle_stream_timeout_seconds = max(8, min(max(poll_interval_seconds, 1) * 2, 20))
+        max_stream_resume_failures = 3
 
         def handle_stream_event(event: Dict[str, Any]) -> None:
             nonlocal interaction_id, last_event_id, last_summary, last_status_bucket, is_complete
@@ -1119,6 +1120,15 @@ class LLMClient:
                         "retry_message": None,
                     }
                 )
+                if resume_attempt >= max_stream_resume_failures:
+                    logger.info(
+                        "gemini_deep_research_stream_fallback_to_polling",
+                        interaction_id=interaction_id,
+                        last_event_id=last_event_id,
+                        resume_attempt=resume_attempt,
+                        message="Exceeded stream resume retries; switching to status polling."
+                    )
+                    break
 
         if not is_complete and interaction_id:
             poll_result = self._generate_gemini_deep_research_poll_result(
@@ -1158,10 +1168,40 @@ class LLMClient:
         max_retryable_poll_errors = 5
 
         while time.monotonic() < deadline:
-            poll_response = self.gemini_http_client.get(
-                f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
-                params=self._gemini_params(),
-            )
+            try:
+                poll_response = self.gemini_http_client.get(
+                    f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
+                    params=self._gemini_params(),
+                )
+            except httpx.TransportError as exc:
+                consecutive_retryable_poll_errors += 1
+                logger.warning(
+                    "gemini_deep_research_poll_transport_retry",
+                    interaction_id=interaction_id,
+                    consecutive_errors=consecutive_retryable_poll_errors,
+                    error=str(exc),
+                )
+                if consecutive_retryable_poll_errors >= max_retryable_poll_errors:
+                    raise ThirdPartyError(
+                        message="Gemini Deep Research polling failed",
+                        details={
+                            "interaction_id": interaction_id,
+                            "consecutive_errors": consecutive_retryable_poll_errors,
+                            "error": str(exc),
+                        },
+                    ) from exc
+                progress_callback(
+                    {
+                        "provider_interaction_id": interaction_id,
+                        "provider_status": "TRANSPORT_RETRY",
+                        "detail_message": "Gemini polling hit a temporary transport failure.",
+                        "retry_message": "Retrying the Deep Research poll after a temporary network failure.",
+                        "is_retrying": True,
+                    }
+                )
+                backoff_seconds = min(max(poll_interval_seconds, 1) * consecutive_retryable_poll_errors, 15)
+                time.sleep(backoff_seconds)
+                continue
             if poll_response.status_code >= 400:
                 if poll_response.status_code in {429, 500, 502, 503, 504}:
                     consecutive_retryable_poll_errors += 1

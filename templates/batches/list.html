@@ -176,12 +176,15 @@
                     const brand = $event.detail.elt.querySelector('[name=brand]').value;
                     const value = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.value\']').value) || 0;
                     const lifestyle = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.lifestyle\']').value) || 0;
+                    const product = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.product\']').value) || 0;
+                    const durationTier = parseInt($event.detail.elt.querySelector('[name=target_length_tier]').value) || 8;
                     const tempId = 'temp-' + Date.now();
                     window.dispatchEvent(new CustomEvent('batch-progress:update', {
                         detail: {
                             batchId: tempId,
                             brand,
-                            expected: value + lifestyle,
+                            expected: value + lifestyle + product,
+                            targetLengthTier: durationTier,
                             posts: 0,
                             isTemp: true,
                         }
@@ -199,6 +202,19 @@
                             required
                             class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-purple-500 focus:border-purple-500"
                         >
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Video Duration</label>
+                        <select
+                            name="target_length_tier"
+                            class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-purple-500 focus:border-purple-500"
+                        >
+                            <option value="8">8 seconds</option>
+                            <option value="16">16 seconds</option>
+                            <option value="32">32 seconds</option>
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">The system routes 8s to the short Veo flow and 16s/32s to the extended Veo flow automatically.</p>
                     </div>
                     
                     <div>
@@ -223,6 +239,17 @@
                                     min="0" 
                                     max="100" 
                                     value="4"
+                                    class="w-20 border border-gray-300 rounded-md py-1 px-2 text-center"
+                                >
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm text-gray-600">Product Posts</label>
+                                <input 
+                                    type="number" 
+                                    name="post_type_counts.product" 
+                                    min="0" 
+                                    max="100" 
+                                    value="0"
                                     class="w-20 border border-gray-300 rounded-md py-1 px-2 text-center"
                                 >
                             </div>

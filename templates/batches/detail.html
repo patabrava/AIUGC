@@ -24,9 +24,27 @@
 
     <!-- Header -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
-        <div>
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
             <h2 class="text-2xl sm:text-3xl font-bold text-gray-900 break-words">{{ batch.brand }}</h2>
             <p class="mt-1 text-sm text-gray-500">Created {{ batch.created_at }}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                {% if batch.target_length_tier %}
+                <span class="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
+                    {{ batch.target_length_tier }}s batch
+                </span>
+                {% endif %}
+                {% if batch.video_pipeline_route == 'veo_extended' %}
+                <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                    Veo extended pipeline
+                </span>
+                {% elif batch.video_pipeline_route == 'short' %}
+                <span class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                    Short Veo pipeline
+                </span>
+                {% endif %}
+            </div>
         </div>
     </div>
 
@@ -599,6 +617,11 @@
                                             {{ (post.video_metadata.size_bytes / 1024 / 1024) | round(2) }} MB
                                         </span>
                                         {% endif %}
+                                        {% if post.video_metadata and (post.video_metadata.actual_seconds or post.video_metadata.duration_seconds) %}
+                                        <span class="text-xs text-gray-500">
+                                            {{ (post.video_metadata.actual_seconds or post.video_metadata.duration_seconds) }}s actual
+                                        </span>
+                                        {% endif %}
                                     </div>
                                 </div>
                                 
@@ -627,7 +650,7 @@
                                                 {% else %}
                                                 <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
                                                 {% endif %}
-                                                <span class="text-gray-700">Duration: {{ post.qa_auto_checks.duration_actual }}s (expected 8s ±0.5s)</span>
+                                                <span class="text-gray-700">Duration: {{ post.qa_auto_checks.duration_actual }}s (expected {{ post.qa_auto_checks.duration_expected }}s ±0.5s)</span>
                                             </div>
                                             <div class="flex items-center gap-2">
                                                 {% if post.qa_auto_checks.resolution_valid %}
@@ -865,10 +888,10 @@
 
     <!-- Video Generation Settings (moved from top) -->
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
-    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mt-6" x-data="videoSettingsComponent()">
+    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mt-6" x-data='videoSettingsComponent({ targetLengthTier: {{ batch.target_length_tier | tojson }}, pipelineRoute: {{ batch.video_pipeline_route | tojson }} })'>
         <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>
         <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4">
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4" x-show="!isDurationRouted">
                 <label class="flex flex-col text-sm" for="provider-select">
                     <span class="text-gray-700 font-medium">Provider</span>
                     <select
@@ -912,17 +935,70 @@
                     <p class="mt-1 text-xs text-gray-500">Sora currently supports 4, 8, or 12 second clips.</p>
                 </label>
             </div>
+            <div class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4" x-show="isDurationRouted" x-cloak>
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <p class="text-sm font-semibold text-indigo-900">Duration-routed batch</p>
+                        <p class="mt-1 text-sm text-indigo-800">
+                            <span x-text="`${targetLengthTier}s selected at batch setup.`"></span>
+                            <span x-show="pipelineRoute === 'short'"> This stays on the short Veo path.</span>
+                            <span x-show="pipelineRoute === 'veo_extended'"> This batch uses the Veo extended chain automatically.</span>
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200">
+                            Veo 3.1
+                        </span>
+                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200" x-text="`${targetLengthTier}s target`"></span>
+                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200" x-show="pipelineRoute === 'veo_extended'">
+                            720p chain
+                        </span>
+                    </div>
+                </div>
+                <div class="mt-4 max-w-xs">
+                    <label class="flex flex-col text-sm" for="aspect-select-routed">
+                        <span class="text-gray-700 font-medium">Aspect Ratio</span>
+                        <select
+                            id="aspect-select-routed"
+                            name="aspect_ratio"
+                            class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            x-model="aspectRatio"
+                        >
+                            <option value="9:16">9:16 Vertical</option>
+                            <option value="16:9">16:9 Landscape</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
             <input type="hidden" name="resolution" x-model="resolution" />
             <input type="hidden" name="seconds" x-model="duration" />
-            <div class="mt-4" aria-live="polite" x-show="submitError || submitSuccess" x-cloak>
+            <div class="mt-4" aria-live="polite" x-show="submitError || submitStatusMessage" x-cloak>
                 <div
-                    x-show="submitSuccess"
+                    x-show="submitStatusMessage && submitStatusKind === 'info'"
+                    class="rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-800 flex items-center gap-2"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01" />
+                    </svg>
+                    <span x-text="submitStatusMessage"></span>
+                </div>
+                <div
+                    x-show="submitStatusMessage && submitStatusKind === 'success'"
                     class="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 flex items-center gap-2"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    <span x-text="successMessage"></span>
+                    <span x-text="submitStatusMessage"></span>
+                </div>
+                <div
+                    x-show="submitStatusMessage && submitStatusKind === 'warning'"
+                    class="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 flex items-center gap-2"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86l-7.98 13.8A1.5 1.5 0 003.59 20h16.82a1.5 1.5 0 001.3-2.34l-7.98-13.8a1.5 1.5 0 00-2.58 0z" />
+                    </svg>
+                    <span x-text="submitStatusMessage"></span>
                 </div>
                 <div
                     x-show="submitError"
@@ -949,11 +1025,16 @@
         </form>
     </div>
     <script>
-        window.videoSettingsComponent = function () {
+        window.videoSettingsComponent = function (options = {}) {
             return {
-                provider: 'veo_3_1',
+                targetLengthTier: options.targetLengthTier || null,
+                pipelineRoute: options.pipelineRoute || null,
+                get isDurationRouted() {
+                    return this.targetLengthTier !== null;
+                },
+                provider: options.targetLengthTier ? 'veo_3_1' : 'veo_3_1',
                 aspectRatio: '9:16',
-                duration: '8',
+                duration: String(options.targetLengthTier || 8),
                 resolution: '720p',
                 supportedSizes: {
                     'veo_3_1': {
@@ -974,14 +1055,16 @@
                     const aspectMap = providerMap[aspect] || {};
                     return aspectMap[resolution] || null;
                 },
-                successMessage: '',
+                submitStatusMessage: '',
+                submitStatusKind: 'info',
                 async submitBatch(event) {
                     if (this.isSubmitting) {
                         return;
                     }
                     this.isSubmitting = true;
                     this.submitError = null;
-                    this.submitSuccess = null;
+                    this.submitStatusKind = 'info';
+                    this.submitStatusMessage = 'Submitting request to the video provider…';
                     try {
                         const response = await fetch(`/videos/batch/{{ batch.id }}/generate-all`, {
                             method: 'POST',
@@ -998,24 +1081,58 @@
                             })
                         });
 
-                        if (!response.ok) {
-                            const errorText = await response.text();
-                            throw new Error(errorText || `Submission failed (${response.status})`);
+                        const rawBody = await response.text();
+                        let payload = null;
+                        if (rawBody) {
+                            try {
+                                payload = JSON.parse(rawBody);
+                            } catch (error) {
+                                payload = null;
+                            }
                         }
 
-                        const payload = await response.json();
+                        if (!response.ok) {
+                            const errorMessage = payload?.message
+                                || payload?.detail?.message
+                                || payload?.error?.message
+                                || rawBody
+                                || `Submission failed (${response.status})`;
+                            const errorCode = payload?.code ? ` [${payload.code}]` : '';
+                            throw new Error(`${errorMessage}${errorCode}`);
+                        }
+
                         const submittedCount = payload?.data?.submitted_count ?? 0;
+                        const skippedCount = payload?.data?.skipped_count ?? 0;
                         const providerLabel = this.provider === 'veo_3_1' ? 'Veo 3.1' : (this.provider === 'sora_2_pro' ? 'Sora 2 Pro' : 'Sora 2');
-                        this.submitSuccess = submittedCount;
-                        this.successMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
+                        if (submittedCount > 0) {
+                            this.submitStatusKind = 'success';
+                            this.submitStatusMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
+                        } else {
+                            this.submitStatusKind = 'warning';
+                            this.submitStatusMessage = payload?.message
+                                || `No prompts were submitted to ${providerLabel}.${skippedCount ? ` ${skippedCount} post(s) were skipped.` : ''} Check the batch details or retry later.`;
+                        }
                     } catch (error) {
+                        this.submitStatusKind = 'warning';
+                        this.submitStatusMessage = error instanceof Error ? error.message : 'Submission failed. Check the server logs or quota status.';
                         this.submitError = error instanceof Error ? error.message : 'Submission failed';
                     } finally {
                         this.isSubmitting = false;
                     }
                 },
                 init() {
+                    if (this.isDurationRouted) {
+                        this.provider = 'veo_3_1';
+                        this.duration = String(this.targetLengthTier || 8);
+                        this.resolution = this.pipelineRoute === 'veo_extended'
+                            ? '720p'
+                            : (this.aspectRatio === '16:9' ? '1080p' : '720p');
+                    }
                     this.$watch('provider', (value) => {
+                        if (this.isDurationRouted) {
+                            this.provider = 'veo_3_1';
+                            return;
+                        }
                         if (value.startsWith('sora_2')) {
                             if (!['4','8','12'].includes(this.duration)) {
                                 this.duration = '8';
@@ -1029,13 +1146,16 @@
                         this.resolution = targetResolution;
                     });
                     this.$watch('aspectRatio', (value) => {
-                        const targetResolution = value === '16:9' ? '1080p' : '720p';
+                        const targetResolution = this.pipelineRoute === 'veo_extended'
+                            ? '720p'
+                            : value === '16:9' ? '1080p' : '720p';
                         this.resolution = targetResolution;
                     });
                 },
                 isSubmitting: false,
                 submitError: null,
-                submitSuccess: null
+                submitStatusMessage: '',
+                submitStatusKind: 'info'
             };
         };
     </script>

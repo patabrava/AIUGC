@@ -15,9 +15,11 @@ __all__ = [
     "STANDARD_AUDIO_BLOCK",
     "SORA_NEGATIVE_CONSTRAINTS",
     "VEO_NEGATIVE_PROMPT",
+    "split_dialogue_sentences",
     "build_video_prompt_from_seed",
     "validate_video_prompt",
     "build_optimized_prompt",
+    "build_veo_prompt_segment",
 ]
 
 
@@ -30,8 +32,9 @@ STANDARD_AUDIO_BLOCK = (
 )
 
 ENDING_HOLD_DIRECTIVE = (
-    "(After delivering the line, she holds a gentle smile and remains still for a brief "
-    "moment while the audio naturally settles into the quiet room ambience before the clip ends.)"
+    "(After the final word, she stops speaking immediately, closes her mouth, and holds a "
+    "gentle relaxed expression in silence for a brief moment while the audio naturally settles "
+    "into the quiet room ambience before the clip ends.)"
 )
 
 SORA_NEGATIVE_CONSTRAINTS = (
@@ -71,7 +74,102 @@ OPTIMIZED_PROMPT_TEMPLATE = (
     "{audio}{negatives_section}"
 )
 
+VEO_PROMPT_TEMPLATE = (
+    "Character:\n"
+    "38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights, hazel eyes, "
+    "and a warm light-medium skin tone. Friendly oval face and natural expression.\n\n"
+    "Style:\n"
+    "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
+    "soft flattering indoor light, and natural skin texture.\n\n"
+    "Action:\n"
+    "Seated in a wheelchair, she delivers the line directly to camera in one continuous take. "
+    "She speaks in German at a natural conversational pace, saying the line exactly as written below "
+    "with no paraphrasing or added words. She uses small natural hand gestures and subtle "
+    "upper-body nods while speaking.\n\n"
+    "Scene:\n"
+    "A modern, tidy bedroom with blush-pink walls and minimal decor. Bright soft vanity light "
+    "and natural daylight from camera-right create an even, flattering indoor look. The "
+    "wheelchair is partially visible in the frame.\n\n"
+    "Cinematography:\n"
+    "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
+    "distance. The camera is handheld but stable, with only minimal natural movement. The "
+    "framing remains consistent throughout the shot without noticeable camera drift or "
+    "reframing.\n\n"
+    "Dialogue:\n"
+    "German dialogue, say exactly as written:\n"
+    "\"{dialogue}\"\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
+    "{audio}"
+)
+
+VEO_PROMPT_TEMPLATE_NO_QUOTES = (
+    "Character:\n"
+    "38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights, hazel eyes, "
+    "and a warm light-medium skin tone. Friendly oval face and natural expression.\n\n"
+    "Style:\n"
+    "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
+    "soft flattering indoor light, and natural skin texture.\n\n"
+    "Action:\n"
+    "Seated in a wheelchair, she delivers the line directly to camera in one continuous take. "
+    "She speaks in German at a natural conversational pace, saying the line exactly as written below "
+    "with no paraphrasing or added words. She uses small natural hand gestures and subtle "
+    "upper-body nods while speaking.\n\n"
+    "Scene:\n"
+    "A modern, tidy bedroom with blush-pink walls and minimal decor. Bright soft vanity light "
+    "and natural daylight from camera-right create an even, flattering indoor look. The "
+    "wheelchair is partially visible in the frame.\n\n"
+    "Cinematography:\n"
+    "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
+    "distance. The camera is handheld but stable, with only minimal natural movement. The "
+    "framing remains consistent throughout the shot without noticeable camera drift or "
+    "reframing.\n\n"
+    "Dialogue:\n"
+    "German dialogue, say exactly as written:\n"
+    "{dialogue}\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
+    "{audio}"
+)
+
 logger = get_logger(__name__)
+
+
+def split_dialogue_sentences(dialogue: str) -> list[str]:
+    cleaned = " ".join(str(dialogue or "").split()).strip()
+    if not cleaned:
+        return []
+    sentences: list[str] = []
+    start = 0
+    index = 0
+    length = len(cleaned)
+    while index < length:
+        char = cleaned[index]
+        if char in ".!?":
+            prev_char = cleaned[index - 1] if index > 0 else ""
+            next_char = cleaned[index + 1] if index + 1 < length else ""
+            if char == "." and prev_char.isdigit() and next_char.isdigit():
+                index += 1
+                continue
+            if index + 1 == length or cleaned[index + 1].isspace():
+                segment = cleaned[start : index + 1].strip()
+                if segment:
+                    sentences.append(segment)
+                index += 1
+                while index < length and cleaned[index].isspace():
+                    index += 1
+                start = index
+                continue
+        index += 1
+    remainder = cleaned[start:].strip()
+    if remainder and not sentences:
+        sentences.append(remainder)
+    elif remainder:
+        logger.warning(
+            "dialogue_sentence_trailing_fragment_ignored",
+            trailing_fragment=remainder,
+        )
+    return sentences
 
 
 def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -118,7 +216,7 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
         normalized_dialogue,
         negative_constraints=SORA_NEGATIVE_CONSTRAINTS,
     )
-    veo_prompt = build_optimized_prompt(normalized_dialogue, negative_constraints=None)
+    veo_prompt = build_veo_prompt(normalized_dialogue)
 
     # Keep a single audio block in the final prompt to avoid contradictory synthesis cues.
     audio_section = AudioSection(dialogue=STANDARD_AUDIO_BLOCK, capture="")
@@ -184,4 +282,29 @@ def build_optimized_prompt(dialogue: str, negative_constraints: Optional[str] = 
         dialogue=cleaned_dialogue,
         audio=STANDARD_AUDIO_BLOCK,
         negatives_section=f"\n\n{negative_constraints}" if negative_constraints else "",
+    )
+
+
+def build_veo_prompt(dialogue: str) -> str:
+    cleaned_dialogue = dialogue.strip()
+    return VEO_PROMPT_TEMPLATE.format(
+        dialogue=cleaned_dialogue,
+        ending=ENDING_HOLD_DIRECTIVE,
+        audio=STANDARD_AUDIO_BLOCK,
+    )
+
+
+def build_veo_prompt_segment(dialogue: str, *, include_quotes: bool = False, include_ending: bool = False) -> str:
+    cleaned_dialogue = dialogue.strip()
+    prompt_dialogue = f"\"{cleaned_dialogue}\"" if include_quotes else cleaned_dialogue
+    ending = (
+        ENDING_HOLD_DIRECTIVE
+        if include_ending
+        else "Do not end the speech yet; continue into the next segment with no pause."
+    )
+    template = VEO_PROMPT_TEMPLATE if include_quotes else VEO_PROMPT_TEMPLATE_NO_QUOTES
+    return template.format(
+        dialogue=prompt_dialogue,
+        ending=ending,
+        audio=STANDARD_AUDIO_BLOCK,
     )

@@ -36,6 +36,7 @@ from app.core.states import BatchState
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.config import get_settings
+from app.core.video_profiles import get_duration_profile
 
 logger = get_logger(__name__)
 
@@ -281,6 +282,7 @@ def clear_seeding_progress(batch_id: str) -> None:
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     """Synchronous topic discovery workflow executed off the request event loop."""
     batch = get_batch_by_id(batch_id)
+    duration_profile = get_duration_profile(batch.get("target_length_tier"))
 
     if batch["state"] != BatchState.S1_SETUP.value:
         raise ValidationError(
@@ -377,7 +379,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
 
                 lifestyle_topics = generate_lifestyle_topics(
-                    count=request_count
+                    count=request_count,
+                    profile=duration_profile,
                 )
 
                 unique_candidates = deduplicate_topics(
@@ -447,7 +450,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 dialog_scripts = topic_data["dialog_scripts"]
                 seed_payload = build_lifestyle_seed_payload(
                     topic_data=topic_data,
-                    dialog_scripts=dialog_scripts
+                    dialog_scripts=dialog_scripts,
+                    profile=duration_profile,
                 )
 
                 add_topic_to_registry(
@@ -553,6 +557,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     post_type=post_type,
                     count=request_count,
                     progress_callback=progress_callback,
+                    profile=duration_profile,
                 )
 
                 update_seeding_progress(
@@ -669,6 +674,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
                 dialog_scripts = generate_dialog_scripts(
                     topic=original_item.topic,
+                    profile=duration_profile,
                 )
                 seed = extract_seed_strict_extractor(topic_model)
 
@@ -676,6 +682,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     original_item,
                     strict_seed=seed,
                     dialog_scripts=dialog_scripts,
+                    profile=duration_profile,
                 )
 
                 add_topic_to_registry(
@@ -727,7 +734,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
         )
 
         lifestyle_topics = generate_lifestyle_topics(
-            count=1
+            count=1,
+            profile=duration_profile,
         )
 
         if lifestyle_topics:
@@ -756,7 +764,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
 
             seed_payload = build_lifestyle_seed_payload(
                 topic_data=fallback_topic,
-                dialog_scripts=dialog_scripts
+                dialog_scripts=dialog_scripts,
+                profile=duration_profile,
             )
 
             fallback_post = create_post_for_batch(

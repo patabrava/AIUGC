@@ -7,21 +7,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
-import yaml
+from app.core.video_profiles import DurationProfile, get_duration_profile
 
 PROMPT_DATA_DIR = Path(__file__).resolve().parent / "prompt_data"
 
 
 @lru_cache(maxsize=None)
-def _load_prompt(name: str) -> dict:
-    """Load a YAML prompt definition from disk and cache the result."""
-    prompt_path = PROMPT_DATA_DIR / f"{name}.yaml"
-    with prompt_path.open("r", encoding="utf-8") as fp:
-        return yaml.safe_load(fp)
-
-
-def _join_sections(*sections: str) -> str:
-    return "\n\n".join(section.strip() for section in sections if section).strip()
+def _load_prompt_text(name: str) -> str:
+    """Load a text prompt definition from disk and cache the result."""
+    prompt_path = PROMPT_DATA_DIR / f"{name}.txt"
+    return prompt_path.read_text(encoding="utf-8")
 
 
 def _extract_topic_candidates(topic_pool_text: str) -> List[str]:
@@ -39,9 +34,8 @@ def _extract_topic_candidates(topic_pool_text: str) -> List[str]:
 @lru_cache(maxsize=None)
 def get_topic_pool_candidates() -> List[str]:
     """Return cached list of topic pool focus areas."""
-    data = _load_prompt("prompt1")
-    topic_pool_text = data.get("topic_pool", "")
-    return _extract_topic_candidates(topic_pool_text)
+    prompt_text = _load_prompt_text("prompt1_8s")
+    return _extract_topic_candidates(prompt_text)
 
 
 def _format_assigned_topics_section(assigned_topics: List[str]) -> str:
@@ -56,21 +50,28 @@ def _format_assigned_topics_section(assigned_topics: List[str]) -> str:
 def build_prompt1(
     post_type: str,
     desired_topics: int,
+    profile: Optional[DurationProfile] = None,
     chunk_index: Optional[int] = None,
     total_chunks: Optional[int] = None,
     assigned_topics: Optional[List[str]] = None,
     seed: Optional[int] = None,
 ) -> str:
-    """Render PROMPT_1 with dynamic context from YAML template."""
-    data = _load_prompt("prompt1")
+    """Render PROMPT_1 with dynamic context from text template."""
+    active_profile = profile or get_duration_profile(None)
+    prompt_text = _load_prompt_text(f"prompt1_{active_profile.target_length_tier}s")
 
     format_kwargs = {
         "desired_topics": desired_topics,
         "chunk_index": chunk_index or 1,
         "total_chunks": total_chunks or 1,
+        "prompt1_min_words": active_profile.prompt1_min_words,
+        "prompt1_max_words": active_profile.prompt1_max_words,
+        "prompt1_min_seconds": active_profile.prompt1_min_seconds,
+        "prompt1_max_seconds": active_profile.prompt1_max_seconds,
+        "prompt1_max_chars_no_spaces": active_profile.prompt1_max_chars_no_spaces,
+        "prompt1_sentence_guidance": active_profile.prompt1_sentence_guidance,
+        "target_length_tier": active_profile.target_length_tier,
     }
-
-    topic_pool_section = data.get("topic_pool", "").format(**format_kwargs)
 
     assigned_rotation_section: Optional[str] = None
     if assigned_topics:
@@ -84,35 +85,29 @@ def build_prompt1(
             subset = shuffled[: max(1, min(desired_topics, len(shuffled)))]
             assigned_rotation_section = _format_assigned_topics_section(subset)
 
-    return _join_sections(
-        data.get("core", "").format(**format_kwargs),
-        data.get("audience_context", "").format(**format_kwargs),
-        topic_pool_section,
-        assigned_rotation_section,
-        data.get("output_schema", "").format(**format_kwargs),
-        data.get("chunk_rules", "").format(**format_kwargs),
-        data.get("example", "").format(**format_kwargs),
-        data.get("closing", "").format(**format_kwargs),
-    )
+    return prompt_text.format(
+        **format_kwargs,
+        assigned_rotation_section=assigned_rotation_section or "",
+    ).strip()
 
 
-def build_prompt2(topic: str, scripts_per_category: int = 5) -> str:
-    """Render PROMPT_2 with topic context from YAML template."""
-    data = _load_prompt("prompt2")
+def build_prompt2(
+    topic: str,
+    scripts_per_category: int = 5,
+    profile: Optional[DurationProfile] = None,
+) -> str:
+    """Render PROMPT_2 with topic context from text template."""
+    active_profile = profile or get_duration_profile(None)
+    prompt_text = _load_prompt_text(f"prompt2_{active_profile.target_length_tier}s")
     total_scripts = scripts_per_category * 3
     format_kwargs = {
         "topic": topic,
         "scripts_per_category": scripts_per_category,
         "total_scripts": total_scripts,
+        "target_length_tier": active_profile.target_length_tier,
+        "prompt2_min_words": active_profile.prompt2_min_words,
+        "prompt2_max_words": active_profile.prompt2_max_words,
+        "prompt2_sentence_guidance": active_profile.prompt2_sentence_guidance,
     }
 
-    return _join_sections(
-        data.get("core", "").format(**format_kwargs),
-        data.get("audience_context", "").format(**format_kwargs),
-        data.get("voice", "").format(**format_kwargs),
-        data.get("structure", "").format(**format_kwargs),
-        data.get("length_rules", "").format(**format_kwargs),
-        data.get("headings", "").format(**format_kwargs),
-        data.get("description_section", "").format(**format_kwargs),
-        data.get("closing", "").format(**format_kwargs),
-    )
+    return prompt_text.format(**format_kwargs).strip()

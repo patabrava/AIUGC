@@ -87,13 +87,15 @@ async def create_batch_endpoint(request: Request):
             payload = CreateBatchRequest.model_validate(
                 {
                     "brand": str(form.get("brand", "")).strip(),
-                    "post_type_counts": post_type_counts
+                    "post_type_counts": post_type_counts,
+                    "target_length_tier": int(form.get("target_length_tier", 8) or 8),
                 }
             )
 
         batch = create_batch(
             brand=payload.brand,
-            post_type_counts=payload.post_type_counts.model_dump()
+            post_type_counts=payload.post_type_counts.model_dump(),
+            target_length_tier=payload.target_length_tier,
         )
         start_seeding_interaction(
             batch_id=batch["id"],
@@ -118,6 +120,7 @@ async def create_batch_endpoint(request: Request):
                     "batch_id": batch["id"],
                     "brand": batch["brand"],
                     "expected_posts": payload.post_type_counts.total,
+                    "target_length_tier": payload.target_length_tier,
                 }
             })
             return response
