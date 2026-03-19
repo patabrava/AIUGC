@@ -1,6 +1,7 @@
 """
 Lifestyle PROMPT_2 integrity testscript.
-Verifies a single-sentence lifestyle script is preserved instead of collapsing to an empty rotation.
+Verifies a single-sentence lifestyle script is preserved instead of collapsing to an empty rotation,
+and that chopped PROMPT_2 fragments are rejected before persistence.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import app.features.topics.agents as topic_agents
+from app.core.errors import ValidationError
 from app.features.topics.schemas import DialogScripts
 
 
@@ -44,6 +46,23 @@ def main() -> None:
     payload = topic_agents.build_lifestyle_seed_payload(topic, topic["dialog_scripts"])
     assert payload["script"] == full_script, payload
     assert payload["dialog_script"] == full_script, payload
+
+    try:
+        topic_agents._coerce_prompt2_payload(
+            {
+                "problem_agitate_solution": [
+                    "Niemand sagt dir, dass Spontanität dein bester Reiseführer ist. Manchmal sind die ungeplant"
+                ],
+                "testimonial": [],
+                "transformation": [],
+                "description": "Ausführliche Lifestyle-Beschreibung mit genug Kontext und drei Hashtags. #Rollstuhl #Alltag #Community",
+            },
+            scripts_required=1,
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("Chopped PROMPT_2 script should be rejected")
 
 
 if __name__ == "__main__":

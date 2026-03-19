@@ -1,195 +1,384 @@
 # FLOW-FORGE Review
 
-Date: 2026-03-16
-Review mode: Existing codebase audit with hosting recommendation
+Date: 2026-03-17
+Review mode: LIRA senior audit for existing codebase with TikTok sandbox integration planning
 
 ## Executive Decision
 
-Default recommendation: move compute to a VPS-style host, not to Cloudflare-only compute, and do not use Hostinger shared hosting.
+Default recommendation: build TikTok as a new provider path inside the existing `publish` slice, but do not reuse the current batch-scoped `meta_connection` pattern for durable TikTok account storage.
 
-Best fit for the current codebase:
-- If your main goal is cost consolidation: use a Hostinger VPS to run both the FastAPI app and the poller, keep Supabase, and keep ImageKit for now.
-- If your main goal is better video edge delivery later: add Cloudflare in front of the app or migrate video storage separately after introducing a storage adapter boundary.
+The repo already has the right monolith shape, provider config entry points, media storage path, and S7 publish UI anchor. The blockers are structural, not foundational: no app-level auth model, no encrypted token storage, a Meta-hardcoded publish slice, and a stale claim that TikTok is supported when only Meta is implemented.
 
-Not recommended as the immediate move:
-- Cloudflare-only deployment for the full app.
-- Hostinger shared hosting as the single platform.
-- Replacing ImageKit with Cloudflare in the same move as the compute migration.
+## Context Zero
+
+### Environment Matrix
+
+- OS from workspace context: macOS / Darwin
+- Shell: `zsh`
+- App runtime target: Python 3.11 from README
+- API framework: `fastapi==0.104.1`
+- Validation/config: `pydantic==2.5.0`, `pydantic-settings==2.1.0`
+- DB client: `supabase==2.9.0`
+- HTTP client: `httpx==0.27.2`
+- Templates/UI: Jinja2 + HTMX + Alpine
+- Background scheduling: APScheduler in-process plus `workers/video_poller.py`
+
+### Non-Functional Constraints
+
+- Locality budget: `{files: 10-14, LOC/file: <=350 target and <=1000 hard, deps: 0 default and max 1 if encryption cannot stay vanilla}`
+- TikTok target scope: sandbox only, `user.info.basic` + `video.upload`
+- Production review: out of scope for this pass
+- Direct publishing with `video.publish`: explicitly deferred
 
 ## Findings
 
-### IMPORTANT: The app requires a persistent worker, so a pure serverless or shared-web-host move will break the video pipeline
+### CRITICAL: The app has no authentication boundary, but the requested TikTok model assumes durable per-user connected accounts
 
 Current State:
-- The repo explicitly documents two processes: the FastAPI server and `workers/video_poller.py` in [README.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/README.md#L46).
-- The worker runs an infinite loop with a 10-second sleep in [workers/video_poller.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/workers/video_poller.py#L450).
-- Batch progression to `S6_QA` depends on worker completion logic in [workers/video_poller.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/workers/video_poller.py#L361).
+- Every router is mounted directly with no auth dependency or session guard in [app/main.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/main.py#L163).
+- Batch creation and mutation endpoints accept unauthenticated requests in [app/features/batches/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/batches/handlers.py#L60).
+- The requested TikTok schema assumes `connected_accounts.user_id`, `media_assets.user_id`, and `publish_jobs.user_id`, but no user model exists anywhere in the repo.
 
 Assessment:
-- This is the main hosting constraint.
-- Vercel can host the request side, but it cannot replace the always-on poller.
-- Hostinger shared hosting is also a mismatch unless it provides reliable daemon/process supervision for Python.
+- This is the primary architectural mismatch between the guide and the current app.
+- If implemented naively, TikTok connected accounts would either be orphaned, implicitly global, or incorrectly attached to batch records.
+
+Severity: CRITICAL
+
+Remediation:
+- Define an explicit ownership rule before coding:
+  - either add a minimal authenticated user model, or
+  - introduce an app-operator ownership convention for sandbox only with nullable `user_id`.
+- Document that rule in schema, handlers, and README.
+- Do not overload `batches.meta_connection` as a pseudo-user account store.
+
+### CRITICAL: Provider tokens are persisted in plaintext-equivalent JSONB today, which violates the TikTok integration requirements
+
+Current State:
+- Meta tokens are stored on the batch record via `_update_batch_meta_connection(...)` in [app/features/publish/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/publish/handlers.py#L284).
+- The callback persists `user_access_token` directly inside the connection payload in [app/features/publish/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/publish/handlers.py#L438).
+- The schema migration explicitly stores Meta connection data in `batches.meta_connection JSONB` in [supabase/migrations/005_add_meta_publish_integration.sql](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/supabase/migrations/005_add_meta_publish_integration.sql#L5).
+
+Assessment:
+- The code sanitizes tokens before sending them back to the browser, but storage is still unencrypted.
+- That is incompatible with the stated non-negotiables for TikTok OAuth and refresh-token handling.
+
+Severity: CRITICAL
+
+Remediation:
+- Introduce a token encryption adapter before any TikTok token persistence.
+- Store encrypted access and refresh tokens in a dedicated `connected_accounts` table.
+- Redact token values from logs and persisted error payloads.
+
+### IMPORTANT: The current social publishing slice is explicitly Meta-hardcoded even where schemas already advertise TikTok
+
+Current State:
+- `SocialNetwork` includes `TIKTOK` in [app/features/publish/schemas.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/publish/schemas.py#L16).
+- The S7 UI copy, controls, and routes are entirely Meta-specific in [templates/batches/detail.html](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/templates/batches/detail.html#L220).
+- The only implemented OAuth and target-selection routes are Meta routes in [app/features/publish/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/publish/handlers.py#L388).
+
+Assessment:
+- The schema suggests a provider-agnostic publish system, but the actual implementation is a provider-specific branch.
+- Adding TikTok by extending `meta_connection` semantics would deepen the coupling and make S7 harder to reason about.
 
 Severity: IMPORTANT
 
 Remediation:
-- If consolidating vendors, use a VPS with process supervision.
-- If staying managed, keep a separate worker runtime.
-- Do not plan around “one website host” unless it supports both ASGI serving and a persistent worker process.
+- Keep TikTok in the `publish` slice, but split provider logic into explicit provider-local helpers.
+- Replace the single Meta card with sibling provider sections.
+- Only expose TikTok network choices after the TikTok backend path exists.
 
-### IMPORTANT: Video hosting is currently ImageKit-shaped in code, tests, and metadata
+### IMPORTANT: The current data model is missing the job/account/media separations required by the TikTok guide
 
 Current State:
-- The only asset adapter is ImageKit in [app/adapters/imagekit_client.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/adapters/imagekit_client.py#L19).
-- Completed videos write `imagekit_file_id`, `file_path`, `thumbnail_url`, and final `video_url` in [workers/video_poller.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/workers/video_poller.py#L314).
-- Tests directly exercise ImageKit upload behavior in `tests/test_imagekit_url_upload.py` and `tests/test_veo_url_upload_flow.py`.
-- QA checks depend on a reachable `video_url` and use `HEAD` against that URL in [app/features/qa/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/qa/handlers.py#L381).
+- Post-level publish outcome fields already exist on `posts` in [supabase/migrations/001_initial_schema.sql](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/supabase/migrations/001_initial_schema.sql).
+- Meta connection state is batch-scoped JSONB in [supabase/migrations/005_add_meta_publish_integration.sql](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/supabase/migrations/005_add_meta_publish_integration.sql#L5).
+- There are no `connected_accounts`, `media_assets`, or `publish_jobs` tables.
 
 Assessment:
-- Cloudflare R2 or Stream can work, but this is not a drop-in config change.
-- A storage migration now would compound risk because it touches worker logic, QA semantics, metadata shape, and tests.
+- The current post-centric schema is usable for final outcome snapshots, but not for OAuth connection lifecycle, token refresh lifecycle, or draft upload job tracking.
+- TikTok draft upload needs its own durable job record even if `posts.publish_results` stays as the denormalized UI summary.
 
 Severity: IMPORTANT
 
 Remediation:
-- Keep ImageKit during the compute migration.
-- If you later want Cloudflare for video, first introduce a `video_asset_store` interface and migrate adapters behind it.
+- Add:
+  - `connected_accounts`
+  - `media_assets`
+  - `publish_jobs`
+- Keep `posts.publish_results` and `posts.platform_ids` as read-optimized summaries, not the source of truth.
 
-### IMPORTANT: The repo already points to Vercel plus Railway, not Render, so the current problem is consolidation rather than replacing a present Render dependency
+### IMPORTANT: TikTok configuration is only partially represented, so exact redirect URI and environment separation would be easy to get wrong
 
 Current State:
-- Deployment docs specify `Vercel (API) + Railway (Worker)` in [README.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/README.md#L94).
-- Vercel config exists in [vercel.json](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/vercel.json#L1).
-- No Render config was found in the repository scan.
+- Only `tiktok_client_key` and `tiktok_client_secret` exist in [app/core/config.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/core/config.py#L87).
+- `.env.example` only lists `TIKTOK_CLIENT_KEY` and `TIKTOK_CLIENT_SECRET` in [/.env.example](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/.env.example#L34).
+- No redirect URI, app URL, policy URLs, environment, or sandbox account config exists.
 
 Assessment:
-- The codebase evidence says your active architecture is already split across request and worker runtimes, but not on Render.
-- The strategic question is whether to keep split hosting or consolidate compute onto one VPS provider.
+- TikTok OAuth requires exact redirect matching, so the current config surface is insufficient for a safe implementation.
+- Sandbox vs production drift would be very likely without explicit settings.
 
 Severity: IMPORTANT
 
 Remediation:
-- Treat this as a consolidation decision:
-  - `Vercel + Railway + ImageKit + Supabase`
-  - or `Hostinger VPS + ImageKit + Supabase`
-  - or `Hostinger VPS + Cloudflare proxy + ImageKit + Supabase`
+- Extend config and `.env.example` with:
+  - `TIKTOK_REDIRECT_URI`
+  - `TIKTOK_ENVIRONMENT`
+  - `APP_URL`
+  - `PRIVACY_POLICY_URL`
+  - `TERMS_URL`
+  - `TIKTOK_SANDBOX_ACCOUNT`
+  - `TOKEN_ENCRYPTION_KEY`
+- Validate required TikTok config together, similar to `_require_meta_settings()`.
 
-### MINOR: Worker packaging is fragile and makes host migration harder than it needs to be
+### IMPORTANT: The request flow already exceeds the locality budget in several critical handlers, which will make TikTok harder to maintain unless its scope is kept narrow
 
 Current State:
-- The worker mutates `sys.path` to import the parent app in [workers/video_poller.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/workers/video_poller.py#L13).
-- The repo maintains a second worker-specific `requirements.txt` in [workers/requirements.txt](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/workers/requirements.txt).
+- `app/features/publish/handlers.py` is 1019 LOC.
+- `app/features/topics/handlers.py` is 982 LOC.
+- `app/features/batches/handlers.py` is 802 LOC.
+- `app/features/videos/handlers.py` is 745 LOC.
+- The file-size scan shows several files well above the repo’s locality budget.
 
 Assessment:
-- This is workable on a VPS, but it is brittle for deployment packaging and increases drift risk between the web app and worker.
+- The vertical-slice structure is good, but several slices have collapsed too many concerns into one handler file.
+- TikTok should not be added as another 300-500 lines into the already oversized publish handler without local helper extraction.
+
+Severity: IMPORTANT
+
+Remediation:
+- Add small provider-local helpers such as:
+  - `app/features/publish/tiktok.py`
+  - `app/features/publish/tiktok_crypto.py`
+- Keep route definitions in `handlers.py`, but move request building, token exchange, and upload orchestration into adjacent helper modules.
+
+### IMPORTANT: The current tests are uneven and partially environment-coupled, leaving the publish/auth boundary underprotected
+
+Current State:
+- The repo has pytest coverage for selected worker and provider paths, for example [tests/test_video_poller_batch_transition.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/tests/test_video_poller_batch_transition.py#L1).
+- Several “tests” are actually environment-coupled scripts that talk to a real Supabase project, for example [tests/test_video_submission_flow.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/tests/test_video_submission_flow.py#L22).
+- Existing publish coverage is not broad enough for a second provider with OAuth + upload + persistence.
+
+Assessment:
+- TikTok OAuth and draft upload should not be added without deterministic local tests that do not depend on a live Supabase environment.
+- The current testing style is enough to add regression tests, but not enough to trust a token-handling integration by default.
+
+Severity: IMPORTANT
+
+Remediation:
+- Add provider-local pytest coverage for:
+  - OAuth state signing/verification
+  - token encryption round-trip
+  - callback token exchange normalization
+  - upload-draft request shaping
+  - error persistence on publish jobs
+- Keep one sandbox smoke testscript separate from unit/integration coverage.
+
+### MINOR: README and product language currently overstate TikTok support
+
+Current State:
+- README describes the app as a “Deterministic UGC video production system for TikTok and Instagram” in [README.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/README.md#L1).
+- Implemented publishing is Meta-only at present.
+
+Assessment:
+- This is product/docs drift, not a runtime bug.
+- It will become misleading once TikTok work begins unless the README is made explicit about sandbox scope and current provider coverage.
 
 Severity: MINOR
 
 Remediation:
-- Unify dependency management and run both processes from the repo root.
-- Package the worker as a normal module entrypoint.
+- Update README after the TikTok slice lands to state:
+  - Meta scheduling/publishing status
+  - TikTok sandbox draft-upload status
+  - direct-post not yet implemented
 
-### MINOR: Some core files are over the repo’s own locality budget, which will slow future infra migrations
+## TikTok Implementation Block
 
-Current State:
-- Large files include [app/features/videos/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/videos/handlers.py), [app/features/batches/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/batches/handlers.py), and [app/features/topics/agents.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/agents.py).
+Budget: `{files: 10-14, LOC/file: <=350 target and <=1000 hard, deps: 0 default and max 1 if encryption cannot stay vanilla}`
 
-Assessment:
-- This is not a blocker for hosting, but it increases change risk when you later refactor storage providers or alter the job model.
+### Capability Map
 
-Severity: MINOR
+1. Accept TikTok app configuration for sandbox web OAuth.
+2. Start and complete Login Kit OAuth with exact redirect URI matching and validated state.
+3. Fetch and persist the connected TikTok account using `user.info.basic`.
+4. Persist encrypted token material and token expiry metadata.
+5. Upload a generated video as a TikTok draft using `video.upload`.
+6. Persist durable publish job records and surface success/failure in S7 UI.
+7. Keep Meta behavior unchanged.
 
-Remediation:
-- Split video submission, polling recovery, and storage concerns into smaller files before a provider migration.
+### Dependency Map
 
-## Hosting Evaluation
+- Config: [app/core/config.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/core/config.py)
+- Publish slice routes and schemas:
+  - [app/features/publish/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/publish/handlers.py)
+  - [app/features/publish/schemas.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/publish/schemas.py)
+- New TikTok helpers:
+  - `app/features/publish/tiktok.py`
+  - `app/features/publish/tiktok_crypto.py`
+- UI: [templates/batches/detail.html](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/templates/batches/detail.html)
+- Storage reuse: [app/adapters/storage_client.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/adapters/storage_client.py)
+- Schema: new Supabase migration(s)
+- Tests: new provider-local pytest files
 
-### Option A: Hostinger VPS
+### Boundary Map
 
-Fit: Strong
+- OAuth boundary:
+  - `GET /api/auth/tiktok/start`
+  - `GET /api/auth/tiktok/callback`
+- Account boundary:
+  - `GET /api/tiktok/account`
+- Draft-upload boundary:
+  - `POST /api/tiktok/upload-draft`
+- Job boundary:
+  - `GET /api/tiktok/publish-jobs/:id`
+- Persistence boundary:
+  - `connected_accounts`
+  - `media_assets`
+  - `publish_jobs`
+- UI boundary:
+  - S7 publish plan provider section
 
-Why it fits this repo:
-- Can run both `uvicorn` and the poller as real long-lived processes.
-- Lets you eliminate the split between Vercel and Railway.
-- Requires the fewest application changes.
+### Implementation Pass
 
-What it does not solve by itself:
-- It does not replace ImageKit’s CDN/storage role automatically.
-- It does not replace Supabase.
+1. Config and contracts
+- Extend settings and `.env.example` for complete TikTok sandbox config.
+- Add provider-local schemas for account state and upload-draft requests.
 
-Recommended layout:
-- `systemd` service 1: FastAPI app
-- `systemd` service 2: `workers/video_poller.py`
-- Reverse proxy: Nginx or Caddy
-- Database/state: Supabase
-- Video assets: keep ImageKit initially
+2. Persistence
+- Create `connected_accounts`, `media_assets`, and `publish_jobs`.
+- Keep `posts.publish_results` and `posts.platform_ids` as the denormalized summary.
 
-Risk:
-- Operational burden is higher than managed hosting.
-- You own uptime, restarts, logs, and SSL termination.
+3. Security
+- Add token encryption helper and exact redirect URI validation.
+- Keep OAuth server-side only.
 
-### Option B: Cloudflare for full hosting
+4. TikTok provider helper
+- Build authorization URL.
+- Exchange code for tokens.
+- Fetch user profile with `user.info.basic`.
+- Upload draft with `video.upload`.
+- Persist request/response/error payloads with redaction.
 
-Fit: Weak for the current codebase
+5. UI
+- Add TikTok connection and draft-upload status card to S7 as a sibling to Meta.
+- Show:
+  - not connected
+  - connecting
+  - connected
+  - uploading
+  - success
+  - failure
+  - reconnect required
 
-Why:
-- The current app is Python/FastAPI plus an infinite-loop worker.
-- Cloudflare’s strengths are edge proxying, CDN, object storage, and edge/serverless compute, but this repo is not shaped for a no-daemon edge runtime.
-- Reaching Cloudflare-only would imply a rewrite of the worker model into cron-driven jobs, queues, or another evented pattern.
+6. Tests
+- Add deterministic pytest coverage for provider-local helpers and route handlers.
+- Add one sandbox smoke testscript for a single authorized TikTok account.
 
-Where Cloudflare does fit:
-- Proxy/CDN in front of a VPS.
-- Future storage migration target after adapterization.
+### Exact App Config Pack To Feed The Coding LLM
 
-### Option C: Hostinger shared hosting
+```text
+Implement a TikTok web integration in sandbox mode using Login Kit and Content Posting API.
 
-Fit: Poor
+Requirements:
+- Web app
+- OAuth login with TikTok
+- Scopes: user.info.basic and video.upload
+- Use sandbox environment first
+- Store connected TikTok account, tokens, open_id, and profile info
+- Allow uploading a video as a TikTok draft
+- Build backend endpoints for auth start, auth callback, upload draft, and account status
+- Use server-side token exchange
+- Encrypt tokens at rest
+- Validate OAuth state
+- Log and persist TikTok API responses and errors
+- Build a minimal frontend flow with Connect TikTok, connected state, upload video, and success/failure state
 
-Why:
-- This repo needs ASGI app hosting and a persistent worker.
-- Shared hosting plans usually optimize for PHP/static workloads, not supervised Python daemons.
+App config:
+- Product: Login Kit + Content Posting API
+- Client key: [PASTE]
+- Client secret: [PASTE]
+- Redirect URI: [PASTE]
+- App URL: [PASTE]
+- Privacy Policy URL: [PASTE]
+- Terms URL: [PASTE]
+- Environment: sandbox
+- Authorized sandbox account: [PASTE HANDLE]
+- Scopes: user.info.basic, video.upload
 
-### Option D: Keep split managed hosting
+Also generate:
+- database schema
+- env var template
+- API client module
+- auth service
+- posting service
+- migration files
+- minimal frontend UI
+- README with setup steps
+```
 
-Fit: Strong operationally, weaker on bill simplicity
+### Pass / Fail Criteria
 
-Why:
-- Matches the code as written.
-- Lowest migration risk.
-- Higher vendor sprawl and likely higher recurring cost than a single VPS.
+- OAuth start builds the exact TikTok sandbox authorization URL and validates state on callback.
+- Connected TikTok account data persists with encrypted token fields.
+- Draft upload creates a durable publish job and stores TikTok request/response snapshots.
+- S7 UI surfaces connect, upload, success, failure, and reconnect-required states.
+- Existing Meta routes and UI continue to work unchanged.
 
-## Strategic Recommendation
+## Testscripts
 
-Choose this order:
+### `tiktok_oauth_local`
 
-1. Move compute to a Hostinger VPS if your priority is cost reduction and fewer vendors.
-2. Keep Supabase.
-3. Keep ImageKit for now.
-4. Put Cloudflare in front later only if you want DNS, caching, WAF, or media migration.
-5. Defer any Cloudflare video-storage migration until after compute consolidation is stable.
+- Objective: validate OAuth URL generation, state verification, and callback persistence logic locally
+- Prerequisites: app config set, mocked TikTok HTTP responses
+- Setup:
+  - configure sandbox env vars
+  - seed one sandbox operator/account owner if needed
+- Run:
+  - execute provider-local pytest coverage for start and callback handlers
+- Expected observations:
+  - exact redirect URI used
+  - invalid state rejected
+  - account row created/updated with encrypted token fields
 
-This gives you the lowest-risk path to “stop paying for split compute” without turning the migration into an infrastructure rewrite.
+### `tiktok_draft_upload_local`
 
-## Recommended Implementation Block
+- Objective: validate media selection, draft upload request shaping, and publish job persistence
+- Prerequisites: one connected TikTok account fixture, one generated media asset fixture
+- Setup:
+  - create connected account fixture
+  - create media asset fixture pointing to stored R2 object or staged file
+- Run:
+  - execute provider-local pytest coverage for `POST /api/tiktok/upload-draft`
+- Expected observations:
+  - job row created
+  - request/response payloads persisted
+  - success and failure states mapped predictably
 
-Budget:
-- files: 6-8 touched
-- LOC/file: target under 250, no file over 700
-- deps: 0 new Python deps preferred, max 1 process-management/doc concern if justified
+### `tiktok_sandbox_smoke`
 
-Implementation block:
-1. Add production process docs for VPS deployment.
-2. Add a single root startup model for web and worker.
-3. Replace deployment-specific README sections with neutral process-manager instructions.
-4. Add health/readiness notes for both web and worker.
-5. Add one smoke testscript for VPS deployment verification.
+- Objective: validate one end-to-end sandbox flow with the authorized TikTok test account
+- Prerequisites: real sandbox app config and one test video asset
+- Setup:
+  - connect the sandbox TikTok account
+  - choose one valid MP4 asset already stored by the app
+- Run:
+  - start OAuth
+  - complete callback
+  - submit draft upload
+- Expected observations:
+  - account becomes connected
+  - publish job reaches submitted/successful draft state
+  - UI reflects job status without exposing tokens
+- Artifact capture:
+  - structured logs
+  - DB snapshots for `connected_accounts` and `publish_jobs`
+  - screenshot of the S7 TikTok state
 
-Testscripts:
-- `deploy-smoke`
-  - Objective: verify FastAPI serves, worker starts, Supabase health passes, and video polling loop boots.
-  - Run: start both services, hit `/health`, inspect worker logs for `video_poller_started`.
-- `video-path-smoke`
-  - Objective: verify a submitted video still progresses to asset URL and QA-readable state.
-  - Run: execute existing phase-4 style flow against staging.
+## Handoff
 
-If remediation is accepted, switch to `EYE` and execute the implementation-block in one pass. If debugging fails for two turns, create `agents/testscripts/failure_report.md`.
+`agents/canon.md` and `agents/review.md` have been updated for this audit.
+
+Switch to `EYE` and use `bridgecode/plan-code-debug.md` to execute the TikTok implementation block and testscripts.
+
+If after trying to debug for two turns the tests still fail, generate [agents/testscripts/failure_report.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/agents/testscripts/failure_report.md) with the failing script id, environment matrix, artifacts, suspected boundary, attempted fixes, and next targeted observations.

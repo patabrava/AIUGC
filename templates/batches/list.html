@@ -65,20 +65,35 @@
                                         Retry in progress
                                     </span>
                                 </template>
+                                <template x-if="info.streamState === 'reconnecting'">
+                                    <span class="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                                        Reconnecting
+                                    </span>
+                                </template>
                             </div>
                             <p class="mt-1 text-sm leading-6 opacity-90" x-text="info.detailMessage || 'Generating topics and posts from the current batch mix.'"></p>
                         </div>
                     </div>
-                    <button 
-                        type="button"
-                        class="text-xs font-medium opacity-75 transition hover:opacity-100"
-                        @click="removeProgressEntry(id)"
-                    >
-                        Dismiss
-                    </button>
+                    <div class="flex flex-col items-end gap-2">
+                        <button
+                            type="button"
+                            class="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white/50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide transition hover:bg-white/80"
+                            @click="toggleSoundEnabled()"
+                            :aria-pressed="soundEnabled ? 'true' : 'false'"
+                        >
+                            <span x-text="soundEnabled ? 'Sound on' : 'Sound off'"></span>
+                        </button>
+                        <button 
+                            type="button"
+                            class="text-xs font-medium opacity-75 transition hover:opacity-100"
+                            @click="removeProgressEntry(id)"
+                        >
+                            Dismiss
+                        </button>
+                    </div>
                 </div>
 
-                <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                <div class="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_260px]">
                     <div class="rounded-lg bg-white/60 p-3 ring-1 ring-black/5">
                         <div class="flex items-center justify-between text-xs font-medium uppercase tracking-wide opacity-70">
                             <span>Live checkpoints</span>
@@ -99,12 +114,47 @@
                             <span x-text="formatRelativeTime(info.lastUpdatedAt)"></span>
                         </div>
                         <p class="mt-2 font-medium" x-text="postCountLabel(info)"></p>
+                        <template x-if="info.interactionId">
+                            <p class="mt-1 break-all opacity-80" x-text="`Interaction: ${info.interactionId}`"></p>
+                        </template>
                         <template x-if="info.retryMessage">
                             <p class="mt-1 opacity-80" x-text="info.retryMessage"></p>
                         </template>
                         <template x-if="info.state">
                             <p class="mt-2 opacity-80" x-text="`Batch state: ${info.state}`"></p>
                         </template>
+                        <p class="mt-2 opacity-80" x-text="streamStateLabel(info)"></p>
+                        <template x-if="info.lastEventId">
+                            <p class="mt-1 opacity-70" x-text="`Last event: ${info.lastEventId}`"></p>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="mt-3 rounded-lg bg-slate-950 p-3 text-slate-100 shadow-inner">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Live research feed</p>
+                            <p class="mt-1 text-sm text-slate-200">Short progress notes stream in here while the batch is being prepared.</p>
+                        </div>
+                        <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide" :class="streamBadgeClasses(info)">
+                            <span x-text="info.streamState || 'polling'"></span>
+                        </span>
+                    </div>
+                    <div class="mt-3 max-h-52 overflow-y-auto rounded-lg bg-black/20 p-2">
+                        <template x-if="!info.events || info.events.length === 0">
+                            <p class="px-2 py-3 text-sm text-slate-400">Waiting for the first live research event...</p>
+                        </template>
+                        <div class="space-y-2">
+                            <template x-for="event in visibleEvents(info)" :key="event.event_id">
+                                <div class="rounded-md border border-white/10 bg-white/5 px-3 py-2">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <p class="text-xs font-semibold uppercase tracking-wide" :class="eventLabelClasses(event)" x-text="eventLabel(event)"></p>
+                                        <span class="text-[11px] text-slate-400" x-text="formatEventTime(event.created_at)"></span>
+                                    </div>
+                                    <p class="mt-1 text-sm leading-5 text-slate-100" x-text="eventSummary(event)"></p>
+                                </div>
+                            </template>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -270,7 +320,9 @@
         const POLL_INTERVAL_MS = 5000;
         const COMPLETION_HOLD_MS = 3200;
         const pollers = new Map();
+        const streams = new Map();
         const completionTimers = new Map();
+        const SOUND_STORAGE_KEY = 'flowforge-seeding-sound-enabled';
         const CHECKPOINTS = [
             { key: 'booting', label: 'Starting' },
             { key: 'researching', label: 'Researching' },
@@ -283,27 +335,129 @@
             acc[item.key] = index;
             return acc;
         }, {});
+        let audioContext = null;
+        let userHasInteracted = false;
 
-        function normalizeProgress(detail = {}) {
+        function soundEnabledFromStorage() {
+            return window.localStorage.getItem(SOUND_STORAGE_KEY) !== 'false';
+        }
+
+        function markUserInteraction() {
+            userHasInteracted = true;
+        }
+
+        window.addEventListener('pointerdown', markUserInteraction, { passive: true });
+        window.addEventListener('keydown', markUserInteraction, { passive: true });
+
+        function createAudioContext() {
+            if (!audioContext && window.AudioContext) {
+                audioContext = new window.AudioContext();
+            }
+            return audioContext;
+        }
+
+        function playCompletionToneIfAllowed() {
+            if (!soundEnabledFromStorage() || !userHasInteracted || !window.AudioContext) {
+                return;
+            }
+
+            const ctx = createAudioContext();
+            if (!ctx) {
+                return;
+            }
+
+            const now = ctx.currentTime;
+            const gain = ctx.createGain();
+            gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(0.08, now + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.7);
+
+            const oscA = ctx.createOscillator();
+            oscA.type = 'sine';
+            oscA.frequency.setValueAtTime(659.25, now);
+            oscA.frequency.setValueAtTime(783.99, now + 0.22);
+            oscA.connect(gain);
+            oscA.start(now);
+            oscA.stop(now + 0.7);
+
+            const oscB = ctx.createOscillator();
+            oscB.type = 'triangle';
+            oscB.frequency.setValueAtTime(987.77, now + 0.05);
+            oscB.connect(gain);
+            oscB.start(now + 0.05);
+            oscB.stop(now + 0.45);
+        }
+
+        function normalizeProgress(detail = {}, previous = {}) {
             return {
-                brand: detail.brand || 'Unbenannte Marke',
-                expected: Number(detail.expected ?? detail.expectedPosts ?? 0),
-                posts: Number(detail.posts ?? detail.postsCreated ?? 0),
-                state: detail.state || 'S1_SETUP',
-                stage: detail.stage || 'booting',
-                stageLabel: detail.stageLabel || 'Preparing topic generation',
-                detailMessage: detail.detailMessage || 'Opening the research run and preparing the first posts.',
-                retryMessage: detail.retryMessage || null,
-                lastUpdatedAt: detail.lastUpdatedAt || new Date().toISOString(),
-                isRetrying: Boolean(detail.isRetrying),
-                completed: Boolean(detail.completed || detail.stage === 'completed'),
+                brand: detail.brand ?? previous.brand ?? 'Unbenannte Marke',
+                expected: Number(detail.expected ?? detail.expectedPosts ?? previous.expected ?? 0),
+                posts: Number(detail.posts ?? detail.postsCreated ?? previous.posts ?? 0),
+                state: detail.state ?? previous.state ?? 'S1_SETUP',
+                stage: detail.stage ?? previous.stage ?? 'booting',
+                stageLabel: detail.stageLabel ?? previous.stageLabel ?? 'Preparing topic generation',
+                detailMessage: detail.detailMessage ?? previous.detailMessage ?? 'Opening the research run and preparing the first posts.',
+                retryMessage: detail.retryMessage ?? previous.retryMessage ?? null,
+                lastUpdatedAt: detail.lastUpdatedAt ?? previous.lastUpdatedAt ?? new Date().toISOString(),
+                isRetrying: Boolean(detail.isRetrying ?? previous.isRetrying),
+                completed: Boolean(detail.completed ?? previous.completed ?? detail.stage === 'completed'),
+                interactionId: detail.interactionId ?? previous.interactionId ?? null,
+                lastEventId: detail.lastEventId ?? previous.lastEventId ?? null,
+                streamState: detail.streamState ?? previous.streamState ?? 'connecting',
+                events: Array.isArray(detail.events) ? detail.events : Array.isArray(previous.events) ? previous.events : [],
             };
+        }
+
+        function progressFromSnapshot(progress = {}, fallback = {}) {
+            return {
+                brand: fallback.brand,
+                expected: progress.expected_posts ?? fallback.expected,
+                posts: progress.posts_created ?? fallback.posts,
+                state: progress.state ?? fallback.state,
+                stage: progress.stage,
+                stageLabel: progress.stage_label,
+                detailMessage: progress.detail_message,
+                retryMessage: progress.retry_message,
+                lastUpdatedAt: progress.last_updated_at,
+                isRetrying: progress.is_retrying,
+                completed: progress.stage === 'completed',
+                interactionId: progress.interaction_id ?? fallback.interactionId,
+            };
+        }
+
+        function eventSummaryText(event) {
+            if (event.summary) return event.summary;
+            if (event.delta && event.delta.type === 'thought_summary') {
+                return event.delta.content && event.delta.content.text ? event.delta.content.text : 'Research update received.';
+            }
+            if (event.progress && event.progress.detail_message) {
+                return event.progress.detail_message;
+            }
+            return 'Research update received.';
+        }
+
+        function stopPolling(batchId) {
+            const poller = pollers.get(batchId);
+            if (poller) {
+                window.clearInterval(poller);
+                pollers.delete(batchId);
+            }
+        }
+
+        function stopStream(batchId) {
+            const stream = streams.get(batchId);
+            if (stream) {
+                stream.close();
+                streams.delete(batchId);
+            }
         }
 
         window.batchListComponent = function batchListComponent() {
             return {
                 showCreateModal: false,
                 batchProgress: {},
+                soundEnabled: soundEnabledFromStorage(),
                 cleanupHandlers: [],
                 init() {
                     const updateHandler = (event) => {
@@ -313,10 +467,10 @@
                             return;
                         }
 
-                        const next = normalizeProgress(detail);
+                        const current = this.batchProgress || {};
+                        const next = normalizeProgress(detail, current[batchId] || {});
                         const brand = next.brand;
 
-                        const current = this.batchProgress || {};
                         const cleanedEntries = Object.entries(current).filter(([key, value]) => {
                             if (!value) {
                                 return false;
@@ -335,6 +489,44 @@
                         };
                     };
 
+                    const feedHandler = (event) => {
+                        const detail = event.detail || {};
+                        const batchId = detail.batchId;
+                        const feedEvent = detail.event;
+                        if (!batchId || !feedEvent) {
+                            return;
+                        }
+
+                        const current = this.batchProgress || {};
+                        const existing = normalizeProgress({ batchId }, current[batchId] || {});
+                        const priorEvents = Array.isArray(existing.events) ? existing.events : [];
+                        const deduped = priorEvents.filter((item) => item.event_id !== feedEvent.event_id);
+                        deduped.push(feedEvent);
+                        const nextEvents = deduped.slice(-24);
+                        this.batchProgress = {
+                            ...current,
+                            [batchId]: {
+                                ...existing,
+                                events: nextEvents,
+                                lastEventId: feedEvent.event_id || existing.lastEventId,
+                            },
+                        };
+                    };
+
+                    const streamHandler = (event) => {
+                        const detail = event.detail || {};
+                        const batchId = detail.batchId;
+                        if (!batchId) {
+                            return;
+                        }
+                        const current = this.batchProgress || {};
+                        const existing = normalizeProgress(detail, current[batchId] || {});
+                        this.batchProgress = {
+                            ...current,
+                            [batchId]: existing,
+                        };
+                    };
+
                     const clearHandler = (event) => {
                         const detail = event.detail || {};
                         const batchId = detail.batchId;
@@ -348,31 +540,45 @@
                         if (!Object.prototype.hasOwnProperty.call(current, batchId)) {
                             return;
                         }
+                        stopPolling(batchId);
+                        stopStream(batchId);
 
                         const { [batchId]: _removed, ...rest } = current;
                         this.batchProgress = rest;
                     };
 
                     window.addEventListener('batch-progress:update', updateHandler);
+                    window.addEventListener('batch-progress:event', feedHandler);
+                    window.addEventListener('batch-progress:stream', streamHandler);
                     window.addEventListener('batch-progress:clear', clearHandler);
 
                     this.cleanupHandlers.push(() => {
                         window.removeEventListener('batch-progress:update', updateHandler);
+                        window.removeEventListener('batch-progress:event', feedHandler);
+                        window.removeEventListener('batch-progress:stream', streamHandler);
                         window.removeEventListener('batch-progress:clear', clearHandler);
                     });
                 },
                 destroy() {
                     this.cleanupHandlers.forEach((dispose) => dispose());
                     this.cleanupHandlers = [];
+                    Array.from(streams.keys()).forEach((batchId) => stopStream(batchId));
+                    Array.from(pollers.keys()).forEach((batchId) => stopPolling(batchId));
                 },
                 removeProgressEntry(id) {
                     const current = this.batchProgress || {};
                     if (!Object.prototype.hasOwnProperty.call(current, id)) {
                         return;
                     }
+                    stopPolling(id);
+                    stopStream(id);
 
                     const { [id]: _removed, ...rest } = current;
                     this.batchProgress = rest;
+                },
+                toggleSoundEnabled() {
+                    this.soundEnabled = !this.soundEnabled;
+                    window.localStorage.setItem(SOUND_STORAGE_KEY, this.soundEnabled ? 'true' : 'false');
                 },
                 checkpointSteps(info) {
                     const activeIndex = STAGE_ORDER[info.stage] ?? 0;
@@ -423,6 +629,44 @@
                     if (info.stage === 'failed') return 'Needs attention';
                     return status;
                 },
+                streamStateLabel(info) {
+                    if (info.streamState === 'live') return 'Live stream connected';
+                    if (info.streamState === 'reconnecting') return 'Live stream reconnecting';
+                    if (info.streamState === 'closed') return 'Live stream finished';
+                    return 'Status polling active';
+                },
+                streamBadgeClasses(info) {
+                    if (info.streamState === 'live') return 'border-emerald-300 bg-emerald-100 text-emerald-900';
+                    if (info.streamState === 'reconnecting') return 'border-amber-300 bg-amber-100 text-amber-900';
+                    if (info.streamState === 'closed') return 'border-slate-300 bg-slate-100 text-slate-900';
+                    return 'border-violet-300 bg-violet-100 text-violet-900';
+                },
+                visibleEvents(info) {
+                    const events = Array.isArray(info.events) ? info.events.slice(-8) : [];
+                    return events.slice().reverse();
+                },
+                eventLabel(event) {
+                    if (event.event_type === 'interaction.start') return 'Session started';
+                    if (event.event_type === 'interaction.complete') return 'Complete';
+                    if (event.event_type === 'interaction.failed') return 'Failed';
+                    if (event.event_type === 'progress.post_created') return 'Post ready';
+                    if (event.event_type === 'content.delta') return 'Thought';
+                    return 'Progress';
+                },
+                eventLabelClasses(event) {
+                    if (event.event_type === 'interaction.complete') return 'text-emerald-300';
+                    if (event.event_type === 'interaction.failed') return 'text-rose-300';
+                    if (event.event_type === 'content.delta') return 'text-sky-300';
+                    if (event.event_type === 'progress.post_created') return 'text-violet-300';
+                    return 'text-slate-300';
+                },
+                eventSummary(event) {
+                    return eventSummaryText(event);
+                },
+                formatEventTime(isoString) {
+                    if (!isoString) return '';
+                    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                },
                 formatRelativeTime(isoString) {
                     if (!isoString) return 'Awaiting update';
                     const diff = Math.max(0, Math.round((Date.now() - new Date(isoString).getTime()) / 1000));
@@ -466,6 +710,24 @@
             }));
         }
 
+        function pushFeedEvent(batchId, eventPayload) {
+            window.dispatchEvent(new CustomEvent('batch-progress:event', {
+                detail: {
+                    batchId,
+                    event: eventPayload,
+                }
+            }));
+        }
+
+        function setStreamState(batchId, detail) {
+            window.dispatchEvent(new CustomEvent('batch-progress:stream', {
+                detail: {
+                    batchId,
+                    ...detail,
+                }
+            }));
+        }
+
         function clearBanner(batchId) {
             window.dispatchEvent(new CustomEvent('batch-progress:clear', {
                 detail: {
@@ -481,6 +743,8 @@
             }
             const timer = window.setTimeout(() => {
                 completionTimers.delete(batchId);
+                stopPolling(batchId);
+                stopStream(batchId);
                 clearBanner(batchId);
                 refreshBatchList();
             }, COMPLETION_HOLD_MS);
@@ -519,11 +783,13 @@
                         lastUpdatedAt: progress.last_updated_at || data.updated_at || new Date().toISOString(),
                         isRetrying: Boolean(progress.is_retrying),
                         completed: progress.stage === 'completed' || stateAdvanced || postsReady,
+                        interactionId: progress.interaction_id || null,
+                        streamState: streams.has(batchId) ? 'live' : 'polling',
                     });
 
                     if (postsReady || stateAdvanced) {
-                        window.clearInterval(poller);
-                        pollers.delete(batchId);
+                        stopPolling(batchId);
+                        playCompletionToneIfAllowed();
                         scheduleCompletion(batchId);
                     }
                 } catch (error) {
@@ -532,6 +798,75 @@
             }, POLL_INTERVAL_MS);
 
             pollers.set(batchId, poller);
+        }
+
+        function startStream(batchId, expectedPosts, brand) {
+            if (!window.EventSource || streams.has(batchId)) {
+                return;
+            }
+
+            const source = new window.EventSource(`/batches/${batchId}/progress/stream`);
+            streams.set(batchId, source);
+            setStreamState(batchId, { streamState: 'connecting' });
+
+            source.onopen = () => {
+                setStreamState(batchId, { streamState: 'live' });
+            };
+
+            source.onmessage = (message) => {
+                try {
+                    const event = JSON.parse(message.data);
+                    pushFeedEvent(batchId, event);
+
+                    if (event.event_type === 'interaction.start') {
+                        updateBanner(batchId, {
+                            brand,
+                            expected: expectedPosts,
+                            interactionId: event.interaction && event.interaction.id ? event.interaction.id : null,
+                            streamState: 'live',
+                            lastEventId: event.event_id || null,
+                        });
+                        return;
+                    }
+
+                    if (event.progress) {
+                        updateBanner(batchId, {
+                            ...progressFromSnapshot(event.progress, { brand, expected: expectedPosts }),
+                            streamState: 'live',
+                            lastEventId: event.event_id || null,
+                        });
+                    } else if (event.delta && event.delta.type === 'thought_summary') {
+                        updateBanner(batchId, {
+                            brand,
+                            expected: expectedPosts,
+                            detailMessage: event.delta.content && event.delta.content.text ? event.delta.content.text : null,
+                            lastEventId: event.event_id || null,
+                            streamState: 'live',
+                        });
+                    }
+
+                    if (event.event_type === 'interaction.complete') {
+                        playCompletionToneIfAllowed();
+                        stopStream(batchId);
+                        setStreamState(batchId, { streamState: 'closed' });
+                        scheduleCompletion(batchId);
+                    }
+
+                    if (event.event_type === 'interaction.failed') {
+                        stopStream(batchId);
+                        setStreamState(batchId, { streamState: 'closed' });
+                    }
+                } catch (error) {
+                    console.error('Failed to parse stream event', error);
+                }
+            };
+
+            source.onerror = () => {
+                if (!streams.has(batchId)) {
+                    return;
+                }
+                setStreamState(batchId, { streamState: 'reconnecting' });
+            };
         }
 
         document.body.addEventListener('batch_created', (event) => {
@@ -559,8 +894,11 @@
                 lastUpdatedAt: new Date().toISOString(),
                 isRetrying: false,
                 completed: false,
+                streamState: 'connecting',
+                events: [],
             });
             startPolling(batchId, Number(expectedPosts), brand);
+            startStream(batchId, Number(expectedPosts), brand);
         });
         
         // Also listen on htmx:afterSwap to catch HX-Trigger events

@@ -22,7 +22,7 @@ def main() -> None:
         "id": "batch-lifestyle",
         "brand": "Lifestyle Dedup Fixture",
         "state": "S1_SETUP",
-        "post_type_counts": {"value": 0, "lifestyle": 2, "product": 0},
+        "post_type_counts": {"value": 0, "lifestyle": 1, "product": 0},
     }
 
     duplicate_topic = {

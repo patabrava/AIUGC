@@ -23,7 +23,7 @@ BASE_FIXTURE = {
             "id": "batch-s2",
             "brand": "Script Review Fixture",
             "state": "S2_SEEDED",
-            "post_type_counts": {"value": 2, "lifestyle": 0, "product": 0},
+            "post_type_counts": {"value": 2, "lifestyle": 1, "product": 0},
             "created_at": "2026-03-16T09:00:00Z",
             "updated_at": "2026-03-16T09:00:00Z",
             "archived": False,
@@ -59,6 +59,24 @@ BASE_FIXTURE = {
             "seed_data": {
                 "script": "Removed script body",
                 "description": "Second post description",
+                "script_review_status": "pending",
+            },
+            "video_prompt_json": None,
+            "video_status": "pending",
+            "created_at": "2026-03-16T09:00:00Z",
+            "updated_at": "2026-03-16T09:00:00Z",
+        },
+        "post-3": {
+            "id": "post-3",
+            "batch_id": "batch-s2",
+            "post_type": "lifestyle",
+            "topic_title": "Long lifestyle review script",
+            "topic_rotation": "Fallback lifestyle rotation",
+            "topic_cta": "CTA three",
+            "spoken_duration": 8.0,
+            "seed_data": {
+                "script": "Was dir bei spontanen Ausflügen niemand klar sagt: Perfekte Planung spart mir unterwegs Stress, Kraft und frustige Umwege auf einmal.",
+                "description": "Long lifestyle description",
                 "script_review_status": "pending",
             },
             "video_prompt_json": None,
@@ -186,7 +204,9 @@ def main():
         html = client.get("/batches/batch-s2", headers={"accept": "text/html"}).text
         assert "Approve Script" in html
         assert "Remove Script" in html
-        assert "Approved 0 / Removed 0 / Pending 2" in html
+        assert "Approved 0 / Removed 0 / Pending 3" in html
+        assert 'rows="3"' in html
+        assert 'rows="4"' in html
         assert 'hx-put="/batches/batch-s2/approve-scripts"' in html and "disabled" in html
 
         blocked = client.put("/batches/batch-s2/approve-scripts")
@@ -199,8 +219,11 @@ def main():
         removed = client.put("/posts/post-2/script-review", json={"action": "removed"})
         assert removed.status_code == 200, removed.text
 
+        approved_lifestyle = client.put("/posts/post-3/script-review", json={"action": "approved"})
+        assert approved_lifestyle.status_code == 200, approved_lifestyle.text
+
         html = client.get("/batches/batch-s2", headers={"accept": "text/html"}).text
-        assert "Approved 1 / Removed 1 / Pending 0" in html
+        assert "Approved 2 / Removed 1 / Pending 0" in html
         assert "Removed From Batch" in html
 
         advanced = client.put("/batches/batch-s2/approve-scripts")

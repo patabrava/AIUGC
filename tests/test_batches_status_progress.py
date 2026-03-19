@@ -3,6 +3,7 @@
 import asyncio
 
 from app.features.batches import handlers as batch_handlers
+from app.features.topics import handlers as topic_handlers
 
 
 def test_get_batch_status_includes_live_progress(monkeypatch):
@@ -74,3 +75,37 @@ def test_get_batch_status_returns_none_when_no_live_progress(monkeypatch):
     assert response.ok is True
     assert response.data["state"] == "S2_SEEDED"
     assert response.data["progress"] is None
+
+
+def test_seeding_interaction_emits_resumable_events():
+    topic_handlers.clear_seeding_progress("batch-events")
+
+    started = topic_handlers.start_seeding_interaction(
+        batch_id="batch-events",
+        brand="Demo",
+        expected_posts=4,
+    )
+    updated = topic_handlers.update_seeding_progress(
+        "batch-events",
+        stage="researching",
+        stage_label="Researching current source-backed topics",
+        detail_message="Collecting current value topics from the model.",
+        posts_created=1,
+        expected_posts=4,
+        is_retrying=False,
+        retry_message=None,
+    )
+
+    all_events = topic_handlers.get_seeding_events("batch-events")
+    replay_events = topic_handlers.get_seeding_events(
+        "batch-events",
+        last_event_id=all_events[0]["event_id"],
+    )
+
+    assert started["interaction_id"].startswith("seed_")
+    assert updated["interaction_id"] == started["interaction_id"]
+    assert all_events[0]["event_type"] == "interaction.start"
+    assert any(event["event_type"] == "progress.update" for event in all_events)
+    assert any(event["event_type"] == "content.delta" for event in all_events)
+    assert any(event["event_type"] == "progress.post_created" for event in all_events)
+    assert all(int(event["event_id"]) > int(all_events[0]["event_id"]) for event in replay_events)

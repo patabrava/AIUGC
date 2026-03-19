@@ -22,7 +22,7 @@ __all__ = [
 
 
 STANDARD_AUDIO_BLOCK = (
-    "Audio: Recorded with a modern smartphone microphone in a quiet indoor bedroom. "
+    "Audio: Recorded with a modern smartphone microphone in a quiet indoor room. "
     "The voice is clear, natural, and close to the microphone. No music and no "
     "background voices. Subtle natural room acoustics typical of a small bedroom. "
     "After the final word, the audio gently settles into a quiet room tone for a "
@@ -30,8 +30,9 @@ STANDARD_AUDIO_BLOCK = (
 )
 
 ENDING_HOLD_DIRECTIVE = (
-    "(After delivering the line, she holds a gentle smile and remains still for a brief "
-    "moment while the audio naturally settles into the quiet room ambience before the clip ends.)"
+    "After the final spoken word, speech stops completely. She does not begin a new word or "
+    "syllable. Her mouth comes to rest, she holds a gentle smile, and remains still for a brief "
+    "moment before the clip ends."
 )
 
 SORA_NEGATIVE_CONSTRAINTS = (
@@ -51,23 +52,28 @@ VEO_NEGATIVE_PROMPT = (
 
 OPTIMIZED_PROMPT_TEMPLATE = (
     "Character:\n"
-    "38-year-old German woman with long, damp, light brown hair with natural blonde highlights, "
-    "hazel almond-shaped eyes, a friendly oval face, natural medium-brown eyebrows, and a warm "
-    "light-medium skin tone. She looks directly at the camera with a neutral expression that "
-    "softens into a gentle smile.\n\n"
+    "38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights, hazel eyes, "
+    "and a warm light-medium skin tone. Friendly oval face and natural expression.\n\n"
+    "Style:\n"
+    "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
+    "soft flattering indoor light, and natural skin texture.\n\n"
     "Action:\n"
     "Seated in a wheelchair, she delivers the line directly to camera in one continuous take. "
-    "Her head-and-shoulders framing stays steady, with only small natural hand gestures and "
-    "subtle upper-body nods while speaking. After finishing the sentence, she holds a gentle "
-    "smile and remains still for a brief moment before the clip ends.\n\n"
+    "She speaks at a natural conversational pace, using small natural hand gestures and subtle "
+    "upper-body nods while speaking.\n\n"
     "Scene:\n"
     "A modern, tidy bedroom with blush-pink walls and minimal decor. Bright soft vanity light "
-    "and natural daylight from camera-right create an even, flattering indoor look.\n\n"
+    "and natural daylight from camera-right create an even, flattering indoor look. The "
+    "wheelchair is partially visible in the frame.\n\n"
     "Cinematography:\n"
-    "Smartphone selfie framing, medium close-up, slightly high angle, centered composition, "
-    "single continuous handheld take, no cuts or angle changes.\n\n"
+    "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
+    "distance. The camera is handheld but stable, with only minimal natural movement. The "
+    "framing remains consistent throughout the shot without noticeable camera drift or "
+    "reframing.\n\n"
     "Dialogue:\n"
     "\"{dialogue}\"\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
     "{audio}{negatives_section}"
 )
 
@@ -112,7 +118,7 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
             normalized_dialogue = normalized_dialogue[: -len(suffix)].rstrip()
             break
 
-    script_line = f"{normalized_dialogue} {ENDING_HOLD_DIRECTIVE}"
+    script_line = f"{normalized_dialogue} ({ENDING_HOLD_DIRECTIVE})"
 
     optimized_prompt = build_optimized_prompt(
         normalized_dialogue,
@@ -182,6 +188,7 @@ def build_optimized_prompt(dialogue: str, negative_constraints: Optional[str] = 
     cleaned_dialogue = dialogue.strip()
     return OPTIMIZED_PROMPT_TEMPLATE.format(
         dialogue=cleaned_dialogue,
+        ending=ENDING_HOLD_DIRECTIVE,
         audio=STANDARD_AUDIO_BLOCK,
         negatives_section=f"\n\n{negative_constraints}" if negative_constraints else "",
     )

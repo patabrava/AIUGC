@@ -782,6 +782,48 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         ) from exc
 
 
+def _coerce_prompt2_payload(payload: Dict[str, Any], scripts_required: int) -> DialogScripts:
+    """Normalize structured PROMPT_2 JSON and enforce the existing single-category fallback contract."""
+    buckets: Dict[str, List[str]] = {
+        "problem_agitate_solution": list(payload.get("problem_agitate_solution") or []),
+        "testimonial": list(payload.get("testimonial") or []),
+        "transformation": list(payload.get("transformation") or []),
+    }
+    description = payload.get("description")
+
+    for category, scripts in buckets.items():
+        if len(scripts) > scripts_required:
+            logger.warning(
+                "dialog_scripts_truncated",
+                category=category,
+                original_count=len(scripts),
+                truncated_to=scripts_required,
+            )
+            buckets[category] = scripts[:scripts_required]
+
+    if buckets["problem_agitate_solution"] and not buckets["testimonial"] and not buckets["transformation"]:
+        fallback_script = buckets["problem_agitate_solution"][0]
+        buckets["testimonial"] = [fallback_script]
+        buckets["transformation"] = [fallback_script]
+        logger.info(
+            "single_category_format_detected",
+            message="Using Problem-Agitieren-Lösung script as fallback for other categories",
+        )
+
+    try:
+        return DialogScripts(
+            problem_agitate_solution=buckets["problem_agitate_solution"],
+            testimonial=buckets["testimonial"],
+            transformation=buckets["transformation"],
+            description=description,
+        )
+    except PydanticValidationError as exc:
+        raise ValidationError(
+            message="PROMPT_2 structured response invalid",
+            details=json.loads(exc.json()),
+        ) from exc
+
+
 def convert_research_item_to_topic(item: ResearchAgentItem) -> TopicData:
     cta = extract_soft_cta(item.script)
     rotation = strip_cta_from_script(item.script, cta)
@@ -1099,13 +1141,14 @@ def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_us
         prompt += f"\n\nWICHTIG: Die folgenden Hooks wurden bereits verwendet: {hooks_list}\nNutze einen ANDEREN Hook-Start für dieses Skript."
 
     for attempt in range(3):
-        response = llm.generate_gemini_text(
-            prompt=prompt,
-            system_prompt=None,
-            max_tokens=900,
-        )
         try:
-            scripts = parse_prompt2_response(response, max_per_category=scripts_required)
+            response = llm.generate_gemini_json(
+                prompt=prompt,
+                system_prompt=None,
+                json_schema=PROMPT2_JSON_SCHEMA,
+                max_tokens=1600,
+            )
+            scripts = _coerce_prompt2_payload(response, scripts_required=scripts_required)
             
             # Check if single-category fallback was applied
             # (testimonial and transformation have same script as problem_agitate_solution[0])
@@ -1152,7 +1195,7 @@ def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_us
                 attempt=attempt + 1,
                 error=exc.message,
                 details=exc.details,
-                response_preview=response[:500]
+                response_preview=json.dumps(response, ensure_ascii=False)[:500] if 'response' in locals() else None
             )
             prompt = f"{prompt}\n\nFEEDBACK: {exc.message}."
     
@@ -1208,6 +1251,8 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
                 cta = " ".join(words[-4:])
             else:
                 cta = rotation
+
+        derived_title = _derive_lifestyle_title(main_script, rotation, topic_template)
         
         # Extract the hook (first 3-5 words) to track for next iteration
         hook = " ".join(main_script.split()[:4])  # First 4 words typically capture the hook
@@ -1218,7 +1263,8 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
         duration = max(1, math.ceil(word_count / 2.6))
         
         topic_data = {
-            "title": topic_template,
+            "title": derived_title,
+            "template_title": topic_template,
             "rotation": rotation,
             "cta": cta,
             "spoken_duration": duration,
@@ -1230,12 +1276,28 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> Lis
         
         logger.info(
             "lifestyle_topic_generated",
-            title=topic_template,
+            title=derived_title,
+            template_title=topic_template,
             scripts_count=1,
             seed=seed
         )
-    
+
     return results
+
+
+def _derive_lifestyle_title(main_script: str, rotation: str, fallback_title: str) -> str:
+    """Derive a content-led title so lifestyle dedupe is based on the actual concept, not the fixed template label."""
+    source_text = (rotation or main_script or "").strip()
+    if not source_text:
+        return fallback_title
+
+    normalized = re.sub(r"\s+", " ", source_text)
+    words = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", normalized)
+    if not words:
+        return fallback_title
+
+    title = " ".join(words[:8]).strip(" -,:;.!?")
+    return title[:90] if title else fallback_title
 
 
 def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: DialogScripts) -> Dict[str, Any]:

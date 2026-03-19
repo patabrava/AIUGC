@@ -86,6 +86,23 @@ class DialogScripts(BaseModel):
     transformation: List[str] = Field(..., min_length=1, max_length=5)
     description: Optional[str] = Field(None, min_length=35, max_length=500, description="Social media description (35-80 words)")
 
+    @validator("problem_agitate_solution", "testimonial", "transformation", each_item=True)
+    def validate_complete_script(cls, v: str) -> str:
+        script = v.strip()
+        if not script:
+            raise ValueError("Script cannot be empty")
+        if "\n" in script:
+            raise ValueError("Script must be a single spoken line")
+        if script[-1] not in ".!?":
+            raise ValueError("Script must end with terminal punctuation")
+        return script
+
+    @validator("description")
+    def validate_description_present(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            raise ValueError("Description is required")
+        return v.strip()
+
 
 class TopicResponse(BaseModel):
     """Topic response model."""
@@ -186,14 +203,20 @@ PROMPT2_JSON_SCHEMA = {
         "properties": {
             "problem_agitate_solution": {
                 "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
                 "items": {"type": "string"}
             },
             "testimonial": {
                 "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
                 "items": {"type": "string"}
             },
             "transformation": {
                 "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
                 "items": {"type": "string"}
             },
             "description": {

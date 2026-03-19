@@ -7,6 +7,7 @@ Per Constitution § V: Locality & Vertical Slices
 import asyncio
 from datetime import datetime, timezone
 from threading import RLock
+from collections import Counter
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException, status, Header
 from typing import Optional, Dict, Any, List
@@ -803,6 +804,27 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 "topic_discovery_fallback_failed",
                 batch_id=batch_id
             )
+
+    created_counts = Counter(post.get("post_type") for post in created_posts)
+    missing_post_types = {
+        post_type: {
+            "requested": requested_count,
+            "created": created_counts.get(post_type, 0),
+        }
+        for post_type, requested_count in post_type_counts.items()
+        if requested_count > created_counts.get(post_type, 0)
+    }
+
+    if missing_post_types:
+        raise ValidationError(
+            message="Topic discovery did not create all requested post types.",
+            details={
+                "batch_id": batch_id,
+                "requested_counts": post_type_counts,
+                "created_counts": dict(created_counts),
+                "missing_post_types": missing_post_types,
+            },
+        )
 
     update_seeding_progress(
         batch_id,

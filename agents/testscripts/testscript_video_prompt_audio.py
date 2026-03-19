@@ -27,6 +27,13 @@ FORBIDDEN_TERMS = (
     "rt60",
     "dbfs",
     "lufs",
+    "golden face",
+    "micro jitter",
+    "autofocus",
+    "20-30 cm",
+    "20–30 cm",
+    "visible pores",
+    "hyper-realistic skin texture",
 )
 
 
@@ -50,6 +57,15 @@ def main() -> None:
     assert prompt["optimized_prompt"].count("Audio:") == 1
     assert prompt["optimized_prompt"].count("Universal Negatives") == 1
     assert "quiet room tone" in prompt["optimized_prompt"]
+    assert "shoulder-length light brown hair" in prompt["optimized_prompt"]
+    assert "authentic influencer-style delivery" in prompt["optimized_prompt"]
+    assert "natural conversational pace" in prompt["optimized_prompt"]
+    assert "wheelchair is partially visible in the frame" in prompt["optimized_prompt"]
+    assert "speech stops completely" in prompt["optimized_prompt"]
+    assert "does not begin a new word or syllable" in prompt["optimized_prompt"]
+    assert "front-facing camera at natural selfie distance" in prompt["optimized_prompt"]
+    assert "handheld but stable" in prompt["optimized_prompt"]
+    assert "noticeable camera drift or reframing" in prompt["optimized_prompt"]
     assert_forbidden_terms_absent(prompt["optimized_prompt"])
     assert prompt["veo_prompt"].count("Audio:") == 1
     assert "Universal Negatives" not in prompt["veo_prompt"]
@@ -62,7 +78,15 @@ def main() -> None:
         request_payload = _build_provider_prompt_request(prompt, provider)
         prompt_text = request_payload["prompt_text"] or ""
         assert prompt_text.count("Audio:") == 1, f"{provider} prompt should contain exactly one audio block"
-        assert "no cuts or angle changes" in prompt_text.lower()
+        assert "shoulder-length light brown hair" in prompt_text.lower()
+        assert "authentic influencer-style delivery" in prompt_text.lower()
+        assert "natural conversational pace" in prompt_text.lower()
+        assert "wheelchair is partially visible in the frame" in prompt_text.lower()
+        assert "speech stops completely" in prompt_text.lower()
+        assert "does not begin a new word or syllable" in prompt_text.lower()
+        assert "front-facing camera at natural selfie distance" in prompt_text.lower()
+        assert "handheld but stable" in prompt_text.lower()
+        assert "noticeable camera drift or reframing" in prompt_text.lower()
         assert "quiet room tone" in prompt_text.lower()
         assert_forbidden_terms_absent(prompt_text)
         if provider == "veo_3_1":

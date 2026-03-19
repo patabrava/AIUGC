@@ -20,23 +20,23 @@ class AudioSection(BaseModel):
 class VideoPrompt(BaseModel):
     """Complete video generation prompt structure per Phase 3 requirements."""
     character: str = Field(
-        default="Character: 38-year-old German woman with long, damp, light brown hair with natural blonde highlights; hazel, almond-shaped eyes with subtle eye wrinkles (fine crow’s feet) at the outer corners; a friendly oval face; soft forehead lines (fine horizontal expression lines) that are faint at rest; gentle laugh lines (light nasolabial folds) framing the mouth; and a warm light-medium skin tone with neutral undertones. She is looking directly at the camera with a neutral, friendly expression. Filmed on an iPhone 15 Pro, bright soft vanity lighting, neutral clean color palette, hyper-realistic skin texture with visible pores..",
+        default="Character: 38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights, hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural expression.",
         description="Character definition"
     )
     action: str = Field(
-        default="Action: Sits in a wheelchair in the bedroom, hair still slightly damp, looking directly into camera with a neutral, friendly expression that turns to a gentle smile. Maintains steady head-and-shoulders orientation; uses small, natural hand gestures and subtle upper-body nods while speaking. Remains seated and centered for a single continuous take with no cuts or alternate angles and says: ENTER SCRIPT FROM POST HERE",
+        default="Action: Seated in a wheelchair in the bedroom, she speaks directly to camera in one continuous take. She speaks at a natural conversational pace, uses small natural hand gestures and subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly at the end of the line. She says: ENTER SCRIPT FROM POST HERE",
         description="Action description"
     )
     style: str = Field(
-        default="Style: Smartphone selfie, UGC authenticity: bright vanity lighting, neutral clean color palette, hyper-realistic skin texture with visible pores, influencer-style monologue and direct-to-camera delivery. Raw, unfiltered TikTok aesthetic with natural skin tone and no filters.",
+        default="Style: Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, soft flattering indoor light, natural skin texture, and direct-to-camera delivery.",
         description="Visual style"
     )
     scene: str = Field(
-        default="Scene: The woman is sitting on a wheelchair in a brightly lit modern bedroom with pink walls. Clean, minimal décor. Natural daylight streams through an unseen window camera-right, supplemented by soft ambient lighting creating even, flattering illumination across the space.",
+        default="Scene: The woman is sitting on a wheelchair in a brightly lit modern bedroom with pink walls. Clean, minimal décor. Natural daylight streams through an unseen window camera-right, supplemented by soft ambient lighting creating even, flattering illumination across the space. The wheelchair is partially visible in the frame.",
         description="Scene setup"
     )
     cinematography: str = Field(
-        default="Cinematography: Camera Shot: Medium close-up from a slightly high angle, with centered framing that keeps her head and shoulders in the shot. This camera shot does not change during the whole take. Lens & DOF: modern smartphone front camera (~24 mm equiv.), deep depth of field keeping the background in focus with a natural subtle falloff. Camera Motion: Subtle handheld sway and jitter consistent with a selfie grip, including very slight natural arm movements as she speaks and gestures.",
+        default="Cinematography: Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie distance. The camera is handheld but stable, with only minimal natural movement. The framing remains consistent throughout the shot without noticeable camera drift or reframing.",
         description="Cinematography notes"
     )
     lighting: str = Field(
@@ -44,7 +44,7 @@ class VideoPrompt(BaseModel):
         description="Lighting description"
     )
     color_and_grade: str = Field(
-        default="Color & Grade: modern smartphone  HDR auto-tone; a neutral clean color palette; natural skin texture with visible pores is preserved; no filters are applied.",
+        default="Color & Grade: modern smartphone color with a clean, natural palette and natural skin texture. No filters are applied.",
         description="Color and grading notes"
     )
     resolution_and_aspect_ratio: str = Field(
@@ -52,7 +52,7 @@ class VideoPrompt(BaseModel):
         description="Resolution and aspect ratio"
     )
     camera_positioning_and_motion: str = Field(
-        default="Camera positioning & movement: Medium close-up from a slightly high angle, centered framing that keeps head and shoulders fully in frame. Front-facing modern smartphone (~24 mm equiv.) held at selfie distance (camera ~20–30 cm from face). Subtle handheld sway and micro arm jitter consistent with a selfie grip; no intentional camera moves or cuts. Maintain framing and facial positioning to match the Golden Face/Look Anchor precisely.",
+        default="Camera positioning & movement: Front-facing smartphone camera at natural selfie distance, handheld but stable. Minor natural movement typical of a person holding a phone, without noticeable drift or framing changes.",
         description="Camera positioning"
     )
     composition: str = Field(
@@ -60,7 +60,7 @@ class VideoPrompt(BaseModel):
         description="Composition details"
     )
     focus_and_lens_effects: str = Field(
-        default="Focus & lens effects: Face-priority autofocus locked on her eyes; deep depth of field with background in focus and a natural, subtle falloff. No focus hunting, no warp or flicker. Preserve skin texture and pores; no heavy bokeh, no digital smoothing or beauty filters. Modern smartphone HDR auto-tone preserved; maintain consistent white balance and colorimetry throughout the take.",
+        default="Focus & lens effects: Natural smartphone clarity with consistent focus on the subject. No heavy blur, warp, flicker, or beauty filters. Keep skin texture natural and lighting consistent throughout the take.",
         description="Focus and lens effects"
     )
     atmosphere: str = Field(
@@ -68,7 +68,7 @@ class VideoPrompt(BaseModel):
         description="Atmospheric notes"
     )
     authenticity_modifiers: str = Field(
-        default="Authenticity/UGC Modifiers: smartphone selfie, handheld realism, living room review, bright vanity lighting, influencer-style monologue, direct-to-camera, product review, raw unfiltered TikTok aesthetic, real voice, micro hand jitters, seamless one-take.",
+        default="Authenticity/UGC Modifiers: smartphone selfie, handheld realism, direct-to-camera delivery, real voice, seamless one-take, natural movement.",
         description="Authenticity modifiers"
     )
     universal_negatives: str = Field(
