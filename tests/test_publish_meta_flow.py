@@ -93,6 +93,15 @@ class _FakeSupabase:
         self.client = _FakeClient(storage)
 
 
+class _FakeRequest:
+    def __init__(self, *, headers=None, form_data=None):
+        self.headers = headers or {}
+        self._form_data = form_data or {}
+
+    async def form(self):
+        return self._form_data
+
+
 def test_confirm_publish_arms_dispatch_without_completing_batch(monkeypatch):
     storage = {
         "posts": [
@@ -148,6 +157,7 @@ def test_confirm_publish_arms_dispatch_without_completing_batch(monkeypatch):
     response = asyncio.run(
         publish_handlers.confirm_publish(
             "batch-1",
+            _FakeRequest(headers={}),
             ConfirmPublishRequest(batch_id="batch-1", confirm=True),
         )
     )
@@ -158,6 +168,61 @@ def test_confirm_publish_arms_dispatch_without_completing_batch(monkeypatch):
     assert [post["publish_status"] for post in storage["posts"]] == ["scheduled", "scheduled"]
     assert storage["posts"][0]["publish_results"] == {}
     assert storage["posts"][1]["platform_ids"] == {}
+
+
+def test_confirm_publish_accepts_htmx_form_payload(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "publish_status": "pending",
+                "publish_results": {},
+                "platform_ids": {},
+            }
+        ]
+    }
+
+    monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(publish_handlers, "_list_batch_rows", lambda fields="id,meta_connection": [])
+    monkeypatch.setattr(
+        publish_handlers,
+        "_load_batch",
+        lambda batch_id, fields="id,state,meta_connection": {
+            "id": batch_id,
+            "state": BatchState.S7_PUBLISH_PLAN.value,
+            "meta_connection": {
+                "selected_page": {"id": "page-1", "access_token": "page-token"},
+                "selected_instagram": {"id": "ig-1"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        publish_handlers,
+        "get_post_schedules",
+        lambda batch_id: [
+            {
+                "id": "post-1",
+                "scheduled_at": "2026-03-20T02:00:00+00:00",
+                "publish_caption": "Caption one",
+                "social_networks": ["facebook", "instagram"],
+            }
+        ],
+    )
+
+    response = asyncio.run(
+        publish_handlers.confirm_publish(
+            "batch-1",
+            _FakeRequest(
+                headers={"content-type": "application/x-www-form-urlencoded"},
+                form_data={"batch_id": "batch-1", "confirm": "true"},
+            ),
+            None,
+        )
+    )
+
+    assert response.total_posts == 1
+    assert response.results[0].success is True
+    assert storage["posts"][0]["publish_status"] == "scheduled"
 
 
 def test_dispatch_due_posts_records_network_results_individually(monkeypatch):
