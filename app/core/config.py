@@ -25,14 +25,14 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     
     # Supabase
-    supabase_url: str = Field(..., description="Supabase project URL")
+    supabase_url: str = Field("https://qnvgiihzbihkedakggth.supabase.co", description="Supabase project URL")
     supabase_key: str = Field(
-        ...,
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFudmdpaWh6Ymloa2VkYWtnZ3RoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzY2MTgwNywiZXhwIjoyMDg5MjM3ODA3fQ.RgV1ErVD4nWfT3e-cyHWMgTNFFJPKBcCzKIF9VyERyI",
         validation_alias=AliasChoices("SUPABASE_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
         description="Supabase anon key or service role key fallback",
     )
     supabase_service_key: str = Field(
-        ...,
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFudmdpaWh6Ymloa2VkYWtnZ3RoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzY2MTgwNywiZXhwIjoyMDg5MjM3ODA3fQ.RgV1ErVD4nWfT3e-cyHWMgTNFFJPKBcCzKIF9VyERyI",
         validation_alias=AliasChoices("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
         description="Supabase service role key",
     )
@@ -60,16 +60,16 @@ class Settings(BaseSettings):
     )
     
     # Video Providers
-    google_ai_api_key: str = Field(..., description="Google AI API key for VEO 3.1")
+    google_ai_api_key: str = Field("AIzaSyD632CwxA-qXMwNbhj5J-EQTQRpmBD8-vY", description="Google AI API key for VEO 3.1")
     google_ai_project_id: Optional[str] = Field(None, description="Google Cloud project ID")
     # sora_api_key: str = Field(default="", description="Sora 2 API key")  # Future
     
     # Video Storage
-    cloudflare_r2_account_id: str = Field(..., description="Cloudflare account ID for R2")
-    cloudflare_r2_access_key_id: str = Field(..., description="Cloudflare R2 access key ID")
-    cloudflare_r2_secret_access_key: str = Field(..., description="Cloudflare R2 secret access key")
-    cloudflare_r2_bucket_name: str = Field(..., description="Cloudflare R2 bucket name")
-    cloudflare_r2_public_base_url: str = Field(..., description="Public base URL for Cloudflare R2 objects")
+    cloudflare_r2_account_id: str = Field("your_account_id", description="Cloudflare account ID for R2")
+    cloudflare_r2_access_key_id: str = Field("e9a62f56a8a1c00cf2ed4ef305201599", description="Cloudflare R2 access key ID")
+    cloudflare_r2_secret_access_key: str = Field("9ecaac159bf2f45f57b6b2000f4d74080e9cf4f459a5a3d53f63d5b1201240ec", description="Cloudflare R2 secret access key")
+    cloudflare_r2_bucket_name: str = Field("aiugc", description="Cloudflare R2 bucket name")
+    cloudflare_r2_public_base_url: str = Field("https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev", description="Public base URL for Cloudflare R2 objects")
     cloudflare_r2_region: str = Field("auto", description="Cloudflare R2 region name")
     cloudflare_r2_endpoint_url: Optional[str] = Field(
         default=None,
@@ -94,16 +94,16 @@ class Settings(BaseSettings):
     )
     tiktok_sandbox_account: str = Field(default="", description="Authorized TikTok sandbox account handle")
     instagram_access_token: str = Field(default="", description="Instagram access token")
-    meta_app_id: str = Field(default="", description="Meta app ID for Instagram Login")
-    meta_app_secret: str = Field(default="", description="Meta app secret")
-    meta_redirect_uri: str = Field(default="", description="OAuth callback URL for Meta login")
-    app_url: str = Field(default="", description="Public application base URL")
-    privacy_policy_url: str = Field(default="", description="Privacy policy URL")
-    terms_url: str = Field(default="", description="Terms URL")
-    token_encryption_key: str = Field(default="", description="Secret for provider token encryption at rest")
+    meta_app_id: str = Field(default="1735188100784208", description="Meta app ID for Instagram Login")
+    meta_app_secret: str = Field(default="65587f895b6d15ff7541fb905633794c", description="Meta app secret")
+    meta_redirect_uri: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud/publish/meta/callback", description="OAuth callback URL for Meta login")
+    app_url: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud", description="Public application base URL")
+    privacy_policy_url: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud/privacy", description="Privacy policy URL")
+    terms_url: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud/terms", description="Terms URL")
+    token_encryption_key: str = Field(default="a-long-random-secret", description="Secret for provider token encryption at rest")
     
     # Cron Security
-    cron_secret: str = Field(..., description="Secret for cron endpoint authentication")
+    cron_secret: str = Field("your-random-secret-string", description="Secret for cron endpoint authentication")
     
     @field_validator("supabase_url")
     @classmethod
