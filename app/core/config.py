@@ -94,9 +94,10 @@ class Settings(BaseSettings):
     )
     tiktok_sandbox_account: str = Field(default="", description="Authorized TikTok sandbox account handle")
     instagram_access_token: str = Field(default="", description="Instagram access token")
-    meta_app_id: str = Field(default="1735188100784208", description="Meta app ID for Instagram Login")
-    meta_app_secret: str = Field(default="65587f895b6d15ff7541fb905633794c", description="Meta app secret")
-    meta_redirect_uri: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud/publish/meta/callback", description="OAuth callback URL for Meta login")
+    # Meta must be provided by the deployment environment; do not fall back to a stale app id/secret.
+    meta_app_id: str = Field(default="", description="Meta app ID for Instagram Login")
+    meta_app_secret: str = Field(default="", description="Meta app secret")
+    meta_redirect_uri: str = Field(default="", description="OAuth callback URL for Meta login")
     app_url: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud", description="Public application base URL")
     privacy_policy_url: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud/privacy", description="Privacy policy URL")
     terms_url: str = Field(default="https://aiugc-prod.srv1498567.hstgr.cloud/terms", description="Terms URL")
