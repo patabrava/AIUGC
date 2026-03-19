@@ -104,7 +104,7 @@ async def _exchange_stub(code: str, code_verifier: str):
         "refresh_token": "refresh-token",
         "expires_in": 3600,
         "refresh_expires_in": 7200,
-        "scope": "user.info.basic,video.upload",
+        "scope": "user.info.basic,video.upload,video.publish",
         "open_id": "open-123",
     }
 
@@ -131,7 +131,7 @@ def test_start_tiktok_oauth_builds_signed_pkce_redirect(monkeypatch):
     assert location.startswith(tiktok.TIKTOK_AUTH_URL)
     assert "client_key=client-key" in location
     assert "redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fauth%2Ftiktok%2Fcallback" in location
-    assert "scope=user.info.basic%2Cvideo.upload" in location
+    assert "scope=user.info.basic%2Cvideo.upload%2Cvideo.publish" in location
     state = location.split("state=")[1].split("&")[0]
     payload = tiktok.decode_signed_state(state, _settings().token_encryption_key)
     assert payload["batch_id"] == "batch-1"

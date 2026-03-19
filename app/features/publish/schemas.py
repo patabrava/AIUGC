@@ -196,6 +196,12 @@ class TikTokAccountResponse(BaseModel):
     access_token_expires_at: Optional[datetime] = None
     refresh_token_expires_at: Optional[datetime] = None
     status: str = "disconnected"
+    publish_ready: bool = False
+    draft_ready: bool = False
+    readiness_status: str = "disconnected"
+    readiness_reason: Optional[str] = None
+    scope_flags: Optional[Dict[str, bool]] = None
+    creator_info: Optional[Dict[str, Any]] = None
     updated_at: Optional[datetime] = None
 
 
@@ -203,6 +209,16 @@ class TikTokUploadDraftRequest(BaseModel):
     """Upload one generated post as a TikTok draft."""
     post_id: str = Field(..., min_length=1, description="Post id for the generated video")
     caption: Optional[str] = Field(default=None, max_length=2200, description="Optional TikTok draft caption")
+
+
+class TikTokPublishRequest(BaseModel):
+    """Post one generated video directly to TikTok."""
+    post_id: str = Field(..., min_length=1, description="Post id for the generated video")
+    caption: Optional[str] = Field(default=None, max_length=2200, description="Optional TikTok post caption")
+    privacy_level: str = Field(..., min_length=1, description="TikTok privacy level chosen from creator_info")
+    disable_comment: bool = Field(default=False, description="Disable comments for the TikTok post")
+    disable_duet: bool = Field(default=False, description="Disable duet for the TikTok post")
+    disable_stitch: bool = Field(default=False, description="Disable stitch for the TikTok post")
 
 
 class TikTokPublishJobResponse(BaseModel):

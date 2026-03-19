@@ -220,6 +220,96 @@ def test_dispatch_due_posts_records_network_results_individually(monkeypatch):
     assert post["publish_results"]["instagram"]["error_code"] == "validation_error"
 
 
+def test_dispatch_due_posts_includes_tiktok_direct_post(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "video_url": "https://cdn.example.com/video.mp4",
+                "seed_data": {"script_review_status": "approved"},
+                "scheduled_at": "2026-03-17T08:00:00",
+                "publish_caption": "Shared caption",
+                "social_networks": ["facebook", "instagram", "tiktok"],
+                "publish_status": "scheduled",
+                "publish_results": {},
+                "platform_ids": {},
+            }
+        ]
+    }
+
+    touched_batches = []
+    monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(publish_handlers, "_list_batch_rows", lambda fields="id,meta_connection": [])
+    monkeypatch.setattr(
+        publish_handlers,
+        "_load_batch",
+        lambda batch_id, fields="id,state,meta_connection": {
+            "id": batch_id,
+            "state": BatchState.S7_PUBLISH_PLAN.value,
+            "meta_connection": {
+                "selected_page": {"id": "page-1", "access_token": "page-token"},
+                "selected_instagram": {"id": "ig-1"},
+                "user_access_token": "user-token",
+            },
+        },
+    )
+    monkeypatch.setattr(publish_handlers, "_publish_facebook_video", lambda post, meta_connection: asyncio.sleep(0, result="fb-remote-1"))
+    monkeypatch.setattr(publish_handlers, "_publish_instagram_reel", lambda post, meta_connection: asyncio.sleep(0, result="ig-remote-1"))
+    monkeypatch.setattr(
+        publish_handlers,
+        "get_tiktok_publish_state",
+        lambda: asyncio.sleep(
+            0,
+            result={
+                "status": "connected",
+                "publish_ready": True,
+                "creator_info": {
+                    "privacy_level_options": ["SELF_ONLY"],
+                    "comment_disabled": False,
+                    "duet_disabled": False,
+                    "stitch_disabled": False,
+                },
+            },
+        ),
+    )
+
+    async def _fake_tiktok_publish(post_id, *, caption=None, privacy_level, disable_comment, disable_duet, disable_stitch):
+        assert post_id == "post-1"
+        assert caption == "Shared caption"
+        assert privacy_level == "SELF_ONLY"
+        return {
+            "id": "job-1",
+            "status": "published",
+            "tiktok_publish_id": "tt-publish-1",
+            "response_payload_json": {
+                "provider_status": "PUBLISH_COMPLETE",
+                "publicaly_available_post_id": ["tt-post-1"],
+            },
+            "error_message": "",
+        }
+
+    monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", _fake_tiktok_publish)
+    monkeypatch.setattr(
+        publish_handlers,
+        "_reconcile_completed_batches",
+        lambda batch_ids: touched_batches.extend(batch_ids),
+    )
+
+    result = asyncio.run(publish_handlers.dispatch_due_posts())
+
+    assert result["processed"] == 1
+    assert result["published"] == 1
+    assert result["failed"] == 0
+    assert touched_batches == ["batch-1"]
+
+    post = storage["posts"][0]
+    assert post["publish_status"] == "published"
+    assert post["platform_ids"]["tiktok"] == "tt-post-1"
+    assert post["publish_results"]["tiktok"]["status"] == "published"
+    assert post["publish_results"]["tiktok"]["provider_status"] == "PUBLISH_COMPLETE"
+
+
 def test_workspace_meta_connection_prefers_connected_state(monkeypatch):
     monkeypatch.setattr(
         publish_handlers,
@@ -358,6 +448,9 @@ def test_get_accounts_status_includes_meta_and_tiktok(monkeypatch):
         "_get_workspace_meta_connection",
         lambda preferred_batch_id=None: {
             "status": "connected",
+            "publish_ready": False,
+            "readiness_status": "page_selection_required",
+            "readiness_reason": "Select a Page target.",
             "user": {"name": "Operator"},
             "user_access_token": "secret",
             "selected_page": {"id": "page-1", "name": "Page Name", "access_token": "page-secret"},
@@ -366,20 +459,52 @@ def test_get_accounts_status_includes_meta_and_tiktok(monkeypatch):
     )
     monkeypatch.setattr(
         publish_handlers,
-        "get_tiktok_public_account",
-        lambda: {
-            "status": "connected",
-            "display_name": "Sandbox Creator",
-            "open_id": "open-123",
-        },
+        "get_tiktok_publish_state",
+        lambda: asyncio.sleep(
+            0,
+            result={
+                "status": "connected",
+                "publish_ready": True,
+                "draft_ready": True,
+                "readiness_status": "publish_ready",
+                "readiness_reason": "Ready to post.",
+                "display_name": "Sandbox Creator",
+                "open_id": "open-123",
+            },
+        ),
     )
 
     response = asyncio.run(publish_handlers.get_accounts_status())
 
     assert response.data["providers"]["meta"]["connected"] is True
+    assert response.data["providers"]["meta"]["publish_ready"] is True
     assert response.data["providers"]["tiktok"]["connected"] is True
+    assert response.data["providers"]["tiktok"]["publish_ready"] is True
     assert response.data["tiktok_connection"]["display_name"] == "Sandbox Creator"
     assert "user_access_token" not in response.data["meta_connection"]
+
+
+def test_meta_publish_readiness_reports_missing_publishable_page():
+    readiness = publish_handlers._meta_publish_readiness(
+        {
+            "status": "connected",
+            "available_pages": [],
+            "selected_page": {},
+            "selected_instagram": {},
+        }
+    )
+
+    assert readiness["publish_ready"] is False
+    assert readiness["readiness_status"] == "missing_instagram_business"
+
+
+def test_derive_publish_status_does_not_treat_tiktok_inbox_as_published():
+    status = publish_handlers._derive_publish_status(
+        ["tiktok"],
+        {"tiktok": {"status": "awaiting_user_action"}},
+    )
+
+    assert status == "publishing"
 
 
 def test_publish_instagram_reel_uses_selected_page_token(monkeypatch):

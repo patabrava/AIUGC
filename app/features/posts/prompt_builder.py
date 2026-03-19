@@ -4,6 +4,7 @@ Simple prompt builder that inserts Phase 2 dialogue into video generation templa
 Per Canon Phase 3: S4_SCRIPTED → S5_PROMPTS_BUILT
 """
 
+import re
 from typing import Dict, Any, Optional
 
 from app.features.posts.schemas import VideoPrompt, AudioSection
@@ -18,6 +19,8 @@ __all__ = [
     "build_video_prompt_from_seed",
     "validate_video_prompt",
     "build_optimized_prompt",
+    "split_dialogue_sentences",
+    "build_veo_prompt_segment",
 ]
 
 
@@ -191,4 +194,33 @@ def build_optimized_prompt(dialogue: str, negative_constraints: Optional[str] = 
         ending=ENDING_HOLD_DIRECTIVE,
         audio=STANDARD_AUDIO_BLOCK,
         negatives_section=f"\n\n{negative_constraints}" if negative_constraints else "",
+    )
+
+
+def split_dialogue_sentences(dialogue: str) -> list[str]:
+    cleaned = " ".join(dialogue.split()).strip()
+    if not cleaned:
+        return []
+    sentence_matches = re.findall(r"[^.!?]+[.!?]", cleaned)
+    remainder_start = sum(len(match) for match in sentence_matches)
+    remainder = cleaned[remainder_start:].strip()
+    sentences = [match.strip() for match in sentence_matches if match.strip()]
+    if remainder:
+        if sentences:
+            sentences[-1] = f"{sentences[-1].rstrip()} {remainder}".strip()
+        else:
+            sentences = [remainder]
+    return sentences
+
+
+def build_veo_prompt_segment(dialogue: str, *, include_quotes: bool = False, include_ending: bool = False) -> str:
+    cleaned_dialogue = dialogue.strip()
+    prompt_dialogue = f"\"{cleaned_dialogue}\"" if include_quotes else cleaned_dialogue
+    ending = ENDING_HOLD_DIRECTIVE if include_ending else "Do not end the speech yet; continue into the next segment with no pause."
+    template = OPTIMIZED_PROMPT_TEMPLATE if include_quotes else OPTIMIZED_PROMPT_TEMPLATE
+    return template.format(
+        dialogue=prompt_dialogue,
+        ending=ending,
+        audio=STANDARD_AUDIO_BLOCK,
+        negatives_section=f"\n\n{VEO_NEGATIVE_PROMPT}" if not include_quotes else f"\n\n{SORA_NEGATIVE_CONSTRAINTS}",
     )

@@ -60,6 +60,7 @@
                         <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Current Login</p>
                         <p class="mt-2 text-sm font-semibold text-gray-900" x-text="$store.accountsHub?.metaAccountName() || 'No Meta login connected yet'"></p>
                         <p class="mt-2 text-xs text-gray-600" x-text="$store.accountsHub?.metaStatusCopy()"></p>
+                        <p class="mt-2 text-xs font-medium" :class="$store.accountsHub?.readinessTextClass('meta')" x-text="$store.accountsHub?.providerReadinessCopy('meta')"></p>
                         <p class="mt-3 text-xs text-gray-500" x-show="$store.accountsHub?.metaTargetName()" x-text="`Target: ${$store.accountsHub?.metaTargetName()}`"></p>
                     </div>
 
@@ -94,7 +95,7 @@
                                 <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">TikTok</p>
                                 <h4 class="mt-1 text-lg font-semibold text-gray-900">TikTok</h4>
                                 <p class="mt-2 text-sm text-gray-600">
-                                    Connect the TikTok account you use for draft uploads.
+                                    Connect the TikTok account you use for direct posts and draft exports.
                                 </p>
                             </div>
                         </div>
@@ -107,6 +108,7 @@
                         <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Current Login</p>
                         <p class="mt-2 text-sm font-semibold text-gray-900" x-text="$store.accountsHub?.tiktokAccountName() || 'No TikTok login connected yet'"></p>
                         <p class="mt-2 text-xs text-gray-600" x-text="$store.accountsHub?.tiktokStatusCopy()"></p>
+                        <p class="mt-2 text-xs font-medium" :class="$store.accountsHub?.readinessTextClass('tiktok')" x-text="$store.accountsHub?.providerReadinessCopy('tiktok')"></p>
                         <p class="mt-3 text-xs text-gray-500" x-show="$store.accountsHub?.tiktokOpenId()" x-text="`Open ID: ${$store.accountsHub?.tiktokOpenId()}`"></p>
                     </div>
 
@@ -204,7 +206,8 @@
 
             providerDot(provider) {
                 if (this.providerNeedsAttention(provider)) return 'bg-red-500';
-                if (this.isProviderConnected(provider)) return 'bg-green-500';
+                if (this.isProviderPublishReady(provider)) return 'bg-green-500';
+                if (this.isProviderConnected(provider)) return 'bg-amber-400';
                 return 'bg-amber-400';
             },
 
@@ -225,18 +228,22 @@
 
             badgeClass(provider) {
                 if (this.providerNeedsAttention(provider)) return 'bg-red-100 text-red-700';
-                if (this.isProviderConnected(provider)) return 'bg-green-100 text-green-700';
+                if (this.isProviderPublishReady(provider)) return 'bg-green-100 text-green-700';
+                if (this.isProviderConnected(provider)) return 'bg-amber-100 text-amber-700';
                 return 'bg-amber-100 text-amber-700';
             },
 
             providerStatusLabel(provider) {
                 if (provider === 'meta') {
                     if (this.metaConnection?.status === 'error') return 'Needs attention';
+                    if (this.metaConnection?.publish_ready) return 'Publish ready';
                     if (this.metaConnection?.status === 'connected') return 'Connected';
                     return 'Not connected';
                 }
                 if (provider === 'tiktok') {
                     if (this.tiktokConnection?.status === 'reconnect_required') return 'Reconnect';
+                    if (this.tiktokConnection?.publish_ready) return 'Publish ready';
+                    if (this.tiktokConnection?.draft_ready) return 'Draft only';
                     if (this.tiktokConnection?.status === 'connected') return 'Connected';
                     return 'Not connected';
                 }
@@ -246,6 +253,12 @@
             isProviderConnected(provider) {
                 if (provider === 'meta') return this.metaConnection?.status === 'connected';
                 if (provider === 'tiktok') return this.tiktokConnection?.status === 'connected';
+                return false;
+            },
+
+            isProviderPublishReady(provider) {
+                if (provider === 'meta') return Boolean(this.metaConnection?.publish_ready);
+                if (provider === 'tiktok') return Boolean(this.tiktokConnection?.publish_ready);
                 return false;
             },
 
@@ -300,6 +313,26 @@
                     return 'The TikTok token expired and needs to be reconnected.';
                 }
                 return 'Use the authorized TikTok account for draft uploads.';
+            },
+
+            providerReadinessCopy(provider) {
+                if (provider === 'meta') {
+                    return this.metaConnection?.readiness_reason || 'Meta publish readiness is unavailable.';
+                }
+                if (provider === 'tiktok') {
+                    return this.tiktokConnection?.readiness_reason || 'TikTok publish readiness is unavailable.';
+                }
+                return '';
+            },
+
+            readinessTextClass(provider) {
+                if (provider === 'meta') {
+                    return this.metaConnection?.publish_ready ? 'text-green-700' : 'text-amber-700';
+                }
+                if (provider === 'tiktok') {
+                    return this.tiktokConnection?.publish_ready ? 'text-green-700' : 'text-amber-700';
+                }
+                return 'text-gray-600';
             },
 
             tiktokOpenId() {

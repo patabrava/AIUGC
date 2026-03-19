@@ -30,6 +30,10 @@ class VideoGenerationRequest(BaseModel):
         default=8,
         description="Target duration in seconds for the generated clip (Sora supports 4, 8, or 12)."
     )
+    target_length_tier: Optional[Literal[8, 16, 32]] = Field(
+        default=None,
+        description="Duration tier for duration-routed batches"
+    )
     size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
         default=None,
         description="Provider-specific pixel dimensions override."
@@ -108,6 +112,10 @@ class BatchVideoGenerationRequest(BaseModel):
     seconds: Literal[4, 8, 12] = Field(
         default=8,
         description="Target duration in seconds for generated clips (Sora supports 4, 8, or 12)"
+    )
+    target_length_tier: Optional[Literal[8, 16, 32]] = Field(
+        default=None,
+        description="Duration tier for duration-routed batches"
     )
     size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
         default=None,

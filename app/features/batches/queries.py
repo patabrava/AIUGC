@@ -14,7 +14,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def create_batch(brand: str, post_type_counts: Dict[str, int]) -> Dict[str, Any]:
+def create_batch(brand: str, post_type_counts: Dict[str, int], target_length_tier: int = 8) -> Dict[str, Any]:
     """
     Create a new batch in S1_SETUP state.
     Per Canon § 3.2: S1_SETUP is initial state.
@@ -25,6 +25,7 @@ def create_batch(brand: str, post_type_counts: Dict[str, int]) -> Dict[str, Any]
         "brand": brand,
         "state": BatchState.S1_SETUP.value,
         "post_type_counts": post_type_counts,
+        "target_length_tier": target_length_tier,
         "archived": False
     }
     

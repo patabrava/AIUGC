@@ -34,6 +34,12 @@ class CreateBatchRequest(BaseModel):
     """Request to create a new batch."""
     brand: str = Field(..., min_length=1, max_length=100, description="Brand name")
     post_type_counts: PostTypeCounts = Field(..., description="Post type distribution")
+    target_length_tier: int = Field(
+        default=8,
+        ge=8,
+        le=32,
+        description="Target video duration tier for the batch"
+    )
     
     @validator('brand')
     def validate_brand(cls, v):
@@ -49,6 +55,12 @@ class CreateBatchRequest(BaseModel):
             raise ValueError("Total post count cannot exceed 100")
         return v
 
+    @validator('target_length_tier')
+    def validate_target_length_tier(cls, v):
+        if v not in (8, 16, 32):
+            raise ValueError("Target length tier must be one of 8, 16, or 32")
+        return v
+
 
 class BatchResponse(BaseModel):
     """Batch response model."""
@@ -56,6 +68,7 @@ class BatchResponse(BaseModel):
     brand: str
     state: BatchState
     post_type_counts: Dict[str, int]
+    target_length_tier: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     archived: bool
@@ -105,6 +118,7 @@ class BatchDetailResponse(BaseModel):
     brand: str
     state: BatchState
     post_type_counts: Dict[str, int]
+    target_length_tier: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     archived: bool

@@ -225,155 +225,40 @@
         </div>
     </div>
     {% elif batch.state == 'S7_PUBLISH_PLAN' %}
-    <div id="publish-plan-workflow" class="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
-        <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div class="flex-1">
-                <div class="flex items-center gap-3 mb-2">
-                    <h3 class="text-xl font-bold text-gray-900">Publish Planning</h3>
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
-                        {{ post_metrics.scheduled }}/{{ post_metrics.active_count }} Scheduled
-                    </span>
-                </div>
-                <p class="text-sm text-gray-700">
-                    Use the navbar Meta login, then bind a Page plus Instagram account here and schedule each video with one editable caption.
-                </p>
-            </div>
-            <div class="w-full lg:w-[30rem] space-y-4">
-                {% if meta.status == 'connected' %}
-                <div class="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
-                    <div class="flex items-center justify-between gap-3">
-                        <div>
-                            <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Publishing Target</p>
-                            <h4 class="mt-1 text-sm font-semibold text-gray-900">
-                                {% if selected_page.id and selected_instagram.id %}
-                                {{ selected_page.name }} + @{{ selected_instagram.username or selected_instagram.id }}
-                                {% else %}
-                                Choose the Page and connected Instagram account
-                                {% endif %}
-                            </h4>
-                        </div>
-                        {% if selected_page.id and selected_instagram.id %}
-                        <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">Bound</span>
-                        {% else %}
-                        <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Select</span>
-                        {% endif %}
-                    </div>
-                    {% if available_pages %}
-                    <form
-                        class="mt-4 space-y-3"
-                        hx-post="/publish/batches/{{ batch.id }}/meta/select-target"
-                        hx-swap="none"
-                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                    >
-                        <label class="block text-xs font-medium text-gray-700" for="meta-page-select">
-                            Facebook Page with connected Instagram business account
-                        </label>
-                        <select
-                            id="meta-page-select"
-                            name="page_id"
-                            class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        >
-                            <option value="">Select a Page</option>
-                            {% for page in available_pages %}
-                            {% set page_instagram = page.instagram_business_account or {} %}
-                            <option value="{{ page.id }}" {% if selected_page.id == page.id %}selected{% endif %}>
-                                {{ page.name }}{% if page_instagram.username %} -> @{{ page_instagram.username }}{% endif %}
-                            </option>
-                            {% endfor %}
-                        </select>
-                        <p class="text-xs text-gray-500">
-                            This workflow binds exactly one Page and its connected Instagram business account.
-                        </p>
-                        <button
-                            type="submit"
-                            class="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        >
-                            Save Target
-                        </button>
-                    </form>
-                    {% else %}
-                    <p class="mt-3 text-xs text-red-700">
-                        No manageable Pages were returned for this Meta connection. The app needs a Page that has an Instagram business account attached.
-                    </p>
-                    {% endif %}
-                </div>
-                {% endif %}
-
-                <div class="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
-                    <div class="flex items-start justify-between gap-4">
-                        <div>
-                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-900">TikTok Sandbox</p>
-                            <h4 class="mt-1 text-sm font-semibold text-gray-900">
-                                {% if tiktok.status == 'connected' %}
-                                {{ tiktok.display_name or tiktok.open_id or 'Connected sandbox account' }}
-                                {% elif tiktok.status == 'reconnect_required' %}
-                                Reconnect required
-                                {% else %}
-                                No TikTok account connected
-                                {% endif %}
-                            </h4>
-                            <p class="mt-1 text-xs text-gray-600">
-                                {% if tiktok.status == 'connected' %}
-                                Manual draft uploads are available for the authorized sandbox account.
-                                {% elif tiktok.status == 'reconnect_required' %}
-                                The TikTok sandbox token expired. Reconnect before uploading a draft.
-                                {% else %}
-                                Connect the authorized TikTok sandbox account to upload drafts from generated videos.
-                                {% endif %}
-                            </p>
-                            {% if tiktok.open_id %}
-                            <p class="mt-2 text-[11px] text-gray-500">Open ID: {{ tiktok.open_id }}</p>
-                            {% endif %}
-                        </div>
-                        {% if tiktok.status == 'connected' %}
-                        <span class="inline-flex items-center rounded-full bg-black px-2.5 py-1 text-xs font-semibold text-white">Connected</span>
-                        {% elif tiktok.status == 'reconnect_required' %}
-                        <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">Reconnect</span>
-                        {% else %}
-                        <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Required</span>
-                        {% endif %}
-                    </div>
-                    <div class="mt-4 flex flex-wrap gap-2">
-                        <a
-                            href="/api/auth/tiktok/start?batch_id={{ batch.id }}"
-                            class="inline-flex items-center justify-center rounded-md bg-black px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-800 focus:ring-offset-2"
-                        >
-                            {% if tiktok.status == 'connected' %}Reconnect TikTok{% else %}Connect TikTok{% endif %}
-                        </a>
-                    </div>
-                    <p class="mt-3 text-xs text-gray-500">
-                        TikTok sandbox v1 uploads drafts manually per post. It does not use the Meta scheduling queue.
-                    </p>
-                </div>
-
-                {% if post_metrics.scheduled == post_metrics.active_count and post_metrics.active_count > 0 %}
-                <button
-                    hx-post="/publish/batches/{{ batch.id }}/confirm"
-                    hx-vals='{"batch_id":"{{ batch.id }}","confirm": true}'
-                    hx-confirm="All posts are planned. Arm Meta dispatch for their scheduled times?"
-                    hx-swap="none"
-                    hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                    class="w-full px-6 py-3 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition shadow-sm"
-                >
-                    Confirm & Arm Dispatch
-                </button>
-                {% endif %}
-            </div>
-        </div>
-    </div>
     {% endif %}
 
     <!-- Posts List -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-medium text-gray-900">Posts</h3>
-            <span class="text-sm text-gray-500">
-                {% if batch.state == 'S2_SEEDED' %}
-                    {{ batch.posts_count }} total
-                {% else %}
-                    {{ post_metrics.active_count }} active
+        <div class="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-3">
+                <h3 class="text-lg font-medium text-gray-900">Posts</h3>
+                <span class="text-sm text-gray-500">
+                    {% if batch.state == 'S2_SEEDED' %}
+                        {{ batch.posts_count }} total
+                    {% else %}
+                        {{ post_metrics.active_count }} active
+                    {% endif %}
+                </span>
+            </div>
+            {% if batch.state == 'S7_PUBLISH_PLAN' %}
+            <div class="flex items-center gap-3">
+                <span class="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
+                    {{ post_metrics.scheduled }}/{{ post_metrics.active_count }} Meta scheduled
+                </span>
+                {% if post_metrics.scheduled == post_metrics.active_count and post_metrics.active_count > 0 %}
+                <button
+                    hx-post="/publish/batches/{{ batch.id }}/confirm"
+                    hx-vals='{"batch_id":"{{ batch.id }}","confirm": true}'
+                    hx-confirm="All active posts are scheduled for Meta. Arm dispatch now?"
+                    hx-swap="none"
+                    hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                    class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                >
+                    Confirm & Arm Meta
+                </button>
                 {% endif %}
-            </span>
+            </div>
+            {% endif %}
         </div>
 
         {% if post_metrics.visible_posts %}
@@ -848,7 +733,20 @@
                         {% set instagram_result = publish_results.instagram or {} %}
                         {% set tiktok_result = publish_results.tiktok or {} %}
                         <div 
-                            x-data="publishSchedulerComponent('{{ post.id }}', {{ post.scheduled_at | tojson if post.scheduled_at else 'null' }}, {{ post.social_networks | tojson }}, {{ post.publish_caption | tojson if post.publish_caption else '\"\"' }}, {{ (batch.meta_connection.selected_page.id if batch.meta_connection and batch.meta_connection.selected_page else None) | tojson }}, {{ (batch.meta_connection.selected_instagram.id if batch.meta_connection and batch.meta_connection.selected_instagram else None) | tojson }}, {{ (batch.tiktok_connection.status == 'connected') | tojson }}, {{ post.video_url | tojson if post.video_url else 'null' }}, {{ ('/publish/meta/connect?batch_id=' ~ batch.id ~ '&post_id=' ~ post.id) | tojson }})"
+                            x-data='publishSchedulerComponent({
+                                postId: {{ post.id | tojson }},
+                                scheduledAt: {{ post.scheduled_at | tojson if post.scheduled_at else "null" }},
+                                initialNetworks: {{ post.social_networks | tojson }},
+                                caption: {{ (post.publish_caption or "") | tojson }},
+                                videoUrl: {{ post.video_url | tojson if post.video_url else "null" }},
+                                meta: {{ batch.meta_connection | tojson }},
+                                tiktok: {{ batch.tiktok_connection | tojson }},
+                                facebookResult: {{ facebook_result | tojson }},
+                                instagramResult: {{ instagram_result | tojson }},
+                                tiktokResult: {{ tiktok_result | tojson }},
+                                metaConnectUrl: {{ ("/publish/meta/connect?batch_id=" ~ batch.id ~ "&post_id=" ~ post.id) | tojson }},
+                                tiktokConnectUrl: {{ ("/api/auth/tiktok/start?batch_id=" ~ batch.id) | tojson }}
+                            })'
                             class="space-y-4"
                         >
                             <div class="flex items-center justify-between">
@@ -897,10 +795,32 @@
                                 </div>
                             </div>
 
-                            <!-- Social Network Selection -->
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                <div class="rounded-md border p-3" :class="metaPublishReady() ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div>
+                                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">Meta Readiness</p>
+                                            <p class="mt-1 text-sm font-semibold text-gray-900" x-text="metaTargetLabel()"></p>
+                                        </div>
+                                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="metaStatusClass()" x-text="metaStatusLabel()"></span>
+                                    </div>
+                                    <p class="mt-2 text-xs text-gray-600" x-text="metaReadinessReason()"></p>
+                                </div>
+                                <div class="rounded-md border p-3" :class="tiktokReadinessClass()">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div>
+                                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">TikTok Readiness</p>
+                                            <p class="mt-1 text-sm font-semibold text-gray-900" x-text="tiktokAccountLabel()"></p>
+                                        </div>
+                                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="tiktokReadinessBadgeClass()" x-text="tiktokReadinessLabel()"></span>
+                                    </div>
+                                    <p class="mt-2 text-xs text-gray-600" x-text="tiktokReadinessCopy()"></p>
+                                </div>
+                            </div>
+
                             <div>
                                 <label class="block text-xs font-medium text-gray-700 mb-2">
-                                    Meta Networks
+                                    Meta Publish Networks
                                 </label>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     <button
@@ -911,10 +831,10 @@
                                         @keydown.enter.prevent="toggleNetwork('instagram')"
                                     >
                                         <div class="flex items-center gap-2">
-                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : (instagramAvailable ? 'text-gray-400' : 'text-indigo-400')" fill="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : (instagramAvailable ? 'text-gray-400' : 'text-amber-500')" fill="currentColor" viewBox="0 0 24 24">
                                                 <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
                                             </svg>
-                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : (instagramAvailable ? 'text-gray-600' : 'text-indigo-700')">Instagram</span>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : (instagramAvailable ? 'text-gray-700' : 'text-amber-700')">Instagram</span>
                                         </div>
                                     </button>
 
@@ -926,95 +846,116 @@
                                         @keydown.enter.prevent="toggleNetwork('facebook')"
                                     >
                                         <div class="flex items-center gap-2">
-                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : (facebookAvailable ? 'text-gray-400' : 'text-indigo-400')" fill="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : (facebookAvailable ? 'text-gray-400' : 'text-amber-500')" fill="currentColor" viewBox="0 0 24 24">
                                                 <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
                                             </svg>
-                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : (facebookAvailable ? 'text-gray-600' : 'text-indigo-700')">Facebook</span>
+                                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : (facebookAvailable ? 'text-gray-700' : 'text-amber-700')">Facebook</span>
                                         </div>
                                     </button>
                                 </div>
-                                <p class="mt-2 text-xs text-gray-500" x-show="selectedNetworks.length === 0">
-                                    Select at least one Meta network for this post.
+                                <p class="mt-2 text-xs text-gray-500">
+                                    Save a scheduled publish plan for Facebook and Instagram here. TikTok posting is handled below.
                                 </p>
-                                <p class="mt-2 text-xs text-red-700" x-show="!facebookAvailable || !instagramAvailable">
-                                    Click a locked Meta network to connect Facebook + Instagram and return to this post.
+                                <p class="mt-2 text-xs text-red-700" x-show="!metaPublishReady()">
+                                    <span x-text="metaReadinessReason()"></span>
                                 </p>
                                 <p class="mt-2 text-xs text-red-700" x-show="!videoUrl">
                                     Generate the video before saving a publish schedule.
                                 </p>
                             </div>
 
-                            <div class="rounded-md border border-gray-200 bg-gray-50 p-3">
-                                <div class="flex items-center justify-between gap-3">
+                            <div class="rounded-md border border-gray-200 bg-gray-50 p-4">
+                                <div class="flex items-start justify-between gap-3">
                                     <div>
-                                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">TikTok Draft Upload</p>
-                                        <p class="mt-1 text-xs text-gray-500">
-                                            Upload this generated video as a sandbox draft without affecting the Meta schedule.
-                                        </p>
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">TikTok</p>
+                                        <p class="mt-1 text-sm text-gray-600">Direct post is the primary path. Draft export remains available as a fallback.</p>
                                     </div>
-                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold {% if tiktok_result.status == 'draft_uploaded' %}bg-green-100 text-green-700{% elif tiktok_result.status == 'failed' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
-                                        {{ tiktok_result.status or 'idle' }}
-                                    </span>
+                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="tiktokResultClass()" x-text="tiktokStatusLabel()"></span>
                                 </div>
-                                {% if tiktok_result.remote_id %}
-                                <p class="mt-2 text-xs text-gray-600">Draft Publish ID: {{ tiktok_result.remote_id }}</p>
-                                {% endif %}
-                                {% if tiktok_result.error_message %}
-                                <p class="mt-2 text-xs text-red-700">{{ tiktok_result.error_message }}</p>
-                                {% endif %}
-                                <div class="mt-3 flex flex-wrap items-center gap-2">
+                                <div class="mt-4 grid gap-3 sm:grid-cols-2" x-show="tiktokHasCreatorInfo()">
+                                    <label class="text-xs font-medium text-gray-700">
+                                        Privacy
+                                        <select x-model="selectedPrivacyLevel" class="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-800">
+                                            <template x-for="option in tiktokPrivacyOptions()" :key="option">
+                                                <option :value="option" x-text="option"></option>
+                                            </template>
+                                        </select>
+                                    </label>
+                                    <div class="grid gap-2 text-xs text-gray-700">
+                                        <label class="inline-flex items-center gap-2">
+                                            <input type="checkbox" x-model="disableComment" class="rounded border-gray-300 text-gray-900 focus:ring-gray-800">
+                                            Disable comments
+                                        </label>
+                                        <label class="inline-flex items-center gap-2">
+                                            <input type="checkbox" x-model="disableDuet" class="rounded border-gray-300 text-gray-900 focus:ring-gray-800">
+                                            Disable duet
+                                        </label>
+                                        <label class="inline-flex items-center gap-2">
+                                            <input type="checkbox" x-model="disableStitch" class="rounded border-gray-300 text-gray-900 focus:ring-gray-800">
+                                            Disable stitch
+                                        </label>
+                                    </div>
+                                </div>
+                                <p class="mt-3 text-xs text-gray-500" x-show="tiktokCreatorInfo.max_video_post_duration_sec">
+                                    TikTok limit for this account: <span x-text="`${tiktokCreatorInfo.max_video_post_duration_sec}s`"></span>
+                                </p>
+                                <p class="mt-2 text-xs text-red-700" x-show="tiktokErrorHint()" x-text="tiktokErrorHint()"></p>
+                                <div class="mt-4 flex flex-wrap items-center gap-2">
+                                    <button
+                                        @click="postToTikTok()"
+                                        :disabled="!canPostTikTok()"
+                                        class="inline-flex items-center justify-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition"
+                                        :class="canPostTikTok() ? 'hover:bg-gray-900 focus:ring-2 focus:ring-gray-800 focus:ring-offset-2' : 'opacity-50 cursor-not-allowed'"
+                                    >
+                                        <span x-text="tiktokPosting ? 'Posting…' : 'Post to TikTok'"></span>
+                                    </button>
                                     <button
                                         @click="uploadTikTokDraft()"
-                                        :disabled="!canUploadTikTok()"
-                                        class="inline-flex items-center justify-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition"
-                                        :class="canUploadTikTok() ? 'hover:bg-gray-900 focus:ring-2 focus:ring-gray-800 focus:ring-offset-2' : 'opacity-50 cursor-not-allowed'"
+                                        :disabled="!canUploadTikTokDraft()"
+                                        class="inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition"
+                                        :class="canUploadTikTokDraft() ? 'hover:bg-gray-100 focus:ring-2 focus:ring-gray-300 focus:ring-offset-2' : 'opacity-50 cursor-not-allowed'"
                                     >
                                         <span x-text="tiktokUploading ? 'Uploading…' : 'Upload Draft to TikTok'"></span>
                                     </button>
-                                    <p class="text-xs text-gray-500" x-show="!tiktokAvailable">
-                                        Connect TikTok sandbox first.
-                                    </p>
-                                    <p class="text-xs text-gray-500" x-show="tiktokAvailable && !videoUrl">
-                                        Generate the video first.
-                                    </p>
                                 </div>
+                                <p class="mt-3 text-xs text-gray-500" x-show="tiktokResult.publish_id">
+                                    Publish ID: <span x-text="tiktokResult.publish_id"></span>
+                                </p>
+                                <p class="mt-1 text-xs text-gray-500" x-show="tiktokResult.post_id">
+                                    Public post ID: <span x-text="tiktokResult.post_id"></span>
+                                </p>
                             </div>
 
-                            {% if facebook_result or instagram_result %}
-                            <div class="rounded-md border border-gray-200 bg-gray-50 p-3">
+                            <div class="rounded-md border border-gray-200 bg-gray-50 p-3" x-show="hasPublishResults()">
                                 <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Latest Publish Results</p>
-                                <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                                     <div class="rounded-md border border-gray-200 bg-white p-3">
                                         <div class="flex items-center justify-between gap-2">
                                             <span class="text-xs font-semibold text-blue-700">Facebook</span>
-                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold {% if facebook_result.status == 'published' %}bg-green-100 text-green-700{% elif facebook_result.status == 'failed' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
-                                                {{ facebook_result.status or 'pending' }}
-                                            </span>
+                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="resultClass(facebookResult.status)" x-text="facebookResult.status || 'pending'"></span>
                                         </div>
-                                        {% if facebook_result.remote_id %}
-                                        <p class="mt-1 text-xs text-gray-600">Remote ID: {{ facebook_result.remote_id }}</p>
-                                        {% endif %}
-                                        {% if facebook_result.error_message %}
-                                        <p class="mt-1 text-xs text-red-700">{{ facebook_result.error_message }}</p>
-                                        {% endif %}
+                                        <p class="mt-1 text-xs text-gray-600" x-show="facebookResult.remote_id">Remote ID: <span x-text="facebookResult.remote_id"></span></p>
+                                        <p class="mt-1 text-xs text-red-700" x-show="facebookResult.error_message" x-text="facebookResult.error_message"></p>
                                     </div>
                                     <div class="rounded-md border border-gray-200 bg-white p-3">
                                         <div class="flex items-center justify-between gap-2">
                                             <span class="text-xs font-semibold text-purple-700">Instagram</span>
-                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold {% if instagram_result.status == 'published' %}bg-green-100 text-green-700{% elif instagram_result.status == 'failed' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
-                                                {{ instagram_result.status or 'pending' }}
-                                            </span>
+                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="resultClass(instagramResult.status)" x-text="instagramResult.status || 'pending'"></span>
                                         </div>
-                                        {% if instagram_result.remote_id %}
-                                        <p class="mt-1 text-xs text-gray-600">Remote ID: {{ instagram_result.remote_id }}</p>
-                                        {% endif %}
-                                        {% if instagram_result.error_message %}
-                                        <p class="mt-1 text-xs text-red-700">{{ instagram_result.error_message }}</p>
-                                        {% endif %}
+                                        <p class="mt-1 text-xs text-gray-600" x-show="instagramResult.remote_id">Remote ID: <span x-text="instagramResult.remote_id"></span></p>
+                                        <p class="mt-1 text-xs text-red-700" x-show="instagramResult.error_message" x-text="instagramResult.error_message"></p>
+                                    </div>
+                                    <div class="rounded-md border border-gray-200 bg-white p-3">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="text-xs font-semibold text-gray-900">TikTok</span>
+                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="resultClass(tiktokResult.status)" x-text="tiktokStatusLabel()"></span>
+                                        </div>
+                                        <p class="mt-1 text-xs text-gray-600" x-show="tiktokResult.publish_id">Publish ID: <span x-text="tiktokResult.publish_id"></span></p>
+                                        <p class="mt-1 text-xs text-gray-600" x-show="tiktokResult.post_id">Post ID: <span x-text="tiktokResult.post_id"></span></p>
+                                        <p class="mt-1 text-xs text-red-700" x-show="tiktokResult.error_message" x-text="tiktokResult.error_message"></p>
                                     </div>
                                 </div>
                             </div>
-                            {% endif %}
 
                             <!-- Save Button -->
                             <div class="flex gap-2">
@@ -1027,7 +968,7 @@
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                                     </svg>
-                                    <span x-text="saving ? 'Saving...' : 'Save Schedule'"></span>
+                                    <span x-text="saving ? 'Saving...' : 'Save Meta Schedule'"></span>
                                 </button>
                             </div>
 
@@ -1053,26 +994,13 @@
 
     <!-- Video Generation Settings (moved from top) -->
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
-    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mt-6" x-data="videoSettingsComponent()">
+    <div id="video-generation-settings" class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mt-6" x-data='videoSettingsComponent({ targetLengthTier: {{ batch.target_length_tier | tojson }}, pipelineRoute: {{ batch.video_pipeline_route | tojson }} })'>
         <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>
         <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4">
-                <label class="flex flex-col text-sm" for="provider-select">
-                    <span class="text-gray-700 font-medium">Provider</span>
-                    <select
-                        id="provider-select"
-                        name="provider"
-                        class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        x-model="provider"
-                    >
-                        <option value="veo_3_1">Veo 3.1 (Recommended)</option>
-                        <option value="sora_2">Sora 2</option>
-                        <option value="sora_2_pro">Sora 2 Pro</option>
-                    </select>
-                    <p class="mt-2 text-xs text-gray-500" x-show="provider.startsWith('sora_2')">
-                        Sora 2 enforces 8s clips and supports 720x1280 or 1024x1792 (vertical) / 1280x720 or 1792x1024 (landscape).
-                    </p>
-                </label>
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4" x-show="!isDurationRouted">
+                <div class="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 sm:col-span-3">
+                    Veo 3.1 is selected automatically. Choose the duration tier and aspect ratio below.
+                </div>
                 <label class="flex flex-col text-sm" for="aspect-select">
                     <span class="text-gray-700 font-medium">Aspect Ratio</span>
                     <select
@@ -1089,28 +1017,63 @@
                     <span class="text-gray-700 font-medium">Duration</span>
                     <select
                         id="duration-select"
-                        name="duration_seconds"
+                        name="target_length_tier"
                         class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         x-model="duration"
                     >
-                        <option value="8">8 seconds (Canon)</option>
-                        <option value="4" x-bind:disabled="provider === 'veo_3_1'">4 seconds (Sora only)</option>
-                        <option value="12" x-bind:disabled="provider === 'veo_3_1'">12 seconds (Sora only)</option>
+                        <option value="8">8 seconds</option>
+                        <option value="16">16 seconds</option>
+                        <option value="32">32 seconds</option>
                     </select>
-                    <p class="mt-1 text-xs text-gray-500">Sora currently supports 4, 8, or 12 second clips.</p>
+                    <p class="mt-1 text-xs text-gray-500">The backend routes the pipeline automatically after you choose the duration.</p>
                 </label>
+            </div>
+            <div class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4" x-show="isDurationRouted" x-cloak>
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <p class="text-sm font-semibold text-indigo-900">Duration-routed batch</p>
+                        <p class="mt-1 text-sm text-indigo-800">
+                            <span x-text="`${targetLengthTier}s selected at batch setup.`"></span>
+                            <span x-show="pipelineRoute === 'short'"> This stays on the short Veo path.</span>
+                            <span x-show="pipelineRoute === 'veo_extended'"> This batch uses the Veo extended chain automatically.</span>
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200">Veo 3.1</span>
+                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200" x-text="`${targetLengthTier}s target`"></span>
+                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200" x-show="pipelineRoute === 'veo_extended'">720p chain</span>
+                    </div>
+                </div>
             </div>
             <input type="hidden" name="resolution" x-model="resolution" />
             <input type="hidden" name="seconds" x-model="duration" />
-            <div class="mt-4" aria-live="polite" x-show="submitError || submitSuccess" x-cloak>
+            <div class="mt-4" aria-live="polite" x-show="submitError || submitStatusMessage" x-cloak>
                 <div
-                    x-show="submitSuccess"
+                    x-show="submitStatusMessage && submitStatusKind === 'info'"
+                    class="rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-800 flex items-center gap-2"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01" />
+                    </svg>
+                    <span x-text="submitStatusMessage"></span>
+                </div>
+                <div
+                    x-show="submitStatusMessage && submitStatusKind === 'success'"
                     class="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 flex items-center gap-2"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    <span x-text="successMessage"></span>
+                    <span x-text="submitStatusMessage"></span>
+                </div>
+                <div
+                    x-show="submitStatusMessage && submitStatusKind === 'warning'"
+                    class="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 flex items-center gap-2"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86l-7.98 13.8A1.5 1.5 0 003.59 20h16.82a1.5 1.5 0 001.3-2.34l-7.98-13.8a1.5 1.5 0 00-2.58 0z" />
+                    </svg>
+                    <span x-text="submitStatusMessage"></span>
                 </div>
                 <div
                     x-show="submitError"
@@ -1137,24 +1100,21 @@
         </form>
     </div>
     <script>
-        window.videoSettingsComponent = function () {
+        window.videoSettingsComponent = function (options = {}) {
             return {
+                targetLengthTier: options.targetLengthTier || null,
+                pipelineRoute: options.pipelineRoute || null,
+                get isDurationRouted() {
+                    return this.targetLengthTier !== null;
+                },
                 provider: 'veo_3_1',
                 aspectRatio: '9:16',
-                duration: '8',
+                duration: String(options.targetLengthTier || 8),
                 resolution: '720p',
                 supportedSizes: {
                     'veo_3_1': {
                         '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
                         '16:9': { '720p': '1280x720', '1080p': '1920x1080' }
-                    },
-                    'sora_2': {
-                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
-                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
-                    },
-                    'sora_2_pro': {
-                        '9:16': { '720p': '720x1280', '1080p': '1024x1792' },
-                        '16:9': { '720p': '1280x720', '1080p': '1792x1024' }
                     }
                 },
                 getProviderSize(aspect, resolution) {
@@ -1162,14 +1122,16 @@
                     const aspectMap = providerMap[aspect] || {};
                     return aspectMap[resolution] || null;
                 },
-                successMessage: '',
+                submitStatusMessage: '',
+                submitStatusKind: 'info',
                 async submitBatch(event) {
                     if (this.isSubmitting) {
                         return;
                     }
                     this.isSubmitting = true;
                     this.submitError = null;
-                    this.submitSuccess = null;
+                    this.submitStatusKind = 'info';
+                    this.submitStatusMessage = 'Submitting request to the video provider…';
                     try {
                         const response = await fetch(`/videos/batch/{{ batch.id }}/generate-all`, {
                             method: 'POST',
@@ -1182,48 +1144,73 @@
                                 aspect_ratio: this.aspectRatio,
                                 resolution: this.resolution,
                                 seconds: Number(this.duration),
+                                target_length_tier: this.isDurationRouted ? Number(this.duration) : null,
                                 size: this.getProviderSize(this.aspectRatio, this.resolution)
                             })
                         });
 
-                        if (!response.ok) {
-                            const errorText = await response.text();
-                            throw new Error(errorText || `Submission failed (${response.status})`);
+                        const rawBody = await response.text();
+                        let payload = null;
+                        if (rawBody) {
+                            try {
+                                payload = JSON.parse(rawBody);
+                            } catch (error) {
+                                payload = null;
+                            }
                         }
 
-                        const payload = await response.json();
+                        if (!response.ok) {
+                            const errorMessage = payload?.message
+                                || payload?.detail?.message
+                                || payload?.error?.message
+                                || rawBody
+                                || `Submission failed (${response.status})`;
+                            const errorCode = payload?.code ? ` [${payload.code}]` : '';
+                            throw new Error(`${errorMessage}${errorCode}`);
+                        }
+
                         const submittedCount = payload?.data?.submitted_count ?? 0;
-                        const providerLabel = this.provider === 'veo_3_1' ? 'Veo 3.1' : (this.provider === 'sora_2_pro' ? 'Sora 2 Pro' : 'Sora 2');
-                        this.submitSuccess = submittedCount;
-                        this.successMessage = `Submitted ${submittedCount} prompt(s) to ${providerLabel}.`;
+                        const skippedCount = payload?.data?.skipped_count ?? 0;
+                        if (submittedCount > 0) {
+                            this.submitStatusKind = 'success';
+                            this.submitStatusMessage = `Submitted ${submittedCount} prompt(s) to Veo 3.1.`;
+                        } else {
+                            this.submitStatusKind = 'warning';
+                            this.submitStatusMessage = payload?.message
+                                || `No prompts were submitted to Veo 3.1.${skippedCount ? ` ${skippedCount} post(s) were skipped.` : ''} Check the batch details or retry later.`;
+                        }
                     } catch (error) {
                         this.submitError = error instanceof Error ? error.message : 'Submission failed';
+                        this.submitStatusKind = 'warning';
+                        this.submitStatusMessage = error instanceof Error ? error.message : 'Submission failed. Check the server logs or quota status.';
                     } finally {
                         this.isSubmitting = false;
                     }
                 },
                 init() {
+                    if (this.isDurationRouted) {
+                        this.provider = 'veo_3_1';
+                        this.duration = String(this.targetLengthTier || 8);
+                    }
                     this.$watch('provider', (value) => {
-                        if (value.startsWith('sora_2')) {
-                            if (!['4','8','12'].includes(this.duration)) {
-                                this.duration = '8';
-                            }
-                        } else if (value === 'veo_3_1') {
-                            if (this.duration !== '8') {
-                                this.duration = '8';
-                            }
+                        if (this.isDurationRouted) {
+                            this.provider = 'veo_3_1';
+                            return;
                         }
                         const targetResolution = this.aspectRatio === '16:9' ? '1080p' : '720p';
                         this.resolution = targetResolution;
                     });
                     this.$watch('aspectRatio', (value) => {
-                        const targetResolution = value === '16:9' ? '1080p' : '720p';
+                        const targetResolution = this.pipelineRoute === 'veo_extended'
+                            ? '720p'
+                            : value === '16:9' ? '1080p' : '720p';
                         this.resolution = targetResolution;
                     });
                 },
                 isSubmitting: false,
                 submitError: null,
-                submitSuccess: null
+                submitStatusMessage: '',
+                submitStatusKind: 'info'
             };
         };
     </script>
@@ -1339,19 +1326,27 @@
         };
 
         // Alpine.js component for publish scheduler
-        window.publishSchedulerComponent = function(postId, initialScheduledAt, initialNetworks, initialCaption, selectedPageId, selectedInstagramId, tiktokAvailable, videoUrl, metaConnectUrl) {
+        window.publishSchedulerComponent = function(options = {}) {
             return {
-                postId: postId,
+                postId: options.postId,
                 scheduledDateTime: '',
-                selectedNetworks: (initialNetworks || []).filter((network) => ['facebook', 'instagram'].includes(network)),
-                publishCaption: initialCaption || '',
-                facebookAvailable: Boolean(selectedPageId),
-                instagramAvailable: Boolean(selectedInstagramId),
-                tiktokAvailable: Boolean(tiktokAvailable),
-                videoUrl: videoUrl,
-                metaConnectUrl: metaConnectUrl,
+                selectedNetworks: (options.initialNetworks || []).filter((network) => ['facebook', 'instagram'].includes(network)),
+                publishCaption: options.caption || '',
+                metaConnection: options.meta || {},
+                tiktokConnection: options.tiktok || {},
+                facebookResult: options.facebookResult || {},
+                instagramResult: options.instagramResult || {},
+                tiktokResult: options.tiktokResult || {},
+                videoUrl: options.videoUrl,
+                metaConnectUrl: options.metaConnectUrl,
+                tiktokConnectUrl: options.tiktokConnectUrl,
+                selectedPrivacyLevel: '',
+                disableComment: false,
+                disableDuet: false,
+                disableStitch: false,
                 minDateTime: '',
                 saving: false,
+                tiktokPosting: false,
                 tiktokUploading: false,
                 successMessage: '',
                 errorMessage: '',
@@ -1361,8 +1356,19 @@
                     const minDate = new Date(now.getTime() + (60 * 60 * 1000));
                     this.minDateTime = window.zoneDateToLocalValue(minDate, BERLIN_TIME_ZONE);
                     
-                    if (initialScheduledAt) {
-                        this.scheduledDateTime = window.zoneDateToLocalValue(new Date(initialScheduledAt), BERLIN_TIME_ZONE);
+                    if (options.scheduledAt) {
+                        this.scheduledDateTime = window.zoneDateToLocalValue(new Date(options.scheduledAt), BERLIN_TIME_ZONE);
+                    }
+                    const creatorInfo = this.tiktokCreatorInfo;
+                    const privacyOptions = this.tiktokPrivacyOptions();
+                    this.selectedPrivacyLevel = privacyOptions.includes('SELF_ONLY') ? 'SELF_ONLY' : (privacyOptions[0] || 'SELF_ONLY');
+                    this.disableComment = Boolean(creatorInfo.comment_disabled);
+                    this.disableDuet = Boolean(creatorInfo.duet_disabled);
+                    this.disableStitch = Boolean(creatorInfo.stitch_disabled);
+
+                    if (this.selectedNetworks.length === 0) {
+                        if (this.instagramAvailable) this.selectedNetworks.push('instagram');
+                        if (this.facebookAvailable) this.selectedNetworks.push('facebook');
                     }
 
                     if (window.location.hash === `#post-${this.postId}`) {
@@ -1382,6 +1388,96 @@
                     if (!utcDate) return '';
                     return utcDate.toISOString().replace('T', ' ').substring(0, 16) + ' UTC';
                 },
+
+                get facebookAvailable() {
+                    return Boolean(this.metaConnection?.selected_page?.id);
+                },
+
+                get instagramAvailable() {
+                    return Boolean(this.metaConnection?.selected_instagram?.id);
+                },
+
+                get tiktokCreatorInfo() {
+                    return this.tiktokConnection?.creator_info || {};
+                },
+
+                metaPublishReady() {
+                    return Boolean(this.metaConnection?.publish_ready);
+                },
+
+                metaStatusLabel() {
+                    if (this.metaConnection?.publish_ready) return 'Ready';
+                    if (this.metaConnection?.status === 'connected') return 'Action needed';
+                    if (this.metaConnection?.status === 'error') return 'Reconnect';
+                    return 'Connect';
+                },
+
+                metaStatusClass() {
+                    if (this.metaConnection?.publish_ready) return 'bg-green-100 text-green-700';
+                    if (this.metaConnection?.status === 'connected') return 'bg-amber-100 text-amber-700';
+                    if (this.metaConnection?.status === 'error') return 'bg-red-100 text-red-700';
+                    return 'bg-gray-100 text-gray-700';
+                },
+
+                metaTargetLabel() {
+                    const page = this.metaConnection?.selected_page || {};
+                    const instagram = this.metaConnection?.selected_instagram || {};
+                    if (page.id && instagram.id) {
+                        return `${page.name} + @${instagram.username || instagram.id}`;
+                    }
+                    return 'Choose the Page and connected Instagram account';
+                },
+
+                metaReadinessReason() {
+                    return this.metaConnection?.readiness_reason || 'Connect Meta before publishing.';
+                },
+
+                tiktokReadinessClass() {
+                    return this.tiktokConnection?.publish_ready
+                        ? 'border-green-200 bg-green-50'
+                        : this.tiktokConnection?.draft_ready
+                            ? 'border-amber-200 bg-amber-50'
+                            : 'border-gray-200 bg-white';
+                },
+
+                tiktokReadinessBadgeClass() {
+                    if (this.tiktokConnection?.publish_ready) return 'bg-green-100 text-green-700';
+                    if (this.tiktokConnection?.draft_ready) return 'bg-amber-100 text-amber-700';
+                    if (this.tiktokConnection?.status === 'reconnect_required') return 'bg-red-100 text-red-700';
+                    return 'bg-gray-100 text-gray-700';
+                },
+
+                tiktokReadinessLabel() {
+                    if (this.tiktokConnection?.publish_ready) return 'Ready';
+                    if (this.tiktokConnection?.draft_ready) return 'Draft only';
+                    if (this.tiktokConnection?.status === 'reconnect_required') return 'Reconnect';
+                    if (this.tiktokConnection?.status === 'connected') return 'Not ready';
+                    return 'Connect';
+                },
+
+                tiktokReadinessCopy() {
+                    return this.tiktokConnection?.readiness_reason || 'Connect TikTok before posting.';
+                },
+
+                tiktokAccountLabel() {
+                    return this.tiktokConnection?.display_name || this.tiktokConnection?.open_id || 'No TikTok account connected';
+                },
+
+                tiktokPrivacyOptions() {
+                    return this.tiktokCreatorInfo?.privacy_level_options || [];
+                },
+
+                tiktokHasCreatorInfo() {
+                    return this.tiktokPrivacyOptions().length > 0;
+                },
+
+                tiktokErrorHint() {
+                    if (!this.videoUrl) return 'Generate the video before posting to TikTok.';
+                    if (!this.publishCaption.trim()) return 'Add a caption before posting to TikTok.';
+                    if (!this.tiktokConnection?.status || this.tiktokConnection?.status === 'disconnected') return 'Connect TikTok first.';
+                    if (!this.tiktokConnection?.publish_ready) return this.tiktokReadinessCopy();
+                    return '';
+                },
                 
                 networkAvailable(network) {
                     if (network === 'facebook') return this.facebookAvailable;
@@ -1396,7 +1492,7 @@
                             : 'bg-purple-50 border-purple-500 ring-2 ring-purple-500 cursor-pointer';
                     }
                     if (!this.networkAvailable(network)) {
-                        return 'bg-indigo-50 border-indigo-300 cursor-pointer hover:border-indigo-400';
+                        return 'bg-amber-50 border-amber-300 cursor-pointer hover:border-amber-400';
                     }
                     return network === 'facebook'
                         ? 'bg-white border-gray-300 hover:border-blue-300 cursor-pointer'
@@ -1405,7 +1501,7 @@
 
                 toggleNetwork(network) {
                     if (!this.networkAvailable(network)) {
-                        this.openAccountsHub();
+                        this.openAccountsHub('meta');
                         return;
                     }
 
@@ -1416,7 +1512,16 @@
                     this.selectedNetworks = [...this.selectedNetworks, network];
                 },
 
-                openAccountsHub() {
+                openAccountsHub(network) {
+                    if (network === 'tiktok') {
+                        const accountsHub = window.Alpine?.store('accountsHub');
+                        if (accountsHub) {
+                            accountsHub.open('tiktok', { postId: this.postId });
+                            return;
+                        }
+                        window.location.assign(this.tiktokConnectUrl);
+                        return;
+                    }
                     const accountsHub = window.Alpine?.store('accountsHub');
                     if (accountsHub) {
                         accountsHub.open('meta', { postId: this.postId });
@@ -1434,11 +1539,43 @@
                            !this.saving;
                 },
 
-                canUploadTikTok() {
-                    return this.tiktokAvailable &&
+                canPostTikTok() {
+                    return this.tiktokConnection?.publish_ready &&
+                           this.tiktokHasCreatorInfo() &&
+                           Boolean(this.videoUrl) &&
+                           this.publishCaption.trim().length > 0 &&
+                           Boolean(this.selectedPrivacyLevel) &&
+                           !this.tiktokPosting;
+                },
+
+                canUploadTikTokDraft() {
+                    return this.tiktokConnection?.draft_ready &&
                            Boolean(this.videoUrl) &&
                            this.publishCaption.trim().length > 0 &&
                            !this.tiktokUploading;
+                },
+
+                resultClass(status) {
+                    if (status === 'published') return 'bg-green-100 text-green-700';
+                    if (status === 'failed') return 'bg-red-100 text-red-700';
+                    if (status === 'publishing' || status === 'processing' || status === 'awaiting_user_action') return 'bg-amber-100 text-amber-700';
+                    return 'bg-gray-100 text-gray-700';
+                },
+
+                tiktokResultClass() {
+                    return this.resultClass(this.tiktokResult?.status);
+                },
+
+                tiktokStatusLabel() {
+                    if (this.tiktokResult?.status === 'awaiting_user_action') return 'Awaiting creator action';
+                    if (this.tiktokResult?.provider_status) return this.tiktokResult.provider_status;
+                    return this.tiktokResult?.status || 'idle';
+                },
+
+                hasPublishResults() {
+                    return Object.keys(this.facebookResult || {}).length > 0
+                        || Object.keys(this.instagramResult || {}).length > 0
+                        || Object.keys(this.tiktokResult || {}).length > 0;
                 },
                 
                 async saveSchedule() {
@@ -1486,8 +1623,55 @@
                     }
                 },
 
+                async postToTikTok() {
+                    if (!this.canPostTikTok()) {
+                        if (!this.tiktokConnection?.publish_ready) {
+                            this.openAccountsHub('tiktok');
+                        }
+                        return;
+                    }
+
+                    this.tiktokPosting = true;
+                    this.successMessage = '';
+                    this.errorMessage = '';
+
+                    try {
+                        const response = await fetch('/api/tiktok/publish', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Correlation-ID': `tiktok_direct_${this.postId}`
+                            },
+                            body: JSON.stringify({
+                                post_id: this.postId,
+                                caption: this.publishCaption.trim(),
+                                privacy_level: this.selectedPrivacyLevel,
+                                disable_comment: this.disableComment,
+                                disable_duet: this.disableDuet,
+                                disable_stitch: this.disableStitch
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(await window.extractApiError(response));
+                        }
+
+                        this.successMessage = 'TikTok post submitted successfully.';
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } catch (error) {
+                        this.errorMessage = error.message || 'TikTok publish failed';
+                    } finally {
+                        this.tiktokPosting = false;
+                    }
+                },
+
                 async uploadTikTokDraft() {
-                    if (!this.canUploadTikTok()) {
+                    if (!this.canUploadTikTokDraft()) {
+                        if (!this.tiktokConnection?.draft_ready) {
+                            this.openAccountsHub('tiktok');
+                        }
                         return;
                     }
 
@@ -1512,7 +1696,7 @@
                             throw new Error(await window.extractApiError(response));
                         }
 
-                        this.successMessage = 'TikTok draft upload submitted successfully.';
+                        this.successMessage = 'TikTok draft export submitted successfully.';
                         setTimeout(() => {
                             window.location.reload();
                         }, 1000);

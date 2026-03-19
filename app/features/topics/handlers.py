@@ -5,7 +5,7 @@ Per Constitution § V: Locality & Vertical Slices
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import RLock
 from collections import Counter
 from uuid import uuid4
@@ -31,8 +31,9 @@ from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
     create_post_for_batch,
+    get_posts_by_batch,
 )
-from app.features.batches.queries import get_batch_by_id, update_batch_state
+from app.features.batches.queries import get_batch_by_id, update_batch_state, list_batches
 from app.core.states import BatchState
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
@@ -45,6 +46,7 @@ _SEEDING_PROGRESS: Dict[str, Dict[str, Any]] = {}
 _SEEDING_EVENTS: Dict[str, List[Dict[str, Any]]] = {}
 _SEEDING_EVENT_COUNTERS: Dict[str, int] = {}
 _SEEDING_PROGRESS_LOCK = RLock()
+_DISCOVERY_TASKS: Dict[str, asyncio.Task] = {}
 _PROGRESS_TTL_SECONDS = 45
 
 
@@ -277,6 +279,135 @@ def clear_seeding_progress(batch_id: str) -> None:
         _SEEDING_PROGRESS.pop(batch_id, None)
         _SEEDING_EVENTS.pop(batch_id, None)
         _SEEDING_EVENT_COUNTERS.pop(batch_id, None)
+
+
+def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _mark_discovery_task(batch_id: str, task: asyncio.Task) -> None:
+    with _SEEDING_PROGRESS_LOCK:
+        _DISCOVERY_TASKS[batch_id] = task
+
+
+def _clear_discovery_task(batch_id: str, task: asyncio.Task) -> None:
+    with _SEEDING_PROGRESS_LOCK:
+        current = _DISCOVERY_TASKS.get(batch_id)
+        if current is task:
+            _DISCOVERY_TASKS.pop(batch_id, None)
+
+
+def is_batch_discovery_active(batch_id: str) -> bool:
+    with _SEEDING_PROGRESS_LOCK:
+        task = _DISCOVERY_TASKS.get(batch_id)
+        if not task:
+            return False
+        if task.done():
+            _DISCOVERY_TASKS.pop(batch_id, None)
+            return False
+        return True
+
+
+async def _run_batch_discovery_task(batch_id: str) -> None:
+    task = asyncio.current_task()
+    if task is not None:
+        _mark_discovery_task(batch_id, task)
+    try:
+        result = await discover_topics_for_batch(batch_id)
+        logger.info(
+            "batch_autoseed_complete",
+            batch_id=batch_id,
+            posts_created=result["posts_created"],
+            new_state=result["state"],
+        )
+    except FlowForgeException as exc:
+        update_seeding_progress(
+            batch_id,
+            stage="failed",
+            stage_label="Topic generation stopped",
+            detail_message=exc.message,
+            is_retrying=False,
+            retry_message=None,
+        )
+        logger.error(
+            "batch_autoseed_failed",
+            batch_id=batch_id,
+            error=exc.message,
+            details=exc.details,
+        )
+    except Exception as exc:
+        update_seeding_progress(
+            batch_id,
+            stage="failed",
+            stage_label="Topic generation stopped",
+            detail_message="The seeding run failed before script review could start.",
+            is_retrying=False,
+            retry_message=None,
+        )
+        logger.exception(
+            "batch_autoseed_unexpected_error",
+            batch_id=batch_id,
+            error=str(exc),
+        )
+    finally:
+        if task is not None:
+            _clear_discovery_task(batch_id, task)
+
+
+def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
+    if is_batch_discovery_active(batch_id):
+        logger.info("batch_autoseed_already_active", batch_id=batch_id, reason=reason)
+        return False
+
+    batch = get_batch_by_id(batch_id)
+    if batch["state"] != BatchState.S1_SETUP.value:
+        logger.info(
+            "batch_autoseed_skipped_non_setup",
+            batch_id=batch_id,
+            state=batch["state"],
+            reason=reason,
+        )
+        return False
+
+    task = asyncio.create_task(_run_batch_discovery_task(batch_id))
+    _mark_discovery_task(batch_id, task)
+    logger.info("batch_autoseed_scheduled", batch_id=batch_id, reason=reason)
+    return True
+
+
+def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]:
+    recovered: List[str] = []
+    batches, _ = list_batches(archived=False, limit=max(limit * 10, 25), offset=0)
+    newest_allowed_created_at = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    for batch in batches:
+        if len(recovered) >= limit:
+            break
+        if batch["state"] != BatchState.S1_SETUP.value:
+            continue
+        batch_id = batch["id"]
+        created_at = _parse_utc_timestamp(batch.get("created_at"))
+        if created_at is None or created_at < newest_allowed_created_at:
+            continue
+        if get_posts_by_batch(batch_id):
+            continue
+        progress = get_seeding_progress(batch_id)
+        if progress and progress.get("stage") not in {"failed", "completed"}:
+            continue
+        if schedule_batch_discovery(batch_id, reason="startup_recovery"):
+            recovered.append(batch_id)
+    return recovered
 
 
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:

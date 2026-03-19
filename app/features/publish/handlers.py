@@ -51,11 +51,37 @@ from app.features.publish.schemas import (
     UpdatePostScheduleRequest,
 )
 try:
-    from app.features.publish.tiktok import get_tiktok_public_account
+    from app.features.publish.tiktok import (
+        get_tiktok_public_account,
+        get_tiktok_publish_state,
+        publish_tiktok_direct_for_post,
+        refresh_tiktok_post_status,
+        upload_tiktok_draft_for_post,
+    )
 except ModuleNotFoundError:
     def get_tiktok_public_account() -> Dict[str, Any]:
         """Keep Meta/account-hub startup resilient when TikTok code is not deployed yet."""
         return {"status": "unavailable"}
+
+    async def get_tiktok_publish_state() -> Dict[str, Any]:
+        return {"status": "unavailable", "publish_ready": False, "draft_ready": False}
+
+    async def publish_tiktok_direct_for_post(
+        post_id: str,
+        *,
+        caption: Optional[str] = None,
+        privacy_level: str,
+        disable_comment: bool,
+        disable_duet: bool,
+        disable_stitch: bool,
+    ) -> Dict[str, Any]:
+        raise ValidationError("TikTok publishing is unavailable in this deployment.")
+
+    async def refresh_tiktok_post_status(post_id: str) -> Optional[Dict[str, Any]]:
+        return None
+
+    async def upload_tiktok_draft_for_post(post_id: str, caption: Optional[str] = None) -> Dict[str, Any]:
+        raise ValidationError("TikTok publishing is unavailable in this deployment.")
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/publish", tags=["publish"])
@@ -115,6 +141,7 @@ def _sanitize_meta_connection(meta_connection: Dict[str, Any]) -> Dict[str, Any]
     if not meta_connection:
         return {}
 
+    readiness = _meta_publish_readiness(meta_connection)
     sanitized = deepcopy(meta_connection)
     sanitized.pop("user_access_token", None)
     sanitized.pop("page_access_token", None)
@@ -127,7 +154,49 @@ def _sanitize_meta_connection(meta_connection: Dict[str, Any]) -> Dict[str, Any]
     if isinstance(selected_page, dict):
         selected_page.pop("access_token", None)
 
-    return sanitized
+    return {**sanitized, **readiness}
+
+
+def _meta_publish_readiness(meta_connection: Dict[str, Any]) -> Dict[str, Any]:
+    status = str(meta_connection.get("status") or "disconnected")
+    selected_page = meta_connection.get("selected_page") or {}
+    selected_instagram = meta_connection.get("selected_instagram") or {}
+    available_pages = meta_connection.get("available_pages") or []
+    publishable_pages = [
+        page
+        for page in available_pages
+        if isinstance(page, dict)
+        and page.get("id")
+        and isinstance(page.get("instagram_business_account"), dict)
+        and page["instagram_business_account"].get("id")
+    ]
+
+    readiness_status = "disconnected"
+    readiness_reason = "Connect Meta before scheduling Facebook or Instagram."
+    publish_ready = False
+    if status == "error":
+        readiness_status = "connected_not_publishable"
+        readiness_reason = str(meta_connection.get("error") or "Reconnect Meta before publishing.")
+    elif status == "connected" and selected_page.get("id") and selected_instagram.get("id"):
+        readiness_status = "publish_ready"
+        readiness_reason = "Facebook and Instagram are ready to publish from this workspace."
+        publish_ready = True
+    elif status == "connected" and not publishable_pages:
+        readiness_status = "missing_instagram_business"
+        readiness_reason = "No manageable Facebook Page with a connected Instagram business account is available."
+    elif status == "connected" and not selected_page.get("id"):
+        readiness_status = "page_selection_required"
+        readiness_reason = "Select the Facebook Page and linked Instagram business account for this workspace."
+    elif status == "connected" and not selected_instagram.get("id"):
+        readiness_status = "missing_instagram_business"
+        readiness_reason = "The selected Facebook Page is missing a linked Instagram business account."
+
+    return {
+        "publish_ready": publish_ready,
+        "readiness_status": readiness_status,
+        "readiness_reason": readiness_reason,
+        "publishable_page_count": len(publishable_pages),
+    }
 
 
 def _require_meta_settings() -> Any:
@@ -531,10 +600,7 @@ async def get_meta_status(batch_id: Optional[str] = None):
         data={
             "meta_connection": sanitized,
             "is_connected": sanitized.get("status") == "connected",
-            "has_selected_target": bool(
-                (sanitized.get("selected_page") or {}).get("id")
-                and (sanitized.get("selected_instagram") or {}).get("id")
-            ),
+            "has_selected_target": bool(sanitized.get("publish_ready")),
         }
     )
 
@@ -549,7 +615,7 @@ async def get_accounts_status(batch_id: Optional[str] = None):
         meta_connection = _get_workspace_meta_connection()
 
     sanitized_meta = _sanitize_meta_connection(meta_connection)
-    tiktok_connection = get_tiktok_public_account()
+    tiktok_connection = await get_tiktok_publish_state()
 
     return SuccessResponse(
         data={
@@ -558,11 +624,18 @@ async def get_accounts_status(batch_id: Optional[str] = None):
             "providers": {
                 "meta": {
                     "connected": sanitized_meta.get("status") == "connected",
+                    "publish_ready": bool(sanitized_meta.get("publish_ready")),
                     "needs_attention": sanitized_meta.get("status") == "error",
+                    "readiness_status": sanitized_meta.get("readiness_status"),
+                    "readiness_reason": sanitized_meta.get("readiness_reason"),
                 },
                 "tiktok": {
                     "connected": tiktok_connection.get("status") == "connected",
+                    "publish_ready": bool(tiktok_connection.get("publish_ready")),
+                    "draft_ready": bool(tiktok_connection.get("draft_ready")),
                     "needs_attention": tiktok_connection.get("status") == "reconnect_required",
+                    "readiness_status": tiktok_connection.get("readiness_status"),
+                    "readiness_reason": tiktok_connection.get("readiness_reason"),
                 },
             },
         }
@@ -1025,11 +1098,46 @@ def _derive_publish_status(networks: List[str], publish_results: Dict[str, Any])
         return "published"
     if any(status == "failed" for status in statuses):
         return "failed"
-    if any(status == "publishing" for status in statuses):
+    if any(status in {"publishing", "processing", "awaiting_user_action"} for status in statuses):
         return "publishing"
     if any(status == "scheduled" for status in statuses):
         return "scheduled"
     return "pending"
+
+
+def _default_tiktok_privacy_level(tiktok_connection: Dict[str, Any]) -> str:
+    creator_info = tiktok_connection.get("creator_info") or {}
+    privacy_options = [str(item) for item in creator_info.get("privacy_level_options") or [] if item]
+    if "SELF_ONLY" in privacy_options:
+        return "SELF_ONLY"
+    if privacy_options:
+        return privacy_options[0]
+    return "SELF_ONLY"
+
+
+async def _reconcile_inflight_tiktok_posts(limit: int = 20) -> List[str]:
+    supabase = get_supabase().client
+    response = supabase.table("posts").select(
+        "id,batch_id,publish_status,publish_results,seed_data"
+    ).eq("publish_status", "publishing").limit(limit).execute()
+    touched_batches: List[str] = []
+    for row in response.data or []:
+        if _is_removed_post(row):
+            continue
+        tiktok_result = _load_json_object(_load_json_object(row.get("publish_results")).get("tiktok"))
+        if not tiktok_result:
+            continue
+        if str(tiktok_result.get("provider_status") or "").upper() in {"PUBLISH_COMPLETE", "FAILED"}:
+            continue
+        try:
+            refreshed = await refresh_tiktok_post_status(str(row["id"]))
+            if refreshed:
+                touched_batches.append(str(row["batch_id"]))
+        except FlowForgeException as exc:
+            logger.warning("tiktok_publish_status_refresh_failed", post_id=row.get("id"), error=exc.message)
+        except Exception as exc:
+            logger.warning("tiktok_publish_status_refresh_failed", post_id=row.get("id"), error=str(exc))
+    return touched_batches
 
 
 def _terminal_batch_post(post: Dict[str, Any]) -> bool:
@@ -1067,7 +1175,8 @@ def _reconcile_completed_batches(batch_ids: List[str]) -> None:
 
 
 async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> Dict[str, Any]:
-    """Dispatch due Meta posts and persist per-network outcomes."""
+    """Dispatch due posts and persist per-network outcomes."""
+    inflight_batches = await _reconcile_inflight_tiktok_posts()
     now = datetime.utcnow().isoformat()
     supabase = get_supabase().client
     due_response = supabase.table("posts").select(
@@ -1078,7 +1187,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
     processed = 0
     published = 0
     failed = 0
-    touched_batches: List[str] = []
+    touched_batches: List[str] = list(inflight_batches)
 
     for due_post in due_posts:
         if _is_removed_post(due_post):
@@ -1097,6 +1206,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
         platform_ids = _load_json_object(post.get("platform_ids"))
         batch = _load_batch(post["batch_id"], fields="id,meta_connection,state")
         meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
+        tiktok_connection = await get_tiktok_publish_state()
 
         try:
             _ensure_meta_targets_for_networks(post["social_networks"], meta_connection)
@@ -1112,9 +1222,38 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
                         remote_id = await _publish_facebook_video(post, meta_connection)
                     elif network == SocialNetwork.INSTAGRAM.value:
                         remote_id = await _publish_instagram_reel(post, meta_connection)
+                    elif network == SocialNetwork.TIKTOK.value:
+                        tiktok_job = await publish_tiktok_direct_for_post(
+                            post["id"],
+                            caption=post["publish_caption"],
+                            privacy_level=_default_tiktok_privacy_level(tiktok_connection),
+                            disable_comment=bool((tiktok_connection.get("creator_info") or {}).get("comment_disabled")),
+                            disable_duet=bool((tiktok_connection.get("creator_info") or {}).get("duet_disabled")),
+                            disable_stitch=bool((tiktok_connection.get("creator_info") or {}).get("stitch_disabled")),
+                        )
+                        tiktok_payload = _load_json_object(tiktok_job.get("response_payload_json"))
+                        provider_post_ids = tiktok_payload.get("publicaly_available_post_id") or []
+                        remote_id = str(provider_post_ids[0]) if provider_post_ids else str(tiktok_job.get("tiktok_publish_id") or tiktok_job.get("id"))
+                        provider_status = str(tiktok_payload.get("provider_status") or tiktok_job.get("status") or "").upper()
+                        publish_results[network] = {
+                            "status": "published" if tiktok_job.get("status") == "published" else "publishing",
+                            "post_mode": "direct",
+                            "provider_status": provider_status,
+                            "publish_id": tiktok_job.get("tiktok_publish_id"),
+                            "remote_id": remote_id,
+                            "post_id": str(provider_post_ids[0]) if provider_post_ids else None,
+                            "fail_reason": tiktok_payload.get("fail_reason"),
+                            "error_message": tiktok_job.get("error_message") or "",
+                            "published_at": datetime.utcnow().isoformat() if tiktok_job.get("status") == "published" else None,
+                            "last_attempt_at": datetime.utcnow().isoformat(),
+                            "attempt_count": attempt_count,
+                        }
+                        if tiktok_job.get("status") == "published" and provider_post_ids:
+                            platform_ids[network] = str(provider_post_ids[0])
+                        continue
                     else:
                         raise ValidationError(
-                            f"{network} publishing is not supported by this Meta slice.",
+                            f"{network} publishing is not supported by this publish slice.",
                             details={"network": network},
                         )
 

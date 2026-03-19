@@ -31,19 +31,22 @@ from app.features.batches.queries import (
     duplicate_batch,
     get_batch_posts_summary
 )
+from app.core.video_profiles import normalize_target_length_tier
 from app.features.topics.handlers import discover_topics_for_batch
 from app.features.topics.handlers import (
     get_seeding_events,
     get_seeding_progress,
+    is_batch_discovery_active,
+    schedule_batch_discovery,
     start_seeding_interaction,
     update_seeding_progress,
 )
 from app.features.publish.handlers import _effective_meta_connection
 
 try:
-    from app.features.publish.tiktok import get_tiktok_public_account
+    from app.features.publish.tiktok import get_tiktok_publish_state
 except ModuleNotFoundError:
-    def get_tiktok_public_account() -> Dict[str, Any]:
+    async def get_tiktok_publish_state() -> Dict[str, Any]:
         """Keep batch detail rendering alive when TikTok code is not deployed yet."""
         return {"status": "unavailable"}
 from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
@@ -95,13 +98,15 @@ async def create_batch_endpoint(request: Request):
             payload = CreateBatchRequest.model_validate(
                 {
                     "brand": str(form.get("brand", "")).strip(),
-                    "post_type_counts": post_type_counts
+                    "post_type_counts": post_type_counts,
+                    "target_length_tier": int(form.get("target_length_tier", 8) or 8)
                 }
             )
 
         batch = create_batch(
             brand=payload.brand,
-            post_type_counts=payload.post_type_counts.model_dump()
+            post_type_counts=payload.post_type_counts.model_dump(),
+            target_length_tier=normalize_target_length_tier(payload.target_length_tier)
         )
         start_seeding_interaction(
             batch_id=batch["id"],
@@ -109,7 +114,7 @@ async def create_batch_endpoint(request: Request):
             expected_posts=payload.post_type_counts.total,
         )
 
-        asyncio.get_running_loop().create_task(_run_discover_topics(batch["id"]))
+        schedule_batch_discovery(batch["id"], reason="batch_create")
 
         if _wants_html(request):
             batches, total = list_batches()
@@ -126,6 +131,7 @@ async def create_batch_endpoint(request: Request):
                     "batch_id": batch["id"],
                     "brand": batch["brand"],
                     "expected_posts": payload.post_type_counts.total,
+                    "target_length_tier": batch.get("target_length_tier"),
                 }
             })
             return response
@@ -465,7 +471,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             "meta_connection": _sanitize_meta_connection(
                 _effective_meta_connection(batch_id, batch.get("meta_connection"))
             ),
-            "tiktok_connection": get_tiktok_public_account(),
+            "tiktok_connection": await get_tiktok_publish_state(),
             "posts": posts_list,
         }
 
@@ -496,6 +502,20 @@ async def get_batch_status(batch_id: str):
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
         progress = get_seeding_progress(batch_id)
+
+        if (
+            batch["state"] == BatchState.S1_SETUP.value
+            and posts_summary["posts_count"] == 0
+            and (progress is None or progress.get("stage") in {"failed", "completed"})
+            and not is_batch_discovery_active(batch_id)
+        ):
+            start_seeding_interaction(
+                batch_id=batch["id"],
+                brand=batch["brand"],
+                expected_posts=sum((batch.get("post_type_counts") or {}).values()),
+            )
+            schedule_batch_discovery(batch_id, reason="status_recovery")
+            progress = get_seeding_progress(batch_id)
 
         payload = {
             "id": batch["id"],

@@ -19,7 +19,15 @@ from app.adapters.veo_client import get_veo_client
 from app.adapters.sora_client import get_sora_client
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
+from app.core.video_profiles import (
+    VEO_EXTENDED_VIDEO_ROUTE,
+    VEO_PROVIDER,
+    get_duration_profile,
+    uses_duration_routing,
+)
+from app.features.batches.queries import get_batch_by_id
 from app.features.posts.prompt_text import build_full_prompt_text
+from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
 from app.features.videos.schemas import (
     VideoGenerationRequest,
     VideoGenerationResponse,
@@ -30,6 +38,104 @@ from app.features.videos.schemas import (
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+
+def _resolve_video_submission_plan(
+    *,
+    batch: Dict[str, Any],
+    requested_provider: Optional[str],
+    requested_seconds: Optional[int],
+    aspect_ratio: str,
+    resolution: str,
+    size: Optional[str],
+) -> Dict[str, Any]:
+    if uses_duration_routing(batch):
+        profile = get_duration_profile(batch.get("target_length_tier"))
+        resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
+        return {
+            "provider": VEO_PROVIDER,
+            "seconds": profile.requested_seconds,
+            "provider_target_seconds": profile.provider_target_seconds,
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolved_resolution,
+            "size": size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution),
+            "profile": profile,
+            "duration_routed": True,
+        }
+
+    provider = requested_provider or VEO_PROVIDER
+    seconds = requested_seconds or 8
+    return {
+        "provider": provider,
+        "seconds": seconds,
+        "provider_target_seconds": seconds,
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+        "size": size,
+        "profile": None,
+        "duration_routed": False,
+    }
+
+
+def _build_submission_metadata(
+    *,
+    existing_metadata: Dict[str, Any],
+    submission_plan: Dict[str, Any],
+    submission_result: Dict[str, Any],
+    segment_metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    requested_size = submission_result.get("requested_size")
+    metadata = {
+        **existing_metadata,
+        "requested_aspect_ratio": submission_plan["aspect_ratio"],
+        "requested_resolution": submission_plan["resolution"],
+        "requested_seconds": submission_plan["seconds"],
+        "requested_size": requested_size,
+    }
+
+    profile = submission_plan.get("profile")
+    if profile is not None:
+        metadata.update(
+            {
+                "target_length_tier": profile.target_length_tier,
+                "video_pipeline_route": profile.route,
+                "provider_target_seconds": profile.provider_target_seconds,
+                "generated_seconds": 0,
+                "actual_seconds": None,
+                "chain_status": "submitted",
+                "operation_ids": [submission_result["operation_id"]],
+                "veo_base_seconds": profile.veo_base_seconds,
+                "veo_extension_seconds": profile.veo_extension_seconds,
+                "veo_extension_hops_target": profile.veo_extension_hops,
+                "veo_extension_hops_completed": 0,
+            }
+        )
+    if profile is not None and profile.route != VEO_EXTENDED_VIDEO_ROUTE:
+        metadata["duration_seconds"] = profile.provider_target_seconds
+
+    provider_model = submission_result.get("provider_model")
+    if provider_model:
+        metadata["provider_model"] = provider_model
+    if submission_result.get("provider_metadata"):
+        metadata["provider_metadata"] = submission_result["provider_metadata"]
+    if segment_metadata:
+        metadata.update(segment_metadata)
+
+    return metadata
+
+
+def _build_veo_extended_base_prompt(seed_data: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
+    segments = split_dialogue_sentences(script) if script else []
+    if not segments and script:
+        segments = [script]
+    base_segment = segments[0] if segments else ""
+    segment_metadata = {
+        "veo_segments": segments,
+        "veo_segments_total": len(segments),
+        "veo_current_segment_index": 0,
+    }
+    return build_veo_prompt_segment(base_segment, include_quotes=False, include_ending=False), segment_metadata
 
 
 @router.post("/{post_id}/generate", response_model=SuccessResponse)
