@@ -30,8 +30,8 @@ x-flow-forge-env: &flow-forge-env
   META_APP_ID: ${META_APP_ID}
   META_APP_SECRET: ${META_APP_SECRET}
   META_REDIRECT_URI: ${META_REDIRECT_URI}
-  APP_URL: ${APP_URL}
-  APP_HOST: ${APP_HOST}
+  APP_URL: ${APP_URL:-https://aiugc-prod.srv1498567.hstgr.cloud}
+  APP_HOST: ${APP_HOST:-aiugc-prod.srv1498567.hstgr.cloud}
   PRIVACY_POLICY_URL: ${PRIVACY_POLICY_URL}
   TERMS_URL: ${TERMS_URL}
   TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
@@ -52,7 +52,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${APP_HOST:-aiugc-prod.srv1498567.hstgr.cloud}`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=websecure
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.tls.certresolver=letsencrypt
       - traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000
