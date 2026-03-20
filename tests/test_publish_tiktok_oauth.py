@@ -186,6 +186,25 @@ def test_tiktok_callback_accepts_single_row_rpc_payload(monkeypatch):
     assert storage["connected_accounts"][0]["open_id"] == "open-123"
 
 
+def test_tiktok_readiness_marks_sandbox_as_draft_only():
+    readiness = tiktok._derive_tiktok_readiness(
+        {
+            "status": "connected",
+            "environment": "sandbox",
+            "scope": "user.info.basic,video.upload,video.publish",
+        },
+        {
+            "privacy_level_options": ["SELF_ONLY", "PUBLIC_TO_EVERYONE"],
+            "max_video_post_duration_sec": 60,
+        },
+    )
+
+    assert readiness["publish_ready"] is False
+    assert readiness["draft_ready"] is True
+    assert readiness["readiness_status"] == "draft_ready"
+    assert "draft upload" in readiness["readiness_reason"]
+
+
 def test_tiktok_request_handles_oauth_error_payload(monkeypatch):
     import asyncio
 

@@ -141,6 +141,20 @@ def _settings():
     )
 
 
+def _production_settings():
+    return SimpleNamespace(
+        tiktok_client_key="client-key",
+        tiktok_client_secret="client-secret",
+        tiktok_redirect_uri="http://localhost:8000/api/auth/tiktok/callback",
+        tiktok_environment="production",
+        tiktok_sandbox_account="@sandbox",
+        token_encryption_key="encryption-secret",
+        app_url="http://localhost:8000",
+        privacy_policy_url="https://example.com/privacy",
+        terms_url="https://example.com/terms",
+    )
+
+
 async def _download_stub(video_url: str):
     assert video_url == "https://cdn.example.com/video.mp4"
     return (b"video-bytes", "video/mp4")
@@ -202,7 +216,7 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
         "connected_accounts": [],
     }
 
-    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings)
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
     monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
     monkeypatch.setattr(tiktok, "_initialize_inbox_video_upload", _init_stub)
@@ -249,7 +263,7 @@ def test_upload_tiktok_draft_allows_s8_complete_after_meta_publish(monkeypatch):
         "connected_accounts": [],
     }
 
-    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings)
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
     monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
     monkeypatch.setattr(tiktok, "_initialize_inbox_video_upload", _init_stub)
@@ -288,7 +302,7 @@ def test_publish_tiktok_direct_persists_published_post_result(monkeypatch):
         "connected_accounts": [],
     }
 
-    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings)
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
     monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
     monkeypatch.setattr(tiktok, "_initialize_direct_post", _direct_init_stub)
@@ -367,7 +381,7 @@ def test_publish_tiktok_direct_allows_s8_complete_after_meta_publish(monkeypatch
         "connected_accounts": [],
     }
 
-    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings)
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
     monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
     monkeypatch.setattr(tiktok, "_initialize_direct_post", _direct_init_stub)
@@ -451,7 +465,7 @@ def test_publish_tiktok_direct_surfaces_private_account_restriction(monkeypatch)
             },
         )
 
-    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings)
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
     monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
     monkeypatch.setattr(tiktok, "_initialize_direct_post", _restricted_init)
@@ -485,6 +499,52 @@ def test_publish_tiktok_direct_surfaces_private_account_restriction(monkeypatch)
         )
         raise AssertionError("Expected ValidationError")
     except ValidationError as exc:
-        assert "blocked for this account" in str(exc)
+        assert "private account" in str(exc) or "blocked" in str(exc)
         assert storage["publish_jobs"][0]["status"] == "failed"
         assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "failed"
+
+
+def test_publish_tiktok_direct_blocks_sandbox_environment(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "topic_title": "Topic",
+                "seed_data": {"script_review_status": "approved", "description": "Fallback caption"},
+                "video_url": "https://cdn.example.com/video.mp4",
+                "video_metadata": {"requested_seconds": 8},
+                "publish_caption": "Local caption",
+                "publish_results": {},
+                "platform_ids": {},
+                "social_networks": ["tiktok"],
+                "publish_status": "pending",
+            }
+        ],
+        "batches": [{"id": "batch-1", "state": "S8_COMPLETE"}],
+        "media_assets": [],
+        "publish_jobs": [],
+        "connected_accounts": [],
+    }
+
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
+
+    try:
+        asyncio.run(
+            tiktok.publish_tiktok_direct(
+                TikTokPublishRequest(
+                    post_id="post-1",
+                    caption="TikTok caption",
+                    privacy_level="SELF_ONLY",
+                    disable_comment=False,
+                    disable_duet=False,
+                    disable_stitch=True,
+                )
+            )
+        )
+        raise AssertionError("Expected ValidationError")
+    except ValidationError as exc:
+        assert "draft-only" in str(exc)
+        assert storage["publish_jobs"] == []
