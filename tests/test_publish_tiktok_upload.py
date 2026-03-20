@@ -214,7 +214,7 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
     )
 
     job = response.data
-    assert job["status"] == "awaiting_user_action"
+    assert job["status"] == "submitted"
     assert job["tiktok_publish_id"] == "publish-1"
     assert storage["media_assets"][0]["source_url"] == "https://cdn.example.com/video.mp4"
     assert storage["publish_jobs"][0]["caption"] == "TikTok caption"
@@ -260,7 +260,7 @@ def test_upload_tiktok_draft_allows_s8_complete_after_meta_publish(monkeypatch):
         tiktok.upload_tiktok_draft(TikTokUploadDraftRequest(post_id="post-1", caption="TikTok caption"))
     )
 
-    assert response.data["status"] == "awaiting_user_action"
+    assert response.data["status"] == "submitted"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
     assert storage["posts"][0]["publish_results"]["tiktok"]["provider_status"] == "SEND_TO_USER_INBOX"
 
@@ -330,7 +330,7 @@ def test_publish_tiktok_direct_persists_published_post_result(monkeypatch):
     )
 
     job = response.data
-    assert job["status"] == "published"
+    assert job["status"] == "submitted"
     assert job["tiktok_publish_id"] == "publish-direct-1"
     assert storage["publish_jobs"][0]["post_mode"] == "direct"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "published"
@@ -408,7 +408,7 @@ def test_publish_tiktok_direct_allows_s8_complete_after_meta_publish(monkeypatch
         )
     )
 
-    assert response.data["status"] == "published"
+    assert response.data["status"] == "submitted"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "published"
     assert storage["posts"][0]["platform_ids"]["tiktok"] == "tt-post-1"
 

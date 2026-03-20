@@ -517,7 +517,7 @@ def _derive_post_publish_status(networks: List[str], publish_results: Dict[str, 
     return "pending"
 
 
-def _map_tiktok_job_status(provider_status: str, post_mode: str) -> str:
+def _map_tiktok_result_status(provider_status: str, post_mode: str) -> str:
     normalized = str(provider_status or "").upper()
     if normalized == "PUBLISH_COMPLETE":
         return "published"
@@ -526,6 +526,17 @@ def _map_tiktok_job_status(provider_status: str, post_mode: str) -> str:
     if post_mode == "draft" and normalized == "SEND_TO_USER_INBOX":
         return "awaiting_user_action"
     return "publishing"
+
+
+def _map_tiktok_publish_job_status(provider_status: str, post_mode: str) -> str:
+    normalized = str(provider_status or "").upper()
+    if normalized == "FAILED":
+        return "failed"
+    if normalized in {"PUBLISH_COMPLETE", "SEND_TO_USER_INBOX"}:
+        return "submitted"
+    if post_mode in {"draft", "direct"}:
+        return "submitted"
+    return "created"
 
 
 def _update_post_tiktok_result(
@@ -540,7 +551,7 @@ def _update_post_tiktok_result(
 ) -> None:
     publish_results = _load_json_object(post.get("publish_results"))
     platform_ids = _load_json_object(post.get("platform_ids"))
-    local_status = _map_tiktok_job_status(provider_status, post_mode)
+    local_status = _map_tiktok_result_status(provider_status, post_mode)
     result = {
         "status": local_status,
         "post_mode": post_mode,
@@ -1080,11 +1091,12 @@ async def _publish_tiktok_post(
         fail_reason = str(status_payload.get("fail_reason") or "")
         provider_post_ids = status_payload.get("publicaly_available_post_id") or []
         provider_post_id = str(provider_post_ids[0]) if provider_post_ids else None
-        local_status = _map_tiktok_job_status(provider_status, mode)
+        local_job_status = _map_tiktok_publish_job_status(provider_status, mode)
+        local_result_status = _map_tiktok_result_status(provider_status, mode)
         updated_job = _update_publish_job(
             str(job["id"]),
             {
-                "status": local_status,
+                "status": local_job_status,
                 "tiktok_publish_id": init_payload.get("publish_id"),
                 "response_payload_json": redact_secret_payload(
                     {
@@ -1097,7 +1109,7 @@ async def _publish_tiktok_post(
                     }
                 ),
                 "error_message": fail_reason,
-                "published_at": datetime.utcnow().isoformat() if local_status == "published" else None,
+                "published_at": datetime.utcnow().isoformat() if local_result_status == "published" else None,
             },
         )
         _update_post_tiktok_result(
@@ -1192,15 +1204,16 @@ async def refresh_tiktok_post_status(post_id: str) -> Optional[Dict[str, Any]]:
     fail_reason = str(status_payload.get("fail_reason") or "")
     provider_post_ids = status_payload.get("publicaly_available_post_id") or []
     provider_post_id = str(provider_post_ids[0]) if provider_post_ids else None
-    local_status = _map_tiktok_job_status(provider_status, str(job.get("post_mode") or "draft"))
+    local_job_status = _map_tiktok_publish_job_status(provider_status, str(job.get("post_mode") or "draft"))
+    local_result_status = _map_tiktok_result_status(provider_status, str(job.get("post_mode") or "draft"))
 
     updated_job = _update_publish_job(
         str(job["id"]),
         {
-            "status": local_status,
+            "status": local_job_status,
             "response_payload_json": redact_secret_payload(status_payload),
             "error_message": fail_reason,
-            "published_at": datetime.utcnow().isoformat() if local_status == "published" else None,
+            "published_at": datetime.utcnow().isoformat() if local_result_status == "published" else None,
         },
     )
     _update_post_tiktok_result(
