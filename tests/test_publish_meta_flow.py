@@ -5,9 +5,10 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from fastapi import HTTPException
+import pytest
 
 from app.core.states import BatchState
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 from app.features.batches import handlers as batch_handlers
 from app.features.publish import handlers as publish_handlers
 from app.features.publish.schemas import ConfirmPublishRequest, PostScheduleRequest, SocialNetwork
@@ -800,3 +801,42 @@ def test_publish_instagram_reel_uses_selected_page_token(monkeypatch):
     assert calls[2]["data"]["access_token"] == "page-token"
     assert calls[0]["url"].endswith("/ig-1/media")
     assert calls[2]["url"].endswith("/ig-1/media_publish")
+
+
+def test_wait_for_instagram_container_retries_until_finished(monkeypatch):
+    statuses = iter(["IN_PROGRESS", "IN_PROGRESS", "FINISHED"])
+    calls = []
+
+    async def _fake_meta_request(method, url, *, params=None, data=None):
+        calls.append({"method": method, "url": url, "params": params, "data": data})
+        return {"status_code": next(statuses)}
+
+    async def _fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
+    monkeypatch.setattr(publish_handlers.asyncio, "sleep", _fake_sleep)
+
+    asyncio.run(publish_handlers._wait_for_instagram_container("container-1", "page-token"))
+
+    assert len(calls) == 3
+    assert all(call["params"]["access_token"] == "page-token" for call in calls)
+
+
+def test_wait_for_instagram_container_reports_last_status_on_timeout(monkeypatch):
+    async def _fake_meta_request(method, url, *, params=None, data=None):
+        return {"status_code": "IN_PROGRESS"}
+
+    async def _fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
+    monkeypatch.setattr(publish_handlers.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(publish_handlers, "INSTAGRAM_POLL_ATTEMPTS", 2)
+
+    with pytest.raises(ThirdPartyError) as exc_info:
+        asyncio.run(publish_handlers._wait_for_instagram_container("container-1", "page-token"))
+
+    assert exc_info.value.details["container_id"] == "container-1"
+    assert exc_info.value.details["status_code"] == "IN_PROGRESS"
+    assert exc_info.value.details["poll_attempts"] == 2

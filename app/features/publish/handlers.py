@@ -90,7 +90,7 @@ META_GRAPH_BASE = "https://graph.facebook.com/v25.0"
 META_IG_BASE = "https://graph.instagram.com/v25.0"
 META_OAUTH_URL = "https://www.facebook.com/v25.0/dialog/oauth"
 META_TIMEOUT_SECONDS = 30.0
-INSTAGRAM_POLL_ATTEMPTS = 10
+INSTAGRAM_POLL_ATTEMPTS = 45
 INSTAGRAM_POLL_SECONDS = 2
 META_LOGIN_SCOPES = [
     "pages_show_list",
@@ -1116,6 +1116,7 @@ async def _publish_facebook_video(post: Dict[str, Any], meta_connection: Dict[st
 
 async def _wait_for_instagram_container(container_id: str, page_token: str) -> None:
     """Poll a container until Instagram says it is ready to publish."""
+    last_status_code = "UNKNOWN"
     for _ in range(INSTAGRAM_POLL_ATTEMPTS):
         payload = await _meta_request(
             "GET",
@@ -1123,7 +1124,8 @@ async def _wait_for_instagram_container(container_id: str, page_token: str) -> N
             params={"fields": "status_code", "access_token": page_token},
         )
         status_code = str(payload.get("status_code", "")).upper()
-        if status_code == "FINISHED":
+        last_status_code = status_code or "UNKNOWN"
+        if status_code in {"FINISHED", "PUBLISHED"}:
             return
         if status_code in {"ERROR", "EXPIRED"}:
             raise ThirdPartyError(
@@ -1134,7 +1136,12 @@ async def _wait_for_instagram_container(container_id: str, page_token: str) -> N
 
     raise ThirdPartyError(
         "Instagram media container did not become publishable in time.",
-        details={"container_id": container_id},
+        details={
+            "container_id": container_id,
+            "status_code": last_status_code,
+            "poll_attempts": INSTAGRAM_POLL_ATTEMPTS,
+            "poll_seconds": INSTAGRAM_POLL_SECONDS,
+        },
     )
 
 
