@@ -95,6 +95,8 @@ async def update_post_script(post_id: str, request: Request):
     
     except FlowForgeException:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("update_script_failed", post_id=post_id, error=str(e))
         raise HTTPException(
@@ -151,6 +153,8 @@ async def update_post_script_review(post_id: str, request: Request):
         return SuccessResponse(data={"id": post_id, "action": action, "script_review_status": seed_data["script_review_status"]})
 
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception("update_script_review_failed", post_id=post_id, error=str(e))
@@ -260,6 +264,8 @@ async def build_post_prompt(post_id: str):
             detail=e.message
         )
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception(

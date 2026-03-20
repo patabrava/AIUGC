@@ -289,6 +289,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
     
     except FlowForgeException:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(
             "video_generation_failed",
@@ -352,6 +354,8 @@ async def get_video_status(post_id: str):
         )
     
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception(

@@ -26,6 +26,27 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/qa", tags=["qa"])
 
 
+def _is_removed_post(post: Dict[str, Any]) -> bool:
+    seed_data = post.get("seed_data") or {}
+    if isinstance(seed_data, str):
+        try:
+            seed_data = json.loads(seed_data)
+        except json.JSONDecodeError:
+            seed_data = {}
+    return seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True
+
+
+def _active_posts(posts: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    return [post for post in posts if not _is_removed_post(post)]
+
+
+def _active_posts_ready_for_publish(posts: list[Dict[str, Any]]) -> bool:
+    active_posts = _active_posts(posts)
+    if not active_posts:
+        return False
+    return all(post.get("qa_pass") is True for post in active_posts)
+
+
 @router.post("/{post_id}/auto-check", response_model=SuccessResponse)
 async def run_auto_qa_checks(post_id: str):
     """
@@ -103,6 +124,8 @@ async def run_auto_qa_checks(post_id: str):
         return SuccessResponse(data=auto_checks.model_dump())
     
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception(
@@ -217,10 +240,8 @@ async def approve_qa(post_id: str, req: Request):
             ).execute()
             
             if all_posts_response.data:
-                all_posts = all_posts_response.data
-                all_approved = all(p.get("qa_pass") is True for p in all_posts)
-                
-                if all_approved and len(all_posts) > 0:
+                all_posts = all_posts_response.data or []
+                if _active_posts_ready_for_publish(all_posts):
                     # Check if batch is in S6_QA state
                     batch_response = supabase.table("batches").select("state").eq(
                         "id", batch_id
@@ -309,19 +330,7 @@ async def get_batch_qa_status(batch_id: str):
         
         # Fetch all posts in batch
         posts_response = supabase.table("posts").select("*").eq("batch_id", batch_id).execute()
-        posts = posts_response.data
-
-        active_posts = []
-        for post in posts:
-            seed_data = post.get("seed_data") or {}
-            if isinstance(seed_data, str):
-                try:
-                    seed_data = json.loads(seed_data)
-                except json.JSONDecodeError:
-                    seed_data = {}
-            if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
-                continue
-            active_posts.append(post)
+        active_posts = _active_posts(posts_response.data or [])
 
         total_posts = len(active_posts)
         posts_with_videos = sum(1 for p in active_posts if p.get("video_status") == "completed")
@@ -354,6 +363,8 @@ async def get_batch_qa_status(batch_id: str):
         )
     
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception(

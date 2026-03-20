@@ -7,14 +7,14 @@ Per Constitution § I: Canon Supremacy
 import uuid
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger, set_correlation_id
-from app.core.errors import FlowForgeException, ErrorResponse
+from app.core.errors import FlowForgeException, ErrorResponse, error_code_for_status
 from app.adapters.supabase_client import get_supabase
 from app.features.batches.handlers import router as batches_router
 from app.features.topics.handlers import recover_stalled_batches, router as topics_router
@@ -117,6 +117,28 @@ async def flowforge_exception_handler(request: Request, exc: FlowForgeException)
     )
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Normalize framework-level HTTP errors into the shared error envelope."""
+    detail = exc.detail
+    if isinstance(detail, dict):
+        message = str(detail.get("message") or detail.get("detail") or "Request failed")
+        details = {key: value for key, value in detail.items() if key not in {"message", "detail"}}
+        if not details:
+            details = None
+    else:
+        message = str(detail or "Request failed")
+        details = None
+
+    error_response = ErrorResponse(
+        status=exc.status_code,
+        code=error_code_for_status(exc.status_code),
+        message=message,
+        details=details,
+    )
+    return JSONResponse(status_code=exc.status_code, content=error_response.model_dump())
+
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected exceptions."""
@@ -127,7 +149,8 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
     
     error_response = ErrorResponse(
-        code="internal_error",
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code=error_code_for_status(status.HTTP_500_INTERNAL_SERVER_ERROR),
         message="An unexpected error occurred",
         details={"error": str(exc)} if get_settings().debug else None
     )

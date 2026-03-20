@@ -24,6 +24,7 @@ class ErrorCode(str, Enum):
 class ErrorResponse(BaseModel):
     """Standard error envelope per Canon § 5.1"""
     ok: bool = Field(default=False, description="Always false for errors")
+    status: int = Field(..., description="HTTP status code")
     code: ErrorCode = Field(..., description="Machine-readable error code")
     message: str = Field(..., description="Human-readable error message")
     details: Optional[Dict[str, Any]] = Field(default=None, description="Additional error context")
@@ -56,10 +57,27 @@ class FlowForgeException(Exception):
     def to_response(self) -> ErrorResponse:
         """Convert exception to error response model."""
         return ErrorResponse(
+            status=self.status_code,
             code=self.code,
             message=self.message,
             details=self.details
         )
+
+
+def error_code_for_status(status_code: int) -> ErrorCode:
+    if status_code == 401:
+        return ErrorCode.AUTH_FAIL
+    if status_code == 404:
+        return ErrorCode.NOT_FOUND
+    if status_code == 409:
+        return ErrorCode.STATE_TRANSITION_ERROR
+    if status_code == 422:
+        return ErrorCode.VALIDATION_ERROR
+    if status_code == 429:
+        return ErrorCode.RATE_LIMIT
+    if status_code >= 500:
+        return ErrorCode.INTERNAL_ERROR
+    return ErrorCode.VALIDATION_ERROR
 
 
 class AuthenticationError(FlowForgeException):
