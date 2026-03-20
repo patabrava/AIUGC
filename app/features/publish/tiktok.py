@@ -315,7 +315,15 @@ async def _tiktok_request(
             details={"status_code": response.status_code, "error": redact_secret_payload(error or payload), "log_id": log_id},
         )
 
-    if response.status_code == 403 and error_code == "unaudited_client_can_only_post_to_private_accounts":
+    private_post_restriction = "unaudited_client_can_only_post_to_private_accounts"
+    response_text = str(response.text or "")
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    if response.status_code == 403 and (
+        error_code == private_post_restriction
+        or private_post_restriction in payload_text
+        or "content-sharing-guidelines" in response_text
+        or "private accounts" in payload_text.lower()
+    ):
         raise ValidationError(
             "TikTok direct posting is blocked for this account until the creator account is private or the API client is audited. Use draft upload for this deployment.",
             details={
