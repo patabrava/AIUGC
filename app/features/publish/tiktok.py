@@ -71,6 +71,16 @@ def _load_json_object(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _coerce_supabase_rows(value: Any) -> List[Dict[str, Any]]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [dict(value)]
+    return []
+
+
 def _state_secret() -> str:
     settings = get_settings()
     if not settings.token_encryption_key:
@@ -258,7 +268,7 @@ def _load_tiktok_account_secret() -> Dict[str, Any]:
             "p_encryption_key": settings.token_encryption_key,
         },
     ).execute()
-    rows = response.data or []
+    rows = _coerce_supabase_rows(response.data)
     if not rows:
         raise AuthenticationError("No TikTok sandbox account is connected.")
 
@@ -410,10 +420,10 @@ def _upsert_connected_account(
             "p_encryption_key": settings.token_encryption_key,
         },
     ).execute()
-    rows = response.data or []
+    rows = _coerce_supabase_rows(response.data)
     if not rows:
         raise ThirdPartyError("TikTok account persistence failed.")
-    return dict(rows[0])
+    return rows[0]
 
 
 def _storage_key_from_url(video_url: str) -> str:

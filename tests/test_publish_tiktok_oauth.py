@@ -36,6 +36,8 @@ class _FakeRpc:
             }
             self.storage["rpc_calls"].append((self.name, self.params))
             self.storage["connected_accounts"] = [row]
+            if self.storage.get("rpc_returns_single_row"):
+                return _FakeResponse(row)
             return _FakeResponse([row])
         raise AssertionError(f"Unexpected RPC {self.name}")
 
@@ -161,6 +163,27 @@ def test_tiktok_callback_persists_connected_account(monkeypatch):
     assert params["p_open_id"] == "open-123"
     assert params["p_display_name"] == "Sandbox Creator"
     assert params["p_access_token_plain"] == "access-token"
+
+
+def test_tiktok_callback_accepts_single_row_rpc_payload(monkeypatch):
+    import asyncio
+
+    storage = {"rpc_calls": [], "connected_accounts": [], "rpc_returns_single_row": True}
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok, "_exchange_code_for_tokens", _exchange_stub)
+    monkeypatch.setattr(tiktok, "_fetch_user_profile", _profile_stub)
+
+    state = tiktok.build_signed_state(
+        _settings().token_encryption_key,
+        batch_id="batch-1",
+        code_verifier="code-verifier",
+    )
+
+    response = asyncio.run(tiktok.tiktok_oauth_callback(code="auth-code", state=state))
+
+    assert response.headers["location"] == "/batches/batch-1"
+    assert storage["connected_accounts"][0]["open_id"] == "open-123"
 
 
 def test_tiktok_request_handles_oauth_error_payload(monkeypatch):
