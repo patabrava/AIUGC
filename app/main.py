@@ -83,6 +83,7 @@ app = FastAPI(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 TIKTOK_VERIFICATION_FILENAME = "tiktokM1iYTqs7dJ1raJALxFS3sJhodU2gFDuk.txt"
+TIKTOK_SANDBOX_VERIFICATION_FILENAME = "tiktokdcXzbIXpURopZpk1bkFGKLkXFMtWeX9T.txt"
 
 
 # Middleware for correlation IDs
@@ -192,6 +193,12 @@ async def root():
 async def tiktok_url_verification():
     """Serve the TikTok URL prefix verification token at the site root."""
     return FileResponse(f"static/{TIKTOK_VERIFICATION_FILENAME}", media_type="text/plain")
+
+
+@app.get(f"/{TIKTOK_SANDBOX_VERIFICATION_FILENAME}")
+async def tiktok_sandbox_url_verification():
+    """Serve the TikTok sandbox URL prefix verification token at the site root."""
+    return FileResponse(f"static/{TIKTOK_SANDBOX_VERIFICATION_FILENAME}", media_type="text/plain")
 
 
 if __name__ == "__main__":
