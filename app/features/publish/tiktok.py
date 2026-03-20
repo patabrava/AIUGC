@@ -790,8 +790,8 @@ def _load_post_for_tiktok(post_id: str, *, mode: str) -> Dict[str, Any]:
         raise NotFoundError("Batch not found for TikTok upload.", details={"post_id": post_id})
     batch_state = str(batch[0].get("state") or "")
     if mode == "draft":
-        allowed_states = {BatchState.S7_PUBLISH_PLAN.value}
-        error_message = "TikTok draft upload is only available in S7_PUBLISH_PLAN."
+        allowed_states = {BatchState.S7_PUBLISH_PLAN.value, BatchState.S8_COMPLETE.value}
+        error_message = "TikTok draft upload is only available in S7_PUBLISH_PLAN or S8_COMPLETE."
     else:
         allowed_states = {BatchState.S7_PUBLISH_PLAN.value, BatchState.S8_COMPLETE.value}
         error_message = "TikTok direct posting is only available in S7_PUBLISH_PLAN or S8_COMPLETE."

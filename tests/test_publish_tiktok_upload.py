@@ -222,6 +222,49 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
     assert storage["posts"][0]["publish_results"]["tiktok"]["provider_status"] == "SEND_TO_USER_INBOX"
 
 
+def test_upload_tiktok_draft_allows_s8_complete_after_meta_publish(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "topic_title": "Topic",
+                "seed_data": {"script_review_status": "approved", "description": "Fallback caption"},
+                "video_url": "https://cdn.example.com/video.mp4",
+                "video_metadata": {"requested_seconds": 8},
+                "publish_caption": "Local caption",
+                "publish_results": {
+                    "facebook": {"status": "published"},
+                    "instagram": {"status": "published"},
+                },
+                "platform_ids": {
+                    "facebook": "fb-post-1",
+                    "instagram": "ig-post-1",
+                },
+            }
+        ],
+        "batches": [{"id": "batch-1", "state": "S8_COMPLETE"}],
+        "media_assets": [],
+        "publish_jobs": [],
+        "connected_accounts": [],
+    }
+
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
+    monkeypatch.setattr(tiktok, "_initialize_inbox_video_upload", _init_stub)
+    monkeypatch.setattr(tiktok, "_poll_publish_status", lambda access_token, publish_id, *, post_mode: asyncio.sleep(0, result={"status": "SEND_TO_USER_INBOX"}))
+    monkeypatch.setattr(tiktok, "_upload_video_chunks", _upload_stub)
+
+    response = asyncio.run(
+        tiktok.upload_tiktok_draft(TikTokUploadDraftRequest(post_id="post-1", caption="TikTok caption"))
+    )
+
+    assert response.data["status"] == "awaiting_user_action"
+    assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
+    assert storage["posts"][0]["publish_results"]["tiktok"]["provider_status"] == "SEND_TO_USER_INBOX"
+
+
 def test_publish_tiktok_direct_persists_published_post_result(monkeypatch):
     storage = {
         "posts": [
