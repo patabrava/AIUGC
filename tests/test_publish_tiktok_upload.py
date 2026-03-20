@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from app.features.publish import tiktok
 from app.features.publish.schemas import TikTokPublishRequest, TikTokUploadDraftRequest
+from app.core.errors import ThirdPartyError, ValidationError
 
 
 class _FakeResponse:
@@ -367,3 +368,80 @@ def test_publish_tiktok_direct_allows_s8_complete_after_meta_publish(monkeypatch
     assert response.data["status"] == "published"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "published"
     assert storage["posts"][0]["platform_ids"]["tiktok"] == "tt-post-1"
+
+
+def test_publish_tiktok_direct_surfaces_private_account_restriction(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "topic_title": "Topic",
+                "seed_data": {"script_review_status": "approved", "description": "Fallback caption"},
+                "video_url": "https://cdn.example.com/video.mp4",
+                "video_metadata": {"requested_seconds": 8},
+                "publish_caption": "Local caption",
+                "publish_results": {},
+                "platform_ids": {},
+                "social_networks": ["tiktok"],
+                "publish_status": "pending",
+            }
+        ],
+        "batches": [{"id": "batch-1", "state": "S8_COMPLETE"}],
+        "media_assets": [],
+        "publish_jobs": [],
+        "connected_accounts": [],
+    }
+
+    async def _restricted_init(*args, **kwargs):
+        raise ThirdPartyError(
+            "Please review our integration guidelines at https://developers.tiktok.com/doc/content-sharing-guidelines/",
+            details={
+                "status_code": 403,
+                "error": {
+                    "code": "unaudited_client_can_only_post_to_private_accounts",
+                    "message": "Please review our integration guidelines at https://developers.tiktok.com/doc/content-sharing-guidelines/",
+                    "log_id": "log-1",
+                },
+                "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+                "log_id": None,
+            },
+        )
+
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
+    monkeypatch.setattr(tiktok, "_initialize_direct_post", _restricted_init)
+    monkeypatch.setattr(
+        tiktok,
+        "_query_creator_info",
+        lambda access_token: asyncio.sleep(
+            0,
+            result={
+                "privacy_level_options": ["SELF_ONLY", "PUBLIC_TO_EVERYONE"],
+                "comment_disabled": False,
+                "duet_disabled": False,
+                "stitch_disabled": False,
+                "max_video_post_duration_sec": 60,
+            },
+        ),
+    )
+
+    try:
+        asyncio.run(
+            tiktok.publish_tiktok_direct(
+                TikTokPublishRequest(
+                    post_id="post-1",
+                    caption="TikTok caption",
+                    privacy_level="SELF_ONLY",
+                    disable_comment=False,
+                    disable_duet=False,
+                    disable_stitch=True,
+                )
+            )
+        )
+        raise AssertionError("Expected ValidationError")
+    except ValidationError as exc:
+        assert "blocked for this account" in str(exc)
+        assert storage["publish_jobs"][0]["status"] == "failed"
+        assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "failed"

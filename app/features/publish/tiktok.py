@@ -704,6 +704,17 @@ def _validate_creator_info_for_direct_post(
         )
 
 
+def _is_tiktok_private_post_restriction(exc: Exception) -> bool:
+    if not isinstance(exc, ThirdPartyError):
+        return False
+    details = exc.details if isinstance(exc.details, dict) else {}
+    error = details.get("error") if isinstance(details.get("error"), dict) else {}
+    return (
+        int(details.get("status_code") or 0) == 403
+        and str(error.get("code") or "").strip() == "unaudited_client_can_only_post_to_private_accounts"
+    )
+
+
 async def _upload_video_chunks(upload_url: str, video_bytes: bytes, content_type: str, chunk_size: int, total_chunk_count: int) -> None:
     async with httpx.AsyncClient(timeout=TIKTOK_TIMEOUT_SECONDS) as client:
         total_size = len(video_bytes)
@@ -955,55 +966,16 @@ async def _publish_tiktok_post(
     )
 
     resolved_caption = (caption or post.get("publish_caption") or (_load_json_object(post.get("seed_data")).get("description")) or post.get("topic_title") or "").strip()
-    request_payload: Dict[str, Any]
+    request_payload: Dict[str, Any] = {
+        "post_id": post["id"],
+        "caption": resolved_caption,
+        "post_mode": mode,
+    }
     creator_info: Dict[str, Any] = {}
-    if mode == "direct":
-        creator_info = await _query_creator_info(account["access_token_plain"])
-        _validate_creator_info_for_direct_post(
-            creator_info,
-            privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
-            duration_seconds=float(duration_seconds) if duration_seconds is not None else None,
-        )
-        init_payload = await _initialize_direct_post(
-            account["access_token_plain"],
-            video_size=video_size,
-            caption=resolved_caption,
-            privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
-            disable_comment=disable_comment,
-            disable_duet=disable_duet,
-            disable_stitch=disable_stitch,
-        )
-        request_payload = {
-            "post_id": post["id"],
-            "caption": resolved_caption,
-            "post_mode": mode,
-            "post_info": _build_tiktok_post_info(
-                caption=resolved_caption,
-                privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
-                disable_comment=disable_comment,
-                disable_duet=disable_duet,
-                disable_stitch=disable_stitch,
-            ),
-            "creator_info": creator_info,
-            "source_info": {
-                "source": "FILE_UPLOAD",
-                "video_size": video_size,
-                "chunk_size": init_payload["chunk_size"],
-                "total_chunk_count": init_payload["total_chunk_count"],
-            },
-        }
-    else:
-        init_payload = await _initialize_inbox_video_upload(account["access_token_plain"], video_size)
-        request_payload = {
-            "post_id": post["id"],
-            "caption": resolved_caption,
-            "post_mode": mode,
-            "source_info": {
-                "source": "FILE_UPLOAD",
-                "video_size": video_size,
-                "chunk_size": init_payload["chunk_size"],
-                "total_chunk_count": init_payload["total_chunk_count"],
-            },
+    if mode == "draft":
+        request_payload["source_info"] = {
+            "source": "FILE_UPLOAD",
+            "video_size": video_size,
         }
     job = _create_publish_job(
         connected_account_id=str(account["id"]),
@@ -1012,8 +984,56 @@ async def _publish_tiktok_post(
         post_mode=mode,
         request_payload_json=request_payload,
     )
-
     try:
+        if mode == "direct":
+            creator_info = await _query_creator_info(account["access_token_plain"])
+            _validate_creator_info_for_direct_post(
+                creator_info,
+                privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
+                duration_seconds=float(duration_seconds) if duration_seconds is not None else None,
+            )
+            init_payload = await _initialize_direct_post(
+                account["access_token_plain"],
+                video_size=video_size,
+                caption=resolved_caption,
+                privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
+                disable_comment=disable_comment,
+                disable_duet=disable_duet,
+                disable_stitch=disable_stitch,
+            )
+            request_payload = {
+                **request_payload,
+                "post_info": _build_tiktok_post_info(
+                    caption=resolved_caption,
+                    privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
+                    disable_comment=disable_comment,
+                    disable_duet=disable_duet,
+                    disable_stitch=disable_stitch,
+                ),
+                "creator_info": creator_info,
+                "source_info": {
+                    "source": "FILE_UPLOAD",
+                    "video_size": video_size,
+                    "chunk_size": init_payload["chunk_size"],
+                    "total_chunk_count": init_payload["total_chunk_count"],
+                },
+            }
+        else:
+            init_payload = await _initialize_inbox_video_upload(account["access_token_plain"], video_size)
+            request_payload = {
+                **request_payload,
+                "source_info": {
+                    "source": "FILE_UPLOAD",
+                    "video_size": video_size,
+                    "chunk_size": init_payload["chunk_size"],
+                    "total_chunk_count": init_payload["total_chunk_count"],
+                },
+            }
+        if mode == "direct":
+            _update_publish_job(
+                str(job["id"]),
+                {"request_payload_json": redact_secret_payload(request_payload)},
+            )
         await _upload_video_chunks(
             str(init_payload["upload_url"]),
             video_bytes,
@@ -1068,6 +1088,39 @@ async def _publish_tiktok_post(
             provider_status=provider_status,
         )
         return updated_job
+    except ThirdPartyError as exc:
+        error_message = exc.message if hasattr(exc, "message") else str(exc)
+        mapped_error: Optional[ValidationError] = None
+        if mode == "direct" and _is_tiktok_private_post_restriction(exc):
+            error_message = (
+                "TikTok direct posting is blocked for this account until the creator account is private or the API client is audited. "
+                "Use draft upload for this deployment."
+            )
+            mapped_error = ValidationError(
+                error_message,
+                details={
+                    "post_id": post["id"],
+                    "mode": mode,
+                    "provider_error": redact_secret_payload(exc.details if isinstance(exc.details, dict) else {}),
+                },
+            )
+        updated_job = _update_publish_job(
+            str(job["id"]),
+            {
+                "status": "failed",
+                "response_payload_json": {},
+                "error_message": error_message,
+            },
+        )
+        _update_post_tiktok_result(
+            post,
+            updated_job,
+            provider_status="FAILED",
+            post_mode=mode,
+            fail_reason=error_message,
+            error_message=error_message,
+        )
+        raise mapped_error or exc
     except Exception as exc:
         error_message = exc.message if isinstance(exc, (ThirdPartyError, AuthenticationError, ValidationError)) else str(exc)
         updated_job = _update_publish_job(
