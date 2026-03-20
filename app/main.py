@@ -8,7 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -82,6 +82,7 @@ app = FastAPI(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+TIKTOK_VERIFICATION_FILENAME = "tiktokM1iYTqs7dJ1raJALxFS3sJhodU2gFDuk.txt"
 
 
 # Middleware for correlation IDs
@@ -185,6 +186,12 @@ if tiktok_router is not None:
 async def root():
     """Root endpoint - redirect to batches dashboard."""
     return RedirectResponse(url="/batches", status_code=status.HTTP_302_FOUND)
+
+
+@app.get(f"/{TIKTOK_VERIFICATION_FILENAME}")
+async def tiktok_url_verification():
+    """Serve the TikTok URL prefix verification token at the site root."""
+    return FileResponse(f"static/{TIKTOK_VERIFICATION_FILENAME}", media_type="text/plain")
 
 
 if __name__ == "__main__":
