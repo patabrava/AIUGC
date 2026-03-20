@@ -292,3 +292,78 @@ def test_publish_tiktok_direct_persists_published_post_result(monkeypatch):
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "published"
     assert storage["posts"][0]["publish_results"]["tiktok"]["provider_status"] == "PUBLISH_COMPLETE"
     assert storage["posts"][0]["platform_ids"]["tiktok"] == "tt-post-1"
+
+
+def test_publish_tiktok_direct_allows_s8_complete_after_meta_publish(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "topic_title": "Topic",
+                "seed_data": {"script_review_status": "approved", "description": "Fallback caption"},
+                "video_url": "https://cdn.example.com/video.mp4",
+                "video_metadata": {"requested_seconds": 8},
+                "publish_caption": "Local caption",
+                "publish_results": {
+                    "facebook": {"status": "published"},
+                    "instagram": {"status": "published"},
+                },
+                "platform_ids": {
+                    "facebook": "fb-post-1",
+                    "instagram": "ig-post-1",
+                },
+                "social_networks": ["facebook", "instagram", "tiktok"],
+                "publish_status": "published",
+            }
+        ],
+        "batches": [{"id": "batch-1", "state": "S8_COMPLETE"}],
+        "media_assets": [],
+        "publish_jobs": [],
+        "connected_accounts": [],
+    }
+
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
+    monkeypatch.setattr(tiktok, "_initialize_direct_post", _direct_init_stub)
+    monkeypatch.setattr(
+        tiktok,
+        "_query_creator_info",
+        lambda access_token: asyncio.sleep(
+            0,
+            result={
+                "privacy_level_options": ["SELF_ONLY", "PUBLIC_TO_EVERYONE"],
+                "comment_disabled": False,
+                "duet_disabled": False,
+                "stitch_disabled": False,
+                "max_video_post_duration_sec": 60,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        tiktok,
+        "_poll_publish_status",
+        lambda access_token, publish_id, *, post_mode: asyncio.sleep(
+            0,
+            result={"status": "PUBLISH_COMPLETE", "publicaly_available_post_id": ["tt-post-1"]},
+        ),
+    )
+    monkeypatch.setattr(tiktok, "_upload_video_chunks", _upload_stub)
+
+    response = asyncio.run(
+        tiktok.publish_tiktok_direct(
+            TikTokPublishRequest(
+                post_id="post-1",
+                caption="TikTok caption",
+                privacy_level="SELF_ONLY",
+                disable_comment=False,
+                disable_duet=False,
+                disable_stitch=True,
+            )
+        )
+    )
+
+    assert response.data["status"] == "published"
+    assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "published"
+    assert storage["posts"][0]["platform_ids"]["tiktok"] == "tt-post-1"

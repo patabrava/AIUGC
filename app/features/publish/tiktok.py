@@ -731,7 +731,7 @@ async def _upload_video_chunks(upload_url: str, video_bytes: bytes, content_type
                 )
 
 
-def _load_post_for_tiktok(post_id: str) -> Dict[str, Any]:
+def _load_post_for_tiktok(post_id: str, *, mode: str) -> Dict[str, Any]:
     response = get_supabase().client.table("posts").select(
         "id,batch_id,topic_title,seed_data,video_url,video_metadata,publish_caption,publish_results,platform_ids,social_networks,publish_status"
     ).eq("id", post_id).execute()
@@ -748,10 +748,17 @@ def _load_post_for_tiktok(post_id: str) -> Dict[str, Any]:
     batch = get_supabase().client.table("batches").select("id,state").eq("id", post["batch_id"]).execute().data or []
     if not batch:
         raise NotFoundError("Batch not found for TikTok upload.", details={"post_id": post_id})
-    if batch[0].get("state") != BatchState.S7_PUBLISH_PLAN.value:
+    batch_state = str(batch[0].get("state") or "")
+    if mode == "draft":
+        allowed_states = {BatchState.S7_PUBLISH_PLAN.value}
+        error_message = "TikTok draft upload is only available in S7_PUBLISH_PLAN."
+    else:
+        allowed_states = {BatchState.S7_PUBLISH_PLAN.value, BatchState.S8_COMPLETE.value}
+        error_message = "TikTok direct posting is only available in S7_PUBLISH_PLAN or S8_COMPLETE."
+    if batch_state not in allowed_states:
         raise ValidationError(
-            "TikTok draft upload is only available in S7_PUBLISH_PLAN.",
-            details={"batch_id": post["batch_id"], "state": batch[0].get("state")},
+            error_message,
+            details={"batch_id": post["batch_id"], "state": batch_state, "mode": mode},
         )
     return post
 
@@ -931,7 +938,7 @@ async def _publish_tiktok_post(
     disable_duet: bool,
     disable_stitch: bool,
 ) -> Dict[str, Any]:
-    post = _load_post_for_tiktok(post_id)
+    post = _load_post_for_tiktok(post_id, mode=mode)
     account = _load_tiktok_account_secret()
     video_bytes, content_type = await _download_video_bytes(str(post["video_url"]))
     video_size = len(video_bytes)
@@ -1084,7 +1091,7 @@ async def _publish_tiktok_post(
 
 async def refresh_tiktok_post_status(post_id: str) -> Optional[Dict[str, Any]]:
     """Refresh the TikTok provider status for an existing publish job."""
-    post = _load_post_for_tiktok(post_id)
+    post = _load_post_for_tiktok(post_id, mode="direct")
     existing = _load_json_object((_load_json_object(post.get("publish_results"))).get("tiktok"))
     publish_id = str(existing.get("publish_id") or existing.get("remote_id") or "").strip()
     if not publish_id:
