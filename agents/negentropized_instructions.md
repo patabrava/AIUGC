@@ -59,3 +59,11 @@ Batch owner/editor working inside the FLOW-FORGE web app while managing topic in
 - Users can launch a new deep research run for one topic from the hub.
 - Run state remains visible after refresh.
 - The implementation stays within the agreed locality budget and uses no unnecessary dependencies.
+
+## Architecture
+- Keep `/topics` as a dual-mode route: HTML for browser and HTMX requests, JSON for API clients and regression scripts.
+- Add a `POST /topics/runs` launch endpoint for one-topic research and a `GET /topics/runs/{run_id}` status endpoint for polling or fragment refresh.
+- Store topic inventory in `topic_registry`, durable run state in `topic_research_runs`, and normalized script variants in `topic_scripts` or an equivalent durable script index.
+- Treat `posts.seed_data` as downstream workflow data, not the user-facing source of truth for hub state.
+- Split responsibilities into a thin route layer, a small hub view-model/service layer, and page-local templates/JS.
+- Keep the implementation vanilla-first, page-local, and within the 6-8 file locality budget.
