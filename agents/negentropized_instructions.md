@@ -1,95 +1,61 @@
-# Meta Login UX Stabilization
+# Topics Hub Contract
 
 ## Goal
-
-Design and implement a global reusable Meta login flow for Facebook + Instagram that redirects users into Meta auth when they try to use locked networks, then returns them to the same batch/post card they were editing before schedule save is enforced.
+Create a read-first topics hub page that lets batch owner/editors browse existing topics, inspect their script variants, review research-run history, and launch a new deep research run for one topic on demand.
 
 ## Primary User / Actor
-
-The primary actor is the single operator managing FLOW-FORGE batches who is scheduling posts in `S7_PUBLISH_PLAN` and needs one reusable Meta connection across all batches.
+Batch owner/editor working inside the FLOW-FORGE web app while managing topic inventory and deciding whether a topic needs fresh research.
 
 ## Inputs
-
-### Required Inputs
-
-- Production Meta app credentials:
-  - `META_APP_ID`
-  - `META_APP_SECRET`
-  - `META_REDIRECT_URI`
-- Existing production callback:
-  - `https://aiugc-prod.srv1498567.hstgr.cloud/publish/meta/callback`
-- Existing batch detail view with `S7_PUBLISH_PLAN`
-- Existing batch/post identifiers for return-to-context after login
-- Existing video-ready post with `video_url`
-
-### Optional Inputs
-
-- Global account-management placement in batch header, nav, or shared modal launcher
-- Query-string or signed-state return target format
-- Copy and visual treatment for locked-network CTA
+- Existing topic registry rows
+- Existing topic script rows
+- Existing topic research run rows
+- A selected topic or lane for on-demand deep research
+- Optional filters such as post type, length tier, cluster, lane family, and run status
 
 ## Outputs / Deliverables
-
-- One global reusable Meta connect entry point labeled:
-  - `Connect Facebook + Instagram`
-- One unified Meta auth flow reused across all batches
-- One return-to-context contract that brings the operator back to the exact batch/post card after login
-- One scheduler gate that only enables save when:
-  - caption exists
-  - scheduled time exists
-  - video exists
-  - at least one eligible connected Meta network exists
-- One bug fix pass after login UX lands to eliminate the broken `Save Schedule` path
+- A `/topics` hub page with list and detail views
+- A topic table or card list showing topic metadata and script availability
+- A script drill-in panel showing variants per topic and length tier
+- A research-run history panel showing status, timestamps, and result or error summary
+- An action to launch a new research run for one topic
 
 ## Core Pipeline
-
-1. Add a global reusable Meta connection component outside the per-post scheduler flow.
-2. When a user clicks `Facebook` or `Instagram` while not connected, redirect immediately into the unified Meta login flow.
-3. Persist a return target that identifies the exact batch and post card being edited.
-4. After successful Meta login, redirect back to the same batch page and restore focus/visibility on the same post card.
-5. Reflect connection state globally so all batches can reuse the same Meta account.
-6. Gate schedule saving on complete requirements:
-   - caption
-   - video
-   - scheduled time
-   - connected eligible Meta target
-7. After login UX is stable, fix the broken schedule-save behavior and ensure error states are explicit instead of generic.
+1. Load the topics hub page with topics, scripts, and recent research runs.
+2. Apply filters to narrow the visible set without leaving the hub.
+3. Open a topic to inspect its scripts, source metadata, and stored research context.
+4. Launch a new deep research run for the selected topic when requested.
+5. Refresh or poll run state until the run completes or fails.
+6. Update the visible topic/script inventory from the stored backend records.
 
 ## Data / Evidence Contracts
-
-- The Meta connection must become workspace-wide, not batch-scoped-only.
-- The auth flow must expose one unified Meta connection, not separate Facebook and Instagram logins.
-- Clicking locked Meta networks must redirect to Meta auth immediately, not open an inline warning first.
-- Return-to-context must carry enough information to land the user back on the same batch/post card without ambiguity.
-- Schedule-save validation must fail explicitly when any required prerequisite is missing.
-- Any scheduling error surfaced to the user must reflect the real backend reason instead of generic fallback copy.
+- The hub must render only stored backend data for topics, scripts, and runs.
+- Any research launcher action must persist a durable run record before the request is treated as started.
+- Run status must be observable after refresh; in-memory-only state is not sufficient for the user-facing tracker.
+- Research claims shown in the UI must come from the stored research payload, sources, or run result summary, not from ad hoc client-side inference.
+- If a topic is missing script or research data, the hub must show that absence explicitly rather than fabricating a filled state.
 
 ## Constraints
-
-- Option selected: `{files: 5, LOC/file: <=280, deps: 0}`
-- Keep the implementation in the existing FastAPI + Jinja + Alpine stack
-- No new frameworks
-- No new UI state management libraries
-- Preserve locality inside the existing publish slice and batch detail surface
-- Design login UX first, then fix the schedule-save bug
-- One Meta login shared across all batches
-- One unified login button and flow
+- Use the existing FastAPI, Jinja, HTMX, and Alpine stack.
+- No new framework by default.
+- Prefer a small page-local slice over a shared global abstraction.
+- Keep the page read-first; launching research is secondary to browsing and inspection.
+- Target a locality budget of roughly 6-8 files, about 120-260 LOC per file, with 0 new dependencies.
+- Keep backend semantics stable; add only the minimal read/launch endpoints needed to support the hub.
+- Preserve the current batch workflow and do not route this page through batch detail.
 
 ## Non-Goals / Backlog
-
-- Separate Facebook-only and Instagram-only auth paths
-- Batch-scoped-only Meta connections
-- A large provider-management dashboard or framework migration
-- Multi-user account ownership and permissions
-- TikTok UX redesign as part of this pass
-- Provider abstraction refactor across Meta and TikTok in the same slice
+- Do not fold this into batch detail.
+- Do not build a full content management system.
+- Do not add topic editing, deletion, or bulk mutation in the first pass.
+- Do not add new AI generation logic in the frontend.
+- Do not require realtime sockets unless polling proves insufficient.
+- Do not redesign the visual system beyond what the existing app already uses.
 
 ## Definition of Done
-
-- A reusable global `Connect Facebook + Instagram` entry point exists outside the per-post scheduler block.
-- Clicking `Facebook` or `Instagram` while disconnected redirects directly into Meta auth.
-- After successful auth, the operator returns to the same batch and same post card they were editing.
-- Meta connection state is reusable across all batches.
-- `Save Schedule` is only enabled when caption, video, time, and connected eligible Meta network are present.
-- The broken save path is fixed and no longer fails due to missing hidden requirements.
-- The user sees clear actionable error messages for schedule validation failures.
+- The app has a dedicated `/topics` hub page.
+- Users can browse topics and inspect associated scripts from the hub.
+- Users can see research-run history for topics.
+- Users can launch a new deep research run for one topic from the hub.
+- Run state remains visible after refresh.
+- The implementation stays within the agreed locality budget and uses no unnecessary dependencies.
