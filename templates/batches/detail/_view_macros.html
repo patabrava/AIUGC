@@ -1,0 +1,51 @@
+{% macro progress_step_classes(current_state, state_code) -%}
+{% if current_state == state_code %}bg-purple-600 text-white{% elif current_state > state_code %}bg-green-500 text-white{% else %}bg-gray-200 text-gray-500{% endif %}
+{%- endmacro %}
+
+{% macro progress_label_classes(current_state, state_code) -%}
+{% if current_state == state_code %}text-purple-600{% else %}text-gray-500{% endif %}
+{%- endmacro %}
+
+{% macro connector_classes(current_state, state_code) -%}
+{% if current_state > state_code %}bg-green-500{% else %}bg-gray-200{% endif %}
+{%- endmacro %}
+
+{% macro review_status_chip(review_status, is_removed) -%}
+{% if review_status == "approved" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+    Script Approved
+</span>
+{% elif is_removed %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+    Removed From Batch
+</span>
+{% else %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+    Review Required
+</span>
+{% endif %}
+{%- endmacro %}
+
+{% macro video_status_chip(video_status) -%}
+{% if video_status == "completed" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+    ✓ Completed
+</span>
+{% elif video_status == "processing" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+    ⏳ Processing
+</span>
+{% elif video_status == "submitted" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
+    ⏳ Submitted
+</span>
+{% elif video_status == "failed" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+    ✗ Failed
+</span>
+{% else %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+    ○ Pending
+</span>
+{% endif %}
+{%- endmacro %}

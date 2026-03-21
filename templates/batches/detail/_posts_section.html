@@ -1,0 +1,45 @@
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+    <div class="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-center gap-3">
+            <h3 class="text-lg font-medium text-gray-900">Posts</h3>
+            <span class="text-sm text-gray-500">
+                {% if batch.state == 'S2_SEEDED' %}
+                    {{ batch.posts_count }} total
+                {% else %}
+                    {{ batch_view.active_posts_count }} active
+                {% endif %}
+            </span>
+        </div>
+        {% if batch.state == 'S7_PUBLISH_PLAN' %}
+        <div class="flex items-center gap-3">
+            <span class="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
+                {{ batch_view.scheduled_count }}/{{ batch_view.active_posts_count }} Meta scheduled
+            </span>
+            {% if batch_view.scheduled_count == batch_view.active_posts_count and batch_view.active_posts_count > 0 %}
+            <button
+                hx-post="/publish/batches/{{ batch.id }}/confirm"
+                hx-vals='{"batch_id":"{{ batch.id }}","confirm": true}'
+                hx-confirm="All active posts are scheduled for Meta. Arm dispatch now?"
+                hx-swap="none"
+                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+                Confirm & Arm Meta
+            </button>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if batch_view.visible_posts %}
+    <div class="space-y-4">
+        {% for post in batch_view.visible_posts %}
+        {% include "batches/detail/_post_card.html" %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-8 text-gray-500">
+        <p>No posts yet. Seed generation may still be running.</p>
+    </div>
+    {% endif %}
+</div>
