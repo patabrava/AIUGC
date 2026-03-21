@@ -117,6 +117,28 @@ class UpdatePostScheduleRequest(BaseModel):
         return normalized
 
 
+class PostMetaNowRequest(BaseModel):
+    """Request to publish one post immediately to selected Meta networks."""
+    post_id: str = Field(..., description="Post ID to publish now")
+    publish_caption: str = Field(..., min_length=1, max_length=2200, description="Caption/description for immediate publish")
+    social_networks: List[SocialNetwork] = Field(
+        ...,
+        min_length=1,
+        description="Selected Meta social networks (Instagram, Facebook)",
+    )
+
+    @field_validator("social_networks")
+    @classmethod
+    def validate_meta_networks(cls, v: List[SocialNetwork]) -> List[SocialNetwork]:
+        """Immediate Meta publish only supports Facebook and Instagram."""
+        if len(v) != len(set(v)):
+            raise ValueError("Duplicate social networks not allowed")
+        unsupported = [network.value for network in v if network not in {SocialNetwork.FACEBOOK, SocialNetwork.INSTAGRAM}]
+        if unsupported:
+            raise ValueError(f"Unsupported networks for Meta now publish: {', '.join(unsupported)}")
+        return v
+
+
 class MetaTargetSelectionRequest(BaseModel):
     """Request to select the Page/Instagram pair for a batch."""
     page_id: str = Field(..., min_length=1, description="Facebook Page ID to bind to the batch")
