@@ -119,6 +119,8 @@ class Settings(BaseSettings):
             raise ValueError("SUPABASE_KEY, SUPABASE_SERVICE_KEY, or SUPABASE_SERVICE_ROLE_KEY must be set")
         if not self.supabase_service_key:
             raise ValueError("SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY must be set")
+        if self.environment == "production" and not self.app_url:
+            raise ValueError("APP_URL must be set in production for host validation")
         return self
 
     @field_validator("cloudflare_r2_public_base_url")

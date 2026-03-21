@@ -189,6 +189,11 @@ vercel --prod
 ### Hostinger VPS with Docker
 Use a Hostinger VPS product with Docker access, not shared hosting.
 
+Production requirement:
+- Set `APP_URL` to the public HTTPS URL of the deployment before starting containers.
+- `APP_URL` is required in production because the app uses it to build the trusted host allowlist.
+- The app will refuse to start in production if `APP_URL` is missing.
+
 ```bash
 docker compose build
 docker compose up -d

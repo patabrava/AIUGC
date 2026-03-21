@@ -6,9 +6,11 @@ Per Constitution § I: Canon Supremacy
 
 import uuid
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -32,12 +34,21 @@ except ModuleNotFoundError:
 # Configure logging on module import
 configure_logging()
 logger = get_logger(__name__)
+settings = get_settings()
+
+
+def _trusted_hosts_from_settings() -> list[str]:
+    hosts = {"localhost", "127.0.0.1", "[::1]", "testserver"}
+    if settings.app_url:
+        parsed = urlparse(settings.app_url)
+        if parsed.hostname:
+            hosts.add(parsed.hostname)
+    return sorted(hosts)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    settings = get_settings()
     scheduler = AsyncIOScheduler(timezone="UTC")
     logger.info(
         "application_startup",
@@ -78,9 +89,13 @@ app = FastAPI(
     title="FLOW-FORGE UGC System",
     description="Deterministic UGC video production system",
     version="1.0.0",
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
     lifespan=lifespan
 )
 
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts_from_settings())
 app.mount("/static", StaticFiles(directory="static"), name="static")
 TIKTOK_VERIFICATION_FILENAME = "tiktokM1iYTqs7dJ1raJALxFS3sJhodU2gFDuk.txt"
 TIKTOK_SANDBOX_VERIFICATION_FILENAME = "tiktokdcXzbIXpURopZpk1bkFGKLkXFMtWeX9T.txt"
