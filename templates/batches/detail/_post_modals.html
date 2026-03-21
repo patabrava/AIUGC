@@ -1,0 +1,53 @@
+<div
+    x-cloak
+    x-show="expanded"
+    x-transition.opacity
+    @keydown.escape.window="close()"
+    class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Expanded video prompt"
+>
+    <div class="absolute inset-0 bg-gray-900/75" aria-hidden="true" @click="close()"></div>
+    <div class="relative z-10 w-full max-w-3xl bg-white rounded-xl shadow-2xl border border-gray-200 p-6">
+        <div class="flex items-start justify-between gap-4">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">Prompt Details</p>
+                <h5 class="mt-1 text-lg font-semibold text-gray-900">Video prompt for {{ post.topic_title }}</h5>
+                <p class="mt-2 text-sm text-gray-500">Same structure, expanded for verification and copy.</p>
+            </div>
+            <button
+                type="button"
+                class="inline-flex items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                @click="close()"
+                aria-label="Close expanded prompt"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            {% for title, value in prompt_sections %}
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">{{ title }}</p>
+                <p class="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{{ value or '—' }}</p>
+            </div>
+            {% endfor %}
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Batch Name</p>
+                <p class="mt-1 text-sm text-gray-800 italic whitespace-pre-wrap">{{ prompt_audio.get('dialogue') if prompt_audio and prompt_audio.get('dialogue') else '—' }}</p>
+                {% if prompt_audio and prompt_audio.get('capture') and prompt_audio.get('capture') != prompt_audio.get('dialogue') %}
+                <p class="mt-1 text-sm text-gray-600 whitespace-pre-wrap">{{ prompt_audio.get('capture') }}</p>
+                {% endif %}
+            </div>
+        </div>
+        <div class="mt-4 flex justify-end">
+            <button
+                type="button"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                @click="close()"
+            >
+                Close
+            </button>
+        </div>
+    </div>
+</div>

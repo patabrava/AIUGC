@@ -302,6 +302,79 @@ def _sanitize_meta_connection(meta_connection: Any) -> Dict[str, Any]:
     return _publish_sanitize_meta_connection(normalized)
 
 
+def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
+    """Prepare template-only derived data for the batch detail page."""
+    batch_state = batch_detail.get("state")
+    posts = batch_detail.get("posts") or []
+
+    visible_posts = []
+    active_posts_count = 0
+    prompt_ready_count = 0
+    qa_passed_count = 0
+    scheduled_count = 0
+    approved_scripts_count = 0
+    removed_scripts_count = 0
+    pending_scripts_count = 0
+
+    for post in posts:
+        seed_data = post.get("seed_data") or {}
+        review_status = seed_data.get("script_review_status") or "pending"
+        is_removed = review_status == "removed" or seed_data.get("video_excluded") is True
+
+        if batch_state == BatchState.S2_SEEDED.value or not is_removed:
+            visible_posts.append(post)
+
+        if review_status == "approved":
+            approved_scripts_count += 1
+        elif review_status == "removed":
+            removed_scripts_count += 1
+        else:
+            pending_scripts_count += 1
+
+        if is_removed:
+            continue
+
+        active_posts_count += 1
+        if post.get("video_prompt_json"):
+            prompt_ready_count += 1
+        if post.get("qa_pass"):
+            qa_passed_count += 1
+        if post.get("scheduled_at"):
+            scheduled_count += 1
+
+    meta_publish_state = batch_detail.get("meta_connection") or {}
+    tiktok_publish_state = batch_detail.get("tiktok_connection") or {}
+
+    return {
+        "should_poll_prompts": batch_state == BatchState.S5_PROMPTS_BUILT.value,
+        "progress_states": [
+            {"code": BatchState.S1_SETUP.value, "label": "Setup"},
+            {"code": BatchState.S2_SEEDED.value, "label": "Seeded"},
+            {"code": BatchState.S4_SCRIPTED.value, "label": "Scripted"},
+            {"code": BatchState.S5_PROMPTS_BUILT.value, "label": "Prompts"},
+            {"code": BatchState.S6_QA.value, "label": "QA"},
+            {"code": BatchState.S7_PUBLISH_PLAN.value, "label": "Plan"},
+            {"code": BatchState.S8_COMPLETE.value, "label": "Complete"},
+        ],
+        "visible_posts": visible_posts,
+        "active_posts_count": active_posts_count,
+        "prompt_ready_count": prompt_ready_count,
+        "qa_passed_count": qa_passed_count,
+        "scheduled_count": scheduled_count,
+        "review_summary": {
+            "total_posts_count": len(posts),
+            "approved_scripts_count": approved_scripts_count,
+            "removed_scripts_count": removed_scripts_count,
+            "pending_scripts_count": pending_scripts_count,
+        },
+        "meta_publish_state": meta_publish_state,
+        "tiktok_publish_state": tiktok_publish_state,
+        "selected_meta_page": meta_publish_state.get("selected_page") or {},
+        "selected_instagram_account": meta_publish_state.get("selected_instagram") or {},
+        "available_meta_pages": meta_publish_state.get("available_pages") or [],
+    }
+
+
 @router.get("", response_model=SuccessResponse)
 async def list_batches_endpoint(
     request: Request,
@@ -466,9 +539,11 @@ async def get_batch_endpoint(request: Request, batch_id: str):
 
         if _wants_html(request):
             batch_model = BatchDetailResponse(**batch_detail)
+            batch_payload = batch_model.model_dump(mode="json")
             context = {
                 "request": request,
-                "batch": batch_model.model_dump(mode="json")
+                "batch": batch_payload,
+                "batch_view": _build_batch_detail_view(batch_payload),
             }
             return templates.TemplateResponse("batches/detail.html", context)
 

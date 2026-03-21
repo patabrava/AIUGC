@@ -1,0 +1,53 @@
+{% from "batches/detail/_view_macros.html" import connector_classes, progress_label_classes, progress_step_classes %}
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
+    <h3 class="text-lg font-medium text-gray-900 mb-4">Progress</h3>
+
+    <div class="hidden lg:flex items-center justify-between">
+        {% for progress_state in batch_view.progress_states %}
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center {{ progress_step_classes(batch.state, progress_state.code) }}">
+                {% if batch.state > progress_state.code %}
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+                {% else %}
+                {{ loop.index }}
+                {% endif %}
+            </div>
+            <span class="mt-2 text-xs font-medium {{ progress_label_classes(batch.state, progress_state.code) }}">
+                {{ progress_state.label }}
+            </span>
+        </div>
+
+        {% if not loop.last %}
+        <div class="flex-1 h-1 {{ connector_classes(batch.state, progress_state.code) }} mx-2"></div>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    <div class="lg:hidden space-y-3">
+        {% for progress_state in batch_view.progress_states %}
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 {{ progress_step_classes(batch.state, progress_state.code) }}">
+                {% if batch.state > progress_state.code %}
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+                {% else %}
+                {{ loop.index }}
+                {% endif %}
+            </div>
+            <div class="flex-1">
+                <span class="text-sm font-medium {% if batch.state == progress_state.code %}text-purple-600{% else %}text-gray-700{% endif %}">
+                    {{ progress_state.label }}
+                </span>
+                <span class="block text-xs text-gray-500">{{ progress_state.code }}</span>
+            </div>
+        </div>
+        {% if not loop.last %}
+        <div class="ml-5 h-6 w-0.5 {{ connector_classes(batch.state, progress_state.code) }}"></div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>

@@ -1,0 +1,627 @@
+{% from "batches/detail/_view_macros.html" import review_status_chip, video_status_chip %}
+
+{% set seed = post.seed_data or {} %}
+{% set source = seed.get('source') %}
+{% set primary_script = seed.get('script') or post.topic_rotation %}
+{% set description = seed.get('description') %}
+{% set review_status = seed.get('script_review_status') or 'pending' %}
+{% set post_removed = review_status == 'removed' or seed.get('video_excluded') == True %}
+
+<div id="post-{{ post.id }}" class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-purple-300 transition" data-post-card="post-{{ post.id }}">
+    <div class="flex items-center space-x-3 text-xs text-gray-500">
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 uppercase tracking-wide">
+            {{ post.post_type }}
+        </span>
+        <span>Created {{ post.created_at or '—' }}</span>
+        {% if post.updated_at %}<span>Updated {{ post.updated_at }}</span>{% endif %}
+    </div>
+    <h4 class="mt-2 text-lg font-semibold text-gray-900">{{ post.topic_title }}</h4>
+    <div class="mt-3 flex items-center gap-2">
+        {{ review_status_chip(review_status, post_removed) }}
+    </div>
+
+    {% if primary_script %}
+    <div class="mt-3">
+        {% if batch.state == 'S2_SEEDED' %}
+            {% if post_removed %}
+            <p class="text-sm text-gray-500">
+                This script has been removed and will not move into prompt or video generation unless restored.
+            </p>
+            {% else %}
+            {% set script_rows = [3, (((primary_script | length) // 40) + 1)] | max %}
+            <textarea
+                class="w-full px-3 py-2 text-sm text-gray-800 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                rows="{{ script_rows }}"
+                hx-put="/posts/{{ post.id }}/script"
+                hx-trigger="blur"
+                hx-swap="none"
+                name="script_text"
+            >{{ primary_script }}</textarea>
+            {% endif %}
+        {% else %}
+        <p class="text-sm text-gray-800">{{ primary_script }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if batch.state == 'S2_SEEDED' %}
+    <div class="mt-4 flex flex-wrap gap-2">
+        {% if post_removed %}
+        <button
+            hx-put="/posts/{{ post.id }}/script-review"
+            hx-vals='{"action":"reset"}'
+            hx-swap="none"
+            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+            class="px-3 py-2 text-sm font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition"
+        >
+            Restore
+        </button>
+        {% else %}
+        <button
+            hx-put="/posts/{{ post.id }}/script-review"
+            hx-vals='{"action":"approved"}'
+            hx-swap="none"
+            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+            class="px-3 py-2 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition"
+        >
+            Approve Script
+        </button>
+        <button
+            hx-put="/posts/{{ post.id }}/script-review"
+            hx-vals='{"action":"removed"}'
+            hx-confirm="Remove this script from the batch before prompt and video generation?"
+            hx-swap="none"
+            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+            class="px-3 py-2 text-sm font-medium rounded-md border border-red-200 text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition"
+        >
+            Remove Script
+        </button>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if description %}
+    <p class="mt-3 text-sm text-gray-600">{{ description }}</p>
+    {% endif %}
+
+    {% if source %}
+    <p class="mt-3 text-sm text-gray-600">
+        <span class="font-medium">{{ source.title }}</span>
+        {% if source.url %}
+            – <a href="{{ source.url }}" class="text-purple-600 hover:text-purple-800" target="_blank" rel="noopener noreferrer">View source</a>
+            {% if source.get('accessible') == False %}
+            <span class="ml-2 text-xs text-amber-600">(⚠ Link may be outdated)</span>
+            {% endif %}
+        {% endif %}
+    </p>
+    {% endif %}
+
+    {% if seed.get('disclaimer') %}
+    <p class="mt-3 text-xs text-gray-500">Disclaimer: {{ seed.get('disclaimer') }}</p>
+    {% endif %}
+
+    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] and not post_removed %}
+    <div class="mt-4 sm:mt-6 border-t border-gray-200 pt-4">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+            <div class="flex-1">
+                <div class="flex items-center gap-2">
+                    {% if post.video_prompt_json %}
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                        Ready for Generation
+                    </span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                        Prompt Needed
+                    </span>
+                    {% endif %}
+                    <span class="text-xs text-gray-500">ID: {{ post.id }}</span>
+                </div>
+                <p class="mt-2 text-sm text-gray-700">
+                    {% if post.video_prompt_json %}
+                        Prompt assembled on prior run. Review the summary below or regenerate to refresh the template.
+                    {% else %}
+                        Generate the video prompt to convert this script into the detailed shot specification for the video providers.
+                    {% endif %}
+                </p>
+                <div class="mt-3 text-xs text-gray-500 space-y-1">
+                    <div class="flex items-center">
+                        <svg class="w-4 h-4 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 16v-2m8-6h2M4 12H2m15.364-7.364l1.414 1.414M5.636 18.364l-1.414-1.414m0-9.9L5.636 5.636m12.728 12.728l1.414 1.414"/></svg>
+                        <span>Script length: {{ primary_script | length }} characters • Spoken duration ≈ {{ post.spoken_duration | round(1) }}s</span>
+                    </div>
+                    {% if seed.get('strict_fact') %}
+                    <div class="flex items-start">
+                        <svg class="w-4 h-4 text-gray-400 mr-2 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12c0 4.418-3.582 8-8 8s-8-3.582-8-8 3.582-8 8-8 8 3.582 8 8z"/></svg>
+                        <span><span class="font-medium">Strict fact anchor:</span> {{ seed.get('strict_fact') }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="w-full lg:w-64 bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4 flex flex-col gap-3">
+                {% if post.video_prompt_json %}
+                {% set prompt = post.video_prompt_json %}
+                {% set prompt_audio = prompt.audio if prompt and prompt.audio else {} %}
+                {% set prompt_sections = [
+                    ('Character', prompt.character),
+                    ('Action', prompt.action),
+                    ('Scene', prompt.scene),
+                    ('Cinematography', prompt.cinematography),
+                    ('Universal Negatives', prompt.universal_negatives)
+                ] %}
+                <div x-data="promptModalComponent('{{ post.id }}')" class="relative">
+                    <div class="text-sm text-gray-700 space-y-2">
+                        <p class="font-semibold text-gray-900">Prompt Snapshot</p>
+                        {% for title, value in prompt_sections %}
+                        <div>
+                            <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">{{ title }}</p>
+                            <p class="mt-1 text-xs text-gray-700" style="display:-webkit-box;-webkit-line-clamp:3;line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">{{ value or '—' }}</p>
+                        </div>
+                        {% endfor %}
+                        <div>
+                            <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Batch Name</p>
+                            <p class="mt-1 text-xs text-gray-700 italic" style="display:-webkit-box;-webkit-line-clamp:4;line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;">{{ prompt_audio.get('dialogue') if prompt_audio and prompt_audio.get('dialogue') else '—' }}</p>
+                            {% if prompt_audio and prompt_audio.get('capture') and prompt_audio.get('capture') != prompt_audio.get('dialogue') %}
+                            <p class="mt-1 text-xs text-gray-500" style="display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ prompt_audio.get('capture') }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-2 mt-4">
+                        <button
+                            hx-post="/posts/{{ post.id }}/build-prompt"
+                            hx-trigger="click"
+                            hx-swap="none"
+                            hx-headers='{"X-Correlation-ID": "prompt_{{ post.id }}"}'
+                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                            class="w-full inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm transition bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            Regenerate Prompt
+                        </button>
+                        <button
+                            type="button"
+                            class="w-full inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition"
+                            @click="open()"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"/></svg>
+                            Maximize Prompt
+                        </button>
+                    </div>
+                    {% include "batches/detail/_post_modals.html" %}
+                </div>
+                {% else %}
+                <div class="text-sm text-gray-600">
+                    <p class="font-semibold text-gray-900">Awaiting Prompt</p>
+                    <p class="mt-1 text-xs text-gray-600">Generate to create the Veo/Sora-ready template using the fixed character, camera, and audio specs.</p>
+                </div>
+                <div class="flex flex-col gap-2 mt-4">
+                    <button
+                        hx-post="/posts/{{ post.id }}/build-prompt"
+                        hx-trigger="click"
+                        hx-swap="none"
+                        hx-headers='{"X-Correlation-ID": "prompt_{{ post.id }}"}'
+                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                        class="w-full inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm transition bg-purple-600 text-white hover:bg-purple-700 focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+                    >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        Generate Prompt
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] and post_removed %}
+    <div class="mt-4 sm:mt-6 border-t border-gray-200 pt-4">
+        <p class="text-sm text-gray-500">
+            This post was removed during script review and is excluded from prompt building and video generation.
+        </p>
+    </div>
+    {% endif %}
+
+    {% if batch.state in ['S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_prompt_json %}
+    <div class="mt-6 border-t border-gray-200 pt-4">
+        <div class="flex items-center justify-between">
+            <div class="flex-1">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-sm font-medium text-gray-700">Video Generation</span>
+                    {{ video_status_chip(post.video_status) }}
+                </div>
+
+                {% if post.video_url %}
+                <div class="mt-3">
+                    <video controls class="w-full sm:max-w-xs rounded-lg border border-gray-300" poster="{{ post.video_metadata.get('thumbnail_url') if post.video_metadata and post.video_metadata.get('thumbnail_url') else '' }}">
+                        <source src="{{ post.video_url }}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="mt-2 flex items-center gap-2">
+                        <a href="{{ post.video_url }}" target="_blank" class="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                            </svg>
+                            Open in new tab
+                        </a>
+                        {% if post.video_metadata and post.video_metadata.get('size_bytes') %}
+                        <span class="text-xs text-gray-500">
+                            {{ (post.video_metadata.get('size_bytes') / 1024 / 1024) | round(2) }} MB
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if batch.state == 'S6_QA' %}
+                <div class="mt-4 border-t border-gray-200 pt-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h5 class="text-sm font-semibold text-gray-900">Quality Assurance</h5>
+                        {% if post.qa_pass %}
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                            ✓ Approved
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+                            Pending Review
+                        </span>
+                        {% endif %}
+                    </div>
+
+                    {% if post.qa_auto_checks %}
+                    <div class="bg-gray-50 rounded-md p-3 mb-3">
+                        <p class="text-xs font-semibold text-gray-600 mb-2">Auto Checks</p>
+                        <div class="space-y-1 text-xs">
+                            <div class="flex items-center gap-2">
+                                {% if post.qa_auto_checks.get('duration_valid') %}
+                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                {% else %}
+                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                {% endif %}
+                                <span class="text-gray-700">Duration: {{ post.qa_auto_checks.get('duration_actual') }}s (expected 8s ±0.5s)</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                {% if post.qa_auto_checks.get('resolution_valid') %}
+                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                {% else %}
+                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                {% endif %}
+                                <span class="text-gray-700">Resolution: {{ post.qa_auto_checks.get('resolution_actual') }}</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                {% if post.qa_auto_checks.get('file_accessible') %}
+                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                {% else %}
+                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                {% endif %}
+                                <span class="text-gray-700">File accessible</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if post.qa_notes %}
+                    <div class="bg-blue-50 rounded-md p-3 mb-3">
+                        <p class="text-xs font-semibold text-blue-900 mb-1">Review Notes</p>
+                        <p class="text-xs text-blue-800">{{ post.qa_notes }}</p>
+                    </div>
+                    {% endif %}
+
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <button
+                            hx-post="/qa/{{ post.id }}/auto-check"
+                            hx-swap="none"
+                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                            class="flex-1 inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+                            Run Auto Check
+                        </button>
+                        {% if not post.qa_pass %}
+                        <button
+                            hx-put="/qa/{{ post.id }}/approve"
+                            hx-vals='{"approved": true}'
+                            hx-swap="none"
+                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                            class="flex-1 inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition"
+                        >
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                            Approve
+                        </button>
+                        {% else %}
+                        <button
+                            hx-put="/qa/{{ post.id }}/approve"
+                            hx-vals='{"approved": false}'
+                            hx-swap="none"
+                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                            class="flex-1 inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition"
+                        >
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                            Reject
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% elif post.video_status in ['submitted', 'processing'] %}
+                <div class="mt-2 text-sm text-gray-600">
+                    <p>Video is being generated. This typically takes 2-3 minutes.</p>
+                    <p class="text-xs text-gray-500 mt-1">Operation ID: {{ post.video_operation_id }}</p>
+                </div>
+                {% elif post.video_status == 'failed' %}
+                <div class="mt-2 text-sm text-red-600">
+                    <p>Video generation failed. Please try again.</p>
+                    {% if post.video_metadata and post.video_metadata.get('error') %}
+                    <p class="text-xs text-red-500 mt-1">Error: {{ post.video_metadata.get('error') }}</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            {% if batch.state in ['S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_status in ['pending', 'failed'] %}
+            <div>
+                <button
+                    hx-post="/videos/{{ post.id }}/generate"
+                    hx-vals='js:{provider: "veo_3_1", format: "9:16"}'
+                    hx-swap="none"
+                    hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                    class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition"
+                >
+                    Generate Video
+                </button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if batch.state == 'S7_PUBLISH_PLAN' %}
+    {% set publish_results = post.publish_results or {} %}
+    {% set facebook_result = publish_results.get('facebook') or {} %}
+    {% set instagram_result = publish_results.get('instagram') or {} %}
+    {% set tiktok_result = publish_results.get('tiktok') or {} %}
+    <div class="mt-6 border-t border-gray-200 pt-4">
+        <div
+            x-data='publishSchedulerComponent({
+                postId: {{ post.id | tojson }},
+                scheduledAt: {{ post.scheduled_at | tojson if post.scheduled_at else "null" }},
+                initialNetworks: {{ post.social_networks | tojson }},
+                caption: {{ (post.publish_caption or "") | tojson }},
+                videoUrl: {{ post.video_url | tojson if post.video_url else "null" }},
+                meta: {{ batch_view.meta_publish_state | tojson }},
+                tiktok: {{ batch_view.tiktok_publish_state | tojson }},
+                facebookResult: {{ facebook_result | tojson }},
+                instagramResult: {{ instagram_result | tojson }},
+                tiktokResult: {{ tiktok_result | tojson }},
+                metaConnectUrl: {{ ("/publish/meta/connect?batch_id=" ~ batch.id ~ "&post_id=" ~ post.id) | tojson }},
+                tiktokConnectUrl: {{ ("/api/auth/tiktok/start?batch_id=" ~ batch.id) | tojson }}
+            })'
+            class="space-y-4"
+        >
+            <div class="flex items-center justify-between">
+                <h5 class="text-sm font-semibold text-gray-900">Publish Schedule</h5>
+                {% if post.scheduled_at %}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                    ✓ Scheduled
+                </span>
+                {% else %}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                    Pending
+                </span>
+                {% endif %}
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                    Scheduled Time (Europe/Berlin)
+                </label>
+                <input
+                    type="datetime-local"
+                    x-model="scheduledDateTime"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    :min="minDateTime"
+                />
+                <p class="mt-1 text-xs text-gray-500" x-show="scheduledDateTime">
+                    UTC: <span x-text="getUTCDisplay()"></span>
+                </p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">
+                    Shared Caption
+                </label>
+                <textarea
+                    x-model="publishCaption"
+                    rows="4"
+                    maxlength="2200"
+                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="Write the caption/description that should be sent to Facebook and Instagram."
+                ></textarea>
+                <div class="mt-1 flex items-center justify-between text-xs text-gray-500">
+                    <span>This caption is shared across Facebook and Instagram, but editable per post.</span>
+                    <span x-text="`${publishCaption.length}/2200`"></span>
+                </div>
+            </div>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+                <div class="rounded-md border p-3" :class="metaPublishReady() ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'">
+                    <div class="flex items-center justify-between gap-2">
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">Meta Readiness</p>
+                            <p class="mt-1 text-sm font-semibold text-gray-900" x-text="metaTargetLabel()"></p>
+                        </div>
+                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="metaStatusClass()" x-text="metaStatusLabel()"></span>
+                    </div>
+                    <p class="mt-2 text-xs text-gray-600" x-text="metaReadinessReason()"></p>
+                </div>
+                <div class="rounded-md border p-3" :class="tiktokReadinessClass()">
+                    <div class="flex items-center justify-between gap-2">
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">TikTok Readiness</p>
+                            <p class="mt-1 text-sm font-semibold text-gray-900" x-text="tiktokAccountLabel()"></p>
+                        </div>
+                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="tiktokReadinessBadgeClass()" x-text="tiktokReadinessLabel()"></span>
+                    </div>
+                    <p class="mt-2 text-xs text-gray-600" x-text="tiktokReadinessCopy()"></p>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-2">
+                    Meta Publish Networks
+                </label>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                        type="button"
+                        class="relative flex items-center justify-center px-3 py-2 border rounded-md transition"
+                        :class="networkButtonClass('instagram')"
+                        @click="toggleNetwork('instagram')"
+                        @keydown.enter.prevent="toggleNetwork('instagram')"
+                    >
+                        <div class="flex items-center gap-2">
+                            <svg class="w-5 h-5" :class="selectedNetworks.includes('instagram') ? 'text-purple-600' : (instagramAvailable ? 'text-gray-400' : 'text-amber-500')" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                            </svg>
+                            <span class="text-xs font-medium" :class="selectedNetworks.includes('instagram') ? 'text-purple-700' : (instagramAvailable ? 'text-gray-700' : 'text-amber-700')">Instagram</span>
+                        </div>
+                    </button>
+
+                    <button
+                        type="button"
+                        class="relative flex items-center justify-center px-3 py-2 border rounded-md transition"
+                        :class="networkButtonClass('facebook')"
+                        @click="toggleNetwork('facebook')"
+                        @keydown.enter.prevent="toggleNetwork('facebook')"
+                    >
+                        <div class="flex items-center gap-2">
+                            <svg class="w-5 h-5" :class="selectedNetworks.includes('facebook') ? 'text-blue-600' : (facebookAvailable ? 'text-gray-400' : 'text-amber-500')" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                            </svg>
+                            <span class="text-xs font-medium" :class="selectedNetworks.includes('facebook') ? 'text-blue-700' : (facebookAvailable ? 'text-gray-700' : 'text-amber-700')">Facebook</span>
+                        </div>
+                    </button>
+                </div>
+                <p class="mt-2 text-xs text-gray-500">
+                    Save a scheduled publish plan for Facebook and Instagram here. TikTok posting is handled below.
+                </p>
+                <p class="mt-2 text-xs text-red-700" x-show="!metaPublishReady()">
+                    <span x-text="metaReadinessReason()"></span>
+                </p>
+                <p class="mt-2 text-xs text-red-700" x-show="!videoUrl">
+                    Generate the video before saving a publish schedule.
+                </p>
+            </div>
+
+            <div class="rounded-md border border-gray-200 bg-gray-50 p-4">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-700">TikTok</p>
+                        <p class="mt-1 text-sm text-gray-600">Direct post is the primary path. Draft export remains available as a fallback.</p>
+                    </div>
+                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="tiktokResultClass()" x-text="tiktokStatusLabel()"></span>
+                </div>
+                <div class="mt-4 grid gap-3 sm:grid-cols-2" x-show="tiktokHasCreatorInfo()">
+                    <label class="text-xs font-medium text-gray-700">
+                        Privacy
+                        <select x-model="selectedPrivacyLevel" class="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-800">
+                            <template x-for="option in tiktokPrivacyOptions()" :key="option">
+                                <option :value="option" x-text="option"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <div class="grid gap-2 text-xs text-gray-700">
+                        <label class="inline-flex items-center gap-2">
+                            <input type="checkbox" x-model="disableComment" class="rounded border-gray-300 text-gray-900 focus:ring-gray-800">
+                            Disable comments
+                        </label>
+                        <label class="inline-flex items-center gap-2">
+                            <input type="checkbox" x-model="disableDuet" class="rounded border-gray-300 text-gray-900 focus:ring-gray-800">
+                            Disable duet
+                        </label>
+                        <label class="inline-flex items-center gap-2">
+                            <input type="checkbox" x-model="disableStitch" class="rounded border-gray-300 text-gray-900 focus:ring-gray-800">
+                            Disable stitch
+                        </label>
+                    </div>
+                </div>
+                <p class="mt-3 text-xs text-gray-500" x-show="tiktokCreatorInfo.max_video_post_duration_sec">
+                    TikTok limit for this account: <span x-text="`${tiktokCreatorInfo.max_video_post_duration_sec}s`"></span>
+                </p>
+                <p class="mt-2 text-xs text-red-700" x-show="tiktokErrorHint()" x-text="tiktokErrorHint()"></p>
+                <div class="mt-4 flex flex-wrap items-center gap-2">
+                    <button
+                        @click="postToTikTok()"
+                        :disabled="!canPostTikTok()"
+                        class="inline-flex items-center justify-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition"
+                        :class="canPostTikTok() ? 'hover:bg-gray-900 focus:ring-2 focus:ring-gray-800 focus:ring-offset-2' : 'opacity-50 cursor-not-allowed'"
+                    >
+                        <span x-text="tiktokPosting ? 'Posting…' : 'Post to TikTok'"></span>
+                    </button>
+                    <button
+                        @click="uploadTikTokDraft()"
+                        :disabled="!canUploadTikTokDraft()"
+                        class="inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition"
+                        :class="canUploadTikTokDraft() ? 'hover:bg-gray-100 focus:ring-2 focus:ring-gray-300 focus:ring-offset-2' : 'opacity-50 cursor-not-allowed'"
+                    >
+                        <span x-text="tiktokUploading ? 'Uploading…' : 'Upload Draft to TikTok'"></span>
+                    </button>
+                </div>
+                <p class="mt-3 text-xs text-gray-500" x-show="tiktokResult.publish_id">
+                    Publish ID: <span x-text="tiktokResult.publish_id"></span>
+                </p>
+                <p class="mt-1 text-xs text-gray-500" x-show="tiktokResult.post_id">
+                    Public post ID: <span x-text="tiktokResult.post_id"></span>
+                </p>
+            </div>
+
+            <div class="rounded-md border border-gray-200 bg-gray-50 p-3" x-show="hasPublishResults()">
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Latest Publish Results</p>
+                <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div class="rounded-md border border-gray-200 bg-white p-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs font-semibold text-blue-700">Facebook</span>
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="resultClass(facebookResult.status)" x-text="facebookResult.status || 'pending'"></span>
+                        </div>
+                        <p class="mt-1 text-xs text-gray-600" x-show="facebookResult.remote_id">Remote ID: <span x-text="facebookResult.remote_id"></span></p>
+                        <p class="mt-1 text-xs text-red-700" x-show="facebookResult.error_message" x-text="facebookResult.error_message"></p>
+                    </div>
+                    <div class="rounded-md border border-gray-200 bg-white p-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs font-semibold text-purple-700">Instagram</span>
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="resultClass(instagramResult.status)" x-text="instagramResult.status || 'pending'"></span>
+                        </div>
+                        <p class="mt-1 text-xs text-gray-600" x-show="instagramResult.remote_id">Remote ID: <span x-text="instagramResult.remote_id"></span></p>
+                        <p class="mt-1 text-xs text-red-700" x-show="instagramResult.error_message" x-text="instagramResult.error_message"></p>
+                    </div>
+                    <div class="rounded-md border border-gray-200 bg-white p-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs font-semibold text-gray-900">TikTok</span>
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="resultClass(tiktokResult.status)" x-text="tiktokStatusLabel()"></span>
+                        </div>
+                        <p class="mt-1 text-xs text-gray-600" x-show="tiktokResult.publish_id">Publish ID: <span x-text="tiktokResult.publish_id"></span></p>
+                        <p class="mt-1 text-xs text-gray-600" x-show="tiktokResult.post_id">Post ID: <span x-text="tiktokResult.post_id"></span></p>
+                        <p class="mt-1 text-xs text-red-700" x-show="tiktokResult.error_message" x-text="tiktokResult.error_message"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button
+                    @click="saveSchedule()"
+                    :disabled="!canSave()"
+                    class="flex-1 inline-flex justify-center items-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white transition"
+                    :class="canSave() ? 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500' : 'bg-gray-300 cursor-not-allowed'"
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <span x-text="saving ? 'Saving...' : 'Save Meta Schedule'"></span>
+                </button>
+            </div>
+
+            <div x-show="successMessage" x-transition class="rounded-md bg-green-50 border border-green-200 p-3">
+                <p class="text-xs text-green-800" x-text="successMessage"></p>
+            </div>
+            <div x-show="errorMessage" x-transition class="rounded-md bg-red-50 border border-red-200 p-3">
+                <p class="text-xs text-red-800" x-text="errorMessage"></p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
