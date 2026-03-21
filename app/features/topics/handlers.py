@@ -9,13 +9,16 @@ from datetime import datetime, timedelta, timezone
 from threading import RLock
 from collections import Counter
 from uuid import uuid4
-from fastapi import APIRouter, HTTPException, status, Header
+from fastapi import APIRouter, HTTPException, Request, Header, status
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
 from typing import Optional, Dict, Any, List
 
 from app.features.topics.schemas import (
     DiscoverTopicsRequest,
     TopicListResponse,
-    TopicResponse
+    TopicResponse,
+    TopicResearchRunRequest,
 )
 from app.features.topics.agents import (
     generate_topics_research_agent,
@@ -23,6 +26,7 @@ from app.features.topics.agents import (
     extract_seed_strict_extractor,
     convert_research_item_to_topic,
     build_seed_payload,
+    generate_topic_script_candidate,
     generate_lifestyle_topics,
     build_lifestyle_seed_payload,
 )
@@ -32,12 +36,21 @@ from app.features.topics.queries import (
     add_topic_to_registry,
     create_post_for_batch,
     get_posts_by_batch,
+    list_topic_suggestions,
+    get_topic_registry_by_id,
 )
 from app.features.batches.queries import get_batch_by_id, update_batch_state, list_batches
 from app.core.states import BatchState
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.config import get_settings
+from app.features.topics.hub import (
+    _wants_html,
+    build_topic_hub_payload,
+    harvest_topics_to_bank_sync,
+    launch_topic_research_run,
+    parse_topic_filters,
+)
 
 logger = get_logger(__name__)
 
@@ -474,6 +487,62 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             count=count
         )
 
+        stored_suggestions = list_topic_suggestions(
+            target_length_tier=batch.get("target_length_tier"),
+            limit=count,
+            post_type=post_type,
+        )
+        if len(stored_suggestions) >= count:
+            update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="writing_posts",
+                stage_label="Reusing stored topic-bank suggestions",
+                detail_message=(
+                    f"Found {len(stored_suggestions)} stored suggestions for {post_type} and writing the requested posts directly from the bank."
+                ),
+                posts_created=len(created_posts),
+                expected_posts=expected_posts,
+                current_post_type=post_type,
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
+            for suggestion in stored_suggestions[:count]:
+                topic_title = suggestion["title"]
+                topic_rotation = suggestion.get("rotation") or suggestion.get("script") or topic_title
+                topic_cta = suggestion.get("cta") or topic_rotation
+                seed_payload = (
+                    suggestion.get("seed_payload")
+                    or (suggestion.get("seed_payloads") or {}).get(str(batch.get("target_length_tier") or 8))
+                    or suggestion.get("research_payload")
+                    or {"facts": [topic_rotation]}
+                )
+                add_topic_to_registry(
+                    title=topic_title,
+                    rotation=topic_rotation,
+                    cta=topic_cta,
+                )
+                post = create_post_for_batch(
+                    batch_id=batch_id,
+                    post_type=post_type,
+                    topic_title=topic_title,
+                    topic_rotation=topic_rotation,
+                    topic_cta=topic_cta,
+                    spoken_duration=float(suggestion.get("spoken_duration") or 5),
+                    seed_data=seed_payload,
+                )
+                created_posts.append(post)
+                dedup_topic_record = {
+                    "title": topic_title,
+                    "rotation": topic_rotation,
+                    "cta": topic_cta,
+                    "spoken_duration": float(suggestion.get("spoken_duration") or 5),
+                }
+                all_generated_topics.append(dedup_topic_record)
+            continue
+
         # PIPELINE DISPATCH: lifestyle uses PROMPT_2 only, value/product use PROMPT_1+PROMPT_2
         if post_type == "lifestyle":
             # Lifestyle pipeline: PROMPT_2 direct (no web research), but still dedupe
@@ -482,6 +551,11 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             attempts = 0
             max_attempts = 5
             dedupe_reference = existing_topics + all_generated_topics
+            existing_titles = {
+                str(topic.get("title") or "").strip().lower()
+                for topic in dedupe_reference
+                if isinstance(topic, dict) and str(topic.get("title") or "").strip()
+            }
 
             while len(collected_candidates) < required_topics and attempts < max_attempts:
                 remaining_topics = required_topics - len(collected_candidates)
@@ -521,7 +595,12 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 for candidate in unique_candidates:
                     if len(collected_candidates) >= required_topics:
                         break
+                    candidate_title = str(candidate.get("title") or "").strip().lower()
+                    if candidate_title and candidate_title in existing_titles:
+                        continue
                     collected_candidates.append(candidate)
+                    if candidate_title:
+                        existing_titles.add(candidate_title)
                     dedupe_reference.append(
                         {
                             "title": candidate["title"],
@@ -799,15 +878,20 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     is_retrying=False,
                     retry_message=None,
                 )
-                dialog_scripts = generate_dialog_scripts(
-                    topic=original_item.topic,
+                prompt1_item = generate_topic_script_candidate(
+                    post_type=post_type,
+                    target_length_tier=batch.get("target_length_tier") or 8,
+                    dossier=payload.get("topic_model"),
+                    lane_candidate=payload.get("original_item").model_dump(mode="json")
+                    if hasattr(payload.get("original_item"), "model_dump")
+                    else {"title": original_item.topic},
                 )
                 seed = extract_seed_strict_extractor(topic_model)
 
                 seed_payload = build_seed_payload(
-                    original_item,
+                    prompt1_item,
                     strict_seed=seed,
-                    dialog_scripts=dialog_scripts,
+                    dialog_scripts=None,
                 )
 
                 add_topic_to_registry(
@@ -1051,37 +1135,129 @@ async def discover_topics_endpoint(request: DiscoverTopicsRequest):
         )
 
 
-@router.get("", response_model=SuccessResponse)
-async def list_topics_endpoint(limit: int = 50, offset: int = 0):
-    """List topics from registry."""
+@router.get("")
+async def list_topics_endpoint(request: Request):
+    """Render the topics hub or return the legacy JSON API payload."""
     try:
-        topics = get_all_topics_from_registry()
-        
-        # Apply pagination
-        paginated = topics[offset:offset + limit]
-        
+        payload = build_topic_hub_payload(request)
+        if _wants_html(request):
+            from fastapi.templating import Jinja2Templates
+
+            templates = Jinja2Templates(directory="templates")
+            response = templates.TemplateResponse(
+                "topics/hub.html",
+                {
+                    "request": request,
+                    **payload,
+                },
+            )
+            return response
+
         topic_responses = [
             TopicResponse(
-                id=t["id"],
-                title=t["title"],
-                rotation=t["rotation"],
-                cta=t["cta"],
-                first_seen_at=t["first_seen_at"],
-                last_used_at=t["last_used_at"],
-                use_count=t["use_count"]
+                id=topic["id"],
+                title=topic["title"],
+                rotation=topic["rotation"],
+                cta=topic["cta"],
+                first_seen_at=topic.get("first_seen_at") or topic.get("created_at") or _utc_now_iso(),
+                last_used_at=topic.get("last_used_at") or topic.get("last_harvested_at") or topic.get("updated_at") or _utc_now_iso(),
+                use_count=int(topic.get("use_count") or 0),
             )
-            for t in paginated
+            for topic in payload["topics"]
         ]
-        
         return SuccessResponse(
-            data=TopicListResponse(topics=topic_responses, total=len(topics))
+            data=TopicListResponse(topics=topic_responses, total=len(topic_responses)).model_dump(mode="json")
         )
-    
+
     except Exception as e:
         logger.exception("list_topics_failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list topics"
+            detail="Failed to list topics",
+        )
+
+
+@router.post("/runs")
+async def launch_topic_research_endpoint(request: Request):
+    """Launch a durable topic research run for the selected topic."""
+    try:
+        payload: Dict[str, Any]
+        script_usage = "all"
+        if "application/json" in request.headers.get("content-type", ""):
+            payload = await request.json()
+            script_usage = str(payload.get("script_usage") or "all").strip().lower()
+        else:
+            form = await request.form()
+            script_usage = str(form.get("script_usage") or "all").strip().lower()
+            payload = {
+                "topic_registry_id": str(form.get("topic_registry_id") or "").strip(),
+                "target_length_tier": form.get("target_length_tier"),
+                "trigger_source": str(form.get("trigger_source") or "manual").strip() or "manual",
+                "post_type": str(form.get("post_type") or "").strip() or None,
+            }
+
+        launch_request = TopicResearchRunRequest.model_validate(payload)
+        result = await launch_topic_research_run(
+            topic_registry_id=launch_request.topic_registry_id,
+            target_length_tier=launch_request.target_length_tier,
+            trigger_source=launch_request.trigger_source,
+            post_type=launch_request.post_type,
+        )
+
+        if _wants_html(request):
+            redirect_url = f"/topics?topic_id={launch_request.topic_registry_id}&run_id={result['run']['id']}"
+            if script_usage in {"used", "unused"}:
+                redirect_url += f"&script_usage={script_usage}"
+            response = RedirectResponse(
+                url=redirect_url,
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+            response.headers["HX-Trigger"] = "topic-research-launched"
+            return response
+
+        return SuccessResponse(
+            data={
+                "run": result["run"],
+                "topic": result["topic"],
+                "status_url": result["status_url"],
+            }
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "ok": False,
+                "code": "validation_error",
+                "message": exc.message,
+                "details": exc.details,
+            },
+        )
+
+
+@router.get("/runs/{run_id}")
+async def get_topic_research_run_endpoint(request: Request, run_id: str):
+    """Return a durable research run as JSON or an HTML fragment."""
+    try:
+        from app.features.topics.queries import get_topic_research_run
+
+        run = get_topic_research_run(run_id)
+        if _wants_html(request):
+            from fastapi.templating import Jinja2Templates
+
+            templates = Jinja2Templates(directory="templates")
+            return templates.TemplateResponse(
+                "topics/partials/run_card.html",
+                {
+                    "request": request,
+                    "run": run,
+                },
+            )
+        return SuccessResponse(data=run)
+    except Exception as exc:
+        logger.exception("topic_research_run_fetch_failed", run_id=run_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research run not found",
         )
 
 

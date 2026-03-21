@@ -1356,17 +1356,50 @@ class LLMClient:
             return f"{system_prompt.strip()}\n\nUSER TASK:\n{prompt.strip()}"
         return prompt.strip()
 
-    def _to_gemini_response_schema(self, schema: Any) -> Any:
-        """Remove JSON Schema fields unsupported by Gemini responseSchema."""
+    def _resolve_gemini_schema_ref(self, ref: str, root_schema: Any) -> Any:
+        """Resolve local JSON-schema refs before sending them to Gemini."""
+        if not isinstance(ref, str) or not ref.startswith("#/"):
+            return None
+
+        node: Any = root_schema
+        for raw_part in ref[2:].split("/"):
+            part = raw_part.replace("~1", "/").replace("~0", "~")
+            if not isinstance(node, dict) or part not in node:
+                return None
+            node = node[part]
+        return deepcopy(node)
+
+    def _to_gemini_response_schema(self, schema: Any, *, root_schema: Any = None) -> Any:
+        """Remove or inline JSON Schema features unsupported by Gemini responseSchema."""
+        if root_schema is None:
+            root_schema = schema
+
         if isinstance(schema, dict):
+            current = dict(schema)
+            ref = current.get("$ref")
+            if ref:
+                resolved = self._resolve_gemini_schema_ref(str(ref), root_schema)
+                current.pop("$ref", None)
+                if resolved is not None:
+                    if isinstance(resolved, dict):
+                        resolved.update(current)
+                    current = resolved
+
             cleaned = {}
-            for key, value in schema.items():
-                if key in {"additionalProperties", "strict", "name", "$schema"}:
+            for key, value in current.items():
+                if key in {
+                    "additionalProperties",
+                    "strict",
+                    "name",
+                    "$schema",
+                    "$defs",
+                    "definitions",
+                }:
                     continue
-                cleaned[key] = self._to_gemini_response_schema(value)
+                cleaned[key] = self._to_gemini_response_schema(value, root_schema=root_schema)
             return cleaned
         if isinstance(schema, list):
-            return [self._to_gemini_response_schema(item) for item in schema]
+            return [self._to_gemini_response_schema(item, root_schema=root_schema) for item in schema]
         return deepcopy(schema)
 
 

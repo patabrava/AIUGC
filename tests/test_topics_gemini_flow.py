@@ -1,6 +1,7 @@
 """Regression tests for Gemini-backed topic discovery."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 import httpx
 import pytest
@@ -345,6 +346,57 @@ def test_generate_gemini_deep_research_retries_transient_poll_503(monkeypatch):
     assert len(get_calls) == 2
 
 
+def test_to_gemini_response_schema_inlines_local_refs(monkeypatch):
+    fake_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_model="gpt-4o-mini",
+        gemini_api_key="gemini-key",
+        gemini_topic_model="gemini-2.5-flash",
+        gemini_deep_research_agent="deep-research-pro-preview",
+        gemini_topic_timeout_seconds=30,
+        gemini_topic_poll_seconds=0,
+    )
+    clients = [FakeHttpClient([]), FakeHttpClient([])]
+
+    monkeypatch.setattr(llm_client_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(llm_client_module.httpx, "Client", lambda *args, **kwargs: clients.pop(0))
+    client = llm_client_module.LLMClient()
+
+    cleaned = client._to_gemini_response_schema(
+        {
+            "type": "object",
+            "properties": {
+                "source": {"$ref": "#/$defs/source"},
+            },
+            "$defs": {
+                "source": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "url": {"type": "string"},
+                    },
+                    "required": ["title", "url"],
+                    "additionalProperties": False,
+                }
+            },
+        }
+    )
+
+    assert cleaned == {
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "url": {"type": "string"},
+                },
+                "required": ["title", "url"],
+            }
+        },
+    }
+
+
 def test_topics_feature_uses_gemini_methods(monkeypatch):
     fake_llm = FakeTopicLLM()
 
@@ -363,6 +415,255 @@ def test_topics_feature_uses_gemini_methods(monkeypatch):
     assert fake_llm.json_prompts, "Strict extractor or normalizer should use Gemini JSON generation"
     assert scripts.problem_agitate_solution
     assert seed.facts == ["Pflegeleistungen müssen beantragt werden"]
+
+
+def test_generate_topic_script_candidate_uses_duration_profile_import(monkeypatch):
+    class FakeLaneLLM:
+        def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
+            return {
+                "items": [
+                    {
+                        "topic": "Begleitservice im Bahnhof clever nutzen",
+                        "framework": "PAL",
+                        "sources": [
+                            {
+                                "title": "DB Barrierefrei",
+                                "url": "https://example.com/barrierefrei",
+                            }
+                        ],
+                        "script": "Kennst du den Begleitservice im Bahnhof? Mit Voranmeldung reist du spürbar entspannter.",
+                        "source_summary": "Die Quelle erklärt Voranmeldung, Servicezeiten und Unterstützung am Bahnhof, damit du Transfers, Einstiege und Begleitung planbarer organisieren kannst.",
+                        "estimated_duration_s": 5,
+                        "tone": "direkt, freundlich, empowernd, du-Form",
+                        "disclaimer": "Keine individuelle Rechts- oder Medizinberatung.",
+                    }
+                ]
+            }
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="oepnv-begleitservice-01",
+        topic="Begleitservice im Bahnhof",
+        anchor_topic="Barrierefrei reisen",
+        seed_topic="Barrierefrei reisen",
+        cluster_summary="Das Dossier bündelt Fakten zu Voranmeldung, Servicezeiten und praktischer Hilfe beim Ein- und Ausstieg.",
+        framework_candidates=["schritt-fuer-schritt"],
+        sources=[{"title": "DB Barrierefrei", "url": "https://example.com/barrierefrei"}],
+        source_summary="Die Quelle erklärt, wie du Unterstützung im Bahnhof rechtzeitig anmeldest und welche Hilfe konkret angeboten wird.",
+        facts=["Begleitservice muss oft vorab angemeldet werden."],
+        angle_options=["Voranmeldung im Alltag"],
+        risk_notes=["Verfügbarkeit kann je nach Bahnhof schwanken."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            {
+                "lane_key": "begleitservice",
+                "lane_family": "value",
+                "title": "Begleitservice im Bahnhof clever nutzen",
+                "angle": "Voranmeldung und Alltagsnutzen.",
+                "priority": 1,
+                "framework_candidates": ["schritt-fuer-schritt"],
+                "source_summary": "Die Quelle zeigt, wie du Hilfe am Bahnhof planbar und stressärmer nutzt.",
+                "facts": ["Viele Hilfen erfordern Vorlauf."],
+                "risk_notes": ["Kurzfristige Änderungen können Unterstützung verschieben."],
+                "disclaimer": "Keine individuelle Rechts- oder Medizinberatung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [8],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeLaneLLM())
+    monkeypatch.setattr(topic_agents, "_validate_url_accessible", lambda url, timeout=5.0: True)
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=8,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    assert item.topic == "Begleitservice im Bahnhof clever nutzen"
+    assert item.estimated_duration_s == 5
+
+
+def test_generate_dialog_scripts_synthesizes_fallback_from_dossier(monkeypatch):
+    class FakeBrokenDialogLLM:
+        def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
+            raise topic_agents.ValidationError(message="Broken JSON", details={})
+
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return """Problem-Agitieren-Lösung Ads
+            Was dir bei Dekubitus niemand klar sagt
+            """
+
+    dossier = {
+        "topic": "Dekubitus-Dokumentation im Alltag",
+        "cluster_summary": "Das Dossier erklärt Risiken, Dokumentation und klare Routinen im Pflegealltag.",
+        "source_summary": "Klare Dokumentation, feste Routinen und nachvollziehbare Nachweise senken Stress, Rückfragen und spätere Haftungsrisiken im Alltag.",
+        "facts": ["Dokumentation macht Risiken und Maßnahmen nachvollziehbar."],
+        "risk_notes": ["Fehlende Nachweise erhöhen den Druck im Schadensfall."],
+        "lane_candidate": {
+            "title": "Haftungsfalle Dekubitus im Alltag",
+        },
+    }
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeBrokenDialogLLM())
+
+    scripts = topic_agents.generate_dialog_scripts(
+        topic="Haftungsfalle Dekubitus im Alltag",
+        scripts_required=2,
+        dossier=dossier,
+        profile=topic_agents.get_duration_profile(8),
+    )
+
+    assert len(scripts.problem_agitate_solution) == 2
+    assert len(scripts.testimonial) == 2
+    assert len(scripts.transformation) == 2
+    assert scripts.description
+    assert all(script.endswith((".", "!", "?")) for script in scripts.problem_agitate_solution)
+
+
+def test_generate_topic_script_candidate_synthesizes_fallback(monkeypatch):
+    class FakeBrokenPrompt1LLM:
+        def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
+            raise topic_agents.ValidationError(message="Broken JSON", details={})
+
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return """topic: broken"""
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="teilhabe-beirat-01",
+        topic="Behindertenbeirat mit Wirkung",
+        anchor_topic="Kommunale Teilhabe",
+        seed_topic="Kommunale Teilhabe",
+        cluster_summary="Das Dossier erklärt Rechte, Mitsprache und feste Routinen für wirksame Behindertenbeiräte.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Kommunale Teilhabe", "url": "https://example.com/teilhabe"}],
+        source_summary="Klare Rechte, feste Abläufe und nachvollziehbare Anträge entscheiden darüber, ob kommunale Teilhabe im Alltag tatsächlich Wirkung entfaltet.",
+        facts=["Antragsrechte erhöhen den Einfluss in kommunalen Gremien."],
+        angle_options=["Rechte sichern"],
+        risk_notes=["Ohne klare Rechte bleibt Mitsprache oft symbolisch."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            {
+                "lane_key": "beirat",
+                "lane_family": "value",
+                "title": "Behindertenbeirat mit Wirkung",
+                "angle": "Rechte und Routinen.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "Die Quelle zeigt, wie Rechte, Anträge und feste Abläufe kommunale Mitsprache belastbarer machen.",
+                "facts": ["Klare Rechte stärken Mitsprache."],
+                "risk_notes": ["Ohne Zuständigkeiten versanden Anträge."],
+                "disclaimer": "Keine individuelle Rechts- oder Medizinberatung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [8],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeBrokenPrompt1LLM())
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=8,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    assert item.topic == "Behindertenbeirat mit Wirkung"
+    assert str(item.sources[0].url) == "https://example.com/teilhabe"
+    assert item.framework == "PAL"
+    assert item.script.endswith("?")
+    assert item.estimated_duration_s >= 5
+
+
+def test_parse_topic_research_response_accepts_json_followed_by_markdown():
+    raw = """{
+      "cluster_id": "rehabilitation-guide-01",
+      "topic": "Ergotherapie und Physiotherapie im Alltag",
+      "anchor_topic": "Therapie im Alltag",
+      "seed_topic": "Ergotherapie und Physiotherapie",
+      "cluster_summary": "Das Dossier vergleicht Ziele, Verordnungen, Kosten und konkrete Alltagseffekte von Ergo- und Physiotherapie.",
+      "framework_candidates": ["PAL", "Testimonial"],
+      "sources": [
+        {"title": "GKV Heilmittel", "url": "https://example.com/heilmittel"}
+      ],
+      "source_summary": "Heilmittelrichtlinien, Verordnungen und Praxisbeispiele zeigen, wann Ergo oder Physio im Alltag sinnvoll und finanzierbar ist.",
+      "facts": ["Beide Therapieformen brauchen in der Regel eine ärztliche Verordnung."],
+      "angle_options": ["Ziele vergleichen", "Kosten erklären"],
+      "risk_notes": ["Verordnungen unterscheiden sich je nach Diagnose."],
+      "disclaimer": "Keine individuelle Therapie- oder Rechtsberatung.",
+      "lane_candidates": [
+        {
+          "lane_key": "vergleich",
+          "lane_family": "value",
+          "title": "Ergo oder Physio: Was hilft dir wann?",
+          "angle": "Vergleich der Ziele und Alltagseffekte.",
+          "priority": 1,
+          "framework_candidates": ["PAL"],
+          "source_summary": "Die Quellen vergleichen Ziele, typische Verordnungen und den praktischen Nutzen im Alltag.",
+          "facts": ["Physiotherapie fokussiert stärker Bewegung und Funktion."],
+          "risk_notes": ["Therapiebedarf bleibt individuell."],
+          "disclaimer": "Keine individuelle Therapie- oder Rechtsberatung.",
+          "lane_overlap_warnings": ["Nicht mit Reha-Sport vermischen."],
+          "suggested_length_tiers": [8, 16]
+        }
+      ]
+    }
+
+    **Sources:**
+    - https://example.com/heilmittel
+    """
+
+    dossier = topic_agents.parse_topic_research_response(raw)
+
+    assert dossier.cluster_id == "rehabilitation-guide-01"
+    assert len(dossier.sources) == 1
+    assert len(dossier.lane_candidates) == 1
+
+
+def test_parse_topic_research_response_clips_overlong_disclaimers():
+    long_disclaimer = "Hinweis " * 80
+    raw = json.dumps(
+        {
+            "cluster_id": "rehabilitation-guide-02",
+            "topic": "Therapie richtig einordnen",
+            "anchor_topic": "Therapie",
+            "seed_topic": "Therapie",
+            "cluster_summary": "Ein Dossier über Grenzen, Nutzen und Organisation von Ergo- und Physiotherapie im Alltag.",
+            "framework_candidates": ["PAL"],
+            "sources": [
+                {"title": "Quelle", "url": "https://example.com/quelle"}
+            ],
+            "source_summary": "Die Quelle ordnet Therapieziele, Verordnungen und alltagsnahe Erwartungen ein.",
+            "facts": ["Therapieziele hängen von Diagnose und Alltag ab."],
+            "angle_options": ["Grenzen erklären"],
+            "risk_notes": ["Nicht jede Therapie passt für jede Situation."],
+            "disclaimer": long_disclaimer,
+            "lane_candidates": [
+                {
+                    "lane_key": "grenzen",
+                    "lane_family": "value",
+                    "title": "Was Therapie leisten kann und was nicht",
+                    "angle": "Abgrenzung realistischer Erwartungen.",
+                    "priority": 3,
+                    "framework_candidates": ["PAL"],
+                    "source_summary": "Die Quelle beschreibt Nutzen, Grenzen und typische Missverständnisse.",
+                    "facts": ["Therapie ersetzt keine individuelle Diagnose."],
+                    "risk_notes": ["Konkrete Behandlungen müssen ärztlich abgestimmt werden."],
+                    "disclaimer": long_disclaimer,
+                    "lane_overlap_warnings": [],
+                    "suggested_length_tiers": [8],
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+    dossier = topic_agents.parse_topic_research_response(raw)
+
+    assert len(dossier.disclaimer) <= 240
+    assert len(dossier.lane_candidates[0].disclaimer) <= 200
 
 
 def test_discover_topics_for_batch_runs_off_event_loop(monkeypatch):

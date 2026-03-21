@@ -5,6 +5,10 @@ Dein Ziel: Community stärken, praktische Impulse geben, Empathie aufbauen – o
 THEMA: {topic}
 Zielgruppe: Rollstuhlnutzer:innen in Deutschland. Sprich locker-direkt, "du"-Anrede, keine Pity-Sprache.
 
+{research_context_section}
+
+{hook_bank_section}
+
 Schreibe im Präsens, lockere "du"-Anrede, keine Mitleidssprache, keine Absolutismen.
 Maximal ein passendes Emoji, keine Hashtags oder Links.
 

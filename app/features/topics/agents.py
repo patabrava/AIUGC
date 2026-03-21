@@ -28,12 +28,23 @@ from app.features.topics.schemas import (
     TopicData,
     DialogScripts,
     SeedData,
+    ResearchDossier,
+    TopicScriptVariant,
     PROMPT1_JSON_SCHEMA,
+    PROMPT1_RESEARCH_JSON_SCHEMA,
     PROMPT2_JSON_SCHEMA,
 )
-from app.features.topics.prompts import build_prompt1, build_prompt2, get_topic_pool_candidates
+from app.features.topics.prompts import (
+    build_prompt1,
+    build_prompt2,
+    build_topic_research_prompt,
+    build_topic_research_dossier_prompt,
+    build_topic_normalization_prompt,
+    get_topic_pool_candidates,
+)
+from app.core.video_profiles import get_duration_profile
 from app.core.logging import get_logger
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 
 logger = get_logger(__name__)
 
@@ -82,6 +93,19 @@ CRITICAL SOURCE URL REQUIREMENTS:
 Always respond with a valid JSON array whose length exactly matches the requested number of topics.
 Each element must include all required keys: topic, framework, sources, script, source_summary, estimated_duration_s, tone, disclaimer.
 Responses must be valid JSON only (no Markdown, no backticks, no commentary)."""
+
+PROMPT1_RESEARCH_SYSTEM_PROMPT = """You are the Flow Forge topic research dossier agent.
+Return exactly one JSON object for the research cluster.
+Do not return an array, Markdown, commentary, or fenced code blocks.
+Keep all content fully in German and strictly follow the prompt's output keys."""
+
+PROMPT1_RESEARCH_NORMALIZER_SYSTEM_PROMPT = """You are the Flow Forge research dossier normalization agent.
+You receive a completed deep-research reply that may be prose or Markdown.
+Convert it into exactly one valid JSON object for the research dossier schema.
+Do not wrap the result in Markdown or commentary.
+Keep all content fully in German.
+Derive lane_candidates from clearly distinct sub-angles already present in the raw research reply.
+Do not invent facts that are not supported by the raw reply."""
 
 
 PROMPT1_NORMALIZER_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 normalization agent.
@@ -163,6 +187,66 @@ def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: 
     raise ValidationError(
         message="PROMPT_1 normalization failed without a detailed error",
         details={"desired_topics": desired_topics},
+    )
+
+
+def _normalize_topic_research_response_to_json(
+    llm,
+    raw_response: str,
+    *,
+    seed_topic: str,
+    post_type: str,
+    target_length_tier: int,
+) -> str:
+    prompt = build_topic_normalization_prompt(
+        raw_response=raw_response,
+        seed_topic=seed_topic,
+        post_type=post_type,
+        target_length_tier=target_length_tier,
+    )
+    logger.info("research_dossier_normalizing_response")
+
+    max_tokens_attempts = [6000, 9000]
+    last_error: Optional[Exception] = None
+    for max_tokens in max_tokens_attempts:
+        try:
+            parsed = llm.generate_gemini_json(
+                prompt=prompt,
+                system_prompt=PROMPT1_RESEARCH_NORMALIZER_SYSTEM_PROMPT,
+                json_schema=PROMPT1_RESEARCH_JSON_SCHEMA,
+                max_tokens=max_tokens,
+            )
+            return json.dumps(parsed, ensure_ascii=False)
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "research_dossier_normalizing_retry",
+                max_tokens=max_tokens,
+                error=str(exc),
+            )
+
+    for max_tokens in max_tokens_attempts:
+        try:
+            fallback_text = llm.generate_gemini_text(
+                prompt=prompt,
+                system_prompt=PROMPT1_RESEARCH_NORMALIZER_SYSTEM_PROMPT,
+                max_tokens=max_tokens,
+            )
+            dossier = parse_topic_research_response(fallback_text)
+            return json.dumps(dossier.model_dump(mode="json"), ensure_ascii=False)
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "research_dossier_normalizing_text_retry",
+                max_tokens=max_tokens,
+                error=str(exc),
+            )
+
+    if last_error is not None:
+        raise last_error
+    raise ValidationError(
+        message="PROMPT_1 research normalization failed without a detailed error",
+        details={},
     )
 
 
@@ -353,6 +437,238 @@ def validate_summary(item: ResearchAgentItem) -> None:
         )
 
 
+def _validate_dialog_script_tier(script: str, profile: Any, context: str = "") -> None:
+    tier = getattr(profile, "target_length_tier", None)
+    expected_words = {
+        8: (4, 18),
+        16: (6, 32),
+        32: (10, 60),
+    }
+    min_words, max_words = expected_words.get(int(tier or 8), (4, 24))
+    words = script.split()
+    if not words:
+        raise ValidationError(message="Dialog script is empty", details={"context": context})
+    if len(words) < min_words or len(words) > max_words:
+        raise ValidationError(
+            message="Dialog script does not match the requested tier",
+            details={
+                "context": context,
+                "target_length_tier": tier,
+                "word_count": len(words),
+                "expected_range": [min_words, max_words],
+            },
+        )
+
+
+def _validate_dialog_script_semantics(script: str, context: str = "") -> None:
+    text = script.strip()
+    if not text:
+        raise ValidationError(message="Dialog script is empty", details={"context": context})
+    if "\n" in text:
+        raise ValidationError(message="Dialog script must be a single line", details={"context": context})
+    if text[-1] not in ".!?":
+        raise ValidationError(
+            message="Dialog script must end with terminal punctuation",
+            details={"context": context, "script": text[:120]},
+        )
+
+
+def _dialog_word_bounds(profile: Any) -> tuple[int, int]:
+    tier = getattr(profile, "target_length_tier", None)
+    expected_words = {
+        8: (4, 18),
+        16: (6, 32),
+        32: (10, 60),
+    }
+    return expected_words.get(int(tier or 8), (4, 24))
+
+
+def _short_focus_phrase(text: Any, max_words: int = 4) -> str:
+    cleaned = re.sub(r"[^\wÄÖÜäöüß\s-]", " ", str(text or "")).strip()
+    words = [word for word in cleaned.split() if word]
+    if not words:
+        return "dein Thema"
+    return " ".join(words[:max_words]).lower()
+
+
+def _fit_dialog_script(script: str, profile: Any) -> str:
+    min_words, max_words = _dialog_word_bounds(profile)
+    cleaned = re.sub(r"\s+", " ", str(script or "").strip())
+    cleaned = re.sub(r"[^\wÄÖÜäöüß\s,.!?-]", "", cleaned)
+    words = [word for word in cleaned.split() if word]
+    if len(words) > max_words:
+        words = words[:max_words]
+    filler = ["im", "Alltag"]
+    filler_index = 0
+    while len(words) < min_words:
+        words.append(filler[filler_index % len(filler)])
+        filler_index += 1
+    normalized = " ".join(words).rstrip(" ,;:-")
+    if not normalized.endswith((".", "!", "?")):
+        normalized += "."
+    return normalized
+
+
+def _coerce_dossier_dict(dossier: Optional[ResearchDossier | Dict[str, Any]]) -> Dict[str, Any]:
+    if isinstance(dossier, ResearchDossier):
+        return dossier.model_dump(mode="json")
+    if isinstance(dossier, dict):
+        return dict(dossier)
+    return {}
+
+
+def _synthesize_dialog_scripts(
+    *,
+    topic: str,
+    scripts_required: int,
+    dossier: Optional[ResearchDossier | Dict[str, Any]],
+    profile: Any,
+) -> DialogScripts:
+    dossier_payload = _coerce_dossier_dict(dossier)
+    focus = _short_focus_phrase(
+        ((dossier_payload.get("lane_candidate") or {}).get("title"))
+        or dossier_payload.get("topic")
+        or topic,
+    )
+    fact_focus = _short_focus_phrase((dossier_payload.get("facts") or [""])[0], max_words=5)
+    risk_focus = _short_focus_phrase((dossier_payload.get("risk_notes") or [""])[0], max_words=5)
+
+    problem_templates = [
+        f"Viele unterschätzen {focus}. Klare Doku schützt dich vor teuren Fehlern im Alltag.",
+        f"Was bei {focus} hilft: Feste Routine senkt Stress, Lücken und unnötige Risiken.",
+        f"Gerade bei {focus} spart saubere Doku später Druck, Rückfragen und Ärger.",
+        f"Schon kleine Lücken bei {focus} kosten Zeit. Klare Abläufe halten dich sicherer.",
+        f"Wenn {risk_focus} droht, hilft dir saubere Doku bei {focus} deutlich früher.",
+    ]
+    testimonial_templates = [
+        f"Ich prüfe {focus} früher. So bleiben Nachweise, Termine und Rückfragen viel klarer.",
+        f"Seit ich {focus} sauber dokumentiere, laufen Übergaben, Belege und Alltag ruhiger.",
+        f"Mir hilft bei {focus} eine feste Routine. So vergesse ich wichtige Nachweise nicht.",
+        f"Ich halte {focus} jetzt klar fest. Das spart später Diskussionen und unnötigen Druck.",
+        f"Bei {focus} merke ich: {fact_focus} bleibt mit klarer Doku viel besser sichtbar.",
+    ]
+    transformation_templates = [
+        f"Früher war {focus} unklar. Heute geben feste Routinen mehr Sicherheit im Alltag.",
+        f"Früher kostete {focus} Kraft. Jetzt sparen klare Abläufe Zeit, Druck und Ärger.",
+        f"Früher fehlte Struktur bei {focus}. Heute macht saubere Doku Entscheidungen leichter.",
+        f"Früher war {focus} reaktiv. Heute erkenne ich Risiken deutlich früher im Alltag.",
+        f"Früher blieb {fact_focus} untergehen. Heute wird {focus} klarer und ruhiger gesteuert.",
+    ]
+
+    def build_bucket(templates: List[str]) -> List[str]:
+        scripts: List[str] = []
+        for index in range(scripts_required):
+            candidate = _fit_dialog_script(templates[index % len(templates)], profile)
+            _validate_dialog_script_tier(candidate, profile, context=topic)
+            _validate_dialog_script_semantics(candidate, context=topic)
+            scripts.append(candidate)
+        return scripts
+
+    description_source = (
+        dossier_payload.get("source_summary")
+        or dossier_payload.get("cluster_summary")
+        or f"{topic} im Alltag: klare Fakten, Risiken und nächste Schritte für eine ruhige Umsetzung."
+    )
+    description = build_social_description(topic, str(description_source))
+    if len(description) < 35:
+        description = (
+            f"{topic} im Alltag: {description_source} "
+            "Der Fallback nutzt das Research-Dossier, damit der Script-Bank-Eintrag vollständig bleibt."
+        )
+    description = re.sub(r"\s+", " ", description).strip()[:500]
+
+    scripts = DialogScripts(
+        problem_agitate_solution=build_bucket(problem_templates),
+        testimonial=build_bucket(testimonial_templates),
+        transformation=build_bucket(transformation_templates),
+        description=description,
+    )
+    logger.warning(
+        "dialog_scripts_synthesized_fallback",
+        topic=topic,
+        scripts_required=scripts_required,
+        used_dossier=bool(dossier_payload),
+    )
+    return scripts
+
+
+def _synthesize_topic_script_candidate(
+    *,
+    post_type: str,
+    target_length_tier: int,
+    dossier: Optional[ResearchDossier | Dict[str, Any]],
+    lane_candidate: Optional[Dict[str, Any]],
+) -> ResearchAgentItem:
+    dossier_payload = _coerce_dossier_dict(dossier)
+    lane = dict(lane_candidate or {})
+    focus = _short_focus_phrase(lane.get("title") or dossier_payload.get("topic") or post_type, max_words=2)
+    framework_candidates = (
+        _normalize_list_payload(lane.get("framework_candidates"))
+        or _normalize_list_payload(dossier_payload.get("framework_candidates"))
+        or ["PAL"]
+    )
+    framework = normalize_framework(framework_candidates[0])
+    if framework not in {"PAL", "Testimonial", "Transformation"}:
+        framework = "PAL"
+    script = _fit_dialog_script(
+        f"Wusstest du, dass {focus} nur mit klaren Rechten und fester Routine Wirkung entfaltet?",
+        get_duration_profile(target_length_tier),
+    )
+
+    source_summary = _clip_text(
+        lane.get("source_summary")
+        or dossier_payload.get("source_summary")
+        or dossier_payload.get("cluster_summary")
+        or f"{lane.get('title') or dossier_payload.get('topic') or post_type} im Alltag verständlich erklärt.",
+        500,
+    )
+    if len(source_summary) < 35:
+        source_summary = (
+            f"{source_summary} "
+            f"{_clip_text((dossier_payload.get('cluster_summary') or source_summary), 220)}"
+        ).strip()[:500]
+
+    sources = [
+        {
+            "title": _clip_text(source.get("title"), 400, default="Quelle"),
+            "url": str(source.get("url") or "").strip(),
+        }
+        for source in list(dossier_payload.get("sources") or [])[:2]
+        if isinstance(source, dict) and str(source.get("url") or "").strip()
+    ]
+    if not sources:
+        raise ValidationError(
+            message="PROMPT_1 fallback cannot synthesize a source-backed lane script",
+            details={"topic": lane.get("title") or dossier_payload.get("topic") or post_type},
+        )
+
+    item = ResearchAgentItem(
+        topic=_clip_text(lane.get("title") or dossier_payload.get("topic") or post_type, 400),
+        framework=framework,
+        sources=sources,
+        script=script,
+        source_summary=source_summary,
+        estimated_duration_s=estimate_script_duration_seconds(script),
+        tone="direkt, freundlich, empowernd, du-Form",
+        disclaimer=_clip_text(
+            lane.get("disclaimer")
+            or dossier_payload.get("disclaimer")
+            or "Keine individuelle Rechts- oder Medizinberatung.",
+            200,
+        ),
+    )
+    validate_duration(item)
+    validate_summary(item)
+    validate_german_content(item)
+    logger.warning(
+        "topic_script_candidate_synthesized_fallback",
+        topic=item.topic,
+        target_length_tier=target_length_tier,
+        post_type=post_type,
+    )
+    return item
+
+
 def validate_sources_accessible(item: ResearchAgentItem) -> None:
     """Validate that all source URLs are accessible. Logs warnings but does not fail."""
     inaccessible_sources = []
@@ -490,28 +806,29 @@ def _sanitize_json_text(text: str) -> str:
 def _parse_json_or_yaml(text: str) -> Any:
     # Sanitize first - this handles curly quotes and other problematic characters
     sanitized = _sanitize_json_text(text)
-    
+
+    def _try_extract_json_fragment(candidate: str) -> Any:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(candidate):
+            if char not in {"{", "["}:
+                continue
+            try:
+                parsed, _end = decoder.raw_decode(candidate[index:])
+                return parsed
+            except json.JSONDecodeError:
+                continue
+        return None
+
     # Try direct JSON parse first
     try:
         return json.loads(sanitized)
     except json.JSONDecodeError:
         pass
-    
-    # Try to extract JSON from text (handle cases where LLM adds preamble)
-    # Look for array or object start
-    json_start = -1
-    for i, char in enumerate(sanitized):
-        if char in ['{', '[']:
-            json_start = i
-            break
-    
-    if json_start >= 0:
-        # Try parsing from the first JSON character (use sanitized text)
-        try:
-            return json.loads(sanitized[json_start:])
-        except json.JSONDecodeError:
-            pass
-    
+
+    extracted_json = _try_extract_json_fragment(sanitized)
+    if extracted_json is not None:
+        return extracted_json
+
     # Fall back to YAML parsing (use sanitized text)
     try:
         parsed_yaml = yaml.safe_load(sanitized)
@@ -529,7 +846,7 @@ def _parse_json_or_yaml(text: str) -> Any:
     return parsed_yaml
 
 
-def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
+def parse_prompt1_response(raw: str, profile: Optional[Any] = None) -> ResearchAgentBatch:
     # Strip markdown code fences if present
     cleaned = raw.strip()
     if cleaned.startswith("```json"):
@@ -602,6 +919,11 @@ def parse_prompt1_response(raw: str) -> ResearchAgentBatch:
         ) from exc
 
     for item in batch.items:
+        if item.script.strip() and item.script.strip()[-1] not in ".!?":
+            raise ValidationError(
+                message="PROMPT_1 response contains incomplete fragment",
+                details={"topic": item.topic, "script": item.script},
+            )
         validate_duration(item)
         validate_summary(item)
         validate_german_content(item)
@@ -782,6 +1104,118 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         ) from exc
 
 
+def _normalize_list_payload(value: Any) -> List[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def _clip_text(value: Any, max_length: int, *, default: str = "") -> str:
+    text = str(value or default).strip()
+    if len(text) <= max_length:
+        return text
+    clipped = text[:max_length].rstrip(" ,;:-")
+    if clipped.endswith(("und", "oder", "sowie")):
+        clipped = clipped.rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return clipped or text[:max_length].strip()
+
+
+def _coerce_priority(value: Any) -> int:
+    try:
+        priority = int(value)
+    except (TypeError, ValueError):
+        priority = 10
+    return max(1, min(priority, 20))
+
+
+def _normalize_length_tiers(value: Any) -> List[int]:
+    tiers: List[int] = []
+    for tier in list(value or []):
+        if not str(tier).strip().isdigit():
+            continue
+        parsed = int(tier)
+        if parsed not in {8, 16, 32} or parsed in tiers:
+            continue
+        tiers.append(parsed)
+    return tiers[:3]
+
+
+def _normalize_research_dossier_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(payload or {})
+    normalized["sources"] = [
+        {
+            "title": _clip_text(item.get("title"), 400),
+            "url": str(item.get("url") or "").strip(),
+        }
+        for item in list(normalized.get("sources") or [])
+        if isinstance(item, dict) and str(item.get("url") or "").strip()
+    ][:8]
+    normalized["cluster_id"] = _clip_text(normalized.get("cluster_id"), 120)
+    normalized["topic"] = _clip_text(normalized.get("topic"), 240)
+    normalized["anchor_topic"] = _clip_text(normalized.get("anchor_topic"), 240, default=normalized["topic"])
+    normalized["seed_topic"] = _clip_text(normalized.get("seed_topic"), 240, default=normalized["anchor_topic"])
+    normalized["cluster_summary"] = _clip_text(normalized.get("cluster_summary"), 1200)
+    normalized["framework_candidates"] = _normalize_list_payload(normalized.get("framework_candidates"))[:4]
+    normalized["source_summary"] = _clip_text(normalized.get("source_summary"), 1200)
+    normalized["facts"] = _normalize_list_payload(normalized.get("facts"))[:20]
+    normalized["angle_options"] = _normalize_list_payload(normalized.get("angle_options"))[:10]
+    normalized["risk_notes"] = _normalize_list_payload(normalized.get("risk_notes"))[:10]
+    normalized["disclaimer"] = _clip_text(
+        normalized.get("disclaimer"),
+        240,
+        default="Keine individuelle Rechts-, Therapie- oder Medizinberatung.",
+    )
+    normalized["lane_candidates"] = [
+        {
+            **dict(item),
+            "lane_key": _clip_text(item.get("lane_key"), 80),
+            "lane_family": _clip_text(item.get("lane_family"), 80, default="value"),
+            "title": _clip_text(item.get("title"), 240),
+            "angle": _clip_text(item.get("angle"), 400),
+            "priority": _coerce_priority(item.get("priority")),
+            "framework_candidates": _normalize_list_payload(item.get("framework_candidates"))[:4],
+            "source_summary": _clip_text(item.get("source_summary"), 500),
+            "facts": _normalize_list_payload(item.get("facts"))[:10],
+            "risk_notes": _normalize_list_payload(item.get("risk_notes"))[:5],
+            "disclaimer": _clip_text(
+                item.get("disclaimer"),
+                200,
+                default="Keine individuelle Rechts-, Therapie- oder Medizinberatung.",
+            ),
+            "lane_overlap_warnings": _normalize_list_payload(item.get("lane_overlap_warnings"))[:5],
+            "suggested_length_tiers": _normalize_length_tiers(item.get("suggested_length_tiers")),
+        }
+        for item in list(normalized.get("lane_candidates") or [])
+        if isinstance(item, dict)
+    ][:12]
+    return normalized
+
+
+def parse_topic_research_response(raw: str) -> ResearchDossier:
+    cleaned = raw.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    parsed = _parse_json_or_yaml(cleaned)
+    payload = parsed if isinstance(parsed, dict) else {}
+    payload = _normalize_research_dossier_payload(payload)
+
+    try:
+        return ResearchDossier(**payload)
+    except PydanticValidationError as exc:
+        raise ValidationError(
+            message="PROMPT_1 research dossier invalid",
+            details=json.loads(exc.json()),
+        ) from exc
+
+
 def _coerce_prompt2_payload(payload: Dict[str, Any], scripts_required: int) -> DialogScripts:
     """Normalize structured PROMPT_2 JSON and enforce the existing single-category fallback contract."""
     buckets: Dict[str, List[str]] = {
@@ -849,7 +1283,7 @@ def convert_research_item_to_topic(item: ResearchAgentItem) -> TopicData:
 def build_seed_payload(
     item: ResearchAgentItem,
     strict_seed: SeedData,
-    dialog_scripts: DialogScripts,
+    dialog_scripts: Optional[DialogScripts] = None,
 ) -> Dict[str, Any]:
     # Normalize sources to a single entry
     primary_source = item.sources[0] if item.sources else None
@@ -860,15 +1294,18 @@ def build_seed_payload(
         "Testimonial": "testimonial",
         "Transformation": "transformation",
     }
-    default_script = dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else item.script
-    script_map = {
-        "problem": dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else default_script,
-        "testimonial": dialog_scripts.testimonial[0] if dialog_scripts.testimonial else default_script,
-        "transformation": dialog_scripts.transformation[0] if dialog_scripts.transformation else default_script,
-    }
-
-    script_category = framework_map.get(item.framework, "problem")
-    selected_script = script_map[script_category]
+    if dialog_scripts is None:
+        selected_script = item.script
+        script_category = framework_map.get(item.framework, "problem")
+    else:
+        default_script = dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else item.script
+        script_map = {
+            "problem": dialog_scripts.problem_agitate_solution[0] if dialog_scripts.problem_agitate_solution else default_script,
+            "testimonial": dialog_scripts.testimonial[0] if dialog_scripts.testimonial else default_script,
+            "transformation": dialog_scripts.transformation[0] if dialog_scripts.transformation else default_script,
+        }
+        script_category = framework_map.get(item.framework, "problem")
+        selected_script = script_map[script_category]
 
     # Strict seed facts: take first fact as primary summary
     seed_payload = strict_seed.model_dump()
@@ -940,12 +1377,16 @@ def generate_topics_research_agent(
     post_type: str,
     count: int = 10,
     seed: Optional[int] = None,
+    assigned_topics: Optional[List[str]] = None,
+    profile: Optional[Any] = None,
+    dossier: Optional[ResearchDossier | Dict[str, Any]] = None,
+    lane_candidate: Optional[Dict[str, Any]] = None,
     progress_callback: Optional[Any] = None,
 ) -> List[ResearchAgentItem]:
     """Execute one PROMPT_1 batch request and return validated items."""
     llm = get_llm_client()
 
-    topic_candidates = get_topic_pool_candidates()
+    topic_candidates = assigned_topics or get_topic_pool_candidates()
     assigned_seed = seed if seed is not None else secrets.randbits(64)
     rng = random.Random(assigned_seed)
     shuffled_topics: List[str] = []
@@ -975,6 +1416,9 @@ def generate_topics_research_agent(
         post_type=post_type,
         desired_topics=count,
         assigned_topics=assigned_topics or None,
+        profile=profile,
+        dossier=dossier,
+        lane_candidate=lane_candidate,
         progress_callback=progress_callback,
     )
 
@@ -994,17 +1438,89 @@ def generate_topics_research_agent(
     return items[:count]
 
 
+def normalize_topic_research_dossier(
+    *,
+    seed_topic: str,
+    post_type: str,
+    target_length_tier: int,
+    raw_response: str,
+    progress_callback: Optional[Any] = None,
+) -> ResearchDossier:
+    """Normalize a completed raw Deep Research response into a structured dossier."""
+    llm = get_llm_client()
+    try:
+        return parse_topic_research_response(raw_response)
+    except ValidationError as exc:
+        logger.warning(
+            "research_dossier_parse_retry",
+            seed_topic=seed_topic,
+            post_type=post_type,
+            error=exc.message,
+            details=exc.details,
+        )
+        normalized = _normalize_topic_research_response_to_json(
+            llm,
+            raw_response,
+            seed_topic=seed_topic,
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+        )
+        return parse_topic_research_response(normalized)
+
+
+def generate_topic_research_dossier(
+    *,
+    seed_topic: str,
+    post_type: str,
+    target_length_tier: int,
+    progress_callback: Optional[Any] = None,
+) -> ResearchDossier:
+    """Run the single-topic deep research prompt and return a validated dossier."""
+    llm = get_llm_client()
+    prompt = build_topic_research_dossier_prompt(
+        seed_topic=seed_topic,
+        post_type=post_type,
+        target_length_tier=target_length_tier,
+    )
+    timeout_seconds = max(getattr(llm, "gemini_topic_timeout_seconds", 600), 300)
+    raw_response = llm.generate_gemini_deep_research(
+        prompt=prompt,
+        system_prompt=PROMPT1_RESEARCH_SYSTEM_PROMPT,
+        timeout_seconds=timeout_seconds,
+        metadata={
+            "feature": "topics.hub_research",
+            "seed_topic": seed_topic,
+            "post_type": post_type,
+            "target_length_tier": str(target_length_tier),
+        },
+        progress_callback=progress_callback,
+    )
+    return normalize_topic_research_dossier(
+        seed_topic=seed_topic,
+        post_type=post_type,
+        target_length_tier=target_length_tier,
+        raw_response=raw_response,
+        progress_callback=progress_callback,
+    )
+
+
 def _generate_prompt1_batch(
     llm,
     post_type: str,
     desired_topics: int,
     assigned_topics: Optional[List[str]] = None,
+    profile: Optional[Any] = None,
+    dossier: Optional[ResearchDossier | Dict[str, Any]] = None,
+    lane_candidate: Optional[Dict[str, Any]] = None,
     progress_callback: Optional[Any] = None,
 ) -> List[ResearchAgentItem]:
     prompt = build_prompt1(
         post_type=post_type,
         desired_topics=desired_topics,
+        profile=profile,
         assigned_topics=assigned_topics,
+        dossier=dossier,
+        lane_candidate=lane_candidate,
     )
     prompt_with_feedback = prompt
 
@@ -1129,11 +1645,94 @@ def _generate_prompt1_batch(
     )
 
 
-def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks: Optional[List[str]] = None) -> DialogScripts:
+def generate_topic_script_candidate(
+    *,
+    post_type: str,
+    target_length_tier: int,
+    dossier: ResearchDossier | Dict[str, Any],
+    lane_candidate: Dict[str, Any],
+    progress_callback: Optional[Any] = None,
+) -> ResearchAgentItem:
+    """Generate one canonical PROMPT_1 script for a single researched lane without rerunning deep research."""
+    llm = get_llm_client()
+    profile = get_duration_profile(target_length_tier)
+    prompt = build_prompt1(
+        post_type=post_type,
+        desired_topics=1,
+        profile=profile,
+        assigned_topics=[str(lane_candidate.get("title") or "").strip()],
+        dossier=dossier,
+        lane_candidate=lane_candidate,
+    )
+
+    for attempt in range(3):
+        try:
+            response = llm.generate_gemini_json(
+                prompt=prompt,
+                system_prompt=PROMPT1_SYSTEM_PROMPT,
+                json_schema=PROMPT1_JSON_SCHEMA,
+                max_tokens=2200,
+            )
+            batch = parse_prompt1_response(json.dumps(response, ensure_ascii=False), profile=profile)
+            if batch.items:
+                return batch.items[0]
+            raise ValidationError(
+                message="PROMPT_1 lane response was empty",
+                details={"lane_title": lane_candidate.get("title")},
+            )
+        except ValidationError as exc:
+            logger.warning(
+                "topic_script_candidate_retry",
+                lane_title=lane_candidate.get("title"),
+                attempt=attempt + 1,
+                error=exc.message,
+                details=exc.details,
+            )
+            prompt = f"{prompt}\n\nFEEDBACK: {exc.message}."
+
+    for attempt in range(2):
+        try:
+            text_response = llm.generate_gemini_text(
+                prompt=prompt,
+                system_prompt=PROMPT1_SYSTEM_PROMPT,
+                max_tokens=2600,
+            )
+            batch, _ = _parse_prompt1_with_normalization(llm, text_response, 1)
+            if batch.items:
+                return batch.items[0]
+        except ValidationError as exc:
+            logger.warning(
+                "topic_script_candidate_text_retry",
+                lane_title=lane_candidate.get("title"),
+                attempt=attempt + 1,
+                error=exc.message,
+                details=exc.details,
+            )
+
+    return _synthesize_topic_script_candidate(
+        post_type=post_type,
+        target_length_tier=target_length_tier,
+        dossier=dossier,
+        lane_candidate=lane_candidate,
+    )
+
+
+def generate_dialog_scripts(
+    topic: str,
+    scripts_required: int = 1,
+    previously_used_hooks: Optional[List[str]] = None,
+    dossier: Optional[ResearchDossier | Dict[str, Any]] = None,
+    profile: Optional[Any] = None,
+) -> DialogScripts:
     """Execute PROMPT_2 and return structured dialog scripts."""
     scripts_required = max(1, min(5, scripts_required))
     llm = get_llm_client()
-    prompt = build_prompt2(topic=topic, scripts_per_category=scripts_required)
+    prompt = build_prompt2(
+        topic=topic,
+        scripts_per_category=scripts_required,
+        profile=profile,
+        dossier=dossier,
+    )
     
     # Add constraint to avoid repeating hooks if we have previous ones
     if previously_used_hooks:
@@ -1188,23 +1787,48 @@ def generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_us
                 topic=topic
             )
             return trimmed
-        except ValidationError as exc:
+        except (ValidationError, ThirdPartyError) as exc:
             logger.warning(
                 "dialog_scripts_retry",
                 topic=topic,
                 attempt=attempt + 1,
-                error=exc.message,
-                details=exc.details,
-                response_preview=json.dumps(response, ensure_ascii=False)[:500] if 'response' in locals() else None
+                error=getattr(exc, "message", str(exc)),
+                details=getattr(exc, "details", {}),
+                response_preview=(json.dumps(response, ensure_ascii=False)[:500] if "response" in locals() else None),
             )
             prompt = f"{prompt}\n\nFEEDBACK: {exc.message}."
-    
-    logger.error(
-        "dialog_scripts_failed_all_attempts",
+
+    for attempt in range(2):
+        try:
+            text_response = llm.generate_gemini_text(
+                prompt=prompt,
+                system_prompt=None,
+                max_tokens=1600,
+            )
+            scripts = parse_prompt2_response(text_response, max_per_category=scripts_required)
+            trimmed = DialogScripts(
+                problem_agitate_solution=scripts.problem_agitate_solution[:scripts_required],
+                testimonial=scripts.testimonial[:scripts_required],
+                transformation=scripts.transformation[:scripts_required],
+                description=scripts.description,
+            )
+            logger.info("dialog_scripts_text_fallback_success", topic=topic, attempt=attempt + 1)
+            return trimmed
+        except (ValidationError, ThirdPartyError) as exc:
+            logger.warning(
+                "dialog_scripts_text_fallback_retry",
+                topic=topic,
+                attempt=attempt + 1,
+                error=getattr(exc, "message", str(exc)),
+                details=getattr(exc, "details", {}),
+            )
+
+    return _synthesize_dialog_scripts(
         topic=topic,
-        last_response=response[:1000] if 'response' in locals() else None
+        scripts_required=scripts_required,
+        dossier=dossier,
+        profile=profile,
     )
-    raise ValidationError(message="Unable to produce dialog scripts", details={})
 
 
 def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> List[Dict[str, Any]]:

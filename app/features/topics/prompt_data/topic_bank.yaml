@@ -1,0 +1,288 @@
+source_file: prompt1_8s.txt
+categories:
+- name: Mobilität & Reisen
+  topics:
+  - 'Barrierefreiheit im ÖPNV-Alltag: Einstieg mit Rampe, Rollstuhlplätze, Ansagen,
+    Begleitservice.'
+  - 'Begleitperson im Nahverkehr mit Merkzeichen B/B-Marke: Freifahrt, Nachweispflicht,
+    aktuelle Regeln.'
+  - 'Unentgeltliche Beförderung & Wertmarke in ÖPNV und Regionalverkehr: Anspruch,
+    Beantragung, Gültigkeit.'
+  - BahnCard & weitere Ermäßigungen für Menschen mit Schwerbehindertenausweis.
+  - 'Mobilitätsservice-Zentrale der Deutschen Bahn: Unterstützung buchen, Fristen,
+    Ablauf vor Ort.'
+  - 'Rechte bei Bahnreisen: barrierefreie Bahnhöfe, reservierte Plätze, Entschädigung
+    bei Störungen.'
+  - 'Rollstuhltransport im Zug und Flugzeug: Anmeldung, Boarding-Hilfen, Schadensmeldungen.'
+  - 'Fluggastrechte mit Rollstuhl: Sicherheitskontrollen, Akku/Batterie-Regeln, Airline-Service.'
+  - 'Inlandsreisen: Hotels & Ferienwohnungen mit „Reisen für Alle“ oder anderen Barrierefrei-Siegeln.'
+  - 'Städtereisen mit Rollstuhl: Kopfsteinpflaster, Gehsteige, Stadtbusse, U-Bahn-Zugänge.'
+  - 'Roadtrips & Mietwagen: Fahrzeuganpassung, barrierefreie Raststätten, Mitnahme
+    von Hilfsmitteln.'
+  - 'Kreuzfahrten & Bootsreisen: barrierefreie Kabinen, Boarding, Ausflüge.'
+  - 'Barrierefreie Naturreisen: Nationalparks, Wanderwege, Aussichtspunkte mit Rollstuhlzugang.'
+  - 'Urlaub mit Familie oder Freund:innen: Bedürfnisse abstimmen, Zimmerwahl, gemeinsame
+    Aktivitäten.'
+  - 'Reisen mit Assistenz: Vertragsgestaltung, Logistik, Kostenerstattung unterwegs.'
+  - Reiseplanungstools für Barrierefreiheit (ÖPNV, Toiletten, Hotels).
+  - 'Rollstuhl und Fahrradtouren: Handbike, Tandem, Anhängerlösungen.'
+  - 'Reisen ins Ausland: Grenzkontrollen, Versicherungen, Ersatzteile, Akkus.'
+  - 'Barrierefrei wohnen unterwegs: Wohnmobile, temporäre Umbauten, Ferienhäuser.'
+- name: Rechte, Gesellschaft & Finanzen
+  topics:
+  - 'Antrag auf Schwerbehindertenausweis: Voraussetzungen, Fristen, Unterlagen.'
+  - 'Schwerbehindertenausweis nutzen: Merkzeichen verstehen, Vorteile im Alltag sichern.'
+  - 'Merkzeichen im Detail (B, G, aG, H, Bl, RF, Gl, TBl): Mobilität, Begleitperson,
+    Gebühren.'
+  - 'Steuerliche Vorteile: Behinderten-Pauschbetrag, außergewöhnliche Belastungen,
+    Fahrtkosten.'
+  - Kfz-Steuerbefreiung oder -ermäßigung bei Merkzeichen aG, Bl, H und notwendige
+    Nachweise.
+  - 'Bundesteilhabegesetz-Updates 2025: neue Leistungsregeln, Auswirkungen auf Teilhabebudget.'
+  - 'Barrierefreiheits-Stärkungsgesetz (BFSG): Anforderungen an Produkte & Dienstleistungen
+    ab 28.06.2025.'
+  - Barrierefreiheit von Behörden-Websites & Apps (BITV 2.0, Feedback-Stellen, Fristen).
+  - Verbraucherrechte im E-Commerce und Bankwesen unter dem Blick von Menschen mit
+    Behinderung.
+  - 'Öffentliche Mobilitätsanbieter: Pflichten zur Barrierefreiheit, Beschwerdewege,
+    Sanktionen.'
+  - 'Kommunale Teilhabe: Behindertenbeirat, Beteiligungsverfahren, Stadtplanung beeinflussen.'
+  - 'Rechtlicher Weg bei Barrieren: Beratung, Widerspruch, Klage, Schlichtungsstelle
+    BGG.'
+  - 'Parkausweis (EU-Blau vs. Orange): Antrag, Nutzung, Parkregeln, Sonderrechte.'
+  - 'Versicherungsschutz: Haftpflicht, Unfall, Pflege sowie Zusatzpolicen für Rollstuhlnutzer:innen.'
+  - 'Assistenzleistungen vs. Pflegeleistungen: rechtliche Einordnung und Kostenträger.'
+  - 'Teilhaberecht im Wohnungs- und Arbeitsmarkt: Diskriminierungsschutz, Gleichstellung,
+    Fristen.'
+  - 'Inklusion im Arbeitsleben: Arbeitgeberpflichten, Integrationsamt, technische
+    Arbeitshilfen.'
+  - 'Barrierefrei ins Wahlrecht: Wahllokal-Zugang, Briefwahl, Hilfspersonenregelungen.'
+  - 'Selbsthilfegruppen & Verbände (z. B. VdK): Beratung, Lobbyarbeit, Peer-Support.'
+  - 'Barrierefreie Kommunikation: Gebärdensprache, Leichte Sprache, verständliche
+    Behördenpost.'
+  - 'Bildungs- und Weiterbildungsangebote für Menschen mit Behinderung: Rechte, Fördermittel.'
+  - 'Digitalisierung & Teilhabe: Online-Dienste, Telemedizin, digitale Identitäten,
+    eID.'
+- name: Gesundheit, Pflege & Assistenz
+  topics:
+  - 'Gesetzliche Krankenkasse und Zusatzleistungen für Rollstuhlnutzer:innen: Anträge,
+    Zuzahlungen, Hilfsmittel.'
+  - Pflegegrad beantragen und Leistungen der Pflegeversicherung 2025 optimal nutzen.
+  - 'Assistenzmodelle im Vergleich (Pflegedienst vs. Assistenzteam vs. Familie): Verträge,
+    Vertretungen, Schulungen.'
+  - 'Persönliches Budget: Assistenz selbst organisieren, Nachweise, Budgetverwaltung.'
+  - 'Spezialist:innen und barrierefreie Praxen finden: Ärzt:innen, Reha-Kliniken,
+    Therapien.'
+  - 'Rehabilitation (DRV vs. GKV): Antrag, Verlängerung, Nachsorge, Hilfsmitteltests.'
+  - 'Hilfsmittelversorgung: Rollstuhl, Sitzsysteme, Wartung, Ersatzbeschaffung.'
+  - 'Druckgeschwür-/Dekubitus-Prävention: Sitzsysteme, Routinen, Dokumentation.'
+  - 'Blasen- und Darmmanagement: Produkte, Schulungen, Reisefreigaben, Diskretion.'
+  - 'Inkontinenzversorgung: Hilfsmittel, Kostenträger, Alltagstipps.'
+  - 'Sexualität & Beziehung mit Behinderung: Beratung, Barrieren, Privatsphäre.'
+  - 'Psychische Gesundheit: Therapieangebote, Peer-Support, Umgang mit Isolation oder
+    Frust.'
+  - 'Assistenz im Alltag: Arbeitgebermodell, Arbeitsrecht, Notfallplanung.'
+  - 'Hilfsmittelverzeichnis der GKV: Auswahl, Formulare, Widerspruchsstrategien.'
+  - 'Medikamentenversorgung: Wechselwirkungen, Spezialapotheken, Reisebedarf.'
+  - 'Ernährung & Bewegung im Rollstuhl: Trainingsprogramme, Fitness, Prävention.'
+  - 'Transfertechniken: selbständig oder mit Hilfe sicher umsetzen, Hilfsmittel einsetzen.'
+  - 'Ergotherapie & Physiotherapie: Ziele, Finanzierung, Alltagstraining.'
+  - 'Frühwarnzeichen für gesundheitliche Komplikationen: Haut, Atmung, Kreislauf,
+    Spastik.'
+  - 'Pandemie- und Infektionsschutz: Impfungen, Hygienekonzepte, Zugänge im Gesundheitssystem.'
+- name: Hilfsmittel, Technik & Fahrzeuge
+  topics:
+  - 'GKV-Hilfsmittelverzeichnis: welche Rollstühle und Zubehör abrechenbar sind.'
+  - 'Aktiv-, Elektro- oder Hybridrollstuhl wählen: Anpassung, Gutachten, Probefahrten.'
+  - 'Sitz- und Rückenkissenwahl: Druckverteilung, Atteste, Formulierungen für die
+    Kasse.'
+  - 'Wartung, Reparatur und Leihservice: Abläufe, Serviceverträge, Dokumentation.'
+  - 'Alltagshilfen: Greifzangen, Transferbretter, Stehrahmen, smarte Assistenzgeräte.'
+  - 'Smart-Home-Lösungen: Türöffner, Sprachsteuerung, Sensorik für Barrierefreiheit.'
+  - 'Assistenzroboter & Exoskelette: Einsatzgebiete, Finanzierung, Grenzen.'
+  - 'Fahrzeuganpassung: Handbedienung, Hebebühnen, Kostenübernahme.'
+  - 'Autofahren mit Behinderung: Fahrtests, Umschulung, Finanzierung durch Kostenträger.'
+  - 'Behindertengerechte Taxi- und Fahrdienste: Buchung, Kostenerstattung, regionale
+    Unterschiede.'
+  - 'Elektrorollstuhl-Akkus im Flugverkehr: Sicherheitsregeln, Ersatzakkus, Transportboxen.'
+  - 'Barrierefreies Wohnen mit Technik: Rampen, Türautomaten, bodengleiche Duschen.'
+  - 'Apps für Barrierefreiheit: Toilettenfinder, Restaurantbewertungen, ÖPNV-Echtzeiten.'
+  - 'Dokumentation & Fotografie: Beweise für Hilfsmittel-Anträge und Mangelmeldungen.'
+  - 'Second-Life-Hilfsmittel & Spendenbörsen: rechtliche Rahmen, Sicherheit, Aufarbeitung.'
+  - 'Digitale Barrierefreiheit von Hilfsmitteln: Software-Updates, App-Anbindung,
+    Datenschutz.'
+- name: Wohnen & Lebensumfeld
+  topics:
+  - 'Barrierefreie Wohnung nach DIN 18040: Planung, Maße, Ausstattung.'
+  - 'Finanzierung von Umbauten: KfW 455-B, Pflegekassen, regionale Zuschüsse.'
+  - 'Wohnraumsuche: rollstuhlgerechte Wohnungen finden, Beratung, Immobilienportale.'
+  - 'Bestehende Wohnungen anpassen: Rampen, Türen, Badezimmer, Küchenlösungen.'
+  - 'Stadtinfrastruktur: Bordsteinkanten, Gehwege, Winterdienst und Barrierefreiheit.'
+  - 'Nachbarschaft & Gemeinschaft: Einfluss barrierefreier Quartiere auf Lebensqualität.'
+  - 'Notfall-Vorbereitung: Evakuierungspläne, Notruf-Apps, Hilfsmittel-Listen.'
+  - 'Haustiere und Assistenzhunde: Rechte, Training, Vermieterzustimmung.'
+  - 'Smart-Home-Integration: Licht, Heizung, Fenster via Sprache oder App.'
+  - 'Gemeinschaftsräume & Hausverwaltung: Aufzüge, Müllraum, Briefkästen barrierefrei
+    gestalten.'
+  - 'Altersgerechtes Wohnen: langfristige Planung, Mehrgenerationen- und Pflegearrangements.'
+  - 'Innenraumgestaltung: Küche, Bad, Arbeits- und Wohnraum für Rollstuhlnutzung optimieren.'
+  - 'Budgetplanung für barrierefreie Ausstattung: Kostenübersicht, Rücklagen, Fördermix.'
+  - 'Soziales Umfeld stärken: Familie, Freund:innen, Nachbarschaft sensibilisieren.'
+  - 'Garten & Außenbereich: barrierefreie Wege, Terrassen, Hochbeete.'
+  - 'Barrierefreie Freizeit zu Hause: Hobbys, Gästebarrierefreiheit, Technik.'
+- name: Arbeit, Bildung & Beruf
+  topics:
+  - 'Rückkehr ins Berufsleben nach Krankheit oder Unfall: stufenweise Wiedereingliederung,
+    Reha-Management.'
+  - 'Inklusionsbetriebe vs. offener Arbeitsmarkt: Chancen, Förderprogramme, Erfahrungsberichte.'
+  - 'Integrationsamt & BIH: Leistungen für Arbeitsplatzsicherung, technische Arbeitshilfen.'
+  - 'Arbeitsplatzgestaltung: Höhenverstellung, barrierefreie Wege, digitale Assistenzsysteme.'
+  - 'Assistive Technik & digitale Arbeitsplätze: Homeoffice, Softwarebarrierefreiheit,
+    Ergonomie.'
+  - 'Arbeitsrecht: Kündigungsschutz, Teilzeit, Schwerbehindertenvertretung, Gleichstellung.'
+  - 'Förderprogramme: Eingliederungszuschuss, Budget für Arbeit, Bildungsprämien.'
+  - 'Studium & Weiterbildung mit Behinderung: Nachteilsausgleich, barrierefreier Campus,
+    Prüfungsrechte.'
+  - 'Selbstständigkeit mit Behinderung: Geschäftsmodelle, Fördermittel, Netzwerkaufbau.'
+  - 'Netzwerke & Mentoring: Austausch mit anderen Rollstuhlnutzer:innen im Beruf.'
+  - 'Sichtbarkeit & Vorbilder: Frauen mit Behinderung im Beruf, Role Models, Öffentlichkeitsarbeit.'
+  - 'Digitale Kompetenzen & Weiterbildung: Online-Kurse, barrierefreie Lernplattformen,
+    Zertifikate.'
+- name: Community, Sport & Sichtbarkeit
+  topics:
+  - 'Community & Peer-Support: lokale Gruppen, Foren, Mentoring.'
+  - 'Sport & Bewegung über DRS-Vereine: von Basketball bis WCMX.'
+  - 'Rollstuhlbasketball-Bundesliga verfolgen: Teams, Spieltage, Zugang.'
+  - 'Aktiv und sichtbar bleiben: Events, Aktionstage, Medien mit gutem Behinderungsverständnis.'
+topics:
+- 'Barrierefreiheit im ÖPNV-Alltag: Einstieg mit Rampe, Rollstuhlplätze, Ansagen,
+  Begleitservice.'
+- 'Begleitperson im Nahverkehr mit Merkzeichen B/B-Marke: Freifahrt, Nachweispflicht,
+  aktuelle Regeln.'
+- 'Unentgeltliche Beförderung & Wertmarke in ÖPNV und Regionalverkehr: Anspruch, Beantragung,
+  Gültigkeit.'
+- BahnCard & weitere Ermäßigungen für Menschen mit Schwerbehindertenausweis.
+- 'Mobilitätsservice-Zentrale der Deutschen Bahn: Unterstützung buchen, Fristen, Ablauf
+  vor Ort.'
+- 'Rechte bei Bahnreisen: barrierefreie Bahnhöfe, reservierte Plätze, Entschädigung
+  bei Störungen.'
+- 'Rollstuhltransport im Zug und Flugzeug: Anmeldung, Boarding-Hilfen, Schadensmeldungen.'
+- 'Fluggastrechte mit Rollstuhl: Sicherheitskontrollen, Akku/Batterie-Regeln, Airline-Service.'
+- 'Inlandsreisen: Hotels & Ferienwohnungen mit „Reisen für Alle“ oder anderen Barrierefrei-Siegeln.'
+- 'Städtereisen mit Rollstuhl: Kopfsteinpflaster, Gehsteige, Stadtbusse, U-Bahn-Zugänge.'
+- 'Roadtrips & Mietwagen: Fahrzeuganpassung, barrierefreie Raststätten, Mitnahme von
+  Hilfsmitteln.'
+- 'Kreuzfahrten & Bootsreisen: barrierefreie Kabinen, Boarding, Ausflüge.'
+- 'Barrierefreie Naturreisen: Nationalparks, Wanderwege, Aussichtspunkte mit Rollstuhlzugang.'
+- 'Urlaub mit Familie oder Freund:innen: Bedürfnisse abstimmen, Zimmerwahl, gemeinsame
+  Aktivitäten.'
+- 'Reisen mit Assistenz: Vertragsgestaltung, Logistik, Kostenerstattung unterwegs.'
+- Reiseplanungstools für Barrierefreiheit (ÖPNV, Toiletten, Hotels).
+- 'Rollstuhl und Fahrradtouren: Handbike, Tandem, Anhängerlösungen.'
+- 'Reisen ins Ausland: Grenzkontrollen, Versicherungen, Ersatzteile, Akkus.'
+- 'Barrierefrei wohnen unterwegs: Wohnmobile, temporäre Umbauten, Ferienhäuser.'
+- 'Antrag auf Schwerbehindertenausweis: Voraussetzungen, Fristen, Unterlagen.'
+- 'Schwerbehindertenausweis nutzen: Merkzeichen verstehen, Vorteile im Alltag sichern.'
+- 'Merkzeichen im Detail (B, G, aG, H, Bl, RF, Gl, TBl): Mobilität, Begleitperson,
+  Gebühren.'
+- 'Steuerliche Vorteile: Behinderten-Pauschbetrag, außergewöhnliche Belastungen, Fahrtkosten.'
+- Kfz-Steuerbefreiung oder -ermäßigung bei Merkzeichen aG, Bl, H und notwendige Nachweise.
+- 'Bundesteilhabegesetz-Updates 2025: neue Leistungsregeln, Auswirkungen auf Teilhabebudget.'
+- 'Barrierefreiheits-Stärkungsgesetz (BFSG): Anforderungen an Produkte & Dienstleistungen
+  ab 28.06.2025.'
+- Barrierefreiheit von Behörden-Websites & Apps (BITV 2.0, Feedback-Stellen, Fristen).
+- Verbraucherrechte im E-Commerce und Bankwesen unter dem Blick von Menschen mit Behinderung.
+- 'Öffentliche Mobilitätsanbieter: Pflichten zur Barrierefreiheit, Beschwerdewege,
+  Sanktionen.'
+- 'Kommunale Teilhabe: Behindertenbeirat, Beteiligungsverfahren, Stadtplanung beeinflussen.'
+- 'Rechtlicher Weg bei Barrieren: Beratung, Widerspruch, Klage, Schlichtungsstelle
+  BGG.'
+- 'Parkausweis (EU-Blau vs. Orange): Antrag, Nutzung, Parkregeln, Sonderrechte.'
+- 'Versicherungsschutz: Haftpflicht, Unfall, Pflege sowie Zusatzpolicen für Rollstuhlnutzer:innen.'
+- 'Assistenzleistungen vs. Pflegeleistungen: rechtliche Einordnung und Kostenträger.'
+- 'Teilhaberecht im Wohnungs- und Arbeitsmarkt: Diskriminierungsschutz, Gleichstellung,
+  Fristen.'
+- 'Inklusion im Arbeitsleben: Arbeitgeberpflichten, Integrationsamt, technische Arbeitshilfen.'
+- 'Barrierefrei ins Wahlrecht: Wahllokal-Zugang, Briefwahl, Hilfspersonenregelungen.'
+- 'Selbsthilfegruppen & Verbände (z. B. VdK): Beratung, Lobbyarbeit, Peer-Support.'
+- 'Barrierefreie Kommunikation: Gebärdensprache, Leichte Sprache, verständliche Behördenpost.'
+- 'Bildungs- und Weiterbildungsangebote für Menschen mit Behinderung: Rechte, Fördermittel.'
+- 'Digitalisierung & Teilhabe: Online-Dienste, Telemedizin, digitale Identitäten,
+  eID.'
+- 'Gesetzliche Krankenkasse und Zusatzleistungen für Rollstuhlnutzer:innen: Anträge,
+  Zuzahlungen, Hilfsmittel.'
+- Pflegegrad beantragen und Leistungen der Pflegeversicherung 2025 optimal nutzen.
+- 'Assistenzmodelle im Vergleich (Pflegedienst vs. Assistenzteam vs. Familie): Verträge,
+  Vertretungen, Schulungen.'
+- 'Persönliches Budget: Assistenz selbst organisieren, Nachweise, Budgetverwaltung.'
+- 'Spezialist:innen und barrierefreie Praxen finden: Ärzt:innen, Reha-Kliniken, Therapien.'
+- 'Rehabilitation (DRV vs. GKV): Antrag, Verlängerung, Nachsorge, Hilfsmitteltests.'
+- 'Hilfsmittelversorgung: Rollstuhl, Sitzsysteme, Wartung, Ersatzbeschaffung.'
+- 'Druckgeschwür-/Dekubitus-Prävention: Sitzsysteme, Routinen, Dokumentation.'
+- 'Blasen- und Darmmanagement: Produkte, Schulungen, Reisefreigaben, Diskretion.'
+- 'Inkontinenzversorgung: Hilfsmittel, Kostenträger, Alltagstipps.'
+- 'Sexualität & Beziehung mit Behinderung: Beratung, Barrieren, Privatsphäre.'
+- 'Psychische Gesundheit: Therapieangebote, Peer-Support, Umgang mit Isolation oder
+  Frust.'
+- 'Assistenz im Alltag: Arbeitgebermodell, Arbeitsrecht, Notfallplanung.'
+- 'Hilfsmittelverzeichnis der GKV: Auswahl, Formulare, Widerspruchsstrategien.'
+- 'Medikamentenversorgung: Wechselwirkungen, Spezialapotheken, Reisebedarf.'
+- 'Ernährung & Bewegung im Rollstuhl: Trainingsprogramme, Fitness, Prävention.'
+- 'Transfertechniken: selbständig oder mit Hilfe sicher umsetzen, Hilfsmittel einsetzen.'
+- 'Ergotherapie & Physiotherapie: Ziele, Finanzierung, Alltagstraining.'
+- 'Frühwarnzeichen für gesundheitliche Komplikationen: Haut, Atmung, Kreislauf, Spastik.'
+- 'Pandemie- und Infektionsschutz: Impfungen, Hygienekonzepte, Zugänge im Gesundheitssystem.'
+- 'GKV-Hilfsmittelverzeichnis: welche Rollstühle und Zubehör abrechenbar sind.'
+- 'Aktiv-, Elektro- oder Hybridrollstuhl wählen: Anpassung, Gutachten, Probefahrten.'
+- 'Sitz- und Rückenkissenwahl: Druckverteilung, Atteste, Formulierungen für die Kasse.'
+- 'Wartung, Reparatur und Leihservice: Abläufe, Serviceverträge, Dokumentation.'
+- 'Alltagshilfen: Greifzangen, Transferbretter, Stehrahmen, smarte Assistenzgeräte.'
+- 'Smart-Home-Lösungen: Türöffner, Sprachsteuerung, Sensorik für Barrierefreiheit.'
+- 'Assistenzroboter & Exoskelette: Einsatzgebiete, Finanzierung, Grenzen.'
+- 'Fahrzeuganpassung: Handbedienung, Hebebühnen, Kostenübernahme.'
+- 'Autofahren mit Behinderung: Fahrtests, Umschulung, Finanzierung durch Kostenträger.'
+- 'Behindertengerechte Taxi- und Fahrdienste: Buchung, Kostenerstattung, regionale
+  Unterschiede.'
+- 'Elektrorollstuhl-Akkus im Flugverkehr: Sicherheitsregeln, Ersatzakkus, Transportboxen.'
+- 'Barrierefreies Wohnen mit Technik: Rampen, Türautomaten, bodengleiche Duschen.'
+- 'Apps für Barrierefreiheit: Toilettenfinder, Restaurantbewertungen, ÖPNV-Echtzeiten.'
+- 'Dokumentation & Fotografie: Beweise für Hilfsmittel-Anträge und Mangelmeldungen.'
+- 'Second-Life-Hilfsmittel & Spendenbörsen: rechtliche Rahmen, Sicherheit, Aufarbeitung.'
+- 'Digitale Barrierefreiheit von Hilfsmitteln: Software-Updates, App-Anbindung, Datenschutz.'
+- 'Barrierefreie Wohnung nach DIN 18040: Planung, Maße, Ausstattung.'
+- 'Finanzierung von Umbauten: KfW 455-B, Pflegekassen, regionale Zuschüsse.'
+- 'Wohnraumsuche: rollstuhlgerechte Wohnungen finden, Beratung, Immobilienportale.'
+- 'Bestehende Wohnungen anpassen: Rampen, Türen, Badezimmer, Küchenlösungen.'
+- 'Stadtinfrastruktur: Bordsteinkanten, Gehwege, Winterdienst und Barrierefreiheit.'
+- 'Nachbarschaft & Gemeinschaft: Einfluss barrierefreier Quartiere auf Lebensqualität.'
+- 'Notfall-Vorbereitung: Evakuierungspläne, Notruf-Apps, Hilfsmittel-Listen.'
+- 'Haustiere und Assistenzhunde: Rechte, Training, Vermieterzustimmung.'
+- 'Smart-Home-Integration: Licht, Heizung, Fenster via Sprache oder App.'
+- 'Gemeinschaftsräume & Hausverwaltung: Aufzüge, Müllraum, Briefkästen barrierefrei
+  gestalten.'
+- 'Altersgerechtes Wohnen: langfristige Planung, Mehrgenerationen- und Pflegearrangements.'
+- 'Innenraumgestaltung: Küche, Bad, Arbeits- und Wohnraum für Rollstuhlnutzung optimieren.'
+- 'Budgetplanung für barrierefreie Ausstattung: Kostenübersicht, Rücklagen, Fördermix.'
+- 'Soziales Umfeld stärken: Familie, Freund:innen, Nachbarschaft sensibilisieren.'
+- 'Garten & Außenbereich: barrierefreie Wege, Terrassen, Hochbeete.'
+- 'Barrierefreie Freizeit zu Hause: Hobbys, Gästebarrierefreiheit, Technik.'
+- 'Rückkehr ins Berufsleben nach Krankheit oder Unfall: stufenweise Wiedereingliederung,
+  Reha-Management.'
+- 'Inklusionsbetriebe vs. offener Arbeitsmarkt: Chancen, Förderprogramme, Erfahrungsberichte.'
+- 'Integrationsamt & BIH: Leistungen für Arbeitsplatzsicherung, technische Arbeitshilfen.'
+- 'Arbeitsplatzgestaltung: Höhenverstellung, barrierefreie Wege, digitale Assistenzsysteme.'
+- 'Assistive Technik & digitale Arbeitsplätze: Homeoffice, Softwarebarrierefreiheit,
+  Ergonomie.'
+- 'Arbeitsrecht: Kündigungsschutz, Teilzeit, Schwerbehindertenvertretung, Gleichstellung.'
+- 'Förderprogramme: Eingliederungszuschuss, Budget für Arbeit, Bildungsprämien.'
+- 'Studium & Weiterbildung mit Behinderung: Nachteilsausgleich, barrierefreier Campus,
+  Prüfungsrechte.'
+- 'Selbstständigkeit mit Behinderung: Geschäftsmodelle, Fördermittel, Netzwerkaufbau.'
+- 'Netzwerke & Mentoring: Austausch mit anderen Rollstuhlnutzer:innen im Beruf.'
+- 'Sichtbarkeit & Vorbilder: Frauen mit Behinderung im Beruf, Role Models, Öffentlichkeitsarbeit.'
+- 'Digitale Kompetenzen & Weiterbildung: Online-Kurse, barrierefreie Lernplattformen,
+  Zertifikate.'
+- 'Community & Peer-Support: lokale Gruppen, Foren, Mentoring.'
+- 'Sport & Bewegung über DRS-Vereine: von Basketball bis WCMX.'
+- 'Rollstuhlbasketball-Bundesliga verfolgen: Teams, Spieltage, Zugang.'
+- 'Aktiv und sichtbar bleiben: Events, Aktionstage, Medien mit gutem Behinderungsverständnis.'

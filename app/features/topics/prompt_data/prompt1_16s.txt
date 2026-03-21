@@ -133,6 +133,10 @@ Community, Sport & Sichtbarkeit:
 
 {assigned_rotation_section}
 
+{research_context_section}
+
+{hook_bank_section}
+
 OUTPUT FORMAT — JSON array mit GENAU {desired_topics} Objekten.
 Keine Markdown-Fences, keine Kommentare.
 SPRACHE: Jedes Feld der Antwort MUSS vollständig auf Deutsch sein.

@@ -16,6 +16,7 @@ def test_prompt_text_files_exist_for_all_duration_tiers():
         "prompt1_8s.txt",
         "prompt1_16s.txt",
         "prompt1_32s.txt",
+        "prompt1_normalization.txt",
         "prompt2_8s.txt",
         "prompt2_16s.txt",
         "prompt2_32s.txt",

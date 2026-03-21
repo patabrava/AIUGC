@@ -1,102 +1,141 @@
-# FLOW-FORGE Canon
+# FLOW-FORGE Topic Generation Canon
 
 Date: 2026-03-21
-Scope: Existing codebase audit and topics hub target state
-Locality Budget: `{files: 6-8 for the topics hub slice, LOC/file: <=260 target and <=500 hard, deps: 0}`
+Scope: `app/features/topics/agents.py` refactor canon for the existing topic-generation slice
+Prime Directive: `agents/canon.md` is the source of truth for the target shape of this slice while the refactor is executed.
+Locality Budget: `{files: 6, LOC/file: <=260 target and <=500 hard, deps: 0}`
 
-## Goal
+## Project Summary
 
-Add a read-first topics hub that lets batch owner/editors browse existing topics, inspect scripts, review durable research-run history, and launch on-demand research for one topic without breaking the current batch workflow.
+FLOW-FORGE is a FastAPI + Jinja + HTMX vertical-slice monolith that generates topic-backed UGC post seeds, then advances batches through script review, prompt generation, QA, and publishing. The requested refactor scope is narrow: make the topic-generation slice lean enough to continue development without rewriting the surrounding batch workflow.
 
-## Current System
+## Current Actual Runtime
 
-### Architecture
+### Verified Runtime Facts
 
-- Runtime: FastAPI in [app/main.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/main.py)
-- Frontend: server-rendered Jinja templates with HTMX and Alpine from CDN in [templates/base.html](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/templates/base.html)
-- Persistence: Supabase/Postgres through the singleton adapter in [app/adapters/supabase_client.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/adapters/supabase_client.py)
-- Topic slice: `topics` router in [app/features/topics/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/handlers.py)
-- Batch detail UI: [templates/batches/detail.html](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/templates/batches/detail.html)
-- Batch list UI: [templates/batches/list.html](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/templates/batches/list.html)
-- Topic generation code: [app/features/topics/agents.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/agents.py)
-- Topic registry queries: [app/features/topics/queries.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/queries.py)
+- Main entrypoint is [app/main.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/main.py).
+- Batch seeding orchestration lives in [app/features/topics/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/handlers.py).
+- Topic generation internals currently live almost entirely in [app/features/topics/agents.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/agents.py).
+- The database write path used by the active batch-seeding flow still writes `title`, `rotation`, and `cta` through [app/features/topics/queries.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/queries.py).
+- The local verification shell resolved `python3` to `3.9.6`, while project docs still target Python 3.11+.
+- The working tree is dirty. Untracked topic-schema migrations and tests exist, so documentation must distinguish between proposed schema and applied runtime behavior.
 
-### Current Topic Flow
+### Request Flow
 
-- `POST /batches` creates a batch and schedules background discovery.
-- `discover_topics_for_batch(...)` in [app/features/topics/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/handlers.py) performs batch-scoped generation off the request event loop.
-- Topic discovery writes into `topic_registry` and `posts`.
-- The current topic router exposes `POST /topics/discover`, `GET /topics`, and `POST /topics/cron/discover`.
-- `GET /topics` currently returns JSON list data, not an HTML hub.
-- Live seeding progress is kept in process memory via `_SEEDING_PROGRESS` and `_SEEDING_EVENTS` in [app/features/topics/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/handlers.py).
+Primary happy path today:
 
-### Current Data Model
+1. `discover_topics_for_batch(...)` in [app/features/topics/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/handlers.py#L1007)
+2. `_discover_topics_for_batch_sync(...)` in [app/features/topics/handlers.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/handlers.py#L413)
+3. `generate_topics_research_agent(...)` / `generate_lifestyle_topics(...)` in [app/features/topics/agents.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/agents.py#L939) and [app/features/topics/agents.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/agents.py#L1210)
+4. `generate_dialog_scripts(...)`, `extract_seed_strict_extractor(...)`, `build_seed_payload(...)`, `build_lifestyle_seed_payload(...)` in [app/features/topics/agents.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/agents.py)
+5. `add_topic_to_registry(...)` and `create_post_for_batch(...)` in [app/features/topics/queries.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/queries.py)
 
-- `topic_registry` is the only topic index table in [supabase/migrations/001_initial_schema.sql](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/supabase/migrations/001_initial_schema.sql)
-- `posts.seed_data` carries the script/review payload used downstream by posts, videos, QA, and publish
-- There is no durable research-run table yet
-- There is no first-class topic script index yet
+This is a valid vertical slice, but the call graph crosses too many unrelated concerns through one oversized file.
 
-### Current UI Surface
+### Current Responsibility Breakdown Of `agents.py`
 
-- There is no `templates/topics/` directory yet
-- There is no page-local JS module for topics
-- Existing topic browsing happens only through the JSON API and batch-driven testscript flows
+`app/features/topics/agents.py` currently mixes all of the following:
+
+- PROMPT_1 normalization and raw parsing
+- PROMPT_1 semantic validation rules
+- PROMPT_2 raw parsing and fallback shaping
+- Gemini provider orchestration and retry logic
+- strict-seed extraction
+- topic-to-seed mapping and social description assembly
+- lifestyle topic generation and title derivation
+
+This file is functioning as parser, validator, service, mapper, and orchestration layer at once.
+
+### Current Data Truth
+
+The actual runtime truth for the active batch path is:
+
+- `topic_registry` plus `posts.seed_data` remain the live storage surfaces used by the code path.
+- `topic_scripts` and `topic_research_runs` are not yet the runtime truth for this slice because the active code path does not read or write them.
+- `architecture.md` must therefore be treated as partially aspirational in the topic-generation section until the code path is updated.
 
 ## Target Remediated State
 
-- Keep `/topics` as the canonical hub route, but make it dual-mode:
-  - HTML for browser/HTMX requests
-  - JSON for API clients and regression tests
-- Add a launch path for on-demand research that does not require batch creation.
-- Persist research runs durably so refresh, reload, or multi-worker deploys do not lose state.
-- Expose existing scripts in the hub from a durable read model instead of a transient in-memory tracker.
-- Keep batch discovery intact and separate from the new hub launch flow.
-- Keep the implementation vanilla-first and localized to the topics feature slice.
+### Architectural Direction
 
-## Architecture And Operations
-
-### Route Contract
-
-- `GET /topics` serves the hub page when the request asks for HTML and returns JSON when it asks for API data.
-- `POST /topics/runs` starts an on-demand research run for one topic.
-- `GET /topics/runs/{run_id}` returns run status for polling or fragment refresh.
-- `POST /topics/discover` remains the existing batch-seeding path.
-- `POST /topics/cron/discover` remains the background batch scheduler entry point.
-
-### Data Contract
-
-- `topic_registry` remains the topic inventory index.
-- `topic_research_runs` stores durable research run status, timings, error state, and result summary.
-- `topic_scripts` stores normalized script variants per topic and length tier.
-- `posts.seed_data` remains the downstream payload used by the batch workflow.
-- Hub reads must come from stored data, not in-memory progress objects.
+Refactor the slice by keeping the public function API stable and moving internals behind a small compatibility facade. The first pass is not a feature rewrite. It is a locality and reliability refactor.
 
 ### File Shape
 
-```text
-app/features/topics/handlers.py       # thin routing and request/response orchestration
-app/features/topics/queries.py        # topic, script, and run read/write helpers
-app/features/topics/service.py        # hub view-model assembly and launch workflow
-templates/topics/hub.html            # page shell
-templates/topics/partials/*.html     # list/detail/run fragments
-static/js/topics/hub.js              # page-local filters, polling, and launch helpers
-supabase/migrations/*topics*.sql      # durable run/script schema
-tests/test_topics_hub.py             # page and contract tests
-```
+Target files for the slice:
 
-### Design Rules
+1. [app/features/topics/agents.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/agents.py)
+   Compatibility facade only. Re-export the stable public functions currently used by handlers and tests. Target: `<=150 LOC`.
+2. `app/features/topics/research_runtime.py`
+   Provider calls, retry loops, and strict extractor runtime.
+3. `app/features/topics/response_parsers.py`
+   PROMPT_1/PROMPT_2 raw parsing, JSON/YAML repair, and semantic validation helpers.
+4. `app/features/topics/seed_builders.py`
+   `convert_research_item_to_topic`, `build_seed_payload`, `build_lifestyle_seed_payload`, description helpers.
+5. `app/features/topics/lifestyle.py`
+   `generate_lifestyle_topics`, hook tracking, and `_derive_lifestyle_title`.
+6. [app/features/topics/schemas.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/schemas.py)
+   Canonical contracts only. Repair stale imports here first or remove invalid references.
 
-- Do not introduce a new framework.
-- Do not move the new feature into batch detail.
-- Keep the hub read-first; launch is secondary to browsing and inspection.
-- Use page-local partials and a small page-local JS module rather than a global store.
-- Keep routing and data contracts explicit enough that a reader can find the full flow in one pass.
+### Public Contract Rules
 
-## Definition of Done
+The first-pass refactor must preserve these call sites so surrounding code does not need to change immediately:
 
-- `/topics` loads as an HTML hub in a browser and still serves JSON to API clients.
-- Users can browse topics, inspect scripts, and review research-run history.
-- Users can launch a research run for one topic and see durable status after refresh.
-- Existing batch discovery tests continue to pass.
-- The topics hub slice stays within the locality budget and uses no unnecessary dependencies.
+- `generate_topics_research_agent(...)`
+- `generate_dialog_scripts(...)`
+- `extract_seed_strict_extractor(...)`
+- `convert_research_item_to_topic(...)`
+- `build_seed_payload(...)`
+- `generate_lifestyle_topics(...)`
+- `build_lifestyle_seed_payload(...)`
+- `parse_prompt1_response(...)`
+- `parse_prompt2_response(...)`
+
+Handlers may keep importing from `agents.py` during the first pass. `agents.py` becomes a facade, not the implementation home.
+
+### Contract And Boundary Rules
+
+- Schema/module drift is not allowed. If `prompts.py` names a contract such as `ResearchDossier`, that contract must exist in `schemas.py` or the import must be removed before further refactoring.
+- Semantic validation rules live in one place only. Do not validate the same research item in both parser and runtime paths.
+- Seed-builder functions must be pure mappers. They must not perform fresh network calls.
+- Provider retry logic must live in the runtime module, not inside parser or mapper code.
+- Architecture documentation must describe only what the live code path actually uses. Proposed schema is explicitly labeled as proposed until reads/writes exist.
+
+### Testing Rules
+
+- Preserve existing regression tests in [tests/test_topics_gemini_flow.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/tests/test_topics_gemini_flow.py), [tests/test_lifestyle_generation_regression.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/tests/test_lifestyle_generation_regression.py), and [tests/test_topic_prompt_templates.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/tests/test_topic_prompt_templates.py).
+- Add one import-smoke test for `app.features.topics.prompts` and `app.features.topics.agents` so contract drift fails fast.
+- Refactor behind the facade first, then narrow tests to the new internal modules only after the facade path is stable.
+
+## Detailed Decisions
+
+### Contracts
+
+- Pydantic models in [app/features/topics/schemas.py](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/features/topics/schemas.py) remain the only runtime contract layer for the slice.
+- If dossier-driven generation remains part of the design, add a real `ResearchDossier` model to `schemas.py`. If it is not yet part of the live runtime, remove the stale import and type references from `prompts.py`.
+
+### Persistence
+
+- Do not switch the runtime to `topic_scripts` or `topic_research_runs` in the same pass as the file split unless the handlers and queries path is updated end-to-end.
+- Keep `queries.py` behavior stable during the first split. Documentation drift is repaired first; schema migration adoption is a separate implementation block.
+
+### Observability
+
+- Logging remains structured via `app.core.logging`.
+- Error paths must not contain type-unsafe debug formatting that can mask the original failure.
+- Retry metadata belongs in runtime orchestration logs, not in parsing helpers.
+
+### Dependency Policy
+
+- No new dependencies.
+- Reuse `json`, `re`, `math`, `secrets`, `httpx`, `yaml`, and existing Pydantic/FastAPI infrastructure only where each concern already requires it.
+
+## Constitution For This Slice
+
+### Locality & Indirection
+
+Keep the topic-generation slice understandable in one pass. Each file must have one dominant reason to change. Prefer a small facade and adjacent focused modules over another catch-all service file. Do not introduce class-heavy indirection for a functional pipeline that is currently imported as module-level functions.
+
+### Testing & Debugging
+
+Run the import-smoke check first, then the focused topic regression tests, then the batch discovery regression. When a refactor failure appears, change one boundary at a time: contracts first, pure parsing next, runtime orchestration next, mappers last. If after two debugging turns the tests still fail, generate `agents/testscripts/failure_report.md` before continuing.
