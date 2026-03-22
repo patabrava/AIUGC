@@ -20,7 +20,7 @@ from app.features.topics.agents import (
     generate_topic_research_dossier,
     generate_topic_script_candidate,
 )
-from app.features.topics.deduplication import deduplicate_topics
+from app.features.topics.deduplication import calculate_topic_similarity, deduplicate_topics
 from app.features.topics.prompts import pick_topic_bank_topics
 from app.features.topics.queries import (
     create_topic_research_run,
@@ -52,6 +52,29 @@ def get_random_topic() -> Optional[Dict[str, Any]]:
     scored.sort(key=lambda pair: pair[0])
     count, topic = scored[0]
     return {**topic, "script_count": count}
+
+
+def fuzzy_match_topic(query: str, threshold: float = 0.35) -> Optional[Dict[str, Any]]:
+    """Find the most similar existing topic to a query string, if above threshold."""
+    topics = get_all_topics_from_registry()
+    if not topics:
+        return None
+    best_score = 0.0
+    best_topic = None
+    for topic in topics:
+        score = calculate_topic_similarity(
+            title1=query, rotation1=query, cta1=query,
+            title2=topic.get("title", ""),
+            rotation2=topic.get("rotation", ""),
+            cta2=topic.get("cta", ""),
+        )
+        if score > best_score:
+            best_score = score
+            best_topic = topic
+    if best_score < threshold or best_topic is None:
+        return None
+    scripts = get_topic_scripts_for_registry(best_topic["id"])
+    return {**best_topic, "script_count": len(scripts), "similarity_score": best_score}
 
 
 def _wants_html(request) -> bool:

@@ -369,3 +369,40 @@ def test_get_random_topic_returns_none_when_no_topics(monkeypatch):
     monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
     result = topic_hub.get_random_topic()
     assert result is None
+
+
+def test_fuzzy_match_topic_finds_similar(monkeypatch):
+    """Fuzzy match should find a similar existing topic."""
+    from app.features.topics import hub as topic_hub
+
+    fake_topics = [
+        {"id": "t1", "title": "Hyaluronic Acid Benefits", "post_type": "value", "rotation": "Benefits of hyaluronic acid", "cta": "Try it"},
+    ]
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: fake_topics)
+    monkeypatch.setattr(
+        topic_hub,
+        "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [],
+    )
+
+    result = topic_hub.fuzzy_match_topic("Hyaluronic Acid")
+    assert result is not None
+    assert result["id"] == "t1"
+
+
+def test_fuzzy_match_topic_returns_none_for_novel_topic(monkeypatch):
+    """Fuzzy match should return None when no similar topic exists."""
+    from app.features.topics import hub as topic_hub
+
+    fake_topics = [
+        {"id": "t1", "title": "Hyaluronic Acid Benefits", "post_type": "value", "rotation": "Benefits of hyaluronic acid", "cta": "Try it"},
+    ]
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: fake_topics)
+    monkeypatch.setattr(
+        topic_hub,
+        "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [],
+    )
+
+    result = topic_hub.fuzzy_match_topic("Morning Skincare Routine Tips")
+    assert result is None
