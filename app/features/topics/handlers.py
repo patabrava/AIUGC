@@ -1193,20 +1193,15 @@ async def select_topic_endpoint(request: Request, topic_id: str):
 async def list_topics_endpoint(request: Request):
     """Render the topics hub or return the legacy JSON API payload."""
     try:
-        payload = build_topic_hub_payload(request)
         if _wants_html(request):
-            from fastapi.templating import Jinja2Templates
-
+            payload = build_launch_hub_payload(request)
             templates = Jinja2Templates(directory="templates")
-            response = templates.TemplateResponse(
+            return templates.TemplateResponse(
                 "topics/hub.html",
-                {
-                    "request": request,
-                    **payload,
-                },
+                {"request": request, **payload},
             )
-            return response
 
+        payload = build_topic_hub_payload(request)
         topic_responses = [
             TopicResponse(
                 id=topic["id"],

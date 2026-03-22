@@ -4,312 +4,70 @@
 
 {% block head_extra %}
 <style>
-    .topics-surface {
-        background:
-            radial-gradient(circle at top left, rgba(217, 119, 6, 0.16), transparent 30%),
-            radial-gradient(circle at top right, rgba(15, 118, 110, 0.18), transparent 24%),
-            linear-gradient(180deg, #0f172a 0%, #111827 42%, #f8fafc 42%, #f8fafc 100%);
-    }
-
-    .topics-grid {
-        background-image:
-            linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
-        background-size: 24px 24px;
-    }
-
     [x-cloak] { display: none !important; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="topics-surface rounded-3xl border border-slate-200 shadow-2xl overflow-hidden">
-    <section class="px-5 py-6 sm:px-8 sm:py-8 text-slate-50">
-        <div class="max-w-6xl mx-auto grid gap-6 lg:grid-cols-[1.15fr_0.85fr] items-start">
-            <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.32em] text-amber-200">Topics Hub</p>
-                <h1 class="mt-3 text-3xl sm:text-4xl font-black tracking-tight">Browse the bank, inspect scripts, launch research.</h1>
-                <p class="mt-4 max-w-2xl text-sm sm:text-base leading-7 text-slate-200">
-                    Read-first inventory for batch owner/editors. Topics, script variants, and research runs stay visible in one place, with on-demand deep research for a single topic when the bank needs a refresh.
-                </p>
-                <div class="mt-6 flex flex-wrap gap-3">
-                    <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                        <div class="text-[11px] uppercase tracking-[0.24em] text-slate-300">Visible topics</div>
-                        <div class="mt-1 text-2xl font-bold text-white">{{ total_topics }}</div>
-                    </div>
-                    <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                        <div class="text-[11px] uppercase tracking-[0.24em] text-slate-300">Scripts</div>
-                        <div class="mt-1 text-2xl font-bold text-white">{{ scripts|length }}</div>
-                    </div>
-                    <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                        <div class="text-[11px] uppercase tracking-[0.24em] text-slate-300">Runs</div>
-                        <div class="mt-1 text-2xl font-bold text-white">{{ runs|length }}</div>
+<div class="rounded-3xl border border-slate-200 bg-white shadow-xl overflow-hidden">
+    <div class="grid lg:grid-cols-[1fr_0.85fr] min-h-[70vh]">
+
+        {# ── LEFT PANEL: Topic List ── #}
+        <div class="border-r border-slate-200 p-5 sm:p-6 overflow-y-auto max-h-[80vh]">
+            <div class="flex items-center justify-between gap-4">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Inventory</p>
+                    <h1 class="mt-1 text-xl font-black text-slate-900">Topics</h1>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-slate-500">{{ total_topics }} topic{{ 's' if total_topics != 1 else '' }}</span>
+                    <div x-data="{ open: false }" class="relative">
+                        <button @click="open = !open" class="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-200">
+                            Filter ▾
+                        </button>
+                        <div x-show="open" @click.outside="open = false" x-cloak
+                             class="absolute right-0 top-full mt-2 z-10 w-64 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
+                            <form hx-get="/topics" hx-target="#topic-list" hx-select="#topic-list" hx-swap="outerHTML">
+                                <label class="block">
+                                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-600">Search</span>
+                                    <input name="search" value="{{ filters.search }}" placeholder="Topic name..."
+                                           class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
+                                </label>
+                                <label class="mt-3 block">
+                                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-600">Post type</span>
+                                    <select name="post_type" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
+                                        <option value="">All</option>
+                                        <option value="value" {% if filters.post_type == 'value' %}selected{% endif %}>Value</option>
+                                        <option value="lifestyle" {% if filters.post_type == 'lifestyle' %}selected{% endif %}>Lifestyle</option>
+                                        <option value="product" {% if filters.post_type == 'product' %}selected{% endif %}>Product</option>
+                                    </select>
+                                </label>
+                                <label class="mt-3 flex items-center gap-2 text-sm text-slate-600">
+                                    <input type="checkbox" name="only_with_scripts" value="true" {% if filters.only_with_scripts %}checked{% endif %}
+                                           class="h-4 w-4 rounded border-slate-300 text-amber-500 focus:ring-amber-300">
+                                    Only with scripts
+                                </label>
+                                <button type="submit" @click="open = false"
+                                        class="mt-4 w-full rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
+                                    Apply
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </div>
+            <p class="mt-1 text-xs text-slate-400">Sorted by least coverage</p>
 
-            <form method="get" action="/topics" class="rounded-3xl border border-white/10 bg-slate-950/55 p-4 sm:p-5 shadow-xl backdrop-blur">
-                <div class="flex items-center justify-between gap-4">
-                    <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-200">Filters</p>
-                        <h2 class="mt-1 text-lg font-bold text-white">Narrow the hub</h2>
-                    </div>
-                    <button type="submit" class="rounded-full bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-200">
-                        Apply
-                    </button>
-                </div>
-                <div class="mt-4 grid gap-3 sm:grid-cols-2">
-                    <label class="block">
-                        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-300">Search</span>
-                        <input name="search" value="{{ filters.search }}" class="w-full rounded-xl border border-white/10 bg-white/95 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200" placeholder="Topic, script, or lane">
-                    </label>
-                    <label class="block">
-                        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-300">Post type</span>
-                        <select name="post_type" class="w-full rounded-xl border border-white/10 bg-white/95 px-3 py-2 text-sm text-slate-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
-                            <option value="">All</option>
-                            <option value="value" {% if filters.post_type == 'value' %}selected{% endif %}>Value</option>
-                            <option value="lifestyle" {% if filters.post_type == 'lifestyle' %}selected{% endif %}>Lifestyle</option>
-                            <option value="product" {% if filters.post_type == 'product' %}selected{% endif %}>Product</option>
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-300">Tier</span>
-                        <select name="target_length_tier" class="w-full rounded-xl border border-white/10 bg-white/95 px-3 py-2 text-sm text-slate-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
-                            <option value="">Any</option>
-                            <option value="8" {% if filters.target_length_tier == 8 %}selected{% endif %}>8s</option>
-                            <option value="16" {% if filters.target_length_tier == 16 %}selected{% endif %}>16s</option>
-                            <option value="32" {% if filters.target_length_tier == 32 %}selected{% endif %}>32s</option>
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-300">Run status</span>
-                        <select name="status" class="w-full rounded-xl border border-white/10 bg-white/95 px-3 py-2 text-sm text-slate-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
-                            <option value="">All</option>
-                            <option value="running" {% if filters.status == 'running' %}selected{% endif %}>Running</option>
-                            <option value="completed" {% if filters.status == 'completed' %}selected{% endif %}>Completed</option>
-                            <option value="failed" {% if filters.status == 'failed' %}selected{% endif %}>Failed</option>
-                        </select>
-                    </label>
-                    <label class="flex items-center gap-2 sm:col-span-2 text-sm text-slate-200">
-                        <input type="checkbox" name="only_with_scripts" value="true" {% if filters.only_with_scripts %}checked{% endif %} class="h-4 w-4 rounded border-white/20 text-amber-500 focus:ring-amber-300">
-                        Only show topics that already have script variants
-                    </label>
-                </div>
-                <input type="hidden" name="topic_id" value="{{ filters.topic_id or '' }}">
-                {% if filters.run_id %}
-                <input type="hidden" name="run_id" value="{{ filters.run_id }}">
-                {% endif %}
-            </form>
-        </div>
-    </section>
-
-    <section class="topics-grid border-t border-slate-200 bg-slate-50 px-5 py-6 sm:px-8">
-        <div class="max-w-6xl mx-auto grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-            <div class="space-y-4">
-                <div class="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div class="flex items-center justify-between gap-4">
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Inventory</p>
-                            <h2 class="mt-1 text-xl font-bold text-slate-900">Topics</h2>
-                        </div>
-                        <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ topics|length }} shown</span>
-                    </div>
-                    <div class="mt-4 space-y-3 max-h-[34rem] overflow-auto pr-1">
-                        {% for topic in topics %}
-                        <a
-                            href="/topics?topic_id={{ topic.id }}{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}{% if filters.post_type %}&post_type={{ filters.post_type }}{% endif %}{% if filters.target_length_tier %}&target_length_tier={{ filters.target_length_tier }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.script_usage %}&script_usage={{ filters.script_usage }}{% endif %}{% if filters.only_with_scripts %}&only_with_scripts=true{% endif %}"
-                            class="block rounded-2xl border {% if selected_topic and topic.id == selected_topic.id %}border-amber-400 bg-amber-50 ring-1 ring-amber-200{% else %}border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white{% endif %} p-4 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-                        >
-                            <div class="flex items-start justify-between gap-4">
-                                <div>
-                                    <div class="flex flex-wrap items-center gap-2">
-                                        <h3 class="text-base font-bold text-slate-900">{{ topic.title }}</h3>
-                                        {% if topic.post_type %}
-                                        <span class="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">{{ topic.post_type }}</span>
-                                        {% endif %}
-                                    </div>
-                                    <p class="mt-2 text-sm leading-6 text-slate-600">{{ topic.rotation }}</p>
-                                </div>
-                                <div class="text-right text-xs text-slate-500">
-                                    <div class="font-semibold text-slate-700">{{ topic.use_count or 0 }} uses</div>
-                                    <div>{{ topic.target_length_tiers|join(', ') if topic.target_length_tiers else 'tier-free' }}</div>
-                                </div>
-                            </div>
-                            <div class="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">{{ topic.script_bank|length if topic.script_bank else 0 }} bank buckets</span>
-                                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">{{ topic.source_bank|length if topic.source_bank else 0 }} sources</span>
-                                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">Script-ready</span>
-                            </div>
-                        </a>
-                        {% endfor %}
-                        {% if not topics %}
-                        <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-500">
-                            No topics match the current filters.
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-
-            <div class="space-y-4">
-                {% if selected_topic %}
-                        <article class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                            <div class="flex flex-wrap items-start justify-between gap-4">
-                                <div>
-                                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Selected topic</p>
-                                    <h2 class="mt-1 text-2xl font-black text-slate-900">{{ selected_topic.title }}</h2>
-                                    <p class="mt-2 text-sm leading-6 text-slate-600">{{ selected_topic.research_payload.cluster_summary if selected_topic.research_payload and selected_topic.research_payload.cluster_summary else selected_topic.script }}</p>
-                                </div>
-                                <form method="post" action="/topics/runs" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm">
-                                    <input type="hidden" name="topic_registry_id" value="{{ selected_topic.id }}">
-                                    <input type="hidden" name="post_type" value="{{ selected_topic.post_type or '' }}">
-                                    <input type="hidden" name="trigger_source" value="hub">
-                                    <input type="hidden" name="script_usage" value="{{ filters.script_usage }}">
-                                    <label class="block">
-                                        <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-amber-900">Target tier</span>
-                                        <select name="target_length_tier" class="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
-                                            <option value="8">8s</option>
-                                            <option value="16" {% if filters.target_length_tier == 16 or selected_topic.target_length_tiers and 16 in selected_topic.target_length_tiers %}selected{% endif %}>16s</option>
-                                    <option value="32" {% if filters.target_length_tier == 32 or selected_topic.target_length_tiers and 32 in selected_topic.target_length_tiers %}selected{% endif %}>32s</option>
-                                </select>
-                            </label>
-                                    <button type="submit" class="mt-3 w-full rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
-                                        Launch deep research
-                                    </button>
-                                </form>
-                            </div>
-
-                            <div class="mt-5 flex flex-wrap items-center gap-2">
-                                <span class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Script usage</span>
-                                <a href="/topics?topic_id={{ selected_topic.id }}{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}{% if filters.post_type %}&post_type={{ filters.post_type }}{% endif %}{% if filters.target_length_tier %}&target_length_tier={{ filters.target_length_tier }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.only_with_scripts %}&only_with_scripts=true{% endif %}" class="rounded-full px-3 py-1.5 text-xs font-semibold transition {% if filters.script_usage == 'all' %}bg-slate-900 text-white{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">All scripts</a>
-                                <a href="/topics?topic_id={{ selected_topic.id }}&script_usage=unused{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}{% if filters.post_type %}&post_type={{ filters.post_type }}{% endif %}{% if filters.target_length_tier %}&target_length_tier={{ filters.target_length_tier }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.only_with_scripts %}&only_with_scripts=true{% endif %}" class="rounded-full px-3 py-1.5 text-xs font-semibold transition {% if filters.script_usage == 'unused' %}bg-amber-400 text-slate-950{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">Unused only</a>
-                                <a href="/topics?topic_id={{ selected_topic.id }}&script_usage=used{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}{% if filters.post_type %}&post_type={{ filters.post_type }}{% endif %}{% if filters.target_length_tier %}&target_length_tier={{ filters.target_length_tier }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.only_with_scripts %}&only_with_scripts=true{% endif %}" class="rounded-full px-3 py-1.5 text-xs font-semibold transition {% if filters.script_usage == 'used' %}bg-emerald-100 text-emerald-900{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">Used only</a>
-                                <span class="text-xs text-slate-500">Unused scripts surface coverage gaps first.</span>
-                            </div>
-
-                            <div class="mt-5 grid gap-4 lg:grid-cols-2">
-                                <div class="rounded-2xl bg-slate-50 p-4">
-                                    <div class="flex items-center justify-between">
-                                        <h3 class="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Sources</h3>
-                                        <span class="text-xs text-slate-500">{{ selected_topic.source_bank|length if selected_topic.source_bank else 0 }}</span>
-                            </div>
-                            <div class="mt-3 space-y-2">
-                                {% for source in selected_topic.source_bank or [] %}
-                                <a href="{{ source.url }}" target="_blank" rel="noreferrer" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-amber-300 hover:bg-amber-50">
-                                    <div class="font-medium text-slate-900">{{ source.title }}</div>
-                                    <div class="truncate text-xs text-slate-500">{{ source.url }}</div>
-                                </a>
-                                {% endfor %}
-                                {% if not selected_topic.source_bank %}
-                                <p class="text-sm text-slate-500">No stored sources on this topic yet.</p>
-                                {% endif %}
-                            </div>
-                        </div>
-
-                        <div class="rounded-2xl bg-slate-50 p-4">
-                            <div class="flex items-center justify-between">
-                                <h3 class="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Research payload</h3>
-                                <span class="text-xs text-slate-500">{{ selected_topic.target_length_tiers|join(', ') if selected_topic.target_length_tiers else 'none' }}</span>
-                            </div>
-                            <div class="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                                <p><span class="font-semibold text-slate-900">Cluster:</span> {{ selected_topic.research_payload.cluster_id if selected_topic.research_payload else 'n/a' }}</p>
-                                <p><span class="font-semibold text-slate-900">Anchor:</span> {{ selected_topic.research_payload.anchor_topic if selected_topic.research_payload else selected_topic.title }}</p>
-                                <p><span class="font-semibold text-slate-900">Disclaimer:</span> {{ selected_topic.research_payload.disclaimer if selected_topic.research_payload else selected_topic.cta }}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="mt-5">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <h3 class="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Existing scripts</h3>
-                                <p class="mt-1 text-xs text-slate-500">Unused scripts are shown first so gaps stay visible.</p>
-                            </div>
-                            <span class="text-xs text-slate-500">{{ selected_scripts|length }} shown</span>
-                        </div>
-                        <div class="mt-3 space-y-5">
-                            {% for group in selected_script_groups %}
-                            <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                                <div class="flex items-center justify-between gap-3">
-                                    <div>
-                                        <h4 class="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">{{ group.label }}</h4>
-                                        <p class="mt-1 text-xs text-slate-500">{{ group.description }}</p>
-                                    </div>
-                                    <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">{{ group.count }}</span>
-                                </div>
-                                <div class="mt-3 grid gap-3">
-                                    {% for script in group.scripts %}
-                                    <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                                        <div class="flex flex-wrap items-center justify-between gap-3">
-                                            <div class="flex flex-wrap items-center gap-2">
-                                                <span class="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">{{ script.target_length_tier }}s</span>
-                                                {% if script.bucket %}
-                                                <span class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-900">{{ script.bucket }}</span>
-                                                {% endif %}
-                                                {% if script.lane_family %}
-                                                <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-700">{{ script.lane_family }}</span>
-                                                {% endif %}
-                                                {% if script.use_count and script.use_count > 0 %}
-                                                <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-900">Used {{ script.use_count }}x</span>
-                                                {% else %}
-                                                <span class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-900">Unused</span>
-                                                {% endif %}
-                                            </div>
-                                            <span class="text-xs text-slate-500">{{ script.framework or 'PAL' }}</span>
-                                        </div>
-                                        <p class="mt-3 text-sm leading-7 text-slate-700">{{ script.script }}</p>
-                                        <div class="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
-                                            <span>{{ script.estimated_duration_s or 0 }}s estimated</span>
-                                            {% if script.last_used_at %}
-                                            <span>Last used {{ script.last_used_at }}</span>
-                                            {% endif %}
-                                            {% if script.primary_source_title %}
-                                            <span>Source: {{ script.primary_source_title }}</span>
-                                            {% endif %}
-                                        </div>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-                            </section>
-                            {% endfor %}
-                            {% if not selected_script_groups %}
-                            <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-500">
-                                No script variants stored for this topic yet.
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                </article>
-                {% else %}
-                <div class="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500 shadow-sm">
-                    Select a topic to inspect its script variants and launch research.
-                </div>
-                {% endif %}
-
-                <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div class="flex items-center justify-between gap-4">
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Research runs</p>
-                            <h2 class="mt-1 text-xl font-bold text-slate-900">Recent launches</h2>
-                        </div>
-                        <span class="text-xs text-slate-500">{{ active_runs|length }} active</span>
-                    </div>
-                    <div class="mt-4 space-y-3">
-                        {% for run in active_runs %}
-                            {% include "topics/partials/run_card.html" %}
-                        {% endfor %}
-                        {% for run in completed_runs %}
-                            {% include "topics/partials/run_card.html" %}
-                        {% endfor %}
-                        {% if not runs %}
-                        <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-500">
-                            No topic research runs yet.
-                        </div>
-                        {% endif %}
-                    </div>
-                </section>
+            <div class="mt-4 space-y-3">
+                {% include "topics/partials/topic_list.html" %}
             </div>
         </div>
-    </section>
+
+        {# ── RIGHT PANEL: Launch Panel ── #}
+        <div id="launch-panel" class="bg-slate-50/50 p-5 sm:p-6">
+            {% include "topics/partials/launch_panel.html" %}
+        </div>
+
+    </div>
 </div>
 {% endblock %}
