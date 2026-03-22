@@ -592,6 +592,13 @@ async def launch_topic_research_run(
         topic_registry_id=topic_registry_id,
     )
 
+    # Initialize live progress tracking
+    from app.features.topics.handlers import start_seeding_interaction, update_seeding_progress
+    start_seeding_interaction(batch_id=run_row["id"], brand=topic.get("title", ""), expected_posts=0)
+
+    def _run_progress_callback(**kwargs):
+        update_seeding_progress(run_row["id"], **kwargs)
+
     async def runner() -> None:
         try:
             await asyncio.to_thread(
@@ -601,8 +608,9 @@ async def launch_topic_research_run(
                 target_length_tier=resolved_tier,
                 trigger_source=trigger_source,
                 post_type=resolved_post_type,
-                progress_callback=progress_callback,
+                progress_callback=_run_progress_callback,
             )
+            update_seeding_progress(run_row["id"], stage="completed", stage_label="Research complete", status="completed")
         except ValidationError as exc:
             update_topic_research_run(
                 run_row["id"],
@@ -615,6 +623,7 @@ async def launch_topic_research_run(
                     "trigger_source": trigger_source,
                 },
             )
+            update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, 'message') else exc))
             logger.warning(
                 "topic_research_run_validation_failed",
                 run_id=run_row["id"],
@@ -633,6 +642,7 @@ async def launch_topic_research_run(
                     "trigger_source": trigger_source,
                 },
             )
+            update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, 'message') else exc))
             logger.warning(
                 "topic_research_run_third_party_failed",
                 run_id=run_row["id"],
@@ -651,6 +661,7 @@ async def launch_topic_research_run(
                     "trigger_source": trigger_source,
                 },
             )
+            update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, 'message') else exc))
             logger.exception(
                 "topic_research_run_failed",
                 run_id=run_row["id"],
