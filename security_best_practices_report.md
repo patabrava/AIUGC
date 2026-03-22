@@ -1,47 +1,60 @@
-# Security Best Practices Report
+# Security Best Practices Report (Focused on Recent Commits)
 
-Executive summary: The codebase is generally using environment-based secret loading rather than hardcoded secrets, but the current production surface still exposes two common FastAPI risks: unrestricted OpenAPI/docs endpoints and missing host header validation. I did not find evidence of secrets being persisted in `app/core/config.py`, but the app should still be hardened before public deployment.
+Date: 2026-03-22
+Scope: Secret leakage + high-impact security regressions in the last commit set (`04e1fb7`, `4a7de29`, `f4d1118`, `eab610c`, `9b2b815`, `674c44c`).
+Stack observed: Python/FastAPI backend.
 
-## High Severity
+## Executive summary
+- No private keys / API keys were committed in the last commits (or in `HEAD`) based on pattern scans for common key formats.
+- One **High** risk remains in app code: Gemini API key is passed as a **query parameter** (`?key=...`) and can be leaked by HTTP client request logging / proxies.
+- One **Medium** risk in testscripts: helper scripts alias `SUPABASE_KEY` to `SUPABASE_SERVICE_ROLE_KEY`, which increases the chance of accidentally using a service-role key in the wrong place.
 
-### [F-1] Host header validation is not enabled
-- Location: `app/main.py:76-84`
-- Evidence: the FastAPI app is created with defaults and there is no `TrustedHostMiddleware` or equivalent host allowlist middleware in the startup path.
-- Impact: attackers can send arbitrary `Host` headers. Depending on downstream routing, redirects, generated URLs, and proxy behavior, this can enable host-header poisoning and make cache or password-reset style flows unreliable or unsafe.
-- Fix: add `TrustedHostMiddleware` with an explicit allowlist for the deployment hostnames and any internal proxy hostnames the app must accept.
-- Mitigation: if host validation must live at the edge, document that assumption and verify it in the reverse proxy / CDN config.
-- False positive notes: this is only fully mitigated if the reverse proxy strips or validates untrusted host headers before forwarding to the app.
+---
 
-### [F-2] Interactive docs and OpenAPI schema are exposed by default
-- Location: `app/main.py:76-82`
-- Evidence: `FastAPI(...)` is instantiated without `docs_url=None`, `redoc_url=None`, or `openapi_url=None`.
-- Impact: public docs and schema exposure increases information disclosure. It makes routes, models, and operational surface area easier to enumerate for an attacker.
-- Fix: disable docs/schema in production, or protect them behind authentication or a private network boundary.
-- Mitigation: if docs are intentionally public for this deployment, treat that as an explicit exception and restrict by network or auth at the edge.
-- False positive notes: this is acceptable for local development; the issue is exposure in a public production deployment.
+## Findings
 
-## Medium Severity
+### [S-1] Gemini API key can leak via URL logging
+- Severity: High
+- Rule: "MUST NOT request, output, log, or commit secrets" (FastAPI spec §0)
+- Location:
+  - `/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/adapters/llm_client.py:60`
+  - `/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/app/adapters/llm_client.py:69`
+- Evidence:
+  - `_gemini_params()` returns `{"key": self.gemini_api_key}` and every Gemini call uses `params=self._gemini_params()`.
+- Impact:
+  - Any HTTP request logging that prints the full URL (common with httpx debug logging, proxies, APM, reverse proxies) can record the API key in plaintext.
+- Fix (recommended):
+  - Prefer `x-goog-api-key` header instead of query param for Gemini calls (similar to `app/adapters/veo_client.py` which already uses `x-goog-api-key`).
+  - As defense-in-depth, add log redaction for `key` query params in your HTTP logging layer.
+- Notes:
+  - This is not a “commit leaked a key” finding; it’s an operational leak vector that can expose keys during normal runs.
 
-### [F-3] Docker deployment relies on a local `.env` file for secrets
-- Location: `docker-compose.yaml:6-8`, `docker-compose.yaml:31-37`
-- Evidence: both services use `env_file: .env`, which means the runtime secret set is pulled from a local file on the host.
-- Impact: this is not inherently unsafe, but it becomes a secret-leak risk if `.env` is copied, committed, or stored in a shared deployment bundle. It also makes local secret hygiene a deployment dependency.
-- Fix: keep `.env` strictly local and untracked, and prefer runtime secret injection in production orchestration where possible.
-- Mitigation: maintain a hard `.gitignore` entry for `.env` and rotate any secret that ever lands in a tracked file.
-- False positive notes: this pattern is normal for local Docker Compose development; it is only a security issue if the file is treated as source material or shipped into git.
+### [S-2] Testscripts alias service-role key into `SUPABASE_KEY`
+- Severity: Medium
+- Location:
+  - `/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/agents/testscripts/testscript_deep_research_trace.py:70`
+- Evidence:
+  - If `SUPABASE_KEY` is absent, script sets `SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY`.
+- Impact:
+  - Increases risk of confusing anon vs service-role usage; if anyone reuses this pattern outside a trusted backend context, it can accidentally widen privileges.
+- Fix (recommended):
+  - Keep `SUPABASE_KEY` and `SUPABASE_SERVICE_ROLE_KEY` distinct.
+  - For testscripts, require `SUPABASE_SERVICE_ROLE_KEY` explicitly and do not backfill `SUPABASE_KEY`.
 
-## Low Severity
+---
 
-### [F-4] Configuration module still uses local dotenv loading
-- Location: `app/core/config.py:15-20`
-- Evidence: `SettingsConfigDict(env_file=".env", ...)` causes the app to read from a local `.env` file when present.
-- Impact: this is fine for development, but it reinforces the same secret-at-rest risk as Compose if a real `.env` is ever checked in or shared.
-- Fix: keep this for local development, but document that production must inject environment variables externally.
-- Mitigation: enforce `.env` exclusion in git and CI, and never commit the generated file.
-- False positive notes: the module itself does not write secrets; it only reads configuration.
+## Secret leakage check (recent commits)
+Methods used:
+- `git grep` scans on `HEAD` for common key patterns: Google API keys (`AIza...`), OpenAI keys (`sk-...`), JWTs, private key PEM headers, AWS access keys, Supabase secret patterns.
+- `git log -p -n 6` scanned for the same patterns.
 
-## Observations
+Result:
+- No concrete secrets found committed.
+- Matches found were **documentation placeholders** (`.env.example`, `README.md`, `setup.sh`) and **environment variable names**, not real key material.
 
-- I did not find tracked live credentials in `app/core/config.py`.
-- The prior `setup.sh` secret seeding was removed before this report, which is the right direction.
-- I did not inspect deployment infrastructure outside the repo, so proxy-level host validation and docs protection still need runtime verification.
+---
+
+## Quick recommendations
+1. Implement [S-1] (header-based Gemini auth + log redaction) before broader rollout.
+2. Tweak testscripts per [S-2] to avoid accidental key-class confusion.
+
