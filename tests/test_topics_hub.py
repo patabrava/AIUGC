@@ -622,3 +622,64 @@ def test_run_status_compact_endpoint(monkeypatch):
     response = client.get("/topics/runs/run-1?compact=1", headers={"HX-Request": "true"})
     assert response.status_code == 200
     assert "Test Topic" in response.text
+
+
+def test_launch_redirects_and_hub_shows_active_runs(monkeypatch):
+    """After launching research, redirecting to /topics should show the active run."""
+    from app.features.topics import hub as topic_hub
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(
+        topic_hub, "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [],
+    )
+    monkeypatch.setattr(
+        topic_hub, "list_topic_research_runs",
+        lambda limit=20, status=None, topic_registry_id=None: [
+            {"id": "run-1", "status": "running", "result_summary": {"topic_title": "Test"}, "created_at": "2026-03-22", "updated_at": "2026-03-22", "target_length_tier": None, "trigger_source": "hub"},
+        ],
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics", headers={"Accept": "text/html"})
+    assert response.status_code == 200
+    assert "Running" in response.text
+
+
+def test_full_launch_flow_pick_from_list(monkeypatch):
+    """Full flow: select topic -> confirmation -> launch -> redirect."""
+    from app.features.topics import hub as topic_hub
+    from app.features.topics import queries as topic_queries
+    from app.features.topics import handlers as topic_handlers
+
+    test_topic = {"id": "t1", "title": "Test Topic", "post_type": "value", "rotation": "r", "cta": "c"}
+
+    monkeypatch.setattr(topic_queries, "get_topic_registry_by_id", lambda tid: test_topic)
+    monkeypatch.setattr(topic_queries, "get_topic_scripts_for_registry", lambda tid, target_length_tier=None: [])
+
+    # Step 1: Select topic
+    client = _build_test_client()
+    select_response = client.get("/topics/select/t1", headers={"HX-Request": "true"})
+    assert select_response.status_code == 200
+    assert "Test Topic" in select_response.text
+    assert "Launch Research" in select_response.text
+
+    # Step 2: Launch research
+    async def fake_launch(**kwargs):
+        return {
+            "run": {"id": "run-1", "status": "running"},
+            "topic": test_topic,
+            "status_url": "/topics/runs/run-1",
+        }
+
+    monkeypatch.setattr(topic_handlers, "launch_topic_research_run", fake_launch)
+
+    launch_response = client.post(
+        "/topics/runs",
+        data={"topic_registry_id": "t1", "post_type": "value", "trigger_source": "hub"},
+        headers={"HX-Request": "true"},
+        follow_redirects=False,
+    )
+    assert launch_response.status_code == 303
+    assert launch_response.headers["location"] == "/topics"
