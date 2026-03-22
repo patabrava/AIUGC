@@ -588,7 +588,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
 
                 lifestyle_topics = generate_lifestyle_topics(
-                    count=request_count
+                    count=request_count,
+                    target_length_tier=target_length_tier,
                 )
 
                 unique_candidates = deduplicate_topics(
@@ -974,7 +975,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
         )
 
         lifestyle_topics = generate_lifestyle_topics(
-            count=1
+            count=1,
+            target_length_tier=target_length_tier,
         )
 
         if lifestyle_topics:
