@@ -172,10 +172,11 @@ def generate_dialog_scripts(
     )
 
 
-def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None) -> List[Dict[str, object]]:
+def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None, target_length_tier: Optional[int] = None) -> List[Dict[str, object]]:
     return _generate_lifestyle_topics(
         count=count,
         seed=seed,
+        target_length_tier=target_length_tier,
         generate_dialog_scripts_fn=generate_dialog_scripts,
     )
 

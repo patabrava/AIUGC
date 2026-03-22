@@ -11,6 +11,7 @@ import secrets
 from typing import Callable, Dict, List, Optional
 
 from app.core.logging import get_logger
+from app.core.video_profiles import get_duration_profile
 from app.features.topics.content_utils import extract_soft_cta, strip_cta_from_script
 
 logger = get_logger(__name__)
@@ -32,6 +33,7 @@ def generate_lifestyle_topics(
     *,
     count: int = 1,
     seed: Optional[int] = None,
+    target_length_tier: Optional[int] = None,
     generate_dialog_scripts_fn: Callable,
 ) -> List[Dict[str, object]]:
     lifestyle_topic_templates = [
@@ -49,10 +51,12 @@ def generate_lifestyle_topics(
     used_hooks: List[str] = []
     for index in range(count):
         topic_template = shuffled_templates[index % len(shuffled_templates)]
+        resolved_profile = get_duration_profile(target_length_tier) if target_length_tier else None
         dialog_scripts = generate_dialog_scripts_fn(
             topic=topic_template,
             scripts_required=1,
             previously_used_hooks=used_hooks if used_hooks else None,
+            profile=resolved_profile,
         )
         main_script = dialog_scripts.problem_agitate_solution[0]
         cta = extract_soft_cta(main_script)
