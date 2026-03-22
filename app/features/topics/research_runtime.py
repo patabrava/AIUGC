@@ -319,8 +319,6 @@ def generate_topic_research_dossier(
             topic=dossier.topic,
             anchor_topic=dossier.anchor_topic,
             normalized_payload=dossier.model_dump(mode="json"),
-            raw_prompt=prompt,
-            raw_response=raw_response,
         )
         update_topic_research_run(
             run_row["id"],
@@ -332,6 +330,7 @@ def generate_topic_research_dossier(
                 "dossier_id": dossier_row["id"],
             },
             error_message="",
+            dossier_id=dossier_row["id"],
         )
     except Exception as exc:
         logger.warning(
@@ -356,8 +355,9 @@ def generate_topic_script_candidate(
     llm = llm_factory()
     profile = get_duration_profile(target_length_tier)
     dossier_payload = dossier.model_dump(mode="json") if hasattr(dossier, "model_dump") else (dossier or {})
-    lane_title = str(lane_candidate.get("title") or "").strip()
-    lane_caption = str(lane_candidate.get("source_summary") or lane_candidate.get("caption") or "").strip()
+    lane_payload = lane_candidate.model_dump(mode="json") if hasattr(lane_candidate, "model_dump") else dict(lane_candidate or {})
+    lane_title = str(lane_payload.get("title") or "").strip()
+    lane_caption = str(lane_payload.get("source_summary") or lane_payload.get("caption") or "").strip()
     lane_sources = list((dossier_payload or {}).get("sources") or [])
     source_title = None
     source_url = None
@@ -372,7 +372,7 @@ def generate_topic_script_candidate(
         profile=profile,
         assigned_topics=[lane_title],
         dossier=dossier_payload,
-        lane_candidate=lane_candidate,
+        lane_candidate=lane_payload,
     )
     prompt = base_prompt
 
@@ -388,7 +388,7 @@ def generate_topic_script_candidate(
 
     lane_fact_texts = [
         str(fact).strip()
-        for fact in list((lane_candidate or {}).get("facts") or []) + list((dossier_payload or {}).get("facts") or [])
+        for fact in list(lane_payload.get("facts") or []) + list((dossier_payload or {}).get("facts") or [])
         if str(fact).strip()
     ]
 
@@ -477,12 +477,12 @@ def generate_topic_script_candidate(
                 return item
             raise ValidationError(
                 message="PROMPT_1 lane response was empty",
-                details={"lane_title": lane_candidate.get("title")},
+                details={"lane_title": lane_payload.get("title")},
             )
         except ValidationError as exc:
             logger.warning(
                 "topic_script_candidate_retry",
-                lane_title=lane_candidate.get("title"),
+                lane_title=lane_payload.get("title"),
                 attempt=attempt + 1,
                 error=exc.message,
                 details=exc.details,
@@ -527,7 +527,7 @@ def generate_topic_script_candidate(
         except ValidationError as exc:
             logger.warning(
                 "topic_script_candidate_text_retry",
-                lane_title=lane_candidate.get("title"),
+                lane_title=lane_payload.get("title"),
                 attempt=attempt + 1,
                 error=exc.message,
                 details=exc.details,
@@ -536,7 +536,7 @@ def generate_topic_script_candidate(
 
     raise ValidationError(
         message="PROMPT_1 lane generation failed after structured and text normalization",
-        details={"lane_title": lane_candidate.get("title"), "target_length_tier": target_length_tier},
+        details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
     )
 
 

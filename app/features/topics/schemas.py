@@ -215,6 +215,7 @@ class TopicScriptVariant(BaseModel):
     """Script variant stored in the topic bank."""
     id: str
     topic_registry_id: str
+    topic_research_dossier_id: Optional[str] = None
     post_type: Optional[str] = None
     title: str
     script: str

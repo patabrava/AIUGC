@@ -70,6 +70,36 @@ def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _fetch_topic_script_rows(
+    *,
+    target_length_tier: Optional[int] = None,
+    topic_registry_id: Optional[str] = None,
+    topic_research_dossier_id: Optional[str] = None,
+    post_type: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    supabase = get_supabase()
+    last_error: Optional[Exception] = None
+    for relation in ("v_topic_scripts_resolved", "topic_scripts"):
+        try:
+            query = supabase.client.table(relation).select("*")
+            if topic_registry_id is not None:
+                query = query.eq("topic_registry_id", topic_registry_id)
+            if topic_research_dossier_id is not None:
+                query = query.eq("topic_research_dossier_id", topic_research_dossier_id)
+            if target_length_tier is not None:
+                query = query.eq("target_length_tier", target_length_tier)
+            if post_type:
+                query = query.eq("post_type", post_type)
+            response = query.execute()
+            return [_normalize_script_row(row) for row in (response.data or [])]
+        except Exception as exc:
+            last_error = exc
+            logger.warning("topic_scripts_relation_fallback", relation=relation, error=str(exc))
+    if last_error is not None:
+        raise last_error
+    return []
+
+
 def _normalize_dossier_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(row or {})
     normalized["normalized_payload"] = normalized.get("normalized_payload") or {}
@@ -341,11 +371,13 @@ def create_topic_research_dossier(
         "topic": topic,
         "anchor_topic": anchor_topic,
         "normalized_payload": normalized_payload,
-        "raw_prompt": raw_prompt or "",
-        "raw_response": raw_response or "",
         "prompt_name": prompt_name,
         "prompt_version": prompt_version,
     }
+    if raw_prompt is not None:
+        payload["raw_prompt"] = raw_prompt
+    if raw_response is not None:
+        payload["raw_response"] = raw_response
     response = supabase.client.table("topic_research_dossiers").insert(payload).execute()
     if not response.data:
         raise RuntimeError("Failed to create topic research dossier")
@@ -356,12 +388,23 @@ def get_topic_scripts_for_registry(
     topic_registry_id: str,
     target_length_tier: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    supabase = get_supabase()
-    query = supabase.client.table("topic_scripts").select("*").eq("topic_registry_id", topic_registry_id)
-    if target_length_tier is not None:
-        query = query.eq("target_length_tier", target_length_tier)
-    response = query.execute()
-    return [_normalize_script_row(row) for row in (response.data or [])]
+    rows = _fetch_topic_script_rows(
+        topic_registry_id=topic_registry_id,
+        target_length_tier=target_length_tier,
+    )
+    if rows:
+        return rows
+    return []
+
+
+def get_topic_scripts_for_dossier(
+    topic_research_dossier_id: str,
+    target_length_tier: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    return _fetch_topic_script_rows(
+        topic_research_dossier_id=topic_research_dossier_id,
+        target_length_tier=target_length_tier,
+    )
 
 
 def list_topic_scripts_for_registry(topic_registry_id: str, target_length_tier: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -375,15 +418,11 @@ def list_topic_suggestions(
 ) -> List[Dict[str, Any]]:
     registry_rows = get_all_topics_from_registry()
     registry_by_id = {str(row.get("id")): row for row in registry_rows}
-    supabase = get_supabase()
     try:
-        query = supabase.client.table("topic_scripts").select("*")
-        if target_length_tier is not None:
-            query = query.eq("target_length_tier", target_length_tier)
-        if post_type:
-            query = query.eq("post_type", post_type)
-        response = query.execute()
-        rows = [_normalize_script_row(row) for row in (response.data or [])]
+        rows = _fetch_topic_script_rows(
+            target_length_tier=target_length_tier,
+            post_type=post_type,
+        )
         if rows:
             rows.sort(
                 key=lambda row: (
@@ -438,7 +477,11 @@ def list_topic_research_runs(
     response = query.execute()
     rows = response.data or []
     if topic_registry_id:
-        rows = [row for row in rows if str((row.get("result_summary") or {}).get("topic_registry_id") or "") == topic_registry_id]
+        rows = [
+            row
+            for row in rows
+            if str(row.get("topic_registry_id") or (row.get("result_summary") or {}).get("topic_registry_id") or "") == topic_registry_id
+        ]
     return rows[:limit]
 
 
@@ -485,6 +528,7 @@ def update_topic_research_run(
     status: Optional[str] = None,
     result_summary: Optional[Dict[str, Any]] = None,
     error_message: Optional[str] = None,
+    dossier_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     supabase = get_supabase()
     update_payload: Dict[str, Any] = {}
@@ -494,6 +538,8 @@ def update_topic_research_run(
         update_payload["result_summary"] = result_summary
     if error_message is not None:
         update_payload["error_message"] = error_message
+    if dossier_id is not None:
+        update_payload["dossier_id"] = dossier_id
     if not update_payload:
         return get_topic_research_run(run_id)
     response = supabase.client.table("topic_research_runs").update(update_payload).eq("id", run_id).execute()
@@ -538,6 +584,7 @@ def store_topic_bank_entry(
     seed_payloads: Dict[str, Any],
     language: str = "de",
     topic_research_run_id: Optional[str] = None,
+    topic_research_dossier_id: Optional[str] = None,
     raw_prompt: Optional[str] = None,
     raw_response: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -562,6 +609,7 @@ def store_topic_bank_entry(
     )
     merged_row = dict(row)
     merged_row["research_dossier_id"] = dossier["id"]
+    merged_row["topic_research_dossier_id"] = topic_research_dossier_id or dossier["id"]
     return merged_row
 
 
@@ -571,6 +619,7 @@ def upsert_topic_script_variants(
     title: str,
     post_type: str,
     target_length_tier: int,
+    topic_research_dossier_id: Optional[str] = None,
     variants: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     supabase = get_supabase()
@@ -595,6 +644,7 @@ def upsert_topic_script_variants(
             continue
         payload = {
             "topic_registry_id": topic_registry_id,
+            "topic_research_dossier_id": topic_research_dossier_id,
             "post_type": post_type,
             "title": title,
             "script": script,

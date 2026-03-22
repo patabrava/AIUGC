@@ -111,6 +111,20 @@ class FakeTopicLLM:
 
     def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
         self.json_prompts.append((prompt, json_schema, system_prompt, kwargs))
+        if system_prompt and "PROMPT_1 stage-3" in system_prompt:
+            return [
+                {
+                    "topic": "Pflegegrad 2025 prüfen",
+                    "framework": "PAL",
+                    "sources": [{"title": "Bundesgesundheitsministerium Pflege", "url": "https://www.bundesgesundheitsministerium.de/themen/pflege.html"}],
+                    "script": "Kennst du deinen Pflegegrad? So prüfst du 2025 deine Leistungen deutlich schneller.",
+                    "caption": "Pflegegrad, Pflegeversicherung und Rollstuhlalltag sauber im Blick behalten.",
+                    "source_summary": "Das Bundesgesundheitsministerium erklärt, welche Leistungen die Pflegeversicherung umfasst.",
+                    "estimated_duration_s": 5,
+                    "tone": "direkt, freundlich, empowernd, du-Form",
+                    "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+                }
+            ]
         return {
             "facts": ["Pflegeleistungen müssen beantragt werden"],
             "source_context": "Pflegeversicherung 2025",
@@ -410,7 +424,7 @@ def test_topics_feature_uses_gemini_methods(monkeypatch):
 
     assert len(items) == 3
     assert fake_llm.deep_research_prompts, "PROMPT_1 should use Gemini Deep Research"
-    assert len(fake_llm.deep_research_prompts) == 1, "PROMPT_1 should use one deep research request per post type batch"
+    assert len(fake_llm.deep_research_prompts) == 3, "PROMPT_1 should request one deep research dossier per generated topic"
     assert fake_llm.text_prompts, "PROMPT_2 should use Gemini text generation"
     assert fake_llm.json_prompts, "Strict extractor or normalizer should use Gemini JSON generation"
     assert scripts.problem_agitate_solution
