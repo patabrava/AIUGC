@@ -46,7 +46,10 @@ from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.features.topics.hub import (
     _wants_html,
+    build_launch_hub_payload,
     build_topic_hub_payload,
+    fuzzy_match_topic,
+    get_random_topic,
     harvest_topics_to_bank_sync,
     launch_topic_research_run,
     parse_topic_filters,
@@ -1131,6 +1134,59 @@ async def discover_topics_endpoint(request: DiscoverTopicsRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to discover topics"
         )
+
+
+@router.get("/random")
+async def random_topic_endpoint(request: Request):
+    """Return the topic with the fewest scripts as an HTMX partial."""
+    from app.features.topics import hub as _hub
+    topic = _hub.get_random_topic()
+    templates = Jinja2Templates(directory="templates")
+    if topic is None:
+        return templates.TemplateResponse(
+            "topics/partials/confirmation_card.html",
+            {"request": request, "topic": None},
+        )
+    return templates.TemplateResponse(
+        "topics/partials/confirmation_card.html",
+        {"request": request, "topic": topic},
+    )
+
+
+@router.get("/match")
+async def match_topic_endpoint(request: Request):
+    """Fuzzy match a query string against existing topics."""
+    from app.features.topics import hub as _hub
+    query = str(request.query_params.get("q") or "").strip()
+    templates = Jinja2Templates(directory="templates")
+    if not query:
+        return templates.TemplateResponse(
+            "topics/partials/launch_panel.html",
+            {"request": request},
+        )
+    match = _hub.fuzzy_match_topic(query)
+    if match:
+        return templates.TemplateResponse(
+            "topics/partials/fuzzy_match.html",
+            {"request": request, "match": match, "query": query},
+        )
+    return templates.TemplateResponse(
+        "topics/partials/confirmation_card.html",
+        {"request": request, "topic": {"title": query, "post_type": None, "script_count": 0, "is_new": True}},
+    )
+
+
+@router.get("/select/{topic_id}")
+async def select_topic_endpoint(request: Request, topic_id: str):
+    """Return a confirmation card for the selected topic."""
+    from app.features.topics.queries import get_topic_registry_by_id, get_topic_scripts_for_registry
+    topic = get_topic_registry_by_id(topic_id)
+    scripts = get_topic_scripts_for_registry(topic_id)
+    templates = Jinja2Templates(directory="templates")
+    return templates.TemplateResponse(
+        "topics/partials/confirmation_card.html",
+        {"request": request, "topic": {**topic, "script_count": len(scripts)}},
+    )
 
 
 @router.get("")

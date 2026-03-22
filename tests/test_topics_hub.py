@@ -436,3 +436,73 @@ def test_build_launch_hub_payload_sorts_by_script_count(monkeypatch):
     assert result["topics"][0]["script_count"] == 0
     assert result["topics"][1]["id"] == "t1"
     assert result["topics"][1]["script_count"] == 3
+
+
+def test_random_topic_endpoint(monkeypatch):
+    from app.features.topics import hub as topic_hub
+
+    monkeypatch.setattr(
+        topic_hub,
+        "get_random_topic",
+        lambda: {"id": "t1", "title": "Random Topic", "post_type": "value", "script_count": 0, "rotation": "r", "cta": "c"},
+    )
+    client = _build_test_client()
+    response = client.get("/topics/random", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Random Topic" in response.text
+
+
+def test_random_topic_endpoint_empty(monkeypatch):
+    from app.features.topics import hub as topic_hub
+
+    monkeypatch.setattr(topic_hub, "get_random_topic", lambda: None)
+    client = _build_test_client()
+    response = client.get("/topics/random", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "No topics" in response.text
+
+
+def test_match_topic_endpoint_found(monkeypatch):
+    from app.features.topics import hub as topic_hub
+
+    monkeypatch.setattr(
+        topic_hub,
+        "fuzzy_match_topic",
+        lambda q, threshold=0.35: {"id": "t1", "title": "Hyaluronic Acid Benefits", "post_type": "value", "script_count": 0, "similarity_score": 0.8},
+    )
+    client = _build_test_client()
+    response = client.get("/topics/match?q=Hyaluronic", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Hyaluronic Acid Benefits" in response.text
+
+
+def test_match_topic_endpoint_no_match(monkeypatch):
+    from app.features.topics import hub as topic_hub
+
+    monkeypatch.setattr(
+        topic_hub, "fuzzy_match_topic", lambda q, threshold=0.35: None
+    )
+    client = _build_test_client()
+    response = client.get("/topics/match?q=Something+New", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Something New" in response.text
+
+
+def test_select_topic_endpoint(monkeypatch):
+    from app.features.topics import hub as topic_hub
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(
+        topic_queries,
+        "get_topic_registry_by_id",
+        lambda tid: {"id": "t1", "title": "Selected Topic", "post_type": "value", "rotation": "r", "cta": "c"},
+    )
+    monkeypatch.setattr(
+        topic_queries,
+        "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [],
+    )
+    client = _build_test_client()
+    response = client.get("/topics/select/t1", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Selected Topic" in response.text
