@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from app.core.logging import get_logger
@@ -91,29 +92,26 @@ def _topic_search_match(topic: Dict[str, Any], search: str) -> bool:
 def _topic_has_tier(topic: Dict[str, Any], target_length_tier: Optional[int]) -> bool:
     if target_length_tier is None:
         return True
+    if get_topic_scripts_for_registry(topic["id"], target_length_tier):
+        return True
     tiers = {int(tier) for tier in topic.get("target_length_tiers") or [] if str(tier).strip().isdigit()}
-    if tiers:
-        return target_length_tier in tiers
-    bank = topic.get("script_bank") or {}
-    if isinstance(bank, dict):
-        return str(target_length_tier) in bank
-    return False
+    return target_length_tier in tiers if tiers else False
 
 
 def _topic_to_detail(topic: Dict[str, Any]) -> Dict[str, Any]:
-    script_bank = topic.get("script_bank") or {}
+    scripts = get_topic_scripts_for_registry(topic["id"])
     bank_summary = []
-    if isinstance(script_bank, dict):
-        for tier_key, variants in script_bank.items():
-            bank_summary.append(
-                {
-                    "tier": int(tier_key) if str(tier_key).isdigit() else tier_key,
-                    "variant_count": len(variants or []),
-                }
-            )
-    scripts = []
-    for script_row in get_topic_scripts_for_registry(topic["id"]):
-        scripts.append(script_row)
+    counts: Dict[str, int] = {}
+    for script_row in scripts:
+        tier_key = str(script_row.get("target_length_tier") or "")
+        counts[tier_key] = counts.get(tier_key, 0) + 1
+    for tier_key, variant_count in sorted(counts.items()):
+        bank_summary.append(
+            {
+                "tier": int(tier_key) if tier_key.isdigit() else tier_key,
+                "variant_count": variant_count,
+            }
+        )
     return {
         **topic,
         "bank_summary": bank_summary,
@@ -201,39 +199,6 @@ def build_topic_hub_payload(request) -> Dict[str, Any]:
             selected_topic["id"],
             filters["target_length_tier"],
         )
-        if not selected_scripts:
-            bank = selected_topic.get("script_bank") or {}
-            if isinstance(bank, dict):
-                for tier_key, variants in bank.items():
-                    if filters["target_length_tier"] is not None and str(filters["target_length_tier"]) != str(tier_key):
-                        continue
-                    for index, variant in enumerate(list(variants or []), start=1):
-                        selected_scripts.append(
-                            {
-                                "id": f"{selected_topic['id']}-{tier_key}-{index}",
-                                "topic_registry_id": selected_topic["id"],
-                                "post_type": selected_topic.get("post_type"),
-                                "title": selected_topic.get("title"),
-                                "script": variant.get("script"),
-                                "target_length_tier": int(tier_key) if str(tier_key).isdigit() else tier_key,
-                                "bucket": variant.get("bucket"),
-                                "hook_style": variant.get("hook_style"),
-                                "framework": variant.get("framework"),
-                                "tone": variant.get("tone"),
-                                "estimated_duration_s": variant.get("estimated_duration_s"),
-                                "lane_key": variant.get("lane_key"),
-                                "lane_family": variant.get("lane_family"),
-                                "cluster_id": variant.get("cluster_id"),
-                                "anchor_topic": variant.get("anchor_topic"),
-                                "disclaimer": variant.get("disclaimer"),
-                                "source_summary": variant.get("source_summary"),
-                                "primary_source_url": variant.get("primary_source_url"),
-                                "primary_source_title": variant.get("primary_source_title"),
-                                "source_urls": variant.get("source_urls") or [],
-                                "use_count": int(variant.get("use_count") or 0),
-                                "last_used_at": variant.get("last_used_at"),
-                            }
-                        )
 
     selected_scripts = _sort_topic_scripts(selected_scripts)
     selected_script_groups = _group_scripts_by_usage(selected_scripts)
@@ -275,57 +240,51 @@ def _build_script_variants(
         for source in list(research_dossier.get("sources") or [])
         if isinstance(source, dict) and source.get("url")
     ]
-    primary_prompt1_source = prompt1_item.sources[0].model_dump(mode="json") if prompt1_item.sources else None
     categories = [
         ("problem_agitate_solution", dialog_scripts.problem_agitate_solution),
         ("testimonial", dialog_scripts.testimonial),
         ("transformation", dialog_scripts.transformation),
     ]
-    variants: List[Dict[str, Any]] = [
-        {
-            "bucket": "prompt1_canonical",
-            "hook_style": "prompt1-canonical",
-            "framework": prompt1_item.framework,
-            "tone": prompt1_item.tone,
-            "estimated_duration_s": prompt1_item.estimated_duration_s,
-            "lane_key": str((research_dossier.get("lane_candidate") or {}).get("lane_key") or ""),
-            "lane_family": str((research_dossier.get("lane_candidate") or {}).get("lane_family") or ""),
-            "cluster_id": research_dossier.get("cluster_id"),
-            "anchor_topic": research_dossier.get("anchor_topic"),
-            "disclaimer": prompt1_item.disclaimer,
-            "source_summary": prompt1_item.source_summary,
-            "primary_source_url": primary_prompt1_source.get("url") if primary_prompt1_source else (source_urls[0]["url"] if source_urls else None),
-            "primary_source_title": primary_prompt1_source.get("title") if primary_prompt1_source else (source_urls[0]["title"] if source_urls else None),
-            "source_urls": source_urls,
-            "script": prompt1_item.script,
-            "quality_notes": "canonical_prompt1_lane_script",
-            "seed_payload": seed_payload,
-        }
-    ]
+    variants: List[Dict[str, Any]] = []
     for bucket_name, scripts in categories:
-        for index, script in enumerate(list(scripts or []), start=1):
-            variants.append(
-                {
-                    "bucket": bucket_name,
-                    "hook_style": f"{bucket_name.replace('_', '-')}-{index}",
-                    "framework": research_dossier.get("framework_candidates", ["PAL"])[0] if research_dossier.get("framework_candidates") else "PAL",
-                    "tone": "direkt, freundlich, empowernd, du-Form",
-                    "estimated_duration_s": max(1, round(len(script.split()) / 2.6)),
-                    "lane_key": str((research_dossier.get("lane_candidate") or {}).get("lane_key") or ""),
-                    "lane_family": str((research_dossier.get("lane_candidate") or {}).get("lane_family") or ""),
-                    "cluster_id": research_dossier.get("cluster_id"),
-                    "anchor_topic": research_dossier.get("anchor_topic"),
-                    "disclaimer": research_dossier.get("disclaimer"),
-                    "source_summary": research_dossier.get("source_summary"),
-                    "primary_source_url": source_urls[0]["url"] if source_urls else None,
-                    "primary_source_title": source_urls[0]["title"] if source_urls else None,
-                    "source_urls": source_urls,
-                    "script": script,
-                    "quality_notes": "",
-                    "seed_payload": seed_payload,
-                }
-            )
+        script = next((str(script).strip() for script in list(scripts or []) if str(script).strip()), "")
+        if not script:
+            continue
+        variants.append(
+            {
+                "bucket": bucket_name,
+                "hook_style": bucket_name.replace("_", "-"),
+                "framework": research_dossier.get("framework_candidates", ["PAL"])[0] if research_dossier.get("framework_candidates") else "PAL",
+                "tone": "direkt, freundlich, empowernd, du-Form",
+                "estimated_duration_s": max(1, round(len(script.split()) / 2.6)),
+                "lane_key": str((research_dossier.get("lane_candidate") or {}).get("lane_key") or ""),
+                "lane_family": str((research_dossier.get("lane_candidate") or {}).get("lane_family") or ""),
+                "cluster_id": research_dossier.get("cluster_id"),
+                "anchor_topic": research_dossier.get("anchor_topic"),
+                "disclaimer": research_dossier.get("disclaimer"),
+                "source_summary": research_dossier.get("source_summary"),
+                "primary_source_url": source_urls[0]["url"] if source_urls else None,
+                "primary_source_title": source_urls[0]["title"] if source_urls else None,
+                "source_urls": source_urls,
+                "caption": seed_payload.get("caption"),
+                "script": script,
+                "quality_notes": "",
+                "seed_payload": seed_payload,
+            }
+        )
     return variants
+
+
+def _build_value_dialog_scripts_from_prompt1(prompt1_item) -> Any:
+    script = str(prompt1_item.script or "").strip()
+    caption = str(prompt1_item.caption or "").strip()
+    fallback_description = caption or script
+    return SimpleNamespace(**{
+        "problem_agitate_solution": [script],
+        "testimonial": [script],
+        "transformation": [script],
+        "description": fallback_description,
+    })
 
 
 def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[str, Any]) -> Dict[str, Any]:
@@ -380,18 +339,6 @@ def _persist_topic_bank_row(
         seed_payload=seed_payload,
     )
     source_bank = _source_bank_from_dossier(research_dossier)
-    tier_key = str(target_length_tier)
-    seed_payload_with_bank = {
-        **seed_payload,
-        "title": title,
-        "post_type": post_type,
-        "target_length_tier": target_length_tier,
-        "research_payload": research_dossier,
-        "source_bank": source_bank,
-        "script_bank": {tier_key: script_variants},
-    }
-    bank = {str(target_length_tier): script_variants}
-    seed_payloads = {tier_key: seed_payload_with_bank}
     stored_row = store_topic_bank_entry(
         title=title,
         topic_script=prompt1_item.script,
@@ -399,8 +346,8 @@ def _persist_topic_bank_row(
         target_length_tier=target_length_tier,
         research_payload=research_dossier,
         source_bank=source_bank,
-        script_bank=bank,
-        seed_payloads=seed_payloads,
+        script_bank={},
+        seed_payloads={},
     )
     upsert_topic_script_variants(
         topic_registry_id=stored_row["id"],
@@ -450,14 +397,25 @@ def _harvest_seed_topic_to_bank(
             logger.info("topic_bank_lane_deduped", seed_topic=seed_topic, lane_title=lane_title)
             continue
 
-        dialog_scripts = generate_dialog_scripts(
-            topic=lane_title,
-            scripts_required=2,
-            dossier=lane_dossier,
-            profile=get_duration_profile(target_length_tier),
-        )
+        if post_type == "value":
+            dialog_scripts = _build_value_dialog_scripts_from_prompt1(prompt1_item)
+        else:
+            dialog_scripts = generate_dialog_scripts(
+                topic=lane_title,
+                scripts_required=1,
+                dossier=lane_dossier,
+                profile=get_duration_profile(target_length_tier),
+            )
         strict_seed = extract_seed_strict_extractor(topic_data)
-        seed_payload = build_seed_payload(prompt1_item, strict_seed, dialog_scripts)
+        source_info = (lane_dossier.get("sources") or [{}])[0] if lane_dossier.get("sources") else {}
+        seed_payload = build_seed_payload(
+            prompt1_item,
+            strict_seed,
+            dialog_scripts,
+            source_title=str(source_info.get("title") or lane_title or prompt1_item.topic).strip() or None,
+            source_url=str(source_info.get("url") or "").strip() or None,
+            source_summary=str(lane_dossier.get("source_summary") or prompt1_item.caption or prompt1_item.source_summary or "").strip() or None,
+        )
         stored_row = _persist_topic_bank_row(
             title=lane_title,
             target_length_tier=target_length_tier,
@@ -630,7 +588,7 @@ def harvest_topics_to_bank_sync(
         trigger_source=trigger_source,
         requested_counts=post_type_counts,
         target_length_tier=target_length_tier,
-        topic_registry_id="batch-harvest",
+        topic_registry_id=None,
     )
     stored_by_type: Dict[str, int] = defaultdict(int)
     stored_topics: List[Dict[str, Any]] = []

@@ -70,6 +70,14 @@ def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _normalize_dossier_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(row or {})
+    normalized["normalized_payload"] = normalized.get("normalized_payload") or {}
+    normalized["created_at"] = normalized.get("created_at")
+    normalized["updated_at"] = normalized.get("updated_at")
+    return normalized
+
+
 def _merge_unique_source_bank(*banks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     merged: List[Dict[str, Any]] = []
     seen = set()
@@ -154,7 +162,7 @@ def add_topic_to_registry(
     language: str = "de",
     last_harvested_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Add or update a topic registry entry with a script-first payload."""
+    """Add or update a slim topic registry entry."""
     topic_script = str(script or rotation or cta or "").strip()
     if not topic_script:
         raise ValueError("A topic script or rotation is required")
@@ -164,12 +172,6 @@ def add_topic_to_registry(
         "script": topic_script,
         "use_count": 1,
         "post_type": post_type,
-        "research_payload": research_payload or {},
-        "source_bank": source_bank or [],
-        "script_bank": script_bank or {},
-        "seed_payloads": seed_payloads or {},
-        "target_length_tiers": target_length_tiers or [],
-        "language": language,
         "last_harvested_at": (last_harvested_at or datetime.now(timezone.utc)).isoformat(),
     }
 
@@ -183,41 +185,25 @@ def add_topic_to_registry(
     except Exception as exc:
         error_str = str(exc).lower()
         logger.warning("topic_registry_insert_failed", title=title[:50], error=str(exc))
-        legacy_payload = {
-            "title": title,
-            "rotation": rotation or topic_script,
-            "cta": cta or _extract_cta(topic_script),
-            "use_count": 1,
-        }
-        try:
-            inserted = _insert_registry_row(legacy_payload)
-            logger.info("topic_added_to_registry_legacy", topic_id=inserted["id"], title=title[:50])
-            return inserted
-        except Exception:
-            if "unique" in error_str or "duplicate" in error_str or "constraint" in error_str:
-                supabase = get_supabase()
-                legacy_query = supabase.client.table("topic_registry").select("*").eq("title", title).limit(1)
-                if rotation is not None:
-                    legacy_query = legacy_query.eq("rotation", rotation)
-                if cta is not None:
-                    legacy_query = legacy_query.eq("cta", cta)
-                existing = legacy_query.execute()
-                if existing.data:
-                    existing_row = _normalize_registry_row(existing.data[0])
-                    current_count = int(existing_row.get("use_count") or 0)
-                    updated = supabase.client.table("topic_registry").update(
-                        {
-                            "use_count": current_count + 1,
-                            "last_used_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    ).eq("id", existing_row["id"]).execute()
-                    if updated.data:
-                        logger.info(
-                            "topic_use_count_incremented",
-                            topic_id=existing_row["id"],
-                            new_count=current_count + 1,
-                        )
-                        return _normalize_registry_row(updated.data[0])
+        if "unique" in error_str or "duplicate" in error_str or "constraint" in error_str:
+            supabase = get_supabase()
+            existing = supabase.client.table("topic_registry").select("*").eq("title", title).limit(1).execute()
+            if existing.data:
+                existing_row = _normalize_registry_row(existing.data[0])
+                current_count = int(existing_row.get("use_count") or 0)
+                updated = supabase.client.table("topic_registry").update(
+                    {
+                        "use_count": current_count + 1,
+                        "last_used_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ).eq("id", existing_row["id"]).execute()
+                if updated.data:
+                    logger.info(
+                        "topic_use_count_incremented",
+                        topic_id=existing_row["id"],
+                        new_count=current_count + 1,
+                    )
+                    return _normalize_registry_row(updated.data[0])
             logger.error(
                 "topic_registry_unexpected_error",
                 title=title[:50],
@@ -328,6 +314,44 @@ def create_post_for_batch(
     return response.data[0]
 
 
+def create_topic_research_dossier(
+    *,
+    topic_research_run_id: Optional[str],
+    topic_registry_id: Optional[str],
+    seed_topic: str,
+    post_type: str,
+    target_length_tier: int,
+    cluster_id: str,
+    topic: str,
+    anchor_topic: str,
+    normalized_payload: Dict[str, Any],
+    raw_prompt: Optional[str] = None,
+    raw_response: Optional[str] = None,
+    prompt_name: str = "prompt1_research",
+    prompt_version: str = "1",
+) -> Dict[str, Any]:
+    supabase = get_supabase()
+    payload = {
+        "topic_research_run_id": topic_research_run_id,
+        "topic_registry_id": topic_registry_id,
+        "seed_topic": seed_topic,
+        "post_type": post_type,
+        "target_length_tier": target_length_tier,
+        "cluster_id": cluster_id,
+        "topic": topic,
+        "anchor_topic": anchor_topic,
+        "normalized_payload": normalized_payload,
+        "raw_prompt": raw_prompt or "",
+        "raw_response": raw_response or "",
+        "prompt_name": prompt_name,
+        "prompt_version": prompt_version,
+    }
+    response = supabase.client.table("topic_research_dossiers").insert(payload).execute()
+    if not response.data:
+        raise RuntimeError("Failed to create topic research dossier")
+    return _normalize_dossier_row(response.data[0])
+
+
 def get_topic_scripts_for_registry(
     topic_registry_id: str,
     target_length_tier: Optional[int] = None,
@@ -338,6 +362,10 @@ def get_topic_scripts_for_registry(
         query = query.eq("target_length_tier", target_length_tier)
     response = query.execute()
     return [_normalize_script_row(row) for row in (response.data or [])]
+
+
+def list_topic_scripts_for_registry(topic_registry_id: str, target_length_tier: Optional[int] = None) -> List[Dict[str, Any]]:
+    return get_topic_scripts_for_registry(topic_registry_id, target_length_tier=target_length_tier)
 
 
 def list_topic_suggestions(
@@ -419,7 +447,14 @@ def create_topic_research_run(
     trigger_source: str,
     requested_counts: Dict[str, Any],
     target_length_tier: Optional[int],
-    topic_registry_id: str,
+    topic_registry_id: Optional[str],
+    seed_topic: Optional[str] = None,
+    post_type: Optional[str] = None,
+    raw_prompt: Optional[str] = None,
+    raw_response: Optional[str] = None,
+    provider_interaction_id: Optional[str] = None,
+    normalized_payload: Optional[Dict[str, Any]] = None,
+    dossier_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     supabase = get_supabase()
     payload = {
@@ -427,9 +462,15 @@ def create_topic_research_run(
         "status": "running",
         "requested_counts": requested_counts,
         "target_length_tier": target_length_tier,
-        "result_summary": {
-            "topic_registry_id": topic_registry_id,
-        },
+        "topic_registry_id": topic_registry_id,
+        "seed_topic": seed_topic,
+        "post_type": post_type,
+        "raw_prompt": raw_prompt or "",
+        "raw_response": raw_response or "",
+        "provider_interaction_id": provider_interaction_id,
+        "normalized_payload": normalized_payload or {},
+        "dossier_id": dossier_id,
+        "result_summary": {"topic_registry_id": topic_registry_id} if topic_registry_id else {},
         "error_message": "",
     }
     response = supabase.client.table("topic_research_runs").insert(payload).execute()
@@ -469,6 +510,22 @@ def get_topic_research_run(run_id: str) -> Dict[str, Any]:
     return response.data[0]
 
 
+def get_topic_research_dossiers(
+    *,
+    topic_registry_id: Optional[str] = None,
+    topic_research_run_id: Optional[str] = None,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    supabase = get_supabase()
+    query = supabase.client.table("topic_research_dossiers").select("*").order("created_at", desc=True).limit(limit)
+    if topic_registry_id:
+        query = query.eq("topic_registry_id", topic_registry_id)
+    if topic_research_run_id:
+        query = query.eq("topic_research_run_id", topic_research_run_id)
+    response = query.execute()
+    return [_normalize_dossier_row(row) for row in (response.data or [])]
+
+
 def store_topic_bank_entry(
     *,
     title: str,
@@ -480,45 +537,32 @@ def store_topic_bank_entry(
     script_bank: Dict[str, Any],
     seed_payloads: Dict[str, Any],
     language: str = "de",
+    topic_research_run_id: Optional[str] = None,
+    raw_prompt: Optional[str] = None,
+    raw_response: Optional[str] = None,
 ) -> Dict[str, Any]:
     row = add_topic_to_registry(
         title=title,
         script=topic_script,
         post_type=post_type,
-        research_payload=research_payload,
-        source_bank=source_bank,
-        script_bank=script_bank,
-        seed_payloads=seed_payloads,
-        target_length_tiers=[target_length_tier],
         language=language,
     )
-    merged_payload = {
-        "script": topic_script,
-        "post_type": post_type,
-        "research_payload": research_payload or row.get("research_payload") or {},
-        "source_bank": _merge_unique_source_bank(row.get("source_bank") or [], source_bank),
-        "script_bank": _merge_script_bank(row.get("script_bank") or {}, script_bank),
-        "seed_payloads": _merge_seed_payloads(row.get("seed_payloads") or {}, seed_payloads),
-        "target_length_tiers": sorted(
-            {
-                int(tier)
-                for tier in list(row.get("target_length_tiers") or []) + [target_length_tier]
-                if str(tier).strip().isdigit()
-            }
-        ),
-        "language": language,
-        "last_harvested_at": datetime.now(timezone.utc).isoformat(),
-    }
-    supabase = get_supabase()
-    response = (
-        supabase.client.table("topic_registry")
-        .update(merged_payload)
-        .eq("id", row["id"])
-        .execute()
+    dossier = create_topic_research_dossier(
+        topic_research_run_id=topic_research_run_id,
+        topic_registry_id=row["id"],
+        seed_topic=str(research_payload.get("seed_topic") or title),
+        post_type=post_type,
+        target_length_tier=target_length_tier,
+        cluster_id=str(research_payload.get("cluster_id") or ""),
+        topic=str(research_payload.get("topic") or title),
+        anchor_topic=str(research_payload.get("anchor_topic") or title),
+        normalized_payload=research_payload or {},
+        raw_prompt=raw_prompt,
+        raw_response=raw_response,
     )
-    if response.data:
-        return _normalize_registry_row(response.data[0])
-    return get_topic_registry_by_id(row["id"])
+    merged_row = dict(row)
+    merged_row["research_dossier_id"] = dossier["id"]
+    return merged_row
 
 
 def upsert_topic_script_variants(

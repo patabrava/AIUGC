@@ -14,7 +14,7 @@ class TopicData(BaseModel):
     title: str = Field(..., min_length=1, max_length=200, description="Topic title")
     rotation: str = Field(..., min_length=1, max_length=500, description="Rotation/hook text")
     cta: str = Field(..., min_length=1, max_length=200, description="Call to action")
-    spoken_duration: Decimal = Field(..., ge=0, le=6, description="Spoken duration in seconds (≤6s)")
+    spoken_duration: Decimal = Field(..., ge=0, le=32, description="Spoken duration in seconds")
     
     @validator('title', 'rotation', 'cta')
     def validate_not_empty(cls, v):
@@ -24,8 +24,8 @@ class TopicData(BaseModel):
     
     @validator('spoken_duration')
     def validate_duration(cls, v):
-        if v > 6:
-            raise ValueError("Spoken duration must be ≤6 seconds")
+        if v > 32:
+            raise ValueError("Spoken duration must be ≤32 seconds")
         return v
 
 
@@ -95,13 +95,15 @@ class ResearchDossier(BaseModel):
 class ResearchAgentItem(BaseModel):
     """Validated result item from PROMPT_1."""
     topic: str = Field(..., min_length=2, max_length=400, description="Chosen topic from pool")
-    framework: Literal["PAL", "Testimonial", "Transformation"]
-    sources: List[ResearchAgentSource] = Field(..., min_length=1, max_length=2, description="Supporting sources")
-    script: str = Field(..., min_length=10, max_length=400, description="Spoken script (≤6s)")
-    source_summary: str = Field(..., min_length=35, max_length=500, description="Summary for IG caption")
-    estimated_duration_s: int = Field(..., ge=1, le=6, description="Ceiling of word_count/2.6")
-    tone: str = Field(..., min_length=5, max_length=120, description="Tone descriptor")
-    disclaimer: str = Field(..., min_length=5, max_length=200, description="Compliance disclaimer")
+    # 32s tier scripts can exceed 400 chars in German; keep validation aligned with tier envelopes.
+    script: str = Field(..., min_length=10, max_length=900, description="Spoken script")
+    caption: str = Field(default="", min_length=0, max_length=500, description="Social caption")
+    framework: Literal["PAL", "Testimonial", "Transformation"] = "PAL"
+    sources: List[ResearchAgentSource] = Field(default_factory=list, min_length=0, max_length=2, description="Supporting sources")
+    source_summary: str = Field(default="", min_length=0, max_length=500, description="Summary for IG caption")
+    estimated_duration_s: int = Field(default=0, ge=0, le=32, description="Conservative natural-speech duration estimate")
+    tone: str = Field(default="direkt, freundlich, empowernd, du-Form", min_length=5, max_length=120, description="Tone descriptor")
+    disclaimer: str = Field(default="Keine Rechts- oder medizinische Beratung.", min_length=5, max_length=200, description="Compliance disclaimer")
 
     @validator("script")
     def validate_script_line(cls, v: str) -> str:
@@ -173,10 +175,38 @@ class TopicResearchRunResponse(BaseModel):
     id: str
     trigger_source: str
     status: str
+    topic_registry_id: Optional[str] = None
+    seed_topic: Optional[str] = None
+    post_type: Optional[str] = None
+    raw_prompt: Optional[str] = None
+    raw_response: Optional[str] = None
+    provider_interaction_id: Optional[str] = None
+    normalized_payload: Optional[Dict[str, Any]] = None
+    dossier_id: Optional[str] = None
     requested_counts: Dict[str, Any]
     target_length_tier: Optional[int] = None
     result_summary: Dict[str, Any]
     error_message: str
+    created_at: str
+    updated_at: str
+
+
+class TopicResearchDossierResponse(BaseModel):
+    """Persisted normalized dossier row."""
+    id: str
+    topic_research_run_id: Optional[str] = None
+    topic_registry_id: Optional[str] = None
+    seed_topic: str
+    post_type: str
+    target_length_tier: int
+    cluster_id: str
+    topic: str
+    anchor_topic: str
+    normalized_payload: Dict[str, Any]
+    raw_prompt: Optional[str] = None
+    raw_response: Optional[str] = None
+    prompt_name: str
+    prompt_version: str
     created_at: str
     updated_at: str
 
@@ -262,8 +292,8 @@ PROMPT1_JSON_SCHEMA = {
                         },
                         "estimated_duration_s": {
                             "type": "integer",
-                            "minimum": 5,
-                            "maximum": 6
+                            "minimum": 1,
+                            "maximum": 32
                         },
                         "tone": {"type": "string"},
                         "disclaimer": {"type": "string"}

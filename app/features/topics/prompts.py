@@ -42,6 +42,29 @@ def _clip_text(value: Any, max_length: int) -> str:
     return clipped
 
 
+def _coerce_prompt_payload(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, ResearchDossier):
+        return value.model_dump(mode="json")
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump(mode="json")
+        if isinstance(dumped, dict):
+            return dumped
+    if hasattr(value, "__dict__"):
+        return {
+            key: payload
+            for key, payload in vars(value).items()
+            if not key.startswith("_")
+        }
+    try:
+        return dict(value)
+    except (TypeError, ValueError):
+        return {}
+
+
 @lru_cache(maxsize=None)
 def _load_text_prompt(name: str, target_length_tier: int) -> str:
     prompt_path = PROMPT_DATA_DIR / f"{name}_{target_length_tier}s.txt"
@@ -229,7 +252,7 @@ def _format_research_prompt_context(
         "- Liefere keine Hook-Liste für die finale Ausgabe.",
         "- Konzentriere dich auf Quellen, Fakten, Winkel, Risiken und hilfreiche Einordnung.",
         "- Die Ausgabe soll als dauerhafte Dossier-Datenbank gespeichert werden.",
-        "- Antworte als gültiges JSON-Objekt mit genau einem Dossier.",
+        "- Antworte als lesbarer Rohtext auf Deutsch, ohne JSON-Schema.",
     )
 
 
@@ -296,7 +319,7 @@ def _format_prompt1_research_context(
     if dossier is None and lane_candidate is None:
         return ""
 
-    payload = dossier.model_dump(mode="json") if isinstance(dossier, ResearchDossier) else dict(dossier or {})
+    payload = _coerce_prompt_payload(dossier)
     lane = dict(lane_candidate or {})
     lane_facts = [f"- {fact}" for fact in list(lane.get("facts") or [])[:4]]
     lane_risks = [f"- {risk}" for risk in list(lane.get("risk_notes") or [])[:3]]
@@ -347,20 +370,41 @@ def build_prompt1(
     dossier: ResearchDossier | Dict[str, Any] | None = None,
     lane_candidate: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Render the legacy tiered PROMPT_1 research prompt."""
+    """Render the single-lane PROMPT_1 stage-3 script prompt."""
     profile = profile or get_duration_profile(8)
     prompt_path = PROMPT_DATA_DIR / f"prompt1_{profile.target_length_tier}s.txt"
     with prompt_path.open("r", encoding="utf-8") as fp:
         template = fp.read().strip()
-    assigned_rotation_section = _format_rotation_section(assigned_topics)
     research_context_section = _format_prompt1_research_context(dossier, lane_candidate)
+    return template.format(
+        desired_topics=desired_topics,
+        research_context_section=research_context_section,
+        hook_bank_section="",
+    )
+
+
+def build_prompt1_batch(
+    post_type: str,
+    desired_topics: int,
+    profile: Optional[DurationProfile] = None,
+    assigned_topics: Optional[List[str]] = None,
+) -> str:
+    """Render the legacy multi-topic batch-discovery prompt."""
+    profile = profile or get_duration_profile(8)
+    template = _load_prompt_text("prompt1_batch")
+    assigned_rotation_section = _format_rotation_section(assigned_topics)
     hook_bank_section = _format_hook_bank_section()
     return template.format(
         desired_topics=desired_topics,
+        post_type=post_type,
         assigned_rotation_section=assigned_rotation_section,
-        research_context_section=research_context_section,
         hook_bank_section=hook_bank_section,
-    )
+        prompt1_min_words=profile.prompt1_min_words,
+        prompt1_max_words=profile.prompt1_max_words,
+        prompt1_min_seconds=profile.prompt1_min_seconds,
+        prompt1_max_seconds=profile.prompt1_max_seconds,
+        prompt1_sentence_guidance=profile.prompt1_sentence_guidance,
+    ).strip()
 
 
 def build_topic_research_prompt(
@@ -401,10 +445,7 @@ def _format_research_context(dossier: ResearchDossier | Dict[str, Any] | None) -
     if dossier is None:
         return ""
 
-    if isinstance(dossier, ResearchDossier):
-        payload = dossier.model_dump(mode="json")
-    else:
-        payload = dict(dossier)
+    payload = _coerce_prompt_payload(dossier)
 
     sources = payload.get("sources") or []
     source_lines = []

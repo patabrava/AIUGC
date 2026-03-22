@@ -515,8 +515,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 topic_cta = suggestion.get("cta") or topic_rotation
                 seed_payload = (
                     suggestion.get("seed_payload")
-                    or (suggestion.get("seed_payloads") or {}).get(str(batch.get("target_length_tier") or 8))
-                    or suggestion.get("research_payload")
                     or {"facts": [topic_rotation]}
                 )
                 add_topic_to_registry(
@@ -543,7 +541,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 all_generated_topics.append(dedup_topic_record)
             continue
 
-        # PIPELINE DISPATCH: lifestyle uses PROMPT_2 only, value/product use PROMPT_1+PROMPT_2
+        # PIPELINE DISPATCH: lifestyle uses PROMPT_2 direct; value/product use Deep Research via PROMPT_1.
         if post_type == "lifestyle":
             # Lifestyle pipeline: PROMPT_2 direct (no web research), but still dedupe
             required_topics = count
@@ -702,7 +700,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 }
                 all_generated_topics.append(dedup_topic_record)
         else:
-            # Value/Product pipeline: PROMPT_1 research + PROMPT_2 scripts with retries for unique topics
+            # Value/Product pipeline: Deep Research candidates via PROMPT_1 with retries for unique topics.
             required_topics = count
             collected_candidates: List[Dict[str, Any]] = []
             attempts = 0
