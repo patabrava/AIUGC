@@ -107,9 +107,11 @@ class ResearchAgentItem(BaseModel):
 
     @validator("script")
     def validate_script_line(cls, v: str) -> str:
-        if "\n" in v.strip():
+        import re
+        v = re.sub(r'[\U00010000-\U0010ffff]', '', v).strip()
+        if "\n" in v:
             raise ValueError("Script must be a single spoken line")
-        return v.strip()
+        return v
 
     def word_count(self) -> int:
         return len(self.script.split())
@@ -129,13 +131,16 @@ class DialogScripts(BaseModel):
 
     @validator("problem_agitate_solution", "testimonial", "transformation", each_item=True)
     def validate_complete_script(cls, v: str) -> str:
+        import re
         script = v.strip()
+        # Strip emojis — scripts are sent to video-generation LLMs.
+        script = re.sub(r'[\U00010000-\U0010ffff]', '', script).strip()
         if not script:
             raise ValueError("Script cannot be empty")
         if "\n" in script:
             raise ValueError("Script must be a single spoken line")
         if script[-1] not in ".!?":
-            raise ValueError("Script must end with terminal punctuation")
+            script = script.rstrip(",;:") + "."
         return script
 
     @validator("description")
