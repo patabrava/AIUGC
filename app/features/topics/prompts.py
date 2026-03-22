@@ -383,6 +383,49 @@ def build_prompt1(
     )
 
 
+def build_prompt1_variant(
+    post_type: str,
+    desired_topics: int = 1,
+    profile: Optional[DurationProfile] = None,
+    dossier: ResearchDossier | Dict[str, Any] | None = None,
+    lane_candidate: Optional[Dict[str, Any]] = None,
+    *,
+    forced_framework: str,
+    forced_hook_style: str,
+) -> str:
+    """Render a variant PROMPT_1 stage-3 prompt with hook bank and forced constraints.
+
+    Unlike build_prompt1(), this injects the hook bank and forces a specific
+    framework + hook_style. Used only by the variant expansion system.
+    """
+    profile = profile or get_duration_profile(8)
+    prompt_path = PROMPT_DATA_DIR / f"prompt1_{profile.target_length_tier}s.txt"
+    with prompt_path.open("r", encoding="utf-8") as fp:
+        template = fp.read().strip()
+    research_context_section = _format_prompt1_research_context(dossier, lane_candidate)
+    hook_bank_section = _format_hook_bank_section()
+
+    # Append framework/hook constraints to the hook bank section
+    constraint_block = (
+        f"\n\nPFLICHT-VORGABEN FÜR DIESES SKRIPT:\n"
+        f"- Framework: {forced_framework}\n"
+        f"- Hook-Stil: {forced_hook_style}\n"
+        f"Halte dich strikt an dieses Framework und diesen Hook-Stil."
+    )
+    hook_bank_section = (hook_bank_section + constraint_block).strip()
+
+    rendered = template.format(
+        desired_topics=desired_topics,
+        research_context_section=research_context_section,
+        hook_bank_section=hook_bank_section,
+    )
+    # If the template does not contain a {hook_bank_section} placeholder,
+    # append the hook bank and constraints at the end of the prompt.
+    if hook_bank_section and "{hook_bank_section}" not in template:
+        rendered = rendered.rstrip() + "\n\n" + hook_bank_section
+    return rendered
+
+
 def build_prompt1_batch(
     post_type: str,
     desired_topics: int,
