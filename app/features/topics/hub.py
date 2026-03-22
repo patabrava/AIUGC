@@ -443,11 +443,13 @@ def _harvest_seed_topic_to_bank(
     target_length_tier: int,
     existing_topics: List[Dict[str, Any]],
     collected_topics: List[Dict[str, Any]],
+    progress_callback: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     research_dossier = generate_topic_research_dossier(
         seed_topic=seed_topic,
         post_type=post_type,
         target_length_tier=target_length_tier,
+        progress_callback=progress_callback,
     ).model_dump(mode="json")
     stored_rows: List[Dict[str, Any]] = []
     for lane_candidate in list(research_dossier.get("lane_candidates") or []):
@@ -521,6 +523,7 @@ def _run_topic_research_pipeline_sync(
     target_length_tier: Optional[int],
     trigger_source: str,
     post_type: str,
+    progress_callback: Optional[Any] = None,
 ) -> Dict[str, Any]:
     topic = get_topic_registry_by_id(topic_registry_id)
     update_topic_research_run(
@@ -537,14 +540,19 @@ def _run_topic_research_pipeline_sync(
     tiers = [target_length_tier] if target_length_tier else [8, 16, 32]
     all_stored_topics: List[Dict[str, Any]] = []
 
-    for tier in tiers:
+    for i, tier in enumerate(tiers):
+        if progress_callback:
+            progress_callback(stage="researching", stage_label=f"Tier {tier}s ({i+1}/{len(tiers)})", detail_message=f"Starting deep research for {tier}s tier...")
         stored_topics = _harvest_seed_topic_to_bank(
             seed_topic=topic["title"],
             post_type=post_type,
             target_length_tier=tier,
             existing_topics=get_all_topics_from_registry(),
             collected_topics=[],
+            progress_callback=progress_callback,
         )
+        if progress_callback:
+            progress_callback(stage="collecting", stage_label=f"Tier {tier}s ({i+1}/{len(tiers)})", detail_message=f"Tier {tier}s complete — {len(stored_topics)} topics stored.")
         all_stored_topics.extend(stored_topics)
 
     run_summary = {
@@ -571,6 +579,7 @@ async def launch_topic_research_run(
     target_length_tier: Optional[int],
     trigger_source: str,
     post_type: Optional[str] = None,
+    progress_callback: Optional[Any] = None,
 ) -> Dict[str, Any]:
     topic = get_topic_registry_by_id(topic_registry_id)
     resolved_tier = int(target_length_tier) if target_length_tier else None
@@ -592,6 +601,7 @@ async def launch_topic_research_run(
                 target_length_tier=resolved_tier,
                 trigger_source=trigger_source,
                 post_type=resolved_post_type,
+                progress_callback=progress_callback,
             )
         except ValidationError as exc:
             update_topic_research_run(

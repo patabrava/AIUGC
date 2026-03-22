@@ -544,7 +544,7 @@ def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
 
     harvested_tiers = []
 
-    def fake_harvest(*, seed_topic, post_type, target_length_tier, existing_topics, collected_topics):
+    def fake_harvest(*, seed_topic, post_type, target_length_tier, existing_topics, collected_topics, progress_callback=None):
         harvested_tiers.append(target_length_tier)
         return []
 
@@ -640,6 +640,35 @@ def test_launch_redirects_and_hub_shows_active_runs(monkeypatch):
     response = client.get("/topics", headers={"Accept": "text/html"})
     assert response.status_code == 200
     assert "Running" in response.text
+
+
+def test_pipeline_passes_progress_callback_to_harvest(monkeypatch):
+    """Pipeline should pass progress_callback through to _harvest_seed_topic_to_bank."""
+    from app.features.topics import hub as topic_hub
+
+    received_callbacks = []
+
+    def fake_harvest(*, seed_topic, post_type, target_length_tier, existing_topics, collected_topics, progress_callback=None):
+        received_callbacks.append(progress_callback)
+        return []
+
+    monkeypatch.setattr(topic_hub, "_harvest_seed_topic_to_bank", fake_harvest)
+    monkeypatch.setattr(topic_hub, "get_topic_registry_by_id", lambda tid: {"id": tid, "title": "Test", "post_type": "value"})
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(topic_hub, "update_topic_research_run", lambda run_id, **kw: None)
+
+    cb = lambda **kw: None
+    topic_hub._run_topic_research_pipeline_sync(
+        run_id="run-1",
+        topic_registry_id="t1",
+        target_length_tier=8,
+        trigger_source="hub",
+        post_type="value",
+        progress_callback=cb,
+    )
+
+    assert len(received_callbacks) == 1
+    assert received_callbacks[0] is cb
 
 
 def test_full_launch_flow_pick_from_list(monkeypatch):
