@@ -94,10 +94,13 @@ def build_launch_hub_payload(request) -> Dict[str, Any]:
     if filters.get("only_with_scripts"):
         enriched = [t for t in enriched if t["script_count"] > 0]
     enriched.sort(key=lambda t: t["script_count"])
+    runs = list_topic_research_runs(limit=5)
+    active_runs = [run for run in runs if run.get("status") == "running"]
     return {
         "filters": filters,
         "topics": enriched,
         "total_topics": len(enriched),
+        "active_runs": active_runs,
     }
 
 

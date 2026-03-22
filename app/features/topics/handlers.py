@@ -8,6 +8,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from threading import RLock
 from collections import Counter
+from types import SimpleNamespace
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request, Header, status
 from fastapi.responses import RedirectResponse
@@ -38,6 +39,8 @@ from app.features.topics.queries import (
     get_posts_by_batch,
     list_topic_suggestions,
     get_topic_registry_by_id,
+    store_topic_bank_entry,
+    upsert_topic_script_variants,
 )
 from app.features.batches.queries import get_batch_by_id, update_batch_state, list_batches
 from app.core.states import BatchState
@@ -45,6 +48,7 @@ from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.features.topics.hub import (
+    _build_script_variants,
     _wants_html,
     build_launch_hub_payload,
     build_topic_hub_payload,
@@ -662,10 +666,36 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     dialog_scripts=dialog_scripts
                 )
 
-                add_topic_to_registry(
+                stored_row = store_topic_bank_entry(
                     title=topic_data["title"],
-                    rotation=topic_data["rotation"],
-                    cta=topic_data["cta"]
+                    topic_script=topic_data["rotation"],
+                    post_type=post_type,
+                    target_length_tier=target_length_tier,
+                    research_payload={},
+                    source_bank=[],
+                    script_bank={},
+                    seed_payloads={},
+                )
+
+                variants = _build_script_variants(
+                    topic_title=topic_data["title"],
+                    post_type=post_type,
+                    target_length_tier=target_length_tier,
+                    research_dossier={},
+                    prompt1_item=SimpleNamespace(
+                        script=topic_data["rotation"],
+                        caption=seed_payload.get("caption", ""),
+                    ),
+                    dialog_scripts=dialog_scripts,
+                    seed_payload=seed_payload,
+                )
+                upsert_topic_script_variants(
+                    topic_registry_id=stored_row["id"],
+                    title=stored_row["title"],
+                    post_type=post_type,
+                    target_length_tier=target_length_tier,
+                    topic_research_dossier_id=None,
+                    variants=variants,
                 )
 
                 post = create_post_for_batch(
@@ -965,15 +995,41 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             fallback_topic = lifestyle_topics[0]
             dialog_scripts = fallback_topic["dialog_scripts"]
 
-            add_topic_to_registry(
-                title=fallback_topic["title"],
-                rotation=fallback_topic["rotation"],
-                cta=fallback_topic["cta"]
-            )
-
             seed_payload = build_lifestyle_seed_payload(
                 topic_data=fallback_topic,
                 dialog_scripts=dialog_scripts
+            )
+
+            fallback_tier = target_length_tier or 8
+            stored_row = store_topic_bank_entry(
+                title=fallback_topic["title"],
+                topic_script=fallback_topic["rotation"],
+                post_type="lifestyle",
+                target_length_tier=fallback_tier,
+                research_payload={},
+                source_bank=[],
+                script_bank={},
+                seed_payloads={},
+            )
+            variants = _build_script_variants(
+                topic_title=fallback_topic["title"],
+                post_type="lifestyle",
+                target_length_tier=fallback_tier,
+                research_dossier={},
+                prompt1_item=SimpleNamespace(
+                    script=fallback_topic["rotation"],
+                    caption=seed_payload.get("caption", ""),
+                ),
+                dialog_scripts=dialog_scripts,
+                seed_payload=seed_payload,
+            )
+            upsert_topic_script_variants(
+                topic_registry_id=stored_row["id"],
+                title=stored_row["title"],
+                post_type="lifestyle",
+                target_length_tier=fallback_tier,
+                topic_research_dossier_id=None,
+                variants=variants,
             )
 
             fallback_post = create_post_for_batch(
@@ -1303,6 +1359,12 @@ async def get_topic_research_run_endpoint(request: Request, run_id: str):
             from fastapi.templating import Jinja2Templates
 
             templates = Jinja2Templates(directory="templates")
+            compact = str(request.query_params.get("compact") or "").strip()
+            if compact == "1":
+                return templates.TemplateResponse(
+                    "topics/partials/run_status_compact.html",
+                    {"request": request, "run": run},
+                )
             return templates.TemplateResponse(
                 "topics/partials/run_card.html",
                 {

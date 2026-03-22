@@ -575,3 +575,50 @@ def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
     )
 
     assert sorted(harvested_tiers) == [8, 16, 32]
+
+
+def test_build_launch_hub_payload_includes_active_runs(monkeypatch):
+    """Launch hub payload should include active research runs."""
+    from app.features.topics import hub as topic_hub
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(
+        topic_hub, "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [],
+    )
+    monkeypatch.setattr(
+        topic_hub, "list_topic_research_runs",
+        lambda limit=20, status=None, topic_registry_id=None: [
+            {"id": "run-1", "status": "running", "result_summary": {"topic_title": "Test"}, "created_at": "2026-03-22", "updated_at": "2026-03-22", "target_length_tier": None, "trigger_source": "hub"},
+            {"id": "run-2", "status": "completed", "result_summary": {"topic_title": "Done"}, "created_at": "2026-03-22", "updated_at": "2026-03-22", "target_length_tier": 8, "trigger_source": "hub"},
+        ],
+    )
+
+    class FakeRequest:
+        query_params = {}
+        headers = {}
+
+    result = topic_hub.build_launch_hub_payload(FakeRequest())
+    assert "active_runs" in result
+    assert len(result["active_runs"]) == 1
+    assert result["active_runs"][0]["id"] == "run-1"
+
+
+def test_run_status_compact_endpoint(monkeypatch):
+    """GET /topics/runs/{id}?compact=1 should return compact status partial."""
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(
+        topic_queries, "get_topic_research_run",
+        lambda run_id: {
+            "id": "run-1", "status": "completed",
+            "result_summary": {"topic_title": "Test Topic", "stored_count": 3, "tiers_processed": [8, 16, 32]},
+            "error_message": None, "created_at": "2026-03-22", "updated_at": "2026-03-22",
+            "target_length_tier": None, "trigger_source": "hub",
+        },
+    )
+    client = _build_test_client()
+    response = client.get("/topics/runs/run-1?compact=1", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Test Topic" in response.text

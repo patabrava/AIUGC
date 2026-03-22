@@ -1,0 +1,51 @@
+{# Compact run status — replaces the polling element when run completes or fails #}
+{% if run.status == 'running' %}
+<div class="rounded-xl border border-amber-200 bg-amber-50 p-3"
+     hx-get="/topics/runs/{{ run.id }}?compact=1"
+     hx-trigger="every 6s"
+     hx-swap="outerHTML">
+    <div class="flex items-center justify-between gap-3">
+        <div>
+            <span class="text-sm font-semibold text-slate-900">
+                {{ run.result_summary.topic_title if run.result_summary and run.result_summary.topic_title else 'Researching...' }}
+            </span>
+            <span class="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse"></span>
+                Running
+            </span>
+        </div>
+        <span class="text-xs text-slate-500">{{ run.created_at }}</span>
+    </div>
+</div>
+{% elif run.status == 'completed' %}
+<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+    <div class="flex items-center justify-between gap-3">
+        <div>
+            <span class="text-sm font-semibold text-slate-900">
+                {{ run.result_summary.topic_title if run.result_summary and run.result_summary.topic_title else 'Research' }}
+            </span>
+            <span class="ml-2 rounded-full bg-emerald-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-900">
+                Completed
+            </span>
+            {% if run.result_summary and run.result_summary.stored_count %}
+            <span class="ml-1 text-xs text-slate-500">· {{ run.result_summary.stored_count }} scripts generated</span>
+            {% endif %}
+        </div>
+        <span class="text-xs text-slate-500">{{ run.updated_at }}</span>
+    </div>
+</div>
+{% else %}
+<div class="rounded-xl border border-rose-200 bg-rose-50 p-3">
+    <div class="flex items-center justify-between gap-3">
+        <div>
+            <span class="text-sm font-semibold text-slate-900">
+                {{ run.result_summary.topic_title if run.result_summary and run.result_summary.topic_title else 'Research' }}
+            </span>
+            <span class="ml-2 rounded-full bg-rose-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-900">
+                Failed
+            </span>
+        </div>
+        <span class="text-xs text-slate-500">{{ run.error_message or 'Unknown error' }}</span>
+    </div>
+</div>
+{% endif %}
