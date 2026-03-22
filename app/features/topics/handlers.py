@@ -13,6 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request, Header, status
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 
 from app.features.topics.schemas import (
@@ -32,6 +33,7 @@ from app.features.topics.agents import (
     build_lifestyle_seed_payload,
 )
 from app.features.topics.deduplication import deduplicate_topics
+from app.features.topics.variant_expansion import expand_topic_variants
 from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
@@ -1431,3 +1433,31 @@ async def cron_topic_discovery(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Cron job failed"
         )
+
+
+# ── Expand Variants ─────────────────────────────────────────────
+
+
+class ExpandVariantsRequest(BaseModel):
+    topic_registry_id: str
+    count: int = 3
+    target_length_tier: int = 8
+
+
+@router.post("/expand-variants")
+async def expand_variants_endpoint(body: ExpandVariantsRequest):
+    """Generate additional script variants for a topic."""
+    topic = get_topic_registry_by_id(body.topic_registry_id)
+    if not topic:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Topic {body.topic_registry_id} not found",
+        )
+    result = expand_topic_variants(
+        topic_registry_id=body.topic_registry_id,
+        title=topic["title"],
+        post_type=topic["post_type"],
+        target_length_tier=body.target_length_tier,
+        count=body.count,
+    )
+    return result
