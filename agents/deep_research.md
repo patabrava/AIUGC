@@ -1,0 +1,9 @@
+# Deep Research Flow
+
+1. **Trigger**: `app/features/topics/handlers.py` seeds batches that request scripts. It calls `list_topic_suggestions()` first; if no stored `topic_scripts` rows cover the requested length, it runs `generate_topics_research_agent()` (or lifestyle fallback) to hit Gemini Deep Research.
+2. **Prompt construction**: `prompt1_research.txt` is assembled via `build_prompt1()` in `app/features/topics/prompts.py`. That builder also extracts the frozen topic seeds and hook bank from `prompt1_8s.txt`, so the research prompt receives a curated topic list and a hook-bank context.
+3. **Dossier normalization**: `generate_topic_dossier()` (in `app/features/topics/agents.py`) cleans the Gemini response, removes JSON fragments, produces `facts`, `angle_options`, `lane_candidates`, and writes the dossier into `topic_registry.research_payload` via `topic_queries.add_topic_to_registry()`.
+4. **Script generation**: `generate_dialog_scripts()` now hits `prompt2_{tier}s.txt`, passing the dossier plus the hook bank context. It enforces tier rules, rotates hook families via `_pick_hook_family()`, and resorts to `_synthesize_prompt2_from_dossier()` only after structured JSON/text repairs fail.
+5. **Fallback and validation**: `_synthesize_prompt2_from_dossier()` builds tier-specific scripts using `_build_tier_fallback_script()` and `_build_hook_opening()`. Scripts must satisfy length/semantic validators before being stored.
+6. **Persistence**: Scripts write into `topic_scripts` (see `supabase/migrations/009_create_topic_scripts.sql`) through `topic_queries.add_topic_script_rows()`. Each row tracks `target_length_tier`, `hook_style`, `source_urls`, lane metadata, and links back to the parent dossier for reuse.
+7. **Future reuse**: Next time a batch asks for the same tier/topic, the handler checks `topic_scripts` and only reruns Deep Research if no matching rows exist, keeping the pipeline efficient.
