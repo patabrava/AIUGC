@@ -77,6 +77,30 @@ def fuzzy_match_topic(query: str, threshold: float = 0.35) -> Optional[Dict[str,
     return {**best_topic, "script_count": len(scripts), "similarity_score": best_score}
 
 
+def build_launch_hub_payload(request) -> Dict[str, Any]:
+    """Build a simplified payload for the launch-focused hub."""
+    filters = parse_topic_filters(request)
+    topics = [
+        topic
+        for topic in get_all_topics_from_registry()
+        if _topic_search_match(topic, filters["search"])
+        and (filters["post_type"] is None or str(topic.get("post_type") or "") == filters["post_type"])
+    ]
+    # Enrich with script counts and sort by least coverage
+    enriched = []
+    for topic in topics:
+        scripts = get_topic_scripts_for_registry(topic["id"])
+        enriched.append({**topic, "script_count": len(scripts)})
+    if filters.get("only_with_scripts"):
+        enriched = [t for t in enriched if t["script_count"] > 0]
+    enriched.sort(key=lambda t: t["script_count"])
+    return {
+        "filters": filters,
+        "topics": enriched,
+        "total_topics": len(enriched),
+    }
+
+
 def _wants_html(request) -> bool:
     hx_header = request.headers.get("HX-Request")
     if hx_header and hx_header.lower() == "true":

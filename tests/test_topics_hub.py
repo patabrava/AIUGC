@@ -406,3 +406,33 @@ def test_fuzzy_match_topic_returns_none_for_novel_topic(monkeypatch):
 
     result = topic_hub.fuzzy_match_topic("Morning Skincare Routine Tips")
     assert result is None
+
+
+def test_build_launch_hub_payload_sorts_by_script_count(monkeypatch):
+    """Launch hub payload should sort topics by script count ascending."""
+    from app.features.topics import hub as topic_hub
+
+    fake_topics = [
+        {"id": "t1", "title": "A", "post_type": "value", "rotation": "r", "cta": "c",
+         "created_at": "2026-01-01", "last_harvested_at": None},
+        {"id": "t2", "title": "B", "post_type": "value", "rotation": "r", "cta": "c",
+         "created_at": "2026-01-02", "last_harvested_at": None},
+    ]
+    script_counts = {"t1": 3, "t2": 0}
+
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: fake_topics)
+    monkeypatch.setattr(
+        topic_hub,
+        "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [{}] * script_counts.get(topic_id, 0),
+    )
+
+    class FakeRequest:
+        query_params = {}
+        headers = {}
+
+    result = topic_hub.build_launch_hub_payload(FakeRequest())
+    assert result["topics"][0]["id"] == "t2"
+    assert result["topics"][0]["script_count"] == 0
+    assert result["topics"][1]["id"] == "t1"
+    assert result["topics"][1]["script_count"] == 3
