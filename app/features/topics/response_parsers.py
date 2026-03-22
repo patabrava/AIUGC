@@ -156,6 +156,8 @@ def parse_prompt1_response(
                         message="PROMPT_1 script empty after trimming",
                         details={"original": item.get("script", "")},
                     )
+                if trimmed_script and trimmed_script[-1] not in ".!?":
+                    trimmed_script = trimmed_script.rstrip(",;:") + "."
                 item["script"] = trimmed_script
                 item["estimated_duration_s"] = estimate_script_duration_seconds(trimmed_script)
 
