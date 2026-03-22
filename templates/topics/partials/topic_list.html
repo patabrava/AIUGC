@@ -1,0 +1,29 @@
+{# Swappable topic list — sorted by script_count ascending #}
+<div id="topic-list">
+    {% for topic in topics %}
+    <a hx-get="/topics/select/{{ topic.id }}"
+       hx-target="#launch-panel"
+       hx-swap="innerHTML"
+       class="block rounded-2xl border border-slate-200 bg-white p-4 transition cursor-pointer hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <h3 class="text-sm font-bold text-slate-900">{{ topic.title }}</h3>
+                <div class="mt-1 text-xs text-slate-500">{{ topic.post_type or 'unknown' }}</div>
+            </div>
+            {% set count = topic.script_count|default(0) %}
+            {% if count == 0 %}
+            <span class="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800">0 scripts</span>
+            {% elif count <= 2 %}
+            <span class="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-orange-800">{{ count }} script{{ 's' if count != 1 else '' }}</span>
+            {% else %}
+            <span class="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-800">{{ count }} scripts</span>
+            {% endif %}
+        </div>
+    </a>
+    {% endfor %}
+    {% if not topics %}
+    <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+        No topics match the current filters.
+    </div>
+    {% endif %}
+</div>

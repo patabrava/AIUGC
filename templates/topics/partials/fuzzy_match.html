@@ -1,0 +1,26 @@
+{# "Did you mean?" card when a new topic fuzzy-matches an existing one #}
+<div class="rounded-2xl border border-amber-300 bg-amber-50 p-5">
+    <div class="text-sm font-bold text-amber-900">Similar topic found</div>
+    <p class="mt-2 text-sm text-slate-700">
+        Did you mean <strong>"{{ match.title }}"</strong>?
+    </p>
+    <p class="mt-1 text-xs text-slate-500">
+        {{ match.post_type or 'unknown' }} · {{ match.script_count }} existing script{{ 's' if match.script_count != 1 else '' }}
+    </p>
+    <div class="mt-4 flex gap-3">
+        <button type="button"
+                hx-get="/topics/select/{{ match.id }}"
+                hx-target="#launch-panel"
+                hx-swap="innerHTML"
+                class="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+            Use existing
+        </button>
+        <form method="post" action="/topics/runs" class="flex-1">
+            <input type="hidden" name="new_topic_title" value="{{ query }}">
+            <input type="hidden" name="trigger_source" value="hub">
+            <button type="submit" class="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800">
+                Create new anyway
+            </button>
+        </form>
+    </div>
+</div>

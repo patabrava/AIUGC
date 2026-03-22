@@ -1,0 +1,44 @@
+{# Right panel default state — new topic input, random, placeholder #}
+<div id="launch-panel-default">
+    <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Launch Research</div>
+    <h2 class="mt-1 text-xl font-black text-slate-900">Generate Scripts</h2>
+    <p class="mt-2 text-sm text-slate-500">Pick a topic from the list, enter a new one, or let the system choose.</p>
+
+    {# New topic input #}
+    <div class="mt-6">
+        <label class="block text-xs font-semibold uppercase tracking-wide text-slate-600">Research a new topic</label>
+        <form class="mt-2 flex gap-2"
+              hx-get="/topics/match"
+              hx-target="#launch-panel"
+              hx-swap="innerHTML">
+            <input name="q" type="text" placeholder="Type a topic..."
+                   class="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
+            <button type="submit" class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800">
+                Go
+            </button>
+        </form>
+    </div>
+
+    <div class="my-5 flex items-center gap-3 text-xs text-slate-400">
+        <div class="h-px flex-1 bg-slate-200"></div>or<div class="h-px flex-1 bg-slate-200"></div>
+    </div>
+
+    {# Random button #}
+    <button type="button"
+            hx-get="/topics/random"
+            hx-target="#launch-panel"
+            hx-swap="innerHTML"
+            class="w-full rounded-xl bg-amber-400 px-4 py-3.5 text-sm font-bold text-slate-950 transition hover:bg-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-200">
+        🎲 Pick Random Topic (least coverage)
+    </button>
+
+    <div class="my-5 flex items-center gap-3 text-xs text-slate-400">
+        <div class="h-px flex-1 bg-slate-200"></div>or<div class="h-px flex-1 bg-slate-200"></div>
+    </div>
+
+    {# Placeholder #}
+    <div class="rounded-2xl border-2 border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+        <div class="text-lg">←</div>
+        <div class="mt-1">Click a topic from the list</div>
+    </div>
+</div>
