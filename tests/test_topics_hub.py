@@ -707,3 +707,18 @@ def test_full_launch_flow_pick_from_list(monkeypatch):
     )
     assert launch_response.status_code == 303
     assert launch_response.headers["location"] == "/topics"
+
+
+def test_topic_run_stream_endpoint_returns_sse(monkeypatch):
+    """GET /topics/runs/{id}/stream should return SSE content type."""
+    from app.features.topics import handlers as topic_handlers
+
+    monkeypatch.setattr(topic_handlers, "get_seeding_events", lambda run_id, last_event_id=None: [
+        {"event_id": "1", "event_type": "interaction.complete", "created_at": "2026-03-22", "progress": {"stage": "completed"}}
+    ])
+    monkeypatch.setattr(topic_handlers, "get_seeding_progress", lambda run_id: {"stage": "completed"})
+
+    client = _build_test_client()
+    response = client.get("/topics/runs/run-1/stream")
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")

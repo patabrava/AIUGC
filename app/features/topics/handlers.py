@@ -1352,6 +1352,40 @@ async def launch_topic_research_endpoint(request: Request):
         )
 
 
+@router.get("/runs/{run_id}/stream")
+async def stream_topic_run_progress(request: Request, run_id: str, last_event_id: Optional[str] = None):
+    """Stream live research progress events via SSE."""
+    import json as _json
+
+    async def event_stream():
+        last_seen = last_event_id or request.headers.get("last-event-id")
+        while True:
+            if await request.is_disconnected():
+                break
+            events = get_seeding_events(run_id, last_seen)
+            if events:
+                for event in events:
+                    payload = _json.dumps(event)
+                    yield f"id: {event['event_id']}\ndata: {payload}\n\n"
+                    last_seen = event["event_id"]
+                terminal = events[-1]["event_type"]
+                if terminal in {"interaction.complete", "interaction.failed"}:
+                    break
+            else:
+                progress = get_seeding_progress(run_id)
+                if progress and progress.get("stage") in {"completed", "failed"}:
+                    break
+            yield ": keep-alive\n\n"
+            await asyncio.sleep(1)
+
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/runs/{run_id}")
 async def get_topic_research_run_endpoint(request: Request, run_id: str):
     """Return a durable research run as JSON or an HTML fragment."""
