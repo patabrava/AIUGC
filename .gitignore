@@ -57,6 +57,16 @@ Thumbs.db
 # Playwright
 playwright-report/
 test-results/
+.playwright-cli/
 
 # Supabase local CLI temp artifacts
 supabase/.temp/
+
+# Local deep-research trace artifacts
+test_log_*.md
+test_logs_*.md
+Deep Research Flow Test Final.md
+agents/Deep Research Flow Test Final.md
+
+# Generated prompt scratchpads (local)
+app/features/topics/prompt_data/prompt1_batch.txt
