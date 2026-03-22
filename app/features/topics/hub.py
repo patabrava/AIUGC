@@ -77,6 +77,17 @@ def fuzzy_match_topic(query: str, threshold: float = 0.35) -> Optional[Dict[str,
     return {**best_topic, "script_count": len(scripts), "similarity_score": best_score}
 
 
+def _fetch_all_script_counts() -> Dict[str, int]:
+    """Fetch script counts for all topics in a single query."""
+    from app.features.topics.queries import _fetch_topic_script_rows
+    all_scripts = _fetch_topic_script_rows()
+    counts: Dict[str, int] = {}
+    for script in all_scripts:
+        rid = str(script.get("topic_registry_id") or "")
+        counts[rid] = counts.get(rid, 0) + 1
+    return counts
+
+
 def build_launch_hub_payload(request) -> Dict[str, Any]:
     """Build a simplified payload for the launch-focused hub."""
     filters = parse_topic_filters(request)
@@ -86,11 +97,11 @@ def build_launch_hub_payload(request) -> Dict[str, Any]:
         if _topic_search_match(topic, filters["search"])
         and (filters["post_type"] is None or str(topic.get("post_type") or "") == filters["post_type"])
     ]
-    # Enrich with script counts and sort by least coverage
+    # Enrich with script counts in a single batch query (avoids N+1)
+    script_counts = _fetch_all_script_counts()
     enriched = []
     for topic in topics:
-        scripts = get_topic_scripts_for_registry(topic["id"])
-        enriched.append({**topic, "script_count": len(scripts)})
+        enriched.append({**topic, "script_count": script_counts.get(topic["id"], 0)})
     if filters.get("only_with_scripts"):
         enriched = [t for t in enriched if t["script_count"] > 0]
     enriched.sort(key=lambda t: t["script_count"])

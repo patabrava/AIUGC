@@ -418,14 +418,9 @@ def test_build_launch_hub_payload_sorts_by_script_count(monkeypatch):
         {"id": "t2", "title": "B", "post_type": "value", "rotation": "r", "cta": "c",
          "created_at": "2026-01-02", "last_harvested_at": None},
     ]
-    script_counts = {"t1": 3, "t2": 0}
-
     monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: fake_topics)
-    monkeypatch.setattr(
-        topic_hub,
-        "get_topic_scripts_for_registry",
-        lambda topic_id, target_length_tier=None: [{}] * script_counts.get(topic_id, 0),
-    )
+    monkeypatch.setattr(topic_hub, "_fetch_all_script_counts", lambda: {"t1": 3, "t2": 0})
+    monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=20, status=None, topic_registry_id=None: [])
 
     class FakeRequest:
         query_params = {}
