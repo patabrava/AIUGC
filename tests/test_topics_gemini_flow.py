@@ -485,7 +485,7 @@ def test_generate_topic_script_candidate_uses_duration_profile_import(monkeypatc
     assert item.estimated_duration_s == 5
 
 
-def test_generate_dialog_scripts_synthesizes_fallback_from_dossier(monkeypatch):
+def test_generate_dialog_scripts_rejects_malformed_output_after_retries(monkeypatch):
     class FakeBrokenDialogLLM:
         def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
             raise topic_agents.ValidationError(message="Broken JSON", details={})
@@ -508,21 +508,16 @@ def test_generate_dialog_scripts_synthesizes_fallback_from_dossier(monkeypatch):
 
     monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeBrokenDialogLLM())
 
-    scripts = topic_agents.generate_dialog_scripts(
-        topic="Haftungsfalle Dekubitus im Alltag",
-        scripts_required=2,
-        dossier=dossier,
-        profile=topic_agents.get_duration_profile(8),
-    )
-
-    assert len(scripts.problem_agitate_solution) == 2
-    assert len(scripts.testimonial) == 2
-    assert len(scripts.transformation) == 2
-    assert scripts.description
-    assert all(script.endswith((".", "!", "?")) for script in scripts.problem_agitate_solution)
+    with pytest.raises(topic_agents.ValidationError, match="PROMPT_2 generation failed"):
+        topic_agents.generate_dialog_scripts(
+            topic="Haftungsfalle Dekubitus im Alltag",
+            scripts_required=2,
+            dossier=dossier,
+            profile=topic_agents.get_duration_profile(8),
+        )
 
 
-def test_generate_topic_script_candidate_synthesizes_fallback(monkeypatch):
+def test_generate_topic_script_candidate_rejects_malformed_output_after_retries(monkeypatch):
     class FakeBrokenPrompt1LLM:
         def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
             raise topic_agents.ValidationError(message="Broken JSON", details={})
@@ -563,18 +558,75 @@ def test_generate_topic_script_candidate_synthesizes_fallback(monkeypatch):
 
     monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeBrokenPrompt1LLM())
 
+    with pytest.raises(topic_agents.ValidationError, match="PROMPT_1 lane generation failed"):
+        topic_agents.generate_topic_script_candidate(
+            post_type="value",
+            target_length_tier=8,
+            dossier=dossier,
+            lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+        )
+
+
+def test_generate_topic_script_candidate_expands_short_16s_script_to_tier_bounds(monkeypatch):
+    class FakeShort16sLLM:
+        def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
+            return {
+                "items": [
+                    {
+                        "topic": "Exoskelette im Alltag",
+                        "script": "Exoskelette helfen dir im Alltag sofort.",
+                        "caption": "Kurz erklärt, was Exoskelette für dich leisten.",
+                    }
+                ]
+            }
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="exo-16s-01",
+        topic="Exoskelette im Alltag",
+        anchor_topic="Exoskelette im Alltag",
+        seed_topic="Exoskelette im Alltag",
+        cluster_summary="Dossier mit Einsatzfeldern, Grenzen und Alltagseffekten von Exoskeletten.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Quelle Exo", "url": "https://example.com/exo"}],
+        source_summary="Exoskelette unterstützen Kraft und Stabilität im Alltag.",
+        facts=[
+            "Passive Systeme arbeiten ohne Motor und speichern Bewegung in Federmechanik.",
+            "Aktive Systeme geben gezielte Unterstützung beim Gehen und Aufstehen.",
+        ],
+        angle_options=["Alltagseffekt"],
+        risk_notes=["Nicht jede Lösung passt für jeden Kontext."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            {
+                "lane_key": "exo-16",
+                "lane_family": "value",
+                "title": "Exoskelette im Alltag",
+                "angle": "Praxisnutzen.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "So helfen Exoskelette bei typischen Alltagsbewegungen.",
+                "facts": [
+                    "Aktive Systeme helfen bei wiederholten Bewegungen in Alltag und Rehabilitation.",
+                ],
+                "risk_notes": ["Eine individuelle Einordnung bleibt notwendig."],
+                "disclaimer": "Keine individuelle Rechts- oder Medizinberatung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [16],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeShort16sLLM())
+
     item = topic_agents.generate_topic_script_candidate(
         post_type="value",
-        target_length_tier=8,
+        target_length_tier=16,
         dossier=dossier,
         lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
     )
 
-    assert item.topic == "Behindertenbeirat mit Wirkung"
-    assert str(item.sources[0].url) == "https://example.com/teilhabe"
-    assert item.framework == "PAL"
-    assert item.script.endswith("?")
-    assert item.estimated_duration_s >= 5
+    word_count = len(item.script.split())
+    assert 26 <= word_count <= 36
 
 
 def test_parse_topic_research_response_accepts_json_followed_by_markdown():
@@ -619,7 +671,61 @@ def test_parse_topic_research_response_accepts_json_followed_by_markdown():
 
     assert dossier.cluster_id == "rehabilitation-guide-01"
     assert len(dossier.sources) == 1
-    assert len(dossier.lane_candidates) == 1
+    assert len(dossier.lane_candidates) >= 3
+    assert len({lane.title for lane in dossier.lane_candidates[:3]}) == 3
+
+
+def test_parse_topic_research_response_expands_lane_fanout_from_angles():
+    raw = json.dumps(
+        {
+            "cluster_id": "opnv-fanout-01",
+            "topic": "Barrierefreiheit im ÖPNV",
+            "anchor_topic": "ÖPNV Barrierefreiheit",
+            "seed_topic": "ÖPNV Barrierefreiheit",
+            "cluster_summary": "Das Dossier fasst Infrastruktur, Regeln und Informationszugang im ÖPNV zusammen.",
+            "framework_candidates": ["PAL"],
+            "sources": [
+                {"title": "Quelle A", "url": "https://example.com/a"}
+            ],
+            "source_summary": "Barrierefreiheit im ÖPNV betrifft Einstieg, Information und Assistenz im Alltag.",
+            "facts": [
+                "Rampen und Aufzüge beeinflussen die Mobilität direkt.",
+                "Informationen müssen auch taktil und akustisch zugänglich sein.",
+            ],
+            "angle_options": [
+                "Einstieg und Fahrzeugtechnik",
+                "Informationszugang im Alltag",
+                "Assistenz und Begleitservice",
+            ],
+            "risk_notes": [
+                "Ausfälle und Zuständigkeiten verzögern die Umsetzung.",
+            ],
+            "disclaimer": "Keine individuelle Rechtsberatung.",
+            "lane_candidates": [
+                {
+                    "lane_key": "entry",
+                    "lane_family": "infrastructure",
+                    "title": "Einstieg und Fahrzeugtechnik",
+                    "angle": "Rampen, Aufzüge, Kneeling.",
+                    "priority": 1,
+                    "framework_candidates": ["PAL"],
+                    "source_summary": "Der Einstieg ist die größte Hürde.",
+                    "facts": ["Niederflurfahrzeuge helfen beim Einstieg."],
+                    "risk_notes": ["Aufzüge fallen aus."],
+                    "disclaimer": "Keine individuelle Rechtsberatung.",
+                    "lane_overlap_warnings": [],
+                    "suggested_length_tiers": [16],
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+    dossier = topic_agents.parse_topic_research_response(raw)
+
+    assert len(dossier.lane_candidates) >= 3
+    signatures = {lane.lane_key for lane in dossier.lane_candidates[:3]}
+    assert len(signatures) == 3
 
 
 def test_parse_topic_research_response_clips_overlong_disclaimers():

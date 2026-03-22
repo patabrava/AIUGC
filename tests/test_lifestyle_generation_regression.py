@@ -199,11 +199,15 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
     def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None):
         return _dialog_scripts("Value dialog script stays valid for the regression harness.")
 
+    def fake_generate_topic_script_candidate(**kwargs):
+        return SimpleNamespace(script="Value prompt-one script remains isolated in this regression.")
+
     def fake_extract_seed_strict_extractor(topic):
         return SimpleNamespace(facts=["Value fact"], source_context="Value context")
 
     def fake_build_seed_payload(original_item, strict_seed, dialog_scripts):
-        return {"script": dialog_scripts.problem_agitate_solution[0], "strict_seed": strict_seed.facts}
+        script = dialog_scripts.problem_agitate_solution[0] if dialog_scripts else original_item.script
+        return {"script": script, "strict_seed": strict_seed.facts}
 
     def fake_generate_lifestyle_topics(count: int = 1):
         return [dict(duplicate_lifestyle_topic) for _ in range(count)]
@@ -238,9 +242,11 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
 
     monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
     monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", fake_get_all_topics_from_registry)
+    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", lambda **kwargs: [])
     monkeypatch.setattr(topic_handlers, "generate_topics_research_agent", fake_generate_topics_research_agent)
     monkeypatch.setattr(topic_handlers, "convert_research_item_to_topic", fake_convert_research_item_to_topic)
     monkeypatch.setattr(topic_handlers, "generate_dialog_scripts", fake_generate_dialog_scripts)
+    monkeypatch.setattr(topic_handlers, "generate_topic_script_candidate", fake_generate_topic_script_candidate)
     monkeypatch.setattr(topic_handlers, "extract_seed_strict_extractor", fake_extract_seed_strict_extractor)
     monkeypatch.setattr(topic_handlers, "build_seed_payload", fake_build_seed_payload)
     monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)

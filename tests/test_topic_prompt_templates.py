@@ -4,7 +4,7 @@ import pytest
 
 from app.core.errors import ValidationError
 from app.core.video_profiles import get_duration_profile
-from app.features.topics.prompts import build_prompt1, build_prompt2
+from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2
 from app.features.topics import agents as topic_agents
 
 
@@ -16,6 +16,7 @@ def test_prompt_text_files_exist_for_all_duration_tiers():
         "prompt1_8s.txt",
         "prompt1_16s.txt",
         "prompt1_32s.txt",
+        "prompt1_batch.txt",
         "prompt1_normalization.txt",
         "prompt2_8s.txt",
         "prompt2_16s.txt",
@@ -30,14 +31,44 @@ def test_build_prompt1_uses_32s_text_template():
         post_type="value",
         desired_topics=1,
         profile=get_duration_profile(32),
-        assigned_topics=["Rollstuhltransport im Zug und Flugzeug"],
+        dossier={
+            "topic": "Rollstuhltransport im Zug und Flugzeug",
+            "seed_topic": "Rollstuhltransport",
+            "source_summary": "Klare Regeln fuer Anmeldung, Akku und Schadensmeldung.",
+            "facts": ["Akkuregeln und Voranmeldung entscheiden ueber den Ablauf."],
+            "risk_notes": ["Fehlende Anmeldung kann Hilfe verzögern."],
+            "framework_candidates": ["PAL"],
+        },
+        lane_candidate={
+            "title": "Rollstuhltransport im Zug und Flugzeug",
+            "lane_family": "mobilitaet",
+            "angle": "Anmeldung und Hilfen vor Abfahrt.",
+            "facts": ["Voranmeldung erleichtert Boarding und Umstieg."],
+            "risk_notes": ["Kurzfristige Aenderungen kosten oft Zeit."],
+            "framework_candidates": ["PAL"],
+        },
     )
 
-    assert "3-4 concise sentences" in prompt
-    assert "54-74 words" in prompt
-    assert "24-28 Sekunden" in prompt
+    assert "DREI oder VIER vollstaendige Saetze" in prompt
+    assert "54-74 Woerter" in prompt
+    assert "Lane-Titel:" in prompt
+    assert "title" in prompt
+    assert "caption" in prompt
+    assert "source_summary" not in prompt
+
+
+def test_build_prompt1_batch_keeps_rotation_context():
+    prompt = build_prompt1_batch(
+        post_type="value",
+        desired_topics=2,
+        profile=get_duration_profile(16),
+        assigned_topics=["Barrierefreie Bahnreisen", "BahnCard bei Schwerbehinderung"],
+    )
+
     assert "ZUFALLS-THEMEN FÜR DIESEN DURCHLAUF:" in prompt
-    assert "core:" not in prompt
+    assert "26-36 Woerter" in prompt
+    assert "2 concise sentences" in prompt
+    assert "Barrierefreie Bahnreisen" in prompt
 
 
 def test_build_prompt2_uses_16s_text_template():
@@ -75,3 +106,26 @@ def test_parse_prompt1_response_rejects_trailing_fragment(monkeypatch):
         topic_agents.parse_prompt1_response(raw, profile=profile)
 
     assert "incomplete fragment" in exc_info.value.message.lower()
+
+
+def test_parse_prompt1_response_accepts_minimal_stage3_contract(monkeypatch):
+    monkeypatch.setattr(topic_agents, "validate_sources_accessible", lambda item: None)
+    profile = get_duration_profile(16)
+    raw = """{
+      "items": [
+        {
+          "title": "Barrierefreie Arbeitshilfen im Job",
+          "script": "Kennst du den Hebel fuer bessere Teilhabe? Gute Arbeitshilfen halten dich im Job und reduzieren Stress.",
+          "caption": "Klare Arbeitshilfen machen den Alltag leichter und sichern Teilhabe. #Teilhabe #Arbeit #Barrierefrei"
+        }
+      ]
+    }"""
+
+    batch = topic_agents.parse_prompt1_response(raw, profile=profile)
+
+    assert batch.items[0].topic == "Barrierefreie Arbeitshilfen im Job"
+    assert batch.items[0].script.endswith(".")
+    assert batch.items[0].caption.startswith("Klare Arbeitshilfen")
+    assert batch.items[0].source_summary.startswith("Klare Arbeitshilfen")
+    assert batch.items[0].framework == "PAL"
+    assert batch.items[0].estimated_duration_s > 0
