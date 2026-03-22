@@ -1238,12 +1238,23 @@ async def launch_topic_research_endpoint(request: Request):
         else:
             form = await request.form()
             script_usage = str(form.get("script_usage") or "all").strip().lower()
+            new_topic_title = str(form.get("new_topic_title") or "").strip()
             payload = {
                 "topic_registry_id": str(form.get("topic_registry_id") or "").strip(),
                 "target_length_tier": form.get("target_length_tier"),
                 "trigger_source": str(form.get("trigger_source") or "manual").strip() or "manual",
                 "post_type": str(form.get("post_type") or "").strip() or None,
             }
+
+            # If a new topic title is provided and no registry ID, create a minimal registry entry
+            if new_topic_title and not payload["topic_registry_id"]:
+                new_topic = add_topic_to_registry(
+                    title=new_topic_title,
+                    rotation=new_topic_title,
+                    cta=new_topic_title,
+                    post_type=payload["post_type"] or "value",
+                )
+                payload["topic_registry_id"] = new_topic["id"]
 
         launch_request = TopicResearchRunRequest.model_validate(payload)
         result = await launch_topic_research_run(
@@ -1254,9 +1265,7 @@ async def launch_topic_research_endpoint(request: Request):
         )
 
         if _wants_html(request):
-            redirect_url = f"/topics?topic_id={launch_request.topic_registry_id}&run_id={result['run']['id']}"
-            if script_usage in {"used", "unused"}:
-                redirect_url += f"&script_usage={script_usage}"
+            redirect_url = "/topics"
             response = RedirectResponse(
                 url=redirect_url,
                 status_code=status.HTTP_303_SEE_OTHER,

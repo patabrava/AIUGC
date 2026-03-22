@@ -506,3 +506,38 @@ def test_select_topic_endpoint(monkeypatch):
     response = client.get("/topics/select/t1", headers={"HX-Request": "true"})
     assert response.status_code == 200
     assert "Selected Topic" in response.text
+
+
+def test_launch_research_with_new_topic_title(monkeypatch):
+    """POST /topics/runs with new_topic_title should create a registry entry and launch."""
+    created_topic = {"id": "new-t1", "title": "Brand New Topic", "post_type": "value", "rotation": "Brand New Topic", "cta": "Brand New Topic"}
+
+    monkeypatch.setattr(
+        topic_handlers,
+        "add_topic_to_registry",
+        lambda title, rotation, cta, post_type, **kwargs: created_topic,
+    )
+
+    launch_called_with = {}
+    async def fake_launch(**kwargs):
+        launch_called_with.update(kwargs)
+        return {
+            "run": {"id": "run-1", "status": "running"},
+            "topic": created_topic,
+            "status_url": "/topics/runs/run-1",
+        }
+
+    monkeypatch.setattr(topic_handlers, "launch_topic_research_run", fake_launch)
+
+    client = _build_test_client()
+    response = client.post(
+        "/topics/runs",
+        data={
+            "new_topic_title": "Brand New Topic",
+            "trigger_source": "hub",
+        },
+        headers={"HX-Request": "true"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert launch_called_with["topic_registry_id"] == "new-t1"
