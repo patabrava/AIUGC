@@ -504,7 +504,7 @@ def _run_topic_research_pipeline_sync(
     *,
     run_id: str,
     topic_registry_id: str,
-    target_length_tier: int,
+    target_length_tier: Optional[int],
     trigger_source: str,
     post_type: str,
 ) -> Dict[str, Any]:
@@ -520,19 +520,26 @@ def _run_topic_research_pipeline_sync(
         },
     )
 
-    stored_topics = _harvest_seed_topic_to_bank(
-        seed_topic=topic["title"],
-        post_type=post_type,
-        target_length_tier=target_length_tier,
-        existing_topics=get_all_topics_from_registry(),
-        collected_topics=[],
-    )
+    tiers = [target_length_tier] if target_length_tier else [8, 16, 32]
+    all_stored_topics: List[Dict[str, Any]] = []
+
+    for tier in tiers:
+        stored_topics = _harvest_seed_topic_to_bank(
+            seed_topic=topic["title"],
+            post_type=post_type,
+            target_length_tier=tier,
+            existing_topics=get_all_topics_from_registry(),
+            collected_topics=[],
+        )
+        all_stored_topics.extend(stored_topics)
+
     run_summary = {
         "topic_registry_id": topic_registry_id,
         "topic_title": topic["title"],
-        "stored_topic_ids": [row["id"] for row in stored_topics],
-        "stored_count": len(stored_topics),
+        "stored_topic_ids": [row["id"] for row in all_stored_topics],
+        "stored_count": len(all_stored_topics),
         "target_length_tier": target_length_tier,
+        "tiers_processed": tiers,
         "post_type": post_type,
     }
     update_topic_research_run(
@@ -552,7 +559,7 @@ async def launch_topic_research_run(
     post_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     topic = get_topic_registry_by_id(topic_registry_id)
-    resolved_tier = int(target_length_tier or 8)
+    resolved_tier = int(target_length_tier) if target_length_tier else None
     resolved_post_type = post_type or str(topic.get("post_type") or "value")
     requested_counts = {"topics": 1, resolved_post_type: 1}
     run_row = create_topic_research_run(

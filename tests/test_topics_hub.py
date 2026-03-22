@@ -541,3 +541,37 @@ def test_launch_research_with_new_topic_title(monkeypatch):
     )
     assert response.status_code == 303
     assert launch_called_with["topic_registry_id"] == "new-t1"
+
+
+def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
+    """When target_length_tier is None, pipeline should harvest for all 3 tiers."""
+    from app.features.topics import hub as topic_hub
+
+    harvested_tiers = []
+
+    def fake_harvest(*, seed_topic, post_type, target_length_tier, existing_topics, collected_topics):
+        harvested_tiers.append(target_length_tier)
+        return []
+
+    monkeypatch.setattr(topic_hub, "_harvest_seed_topic_to_bank", fake_harvest)
+    monkeypatch.setattr(
+        topic_hub, "get_topic_registry_by_id",
+        lambda tid: {"id": tid, "title": "Test Topic", "post_type": "value"},
+    )
+    monkeypatch.setattr(
+        topic_hub, "get_all_topics_from_registry", lambda: [],
+    )
+    monkeypatch.setattr(
+        topic_hub, "update_topic_research_run",
+        lambda run_id, **kwargs: None,
+    )
+
+    topic_hub._run_topic_research_pipeline_sync(
+        run_id="run-1",
+        topic_registry_id="t1",
+        target_length_tier=None,
+        trigger_source="hub",
+        post_type="value",
+    )
+
+    assert sorted(harvested_tiers) == [8, 16, 32]
