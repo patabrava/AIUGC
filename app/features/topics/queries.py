@@ -685,6 +685,25 @@ def upsert_topic_script_variants(
     return stored_variants
 
 
+def get_existing_variant_pairs(
+    *,
+    topic_registry_id: str,
+    target_length_tier: int,
+    post_type: str,
+) -> List[Dict[str, Any]]:
+    """Return existing (framework, hook_style) pairs for a topic/tier/post_type."""
+    supabase = get_supabase()
+    response = (
+        supabase.client.table("topic_scripts")
+        .select("framework, hook_style")
+        .eq("topic_registry_id", topic_registry_id)
+        .eq("target_length_tier", target_length_tier)
+        .eq("post_type", post_type)
+        .execute()
+    )
+    return response.data or []
+
+
 def get_posts_by_batch(batch_id: str) -> List[Dict[str, Any]]:
     """Get all posts for a batch."""
     supabase = get_supabase()

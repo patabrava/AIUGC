@@ -9,13 +9,18 @@ missing, then picks the most diverse next combination.
 from __future__ import annotations
 
 from collections import Counter
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.adapters.llm_client import get_llm_client
 from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
-from app.features.topics.prompts import build_prompt2
-from app.features.topics.response_parsers import parse_prompt2_response
+from app.features.topics.prompts import build_prompt1_variant, build_prompt2, get_hook_bank
+from app.features.topics.queries import (
+    get_existing_variant_pairs,
+    get_topic_research_dossiers,
+    upsert_topic_script_variants,
+)
+from app.features.topics.response_parsers import parse_prompt1_response, parse_prompt2_response
 
 logger = get_logger(__name__)
 
@@ -104,3 +109,180 @@ def generate_dialog_scripts_variant(
     )
 
     return parse_prompt2_response(raw_response)
+
+
+def _get_hook_style_names() -> List[str]:
+    """Extract hook family names from the hook bank YAML."""
+    payload = get_hook_bank()
+    families = list(payload.get("families") or [])
+    return [str(f.get("name") or "").strip() for f in families if f.get("name")]
+
+
+def _pick_lane_for_framework(
+    lane_candidates: List[Dict[str, Any]],
+    target_framework: str,
+    existing_pairs: list,
+) -> Dict[str, Any]:
+    """Pick the lane whose framework_candidates contains the target framework."""
+    matching = [
+        lc for lc in lane_candidates
+        if target_framework in (lc.get("framework_candidates") or [])
+    ]
+    if not matching:
+        return lane_candidates[0] if lane_candidates else {}
+    return matching[0]
+
+
+def expand_topic_variants(
+    *,
+    topic_registry_id: str,
+    title: str,
+    post_type: str,
+    target_length_tier: int,
+    count: int = 1,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Generate up to *count* new script variants for a topic.
+
+    Returns a summary dict with generated count and details.
+    """
+    existing_rows = get_existing_variant_pairs(
+        topic_registry_id=topic_registry_id,
+        target_length_tier=target_length_tier,
+        post_type=post_type,
+    )
+    existing_pairs = [
+        (row["framework"], row["hook_style"]) for row in existing_rows
+    ]
+
+    # Determine available frameworks and hook styles
+    if post_type == "value":
+        dossiers = get_topic_research_dossiers(topic_registry_id=topic_registry_id)
+        dossier_payload = (dossiers[0].get("normalized_payload") or {}) if dossiers else {}
+        available_frameworks = list(dossier_payload.get("framework_candidates") or ["PAL", "Testimonial", "Transformation"])
+        available_hook_styles = _get_hook_style_names() or ["default"]
+        lane_candidates = list(dossier_payload.get("lane_candidates") or [])
+    else:
+        dossiers = []
+        dossier_payload = {}
+        available_frameworks = LIFESTYLE_FRAMEWORKS
+        available_hook_styles = LIFESTYLE_HOOK_STYLES
+        lane_candidates = []
+
+    generated = 0
+    details: List[Dict[str, Any]] = []
+
+    for _ in range(count):
+        variant = pick_next_variant(
+            existing_pairs=existing_pairs,
+            available_frameworks=available_frameworks,
+            available_hook_styles=available_hook_styles,
+            max_scripts=DEFAULT_MAX_SCRIPTS_PER_TOPIC,
+        )
+        if variant is None:
+            logger.info("variant_expansion_exhausted", topic_registry_id=topic_registry_id)
+            break
+
+        framework, hook_style = variant
+
+        if dry_run:
+            details.append({"framework": framework, "hook_style": hook_style, "dry_run": True})
+            existing_pairs.append(variant)
+            generated += 1
+            continue
+
+        try:
+            if post_type == "value":
+                lane = _pick_lane_for_framework(lane_candidates, framework, existing_pairs)
+                variant_prompt = build_prompt1_variant(
+                    post_type=post_type,
+                    desired_topics=1,
+                    dossier=dossier_payload,
+                    lane_candidate=lane,
+                    forced_framework=framework,
+                    forced_hook_style=hook_style,
+                    profile=get_duration_profile(target_length_tier),
+                )
+                llm = get_llm_client()
+                raw = llm.generate_gemini_json(
+                    prompt=variant_prompt,
+                    system_prompt="You are the Flow Forge PROMPT_1 stage-3 script agent. Return only valid JSON. Keep all output fully in German.",
+                )
+                batch = parse_prompt1_response(raw)
+                prompt1_item = batch.items[0] if batch.items else None
+                if not prompt1_item:
+                    logger.warning("variant_expansion_parse_failed", framework=framework, hook_style=hook_style)
+                    continue
+                script_text = str(prompt1_item.script or "").strip()
+                variant_data: Dict[str, Any] = {
+                    "script": script_text,
+                    "framework": framework,
+                    "hook_style": hook_style,
+                    "bucket": framework.lower(),
+                    "estimated_duration_s": getattr(prompt1_item, "estimated_duration_s", None),
+                    "lane_key": getattr(prompt1_item, "lane_key", None) or lane.get("lane_key"),
+                    "lane_family": getattr(prompt1_item, "lane_family", None) or lane.get("lane_family"),
+                    "cluster_id": getattr(prompt1_item, "cluster_id", None),
+                    "anchor_topic": getattr(prompt1_item, "anchor_topic", None),
+                    "seed_payload": {},
+                }
+            else:
+                dialog_scripts = generate_dialog_scripts_variant(
+                    topic=title,
+                    forced_framework=framework,
+                    forced_hook_style=hook_style,
+                    target_length_tier=target_length_tier,
+                )
+                script_text = str(
+                    (dialog_scripts.problem_agitate_solution or [""])[0]
+                ).strip()
+                variant_data = {
+                    "script": script_text,
+                    "framework": framework,
+                    "hook_style": hook_style,
+                    "bucket": framework.lower(),
+                    "seed_payload": {},
+                }
+
+            if not script_text:
+                logger.warning("variant_expansion_empty_script", framework=framework, hook_style=hook_style)
+                continue
+
+            dossier_id = dossiers[0].get("id") if (post_type == "value" and dossiers) else None
+            upsert_topic_script_variants(
+                topic_registry_id=topic_registry_id,
+                title=title,
+                post_type=post_type,
+                target_length_tier=target_length_tier,
+                topic_research_dossier_id=dossier_id,
+                variants=[variant_data],
+            )
+
+            existing_pairs.append(variant)
+            generated += 1
+            details.append({"framework": framework, "hook_style": hook_style, "script": script_text[:80]})
+            logger.info(
+                "variant_expansion_generated",
+                topic_registry_id=topic_registry_id,
+                framework=framework,
+                hook_style=hook_style,
+            )
+
+        except Exception as exc:
+            logger.warning(
+                "variant_expansion_failed",
+                topic_registry_id=topic_registry_id,
+                framework=framework,
+                hook_style=hook_style,
+                error=str(exc),
+            )
+            continue
+
+    return {
+        "topic_registry_id": topic_registry_id,
+        "post_type": post_type,
+        "target_length_tier": target_length_tier,
+        "generated": generated,
+        "total_existing": len(existing_rows) + generated,
+        "details": details,
+    }
