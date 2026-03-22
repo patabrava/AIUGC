@@ -307,13 +307,15 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
             "id": f"topic-{len(stored_entries)}",
             "title": kwargs["title"],
             "research_dossier_id": f"dossier-{len(stored_entries)}",
+            "topic_research_dossier_id": f"dossier-{len(stored_entries)}",
         }
 
     monkeypatch.setattr(topic_hub, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    variant_calls = []
     monkeypatch.setattr(
         topic_hub,
         "upsert_topic_script_variants",
-        lambda **kwargs: variant_counts.setdefault(kwargs["title"], len(kwargs["variants"])) or [],
+        lambda **kwargs: (variant_calls.append(kwargs), variant_counts.setdefault(kwargs["title"], len(kwargs["variants"])))[1],
     )
 
     result = topic_hub.harvest_topics_to_bank_sync(
@@ -329,6 +331,41 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
     ]
     assert all(entry["research_payload"]["topic"] == entry["title"] for entry in stored_entries)
     assert all(len(entry["research_payload"]["lane_candidates"]) == 1 for entry in stored_entries)
+    assert all(call["topic_research_dossier_id"] for call in variant_calls)
     assert variant_counts["Rampe vorher anmelden"] == 3
     assert variant_counts["Entschädigung bei Ausfall prüfen"] == 3
     assert updated_runs[-1][1]["status"] == "completed"
+
+
+def test_get_random_topic_returns_least_coverage(monkeypatch):
+    """Random topic should return the topic with the fewest scripts."""
+    from app.features.topics import hub as topic_hub
+
+    fake_topics = [
+        {"id": "t1", "title": "Topic A", "post_type": "value", "rotation": "r", "cta": "c"},
+        {"id": "t2", "title": "Topic B", "post_type": "value", "rotation": "r", "cta": "c"},
+        {"id": "t3", "title": "Topic C", "post_type": "lifestyle", "rotation": "r", "cta": "c"},
+    ]
+    script_counts = {"t1": 5, "t2": 0, "t3": 2}
+
+    monkeypatch.setattr(
+        topic_hub, "get_all_topics_from_registry", lambda: fake_topics
+    )
+    monkeypatch.setattr(
+        topic_hub,
+        "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [{}] * script_counts.get(topic_id, 0),
+    )
+
+    result = topic_hub.get_random_topic()
+    assert result is not None
+    assert result["id"] == "t2"
+    assert result["script_count"] == 0
+
+
+def test_get_random_topic_returns_none_when_no_topics(monkeypatch):
+    from app.features.topics import hub as topic_hub
+
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
+    result = topic_hub.get_random_topic()
+    assert result is None

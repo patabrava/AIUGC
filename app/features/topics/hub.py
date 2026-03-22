@@ -40,6 +40,20 @@ logger = get_logger(__name__)
 TOPIC_RUN_TASKS: Dict[str, asyncio.Task] = {}
 
 
+def get_random_topic() -> Optional[Dict[str, Any]]:
+    """Return the topic with the fewest scripts (least coverage)."""
+    topics = get_all_topics_from_registry()
+    if not topics:
+        return None
+    scored = []
+    for topic in topics:
+        scripts = get_topic_scripts_for_registry(topic["id"])
+        scored.append((len(scripts), topic))
+    scored.sort(key=lambda pair: pair[0])
+    count, topic = scored[0]
+    return {**topic, "script_count": count}
+
+
 def _wants_html(request) -> bool:
     hx_header = request.headers.get("HX-Request")
     if hx_header and hx_header.lower() == "true":
@@ -349,11 +363,13 @@ def _persist_topic_bank_row(
         script_bank={},
         seed_payloads={},
     )
+    topic_research_dossier_id = str(stored_row.get("topic_research_dossier_id") or stored_row.get("research_dossier_id") or "").strip() or None
     upsert_topic_script_variants(
         topic_registry_id=stored_row["id"],
         title=stored_row["title"],
         post_type=post_type,
         target_length_tier=target_length_tier,
+        topic_research_dossier_id=topic_research_dossier_id,
         variants=script_variants,
     )
     return stored_row
