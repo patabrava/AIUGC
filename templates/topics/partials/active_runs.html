@@ -1,27 +1,84 @@
-{# Compact active runs status — polls via HTMX when runs are active #}
+{# Live research progress — uses EventSource for real-time Gemini updates #}
 <div id="active-runs">
     {% if active_runs %}
     <div class="mt-5 space-y-3">
         <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Active Research</div>
         {% for run in active_runs %}
-        <div class="rounded-xl border border-amber-200 bg-amber-50 p-3"
-             hx-get="/topics/runs/{{ run.id }}?compact=1"
-             hx-trigger="every 6s"
-             hx-swap="outerHTML">
+        <div id="run-{{ run.id }}"
+             x-data="runProgress('{{ run.id }}', '{{ run.result_summary.topic_title if run.result_summary and run.result_summary.topic_title else 'Researching...' }}')"
+             x-init="connect()"
+             class="rounded-xl border p-4 transition-colors duration-300"
+             :class="status === 'completed' ? 'border-emerald-200 bg-emerald-50' : status === 'failed' ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'">
             <div class="flex items-center justify-between gap-3">
                 <div>
-                    <span class="text-sm font-semibold text-slate-900">
-                        {{ run.result_summary.topic_title if run.result_summary and run.result_summary.topic_title else 'Researching...' }}
-                    </span>
-                    <span class="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
-                        <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse"></span>
-                        Running
+                    <span class="text-sm font-semibold text-slate-900" x-text="topicTitle"></span>
+                    <span class="ml-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                          :class="status === 'completed' ? 'bg-emerald-200 text-emerald-900' : status === 'failed' ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'">
+                        <span x-show="status === 'running'" class="inline-block h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse"></span>
+                        <span x-text="stageLabel"></span>
                     </span>
                 </div>
                 <span class="text-xs text-slate-500">{{ run.created_at }}</span>
             </div>
+            <p class="mt-2 text-xs text-slate-600 leading-5 truncate" x-show="detailMessage" x-text="detailMessage" x-cloak></p>
         </div>
         {% endfor %}
     </div>
     {% endif %}
 </div>
+
+<script>
+function runProgress(runId, initialTitle) {
+    return {
+        topicTitle: initialTitle,
+        stageLabel: 'Running',
+        detailMessage: '',
+        status: 'running',
+        _source: null,
+
+        connect() {
+            this._source = new EventSource('/topics/runs/' + runId + '/stream');
+
+            this._source.onmessage = (e) => {
+                try {
+                    const event = JSON.parse(e.data);
+
+                    if (event.progress) {
+                        if (event.progress.stage_label) this.stageLabel = event.progress.stage_label;
+                        if (event.progress.detail_message) this.detailMessage = event.progress.detail_message;
+                    }
+
+                    if (event.delta && event.delta.type === 'thought_summary') {
+                        this.detailMessage = event.delta.content.text;
+                    }
+
+                    if (event.event_type === 'interaction.complete') {
+                        this.status = 'completed';
+                        this.stageLabel = 'Completed';
+                        this.detailMessage = '';
+                        this._source.close();
+                    }
+
+                    if (event.event_type === 'interaction.failed') {
+                        this.status = 'failed';
+                        this.stageLabel = 'Failed';
+                        this._source.close();
+                    }
+                } catch (err) {
+                    // Ignore malformed events
+                }
+            };
+
+            this._source.onerror = () => {
+                if (this.status === 'running') {
+                    this.detailMessage = 'Reconnecting...';
+                }
+            };
+        },
+
+        destroy() {
+            if (this._source) this._source.close();
+        }
+    };
+}
+</script>
