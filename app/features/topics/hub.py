@@ -596,8 +596,31 @@ async def launch_topic_research_run(
     from app.features.topics.handlers import start_seeding_interaction, update_seeding_progress
     start_seeding_interaction(batch_id=run_row["id"], brand=topic.get("title", ""), expected_posts=0)
 
-    def _run_progress_callback(**kwargs):
-        update_seeding_progress(run_row["id"], **kwargs)
+    def _run_progress_callback(*args, **kwargs):
+        """Handle both Gemini dict callbacks and pipeline kwargs callbacks."""
+        if args and isinstance(args[0], dict):
+            # Gemini LLM callback: progress_callback({"provider_status": ..., "detail_message": ...})
+            update = args[0]
+            provider_status = str(update.get("provider_status") or "").upper()
+            stage = "retry_wait" if update.get("is_retrying") else "researching"
+            stage_label = (
+                "Retrying Gemini research" if update.get("is_retrying")
+                else "Gemini deep research finished" if provider_status in {"DONE", "COMPLETED", "SUCCEEDED"}
+                else "Gemini deep research is running"
+            )
+            update_seeding_progress(
+                run_row["id"],
+                stage=stage,
+                stage_label=stage_label,
+                detail_message=update.get("detail_message") or "Gemini is researching...",
+                is_retrying=bool(update.get("is_retrying")),
+                retry_message=update.get("retry_message"),
+                provider_interaction_id=update.get("provider_interaction_id"),
+                provider_status=provider_status or None,
+            )
+        else:
+            # Pipeline stage callback: progress_callback(stage="researching", ...)
+            update_seeding_progress(run_row["id"], **kwargs)
 
     async def runner() -> None:
         try:
