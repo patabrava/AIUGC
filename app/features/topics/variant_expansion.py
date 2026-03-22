@@ -16,8 +16,10 @@ from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.prompts import build_prompt1_variant, build_prompt2, get_hook_bank
 from app.features.topics.queries import (
+    get_all_topics_from_registry,
     get_existing_variant_pairs,
     get_topic_research_dossiers,
+    get_topic_scripts_for_registry,
     upsert_topic_script_variants,
 )
 from app.features.topics.response_parsers import parse_prompt1_response, parse_prompt2_response
@@ -37,6 +39,8 @@ LIFESTYLE_HOOK_STYLES = [
 # Default config
 DEFAULT_MAX_SCRIPTS_PER_TOPIC = 20
 DEFAULT_MAX_SCRIPTS_PER_CRON_RUN = 30
+
+ALL_TIERS = [8, 16, 32]
 
 
 def pick_next_variant(
@@ -286,3 +290,72 @@ def expand_topic_variants(
         "total_existing": len(existing_rows) + generated,
         "details": details,
     }
+
+
+def expand_script_bank(
+    *,
+    max_scripts_per_cron_run: int = DEFAULT_MAX_SCRIPTS_PER_CRON_RUN,
+    target_length_tiers: List[int] | None = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Cron entry point: fill the script bank across all topics and tiers."""
+    tiers = target_length_tiers or ALL_TIERS
+    topics = get_all_topics_from_registry()
+
+    scored = []
+    for topic in topics:
+        scripts = get_topic_scripts_for_registry(topic["id"])
+        scored.append((len(scripts), topic))
+    scored.sort(key=lambda pair: pair[0])
+
+    total_generated = 0
+    topic_results = []
+
+    for script_count, topic in scored:
+        if total_generated >= max_scripts_per_cron_run:
+            break
+
+        post_type = topic.get("post_type") or "value"
+
+        for tier in tiers:
+            if total_generated >= max_scripts_per_cron_run:
+                break
+            remaining_budget = max_scripts_per_cron_run - total_generated
+
+            result = expand_topic_variants(
+                topic_registry_id=topic["id"],
+                title=topic.get("title") or "",
+                post_type=post_type,
+                target_length_tier=tier,
+                count=min(remaining_budget, 3),
+                dry_run=dry_run,
+            )
+
+            total_generated += result["generated"]
+            if result["generated"] > 0:
+                topic_results.append({
+                    "topic_id": topic["id"],
+                    "title": topic.get("title"),
+                    "tier": tier,
+                    "generated": result["generated"],
+                    "total": result["total_existing"],
+                })
+
+            logger.info(
+                "expand_script_bank_topic",
+                topic_id=topic["id"],
+                title=topic.get("title"),
+                tier=tier,
+                generated=result["generated"],
+                total=result["total_existing"],
+                dry_run=dry_run,
+            )
+
+    summary = {
+        "total_generated": total_generated,
+        "topics_processed": len(topic_results),
+        "topic_results": topic_results,
+        "dry_run": dry_run,
+    }
+    logger.info("expand_script_bank_complete", **summary)
+    return summary
