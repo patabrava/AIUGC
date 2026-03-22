@@ -9,18 +9,14 @@ def test_generate_dialog_scripts_variant_includes_constraints(monkeypatch):
     """The variant prompt includes forced framework and hook style."""
     captured_prompt = {}
 
-    def mock_generate(*, prompt, system_prompt=None, **kwargs):
+    def mock_generate(*, prompt, json_schema=None, system_prompt=None, **kwargs):
         captured_prompt["value"] = prompt
-        return (
-            "## Problem-Agitieren-Lösung Ads\n\n"
-            "kennst du das Gefühl, wenn alles zu viel wird? Hier ist die Lösung.\n\n"
-            "## Testimonial Ads\n\n"
-            "seit ich das ausprobiert habe, hat sich alles verändert.\n\n"
-            "## Transformations-Geschichten Ads\n\n"
-            "der Moment, als ich aufgehört habe zu zweifeln, war magisch.\n\n"
-            "## Beschreibung\n\n"
-            "Ein Test-Skript für Lifestyle-Inhalte.\n"
-        )
+        return {
+            "problem_agitate_solution": ["Test script."],
+            "testimonial": ["Test testimonial."],
+            "transformation": ["Test transformation."],
+            "description": "Ein ausfuehrliches Test-Skript fuer Lifestyle-Inhalte mit genug Zeichen.",
+        }
 
     mock_llm = MagicMock()
     mock_llm.generate_gemini_json = mock_generate
@@ -38,3 +34,4 @@ def test_generate_dialog_scripts_variant_includes_constraints(monkeypatch):
     assert "Testimonial" in captured_prompt["value"]
     assert "personal_story" in captured_prompt["value"]
     assert result is not None
+    assert len(result.problem_agitate_solution) >= 1

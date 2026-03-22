@@ -27,7 +27,7 @@ def test_expand_topic_variants_generates_and_stores(monkeypatch):
     )
 
     mock_llm = MagicMock()
-    mock_llm.generate_gemini_json.return_value = '[{"topic": "Test", "script": "Test script das ist ein guter Skript fuer dich.", "caption": "Cap"}]'
+    mock_llm.generate_gemini_json.return_value = [{"topic": "Test", "script": "Test script das ist ein guter Skript fuer dich.", "caption": "Cap"}]
     monkeypatch.setattr(
         "app.features.topics.variant_expansion.get_llm_client",
         lambda: mock_llm,

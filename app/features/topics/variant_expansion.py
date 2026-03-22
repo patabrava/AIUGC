@@ -8,6 +8,7 @@ missing, then picks the most diverse next combination.
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,7 +23,8 @@ from app.features.topics.queries import (
     get_topic_scripts_for_registry,
     upsert_topic_script_variants,
 )
-from app.features.topics.response_parsers import parse_prompt1_response, parse_prompt2_response
+from app.features.topics.response_parsers import parse_prompt1_response, _coerce_prompt2_payload
+from app.features.topics.schemas import DialogScripts
 
 logger = get_logger(__name__)
 
@@ -107,12 +109,27 @@ def generate_dialog_scripts_variant(
     constrained_prompt = base_prompt + constraint_block
 
     llm = get_llm_client()
-    raw_response = llm.generate_gemini_json(
+    response = llm.generate_gemini_json(
         prompt=constrained_prompt,
+        json_schema={
+            "type": "object",
+            "properties": {
+                "problem_agitate_solution": {"type": "array", "items": {"type": "string"}},
+                "testimonial": {"type": "array", "items": {"type": "string"}},
+                "transformation": {"type": "array", "items": {"type": "string"}},
+                "description": {"type": "string"},
+            },
+            "required": ["problem_agitate_solution", "description"],
+        },
         system_prompt="You are a German UGC script writer. Return valid JSON only.",
     )
-
-    return parse_prompt2_response(raw_response)
+    scripts = _coerce_prompt2_payload(response, scripts_required=1)
+    return DialogScripts(
+        problem_agitate_solution=scripts.problem_agitate_solution[:1],
+        testimonial=scripts.testimonial[:1],
+        transformation=scripts.transformation[:1],
+        description=scripts.description,
+    )
 
 
 def _get_hook_style_names() -> List[str]:
@@ -210,9 +227,23 @@ def expand_topic_variants(
                 llm = get_llm_client()
                 raw = llm.generate_gemini_json(
                     prompt=variant_prompt,
+                    json_schema={
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "script": {"type": "string"},
+                                "caption": {"type": "string"},
+                            },
+                            "required": ["title", "script", "caption"],
+                        },
+                        "minItems": 1,
+                        "maxItems": 1,
+                    },
                     system_prompt="You are the Flow Forge PROMPT_1 stage-3 script agent. Return only valid JSON. Keep all output fully in German.",
                 )
-                batch = parse_prompt1_response(raw)
+                batch = parse_prompt1_response(json.dumps(raw, ensure_ascii=False))
                 prompt1_item = batch.items[0] if batch.items else None
                 if not prompt1_item:
                     logger.warning("variant_expansion_parse_failed", framework=framework, hook_style=hook_style)
