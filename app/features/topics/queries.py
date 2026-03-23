@@ -622,3 +622,73 @@ def count_posts_by_batch_and_type(batch_id: str, post_type: str) -> int:
     response = supabase.client.table("posts").select("id", count="exact").eq("batch_id", batch_id).eq("post_type", post_type).execute()
     
     return response.count or 0
+
+
+# ── Cron Run Tracking ────────────────────────────────────────────
+
+def create_cron_run(
+    *,
+    topics_requested: int,
+    seed_source: str,
+) -> Dict[str, Any]:
+    """Create a new cron run record with status='running'."""
+    sb = get_supabase()
+    result = sb.client.table("topic_research_cron_runs").insert({
+        "topics_requested": topics_requested,
+        "seed_source": seed_source,
+        "status": "running",
+    }).execute()
+    return result.data[0]
+
+
+def update_cron_run(
+    run_id: str,
+    *,
+    status: str,
+    topics_completed: int = 0,
+    topics_failed: int = 0,
+    topic_ids: Optional[List[str]] = None,
+    error_message: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Update a cron run record on completion or failure."""
+    payload: Dict[str, Any] = {"status": status}
+    if status in ("completed", "failed"):
+        payload["completed_at"] = datetime.now(timezone.utc).isoformat()
+    payload["topics_completed"] = topics_completed
+    payload["topics_failed"] = topics_failed
+    if topic_ids is not None:
+        payload["topic_ids"] = topic_ids
+    if error_message is not None:
+        payload["error_message"] = error_message
+    if details is not None:
+        payload["details"] = details
+    sb = get_supabase()
+    result = sb.client.table("topic_research_cron_runs").update(
+        payload
+    ).eq("id", run_id).execute()
+    return result.data[0]
+
+
+def get_latest_cron_run(*, status: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Get the most recent cron run, optionally filtered by status."""
+    sb = get_supabase()
+    query = sb.client.table("topic_research_cron_runs").select("*").order(
+        "started_at", desc=True
+    ).limit(1)
+    if status:
+        query = query.eq("status", status)
+    result = query.execute()
+    return result.data[0] if result.data else None
+
+
+def get_cron_run_stats() -> Dict[str, Any]:
+    """Get aggregate stats across all cron runs."""
+    sb = get_supabase()
+    result = sb.client.table("topic_research_cron_runs").select(
+        "status,topics_completed"
+    ).execute()
+    rows = result.data or []
+    total_runs = len(rows)
+    total_topics = sum(r.get("topics_completed", 0) for r in rows)
+    return {"total_runs": total_runs, "total_topics_researched": total_topics}
