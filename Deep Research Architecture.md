@@ -437,9 +437,7 @@ The durable topic bank. One row per unique topic.
 | `script` | TEXT | Primary script text |
 | `post_type` | TEXT | value, lifestyle, product |
 | `use_count` | INT | Times used in batches |
-| `language` | TEXT | Default `de` |
 | `last_harvested_at` | TIMESTAMPTZ | Last research timestamp |
-| `target_length_tiers` | INTEGER[] | Supported tiers |
 
 ### `topic_research_runs`
 
@@ -616,20 +614,13 @@ Simplified seed without external sources. Uses a synthetic fact (`"Community-bas
 | Function | Purpose |
 |----------|---------|
 | `add_topic_to_registry()` | Insert or merge topic (handles unique constraint) |
-| `store_topic_bank_entry()` | Insert with full payloads (script_bank, seed_payloads, sources) |
+| `store_topic_bank_entry()` | Insert registry row + create research dossier |
 | `upsert_topic_script_variants()` | Insert script variants with dedup on (registry_id, tier, script) |
 | `create_topic_research_run()` | Track research execution |
 | `update_topic_research_run()` | Update status, result_summary, dossier_id |
 | `create_topic_research_dossier()` | Persist normalized dossier |
 | `get_topic_scripts_for_registry()` | Fetch scripts with optional tier filter |
 | `list_topic_suggestions()` | List topics with script excerpts for UI |
-
-### Merge Strategies
-
-When upserting, the queries layer handles conflicts:
-- **`_merge_script_bank()`** — Combines variant lists, deduplicates by script text
-- **`_merge_seed_payloads()`** — Merges tier-keyed payloads
-- **`_merge_unique_source_bank()`** — Deduplicates sources by (title, url)
 
 ---
 
