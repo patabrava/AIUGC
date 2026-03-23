@@ -39,3 +39,15 @@ services:
     depends_on:
       web:
         condition: service_healthy
+
+  topic-researcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "workers/topic_researcher.py"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy

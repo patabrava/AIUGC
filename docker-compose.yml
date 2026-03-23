@@ -36,6 +36,7 @@ x-flow-forge-env: &flow-forge-env
   TERMS_URL: ${TERMS_URL}
   TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
   CRON_SECRET: ${CRON_SECRET}
+  CRON_RESEARCH_NICHE: ${CRON_RESEARCH_NICHE:-Schwerbehinderung, Treppenlifte, Barrierefreiheit}
   DEBUG: ${DEBUG:-0}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -74,6 +75,17 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["python", "workers/video_poller.py"]
+    environment: *flow-forge-env
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+
+  topic-researcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "workers/topic_researcher.py"]
     environment: *flow-forge-env
     restart: unless-stopped
     depends_on:
