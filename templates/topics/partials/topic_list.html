@@ -1,9 +1,10 @@
 {# Swappable topic list — sorted by script_count ascending #}
 <div id="topic-list">
     {% for topic in topics %}
-    <a hx-get="/topics/select/{{ topic.id }}"
-       hx-target="#launch-panel"
+    <a hx-get="/topics/{{ topic.id }}/scripts-drawer"
+       hx-target="#scripts-drawer-container"
        hx-swap="innerHTML"
+       hx-indicator="#scripts-drawer-container"
        class="block rounded-2xl border border-slate-200 bg-white p-4 transition cursor-pointer hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
         <div class="flex items-center justify-between gap-4">
             <div>
