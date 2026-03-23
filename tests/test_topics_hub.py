@@ -722,3 +722,50 @@ def test_topic_run_stream_endpoint_returns_sse(monkeypatch):
     response = client.get("/topics/runs/run-1/stream")
     assert response.status_code == 200
     assert "text/event-stream" in response.headers.get("content-type", "")
+
+
+def test_scripts_drawer_endpoint_returns_grouped_scripts(monkeypatch):
+    """GET /topics/{id}/scripts-drawer should return drawer HTML with scripts grouped by tier."""
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(
+        topic_queries, "get_topic_registry_by_id",
+        lambda tid: {"id": "t1", "title": "Test Topic", "post_type": "value", "rotation": "r", "cta": "c"},
+    )
+    monkeypatch.setattr(
+        topic_queries, "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [
+            {"id": "s1", "script": "Script one text", "target_length_tier": 8, "source_urls": [{"title": "Src", "url": "https://example.com"}], "primary_source_url": None, "primary_source_title": None, "created_at": "2026-03-20", "use_count": 0},
+            {"id": "s2", "script": "Script two text", "target_length_tier": 16, "source_urls": [], "primary_source_url": "https://example.com/alt", "primary_source_title": "Alt Source", "created_at": "2026-03-21", "use_count": 0},
+        ],
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics/t1/scripts-drawer", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Test Topic" in response.text
+    assert "Script one text" in response.text
+    assert "Script two text" in response.text
+    assert "8s" in response.text
+    assert "16s" in response.text
+    assert "open-scripts-drawer" in response.headers.get("hx-trigger", "")
+
+
+def test_scripts_drawer_endpoint_empty_scripts(monkeypatch):
+    """GET /topics/{id}/scripts-drawer with no scripts should show empty state."""
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(
+        topic_queries, "get_topic_registry_by_id",
+        lambda tid: {"id": "t1", "title": "Empty Topic", "post_type": "value", "rotation": "r", "cta": "c"},
+    )
+    monkeypatch.setattr(
+        topic_queries, "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [],
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics/t1/scripts-drawer", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Empty Topic" in response.text
+    assert "No scripts generated yet" in response.text
