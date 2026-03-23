@@ -41,6 +41,7 @@ from app.features.topics.queries import (
     get_posts_by_batch,
     list_topic_suggestions,
     get_topic_registry_by_id,
+    get_topic_scripts_for_registry,
     store_topic_bank_entry,
     upsert_topic_script_variants,
 )
@@ -1228,6 +1229,48 @@ async def match_topic_endpoint(request: Request):
         "topics/partials/confirmation_card.html",
         {"request": request, "topic": {"title": query, "post_type": None, "script_count": 0, "is_new": True}},
     )
+
+
+@router.get("/{topic_id}/scripts-drawer")
+async def scripts_drawer_endpoint(request: Request, topic_id: str):
+    """Return drawer content with tier-grouped scripts for a topic."""
+    from app.features.topics.queries import get_topic_registry_by_id as _get_topic, get_topic_scripts_for_registry as _get_scripts
+
+    topic = _get_topic(topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    scripts = _get_scripts(topic_id)
+
+    # Group scripts by tier, sort by created_at descending within each
+    tier_groups = {}
+    for script in scripts:
+        tier = script.get("target_length_tier", 0)
+        tier_groups.setdefault(tier, []).append(script)
+    for tier_scripts in tier_groups.values():
+        tier_scripts.sort(key=lambda s: s.get("created_at", ""), reverse=True)
+
+    # Build ordered list of non-empty tier groups
+    grouped = []
+    for tier in [8, 16, 32]:
+        if tier in tier_groups:
+            grouped.append({"tier": tier, "scripts": tier_groups.pop(tier)})
+    # Include any scripts with unexpected tiers
+    for tier, tier_scripts in sorted(tier_groups.items()):
+        if tier_scripts:
+            grouped.append({"tier": tier, "scripts": tier_scripts})
+
+    templates = Jinja2Templates(directory="templates")
+    response = templates.TemplateResponse(
+        "topics/partials/scripts_drawer.html",
+        {
+            "request": request,
+            "topic": {**topic, "script_count": len(scripts)},
+            "grouped_scripts": grouped,
+            "total_scripts": len(scripts),
+        },
+    )
+    response.headers["HX-Trigger"] = "open-scripts-drawer"
+    return response
 
 
 @router.get("/select/{topic_id}")
