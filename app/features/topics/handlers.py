@@ -675,9 +675,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     post_type=post_type,
                     target_length_tier=target_length_tier,
                     research_payload={},
-                    source_bank=[],
-                    script_bank={},
-                    seed_payloads={},
                 )
 
                 variants = _build_script_variants(
@@ -1011,9 +1008,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 post_type="lifestyle",
                 target_length_tier=fallback_tier,
                 research_payload={},
-                source_bank=[],
-                script_bank={},
-                seed_payloads={},
             )
             variants = _build_script_variants(
                 topic_title=fallback_topic["title"],

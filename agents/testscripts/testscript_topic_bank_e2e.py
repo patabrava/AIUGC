@@ -72,7 +72,7 @@ async def main() -> int:
 
     suggestions = list_topic_suggestions(target_length_tier=16, limit=5, post_type="value")
     print("SUGGESTIONS_START")
-    print(_json([{"id": row["id"], "title": row["title"], "tiers": row.get("target_length_tiers")} for row in suggestions]))
+    print(_json([{"id": row["id"], "title": row["title"]} for row in suggestions]))
     print("SUGGESTIONS_END")
     if not suggestions:
         raise RuntimeError("Expected at least one stored 16-second value suggestion")
@@ -172,8 +172,7 @@ async def main() -> int:
         raise RuntimeError(f"Expected script-only registry storage, got: {_json(stored_row)}")
     if "rotation" in stored_row or "cta" in stored_row:
         raise RuntimeError(f"Expected rotation/cta to be removed from registry, got: {_json(stored_row)}")
-    if stored_row.get("script_bank") or stored_row.get("seed_payloads") or stored_row.get("research_payload"):
-        raise RuntimeError(f"Expected registry row to stay slim, got: {_json(stored_row)}")
+    # Legacy columns (script_bank, seed_payloads, research_payload) have been dropped from topic_registry.
 
     batch_brand = f"EYE topic bank 16s {datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     batch = create_batch(
@@ -217,8 +216,7 @@ async def main() -> int:
         raise RuntimeError(f"Expected a value post, got {post.get('post_type')}")
     if int(seed_data.get("target_length_tier") or 0) != 16:
         raise RuntimeError(f"Expected target_length_tier=16 in seed_data, got: {_json(seed_data)}")
-    if "script_bank" in seed_data:
-        raise RuntimeError(f"Expected lean seed_data without script_bank, got: {_json(seed_data)}")
+    # script_bank column has been dropped from topic_registry.
     if "dialog_script" not in seed_data or "strict_seed" not in seed_data:
         raise RuntimeError(f"Expected dialog_script and strict_seed in seed_data, got: {_json(seed_data)}")
     if post.get("topic_title") not in {row["title"] for row in suggestions}:

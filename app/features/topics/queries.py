@@ -28,17 +28,6 @@ def _extract_cta(script: str) -> str:
 def _normalize_registry_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(row or {})
     script = str(normalized.get("script") or normalized.get("rotation") or "").strip()
-    if not script:
-        script_bank = normalized.get("script_bank") or {}
-        if isinstance(script_bank, dict):
-            for tier_key in ("32", "16", "8"):
-                variants = script_bank.get(tier_key) or []
-                if variants:
-                    candidate = variants[0]
-                    if isinstance(candidate, dict):
-                        script = str(candidate.get("script") or "").strip()
-                        if script:
-                            break
     rotation = str(normalized.get("rotation") or "").strip()
     cta = str(normalized.get("cta") or "").strip()
     if script and (not rotation or not cta):
@@ -52,12 +41,6 @@ def _normalize_registry_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized["cta"] = cta or _extract_cta(normalized["script"])
     normalized["title"] = str(normalized.get("title") or "").strip()
     normalized["post_type"] = normalized.get("post_type")
-    normalized["target_length_tiers"] = list(normalized.get("target_length_tiers") or [])
-    normalized["script_bank"] = normalized.get("script_bank") or {}
-    normalized["seed_payloads"] = normalized.get("seed_payloads") or {}
-    normalized["source_bank"] = normalized.get("source_bank") or []
-    normalized["research_payload"] = normalized.get("research_payload") or {}
-    normalized["language"] = normalized.get("language") or "de"
     normalized["first_seen_at"] = normalized.get("first_seen_at") or normalized.get("created_at") or normalized.get("last_harvested_at")
     normalized["last_used_at"] = normalized.get("last_used_at") or normalized.get("updated_at") or normalized.get("last_harvested_at")
     return normalized
@@ -108,51 +91,6 @@ def _normalize_dossier_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _merge_unique_source_bank(*banks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    merged: List[Dict[str, Any]] = []
-    seen = set()
-    for bank in banks:
-        for item in list(bank or []):
-            if not isinstance(item, dict):
-                continue
-            url = str(item.get("url") or "").strip()
-            title = str(item.get("title") or "").strip()
-            if not url:
-                continue
-            key = (title, url)
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append({"title": title, "url": url})
-    return merged
-
-
-def _merge_script_bank(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
-    merged: Dict[str, Any] = {}
-    tier_keys = set((existing or {}).keys()) | set((incoming or {}).keys())
-    for tier_key in tier_keys:
-        variants: List[Dict[str, Any]] = []
-        seen_scripts = set()
-        for bank in (existing or {}, incoming or {}):
-            for variant in list(bank.get(tier_key) or []):
-                if not isinstance(variant, dict):
-                    continue
-                script = str(variant.get("script") or "").strip()
-                if not script or script in seen_scripts:
-                    continue
-                seen_scripts.add(script)
-                variants.append(variant)
-        if variants:
-            merged[str(tier_key)] = variants
-    return merged
-
-
-def _merge_seed_payloads(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(existing or {})
-    for tier_key, payload in (incoming or {}).items():
-        merged[str(tier_key)] = payload
-    return merged
-
 
 def get_all_topics_from_registry() -> List[Dict[str, Any]]:
     """Get all topics from the registry for deduplication and hub browsing."""
@@ -184,12 +122,6 @@ def add_topic_to_registry(
     *,
     script: Optional[str] = None,
     post_type: Optional[str] = None,
-    research_payload: Optional[Dict[str, Any]] = None,
-    source_bank: Optional[List[Dict[str, Any]]] = None,
-    script_bank: Optional[Dict[str, Any]] = None,
-    seed_payloads: Optional[Dict[str, Any]] = None,
-    target_length_tiers: Optional[List[int]] = None,
-    language: str = "de",
     last_harvested_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Add or update a slim topic registry entry."""
@@ -256,19 +188,7 @@ def _registry_row_to_topic_suggestion(row: Dict[str, Any]) -> Dict[str, Any]:
         "spoken_duration": normalized.get("spoken_duration")
         or max(1, int(round(max(len(script.split()), 1) / 2.6))),
         "post_type": normalized.get("post_type"),
-        "target_length_tiers": normalized.get("target_length_tiers") or [],
-        "script_bank": normalized.get("script_bank") or {},
-        "source_bank": normalized.get("source_bank") or [],
-        "seed_payloads": normalized.get("seed_payloads") or {},
-        "research_payload": normalized.get("research_payload") or {},
-        "source_urls": [
-            {
-                "title": source.get("title"),
-                "url": source.get("url"),
-            }
-            for source in list(normalized.get("source_bank") or [])
-            if isinstance(source, dict) and source.get("url")
-        ],
+        "source_urls": [],
         "last_harvested_at": normalized.get("last_harvested_at"),
         "created_at": normalized.get("created_at"),
         "updated_at": normalized.get("updated_at"),
@@ -286,18 +206,8 @@ def _hydrate_script_suggestion(
     hydrated["title"] = str(hydrated.get("title") or registry.get("title") or "").strip()
     hydrated["rotation"] = registry.get("rotation") or hydrated.get("script") or ""
     hydrated["cta"] = registry.get("cta") or _extract_cta(str(hydrated.get("script") or ""))
-    hydrated["target_length_tiers"] = registry.get("target_length_tiers") or [hydrated.get("target_length_tier")]
-    hydrated["script_bank"] = registry.get("script_bank") or {}
-    hydrated["source_bank"] = registry.get("source_bank") or []
-    hydrated["seed_payloads"] = registry.get("seed_payloads") or {}
-    hydrated["research_payload"] = registry.get("research_payload") or {}
-    hydrated["source_urls"] = hydrated.get("source_urls") or [
-        {"title": item.get("title"), "url": item.get("url")}
-        for item in list(hydrated.get("source_bank") or [])
-        if isinstance(item, dict) and item.get("url")
-    ]
-    tier_key = str(hydrated.get("target_length_tier") or "")
-    hydrated["seed_payload"] = hydrated.get("seed_payload") or (hydrated["seed_payloads"].get(tier_key) if tier_key else None)
+    hydrated["source_urls"] = hydrated.get("source_urls") or []
+    hydrated["seed_payload"] = hydrated.get("seed_payload") or {}
     hydrated["spoken_duration"] = hydrated.get("estimated_duration_s") or max(
         1, int(round(max(len(str(hydrated.get("script") or "").split()), 1) / 2.6))
     )
@@ -450,10 +360,6 @@ def list_topic_suggestions(
     for row in registry_rows:
         if post_type and row.get("post_type") and row.get("post_type") != post_type:
             continue
-        if target_length_tier is not None:
-            tiers = set(int(tier) for tier in row.get("target_length_tiers") or [])
-            if tiers and target_length_tier not in tiers:
-                continue
         suggestions.append(_registry_row_to_topic_suggestion(row))
     suggestions.sort(
         key=lambda row: (
@@ -579,9 +485,6 @@ def store_topic_bank_entry(
     post_type: str,
     target_length_tier: int,
     research_payload: Dict[str, Any],
-    source_bank: List[Dict[str, Any]],
-    script_bank: Dict[str, Any],
-    seed_payloads: Dict[str, Any],
     language: str = "de",
     topic_research_run_id: Optional[str] = None,
     topic_research_dossier_id: Optional[str] = None,
@@ -592,7 +495,6 @@ def store_topic_bank_entry(
         title=title,
         script=topic_script,
         post_type=post_type,
-        language=language,
     )
     dossier = create_topic_research_dossier(
         topic_research_run_id=topic_research_run_id,

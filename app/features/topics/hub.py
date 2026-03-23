@@ -158,7 +158,6 @@ def _topic_search_match(topic: Dict[str, Any], search: str) -> bool:
             "rotation",
             "cta",
             "post_type",
-            "language",
         )
     ).lower()
     return search.lower() in haystack
@@ -167,10 +166,7 @@ def _topic_search_match(topic: Dict[str, Any], search: str) -> bool:
 def _topic_has_tier(topic: Dict[str, Any], target_length_tier: Optional[int]) -> bool:
     if target_length_tier is None:
         return True
-    if get_topic_scripts_for_registry(topic["id"], target_length_tier):
-        return True
-    tiers = {int(tier) for tier in topic.get("target_length_tiers") or [] if str(tier).strip().isdigit()}
-    return target_length_tier in tiers if tiers else False
+    return bool(get_topic_scripts_for_registry(topic["id"], target_length_tier))
 
 
 def _topic_to_detail(topic: Dict[str, Any]) -> Dict[str, Any]:
@@ -386,14 +382,6 @@ def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[s
     }
 
 
-def _source_bank_from_dossier(research_dossier: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return [
-        {"title": source.get("title"), "url": source.get("url")}
-        for source in list(research_dossier.get("sources") or [])
-        if isinstance(source, dict) and source.get("url")
-    ]
-
-
 def _persist_topic_bank_row(
     *,
     title: str,
@@ -413,16 +401,12 @@ def _persist_topic_bank_row(
         dialog_scripts=dialog_scripts,
         seed_payload=seed_payload,
     )
-    source_bank = _source_bank_from_dossier(research_dossier)
     stored_row = store_topic_bank_entry(
         title=title,
         topic_script=prompt1_item.script,
         post_type=post_type,
         target_length_tier=target_length_tier,
         research_payload=research_dossier,
-        source_bank=source_bank,
-        script_bank={},
-        seed_payloads={},
     )
     topic_research_dossier_id = str(stored_row.get("topic_research_dossier_id") or stored_row.get("research_dossier_id") or "").strip() or None
     upsert_topic_script_variants(
