@@ -1506,6 +1506,50 @@ async def cron_topic_discovery(
         )
 
 
+# ── Cron Status ─────────────────────────────────────────────────
+
+
+@router.get("/cron-status", response_model=SuccessResponse)
+async def cron_status():
+    """
+    Health/status endpoint for the automated topic discovery cron.
+    Returns the latest run info and aggregate stats.
+    """
+    from app.features.topics.queries import get_latest_cron_run, get_cron_run_stats
+
+    latest = get_latest_cron_run()
+    stats = get_cron_run_stats()
+
+    last_run = None
+    next_expected = None
+    if latest:
+        last_run = {
+            "id": latest.get("id"),
+            "started_at": latest.get("started_at"),
+            "completed_at": latest.get("completed_at"),
+            "status": latest.get("status"),
+            "topics_completed": latest.get("topics_completed", 0),
+            "topics_failed": latest.get("topics_failed", 0),
+            "seed_source": latest.get("seed_source"),
+        }
+        if latest.get("completed_at"):
+            try:
+                from dateutil.parser import isoparse
+                from datetime import timedelta
+                completed = isoparse(latest["completed_at"])
+                next_expected = (completed + timedelta(hours=24)).isoformat()
+            except (ValueError, TypeError):
+                pass
+
+    return SuccessResponse(
+        data={
+            "last_run": last_run,
+            "next_expected_run": next_expected,
+            **stats,
+        }
+    )
+
+
 # ── Expand Variants ─────────────────────────────────────────────
 
 
