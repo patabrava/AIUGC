@@ -66,3 +66,92 @@ def test_needs_extension_hop_returns_false_for_short_route():
 def test_needs_extension_hop_returns_false_for_missing_metadata():
     assert _needs_extension_hop({}) is False
     assert _needs_extension_hop(None) is False
+
+
+def test_submit_extension_hop_advances_segment_and_submits():
+    """Extension hop must advance segment index and submit next VEO generation."""
+    from workers.video_poller import _submit_extension_hop
+
+    post = {
+        "id": "post-123",
+        "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 2,
+            "veo_extension_hops_completed": 0,
+            "veo_segments": ["Erster Satz.", "Zweiter Satz.", "Dritter Satz."],
+            "veo_segments_total": 3,
+            "veo_current_segment_index": 0,
+            "operation_ids": ["op-base"],
+            "chain_status": "submitted",
+            "generated_seconds": 4,
+            "veo_base_seconds": 4,
+            "veo_extension_seconds": 7,
+            "requested_aspect_ratio": "9:16",
+            "requested_resolution": "720p",
+        },
+    }
+
+    mock_veo = MagicMock()
+    mock_veo.submit_video_generation.return_value = {
+        "operation_id": "op-ext-1",
+        "status": "submitted",
+    }
+
+    mock_supabase = MagicMock()
+    mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase):
+        _submit_extension_hop(post, correlation_id="test-corr")
+
+    mock_veo.submit_video_generation.assert_called_once()
+    call_kwargs = mock_veo.submit_video_generation.call_args[1]
+    assert "Zweiter Satz." in call_kwargs["prompt"]
+
+    update_call = mock_supabase.client.table.return_value.update
+    assert update_call.called
+    update_data = update_call.call_args[0][0]
+    assert update_data["video_operation_id"] == "op-ext-1"
+    meta = update_data["video_metadata"]
+    assert meta["veo_extension_hops_completed"] == 1
+    assert meta["veo_current_segment_index"] == 1
+    assert "op-ext-1" in meta["operation_ids"]
+    assert meta["chain_status"] == "extending"
+
+
+def test_submit_extension_hop_reuses_last_segment_when_fewer_segments_than_hops():
+    """If segments list is shorter than hops, reuse the last segment."""
+    from workers.video_poller import _submit_extension_hop
+
+    post = {
+        "id": "post-short-segs",
+        "seed_data": {"script": "Nur ein Satz."},
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 4,
+            "veo_extension_hops_completed": 0,
+            "veo_segments": ["Nur ein Satz."],
+            "veo_segments_total": 1,
+            "veo_current_segment_index": 0,
+            "operation_ids": ["op-base"],
+            "chain_status": "submitted",
+            "generated_seconds": 4,
+            "veo_base_seconds": 4,
+            "veo_extension_seconds": 7,
+            "requested_aspect_ratio": "9:16",
+            "requested_resolution": "720p",
+        },
+    }
+
+    mock_veo = MagicMock()
+    mock_veo.submit_video_generation.return_value = {"operation_id": "op-ext-1", "status": "submitted"}
+    mock_supabase = MagicMock()
+    mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase):
+        _submit_extension_hop(post, correlation_id="test-corr")
+
+    call_kwargs = mock_veo.submit_video_generation.call_args[1]
+    assert "Nur ein Satz." in call_kwargs["prompt"]

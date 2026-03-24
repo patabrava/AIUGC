@@ -478,6 +478,75 @@ def _needs_extension_hop(metadata: Optional[Dict[str, Any]]) -> bool:
     return completed < target
 
 
+def _submit_extension_hop(post: Dict[str, Any], *, correlation_id: str) -> None:
+    """Submit the next VEO extension hop for an in-progress chain."""
+    post_id = post["id"]
+    metadata = dict(post.get("video_metadata") or {})
+
+    hops_completed = metadata.get("veo_extension_hops_completed", 0)
+    current_segment_idx = metadata.get("veo_current_segment_index", 0)
+    segments = metadata.get("veo_segments") or []
+    next_segment_idx = current_segment_idx + 1
+
+    if next_segment_idx < len(segments):
+        segment_text = segments[next_segment_idx]
+    elif segments:
+        segment_text = segments[-1]
+    else:
+        segment_text = ""
+
+    is_final_hop = (hops_completed + 1) >= metadata.get("veo_extension_hops_target", 0)
+
+    from app.features.posts.prompt_builder import build_veo_prompt_segment
+    prompt = build_veo_prompt_segment(
+        segment_text,
+        include_quotes=False,
+        include_ending=is_final_hop,
+    )
+
+    veo_client = get_veo_client()
+    result = veo_client.submit_video_generation(
+        prompt=prompt,
+        negative_prompt=None,
+        correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
+        aspect_ratio=metadata.get("requested_aspect_ratio", "9:16"),
+        resolution=metadata.get("requested_resolution", "720p"),
+    )
+
+    new_operation_id = result["operation_id"]
+    operation_ids = list(metadata.get("operation_ids") or [])
+    operation_ids.append(new_operation_id)
+
+    extension_seconds = metadata.get("veo_extension_seconds", 7)
+    generated_seconds = metadata.get("generated_seconds", 0) + extension_seconds
+
+    metadata.update({
+        "veo_extension_hops_completed": hops_completed + 1,
+        "veo_current_segment_index": next_segment_idx,
+        "operation_ids": operation_ids,
+        "chain_status": "extending",
+        "generated_seconds": generated_seconds,
+    })
+
+    supabase = get_supabase().client
+    supabase.table("posts").update({
+        "video_operation_id": new_operation_id,
+        "video_status": "extended_submitted",
+        "video_metadata": metadata,
+    }).eq("id", post_id).execute()
+
+    logger.info(
+        "extension_hop_submitted",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        hop_number=hops_completed + 1,
+        hops_target=metadata.get("veo_extension_hops_target"),
+        operation_id=new_operation_id,
+        segment_index=next_segment_idx,
+        is_final_hop=is_final_hop,
+    )
+
+
 def _check_and_transition_batch_to_qa(post_id: str, correlation_id: str) -> None:
     """
     Check if all videos in batch are complete and transition to S6_QA.
