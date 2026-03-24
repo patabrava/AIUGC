@@ -66,41 +66,48 @@ def _render_caption_frame(
     video_width: int,
     video_height: int,
     font_size: int,
+    word_index_global: int = 0,
 ) -> Image.Image:
-    """Render a single caption frame as a transparent PNG with word highlight."""
+    """Render a single Hormozi-style caption frame.
+
+    One word at a time, ALL CAPS, centered on screen, with yellow/white
+    color cycling and thick black outline.
+    """
     img = Image.new("RGBA", (video_width, video_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     font = _get_font(font_size)
 
-    # Build word segments with colors
-    word_texts = [w.word for w in words]
+    # Hormozi style: show only the active word, ALL CAPS
+    word_text = words[highlight_index].word.upper()
 
-    # Measure total width to center
-    space_width = draw.textlength(" ", font=font)
-    word_widths = [draw.textlength(w, font=font) for w in word_texts]
-    total_width = sum(word_widths) + space_width * (len(word_texts) - 1)
+    # Color cycling: alternate white and yellow based on global word index
+    # Every other word gets yellow for visual rhythm
+    if word_index_global % 2 == 1:
+        fill = (255, 215, 0, 255)  # Yellow #FFD700
+    else:
+        fill = (255, 255, 255, 255)  # White
 
-    # Position: centered horizontally, lower third vertically
-    x_start = (video_width - total_width) / 2
-    y_pos = int(video_height * 0.72)
+    # Measure text to center it
+    bbox = draw.textbbox((0, 0), word_text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
 
-    x = x_start
-    for i, word_text in enumerate(word_texts):
-        if i == highlight_index:
-            fill = (255, 255, 255, 255)  # Bright white for active word
-        else:
-            fill = (180, 180, 180, 200)  # Dimmer for inactive
+    # Position: dead center of screen (Hormozi signature)
+    x = (video_width - text_width) / 2
+    y = (video_height - text_height) / 2 - text_height * 0.1  # Slightly above center
 
-        # Draw outline (black border for readability)
-        outline_range = 3
-        for dx in range(-outline_range, outline_range + 1):
-            for dy in range(-outline_range, outline_range + 1):
-                if dx != 0 or dy != 0:
-                    draw.text((x + dx, y_pos + dy), word_text, font=font, fill=(0, 0, 0, 200))
+    # Thick black outline (4px stroke for Hormozi readability)
+    outline_range = 4
+    for dx in range(-outline_range, outline_range + 1):
+        for dy in range(-outline_range, outline_range + 1):
+            if dx * dx + dy * dy <= outline_range * outline_range:
+                draw.text((x + dx, y + dy), word_text, font=font, fill=(0, 0, 0, 255))
 
-        # Draw text
-        draw.text((x, y_pos), word_text, font=font, fill=fill)
-        x += word_widths[i] + space_width
+    # Drop shadow
+    draw.text((x + 3, y + 3), word_text, font=font, fill=(0, 0, 0, 180))
+
+    # Draw main text
+    draw.text((x, y), word_text, font=font, fill=fill)
 
     return img
 
@@ -186,10 +193,7 @@ def burn_captions(
     if video_width == 0 or video_height == 0:
         video_width, video_height = _get_video_dimensions(video_path)
 
-    fps = _get_video_fps(video_path)
-    font_size = max(int(video_width * 0.065), 48)
-
-    phrases = group_words_into_phrases(transcript.words, max_words=4)
+    font_size = max(int(video_width * 0.1), 72)  # Hormozi: large text
 
     # Create temp directory for overlay frames
     frames_dir = tempfile.mkdtemp(prefix="caption_frames_")
@@ -197,26 +201,29 @@ def burn_captions(
     os.close(output_fd)
 
     try:
-        # Build a timeline of (start_sec, end_sec, frame_path) for each word highlight
+        # Hormozi style: one word at a time, each as its own frame
         segments = []
-        for phrase in phrases:
-            words = phrase["words"]
-            phrase_end = phrase["end"]
-            for idx, word in enumerate(words):
-                word_start = word.start
-                word_end = word.end if idx < len(words) - 1 else phrase_end
+        all_words = transcript.words
+        for global_idx, word in enumerate(all_words):
+            word_start = word.start
+            # End time: use next word's start if available, else this word's end
+            if global_idx < len(all_words) - 1:
+                word_end = all_words[global_idx + 1].start
+            else:
+                word_end = word.end
 
-                frame_img = _render_caption_frame(
-                    text=phrase["text"],
-                    highlight_index=idx,
-                    words=words,
-                    video_width=video_width,
-                    video_height=video_height,
-                    font_size=font_size,
-                )
-                frame_path = os.path.join(frames_dir, f"frame_{len(segments):04d}.png")
-                frame_img.save(frame_path)
-                segments.append((word_start, word_end, frame_path))
+            frame_img = _render_caption_frame(
+                text=word.word,
+                highlight_index=0,
+                words=[word],
+                video_width=video_width,
+                video_height=video_height,
+                font_size=font_size,
+                word_index_global=global_idx,
+            )
+            frame_path = os.path.join(frames_dir, f"frame_{global_idx:04d}.png")
+            frame_img.save(frame_path)
+            segments.append((word_start, word_end, frame_path))
 
         if not segments:
             # No segments to overlay — just copy
