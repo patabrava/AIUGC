@@ -5,9 +5,9 @@ from unittest.mock import patch, MagicMock
 from app.adapters.deepgram_client import Word, WordLevelTranscript
 from app.adapters.caption_renderer import (
     group_words_into_phrases,
-    generate_ass_content,
     burn_captions,
     CaptionRendererError,
+    _render_caption_frame,
 )
 
 
@@ -41,27 +41,33 @@ class TestPhraseGrouping:
         assert phrases[0]["text"] == "Hallo"
 
 
-class TestASSGeneration:
-    def test_generates_valid_ass(self):
+class TestCaptionFrameRendering:
+    def test_render_produces_rgba_image(self):
         words = [Word("Hallo", 0.0, 0.5), Word("Welt", 0.6, 1.0)]
-        transcript = WordLevelTranscript(words=words, full_text="Hallo Welt")
-        content = generate_ass_content(transcript, video_width=1080, video_height=1920)
-        assert "[Script Info]" in content
-        assert "[V4+ Styles]" in content
-        assert "[Events]" in content
-        assert "Hallo" in content
-        assert "Welt" in content
+        img = _render_caption_frame(
+            text="Hallo Welt",
+            highlight_index=0,
+            words=words,
+            video_width=1080,
+            video_height=1920,
+            font_size=70,
+        )
+        assert img.mode == "RGBA"
+        assert img.size == (1080, 1920)
 
-    def test_empty_transcript_returns_empty_ass(self):
-        transcript = WordLevelTranscript(words=[], full_text="")
-        content = generate_ass_content(transcript, video_width=1080, video_height=1920)
-        assert "[Script Info]" in content
-        assert "Dialogue:" not in content
+    def test_render_different_highlights(self):
+        words = [Word("A", 0.0, 0.3), Word("B", 0.4, 0.6)]
+        img0 = _render_caption_frame("A B", 0, words, 1080, 1920, 70)
+        img1 = _render_caption_frame("A B", 1, words, 1080, 1920, 70)
+        # Different highlight index should produce different images
+        assert img0.tobytes() != img1.tobytes()
 
 
 class TestBurnCaptions:
     @patch("app.adapters.caption_renderer.subprocess.run")
-    def test_burn_success(self, mock_run):
+    @patch("app.adapters.caption_renderer._get_video_fps", return_value=30.0)
+    @patch("app.adapters.caption_renderer._get_video_dimensions", return_value=(1080, 1920))
+    def test_burn_success(self, mock_dims, mock_fps, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         transcript = WordLevelTranscript(words=[Word("Test", 0.0, 0.5)], full_text="Test")
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
@@ -72,14 +78,16 @@ class TestBurnCaptions:
             assert mock_run.called
             cmd = mock_run.call_args[0][0]
             assert "ffmpeg" in cmd[0]
-            assert "-vf" in cmd
+            assert "-filter_complex" in cmd
         finally:
             os.unlink(input_path)
             if output_path and os.path.exists(output_path):
                 os.unlink(output_path)
 
     @patch("app.adapters.caption_renderer.subprocess.run")
-    def test_burn_ffmpeg_failure_raises(self, mock_run):
+    @patch("app.adapters.caption_renderer._get_video_fps", return_value=30.0)
+    @patch("app.adapters.caption_renderer._get_video_dimensions", return_value=(1080, 1920))
+    def test_burn_ffmpeg_failure_raises(self, mock_dims, mock_fps, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="codec error")
         transcript = WordLevelTranscript(words=[Word("Test", 0.0, 0.5)], full_text="Test")
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
