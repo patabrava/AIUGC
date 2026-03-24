@@ -70,3 +70,6 @@ agents/Deep Research Flow Test Final.md
 
 # Generated prompt scratchpads (local)
 app/features/topics/prompt_data/prompt1_batch.txt
+
+# Worktrees
+.worktrees/
