@@ -44,11 +44,12 @@ def group_words_into_phrases(words: list[Word], *, max_words: int = 4) -> list[d
 
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
-    """Get a bold font, falling back gracefully."""
+    """Get a heavy impact-style font (TikTok/Hormozi look)."""
     font_paths = [
-        "/System/Library/Fonts/Helvetica.ttc",  # macOS
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
-        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",  # Arch Linux
+        "/System/Library/Fonts/Supplemental/Impact.ttf",  # macOS — classic TikTok font
+        "/System/Library/Fonts/Supplemental/Arial Black.ttf",  # macOS fallback
+        "/usr/share/fonts/truetype/msttcorefonts/Impact.ttf",  # Linux
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux fallback
     ]
     for path in font_paths:
         if os.path.exists(path):
@@ -92,9 +93,10 @@ def _render_caption_frame(
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
 
-    # Position: dead center of screen (Hormozi signature)
+    # Position: lower third (75% down), standard TikTok caption zone
+    # Above the TikTok UI buttons but clearly in the subtitle area
     x = (video_width - text_width) / 2
-    y = (video_height - text_height) / 2 - text_height * 0.1  # Slightly above center
+    y = int(video_height * 0.75) - text_height / 2
 
     # Thick black outline (4px stroke for Hormozi readability)
     outline_range = 4
