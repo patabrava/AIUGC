@@ -217,7 +217,7 @@ def build_veo_prompt_segment(dialogue: str, *, include_quotes: bool = False, inc
     cleaned_dialogue = dialogue.strip()
     prompt_dialogue = f"\"{cleaned_dialogue}\"" if include_quotes else cleaned_dialogue
     ending = ENDING_HOLD_DIRECTIVE if include_ending else "Do not end the speech yet; continue into the next segment with no pause."
-    template = OPTIMIZED_PROMPT_TEMPLATE if include_quotes else OPTIMIZED_PROMPT_TEMPLATE
+    template = OPTIMIZED_PROMPT_TEMPLATE
     return template.format(
         dialogue=prompt_dialogue,
         ending=ending,

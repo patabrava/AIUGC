@@ -233,3 +233,31 @@ def test_handle_veo_video_completes_when_all_hops_done():
         _handle_veo_video(post, "op-ext-2", "corr-final")
 
     mock_store.assert_called_once()
+
+
+def test_full_32s_chain_lifecycle():
+    """Simulate a complete 32s chain: base + 4 extension hops."""
+    from workers.video_poller import _needs_extension_hop
+
+    metadata = {
+        "video_pipeline_route": "veo_extended",
+        "veo_extension_hops_target": 4,
+        "veo_extension_hops_completed": 0,
+        "generated_seconds": 4,
+        "veo_base_seconds": 4,
+        "veo_extension_seconds": 7,
+    }
+
+    assert _needs_extension_hop(metadata) is True
+
+    for hop in range(1, 5):
+        metadata["veo_extension_hops_completed"] = hop
+        metadata["generated_seconds"] = 4 + (hop * 7)
+
+        if hop < 4:
+            assert _needs_extension_hop(metadata) is True, f"Hop {hop} should still need more"
+        else:
+            assert _needs_extension_hop(metadata) is False, f"Hop {hop} should be done"
+
+    assert metadata["generated_seconds"] == 32
+    assert metadata["veo_extension_hops_completed"] == 4
