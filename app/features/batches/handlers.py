@@ -6,6 +6,7 @@ Per Constitution § V: Locality & Vertical Slices
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -60,6 +61,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 templates = Jinja2Templates(directory="templates")
+DETAIL_JS_VERSION = str(Path("static/js/batches/detail.js").stat().st_mtime_ns)
 
 
 def _wants_html(request: Request) -> bool:
@@ -544,6 +546,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                 "request": request,
                 "batch": batch_payload,
                 "batch_view": _build_batch_detail_view(batch_payload),
+                "static_version": DETAIL_JS_VERSION,
             }
             return templates.TemplateResponse("batches/detail.html", context)
 
