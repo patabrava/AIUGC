@@ -94,7 +94,7 @@ def poll_pending_videos():
         
         # Fetch posts awaiting video completion
         response = supabase.table("posts").select("*").in_(
-            "video_status", ["submitted", "processing"]
+            "video_status", list(get_pollable_video_statuses())
         ).execute()
         
         posts = response.data
