@@ -25,5 +25,5 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="{{ url_for('static', path='js/batches/detail.js') }}?v={{ static_version }}"></script>
+<script src="/static/js/batches/detail.js?v={{ static_version }}"></script>
 {% endblock %}
