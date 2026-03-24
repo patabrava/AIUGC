@@ -219,7 +219,11 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
         # Check if this is an extended pipeline that needs more hops
         metadata = post.get("video_metadata") or {}
         if _needs_extension_hop(metadata):
-            _submit_extension_hop(post, correlation_id=correlation_id)
+            _submit_extension_hop(
+                post,
+                correlation_id=correlation_id,
+                previous_video_data=video_data,
+            )
             return
 
         video_uri = video_data["video_uri"]
@@ -484,8 +488,18 @@ def _needs_extension_hop(metadata: Optional[Dict[str, Any]]) -> bool:
     return completed < target
 
 
-def _submit_extension_hop(post: Dict[str, Any], *, correlation_id: str) -> None:
-    """Submit the next VEO extension hop for an in-progress chain."""
+def _submit_extension_hop(
+    post: Dict[str, Any],
+    *,
+    correlation_id: str,
+    previous_video_data: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Submit the next VEO extension hop for an in-progress chain.
+
+    Per the Veo 3.1 API, extending a video requires sending the previous
+    video's bytes back in the request payload (``video.inlineData``).  The
+    API returns a single combined video (original + extension).
+    """
     post_id = post["id"]
     metadata = dict(post.get("video_metadata") or {})
 
@@ -511,9 +525,31 @@ def _submit_extension_hop(post: Dict[str, Any], *, correlation_id: str) -> None:
     )
 
     veo_client = get_veo_client()
-    result = veo_client.submit_video_generation(
+
+    # Download the just-completed video so we can send it back for extension
+    video_uri = (previous_video_data or {}).get("video_uri")
+    if not video_uri:
+        raise ValueError(
+            f"Cannot extend video for post {post_id}: previous video_data "
+            f"missing video_uri"
+        )
+
+    video_bytes = veo_client.download_video(
+        video_uri=video_uri,
+        correlation_id=f"{correlation_id}_ext_{hops_completed + 1}_download",
+    )
+
+    logger.info(
+        "extension_hop_video_downloaded",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        hop_number=hops_completed + 1,
+        video_size_bytes=len(video_bytes),
+    )
+
+    result = veo_client.submit_video_extension(
         prompt=prompt,
-        negative_prompt=None,
+        video_bytes=video_bytes,
         correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
         aspect_ratio=metadata.get("requested_aspect_ratio", "9:16"),
         resolution=metadata.get("requested_resolution", "720p"),
