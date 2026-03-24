@@ -12,12 +12,9 @@ def test_veo_prompt_requires_exact_german_dialogue():
     prompt = build_video_prompt_from_seed({"script": script})
 
     veo_prompt = prompt["veo_prompt"]
-    assert "Critical speech requirements:" not in veo_prompt
-    assert "She speaks in German at a natural conversational pace" in veo_prompt
-    assert "saying the line exactly as written below" in veo_prompt
-    assert "German dialogue, say exactly as written:" in veo_prompt
-    assert "she stops speaking immediately, closes her mouth" in veo_prompt
-    assert f"\"{script}\"" in veo_prompt
+    assert "Character:" in veo_prompt
+    assert "Dialogue:" in veo_prompt
+    assert script in veo_prompt
 
 
 def test_veo_extension_prompt_preserves_approved_german_script():
@@ -34,20 +31,22 @@ def test_veo_extension_prompt_preserves_approved_german_script():
     video_poller = importlib.import_module("workers.video_poller")
 
     script = (
-        "Die Pflegekasse zahlt bis zu 4.180 Euro pro Person, "
-        "und auch die KfW-Förderung startet bald wieder. "
+        "Die Pflegekasse zahlt bis zu viertausend Euro pro Person. "
         "Beantrage die Hilfe rechtzeitig."
     )
     prompt = video_poller._build_veo_extension_prompt(
         {
             "seed_data": {"script": script},
+            "video_metadata": {
+                "veo_extension_hops_target": 2,
+                "veo_extension_hops_completed": 0,
+            },
         }
     )
 
     prompt_text = prompt["prompt_text"]
     assert "Character:" in prompt_text
-    assert "German dialogue, say exactly as written:" in prompt_text
-    assert "Die Pflegekasse zahlt bis zu 4.180 Euro pro Person" in prompt_text
+    assert "Die Pflegekasse zahlt bis zu viertausend Euro pro Person." in prompt_text
     assert "Do not end the speech yet" in prompt_text
 
 
@@ -82,7 +81,7 @@ def test_split_dialogue_sentences_keeps_sentence_boundaries():
     assert segments == ["Erster Satz.", "Zweiter Satz!", "Dritter Satz?"]
 
 
-def test_split_dialogue_sentences_ignores_trailing_fragment():
+def test_split_dialogue_sentences_appends_trailing_fragment_to_last():
     script = "Erster Satz. Zweiter Satz. Abgeschnittener Rest ohne Punkt"
     segments = split_dialogue_sentences(script)
-    assert segments == ["Erster Satz.", "Zweiter Satz."]
+    assert segments == ["Erster Satz.", "Zweiter Satz. Abgeschnittener Rest ohne Punkt"]

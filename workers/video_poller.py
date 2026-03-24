@@ -10,7 +10,7 @@ import sys
 import os
 import json
 import socket
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Optional, Union
 import httpx
 
 # Add parent directory to path for imports
@@ -21,6 +21,14 @@ from app.adapters.sora_client import get_sora_client
 from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
+from app.core.video_profiles import (
+    get_pollable_video_statuses,
+    VEO_EXTENDED_VIDEO_ROUTE,
+    VIDEO_STATUS_COMPLETED,
+    VIDEO_STATUS_FAILED,
+    get_processing_video_status,
+    get_submitted_video_status,
+)
 
 try:  # pragma: no cover - allow worker to run without google-genai on Python 3.9
     from app.adapters.veo_client import get_veo_client  # type: ignore
@@ -415,6 +423,48 @@ def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> No
         correlation_id=correlation_id,
         operation_id=operation_id
     )
+
+
+def _build_veo_extension_prompt(
+    post: Dict[str, Any],
+    segment_index: Optional[int] = None,
+) -> Dict[str, str]:
+    """Build a VEO extension prompt for the given post and segment index."""
+    from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
+
+    seed_data = post.get("seed_data") or {}
+    if isinstance(seed_data, str):
+        import json as _json
+        try:
+            seed_data = _json.loads(seed_data)
+        except _json.JSONDecodeError:
+            seed_data = {}
+
+    script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
+    segments = split_dialogue_sentences(script) if script else []
+    if not segments and script:
+        segments = [script]
+
+    idx = segment_index if segment_index is not None else 0
+    if idx < len(segments):
+        segment_text = segments[idx]
+    elif segments:
+        segment_text = segments[-1]
+    else:
+        segment_text = script
+
+    metadata = post.get("video_metadata") or {}
+    hops_target = metadata.get("veo_extension_hops_target", 0)
+    hops_completed = metadata.get("veo_extension_hops_completed", 0)
+    is_final = (hops_completed + 1) >= hops_target if hops_target > 0 else True
+
+    prompt_text = build_veo_prompt_segment(
+        segment_text,
+        include_quotes=False,
+        include_ending=is_final,
+    )
+
+    return {"prompt_text": prompt_text, "segment_text": segment_text}
 
 
 def _check_and_transition_batch_to_qa(post_id: str, correlation_id: str) -> None:
