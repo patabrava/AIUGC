@@ -82,7 +82,7 @@ def test_reconcile_batches_ready_for_qa_heals_stuck_completed_batch(monkeypatch)
             {
                 "id": "post-1",
                 "batch_id": "batch-1",
-                "video_status": "completed",
+                "video_status": "caption_completed",
                 "seed_data": json.dumps({"script_review_status": "approved"}),
             },
             {

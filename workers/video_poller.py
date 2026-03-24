@@ -24,6 +24,8 @@ from app.core.config import get_settings
 from app.core.video_profiles import (
     get_pollable_video_statuses,
     VEO_EXTENDED_VIDEO_ROUTE,
+    VIDEO_STATUS_CAPTION_COMPLETED,
+    VIDEO_STATUS_CAPTION_PENDING,
     VIDEO_STATUS_COMPLETED,
     VIDEO_STATUS_FAILED,
     get_processing_video_status,
@@ -392,7 +394,7 @@ def _store_completed_video(
     }
 
     supabase.table("posts").update({
-        "video_status": "completed",
+        "video_status": VIDEO_STATUS_CAPTION_PENDING,
         "video_url": upload_result["url"],
         "video_metadata": merged_metadata,
     }).eq("id", post_id).execute()
@@ -408,9 +410,6 @@ def _store_completed_video(
         upload_method=upload_method,
         upload_duration_seconds=upload_duration
     )
-    
-    # Check if all videos in batch are complete and transition to S6_QA
-    _check_and_transition_batch_to_qa(post_id, correlation_id)
 
 
 def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> None:
@@ -647,7 +646,7 @@ def _check_and_transition_batch_to_qa_by_batch_id(batch_id: str, correlation_id:
         return
 
     total_posts = len(active_posts)
-    completed_videos = sum(1 for post in active_posts if post.get("video_status") == "completed")
+    completed_videos = sum(1 for post in active_posts if post.get("video_status") == VIDEO_STATUS_CAPTION_COMPLETED)
 
     logger.debug(
         "batch_qa_transition_check",
