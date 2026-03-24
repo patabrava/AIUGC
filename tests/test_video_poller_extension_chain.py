@@ -94,7 +94,6 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
     }
 
     mock_veo = MagicMock()
-    mock_veo.download_video.return_value = b"fake-video-bytes"
     mock_veo.submit_video_extension.return_value = {
         "operation_id": "op-ext-1",
         "status": "submitted",
@@ -107,16 +106,12 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
          patch("workers.video_poller.get_supabase", return_value=mock_supabase):
         _submit_extension_hop(post, correlation_id="test-corr", previous_video_data=previous_video_data)
 
-    # Must download the previous video first
-    mock_veo.download_video.assert_called_once()
-    assert mock_veo.download_video.call_args[1]["video_uri"] == "gs://bucket/base.mp4"
-
-    # Must use submit_video_extension (not submit_video_generation)
+    # Must use submit_video_extension with video_uri (SDK, no download)
     mock_veo.submit_video_extension.assert_called_once()
     mock_veo.submit_video_generation.assert_not_called()
     call_kwargs = mock_veo.submit_video_extension.call_args[1]
     assert "Zweiter Satz." in call_kwargs["prompt"]
-    assert call_kwargs["video_bytes"] == b"fake-video-bytes"
+    assert call_kwargs["video_uri"] == "gs://bucket/base.mp4"
 
     update_call = mock_supabase.client.table.return_value.update
     assert update_call.called
@@ -155,7 +150,6 @@ def test_submit_extension_hop_reuses_last_segment_when_fewer_segments_than_hops(
     }
 
     mock_veo = MagicMock()
-    mock_veo.download_video.return_value = b"fake-video"
     mock_veo.submit_video_extension.return_value = {"operation_id": "op-ext-1", "status": "submitted"}
     mock_supabase = MagicMock()
     mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
@@ -196,7 +190,6 @@ def test_handle_veo_video_chains_when_hops_remaining():
         "done": True,
         "video_data": {"video_uri": "gs://bucket/video.mp4"},
     }
-    mock_veo.download_video.return_value = b"fake-video-bytes"
     mock_veo.submit_video_extension.return_value = {
         "operation_id": "op-ext-1",
         "status": "submitted",
@@ -211,11 +204,10 @@ def test_handle_veo_video_chains_when_hops_remaining():
         _handle_veo_video(post, "op-base", "corr-chain")
 
     mock_store.assert_not_called()
-    # Must use extension API, not regular generation
+    # Must use extension API with video_uri (SDK, no download)
     mock_veo.submit_video_extension.assert_called_once()
+    assert mock_veo.submit_video_extension.call_args[1]["video_uri"] == "gs://bucket/video.mp4"
     mock_veo.submit_video_generation.assert_not_called()
-    # Must have downloaded the previous video first
-    mock_veo.download_video.assert_called_once()
 
 
 def test_handle_veo_video_completes_when_all_hops_done():

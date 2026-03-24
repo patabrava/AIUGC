@@ -526,7 +526,7 @@ def _submit_extension_hop(
 
     veo_client = get_veo_client()
 
-    # Download the just-completed video so we can send it back for extension
+    # Pass the video URI to the SDK (no download needed — SDK handles the reference)
     video_uri = (previous_video_data or {}).get("video_uri")
     if not video_uri:
         raise ValueError(
@@ -534,22 +534,9 @@ def _submit_extension_hop(
             f"missing video_uri"
         )
 
-    video_bytes = veo_client.download_video(
-        video_uri=video_uri,
-        correlation_id=f"{correlation_id}_ext_{hops_completed + 1}_download",
-    )
-
-    logger.info(
-        "extension_hop_video_downloaded",
-        post_id=post_id,
-        correlation_id=correlation_id,
-        hop_number=hops_completed + 1,
-        video_size_bytes=len(video_bytes),
-    )
-
     result = veo_client.submit_video_extension(
         prompt=prompt,
-        video_bytes=video_bytes,
+        video_uri=video_uri,
         correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
         aspect_ratio=metadata.get("requested_aspect_ratio", "9:16"),
         resolution=metadata.get("requested_resolution", "720p"),

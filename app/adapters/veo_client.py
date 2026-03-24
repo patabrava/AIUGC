@@ -397,22 +397,22 @@ class VeoClient:
         self,
         *,
         prompt: str,
-        video_bytes: bytes,
+        video_uri: str,
         correlation_id: str,
         aspect_ratio: str = "9:16",
         resolution: str = "720p",
     ) -> Dict[str, Any]:
         """
-        Extend a previously generated VEO video by passing its bytes back
-        alongside a continuation prompt.
+        Extend a previously generated VEO video using the Python SDK.
 
-        Per Veo 3.1 docs: the extension payload includes a ``video`` field
-        with the previous video's base64-encoded data in the ``instances``
-        array.  The output is a single combined video (original + extension).
+        The ``predictLongRunning`` REST endpoint does not support video input
+        (rejects both ``inlineData`` and ``fileUri``).  Extension must go
+        through the SDK's ``generate_videos(video=...)`` which handles the
+        video reference internally.
 
         Args:
             prompt: Text prompt describing the continuation.
-            video_bytes: Raw MP4 bytes of the video to extend.
+            video_uri: URI of the previous video from check_operation_status.
             correlation_id: Correlation ID for structured logging.
             aspect_ratio: Must match the original video.
             resolution: Must be ``"720p"`` for extensions.
@@ -420,68 +420,38 @@ class VeoClient:
         Returns:
             Dict with ``operation_id``, ``status``, ``done``.
         """
-        import base64
+        from google.genai import types
 
-        video_b64 = base64.b64encode(video_bytes).decode("ascii")
-
-        payload: Dict[str, Any] = {
-            "instances": [
-                {
-                    "prompt": prompt,
-                    "video": {
-                        "inlineData": {
-                            "mimeType": "video/mp4",
-                            "data": video_b64,
-                        }
-                    },
-                }
-            ],
-            "parameters": {
-                "aspectRatio": aspect_ratio,
-                "resolution": resolution,
-                "numberOfVideos": 1,
-            },
-        }
+        video_ref = types.Video(uri=video_uri)
 
         logger.info(
             "veo_extension_request",
             correlation_id=correlation_id,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
-            video_size_bytes=len(video_bytes),
+            video_uri=video_uri,
             prompt_length=len(prompt),
             prompt_preview=prompt[:400],
         )
 
         try:
-            response = self._http_client.post(
-                f"{_GEMINI_API_BASE}/models/veo-3.1-generate-preview:predictLongRunning",
-                headers=self._build_headers(include_json=True),
-                json=payload,
-                timeout=120.0,
+            operation = self.client.models.generate_videos(
+                model="veo-3.1-generate-preview",
+                video=video_ref,
+                prompt=prompt,
+                config=types.GenerateVideosConfig(
+                    number_of_videos=1,
+                    resolution=resolution,
+                ),
             )
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                logger.error(
-                    "veo_extension_http_error",
-                    correlation_id=correlation_id,
-                    status_code=exc.response.status_code,
-                    response_text=exc.response.text,
-                )
-                raise
 
-            data = response.json()
-            operation_name = data.get("name")
-
-            if not operation_name:
-                raise ValueError("VEO extension response missing operation name")
+            operation_name = operation.name
 
             logger.info(
                 "veo_extension_submitted",
                 correlation_id=correlation_id,
                 operation_id=operation_name,
-                video_size_bytes=len(video_bytes),
+                video_uri=video_uri,
             )
 
             return {
@@ -495,7 +465,7 @@ class VeoClient:
                 "veo_extension_submission_failed",
                 correlation_id=correlation_id,
                 error=str(e),
-                video_size_bytes=len(video_bytes),
+                video_uri=video_uri,
             )
             raise
 
