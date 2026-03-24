@@ -1,0 +1,234 @@
+{# Batch-level publish scheduling panel for S7_PUBLISH_PLAN #}
+<div x-data='batchPublishComponent({
+    batchId: {{ batch.id | tojson }},
+    posts: {{ batch_view.publish_posts_json | tojson }},
+    metaState: {{ batch_view.meta_publish_state | tojson }},
+    tiktokState: {{ batch_view.tiktok_publish_state | tojson }}
+})'>
+
+    {# ── Batch Schedule Panel ── #}
+    <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h3 class="text-lg font-semibold text-indigo-900">Batch Schedule</h3>
+                <p class="text-sm text-indigo-700 mt-1">Set your week and posting times. Posts are auto-assigned Mon&rarr;Fri.</p>
+            </div>
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold"
+                :class="allSlotsSet ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
+                x-text="allSlotsSet ? '5/5 slots set' : slotsSetCount + '/5 slots set'"></span>
+        </div>
+
+        {# Week start + network toggles #}
+        <div class="flex flex-wrap items-center gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-medium text-indigo-700 mb-1">Week starting</label>
+                <input type="date" x-model="weekStart"
+                    class="px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+            </div>
+            <div class="flex items-center gap-2 ml-auto">
+                <label class="text-xs font-medium text-indigo-700">Networks</label>
+                <template x-for="net in [{id:'instagram',label:'IG',color:'purple'},{id:'facebook',label:'FB',color:'blue'},{id:'tiktok',label:'TT',color:'gray'}]" :key="net.id">
+                    <button type="button" @click="toggleNetwork(net.id)"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition"
+                        :class="networks.includes(net.id)
+                            ? (net.color === 'purple' ? 'bg-purple-100 border-purple-400 text-purple-700' : net.color === 'blue' ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-gray-800 border-gray-700 text-white')
+                            : 'bg-white border-gray-300 text-gray-500 hover:border-gray-400'">
+                        <span class="inline-flex h-2 w-2 rounded-full" :class="networks.includes(net.id) ? 'bg-green-500' : 'bg-gray-300'"></span>
+                        <span x-text="net.label"></span>
+                    </button>
+                </template>
+            </div>
+        </div>
+
+        {# Time slots row #}
+        <div class="grid grid-cols-5 gap-3">
+            <template x-for="(slot, i) in slots" :key="slot.day">
+                <div class="bg-white rounded-lg border border-indigo-200 p-3 text-center">
+                    <div class="text-xs font-bold uppercase tracking-wide text-indigo-600 mb-2" x-text="slot.day"></div>
+                    <div class="text-xs text-gray-500 mb-1" x-text="slotDate(i)"></div>
+                    <input type="time" x-model="slot.time"
+                        class="w-full text-center text-sm font-medium px-2 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                </div>
+            </template>
+        </div>
+    </div>
+
+    {# ── Post List ── #}
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+                <h3 class="text-lg font-medium text-gray-900">Posts</h3>
+                <span class="text-sm text-gray-500" x-text="posts.length + ' active'"></span>
+            </div>
+        </div>
+
+        <div class="space-y-2">
+            <template x-for="(post, i) in posts" :key="post.id">
+                <div class="border rounded-lg transition"
+                    :class="expanded === post.id ? 'border-indigo-300 bg-indigo-50/30' : 'border-gray-200 hover:border-purple-300'">
+                    {# Collapsed Row #}
+                    <div class="flex items-center gap-3 px-4 py-3 cursor-pointer" @click="expanded = expanded === post.id ? null : post.id">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700 min-w-[70px] justify-center" x-text="post.type"></span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm text-gray-900 truncate" x-text="post.title"></div>
+                            <div class="text-xs text-gray-400 truncate mt-0.5" x-text="(post.caption || '').substring(0, 60) + (post.caption && post.caption.length > 60 ? '...' : '')"></div>
+                        </div>
+                        <span class="text-xs font-medium text-indigo-600 whitespace-nowrap" x-text="postSlotLabel(i)"></span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                            :class="post.caption && slots[i]?.time ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
+                            x-text="post.caption && slots[i]?.time ? 'Ready' : 'Needs attention'"></span>
+                        <svg class="w-4 h-4 text-gray-400 transition-transform" :class="expanded === post.id ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                    </div>
+
+                    {# Expanded Panel #}
+                    <div x-show="expanded === post.id" x-collapse class="border-t border-gray-200 px-4 py-4 space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Caption</label>
+                            <textarea x-model="post.caption" rows="3" maxlength="2200"
+                                class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                placeholder="Write the caption for this post..."></textarea>
+                            <div class="flex justify-between mt-1">
+                                <span class="text-[10px] text-gray-400">Pre-filled from generated caption</span>
+                                <span class="text-[10px] text-gray-400" x-text="(post.caption || '').length + '/2200'"></span>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-4">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">Override time <span class="font-normal text-gray-400">(optional)</span></label>
+                                <input type="datetime-local" x-model="post.timeOverride"
+                                    class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">Override networks <span class="font-normal text-gray-400">(optional)</span></label>
+                                <div class="flex gap-1.5">
+                                    <template x-for="net in ['IG','FB','TT']" :key="net">
+                                        <button type="button"
+                                            class="px-2.5 py-1 text-[11px] font-semibold rounded-full border border-gray-300 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition"
+                                            x-text="net"></button>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        {# Review & Arm Button #}
+        <div class="mt-6 flex items-center justify-between">
+            <p class="text-xs text-gray-500" x-text="summaryLine"></p>
+            <button type="button" @click="showReviewModal = true"
+                :disabled="!allSlotsSet"
+                class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition"
+                :class="allSlotsSet ? 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500' : 'bg-gray-300 cursor-not-allowed'">
+                <span>Review &amp; Arm Dispatch</span>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                </svg>
+            </button>
+        </div>
+
+        {# Status messages #}
+        <div x-show="successMessage" x-transition class="mt-4 rounded-md bg-green-50 border border-green-200 p-3">
+            <p class="text-xs text-green-800" x-text="successMessage"></p>
+        </div>
+        <div x-show="errorMessage" x-transition class="mt-4 rounded-md bg-red-50 border border-red-200 p-3">
+            <p class="text-xs text-red-800" x-text="errorMessage"></p>
+        </div>
+    </div>
+
+    {# ── Review & Arm Modal ── #}
+    <div x-show="showReviewModal" x-cloak x-transition.opacity
+        class="fixed inset-0 z-50 flex items-center justify-center bg-gray-500 bg-opacity-75 px-4 py-6"
+        @keydown.escape.window="showReviewModal = false">
+        <div class="absolute inset-0" @click="showReviewModal = false"></div>
+        <div class="relative z-10 w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl">
+            {# Header #}
+            <div class="border-b border-gray-200 bg-indigo-50 px-6 py-5">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">Review &amp; Arm Dispatch</h3>
+                        <p class="mt-1 text-sm text-gray-600" x-text="summaryLine"></p>
+                    </div>
+                    <button type="button" @click="showReviewModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            {# Summary Table #}
+            <div class="px-6 py-4">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-200">
+                            <th class="pb-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Post</th>
+                            <th class="pb-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Day</th>
+                            <th class="pb-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Time</th>
+                            <th class="pb-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Networks</th>
+                            <th class="pb-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Caption</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(post, i) in posts" :key="post.id">
+                            <tr class="border-b border-gray-100">
+                                <td class="py-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-purple-100 text-purple-700" x-text="post.type"></span>
+                                        <span class="font-medium text-gray-900 text-xs" x-text="post.title.substring(0, 25) + (post.title.length > 25 ? '\u2026' : '')"></span>
+                                    </div>
+                                </td>
+                                <td class="py-3 text-xs text-gray-700" x-text="slots[i]?.day.toUpperCase()"></td>
+                                <td class="py-3 text-xs font-medium text-indigo-600" x-text="post.timeOverride ? 'Custom' : (slots[i]?.time || '\u2014')"></td>
+                                <td class="py-3">
+                                    <div class="flex gap-1">
+                                        <template x-for="net in networks" :key="net">
+                                            <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                                :class="net === 'instagram' ? 'bg-purple-100 text-purple-700' : net === 'facebook' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'"
+                                                x-text="net === 'instagram' ? 'IG' : net === 'facebook' ? 'FB' : 'TT'"></span>
+                                        </template>
+                                    </div>
+                                </td>
+                                <td class="py-3 text-xs text-gray-500 max-w-[200px] truncate" x-text="(post.caption || '').substring(0, 40) + '...'"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            {# Warnings #}
+            <div class="px-6" x-show="warnings.length > 0">
+                <div class="rounded-md bg-amber-50 border border-amber-200 p-3 mb-4">
+                    <template x-for="warning in warnings" :key="warning">
+                        <p class="text-xs text-amber-800 flex items-center gap-2">
+                            <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                            </svg>
+                            <span x-text="warning"></span>
+                        </p>
+                    </template>
+                </div>
+            </div>
+
+            {# Confirm #}
+            <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
+                <button type="button" @click="showReviewModal = false"
+                    class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition">
+                    Back to editing
+                </button>
+                <button type="button" @click="armDispatch()"
+                    :disabled="!canArm"
+                    class="inline-flex items-center gap-2 rounded-md px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition"
+                    :class="canArm ? 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500' : 'bg-gray-300 cursor-not-allowed'">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <span x-text="saving ? 'Arming...' : 'Confirm \u2014 Arm All Platforms'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
