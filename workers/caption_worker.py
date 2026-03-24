@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
 from typing import Any
+
+# Keep script execution import-safe (python workers/caption_worker.py).
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.adapters.deepgram_client import DeepgramError, get_deepgram_client
 from app.adapters.caption_renderer import burn_captions, CaptionRendererError

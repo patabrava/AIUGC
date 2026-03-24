@@ -56,7 +56,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "workers/caption_worker.py"]
+    command: ["python", "-m", "workers.caption_worker"]
     env_file:
       - .env
     restart: unless-stopped

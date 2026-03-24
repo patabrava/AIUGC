@@ -97,7 +97,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "workers/caption_worker.py"]
+    command: ["python", "-m", "workers.caption_worker"]
     environment: *flow-forge-env
     restart: unless-stopped
     depends_on:
