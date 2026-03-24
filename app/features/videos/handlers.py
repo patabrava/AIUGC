@@ -28,6 +28,7 @@ from app.core.video_profiles import (
 from app.features.batches.queries import get_batch_by_id
 from app.features.posts.prompt_text import build_full_prompt_text
 from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
+from app.features.videos.prompt_audit import record_prompt_audit
 from app.features.videos.schemas import (
     VideoGenerationRequest,
     VideoGenerationResponse,
@@ -211,6 +212,19 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         operation_id = submission_result["operation_id"]
         provider_model = submission_result.get("provider_model")
         requested_size = submission_result.get("requested_size")
+
+        record_prompt_audit(
+            post_id=post_id,
+            operation_id=operation_id,
+            provider=request.provider,
+            prompt_text=prompt_request["prompt_text"] or "",
+            negative_prompt=prompt_request.get("negative_prompt"),
+            prompt_path=prompt_request["prompt_path"],
+            aspect_ratio=request.aspect_ratio,
+            resolution=request.resolution,
+            requested_seconds=request.seconds,
+            correlation_id=correlation_id,
+        )
 
         existing_metadata = post.get("video_metadata") or {}
         submission_metadata = {
@@ -467,7 +481,21 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
                 requested_size = submission_result.get("requested_size")
-                
+
+                record_prompt_audit(
+                    post_id=post_id,
+                    operation_id=operation_id,
+                    provider=request.provider,
+                    prompt_text=prompt_request["prompt_text"] or "",
+                    negative_prompt=prompt_request.get("negative_prompt"),
+                    prompt_path=prompt_request["prompt_path"],
+                    aspect_ratio=request.aspect_ratio,
+                    resolution=request.resolution,
+                    requested_seconds=request.seconds,
+                    correlation_id=f"{correlation_id}_{post_id}",
+                    batch_id=batch_id,
+                )
+
                 # Update post
                 existing_metadata = post.get("video_metadata") or {}
                 submission_metadata = {
@@ -595,15 +623,15 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         )
 
 
-def _build_veo_prompt_text(video_prompt: Dict[str, Any]) -> str:
-    """Build VEO-compatible prompt text from video_prompt_json."""
+def _build_veo_prompt_text(video_prompt: Dict[str, Any]) -> tuple[str, str]:
+    """Build VEO-compatible prompt text from video_prompt_json. Returns (text, path)."""
     veo_prompt = video_prompt.get("veo_prompt")
     if veo_prompt:
         logger.debug(
             "veo_prompt_selected",
             prompt_length=len(veo_prompt)
         )
-        return veo_prompt
+        return veo_prompt, "veo_prompt"
 
     optimized_prompt = video_prompt.get("optimized_prompt")
     if optimized_prompt:
@@ -611,8 +639,8 @@ def _build_veo_prompt_text(video_prompt: Dict[str, Any]) -> str:
             "veo_optimized_prompt_fallback_selected",
             prompt_length=len(optimized_prompt)
         )
-        return optimized_prompt
-    return build_full_prompt_text(video_prompt)
+        return optimized_prompt, "optimized_prompt"
+    return build_full_prompt_text(video_prompt), "full_prompt_text_fallback"
 
 
 def _build_veo_negative_prompt(video_prompt: Dict[str, Any]) -> Optional[str]:
@@ -663,8 +691,8 @@ def _write_recovery_record(post_id: str, operation_id: str, provider: str, corre
         )
 
 
-def _build_provider_prompt_text(video_prompt: Dict[str, Any], provider: str) -> str:
-    """Build provider-specific prompt text."""
+def _build_provider_prompt_text(video_prompt: Dict[str, Any], provider: str) -> tuple[str, str]:
+    """Build provider-specific prompt text. Returns (text, path)."""
     if provider == "veo_3_1":
         return _build_veo_prompt_text(video_prompt)
 
@@ -675,19 +703,20 @@ def _build_provider_prompt_text(video_prompt: Dict[str, Any], provider: str) -> 
                 "sora_optimized_prompt_selected",
                 prompt_length=len(optimized_prompt)
             )
-            return optimized_prompt
+            return optimized_prompt, "sora_optimized_prompt"
 
     # Fallback to canonical composition
-    return build_full_prompt_text(video_prompt)
+    return build_full_prompt_text(video_prompt), "full_prompt_text_fallback"
 
 
-def _build_provider_prompt_request(video_prompt: Dict[str, Any], provider: str) -> Dict[str, Optional[str]]:
+def _build_provider_prompt_request(video_prompt: Dict[str, Any], provider: str) -> Dict[str, Any]:
     """Build provider-specific prompt payload pieces."""
-    prompt_text = _build_provider_prompt_text(video_prompt, provider)
+    prompt_text, prompt_path = _build_provider_prompt_text(video_prompt, provider)
     negative_prompt = _build_veo_negative_prompt(video_prompt) if provider == "veo_3_1" else None
     return {
         "prompt_text": prompt_text,
         "negative_prompt": negative_prompt,
+        "prompt_path": prompt_path,
     }
 
 
