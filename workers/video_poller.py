@@ -216,6 +216,12 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
             )
             raise ValueError("Video data missing download URI")
 
+        # Check if this is an extended pipeline that needs more hops
+        metadata = post.get("video_metadata") or {}
+        if _needs_extension_hop(metadata):
+            _submit_extension_hop(post, correlation_id=correlation_id)
+            return
+
         video_uri = video_data["video_uri"]
 
         settings = get_settings()
