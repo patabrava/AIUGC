@@ -232,6 +232,20 @@ class VeoClient:
             }
 
             if done:
+                provider_error = data.get("error")
+                if provider_error:
+                    logger.error(
+                        "veo_status_operation_failed",
+                        correlation_id=correlation_id,
+                        operation_id=operation_id,
+                        provider_error=provider_error,
+                    )
+                    result["status"] = "failed"
+                    result["error"] = {
+                        "code": provider_error.get("code"),
+                        "message": provider_error.get("message"),
+                    }
+
                 video_samples = (
                     data.get("response", {})
                     .get("generateVideoResponse", {})

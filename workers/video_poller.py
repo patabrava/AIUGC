@@ -9,7 +9,9 @@ import time
 import sys
 import os
 import json
+import socket
 from typing import List, Dict, Any, Union
+import httpx
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -44,6 +46,34 @@ POLL_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
 EXPANSION_INTERVAL_SECONDS = 24 * 60 * 60  # 24 hours
 EXPANSION_MAX_SCRIPTS_PER_RUN = 30
+
+
+def _poller_identity() -> str:
+    settings = get_settings()
+    configured = (settings.video_poller_identity or "").strip()
+    if configured:
+        return configured
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _failure_metadata(
+    *,
+    error: Exception,
+    provider: str,
+    operation_id: str,
+) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {
+        "error": str(error),
+        "error_type": error.__class__.__name__,
+        "provider": provider,
+        "operation_id": operation_id,
+        "last_polled_by": _poller_identity(),
+        "failed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    if isinstance(error, httpx.HTTPStatusError):
+        metadata["provider_status_code"] = error.response.status_code
+        metadata["provider_response_body"] = error.response.text[:4000]
+    return metadata
 
 
 def poll_pending_videos():
@@ -117,6 +147,8 @@ def process_video_operation(post: Dict[str, Any]):
             post_id=post_id,
             correlation_id=correlation_id,
             operation_id=operation_id,
+            provider=provider,
+            poller_identity=_poller_identity(),
             error=str(e)
         )
         
@@ -126,10 +158,13 @@ def process_video_operation(post: Dict[str, Any]):
             supabase.table("posts").update({
                 "video_status": "failed",
                 "video_metadata": {
-                    "error": str(e),
-                    "provider": provider,
-                    "operation_id": operation_id
-                }
+                    **(post.get("video_metadata") or {}),
+                    **_failure_metadata(
+                        error=e,
+                        provider=provider,
+                        operation_id=operation_id,
+                    ),
+                },
             }).eq("id", post_id).execute()
             
             logger.error(
@@ -152,6 +187,14 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
         operation_id=operation_id,
         correlation_id=correlation_id
     )
+
+    if status_result.get("status") == "failed":
+        error = status_result.get("error") or {}
+        error_message = error.get("message") or "Veo operation failed without an error message"
+        error_code = error.get("code")
+        if error_code is not None:
+            raise ValueError(f"Veo operation failed ({error_code}): {error_message}")
+        raise ValueError(f"Veo operation failed: {error_message}")
 
     if status_result["done"]:
         video_data = status_result.get("video_data")
@@ -326,6 +369,8 @@ def _store_completed_video(
         "thumbnail_url": upload_result.get("thumbnail_url"),
         "provider_metadata": provider_metadata,
         "upload_method": upload_method,
+        "last_polled_by": _poller_identity(),
+        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
     supabase.table("posts").update({
@@ -352,8 +397,16 @@ def _store_completed_video(
 
 def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> None:
     supabase = get_supabase().client
+    post_response = supabase.table("posts").select("video_metadata").eq("id", post_id).single().execute()
+    existing_metadata = (post_response.data or {}).get("video_metadata") or {}
     supabase.table("posts").update({
-        "video_status": "processing"
+        "video_status": "processing",
+        "video_metadata": {
+            **existing_metadata,
+            "last_polled_by": _poller_identity(),
+            "last_polled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "operation_id": operation_id,
+        },
     }).eq("id", post_id).execute()
 
     logger.debug(
@@ -497,6 +550,8 @@ def _maybe_expand_script_bank(last_expansion_time: float) -> float:
     Returns the updated last_expansion_time.
     """
     now = time.time()
+    if not get_settings().video_poller_enable_script_bank_expansion:
+        return now
     if (now - last_expansion_time) < EXPANSION_INTERVAL_SECONDS:
         return last_expansion_time
 
@@ -531,6 +586,8 @@ if __name__ == "__main__":
         poll_interval_seconds=POLL_INTERVAL_SECONDS,
         expansion_interval_hours=EXPANSION_INTERVAL_SECONDS / 3600,
         expansion_max_scripts=EXPANSION_MAX_SCRIPTS_PER_RUN,
+        poller_identity=_poller_identity(),
+        script_bank_expansion_enabled=get_settings().video_poller_enable_script_bank_expansion,
     )
 
     # Run expansion immediately on first startup, then every 24h

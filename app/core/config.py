@@ -83,6 +83,14 @@ class Settings(BaseSettings):
         default=False,
         description="Enable source URL ingestion before storing videos in Cloudflare R2"
     )
+    video_poller_enable_script_bank_expansion: bool = Field(
+        default=True,
+        description="Enable the daily topic script-bank expansion inside the video poller worker",
+    )
+    video_poller_identity: str = Field(
+        default="",
+        description="Optional stable identity label for the video poller worker instance",
+    )
     
     # Social Media
     tiktok_client_key: str = Field(default="", description="TikTok client key")
