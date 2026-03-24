@@ -30,15 +30,7 @@ from app.features.topics.response_parsers import (
     parse_topic_research_response,
 )
 from app.features.topics.schemas import DialogScripts, ResearchAgentBatch, ResearchAgentItem, ResearchDossier, SeedData, TopicData
-from app.features.topics.topic_validation import (
-    estimate_script_duration_seconds,
-    validate_duration,
-    validate_german_content,
-    validate_sources_accessible,
-    validate_summary,
-    validate_unique_ctas,
-    validate_round_robin,
-)
+from app.features.topics.topic_validation import estimate_script_duration_seconds
 
 logger = get_logger(__name__)
 
@@ -144,15 +136,6 @@ def _parse_prompt1_with_normalization(
         batch = parse_prompt1_response(normalized, profile=profile)
         return batch, normalized
 
-
-def _validate_prompt1_items(items: List[ResearchAgentItem]) -> None:
-    for item in items:
-        validate_duration(item)
-        validate_summary(item)
-        validate_german_content(item)
-        validate_sources_accessible(item)
-    validate_round_robin(items)
-    validate_unique_ctas(items)
 
 
 def generate_topics_research_agent(

@@ -32,9 +32,6 @@ from app.features.topics.response_parsers import (
 from app.features.topics.schemas import (
     DiscoverTopicsRequest,
     DialogScripts,
-    PROMPT1_JSON_SCHEMA,
-    PROMPT1_RESEARCH_JSON_SCHEMA,
-    PROMPT2_JSON_SCHEMA,
     ResearchAgentBatch,
     ResearchAgentItem,
     ResearchDossier,

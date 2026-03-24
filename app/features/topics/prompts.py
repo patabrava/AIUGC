@@ -19,13 +19,6 @@ TOPIC_BANK_PATH = PROMPT_DATA_DIR / "topic_bank.yaml"
 HOOK_BANK_PATH = PROMPT_DATA_DIR / "hook_bank.yaml"
 
 
-@lru_cache(maxsize=None)
-def _load_prompt(name: str) -> dict:
-    """Load a YAML prompt definition from disk and cache the result."""
-    prompt_path = PROMPT_DATA_DIR / f"{name}.yaml"
-    with prompt_path.open("r", encoding="utf-8") as fp:
-        return yaml.safe_load(fp)
-
 
 def _join_sections(*sections: str) -> str:
     return "\n\n".join(section.strip() for section in sections if section).strip()
@@ -219,20 +212,6 @@ def pick_topic_bank_topics(count: int, *, seed: Optional[int] = None) -> List[st
             chosen.extend(shuffled[:remaining])
     return chosen
 
-
-def _choose_seed_topic(
-    desired_topics: int,
-    *,
-    assigned_topics: Optional[List[str]] = None,
-    seed: Optional[int] = None,
-) -> str:
-    candidates = assigned_topics or get_topic_seed_catalog()
-    if not candidates:
-        raise ValueError("No topic seed candidates available")
-    if len(candidates) == 1:
-        return candidates[0]
-    rng = random.Random(seed if seed is not None else desired_topics)
-    return rng.choice(candidates)
 
 
 def _format_research_prompt_context(
