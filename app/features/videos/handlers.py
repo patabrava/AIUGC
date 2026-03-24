@@ -23,6 +23,7 @@ from app.core.video_profiles import (
     VEO_EXTENDED_VIDEO_ROUTE,
     VEO_PROVIDER,
     get_duration_profile,
+    get_submission_video_status,
     uses_duration_routing,
 )
 from app.features.batches.queries import get_batch_by_id
@@ -411,7 +412,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         # Fetch all posts in batch with video_prompt_json
         response = supabase.table("posts").select("*").eq("batch_id", batch_id).execute()
         posts = response.data
-        
+        batch = get_batch_by_id(batch_id)
+
         if not posts:
             raise FlowForgeException(
                 code=ErrorCode.NOT_FOUND,
@@ -454,7 +456,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 skipped_count += 1
                 continue
             
-            if post.get("video_status") in ["submitted", "processing", "completed"]:
+            if post.get("video_status") in ["submitted", "processing", "completed", "extended_submitted", "extended_processing"]:
                 logger.info(
                     "post_skipped_already_submitted",
                     post_id=post_id,
@@ -466,68 +468,79 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             
             # Build prompt and submit
             try:
-                prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
-
-                submission_result = _submit_video_request(
-                    provider=request.provider,
-                    prompt_text=prompt_request["prompt_text"] or "",
-                    negative_prompt=prompt_request.get("negative_prompt"),
+                submission_plan = _resolve_video_submission_plan(
+                    batch=batch,
+                    requested_provider=request.provider,
+                    requested_seconds=request.seconds,
                     aspect_ratio=request.aspect_ratio,
                     resolution=request.resolution,
-                    seconds=request.seconds,
                     size=request.size,
+                )
+
+                profile = submission_plan.get("profile")
+                is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
+
+                if is_extended:
+                    prompt_text, segment_metadata = _build_veo_extended_base_prompt(seed_data)
+                    negative_prompt = None
+                else:
+                    prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
+                    prompt_text = prompt_request["prompt_text"] or ""
+                    negative_prompt = prompt_request.get("negative_prompt")
+                    segment_metadata = None
+
+                submission_result = _submit_video_request(
+                    provider=submission_plan["provider"],
+                    prompt_text=prompt_text,
+                    negative_prompt=negative_prompt,
+                    aspect_ratio=submission_plan["aspect_ratio"],
+                    resolution=submission_plan["resolution"],
+                    seconds=submission_plan["seconds"],
+                    size=submission_plan["size"],
                     correlation_id=f"{correlation_id}_{post_id}",
                 )
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
-                requested_size = submission_result.get("requested_size")
 
                 record_prompt_audit(
                     post_id=post_id,
                     operation_id=operation_id,
-                    provider=request.provider,
-                    prompt_text=prompt_request["prompt_text"] or "",
-                    negative_prompt=prompt_request.get("negative_prompt"),
-                    prompt_path=prompt_request["prompt_path"],
-                    aspect_ratio=request.aspect_ratio,
-                    resolution=request.resolution,
-                    requested_seconds=request.seconds,
+                    provider=submission_plan["provider"],
+                    prompt_text=prompt_text,
+                    negative_prompt=negative_prompt,
+                    prompt_path="veo_extended_segment" if is_extended else "batch_standard",
+                    aspect_ratio=submission_plan["aspect_ratio"],
+                    resolution=submission_plan["resolution"],
+                    requested_seconds=submission_plan["seconds"],
                     correlation_id=f"{correlation_id}_{post_id}",
                     batch_id=batch_id,
                 )
 
-                # Update post
                 existing_metadata = post.get("video_metadata") or {}
-                submission_metadata = {
-                    **existing_metadata,
-                    "requested_aspect_ratio": request.aspect_ratio,
-                    "requested_resolution": request.resolution,
-                    "requested_seconds": request.seconds,
-                    "requested_size": requested_size,
-                }
-                if provider_model:
-                    submission_metadata["provider_model"] = provider_model
-                if submission_result.get("provider_metadata"):
-                    submission_metadata["provider_metadata"] = submission_result["provider_metadata"]
+                submission_metadata = _build_submission_metadata(
+                    existing_metadata=existing_metadata,
+                    submission_plan=submission_plan,
+                    submission_result=submission_result,
+                    segment_metadata=segment_metadata,
+                )
 
-                # Normalize provider status to DB-compatible values
+                route = profile.route if profile else None
                 provider_status = submission_result.get("status", "submitted")
-                db_status = "submitted" if provider_status == "queued" else provider_status
+                db_status = get_submission_video_status(route, provider_status)
 
-                # CRITICAL: Log operation_id before DB update to enable recovery if update fails
                 logger.warning(
                     "video_operation_id_paid_request",
                     post_id=post_id,
                     operation_id=operation_id,
-                    provider=request.provider,
+                    provider=submission_plan["provider"],
                     correlation_id=correlation_id,
                     message="PAID VIDEO SUBMITTED - Operation ID logged for recovery"
                 )
 
                 try:
                     supabase.table("posts").update({
-                        "video_provider": request.provider,
-                        "video_format": request.aspect_ratio,
+                        "video_provider": submission_plan["provider"],
+                        "video_format": submission_plan["aspect_ratio"],
                         "video_operation_id": operation_id,
                         "video_status": db_status,
                         "video_metadata": submission_metadata
@@ -537,32 +550,31 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         "batch_video_db_update_failed_but_video_submitted",
                         post_id=post_id,
                         operation_id=operation_id,
-                        provider=request.provider,
+                        provider=submission_plan["provider"],
                         batch_id=batch_id,
                         correlation_id=correlation_id,
                         error=str(db_error),
-                        message="DATABASE UPDATE FAILED - Video is still processing at provider. Use operation_id to recover."
+                        message="DATABASE UPDATE FAILED - Video is still processing at provider."
                     )
-                    # Write to fallback recovery file
-                    _write_recovery_record(post_id, operation_id, request.provider, correlation_id)
-                    # Don't raise in batch mode - continue with other posts
+                    _write_recovery_record(post_id, operation_id, submission_plan["provider"], correlation_id)
                     skipped_count += 1
                     continue
-                
+
                 submitted_count += 1
                 submitted_post_ids.append(post_id)
                 if provider_model:
                     last_provider_model = provider_model
-                
+
                 logger.info(
                     "batch_video_submitted",
                     post_id=post_id,
                     batch_id=batch_id,
-                    provider=request.provider,
+                    provider=submission_plan["provider"],
                     provider_model=provider_model,
-                    seconds=request.seconds,
-                    size=requested_size,
-                    operation_id=operation_id
+                    seconds=submission_plan["seconds"],
+                    size=submission_plan["size"],
+                    operation_id=operation_id,
+                    duration_routed=submission_plan["duration_routed"],
                 )
                 
             except FlowForgeException as exc:

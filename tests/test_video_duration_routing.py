@@ -77,3 +77,47 @@ def test_extended_route_uses_isolated_submission_statuses():
     assert get_submission_video_status(VEO_EXTENDED_VIDEO_ROUTE, "processing") == "extended_processing"
     assert "extended_submitted" in get_pollable_video_statuses()
     assert "extended_processing" in get_pollable_video_statuses()
+
+
+def test_build_veo_extended_base_prompt_returns_first_segment():
+    seed_data = {"script": "Erster Satz. Zweiter Satz. Dritter Satz."}
+    prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(seed_data)
+
+    assert "Erster Satz." in prompt
+    assert seg_meta["veo_segments"] == ["Erster Satz.", "Zweiter Satz.", "Dritter Satz."]
+    assert seg_meta["veo_segments_total"] == 3
+    assert seg_meta["veo_current_segment_index"] == 0
+
+
+def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():
+    batch = {"id": "b-32", "target_length_tier": 32}
+
+    plan = video_handlers._resolve_video_submission_plan(
+        batch=batch,
+        requested_provider=None,
+        requested_seconds=None,
+        aspect_ratio="9:16",
+        resolution="720p",
+        size=None,
+    )
+
+    assert plan["duration_routed"] is True
+    assert plan["provider"] == "veo_3_1"
+    assert plan["profile"].veo_extension_hops == 4
+    assert plan["resolution"] == "720p"
+
+    metadata = video_handlers._build_submission_metadata(
+        existing_metadata={},
+        submission_plan=plan,
+        submission_result={"operation_id": "op-1", "requested_size": "720x1280"},
+        segment_metadata={
+            "veo_segments": ["S1.", "S2.", "S3.", "S4."],
+            "veo_segments_total": 4,
+            "veo_current_segment_index": 0,
+        },
+    )
+
+    assert metadata["veo_extension_hops_target"] == 4
+    assert metadata["veo_extension_hops_completed"] == 0
+    assert metadata["veo_segments"] == ["S1.", "S2.", "S3.", "S4."]
+    assert metadata["chain_status"] == "submitted"
