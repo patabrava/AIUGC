@@ -35,3 +35,34 @@ def test_poll_pending_videos_includes_extended_statuses(monkeypatch):
     assert "extended_processing" in queried
     assert "submitted" in queried
     assert "processing" in queried
+
+
+from workers.video_poller import _needs_extension_hop
+
+
+def test_needs_extension_hop_returns_true_when_hops_remaining():
+    metadata = {
+        "video_pipeline_route": "veo_extended",
+        "veo_extension_hops_target": 4,
+        "veo_extension_hops_completed": 1,
+    }
+    assert _needs_extension_hop(metadata) is True
+
+
+def test_needs_extension_hop_returns_false_when_all_hops_done():
+    metadata = {
+        "video_pipeline_route": "veo_extended",
+        "veo_extension_hops_target": 2,
+        "veo_extension_hops_completed": 2,
+    }
+    assert _needs_extension_hop(metadata) is False
+
+
+def test_needs_extension_hop_returns_false_for_short_route():
+    metadata = {"video_pipeline_route": "short", "veo_extension_hops_target": 0, "veo_extension_hops_completed": 0}
+    assert _needs_extension_hop(metadata) is False
+
+
+def test_needs_extension_hop_returns_false_for_missing_metadata():
+    assert _needs_extension_hop({}) is False
+    assert _needs_extension_hop(None) is False

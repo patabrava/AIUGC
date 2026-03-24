@@ -467,6 +467,17 @@ def _build_veo_extension_prompt(
     return {"prompt_text": prompt_text, "segment_text": segment_text}
 
 
+def _needs_extension_hop(metadata: Optional[Dict[str, Any]]) -> bool:
+    """Check whether a completed VEO operation still needs more extension hops."""
+    if not metadata:
+        return False
+    if metadata.get("video_pipeline_route") != VEO_EXTENDED_VIDEO_ROUTE:
+        return False
+    target = metadata.get("veo_extension_hops_target", 0)
+    completed = metadata.get("veo_extension_hops_completed", 0)
+    return completed < target
+
+
 def _check_and_transition_batch_to_qa(post_id: str, correlation_id: str) -> None:
     """
     Check if all videos in batch are complete and transition to S6_QA.
