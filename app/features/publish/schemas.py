@@ -7,9 +7,11 @@ Per Canon § 3.2: S7_PUBLISH_PLAN state
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+import re
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import List, Literal, Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 
@@ -236,6 +238,68 @@ class TikTokAccountResponse(BaseModel):
     scope_flags: Optional[Dict[str, bool]] = None
     creator_info: Optional[Dict[str, Any]] = None
     updated_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch Arm schemas (Canon § 7.3)
+# ---------------------------------------------------------------------------
+
+
+class SlotSpec(BaseModel):
+    day: Literal["mon", "tue", "wed", "thu", "fri"]
+    time: str = Field(..., description="Time in HH:MM 24h format")
+
+    @field_validator("time")
+    @classmethod
+    def validate_time_format(cls, v: str) -> str:
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", v):
+            raise ValueError("time must be in HH:MM 24h format")
+        return v
+
+
+class PostArmSpec(BaseModel):
+    post_id: str
+    caption: str = Field(..., min_length=1, max_length=2200)
+    time_override: Optional[str] = None
+    networks_override: Optional[List[str]] = None
+
+
+class BatchArmRequest(BaseModel):
+    week_start: str = Field(..., description="ISO date YYYY-MM-DD, must be a Monday")
+    slots: List[SlotSpec] = Field(..., min_length=1, max_length=5)
+    default_networks: List[str] = Field(..., min_length=1)
+    posts: List[PostArmSpec] = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def validate_min_gap(self) -> "BatchArmRequest":
+        """Canon 7.3: enforce 30-minute minimum gap between any two scheduled posts."""
+        from zoneinfo import ZoneInfo
+
+        day_offsets = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4}
+        berlin = ZoneInfo("Europe/Berlin")
+        base = datetime.strptime(self.week_start, "%Y-%m-%d")
+        times = []
+        for i, post in enumerate(self.posts):
+            if post.time_override:
+                dt = datetime.strptime(post.time_override, "%Y-%m-%dT%H:%M").replace(tzinfo=berlin)
+            elif i < len(self.slots):
+                slot = self.slots[i]
+                h, m = int(slot.time[:2]), int(slot.time[3:])
+                dt = base.replace(hour=h, minute=m, tzinfo=berlin) + timedelta(days=day_offsets[slot.day])
+            else:
+                continue
+            times.append(dt)
+        times.sort()
+        for a, b in zip(times, times[1:]):
+            if (b - a) < timedelta(minutes=30):
+                raise ValueError("Posts must be at least 30 minutes apart (Canon 7.3)")
+        return self
+
+
+class BatchArmResponse(BaseModel):
+    ok: bool = True
+    armed_count: int
+    scheduled_posts: List[dict]
 
 
 class TikTokUploadDraftRequest(BaseModel):
