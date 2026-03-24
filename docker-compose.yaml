@@ -51,3 +51,15 @@ services:
     depends_on:
       web:
         condition: service_healthy
+
+  caption-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "workers/caption_worker.py"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
