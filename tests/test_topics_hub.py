@@ -220,6 +220,38 @@ def test_topics_hub_groups_scripts_by_usage(monkeypatch):
     assert payload_unused["selected_scripts"][0]["use_count"] == 0
 
 
+def test_topics_hub_falls_back_to_topic_bank_when_registry_is_empty(monkeypatch):
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(
+        topic_hub,
+        "get_topic_bank",
+        lambda: {
+            "topics": [
+                "Barrierefreiheit im ÖPNV-Alltag: Einstieg mit Rampe, Rollstuhlplätze, Ansagen, Begleitservice.",
+                "Pflegegrad beantragen und Leistungen der Pflegeversicherung 2025 optimal nutzen.",
+            ]
+        },
+    )
+    monkeypatch.setattr(topic_hub, "get_topic_scripts_for_registry", lambda *args, **kwargs: [])
+    monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=12, status=None: [])
+    monkeypatch.setattr(topic_hub, "list_topic_suggestions", lambda **kwargs: [])
+
+    payload = topic_hub.build_topic_hub_payload(
+        SimpleNamespace(
+            query_params={},
+            headers={"accept": "text/html"},
+        )
+    )
+
+    assert payload["total_topics"] == 2
+    assert [topic["title"] for topic in payload["topics"]] == [
+        "Barrierefreiheit im ÖPNV-Alltag: Einstieg mit Rampe, Rollstuhlplätze, Ansagen, Begleitservice.",
+        "Pflegegrad beantragen und Leistungen der Pflegeversicherung 2025 optimal nutzen.",
+    ]
+    assert payload["selected_topic"]["id"].startswith("topic-bank-")
+    assert payload["selected_topic"]["source"] == "topic_bank.yaml"
+
+
 def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
     stored_entries = []
     updated_runs = []
@@ -409,16 +441,21 @@ def test_fuzzy_match_topic_returns_none_for_novel_topic(monkeypatch):
 
 
 def test_build_launch_hub_payload_sorts_by_script_count(monkeypatch):
-    """Launch hub payload should sort topics by script count ascending."""
+    """Launch hub payload should default to the basic topic bank."""
     from app.features.topics import hub as topic_hub
 
-    fake_topics = [
-        {"id": "t1", "title": "A", "post_type": "value", "rotation": "r", "cta": "c",
-         "created_at": "2026-01-01", "last_harvested_at": None},
-        {"id": "t2", "title": "B", "post_type": "value", "rotation": "r", "cta": "c",
-         "created_at": "2026-01-02", "last_harvested_at": None},
-    ]
-    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: fake_topics)
+    monkeypatch.setattr(topic_hub, "_topic_bank_rows", lambda: [
+        {"id": "topic-bank-1", "title": "Basic A", "post_type": "bank", "source": "topic_bank.yaml"},
+        {"id": "topic-bank-2", "title": "Basic B", "post_type": "bank", "source": "topic_bank.yaml"},
+    ])
+    monkeypatch.setattr(
+        topic_hub,
+        "get_all_topics_from_registry",
+        lambda: [
+            {"id": "t1", "title": "A", "post_type": "value", "rotation": "r", "cta": "c", "created_at": "2026-01-01"},
+            {"id": "t2", "title": "B", "post_type": "value", "rotation": "r", "cta": "c", "created_at": "2026-01-02"},
+        ],
+    )
     monkeypatch.setattr(topic_hub, "_fetch_all_script_counts", lambda: {"t1": 3, "t2": 0})
     monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=20, status=None, topic_registry_id=None: [])
 
@@ -427,10 +464,37 @@ def test_build_launch_hub_payload_sorts_by_script_count(monkeypatch):
         headers = {}
 
     result = topic_hub.build_launch_hub_payload(FakeRequest())
-    assert result["topics"][0]["id"] == "t2"
-    assert result["topics"][0]["script_count"] == 0
-    assert result["topics"][1]["id"] == "t1"
-    assert result["topics"][1]["script_count"] == 3
+    assert result["topics"][0]["id"] == "topic-bank-1"
+    assert result["topics"][1]["id"] == "topic-bank-2"
+    assert result["generated_topics"][0]["id"] == "t2"
+    assert result["generated_topics"][0]["script_count"] == 0
+    assert result["generated_topics"][1]["id"] == "t1"
+    assert result["generated_topics"][1]["script_count"] == 3
+
+
+def test_build_launch_hub_payload_generated_mode(monkeypatch):
+    from app.features.topics import hub as topic_hub
+
+    monkeypatch.setattr(topic_hub, "_topic_bank_rows", lambda: [
+        {"id": "topic-bank-1", "title": "Basic A", "post_type": "bank", "source": "topic_bank.yaml"},
+    ])
+    monkeypatch.setattr(
+        topic_hub,
+        "get_all_topics_from_registry",
+        lambda: [
+            {"id": "t1", "title": "Generated A", "post_type": "value", "rotation": "r", "cta": "c", "created_at": "2026-01-01"},
+        ],
+    )
+    monkeypatch.setattr(topic_hub, "_fetch_all_script_counts", lambda: {"t1": 2})
+    monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=20, status=None, topic_registry_id=None: [])
+
+    class FakeRequest:
+        query_params = {"topic_mode": "generated"}
+        headers = {}
+
+    result = topic_hub.build_launch_hub_payload(FakeRequest())
+    assert result["topics"][0]["id"] == "t1"
+    assert result["topics"][0]["script_count"] == 2
 
 
 def test_random_topic_endpoint(monkeypatch):

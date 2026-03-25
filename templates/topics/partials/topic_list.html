@@ -1,30 +1,87 @@
-{# Swappable topic list — sorted by script_count ascending #}
-<div id="topic-list">
-    {% for topic in topics %}
-    <a hx-get="/topics/{{ topic.id }}/scripts-drawer"
-       hx-target="#scripts-drawer-container"
-       hx-swap="innerHTML"
-       hx-indicator="#scripts-drawer-container"
-       class="block rounded-2xl border border-slate-200 bg-white p-4 transition cursor-pointer hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
-        <div class="flex items-center justify-between gap-4">
-            <div>
-                <h3 class="text-sm font-bold text-slate-900">{{ topic.title }}</h3>
-                <div class="mt-1 text-xs text-slate-500">{{ topic.post_type or 'unknown' }}</div>
-            </div>
-            {% set count = topic.script_count|default(0) %}
-            {% if count == 0 %}
-            <span class="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800">0 scripts</span>
-            {% elif count <= 2 %}
-            <span class="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-orange-800">{{ count }} script{{ 's' if count != 1 else '' }}</span>
-            {% else %}
-            <span class="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-800">{{ count }} scripts</span>
-            {% endif %}
+{# Swappable topic browser with mode toggle #}
+<div class="space-y-4" x-data="{ topicMode: '{{ filters.topic_mode }}' }">
+    <div class="flex items-start justify-between gap-4">
+        <div>
+            <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Topic source</p>
+            <h2 class="mt-1 text-lg font-black text-slate-900" x-text="topicMode === 'basic' ? 'Basic topics' : 'Generated topics'">{{ 'Basic topics' if filters.topic_mode == 'basic' else 'Generated topics' }}</h2>
+            <p class="mt-1 text-xs text-slate-500">
+                <span x-show="topicMode === 'basic'">
+                Choose a topic-bank entry to launch fresh research.
+                </span>
+                <span x-show="topicMode === 'generated'" x-cloak>
+                Inspect generated topics and their scripts.
+                </span>
+            </p>
         </div>
-    </a>
-    {% endfor %}
-    {% if not topics %}
-    <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-        No topics match the current filters.
+        <div class="inline-flex rounded-2xl border border-slate-200 bg-slate-100 p-1 text-xs font-semibold">
+            <button type="button"
+               @click="topicMode = 'basic'"
+               class="rounded-xl px-3 py-1.5 transition"
+               :class="topicMode === 'basic' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'">
+                Basic
+            </button>
+            <button type="button"
+               @click="topicMode = 'generated'"
+               class="rounded-xl px-3 py-1.5 transition"
+               :class="topicMode === 'generated' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'">
+                Generated
+            </button>
+        </div>
     </div>
-    {% endif %}
+
+    <div class="flex items-center gap-3 text-xs text-slate-500">
+        <span x-show="topicMode === 'basic'">{{ basic_topic_count }} topic{{ 's' if basic_topic_count != 1 else '' }}</span>
+        <span x-show="topicMode === 'generated'" x-cloak>{{ generated_topic_count }} generated topic{{ 's' if generated_topic_count != 1 else '' }}</span>
+        <span class="text-slate-300">•</span>
+        <span class="hidden sm:inline" x-show="topicMode === 'basic'">Basic topic bank</span>
+        <span class="hidden sm:inline" x-show="topicMode === 'generated'" x-cloak>Generated topic registry</span>
+    </div>
+
+    <div id="topic-list" class="space-y-3">
+        <div x-show="topicMode === 'basic'">
+            {% for topic in basic_topics %}
+            <a hx-get="/topics/match?q={{ topic.title | urlencode }}"
+               hx-target="#launch-panel"
+               hx-swap="innerHTML"
+               class="block rounded-2xl border border-slate-200 bg-white p-4 transition cursor-pointer hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+                <div class="flex items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-900">{{ topic.title }}</h3>
+                        <div class="mt-1 text-xs text-slate-500">{{ topic.post_type or 'unknown' }}</div>
+                    </div>
+                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700">Launch</span>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        <div x-show="topicMode === 'generated'" x-cloak>
+            {% for topic in generated_topics %}
+            <a hx-get="/topics/{{ topic.id }}/scripts-drawer"
+               hx-target="#scripts-drawer-container"
+               hx-swap="innerHTML"
+               hx-indicator="#scripts-drawer-container"
+               class="block rounded-2xl border border-slate-200 bg-white p-4 transition cursor-pointer hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+                <div class="flex items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-900">{{ topic.title }}</h3>
+                        <div class="mt-1 text-xs text-slate-500">{{ topic.post_type or 'unknown' }}</div>
+                    </div>
+                    {% set count = topic.script_count|default(0) %}
+                    {% if count == 0 %}
+                    <span class="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800">0 scripts</span>
+                    {% elif count <= 2 %}
+                    <span class="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-orange-800">{{ count }} script{{ 's' if count != 1 else '' }}</span>
+                    {% else %}
+                    <span class="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-800">{{ count }} scripts</span>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% if not basic_topics and not generated_topics %}
+        <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+            No topics match the current filters.
+        </div>
+        {% endif %}
+    </div>
 </div>

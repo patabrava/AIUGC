@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -22,7 +23,7 @@ from app.features.topics.agents import (
 )
 from app.features.topics.captions import attach_caption_bundle
 from app.features.topics.deduplication import calculate_topic_similarity, deduplicate_topics
-from app.features.topics.prompts import pick_topic_bank_topics
+from app.features.topics.prompts import get_topic_bank, pick_topic_bank_topics
 from app.features.topics.queries import (
     create_topic_research_run,
     get_all_topics_from_registry,
@@ -39,6 +40,34 @@ from app.features.topics.queries import (
 logger = get_logger(__name__)
 
 TOPIC_RUN_TASKS: Dict[str, asyncio.Task] = {}
+_UUID_LIKE_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
+
+def _topic_bank_rows() -> List[Dict[str, Any]]:
+    bank = get_topic_bank()
+    topics: List[Dict[str, Any]] = []
+    for index, raw_topic in enumerate(list(bank.get("topics") or []), start=1):
+        title = str(raw_topic).strip()
+        if not title:
+            continue
+        topics.append(
+            {
+                "id": f"topic-bank-{index}",
+                "title": title,
+                "script": title,
+                "rotation": title,
+                "cta": "",
+                "post_type": "bank",
+                "source": "topic_bank.yaml",
+                "script_count": 0,
+            }
+        )
+    return topics
+
+
+def _registry_or_topic_bank() -> List[Dict[str, Any]]:
+    topics = get_all_topics_from_registry()
+    return topics if topics else _topic_bank_rows()
 
 
 def get_random_topic() -> Optional[Dict[str, Any]]:
@@ -48,7 +77,10 @@ def get_random_topic() -> Optional[Dict[str, Any]]:
         return None
     scored = []
     for topic in topics:
-        scripts = get_topic_scripts_for_registry(topic["id"])
+        if str(topic.get("id") or "").startswith("topic-bank-"):
+            scripts = []
+        else:
+            scripts = get_topic_scripts_for_registry(topic["id"])
         scored.append((len(scripts), topic))
     scored.sort(key=lambda pair: pair[0])
     count, topic = scored[0]
@@ -89,29 +121,52 @@ def _fetch_all_script_counts() -> Dict[str, int]:
     return counts
 
 
+def _count_topic_scripts(topic_id: str, bulk_counts: Dict[str, int]) -> int:
+    count = int(bulk_counts.get(topic_id, 0) or 0)
+    if count > 0 or not _UUID_LIKE_RE.match(topic_id or ""):
+        return count
+    try:
+        return len(get_topic_scripts_for_registry(topic_id))
+    except Exception:
+        return count
+
+
 def build_launch_hub_payload(request) -> Dict[str, Any]:
     """Build a simplified payload for the launch-focused hub."""
     filters = parse_topic_filters(request)
     topics = [
         topic
-        for topic in get_all_topics_from_registry()
+        for topic in _topic_bank_rows()
         if _topic_search_match(topic, filters["search"])
         and (filters["post_type"] is None or str(topic.get("post_type") or "") == filters["post_type"])
     ]
-    # Enrich with script counts in a single batch query (avoids N+1)
+    topics.sort(key=lambda row: str(row.get("title") or "").lower())
+    generated_topics = [
+        topic
+        for topic in get_all_topics_from_registry()
+        if _topic_search_match(topic, filters["search"])
+        and (filters["post_type"] is None or str(topic.get("post_type") or "") == filters["post_type"])
+        and _topic_has_tier(topic, filters["target_length_tier"])
+    ]
+    generated_topics.sort(key=lambda row: str(row.get("last_harvested_at") or row.get("created_at") or ""), reverse=True)
+
     script_counts = _fetch_all_script_counts()
-    enriched = []
-    for topic in topics:
-        enriched.append({**topic, "script_count": script_counts.get(topic["id"], 0)})
+    generated_topics = [{**topic, "script_count": _count_topic_scripts(str(topic["id"]), script_counts)} for topic in generated_topics]
     if filters.get("only_with_scripts"):
-        enriched = [t for t in enriched if t["script_count"] > 0]
-    enriched.sort(key=lambda t: t["script_count"])
+        generated_topics = [t for t in generated_topics if t["script_count"] > 0]
+
+    if filters["topic_mode"] == "generated":
+        topics = generated_topics
     runs = list_topic_research_runs(limit=5)
     active_runs = [run for run in runs if run.get("status") == "running"]
     return {
         "filters": filters,
-        "topics": enriched,
-        "total_topics": len(enriched),
+        "topics": topics,
+        "basic_topics": topics if filters["topic_mode"] == "basic" else _topic_bank_rows(),
+        "generated_topics": generated_topics,
+        "total_topics": len(topics),
+        "basic_topic_count": len(_topic_bank_rows()),
+        "generated_topic_count": len(generated_topics),
         "active_runs": active_runs,
     }
 
@@ -134,6 +189,9 @@ def parse_topic_filters(request) -> Dict[str, Any]:
     params = request.query_params
     target_length_tier = params.get("target_length_tier")
     script_usage = str(params.get("script_usage") or "all").strip().lower()
+    topic_mode = str(params.get("topic_mode") or "basic").strip().lower()
+    if topic_mode not in {"basic", "generated"}:
+        topic_mode = "basic"
     if script_usage not in {"all", "used", "unused"}:
         script_usage = "all"
     return {
@@ -144,6 +202,7 @@ def parse_topic_filters(request) -> Dict[str, Any]:
         "run_id": str(params.get("run_id") or "").strip() or None,
         "status": str(params.get("status") or "").strip() or None,
         "script_usage": script_usage,
+        "topic_mode": topic_mode,
         "only_with_scripts": _parse_boolish(params.get("only_with_scripts") or ""),
     }
 
@@ -167,10 +226,18 @@ def _topic_search_match(topic: Dict[str, Any], search: str) -> bool:
 def _topic_has_tier(topic: Dict[str, Any], target_length_tier: Optional[int]) -> bool:
     if target_length_tier is None:
         return True
+    if str(topic.get("id") or "").startswith("topic-bank-"):
+        return True
     return bool(get_topic_scripts_for_registry(topic["id"], target_length_tier))
 
 
 def _topic_to_detail(topic: Dict[str, Any]) -> Dict[str, Any]:
+    if str(topic.get("id") or "").startswith("topic-bank-"):
+        return {
+            **topic,
+            "bank_summary": [],
+            "scripts": [],
+        }
     scripts = get_topic_scripts_for_registry(topic["id"])
     bank_summary = []
     counts: Dict[str, int] = {}
@@ -238,14 +305,24 @@ def _group_scripts_by_usage(scripts: List[Dict[str, Any]]) -> List[Dict[str, Any
 
 def build_topic_hub_payload(request) -> Dict[str, Any]:
     filters = parse_topic_filters(request)
-    topics = [
+    basic_topics = [
+        topic
+        for topic in _topic_bank_rows()
+        if _topic_search_match(topic, filters["search"])
+        and (filters["post_type"] is None or str(topic.get("post_type") or "") == filters["post_type"])
+    ]
+    basic_topics.sort(key=lambda row: str(row.get("title") or "").lower())
+
+    generated_topics = [
         topic
         for topic in get_all_topics_from_registry()
         if _topic_search_match(topic, filters["search"])
         and (filters["post_type"] is None or str(topic.get("post_type") or "") == filters["post_type"])
         and _topic_has_tier(topic, filters["target_length_tier"])
     ]
-    topics.sort(key=lambda row: str(row.get("last_harvested_at") or row.get("created_at") or ""), reverse=True)
+    generated_topics.sort(key=lambda row: str(row.get("last_harvested_at") or row.get("created_at") or ""), reverse=True)
+    script_counts = _fetch_all_script_counts()
+    generated_topics = [{**topic, "script_count": _count_topic_scripts(str(topic["id"]), script_counts)} for topic in generated_topics]
 
     scripts = list_topic_suggestions(
         target_length_tier=filters["target_length_tier"],
@@ -257,20 +334,26 @@ def build_topic_hub_payload(request) -> Dict[str, Any]:
 
     runs = list_topic_research_runs(limit=12, status=filters["status"])
     selected_topic = None
+    topics = basic_topics if filters["topic_mode"] == "basic" else generated_topics
     if filters["topic_id"]:
-        for topic in topics:
+        for topic in generated_topics + basic_topics:
             if topic.get("id") == filters["topic_id"]:
                 selected_topic = _topic_to_detail(topic)
                 break
-    if selected_topic is None and topics:
+    if selected_topic is None and topics and filters["topic_mode"] == "basic":
+        selected_topic = _topic_to_detail(topics[0])
+    if selected_topic is None and topics and filters["topic_mode"] == "generated":
         selected_topic = _topic_to_detail(topics[0])
 
     selected_scripts: List[Dict[str, Any]] = []
     if selected_topic:
-        selected_scripts = get_topic_scripts_for_registry(
-            selected_topic["id"],
-            filters["target_length_tier"],
-        )
+        if str(selected_topic.get("id") or "").startswith("topic-bank-"):
+            selected_scripts = []
+        else:
+            selected_scripts = get_topic_scripts_for_registry(
+                selected_topic["id"],
+                filters["target_length_tier"],
+            )
 
     selected_scripts = _sort_topic_scripts(selected_scripts)
     selected_script_groups = _group_scripts_by_usage(selected_scripts)
@@ -285,7 +368,11 @@ def build_topic_hub_payload(request) -> Dict[str, Any]:
     return {
         "filters": filters,
         "topics": topics,
+        "basic_topics": basic_topics,
+        "generated_topics": generated_topics,
         "total_topics": len(topics),
+        "basic_topic_count": len(basic_topics),
+        "generated_topic_count": len(generated_topics),
         "scripts": scripts,
         "selected_topic": selected_topic,
         "selected_scripts": selected_scripts,

@@ -1337,7 +1337,7 @@ async def list_topics_endpoint(request: Request):
     """Render the topics hub or return the legacy JSON API payload."""
     try:
         if _wants_html(request):
-            payload = build_launch_hub_payload(request)
+            payload = build_topic_hub_payload(request)
             templates = Jinja2Templates(directory="templates")
             return templates.TemplateResponse(
                 "topics/hub.html",
