@@ -42,6 +42,7 @@ logger = get_logger(__name__)
 
 TOPIC_RESEARCH_TASKS: Dict[str, asyncio.Task] = {}
 _UUID_LIKE_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+_TOPIC_NEW_WINDOW = timedelta(hours=24)
 
 
 def _topic_bank_rows() -> List[Dict[str, Any]]:
