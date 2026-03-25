@@ -119,6 +119,7 @@ class BatchDetailResponse(BaseModel):
     state: BatchState
     post_type_counts: Dict[str, int]
     target_length_tier: Optional[int] = None
+    video_pipeline_route: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     archived: bool

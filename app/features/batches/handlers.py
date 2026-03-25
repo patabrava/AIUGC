@@ -531,7 +531,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     qa_auto_checks=qa_auto_checks,
                     scheduled_at=p.get("scheduled_at"),
                     social_networks=social_networks,
-                    publish_caption=p.get("publish_caption") or normalized_seed.get("description"),
+                    publish_caption=p.get("publish_caption") or normalized_seed.get("caption") or normalized_seed.get("description"),
                     publish_status=p.get("publish_status"),
                     platform_ids=platform_ids,
                     publish_results=publish_results,
