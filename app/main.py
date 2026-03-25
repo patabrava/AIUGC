@@ -20,6 +20,7 @@ from app.core.errors import FlowForgeException, ErrorResponse, error_code_for_st
 from app.adapters.supabase_client import get_supabase
 from app.features.batches.handlers import router as batches_router
 from app.features.topics.handlers import recover_stalled_batches, router as topics_router
+from app.features.topics.hub import recover_stalled_topic_research_runs
 from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
@@ -76,6 +77,10 @@ async def lifespan(app: FastAPI):
     recovered_batches = recover_stalled_batches(limit=1, max_age_hours=6)
     if recovered_batches:
         logger.info("startup_batch_recovery_scheduled", batch_ids=recovered_batches)
+
+    recovered_topic_runs = recover_stalled_topic_research_runs(limit=1, max_age_hours=6)
+    if recovered_topic_runs:
+        logger.info("startup_topic_research_recovery_scheduled", run_ids=recovered_topic_runs)
     
     yield
 

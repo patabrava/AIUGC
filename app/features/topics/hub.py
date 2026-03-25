@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -39,7 +39,7 @@ from app.features.topics.queries import (
 
 logger = get_logger(__name__)
 
-TOPIC_RUN_TASKS: Dict[str, asyncio.Task] = {}
+TOPIC_RESEARCH_TASKS: Dict[str, asyncio.Task] = {}
 _UUID_LIKE_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
@@ -129,6 +129,232 @@ def _count_topic_scripts(topic_id: str, bulk_counts: Dict[str, int]) -> int:
         return len(get_topic_scripts_for_registry(topic_id))
     except Exception:
         return count
+
+
+def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _mark_topic_research_task(run_id: str, task: asyncio.Task) -> None:
+    TOPIC_RESEARCH_TASKS[run_id] = task
+
+
+def _clear_topic_research_task(run_id: str, task: asyncio.Task) -> None:
+    current = TOPIC_RESEARCH_TASKS.get(run_id)
+    if current is task:
+        TOPIC_RESEARCH_TASKS.pop(run_id, None)
+
+
+def is_topic_research_active(run_id: str) -> bool:
+    task = TOPIC_RESEARCH_TASKS.get(run_id)
+    if not task:
+        return False
+    if task.done():
+        TOPIC_RESEARCH_TASKS.pop(run_id, None)
+        return False
+    return True
+
+
+async def _run_topic_research_task(
+    *,
+    run_row: Dict[str, Any],
+    topic_registry_id: str,
+    target_length_tier: Optional[int],
+    trigger_source: str,
+    post_type: str,
+    progress_callback: Optional[Any] = None,
+) -> None:
+    topic = get_topic_registry_by_id(topic_registry_id)
+
+    from app.features.topics.handlers import start_seeding_interaction, update_seeding_progress
+
+    start_seeding_interaction(batch_id=run_row["id"], brand=topic.get("title", ""), expected_posts=0)
+
+    def _run_progress_callback(*args, **kwargs):
+        """Handle both Gemini dict callbacks and pipeline kwargs callbacks."""
+        if args and isinstance(args[0], dict):
+            update = args[0]
+            provider_status = str(update.get("provider_status") or "").upper()
+            stage = "retry_wait" if update.get("is_retrying") else "researching"
+            stage_label = (
+                "Retrying Gemini research" if update.get("is_retrying")
+                else "Gemini deep research finished" if provider_status in {"DONE", "COMPLETED", "SUCCEEDED"}
+                else "Gemini deep research is running"
+            )
+            update_seeding_progress(
+                run_row["id"],
+                stage=stage,
+                stage_label=stage_label,
+                detail_message=update.get("detail_message") or "Gemini is researching...",
+                is_retrying=bool(update.get("is_retrying")),
+                retry_message=update.get("retry_message"),
+                provider_interaction_id=update.get("provider_interaction_id"),
+                provider_status=provider_status or None,
+            )
+        else:
+            update_seeding_progress(run_row["id"], **kwargs)
+
+    def _combined_progress_callback(*args, **kwargs):
+        _run_progress_callback(*args, **kwargs)
+        if progress_callback is not None:
+            progress_callback(*args, **kwargs)
+
+    try:
+        await asyncio.to_thread(
+            _run_topic_research_pipeline_sync,
+            run_id=run_row["id"],
+            topic_registry_id=topic_registry_id,
+            target_length_tier=target_length_tier,
+            trigger_source=trigger_source,
+            post_type=post_type,
+            progress_callback=_combined_progress_callback,
+        )
+        update_seeding_progress(run_row["id"], stage="completed", stage_label="Research complete", status="completed")
+    except ValidationError as exc:
+        update_topic_research_run(
+            run_row["id"],
+            status="failed",
+            error_message=exc.message,
+            result_summary={
+                "topic_registry_id": topic_registry_id,
+                "topic_title": topic["title"],
+                "target_length_tier": target_length_tier,
+                "trigger_source": trigger_source,
+            },
+        )
+        update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, "message") else exc))
+        logger.warning(
+            "topic_research_run_validation_failed",
+            run_id=run_row["id"],
+            error=exc.message,
+            details=exc.details,
+        )
+    except ThirdPartyError as exc:
+        update_topic_research_run(
+            run_row["id"],
+            status="failed",
+            error_message=exc.message,
+            result_summary={
+                "topic_registry_id": topic_registry_id,
+                "topic_title": topic["title"],
+                "target_length_tier": target_length_tier,
+                "trigger_source": trigger_source,
+            },
+        )
+        update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, "message") else exc))
+        logger.warning(
+            "topic_research_run_third_party_failed",
+            run_id=run_row["id"],
+            error=exc.message,
+            details=exc.details,
+        )
+    except Exception as exc:
+        update_topic_research_run(
+            run_row["id"],
+            status="failed",
+            error_message=str(exc),
+            result_summary={
+                "topic_registry_id": topic_registry_id,
+                "topic_title": topic["title"],
+                "target_length_tier": target_length_tier,
+                "trigger_source": trigger_source,
+            },
+        )
+        update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, "message") else exc))
+        logger.exception(
+            "topic_research_run_failed",
+            run_id=run_row["id"],
+            topic_registry_id=topic_registry_id,
+            error=str(exc),
+        )
+    finally:
+        task = TOPIC_RESEARCH_TASKS.get(run_row["id"])
+        if task is not None:
+            _clear_topic_research_task(run_row["id"], task)
+
+
+def schedule_topic_research_run(
+    *,
+    run_row: Dict[str, Any],
+    topic_registry_id: str,
+    target_length_tier: Optional[int],
+    trigger_source: str,
+    post_type: str,
+    reason: str,
+    progress_callback: Optional[Any] = None,
+) -> bool:
+    run_id = str(run_row["id"])
+    if is_topic_research_active(run_id):
+        logger.info("topic_research_already_active", run_id=run_id, reason=reason)
+        return False
+
+    task = asyncio.create_task(
+        _run_topic_research_task(
+            run_row=run_row,
+            topic_registry_id=topic_registry_id,
+            target_length_tier=target_length_tier,
+            trigger_source=trigger_source,
+            post_type=post_type,
+            progress_callback=progress_callback,
+        )
+    )
+    _mark_topic_research_task(run_id, task)
+
+    def _cleanup(_task: asyncio.Task) -> None:
+        _clear_topic_research_task(run_id, _task)
+
+    task.add_done_callback(_cleanup)
+    logger.info("topic_research_scheduled", run_id=run_id, topic_registry_id=topic_registry_id, reason=reason)
+    return True
+
+
+def recover_stalled_topic_research_runs(limit: int = 1, max_age_hours: int = 6) -> List[str]:
+    recovered: List[str] = []
+    runs = list_topic_research_runs(limit=max(limit * 10, 25), status="running")
+    newest_allowed_created_at = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    for run in runs:
+        if len(recovered) >= limit:
+            break
+        run_id = str(run.get("id") or "").strip()
+        topic_registry_id = str(run.get("topic_registry_id") or "").strip()
+        if not run_id or not topic_registry_id:
+            continue
+        if is_topic_research_active(run_id):
+            continue
+        created_at = _parse_utc_timestamp(run.get("created_at"))
+        if created_at is None or created_at < newest_allowed_created_at:
+            continue
+        if any(str(run.get(key) or "").strip() for key in ("raw_prompt", "raw_response", "provider_interaction_id")):
+            continue
+        topic = get_topic_registry_by_id(topic_registry_id)
+        target_length_tier = run.get("target_length_tier")
+        if target_length_tier is not None:
+            try:
+                target_length_tier = int(target_length_tier)
+            except (TypeError, ValueError):
+                target_length_tier = None
+        if schedule_topic_research_run(
+            run_row=run,
+            topic_registry_id=topic_registry_id,
+            target_length_tier=target_length_tier,
+            trigger_source=str(run.get("trigger_source") or "startup_recovery"),
+            post_type=str(run.get("post_type") or topic.get("post_type") or "value"),
+            reason="startup_recovery",
+        ):
+            recovered.append(run_id)
+    return recovered
 
 
 def build_launch_hub_payload(request) -> Dict[str, Any]:
@@ -670,114 +896,15 @@ async def launch_topic_research_run(
         target_length_tier=resolved_tier,
         topic_registry_id=topic_registry_id,
     )
-
-    # Initialize live progress tracking
-    from app.features.topics.handlers import start_seeding_interaction, update_seeding_progress
-    start_seeding_interaction(batch_id=run_row["id"], brand=topic.get("title", ""), expected_posts=0)
-
-    def _run_progress_callback(*args, **kwargs):
-        """Handle both Gemini dict callbacks and pipeline kwargs callbacks."""
-        if args and isinstance(args[0], dict):
-            # Gemini LLM callback: progress_callback({"provider_status": ..., "detail_message": ...})
-            update = args[0]
-            provider_status = str(update.get("provider_status") or "").upper()
-            stage = "retry_wait" if update.get("is_retrying") else "researching"
-            stage_label = (
-                "Retrying Gemini research" if update.get("is_retrying")
-                else "Gemini deep research finished" if provider_status in {"DONE", "COMPLETED", "SUCCEEDED"}
-                else "Gemini deep research is running"
-            )
-            update_seeding_progress(
-                run_row["id"],
-                stage=stage,
-                stage_label=stage_label,
-                detail_message=update.get("detail_message") or "Gemini is researching...",
-                is_retrying=bool(update.get("is_retrying")),
-                retry_message=update.get("retry_message"),
-                provider_interaction_id=update.get("provider_interaction_id"),
-                provider_status=provider_status or None,
-            )
-        else:
-            # Pipeline stage callback: progress_callback(stage="researching", ...)
-            update_seeding_progress(run_row["id"], **kwargs)
-
-    async def runner() -> None:
-        try:
-            await asyncio.to_thread(
-                _run_topic_research_pipeline_sync,
-                run_id=run_row["id"],
-                topic_registry_id=topic_registry_id,
-                target_length_tier=resolved_tier,
-                trigger_source=trigger_source,
-                post_type=resolved_post_type,
-                progress_callback=_run_progress_callback,
-            )
-            update_seeding_progress(run_row["id"], stage="completed", stage_label="Research complete", status="completed")
-        except ValidationError as exc:
-            update_topic_research_run(
-                run_row["id"],
-                status="failed",
-                error_message=exc.message,
-                result_summary={
-                    "topic_registry_id": topic_registry_id,
-                    "topic_title": topic["title"],
-                    "target_length_tier": resolved_tier,
-                    "trigger_source": trigger_source,
-                },
-            )
-            update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, 'message') else exc))
-            logger.warning(
-                "topic_research_run_validation_failed",
-                run_id=run_row["id"],
-                error=exc.message,
-                details=exc.details,
-            )
-        except ThirdPartyError as exc:
-            update_topic_research_run(
-                run_row["id"],
-                status="failed",
-                error_message=exc.message,
-                result_summary={
-                    "topic_registry_id": topic_registry_id,
-                    "topic_title": topic["title"],
-                    "target_length_tier": resolved_tier,
-                    "trigger_source": trigger_source,
-                },
-            )
-            update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, 'message') else exc))
-            logger.warning(
-                "topic_research_run_third_party_failed",
-                run_id=run_row["id"],
-                error=exc.message,
-                details=exc.details,
-            )
-        except Exception as exc:
-            update_topic_research_run(
-                run_row["id"],
-                status="failed",
-                error_message=str(exc),
-                result_summary={
-                    "topic_registry_id": topic_registry_id,
-                    "topic_title": topic["title"],
-                    "target_length_tier": resolved_tier,
-                    "trigger_source": trigger_source,
-                },
-            )
-            update_seeding_progress(run_row["id"], stage="failed", stage_label="Research failed", status="failed", detail_message=str(exc.message if hasattr(exc, 'message') else exc))
-            logger.exception(
-                "topic_research_run_failed",
-                run_id=run_row["id"],
-                topic_registry_id=topic_registry_id,
-                error=str(exc),
-            )
-
-    task = asyncio.create_task(runner())
-    TOPIC_RUN_TASKS[run_row["id"]] = task
-
-    def _cleanup(_task: asyncio.Task) -> None:
-        TOPIC_RUN_TASKS.pop(run_row["id"], None)
-
-    task.add_done_callback(_cleanup)
+    schedule_topic_research_run(
+        run_row=run_row,
+        topic_registry_id=topic_registry_id,
+        target_length_tier=resolved_tier,
+        trigger_source=trigger_source,
+        post_type=resolved_post_type,
+        reason="manual_launch",
+        progress_callback=progress_callback,
+    )
     return {
         "run": run_row,
         "topic": topic,

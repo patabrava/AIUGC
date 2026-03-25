@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -103,6 +104,38 @@ def test_topics_launch_endpoint_returns_json(monkeypatch):
     assert payload["ok"] is True
     assert payload["data"]["run"]["id"] == "run-1"
     assert payload["data"]["status_url"] == "/topics/runs/run-1"
+
+
+def test_recover_stalled_topic_research_runs_requeues_recent_running_row(monkeypatch):
+    from app.features.topics import hub as topic_hub
+
+    run = {
+        "id": "run-1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+        "trigger_source": "hub",
+        "target_length_tier": 16,
+        "topic_registry_id": "topic-1",
+        "post_type": "value",
+        "raw_prompt": "",
+        "raw_response": "",
+        "provider_interaction_id": None,
+    }
+    monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=25, status=None: [run])
+    monkeypatch.setattr(topic_hub, "get_topic_registry_by_id", lambda topic_registry_id: {"id": topic_registry_id, "title": "Test Topic", "post_type": "value"})
+
+    scheduled = []
+    monkeypatch.setattr(
+        topic_hub,
+        "schedule_topic_research_run",
+        lambda **kwargs: scheduled.append(kwargs) or True,
+    )
+
+    recovered = topic_hub.recover_stalled_topic_research_runs(limit=1, max_age_hours=6)
+
+    assert recovered == ["run-1"]
+    assert scheduled[0]["run_row"]["id"] == "run-1"
+    assert scheduled[0]["reason"] == "startup_recovery"
 
 
 def test_prompt_builders_include_bank_and_research_context():
