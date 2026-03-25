@@ -69,7 +69,7 @@ def test_needs_extension_hop_returns_false_for_missing_metadata():
 
 
 def test_submit_extension_hop_downloads_video_and_uses_extension_api():
-    """Extension hop must download previous video, then call submit_video_extension."""
+    """Extension hop must call the REST submit_video_extension path."""
     from workers.video_poller import _submit_extension_hop
 
     previous_video_data = {"video_uri": "gs://bucket/base.mp4", "mime_type": "video/mp4"}
@@ -89,7 +89,9 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
             "veo_base_seconds": 4,
             "veo_extension_seconds": 7,
             "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
             "requested_resolution": "720p",
+            "requested_size": "720x1280",
         },
     }
 
@@ -106,12 +108,13 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
          patch("workers.video_poller.get_supabase", return_value=mock_supabase):
         _submit_extension_hop(post, correlation_id="test-corr", previous_video_data=previous_video_data)
 
-    # Must use submit_video_extension with video_uri (SDK, no download)
+    # Must use submit_video_extension with video_uri via REST.
     mock_veo.submit_video_extension.assert_called_once()
     mock_veo.submit_video_generation.assert_not_called()
     call_kwargs = mock_veo.submit_video_extension.call_args[1]
     assert "Zweiter Satz." in call_kwargs["prompt"]
     assert call_kwargs["video_uri"] == "gs://bucket/base.mp4"
+    assert call_kwargs["aspect_ratio"] == "9:16"
 
     update_call = mock_supabase.client.table.return_value.update
     assert update_call.called
@@ -145,7 +148,9 @@ def test_submit_extension_hop_reuses_last_segment_when_fewer_segments_than_hops(
             "veo_base_seconds": 4,
             "veo_extension_seconds": 7,
             "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
             "requested_resolution": "720p",
+            "requested_size": "720x1280",
         },
     }
 
@@ -160,6 +165,7 @@ def test_submit_extension_hop_reuses_last_segment_when_fewer_segments_than_hops(
 
     call_kwargs = mock_veo.submit_video_extension.call_args[1]
     assert "Nur ein Satz." in call_kwargs["prompt"]
+    assert call_kwargs["aspect_ratio"] == "9:16"
 
 
 def test_handle_veo_video_chains_when_hops_remaining():
@@ -181,7 +187,9 @@ def test_handle_veo_video_chains_when_hops_remaining():
             "veo_base_seconds": 4,
             "veo_extension_seconds": 7,
             "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
             "requested_resolution": "720p",
+            "requested_size": "720x1280",
         },
     }
 
@@ -204,9 +212,10 @@ def test_handle_veo_video_chains_when_hops_remaining():
         _handle_veo_video(post, "op-base", "corr-chain")
 
     mock_store.assert_not_called()
-    # Must use extension API with video_uri (SDK, no download)
+    # Must use extension API with video_uri via REST.
     mock_veo.submit_video_extension.assert_called_once()
     assert mock_veo.submit_video_extension.call_args[1]["video_uri"] == "gs://bucket/video.mp4"
+    assert mock_veo.submit_video_extension.call_args[1]["aspect_ratio"] == "9:16"
     mock_veo.submit_video_generation.assert_not_called()
 
 
@@ -241,6 +250,98 @@ def test_handle_veo_video_completes_when_all_hops_done():
         _handle_veo_video(post, "op-ext-2", "corr-final")
 
     mock_store.assert_called_once()
+
+
+def test_handle_veo_video_downloads_bytes_when_postprocess_needed():
+    """Portrait fallback must bypass URL ingest and download bytes for the final crop step."""
+    from workers.video_poller import _handle_veo_video
+
+    post = {
+        "id": "post-final-crop",
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 2,
+            "veo_extension_hops_completed": 2,
+            "chain_status": "extending",
+            "operation_ids": ["op-base", "op-ext-1", "op-ext-2"],
+            "postprocess_crop_aspect_ratio": "9:16",
+            "requested_size": "720x1280",
+        },
+    }
+
+    mock_veo = MagicMock()
+    mock_veo.check_operation_status.return_value = {
+        "done": True,
+        "video_data": {"video_uri": "gs://bucket/final.mp4"},
+    }
+    mock_veo.download_video.return_value = b"final-video"
+
+    mock_settings = MagicMock()
+    mock_settings.use_url_based_upload = True
+
+    with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
+         patch("workers.video_poller.get_settings", return_value=mock_settings), \
+         patch("workers.video_poller._store_completed_video") as mock_store:
+        _handle_veo_video(post, "op-ext-2", "corr-final-crop")
+
+    mock_veo.get_video_download_url.assert_not_called()
+    mock_veo.download_video.assert_called_once_with(
+        video_uri="gs://bucket/final.mp4",
+        correlation_id="corr-final-crop",
+    )
+    mock_store.assert_called_once()
+    assert mock_store.call_args.kwargs["video_source"] == b"final-video"
+
+
+def test_store_completed_video_applies_crop_postprocess():
+    """Final storage must upload the post-processed portrait bytes when crop metadata is present."""
+    from workers.video_poller import _store_completed_video
+
+    mock_storage = MagicMock()
+    mock_storage.upload_video.return_value = {
+        "storage_provider": "cloudflare_r2",
+        "storage_key": "videos/post.mp4",
+        "url": "https://cdn.example.com/post.mp4",
+        "thumbnail_url": None,
+        "file_path": "videos/post.mp4",
+        "size": 12,
+    }
+    mock_supabase = MagicMock()
+    mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    with patch("workers.video_poller.get_storage_client", return_value=mock_storage), \
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch(
+             "workers.video_poller._maybe_postprocess_video_bytes",
+             return_value=(
+                 b"cropped-video",
+                 {
+                     "postprocess_crop_applied": True,
+                     "postprocess_crop_output_size": "720x1280",
+                 },
+             ),
+         ) as mock_postprocess:
+        _store_completed_video(
+            post_id="post-crop",
+            provider="veo_3_1",
+            video_source=b"raw-video",
+            correlation_id="corr-store",
+            provider_metadata={"video_uri": "gs://bucket/final.mp4"},
+            existing_metadata={
+                "postprocess_crop_aspect_ratio": "9:16",
+                "requested_size": "720x1280",
+            },
+        )
+
+    mock_postprocess.assert_called_once()
+    mock_storage.upload_video.assert_called_once_with(
+        video_bytes=b"cropped-video",
+        file_name="post_post-crop.mp4",
+        correlation_id="corr-store",
+    )
+    update_payload = mock_supabase.client.table.return_value.update.call_args[0][0]
+    assert update_payload["video_metadata"]["postprocess_crop_applied"] is True
+    assert update_payload["video_metadata"]["postprocess_crop_output_size"] == "720x1280"
 
 
 def test_full_32s_chain_lifecycle():

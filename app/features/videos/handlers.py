@@ -42,6 +42,11 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 
+def _resolve_extended_provider_aspect_ratio(route: Optional[str], requested_aspect_ratio: str) -> str:
+    """Extended runs keep the requested aspect ratio when the REST path is used."""
+    return requested_aspect_ratio
+
+
 def _resolve_video_submission_plan(
     *,
     batch: Dict[str, Any],
@@ -54,13 +59,21 @@ def _resolve_video_submission_plan(
     if uses_duration_routing(batch):
         profile = get_duration_profile(batch.get("target_length_tier"))
         resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
+        provider_aspect_ratio = _resolve_extended_provider_aspect_ratio(profile.route, aspect_ratio)
+        requested_size = size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution)
         return {
             "provider": VEO_PROVIDER,
             "seconds": profile.requested_seconds,
             "provider_target_seconds": profile.provider_target_seconds,
             "aspect_ratio": aspect_ratio,
+            "requested_aspect_ratio": aspect_ratio,
+            "provider_aspect_ratio": provider_aspect_ratio,
             "resolution": resolved_resolution,
-            "size": size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution),
+            "size": requested_size,
+            "requested_size": requested_size,
+            "provider_requested_size": _map_size_from_aspect_ratio(provider_aspect_ratio, resolved_resolution),
+            "postprocess_crop_aspect_ratio": aspect_ratio if provider_aspect_ratio != aspect_ratio else None,
+            "postprocess_strategy": "center_crop_scale" if provider_aspect_ratio != aspect_ratio else None,
             "profile": profile,
             "duration_routed": True,
         }
@@ -72,8 +85,14 @@ def _resolve_video_submission_plan(
         "seconds": seconds,
         "provider_target_seconds": seconds,
         "aspect_ratio": aspect_ratio,
+        "requested_aspect_ratio": aspect_ratio,
+        "provider_aspect_ratio": aspect_ratio,
         "resolution": resolution,
         "size": size,
+        "requested_size": size,
+        "provider_requested_size": size,
+        "postprocess_crop_aspect_ratio": None,
+        "postprocess_strategy": None,
         "profile": None,
         "duration_routed": False,
     }
@@ -86,14 +105,28 @@ def _build_submission_metadata(
     submission_result: Dict[str, Any],
     segment_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    requested_size = submission_result.get("requested_size")
+    requested_aspect_ratio = submission_plan.get("requested_aspect_ratio") or submission_plan["aspect_ratio"]
+    requested_size = submission_result.get("requested_size") or submission_plan.get("requested_size")
+    provider_aspect_ratio = submission_plan.get("provider_aspect_ratio") or requested_aspect_ratio
     metadata = {
         **existing_metadata,
-        "requested_aspect_ratio": submission_plan["aspect_ratio"],
+        "requested_aspect_ratio": requested_aspect_ratio,
         "requested_resolution": submission_plan["resolution"],
         "requested_seconds": submission_plan["seconds"],
         "requested_size": requested_size,
+        "provider_aspect_ratio": provider_aspect_ratio,
     }
+
+    provider_requested_size = (
+        submission_result.get("provider_requested_size")
+        or submission_plan.get("provider_requested_size")
+    )
+    if provider_requested_size:
+        metadata["provider_requested_size"] = provider_requested_size
+    if submission_plan.get("postprocess_crop_aspect_ratio"):
+        metadata["postprocess_crop_aspect_ratio"] = submission_plan["postprocess_crop_aspect_ratio"]
+    if submission_plan.get("postprocess_strategy"):
+        metadata["postprocess_strategy"] = submission_plan["postprocess_strategy"]
 
     profile = submission_plan.get("profile")
     if profile is not None:
@@ -204,6 +237,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             prompt_text=prompt_request["prompt_text"] or "",
             negative_prompt=prompt_request.get("negative_prompt"),
             aspect_ratio=request.aspect_ratio,
+            provider_aspect_ratio=request.aspect_ratio,
+            requested_aspect_ratio=request.aspect_ratio,
             resolution=request.resolution,
             seconds=request.seconds,
             size=request.size,
@@ -494,6 +529,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     prompt_text=prompt_text,
                     negative_prompt=negative_prompt,
                     aspect_ratio=submission_plan["aspect_ratio"],
+                    provider_aspect_ratio=submission_plan.get("provider_aspect_ratio"),
+                    requested_aspect_ratio=submission_plan.get("requested_aspect_ratio"),
                     resolution=submission_plan["resolution"],
                     seconds=submission_plan["seconds"],
                     size=submission_plan["size"],
@@ -738,6 +775,8 @@ def _submit_video_request(
     prompt_text: str,
     negative_prompt: Optional[str],
     aspect_ratio: str,
+    provider_aspect_ratio: Optional[str],
+    requested_aspect_ratio: Optional[str],
     resolution: str,
     seconds: int,
     size: Optional[str],
@@ -747,12 +786,14 @@ def _submit_video_request(
 
     if provider == "veo_3_1":
         veo_client = get_veo_client()
+        provider_aspect = provider_aspect_ratio or aspect_ratio
+        requested_aspect = requested_aspect_ratio or aspect_ratio
         try:
             result = veo_client.submit_video_generation(
                 prompt=prompt_text,
                 negative_prompt=negative_prompt,
                 correlation_id=correlation_id,
-                aspect_ratio=aspect_ratio,
+                aspect_ratio=provider_aspect,
                 resolution=resolution,
             )
         except httpx.HTTPStatusError as exc:
@@ -785,12 +826,14 @@ def _submit_video_request(
                 },
                 status_code=503,
             ) from exc
-        requested_size = _map_size_from_aspect_ratio(aspect_ratio, resolution)
+        requested_size = _map_size_from_aspect_ratio(requested_aspect, resolution)
+        provider_requested_size = _map_size_from_aspect_ratio(provider_aspect, resolution)
         return {
             "operation_id": result["operation_id"],
             "status": result.get("status", "submitted"),
             "provider_model": "veo-3.1",
             "requested_size": requested_size,
+            "provider_requested_size": provider_requested_size,
             "estimated_duration_seconds": 180,
             "provider_metadata": result,
         }

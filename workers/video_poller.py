@@ -10,6 +10,8 @@ import sys
 import os
 import json
 import socket
+import subprocess
+import tempfile
 from typing import List, Dict, Any, Optional, Union
 import httpx
 
@@ -84,6 +86,146 @@ def _failure_metadata(
         metadata["provider_status_code"] = error.response.status_code
         metadata["provider_response_body"] = error.response.text[:4000]
     return metadata
+
+
+def _parse_aspect_ratio(value: str) -> tuple[int, int]:
+    width_str, height_str = value.split(":", 1)
+    width = int(width_str)
+    height = int(height_str)
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Invalid aspect ratio: {value}")
+    return width, height
+
+
+def _parse_size(value: str) -> tuple[int, int]:
+    width_str, height_str = value.lower().split("x", 1)
+    width = int(width_str)
+    height = int(height_str)
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Invalid size: {value}")
+    return width, height
+
+
+def _even(value: int) -> int:
+    return value if value % 2 == 0 else value - 1
+
+
+def _probe_video_dimensions(video_path: str) -> tuple[int, int]:
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "json",
+        video_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise ValueError(f"ffprobe failed: {result.stderr[-200:]}")
+    data = json.loads(result.stdout)
+    stream = (data.get("streams") or [{}])[0]
+    width = int(stream["width"])
+    height = int(stream["height"])
+    return width, height
+
+
+def _maybe_postprocess_video_bytes(
+    *,
+    post_id: str,
+    video_bytes: bytes,
+    existing_metadata: Dict[str, Any],
+    correlation_id: str,
+) -> tuple[bytes, Dict[str, Any]]:
+    target_aspect_ratio = str(existing_metadata.get("postprocess_crop_aspect_ratio") or "").strip()
+    if not target_aspect_ratio:
+        return video_bytes, {}
+
+    requested_size = str(existing_metadata.get("requested_size") or "").strip()
+    if not requested_size:
+        raise ValueError(f"Post {post_id} is missing requested_size for crop postprocess")
+
+    target_aspect_width, target_aspect_height = _parse_aspect_ratio(target_aspect_ratio)
+    target_width, target_height = _parse_size(requested_size)
+
+    with tempfile.TemporaryDirectory(prefix="video_postprocess_") as temp_dir:
+        input_path = os.path.join(temp_dir, "input.mp4")
+        output_path = os.path.join(temp_dir, "output.mp4")
+        with open(input_path, "wb") as file_obj:
+            file_obj.write(video_bytes)
+
+        source_width, source_height = _probe_video_dimensions(input_path)
+        source_ratio = source_width / source_height
+        target_ratio = target_aspect_width / target_aspect_height
+
+        if abs(source_ratio - target_ratio) < 0.001:
+            crop_width = source_width
+            crop_height = source_height
+            crop_x = 0
+            crop_y = 0
+        elif source_ratio > target_ratio:
+            crop_height = source_height
+            crop_width = _even(int(source_height * target_ratio))
+            crop_x = max((source_width - crop_width) // 2, 0)
+            crop_y = 0
+        else:
+            crop_width = source_width
+            crop_height = _even(int(source_width / target_ratio))
+            crop_x = 0
+            crop_y = max((source_height - crop_height) // 2, 0)
+
+        filter_graph = (
+            f"crop={crop_width}:{crop_height}:{crop_x}:{crop_y},"
+            f"scale={target_width}:{target_height}"
+        )
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            input_path,
+            "-vf",
+            filter_graph,
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "18",
+            "-c:a",
+            "copy",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        if result.returncode != 0:
+            raise ValueError(f"ffmpeg postprocess failed: {result.stderr[-300:]}")
+
+        with open(output_path, "rb") as file_obj:
+            processed_bytes = file_obj.read()
+
+    logger.info(
+        "video_postprocess_crop_applied",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        target_aspect_ratio=target_aspect_ratio,
+        source_size=f"{source_width}x{source_height}",
+        output_size=f"{target_width}x{target_height}",
+        filter_graph=filter_graph,
+    )
+    return processed_bytes, {
+        "postprocess_crop_applied": True,
+        "postprocess_crop_source_size": f"{source_width}x{source_height}",
+        "postprocess_crop_output_size": f"{target_width}x{target_height}",
+        "postprocess_crop_filter": filter_graph,
+    }
 
 
 def poll_pending_videos():
@@ -231,8 +373,9 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
         video_uri = video_data["video_uri"]
 
         settings = get_settings()
+        requires_local_postprocess = bool(metadata.get("postprocess_crop_aspect_ratio"))
 
-        if settings.use_url_based_upload:
+        if settings.use_url_based_upload and not requires_local_postprocess:
             try:
                 logger.info(
                     "attempting_url_based_upload",
@@ -343,27 +486,37 @@ def _store_completed_video(
     existing_metadata: Dict[str, Any],
 ) -> None:
     storage_client = get_storage_client()
+    processed_source = video_source
+    postprocess_metadata: Dict[str, Any] = {}
 
-    upload_method = "url" if isinstance(video_source, str) else "bytes"
+    if isinstance(video_source, bytes):
+        processed_source, postprocess_metadata = _maybe_postprocess_video_bytes(
+            post_id=post_id,
+            video_bytes=video_source,
+            existing_metadata=existing_metadata,
+            correlation_id=correlation_id,
+        )
+
+    upload_method = "url" if isinstance(processed_source, str) else "bytes"
     upload_start = time.monotonic()
 
     if upload_method == "url":
         upload_result = storage_client.upload_video_from_url(
-            video_url=video_source,
+            video_url=processed_source,
             file_name=f"post_{post_id}.mp4",
             correlation_id=correlation_id
         )
     else:
         upload_result = storage_client.upload_video(
-            video_bytes=video_source,
+            video_bytes=processed_source,
             file_name=f"post_{post_id}.mp4",
             correlation_id=correlation_id
         )
 
     upload_duration = time.monotonic() - upload_start
 
-    if isinstance(video_source, bytes):
-        size_bytes = len(video_source)
+    if isinstance(processed_source, bytes):
+        size_bytes = len(processed_source)
     else:
         size_bytes = upload_result.get("size")
 
@@ -391,6 +544,7 @@ def _store_completed_video(
         "upload_method": upload_method,
         "last_polled_by": _poller_identity(),
         "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        **postprocess_metadata,
     }
 
     supabase.table("posts").update({
@@ -495,9 +649,8 @@ def _submit_extension_hop(
 ) -> None:
     """Submit the next VEO extension hop for an in-progress chain.
 
-    Per the Veo 3.1 API, extending a video requires sending the previous
-    video's bytes back in the request payload (``video.inlineData``).  The
-    API returns a single combined video (original + extension).
+    The REST extension path accepts a previous video URI and returns a
+    single combined video (original + extension).
     """
     post_id = post["id"]
     metadata = dict(post.get("video_metadata") or {})
@@ -525,7 +678,6 @@ def _submit_extension_hop(
 
     veo_client = get_veo_client()
 
-    # Pass the video URI to the SDK (no download needed — SDK handles the reference)
     video_uri = (previous_video_data or {}).get("video_uri")
     if not video_uri:
         raise ValueError(
@@ -537,7 +689,7 @@ def _submit_extension_hop(
         prompt=prompt,
         video_uri=video_uri,
         correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
-        aspect_ratio=metadata.get("requested_aspect_ratio", "9:16"),
+        aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
         resolution=metadata.get("requested_resolution", "720p"),
     )
 

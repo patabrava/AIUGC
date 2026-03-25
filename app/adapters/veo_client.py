@@ -403,12 +403,8 @@ class VeoClient:
         resolution: str = "720p",
     ) -> Dict[str, Any]:
         """
-        Extend a previously generated VEO video using the Python SDK.
-
-        The ``predictLongRunning`` REST endpoint does not support video input
-        (rejects both ``inlineData`` and ``fileUri``).  Extension must go
-        through the SDK's ``generate_videos(video=...)`` which handles the
-        video reference internally.
+        Extend a previously generated VEO video using the REST payload that
+        historically powered the March 19 successful 9:16 chains.
 
         Args:
             prompt: Text prompt describing the continuation.
@@ -420,9 +416,20 @@ class VeoClient:
         Returns:
             Dict with ``operation_id``, ``status``, ``done``.
         """
-        from google.genai import types
-
-        video_ref = types.Video(uri=video_uri)
+        payload: Dict[str, Any] = {
+            "instances": [
+                {
+                    "prompt": prompt,
+                    "video": {
+                        "uri": video_uri,
+                    },
+                }
+            ],
+            "parameters": {
+                "aspectRatio": aspect_ratio,
+                "resolution": resolution,
+            },
+        }
 
         logger.info(
             "veo_extension_request",
@@ -432,20 +439,25 @@ class VeoClient:
             video_uri=video_uri,
             prompt_length=len(prompt),
             prompt_preview=prompt[:400],
+            request_payload=payload,
         )
 
         try:
-            operation = self.client.models.generate_videos(
-                model="veo-3.1-generate-preview",
-                video=video_ref,
-                prompt=prompt,
-                config=types.GenerateVideosConfig(
-                    number_of_videos=1,
-                    resolution=resolution,
-                ),
+            response = self._http_client.post(
+                f"{_GEMINI_API_BASE}/models/veo-3.1-generate-preview:predictLongRunning",
+                headers=self._build_headers(include_json=True),
+                json=payload,
             )
-
-            operation_name = operation.name
+            logger.info(
+                "veo_extension_raw_response",
+                correlation_id=correlation_id,
+                status_code=response.status_code,
+                text=response.text,
+            )
+            response.raise_for_status()
+            operation_name = response.json().get("name")
+            if not operation_name:
+                raise ValueError("VEO extension response missing operation name")
 
             logger.info(
                 "veo_extension_submitted",
@@ -466,6 +478,7 @@ class VeoClient:
                 correlation_id=correlation_id,
                 error=str(e),
                 video_uri=video_uri,
+                request_payload=payload,
             )
             raise
 
