@@ -107,3 +107,4 @@ END_LLM_FRIENDLY_PLAN_TEST_DEBUG
 - Caption fallback synthesis must always return all three validated families (never one-lane only) and must keep each template inside its exact char bucket so malformed Gemini JSON can never crash post creation or caption repair jobs.
 - Caption generation must never bubble provider exceptions to callers; on any Gemini JSON/text/runtime failure, synthesize a validated 3-variant bundle and return the chosen caption instead of failing the batch.
 - Veo video extension must use the REST `predictLongRunning` `video.uri` path only; the Gemini SDK extension path currently rejects valid `9:16` inputs with `INVALID_ARGUMENT`, so do not route portrait extension jobs through the SDK.
+- Topics hub desktop panels must keep a shared fixed height (`lg:h-[80vh]`) with internal scrolling; never let launch/active-run HTMX swaps resize the right panel during deep-research progress.

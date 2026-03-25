@@ -78,6 +78,31 @@ def test_topics_endpoint_returns_html_for_browser_requests(monkeypatch):
     assert "Topics Hub" in response.text
 
 
+def test_topics_hub_uses_fixed_height_desktop_panels(monkeypatch):
+    monkeypatch.setattr(
+        topic_handlers,
+        "build_topic_hub_payload",
+        lambda request: {
+            "filters": {"search": "", "post_type": None, "target_length_tier": None, "topic_id": None, "run_id": None, "status": None, "only_with_scripts": False},
+            "topics": [],
+            "total_topics": 0,
+            "scripts": [],
+            "selected_topic": None,
+            "selected_scripts": [],
+            "runs": [],
+            "active_runs": [],
+            "completed_runs": [],
+        },
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert "lg:h-[80vh]" in response.text
+    assert 'id="launch-panel" class="bg-slate-50/50 p-5 sm:p-6 overflow-y-auto lg:h-full min-h-0"' in response.text
+
+
 def test_topics_launch_endpoint_returns_json(monkeypatch):
     async def fake_launch_topic_research_run(**kwargs):
         return {

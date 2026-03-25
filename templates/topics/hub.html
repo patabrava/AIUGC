@@ -13,10 +13,10 @@
      @open-scripts-drawer.window="drawerOpen = true">
 
     <div class="rounded-3xl border border-slate-200 bg-white shadow-xl overflow-hidden">
-        <div class="grid lg:grid-cols-[1fr_0.85fr] min-h-[70vh]">
+        <div class="grid lg:grid-cols-[1fr_0.85fr] lg:h-[80vh]">
 
             {# ── LEFT PANEL: Topic List ── #}
-            <div class="border-r border-slate-200 p-5 sm:p-6 overflow-y-auto max-h-[80vh]">
+            <div class="border-r border-slate-200 p-5 sm:p-6 overflow-y-auto lg:h-full">
                 <div class="flex items-center justify-between gap-4">
                     <div>
                         <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Inventory</p>
@@ -67,7 +67,7 @@
             </div>
 
             {# ── RIGHT PANEL: Launch Panel ── #}
-            <div id="launch-panel" class="bg-slate-50/50 p-5 sm:p-6">
+            <div id="launch-panel" class="bg-slate-50/50 p-5 sm:p-6 overflow-y-auto lg:h-full min-h-0">
                 {% include "topics/partials/launch_panel.html" %}
                 {% include "topics/partials/active_runs.html" %}
             </div>
