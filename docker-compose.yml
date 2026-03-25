@@ -12,6 +12,7 @@ x-flow-forge-env: &flow-forge-env
   GEMINI_TOPIC_POLL_SECONDS: ${GEMINI_TOPIC_POLL_SECONDS:-5}
   GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY}
   GOOGLE_AI_PROJECT_ID: ${GOOGLE_AI_PROJECT_ID}
+  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
   CLOUDFLARE_R2_ACCOUNT_ID: ${CLOUDFLARE_R2_ACCOUNT_ID}
   CLOUDFLARE_R2_ACCESS_KEY_ID: ${CLOUDFLARE_R2_ACCESS_KEY_ID}
   CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${CLOUDFLARE_R2_SECRET_ACCESS_KEY}
@@ -86,6 +87,17 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["python", "workers/topic_researcher.py"]
+    environment: *flow-forge-env
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+
+  caption-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "workers.caption_worker"]
     environment: *flow-forge-env
     restart: unless-stopped
     depends_on:

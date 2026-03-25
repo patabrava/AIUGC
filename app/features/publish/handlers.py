@@ -87,6 +87,9 @@ except ModuleNotFoundError:
 logger = structlog.get_logger()
 router = APIRouter(prefix="/publish", tags=["publish"])
 
+from app.features.publish.arm import router as arm_router
+router.include_router(arm_router)
+
 META_GRAPH_BASE = "https://graph.facebook.com/v25.0"
 META_IG_BASE = "https://graph.instagram.com/v25.0"
 META_OAUTH_URL = "https://www.facebook.com/v25.0/dialog/oauth"

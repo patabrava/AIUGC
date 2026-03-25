@@ -42,6 +42,11 @@ def test_resolve_video_submission_plan_routes_duration_tier_to_veo_extended():
     assert plan["seconds"] == 16
     assert plan["provider_target_seconds"] == 18
     assert plan["resolution"] == "720p"
+    assert plan["requested_aspect_ratio"] == "9:16"
+    assert plan["provider_aspect_ratio"] == "9:16"
+    assert plan["requested_size"] == "720x1280"
+    assert plan["provider_requested_size"] == "720x1280"
+    assert plan["postprocess_crop_aspect_ratio"] is None
     assert plan["profile"].route == "veo_extended"
 
 
@@ -62,6 +67,7 @@ def test_build_submission_metadata_initializes_extension_chain():
         submission_result={
             "operation_id": "operations/abc",
             "requested_size": "720x1280",
+            "provider_requested_size": "720x1280",
         },
     )
 
@@ -70,6 +76,12 @@ def test_build_submission_metadata_initializes_extension_chain():
     assert metadata["provider_target_seconds"] == 32
     assert metadata["generated_seconds"] == 0
     assert metadata["operation_ids"] == ["operations/abc"]
+    assert metadata["requested_aspect_ratio"] == "9:16"
+    assert metadata["provider_aspect_ratio"] == "9:16"
+    assert metadata["requested_size"] == "720x1280"
+    assert metadata["provider_requested_size"] == "720x1280"
+    assert "postprocess_crop_aspect_ratio" not in metadata
+    assert "postprocess_strategy" not in metadata
 
 
 def test_extended_route_uses_isolated_submission_statuses():
@@ -121,3 +133,4 @@ def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():
     assert metadata["veo_extension_hops_completed"] == 0
     assert metadata["veo_segments"] == ["S1.", "S2.", "S3.", "S4."]
     assert metadata["chain_status"] == "submitted"
+    assert metadata["provider_aspect_ratio"] == "9:16"

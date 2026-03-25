@@ -56,3 +56,38 @@ def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(mon
     assert submission["operation_id"] == "operations/test-operation"
 
     veo_module.VeoClient._instance = None
+
+
+def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
+    monkeypatch.setattr(
+        veo_module,
+        "get_settings",
+        lambda: SimpleNamespace(google_ai_api_key="test-key"),
+    )
+    monkeypatch.setattr(
+        veo_module.genai,
+        "Client",
+        lambda api_key: SimpleNamespace(api_key=api_key),
+    )
+
+    fake_http_client = FakeHttpClient()
+    veo_module.VeoClient._instance = None
+    client = veo_module.VeoClient()
+    client._http_client = fake_http_client
+
+    submission = client.submit_video_extension(
+        prompt="continue the scene",
+        video_uri="https://generativelanguage.googleapis.com/v1beta/files/example:download?alt=media",
+        correlation_id="test-extension",
+        aspect_ratio="9:16",
+        resolution="720p",
+    )
+
+    payload = fake_http_client.post_calls[0]["json"]
+    assert payload["parameters"]["aspectRatio"] == "9:16"
+    assert payload["parameters"]["resolution"] == "720p"
+    assert payload["instances"][0]["prompt"] == "continue the scene"
+    assert payload["instances"][0]["video"]["uri"].endswith(":download?alt=media")
+    assert submission["operation_id"] == "operations/test-operation"
+
+    veo_module.VeoClient._instance = None

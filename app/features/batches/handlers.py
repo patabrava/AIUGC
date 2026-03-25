@@ -369,6 +369,17 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
             "removed_scripts_count": removed_scripts_count,
             "pending_scripts_count": pending_scripts_count,
         },
+        "publish_posts_json": [
+            {
+                "id": post.get("id"),
+                "type": post.get("post_type"),
+                "title": post.get("topic_title"),
+                "caption": post.get("publish_caption") or "",
+                "videoUrl": post.get("video_url"),
+            }
+            for post in posts
+            if not (post.get("seed_data") or {}).get("video_excluded")
+        ],
         "meta_publish_state": meta_publish_state,
         "tiktok_publish_state": tiktok_publish_state,
         "selected_meta_page": meta_publish_state.get("selected_page") or {},

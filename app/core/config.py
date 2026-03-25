@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     # Video Providers
     google_ai_api_key: str = Field("", description="Google AI API key for VEO 3.1")
     google_ai_project_id: Optional[str] = Field(None, description="Google Cloud project ID")
+    deepgram_api_key: str = Field("", description="Deepgram API key for speech-to-text captioning")
     # sora_api_key: str = Field(default="", description="Sora 2 API key")  # Future
     
     # Video Storage

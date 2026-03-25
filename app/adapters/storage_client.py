@@ -162,6 +162,22 @@ class StorageClient:
             content_type=content_type or "video/mp4",
         )
 
+    def download_video(self, *, video_url: str, correlation_id: str) -> bytes:
+        """Download video bytes from a URL (R2 CDN or presigned)."""
+        logger.info(
+            "storage_download_start",
+            correlation_id=correlation_id,
+            url=video_url[:80],
+        )
+        response = self._http_client.get(video_url)
+        response.raise_for_status()
+        logger.info(
+            "storage_download_done",
+            correlation_id=correlation_id,
+            size=len(response.content),
+        )
+        return response.content
+
     def _build_object_key(self, file_name: str) -> str:
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", file_name).strip("-") or "video.mp4"
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

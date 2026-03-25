@@ -19,6 +19,10 @@ VIDEO_STATUS_COMPLETED = "completed"
 VIDEO_STATUS_FAILED = "failed"
 VIDEO_STATUS_EXTENDED_SUBMITTED = "extended_submitted"
 VIDEO_STATUS_EXTENDED_PROCESSING = "extended_processing"
+VIDEO_STATUS_CAPTION_PENDING = "caption_pending"
+VIDEO_STATUS_CAPTION_PROCESSING = "caption_processing"
+VIDEO_STATUS_CAPTION_COMPLETED = "caption_completed"
+VIDEO_STATUS_CAPTION_FAILED = "caption_failed"
 
 
 @dataclass(frozen=True)
@@ -161,3 +165,8 @@ def get_pollable_video_statuses() -> tuple[str, ...]:
         VIDEO_STATUS_EXTENDED_SUBMITTED,
         VIDEO_STATUS_EXTENDED_PROCESSING,
     )
+
+
+def get_caption_pollable_statuses() -> tuple[str, ...]:
+    """Statuses the caption worker should poll for."""
+    return (VIDEO_STATUS_CAPTION_PENDING,)
