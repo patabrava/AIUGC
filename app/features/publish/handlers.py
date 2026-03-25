@@ -50,6 +50,7 @@ from app.features.publish.schemas import (
     SuggestTimesResponse,
     UpdatePostScheduleRequest,
 )
+from app.features.topics.captions import resolve_selected_caption
 try:
     from app.features.publish.tiktok import (
         get_tiktok_public_account,
@@ -580,16 +581,13 @@ def _ensure_meta_targets_for_networks(networks: List[str], meta_connection: Dict
 
 
 def _default_publish_caption(post: Dict[str, Any]) -> str:
-    """Use stored caption when available, otherwise fall back to the generated description."""
+    """Use stored caption when available, otherwise fall back to the generated seed bundle."""
     caption = (post.get("publish_caption") or "").strip()
     if caption:
         return caption
 
     seed_data = _load_json_object(post.get("seed_data"))
-    description = seed_data.get("description")
-    if description:
-        return str(description).strip()
-    return ""
+    return resolve_selected_caption(seed_data)
 
 
 def get_post_schedules(batch_id: str) -> List[Dict[str, Any]]:

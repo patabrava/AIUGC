@@ -32,6 +32,7 @@ from app.features.topics.agents import (
     generate_lifestyle_topics,
     build_lifestyle_seed_payload,
 )
+from app.features.topics.captions import attach_caption_bundle
 from app.features.topics.deduplication import deduplicate_topics
 from app.features.topics.variant_expansion import expand_topic_variants
 from app.features.topics.queries import (
@@ -65,12 +66,30 @@ from app.features.topics.hub import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/topics", tags=["topics"])
+templates = Jinja2Templates(directory="templates")
 _SEEDING_PROGRESS: Dict[str, Dict[str, Any]] = {}
 _SEEDING_EVENTS: Dict[str, List[Dict[str, Any]]] = {}
 _SEEDING_EVENT_COUNTERS: Dict[str, int] = {}
 _SEEDING_PROGRESS_LOCK = RLock()
 _DISCOVERY_TASKS: Dict[str, asyncio.Task] = {}
 _PROGRESS_TTL_SECONDS = 45
+
+
+def _attach_publish_captions(
+    *,
+    topic_title: str,
+    post_type: str,
+    seed_payload: Dict[str, Any],
+    script_fallback: str = "",
+    context: str = "",
+) -> Dict[str, Any]:
+    return attach_caption_bundle(
+        seed_payload,
+        topic_title=topic_title,
+        post_type=post_type,
+        script_fallback=script_fallback,
+        context=context,
+    )
 
 
 def _utc_now_iso() -> str:
@@ -527,6 +546,13 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     suggestion.get("seed_payload")
                     or {"facts": [topic_rotation]}
                 )
+                seed_payload = _attach_publish_captions(
+                    topic_title=topic_title,
+                    post_type=post_type,
+                    seed_payload=seed_payload,
+                    script_fallback=topic_rotation,
+                    context=str(seed_payload.get("description") or seed_payload.get("caption") or topic_rotation),
+                )
                 add_topic_to_registry(
                     title=topic_title,
                     rotation=topic_rotation,
@@ -668,6 +694,13 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 seed_payload = build_lifestyle_seed_payload(
                     topic_data=topic_data,
                     dialog_scripts=dialog_scripts
+                )
+                seed_payload = _attach_publish_captions(
+                    topic_title=topic_data["title"],
+                    post_type=post_type,
+                    seed_payload=seed_payload,
+                    script_fallback=topic_data["rotation"],
+                    context=str(seed_payload.get("description") or topic_data["title"]),
                 )
 
                 stored_row = store_topic_bank_entry(
@@ -925,6 +958,13 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     strict_seed=seed,
                     dialog_scripts=None,
                 )
+                seed_payload = _attach_publish_captions(
+                    topic_title=topic_model.title,
+                    post_type=post_type,
+                    seed_payload=seed_payload,
+                    script_fallback=topic_model.rotation,
+                    context=str(seed_payload.get("description") or seed_payload.get("caption") or topic_model.title),
+                )
 
                 add_topic_to_registry(
                     title=topic_model.title,
@@ -1000,6 +1040,13 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             seed_payload = build_lifestyle_seed_payload(
                 topic_data=fallback_topic,
                 dialog_scripts=dialog_scripts
+            )
+            seed_payload = _attach_publish_captions(
+                topic_title=fallback_topic["title"],
+                post_type="lifestyle",
+                seed_payload=seed_payload,
+                script_fallback=fallback_topic["rotation"],
+                context=str(seed_payload.get("description") or fallback_topic["title"]),
             )
 
             fallback_tier = target_length_tier or 8
@@ -1196,7 +1243,6 @@ async def random_topic_endpoint(request: Request):
     """Return the topic with the fewest scripts as an HTMX partial."""
     from app.features.topics import hub as _hub
     topic = _hub.get_random_topic()
-    templates = Jinja2Templates(directory="templates")
     if topic is None:
         return templates.TemplateResponse(
             "topics/partials/confirmation_card.html",

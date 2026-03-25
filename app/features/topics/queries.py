@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import NotFoundError
 from app.core.logging import get_logger
+from app.features.topics.captions import resolve_selected_caption
 
 logger = get_logger(__name__)
 
@@ -236,7 +237,8 @@ def create_post_for_batch(
         "topic_rotation": topic_rotation,
         "topic_cta": topic_cta,
         "spoken_duration": spoken_duration,
-        "seed_data": seed_data
+        "seed_data": seed_data,
+        "publish_caption": resolve_selected_caption(seed_data),
     }
     
     response = supabase.client.table("posts").insert(post_data).execute()

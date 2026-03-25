@@ -34,6 +34,7 @@ from app.features.publish.schemas import (
     TikTokPublishJobResponse,
     TikTokUploadDraftRequest,
 )
+from app.features.topics.captions import resolve_selected_caption
 from app.features.publish.tiktok_crypto import (
     build_code_challenge,
     build_signed_state,
@@ -1027,7 +1028,8 @@ async def _publish_tiktok_post(
         status="ready",
     )
 
-    resolved_caption = (caption or post.get("publish_caption") or (_load_json_object(post.get("seed_data")).get("description")) or post.get("topic_title") or "").strip()
+    seed_data = _load_json_object(post.get("seed_data"))
+    resolved_caption = (caption or post.get("publish_caption") or resolve_selected_caption(seed_data) or post.get("topic_title") or "").strip()
     request_payload: Dict[str, Any] = {
         "post_id": post["id"],
         "caption": resolved_caption,
