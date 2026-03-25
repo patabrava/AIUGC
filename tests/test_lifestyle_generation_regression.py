@@ -40,7 +40,7 @@ def test_generate_lifestyle_topics_derives_content_titles(monkeypatch):
     ]
     call_index = {"value": 0}
 
-    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None):
+    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
         script = scripts[call_index["value"]]
         call_index["value"] += 1
         return _dialog_scripts(
@@ -76,7 +76,7 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
     ]
     call_index = {"value": 0}
 
-    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None):
+    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
         script = scripts[call_index["value"]]
         call_index["value"] += 1
         return _dialog_scripts(
@@ -196,7 +196,7 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
     def fake_convert_research_item_to_topic(item):
         return value_topic
 
-    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None):
+    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
         return _dialog_scripts("Value dialog script stays valid for the regression harness.")
 
     def fake_generate_topic_script_candidate(**kwargs):
@@ -205,11 +205,11 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
     def fake_extract_seed_strict_extractor(topic):
         return SimpleNamespace(facts=["Value fact"], source_context="Value context")
 
-    def fake_build_seed_payload(original_item, strict_seed, dialog_scripts):
+    def fake_build_seed_payload(original_item, strict_seed, dialog_scripts, **_kwargs):
         script = dialog_scripts.problem_agitate_solution[0] if dialog_scripts else original_item.script
         return {"script": script, "strict_seed": strict_seed.facts}
 
-    def fake_generate_lifestyle_topics(count: int = 1):
+    def fake_generate_lifestyle_topics(count: int = 1, target_length_tier=None):
         return [dict(duplicate_lifestyle_topic) for _ in range(count)]
 
     def fake_build_lifestyle_seed_payload(topic_data, dialog_scripts):
@@ -266,18 +266,24 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
 
 
 def test_prompt2_structured_payload_rejects_chopped_script():
-    with pytest.raises(ValidationError, match="PROMPT_2 structured response invalid"):
-        topic_agents._coerce_prompt2_payload(
-            {
-                "problem_agitate_solution": [
-                    "Niemand sagt dir, dass Spontanität dein bester Reiseführer ist. Manchmal sind die ungeplant"
-                ],
-                "testimonial": [],
-                "transformation": [],
-                "description": "Ausführliche Lifestyle-Beschreibung mit genug Kontext und drei Hashtags am Ende. #Rollstuhl #Alltag #Tipps",
-            },
-            scripts_required=1,
-        )
+    payload = topic_agents._coerce_prompt2_payload(
+        {
+            "problem_agitate_solution": [
+                "Niemand sagt dir, dass Spontanität dein bester Reiseführer ist. Manchmal sind die ungeplant"
+            ],
+            "testimonial": [],
+            "transformation": [],
+            "description": "Ausführliche Lifestyle-Beschreibung mit genug Kontext und drei Hashtags am Ende. #Rollstuhl #Alltag #Tipps",
+        },
+        scripts_required=1,
+    )
+
+    assert payload.problem_agitate_solution == [
+        "Niemand sagt dir, dass Spontanität dein bester Reiseführer ist. Manchmal sind die ungeplant."
+    ]
+    assert payload.testimonial == payload.problem_agitate_solution
+    assert payload.transformation == payload.problem_agitate_solution
+    assert payload.description.startswith("Ausführliche Lifestyle-Beschreibung")
 
 
 def test_prompt2_structured_payload_requires_description():

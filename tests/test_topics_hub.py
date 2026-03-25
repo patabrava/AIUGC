@@ -8,12 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from app.features.topics import handlers as topic_handlers
 from app.features.topics import hub as topic_hub
 from app.features.topics.prompts import build_prompt1, build_prompt2
+from app.features.topics.seed_builders import build_research_seed_data
 from app.features.topics.schemas import (
     ResearchAgentItem,
     ResearchAgentSource,
     ResearchDossier,
     ResearchLaneCandidate,
-    SeedData,
 )
 from app.core.video_profiles import get_duration_profile
 
@@ -211,6 +211,32 @@ def test_prompt_builders_include_bank_and_research_context():
     assert "HOOK-BANK (verbindlich):" in prompt2
 
 
+def test_build_research_seed_data_uses_normalized_dossier_facts():
+    prompt1_item = ResearchAgentItem(
+        topic="Barrierefreier Bahnalltag",
+        script="Kennst du die richtige Buchung vor der Fahrt?",
+        caption="Kurz gesagt: Vorlauf hilft.",
+        framework="PAL",
+        sources=[ResearchAgentSource(title="Quelle", url="https://example.com")],
+        source_summary="Zusätzlicher Hinweis aus dem Dossier.",
+        estimated_duration_s=8,
+        tone="direkt, freundlich, empowernd, du-Form",
+        disclaimer="Keine Rechts- oder medizinische Beratung.",
+    )
+
+    seed = build_research_seed_data(
+        prompt1_item=prompt1_item,
+        research_dossier={
+            "topic": "Barrierefreier Bahnalltag",
+            "facts": ["Fakt aus der Normierung.", "Zweites Faktum."],
+            "source_summary": "Normierter Dossier-Kontext.",
+        },
+    )
+
+    assert seed.facts == ["Fakt aus der Normierung.", "Zweites Faktum."]
+    assert seed.source_context == "Normierter Dossier-Kontext."
+
+
 def test_topics_hub_groups_scripts_by_usage(monkeypatch):
     monkeypatch.setattr(
         topic_hub,
@@ -389,7 +415,11 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
         raise AssertionError(f"PROMPT_2 path should not run for value posts: {kwargs}")
 
     monkeypatch.setattr(topic_hub, "generate_dialog_scripts", fail_if_prompt2_called)
-    monkeypatch.setattr(topic_hub, "extract_seed_strict_extractor", lambda topic_data: SeedData(facts=[topic_data.title], source_context="Kontext"))
+    monkeypatch.setattr(
+        topic_hub,
+        "extract_seed_strict_extractor",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("strict extractor should not run in the harvest path")),
+    )
 
     def fake_store_topic_bank_entry(**kwargs):
         stored_entries.append(kwargs)

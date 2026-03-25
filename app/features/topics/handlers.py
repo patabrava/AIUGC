@@ -35,6 +35,7 @@ from app.features.topics.agents import (
 from app.features.topics.captions import attach_caption_bundle
 from app.features.topics.deduplication import deduplicate_topics
 from app.features.topics.variant_expansion import expand_topic_variants
+from app.features.topics.seed_builders import build_research_seed_data
 from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
@@ -82,6 +83,7 @@ def _attach_publish_captions(
     seed_payload: Dict[str, Any],
     script_fallback: str = "",
     context: str = "",
+    canonical_topic: str = "",
 ) -> Dict[str, Any]:
     return attach_caption_bundle(
         seed_payload,
@@ -89,6 +91,7 @@ def _attach_publish_captions(
         post_type=post_type,
         script_fallback=script_fallback,
         context=context,
+        canonical_topic=canonical_topic or None,
     )
 
 
@@ -464,6 +467,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
 
     post_type_counts = batch["post_type_counts"]
     existing_topics = get_all_topics_from_registry()
+    target_length_tier = batch.get("target_length_tier")
 
     expected_posts = sum(post_type_counts.values())
     all_generated_topics: List[Dict[str, Any]] = []
@@ -551,7 +555,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     post_type=post_type,
                     seed_payload=seed_payload,
                     script_fallback=topic_rotation,
-                    context=str(seed_payload.get("description") or seed_payload.get("caption") or topic_rotation),
+                    context=str(seed_payload.get("description") or seed_payload.get("research_caption") or topic_rotation),
+                    canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
                 )
                 add_topic_to_registry(
                     title=topic_title,
@@ -701,6 +706,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     seed_payload=seed_payload,
                     script_fallback=topic_data["rotation"],
                     context=str(seed_payload.get("description") or topic_data["title"]),
+                    canonical_topic=str(seed_payload.get("canonical_topic") or topic_data["title"]),
                 )
 
                 stored_row = store_topic_bank_entry(
@@ -951,34 +957,62 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     if hasattr(payload.get("original_item"), "model_dump")
                     else {"title": original_item.topic},
                 )
-                seed = extract_seed_strict_extractor(topic_model)
+                if hasattr(topic_model, "model_dump"):
+                    topic_model_payload = topic_model.model_dump(mode="json")
+                elif isinstance(topic_model, dict):
+                    topic_model_payload = dict(topic_model)
+                elif hasattr(topic_model, "__dict__"):
+                    topic_model_payload = {key: value for key, value in vars(topic_model).items() if not key.startswith("_")}
+                else:
+                    topic_model_payload = {}
+                topic_title = str(
+                    topic_model_payload.get("topic")
+                    or topic_model_payload.get("title")
+                    or getattr(original_item, "topic", "")
+                    or getattr(prompt1_item, "topic", "")
+                    or ""
+                ).strip()
+                topic_rotation = str(
+                    topic_model_payload.get("rotation")
+                    or getattr(prompt1_item, "script", "")
+                    or topic_title
+                ).strip()
+                topic_cta = str(topic_model_payload.get("cta") or topic_rotation).strip()
+                seed = build_research_seed_data(
+                    prompt1_item=prompt1_item,
+                    research_dossier=topic_model_payload,
+                    topic_title=topic_title,
+                )
 
                 seed_payload = build_seed_payload(
                     prompt1_item,
                     strict_seed=seed,
                     dialog_scripts=None,
+                    source_title=topic_title,
+                    source_summary=str(topic_model_payload.get("source_summary") or getattr(prompt1_item, "source_summary", "") or getattr(prompt1_item, "caption", "") or "").strip() or None,
                 )
                 seed_payload = _attach_publish_captions(
-                    topic_title=topic_model.title,
+                    topic_title=topic_title,
                     post_type=post_type,
                     seed_payload=seed_payload,
-                    script_fallback=topic_model.rotation,
-                    context=str(seed_payload.get("description") or seed_payload.get("caption") or topic_model.title),
+                    script_fallback=topic_rotation,
+                    context=str(seed_payload.get("description") or seed_payload.get("research_caption") or topic_title),
+                    canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
                 )
 
                 add_topic_to_registry(
-                    title=topic_model.title,
-                    rotation=topic_model.rotation,
-                    cta=topic_model.cta,
+                    title=topic_title,
+                    rotation=topic_rotation,
+                    cta=topic_cta,
                 )
 
                 post = create_post_for_batch(
                     batch_id=batch_id,
                     post_type=post_type,
-                    topic_title=topic_model.title,
-                    topic_rotation=topic_model.rotation,
-                    topic_cta=topic_model.cta,
-                    spoken_duration=float(topic_model.spoken_duration),
+                    topic_title=topic_title,
+                    topic_rotation=topic_rotation,
+                    topic_cta=topic_cta,
+                    spoken_duration=float(getattr(topic_model, "spoken_duration", 0) or 0),
                     seed_data=seed_payload,
                 )
 
@@ -1047,6 +1081,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 seed_payload=seed_payload,
                 script_fallback=fallback_topic["rotation"],
                 context=str(seed_payload.get("description") or fallback_topic["title"]),
+                canonical_topic=str(seed_payload.get("canonical_topic") or fallback_topic["title"]),
             )
 
             fallback_tier = target_length_tier or 8

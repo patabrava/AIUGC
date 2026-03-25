@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 from textwrap import dedent
 from typing import Any, Callable, Dict, List, Optional
 
@@ -17,10 +18,18 @@ FAMILY_SPECS: Dict[str, Dict[str, int]] = {
 }
 _MARKER_PATTERN = re.compile(r"^\[(short_paragraph|medium_bullets|long_structured)\]\s*$", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"(?<!\w)#[A-Za-zÀ-ÿ0-9_]+")
+_EMOJI_PATTERN = re.compile(r"[\u2600-\u27BF\U00010000-\U0010ffff]")
 _BULLET_PATTERN = re.compile(r"^•\s+\S")
 _NUMBERED_PATTERN = re.compile(r"^\d+\.\s+\S")
 _COMMON_ENGLISH_WORDS = {
     "the", "and", "your", "with", "for", "this", "that", "you", "from", "into", "just", "only",
+}
+
+_TITLE_STOPWORDS = {
+    "und", "oder", "mit", "ohne", "für", "fuer", "im", "in", "am", "an", "bei", "von",
+    "auf", "der", "die", "das", "den", "dem", "des", "eine", "einer", "eines", "einem",
+    "ein", "einen", "einem", "forschung", "forschungsdossier", "dossier", "barrierefreiheit",
+    "öpnv", "opnv", "alltag", "einstieg", "platzvergabe", "fahrgastinformation", "begleitservice",
 }
 
 
@@ -50,6 +59,10 @@ def _numbered_lines(text: str) -> List[str]:
 
 def _extract_hashtags(text: str) -> List[str]:
     return _HASHTAG_PATTERN.findall(_normalize_line_breaks(text))
+
+
+def _count_emojis(text: str) -> int:
+    return len(_EMOJI_PATTERN.findall(str(text or "")))
 
 
 def _paragraph_contains_structured_list(paragraph: str) -> bool:
@@ -85,6 +98,40 @@ def _looks_mixed_language(text: str) -> bool:
     return english_hits >= 4 and english_hits / max(len(words), 1) > 0.12
 
 
+def _meaningful_title_tokens(topic_title: str) -> List[str]:
+    tokens = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(topic_title or "").lower())
+    return [token for token in tokens if len(token) > 2 and token not in _TITLE_STOPWORDS]
+
+
+def _caption_looks_like_title(topic_title: str, caption: str) -> bool:
+    title_tokens = _meaningful_title_tokens(topic_title)
+    if not title_tokens:
+        return False
+    normalized_caption = _normalize_line_breaks(caption).lower()
+    if not normalized_caption:
+        return False
+    first_sentence = re.split(r"[.!?]", normalized_caption, maxsplit=1)[0].strip()
+    if not first_sentence:
+        return False
+    title_phrase = " ".join(title_tokens[:4])
+    if title_phrase and title_phrase in first_sentence:
+        return True
+    caption_tokens = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", first_sentence)
+    overlap = sum(1 for token in caption_tokens if token in title_tokens)
+    return overlap >= max(2, len(title_tokens) // 2)
+
+
+def _resolve_canonical_topic(*, topic_title: str, payload: Optional[Dict[str, Any]] = None) -> str:
+    data = dict(payload or {})
+    canonical_topic = str(data.get("canonical_topic") or data.get("canonicalTopic") or "").strip()
+    if canonical_topic:
+        return canonical_topic
+    research_title = str(data.get("research_title") or data.get("researchTitle") or "").strip()
+    if research_title:
+        return research_title
+    return str(topic_title or "").strip()
+
+
 
 def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]:
     if key not in FAMILY_SPECS:
@@ -106,6 +153,8 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
         )
     if len(hashtags) < 2 or len(hashtags) > 4:
         raise ValidationError(message="Caption hashtag count invalid", details={"key": key, "hashtags": hashtags})
+    if _count_emojis(normalized) > 1:
+        raise ValidationError(message="Caption emoji count invalid", details={"key": key, "emoji_count": _count_emojis(normalized)})
     if _looks_mixed_language(normalized):
         raise ValidationError(message="Caption appears mixed-language", details={"key": key})
     if _script_overlap_ratio(script, normalized) > 0.72:
@@ -186,37 +235,18 @@ def validate_caption_bundle(bundle: Dict[str, Any], script: str) -> Dict[str, An
 
 
 
+def _load_caption_prompt_template() -> str:
+    prompt_path = Path(__file__).with_name("prompt_data") / "captions_prompt.txt"
+    return prompt_path.read_text(encoding="utf-8").strip()
+
+
 def _build_caption_prompt(topic_title: str, post_type: str, script: str, context: str) -> str:
-    return dedent(
-        f"""
-        Erstelle exakt 3 deutsche Caption-Varianten fuer einen UGC-Post fuer Rollstuhlnutzer:innen in Deutschland.
-
-        Thema: {topic_title}
-        Post-Typ: {post_type}
-        Gesprochenes Skript: {script}
-        Kontext: {context}
-
-        Gib ausschliesslich valides JSON zurueck mit dem Feld `variants`.
-        Jede Variante braucht exakt die Felder `key` und `body`.
-        Die drei keys muessen exakt sein:
-        - short_paragraph
-        - medium_bullets
-        - long_structured
-
-        Strukturregeln:
-        - short_paragraph: 140-260 Zeichen, genau 1 Absatz, keine Stichpunkte, keine Nummerierung.
-        - medium_bullets: 220-420 Zeichen, Hook-Absatz, dann Leerzeile, dann 2-3 Stichpunkte mit `• `. Wenn die Caption laenger wird, fuege vor den Stichpunkten einen zweiten kurzen Absatz ein.
-        - long_structured: 350-700 Zeichen, immer 2 kurze Prosa-Absaetze vor der Liste, dann Leerzeile, dann 3-4 Stichpunkte mit `• ` ODER 2-4 nummerierte Zeilen (`1.`, `2.`), nur wenn eine Reihenfolge sinnvoll ist.
-        - Nutze echte Absätze mit echten Zeilenumbrüchen.
-        - Kein Textblock ohne Struktur bei medium_bullets oder long_structured.
-        - Lange Captions duerfen nie aus einem einzigen grossen Absatz vor der Liste bestehen.
-        - Wiederhole das Skript nicht einfach.
-        - Schreibe direkt, glaubwürdig, hilfreich, teilbar.
-        - Ergänze Kontext, Einordnung oder praktische Hinweise ohne neue Fakten zu erfinden.
-        - Jede Variante endet mit 2-4 thematisch passenden Hashtags.
-        - Alles vollständig auf Deutsch.
-        """
-    ).strip()
+    return _load_caption_prompt_template().format(
+        topic_title=topic_title,
+        post_type=post_type,
+        script=script,
+        context=context,
+    )
 
 
 
@@ -241,40 +271,57 @@ def _parse_text_variants(raw: str) -> Dict[str, Any]:
 
 
 def _fallback_body(topic_title: str, context: str, key: str) -> str:
-    topic = str(topic_title or "Thema").strip()
-    context_sentence = re.sub(r"\s+", " ", str(context or "").strip()).rstrip(" ,;:-")
-    context_sentence = _HASHTAG_PATTERN.sub("", context_sentence).strip(" ,;:-")
-    short_topic = topic[:70].rstrip(" ,;:-")
-    medium_topic = topic[:80].rstrip(" ,;:-")
+    topic_raw = re.sub(r"\s+", " ", str(topic_title or "Thema").strip())
+    topic_words = [word for word in re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", topic_raw) if len(word) > 2]
+    hook_topic = " ".join(topic_words[:3]).strip() or "das Thema"
+    context_raw = re.sub(r"\s+", " ", str(context or "").strip())
+    context_words = [word for word in re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", context_raw) if len(word) > 3]
+    hook_context = " ".join(context_words[:4]).strip() or hook_topic
+    if hook_context.lower() in {"kontext", "thema", "details"}:
+        hook_context = ""
+    digest = hashlib.sha256(f"{topic_raw}|{context_raw}|{key}".encode("utf-8")).hexdigest()
+    opener_index = int(digest[:2], 16) % 3
     if key == "short_paragraph":
+        openers = (
+            f"Im Alltag rund um {hook_topic} helfen kleine Details oft mehr als große Ansagen ✨ ",
+            f"Wer {hook_topic} im Blick behält, merkt schnell, wo es im Alltag hakt 🚦 ",
+            f"Schon bei {hook_topic} entscheiden kleine Details oft ueber Ruhe oder Stress ✨ ",
+        )
+        opener = openers[opener_index]
         return (
-            f"Bei {short_topic} steckt oft mehr dran, als man auf den ersten Blick merkt. "
-            f"Wenn du die entscheidenden Details früh sortierst, sparst du dir Stress und unnötige Rückfragen. "
+            f"{opener}"
+            "Wenn du die wichtigsten Punkte vorher sortierst, vermeidest du Stress und reagierst unterwegs ruhiger. "
             f"#Barrierefrei #RollstuhlAlltag"
         )
     if key == "medium_bullets":
-        medium_context = context_sentence[:90].rstrip(" ,;:-")
-        if medium_context and not re.search(r"[.!?]$", medium_context):
-            medium_context = f"{medium_context}."
+        openers = (
+            "Kleine Details entscheiden oft darüber, ob der Alltag ruhig bleibt oder kippt 🚦",
+            f"Gerade bei {hook_topic} zahlt sich ein klarer Plan schnell aus ✨",
+            f"Im Alltag mit {hook_topic} merkt man Reibung oft erst an kleinen Stellen 🚦",
+        )
+        opening = openers[opener_index]
         return (
-            f"{medium_topic} wirkt oft simpel, entscheidet aber oft ueber Ruhe oder Stress.\n\n"
-            f"{medium_context or 'Ein zweiter kurzer Absatz macht den Nutzen schneller klar.'}\n\n"
-            f"• Pruefe die Details lieber vorher als unterwegs unter Druck.\n"
-            f"• Halte wichtige Infos griffbereit, damit du schneller reagieren kannst.\n"
-            f"• Nutze klare Ablaeufe statt alles spontan loesen zu muessen.\n\n"
+            f"{opening}\n\n"
+            f"{'Mit einem klaren Ablauf bleibst du ruhiger und verlierst den Überblick nicht.' if not hook_context else f'Ein klarer Blick auf {hook_context} hilft dir, ruhiger zu bleiben und den Überblick nicht zu verlieren.'}\n\n"
+            "• Prüfe zuerst, welche Infos gebraucht werden.\n"
+            "• Notiere Kernpunkte kurz, damit Rueckfragen schneller geklaert sind.\n"
+            "• Plane Puffer ein, falls etwas unklar bleibt.\n\n"
             f"#Barrierefrei #Alltagstipps #Rollstuhl"
         )
-    max_context_chars = max(0, FAMILY_SPECS["long_structured"]["max_chars"] - 340 - len(topic))
-    clipped_context = context_sentence[:max_context_chars].rstrip(" ,;:-")
-    if clipped_context and not re.search(r"[.!?]$", clipped_context):
-        clipped_context = f"{clipped_context}."
-    context_paragraph = clipped_context or "Sortiere die Lage erst sauber, bevor du Entscheidungen triffst."
+    openers = (
+        f"Rund um {hook_topic} kippt es oft an fehlender Vorbereitung 🚀",
+        f"Gerade bei {hook_topic} zeigt sich schnell, ob der Ablauf wirklich passt ✨",
+        f"Bei {hook_topic} wird oft erst unterwegs klar, wo die Reibung entsteht 🚦",
+    )
+    opening = openers[opener_index]
     return (
-        f"Wenn es um {topic} geht, hilft dir kein Bauchgefühl, sondern ein klarer Ablauf.\n\n"
-        f"{context_paragraph}\n\n"
-        f"1. Sortiere zuerst die wichtigsten Nachweise oder Infos.\n"
-        f"2. Prüfe dann, welche Stelle oder Unterstützung wirklich zuständig ist.\n"
-        f"3. Plane genug Puffer ein, damit unterwegs nichts unnötig kippt.\n\n"
+        f"{opening}\n\n"
+        f"{'Ein klarer Ablauf gibt dir Orientierung und spart Energie.' if not hook_context else f'Ein klarer Blick auf {hook_context} gibt dir Orientierung und spart Energie.'} "
+        "Gerade wenn mehrere Stellen beteiligt sind, spart das Zeit und verhindert doppelte Rueckfragen. "
+        "Du bleibst handlungsfaehig, statt jedes Mal bei Null anfangen zu muessen.\n\n"
+        "1. Kläre zuerst das Ziel und sammle die relevanten Fakten an einem Ort.\n"
+        "2. Prüfe danach Zuständigkeiten, Fristen und praktische Hürden Schritt für Schritt.\n"
+        "3. Halte Ergebnisse kurz fest, damit du beim nächsten Kontakt sofort anknüpfen kannst.\n\n"
         f"#Barrierefrei #Selbstbestimmt #RollstuhlAlltag"
     )
 
@@ -295,22 +342,33 @@ def _synthesize_fallback_bundle(topic_title: str, post_type: str, script: str, c
 
 
 
+def _caption_variant_pool(post_type: str) -> tuple:
+    normalized = str(post_type or "").strip().lower()
+    if normalized == "value":
+        return ("medium_bullets", "long_structured")
+    if normalized == "lifestyle":
+        return ("short_paragraph", "medium_bullets")
+    return FAMILY_ORDER
+
+
 def select_caption_variant_key(*, topic_title: str, post_type: str, script: str) -> str:
     digest = hashlib.sha256(f"{topic_title}|{post_type}|{script}".encode("utf-8")).hexdigest()
-    return FAMILY_ORDER[int(digest[:8], 16) % len(FAMILY_ORDER)]
+    pool = _caption_variant_pool(post_type)
+    return pool[int(digest[:8], 16) % len(pool)]
 
 
 
 def resolve_selected_caption(seed_data: Dict[str, Any]) -> str:
     bundle = dict(seed_data.get("caption_bundle") or {})
-    if bundle.get("selected_body"):
-        return str(bundle["selected_body"]).strip()
-    description = str(seed_data.get("description") or "").strip()
-    if description:
-        return description
     caption = str(seed_data.get("caption") or "").strip()
     if caption:
         return caption
+    selected_body = str(bundle.get("selected_body") or "").strip()
+    if selected_body:
+        return selected_body
+    description = str(seed_data.get("description") or "").strip()
+    if description:
+        return description
     return ""
 
 
@@ -321,18 +379,24 @@ def generate_caption_bundle(
     post_type: str,
     script: str,
     context: str,
-    llm_factory: Callable = get_llm_client,
+    llm_factory: Optional[Callable] = None,
+    canonical_topic: Optional[str] = None,
 ) -> Dict[str, Any]:
+    canonical_topic = str(canonical_topic or topic_title or "").strip()
+    selected_key = select_caption_variant_key(topic_title=canonical_topic, post_type=post_type, script=script)
+    llm_factory = llm_factory or get_llm_client
     try:
         llm = llm_factory()
     except Exception:
-        return _synthesize_fallback_bundle(topic_title=topic_title, post_type=post_type, script=script, context=context)
-    prompt = _build_caption_prompt(topic_title=topic_title, post_type=post_type, script=script, context=context)
+        return _synthesize_fallback_bundle(canonical_topic, post_type, script, context)
+    prompt = _build_caption_prompt(topic_title=canonical_topic, post_type=post_type, script=script, context=context)
     schema = {
         "type": "object",
         "properties": {
             "variants": {
                 "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
                 "items": {
                     "type": "object",
                     "properties": {
@@ -341,9 +405,9 @@ def generate_caption_bundle(
                     },
                     "required": ["key", "body"],
                 },
-                "minItems": 3,
-                "maxItems": 3,
-            }
+            },
+            "selected_key": {"type": "string"},
+            "selected_body": {"type": "string"},
         },
         "required": ["variants"],
     }
@@ -351,28 +415,39 @@ def generate_caption_bundle(
     for _ in range(2):
         try:
             raw = llm.generate_gemini_json(prompt=prompt, json_schema=schema, max_tokens=1400, temperature=0.8)
+            if not isinstance(raw, dict):
+                raise ValidationError(
+                    message="Caption structured response invalid",
+                    details={"reason": "not_a_dict", "response_type": type(raw).__name__},
+                )
             bundle = validate_caption_bundle(raw, script)
+            preferred_pool = _caption_variant_pool(post_type)
+            if not bundle["selected_key"] or bundle["selected_key"] not in preferred_pool:
+                bundle["selected_key"] = selected_key
+            bundle["selected_body"] = next(
+                item["body"] for item in bundle["variants"] if item["key"] == bundle["selected_key"]
+            )
+            if _caption_looks_like_title(canonical_topic, bundle["selected_body"]):
+                raise ValidationError(
+                    message="Caption repeats topic title too closely",
+                    details={"topic_title": canonical_topic, "selected_key": bundle["selected_key"]},
+                )
             break
         except ValidationError as exc:
             last_error = exc
             prompt = f"{prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, ensure_ascii=False)[:800]}"
-    else:
-        try:
-            text_response = llm.generate_gemini_text(
-                prompt=prompt + "\n\nFalls JSON scheitert, nutze dieses Markerformat: [short_paragraph], [medium_bullets], [long_structured].",
-                max_tokens=1400,
-                temperature=0.8,
+        except Exception as exc:
+            last_error = ValidationError(
+                message="Caption generation failed",
+                details={"reason": type(exc).__name__, "message": str(exc)},
             )
-            bundle = validate_caption_bundle(_parse_text_variants(text_response), script)
-        except Exception:
-            bundle = _synthesize_fallback_bundle(topic_title=topic_title, post_type=post_type, script=script, context=context)
-    selected_key = select_caption_variant_key(topic_title=topic_title, post_type=post_type, script=script)
-    selected_body = next(item["body"] for item in bundle["variants"] if item["key"] == selected_key)
+    else:
+        bundle = _synthesize_fallback_bundle(canonical_topic, post_type, script, context)
     return {
         "variants": bundle["variants"],
-        "selected_key": selected_key,
-        "selected_body": selected_body,
-        "selection_reason": "hash_variant" if bundle.get("selection_reason") != "fallback_hash_variant" else "fallback_hash_variant",
+        "selected_key": bundle["selected_key"],
+        "selected_body": bundle["selected_body"],
+        "selection_reason": bundle.get("selection_reason") or "hash_variant",
         "last_error": {"message": last_error.message, "details": last_error.details} if last_error else None,
     }
 
@@ -386,6 +461,7 @@ def attach_caption_bundle(
     script_fallback: str = "",
     context: str = "",
     llm_factory: Callable = get_llm_client,
+    canonical_topic: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload = dict(seed_payload or {})
     if (payload.get("caption_bundle") or {}).get("selected_body"):
@@ -401,16 +477,20 @@ def attach_caption_bundle(
         strict_seed = payload.get("strict_seed") or {}
         facts = list(strict_seed.get("facts") or [])
         derived_context = " ".join(str(item).strip() for item in facts if str(item).strip())
-    bundle = generate_caption_bundle(
+    canonical_topic = _resolve_canonical_topic(
         topic_title=topic_title,
+        payload={**payload, **({"canonical_topic": canonical_topic} if canonical_topic else {})},
+    )
+    bundle = generate_caption_bundle(
+        topic_title=canonical_topic,
         post_type=post_type,
         script=script,
         context=derived_context,
         llm_factory=llm_factory,
+        canonical_topic=canonical_topic,
     )
+    payload["canonical_topic"] = canonical_topic
     payload["caption_bundle"] = bundle
     payload["description"] = bundle["selected_body"]
-    payload["caption"] = payload.get("caption") or next(
-        item["body"] for item in bundle["variants"] if item["key"] == "short_paragraph"
-    )
+    payload["caption"] = payload.get("caption") or bundle["selected_body"]
     return payload

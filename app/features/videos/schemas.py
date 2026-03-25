@@ -26,9 +26,9 @@ class VideoGenerationRequest(BaseModel):
         default="720p",
         description="Output resolution (provider specific constraints apply)"
     )
-    seconds: Literal[4, 8, 12] = Field(
+    seconds: Literal[4, 8, 12, 16, 32] = Field(
         default=8,
-        description="Target duration in seconds for the generated clip (Sora supports 4, 8, or 12)."
+        description="Target duration in seconds for the generated clip."
     )
     target_length_tier: Optional[Literal[8, 16, 32]] = Field(
         default=None,
@@ -109,9 +109,9 @@ class BatchVideoGenerationRequest(BaseModel):
         default="720p",
         description="Output resolution"
     )
-    seconds: Literal[4, 8, 12] = Field(
+    seconds: Literal[4, 8, 12, 16, 32] = Field(
         default=8,
-        description="Target duration in seconds for generated clips (Sora supports 4, 8, or 12)"
+        description="Target duration in seconds for generated clips."
     )
     target_length_tier: Optional[Literal[8, 16, 32]] = Field(
         default=None,

@@ -36,6 +36,7 @@ from app.features.topics.queries import (
     update_topic_research_run,
     upsert_topic_script_variants,
 )
+from app.features.topics.seed_builders import build_research_seed_data
 
 logger = get_logger(__name__)
 
@@ -651,7 +652,7 @@ def _build_script_variants(
                 "primary_source_url": source_urls[0]["url"] if source_urls else None,
                 "primary_source_title": source_urls[0]["title"] if source_urls else None,
                 "source_urls": source_urls,
-                "caption": seed_payload.get("caption"),
+                "caption": seed_payload.get("research_caption") or seed_payload.get("caption"),
                 "script": script,
                 "quality_notes": "",
                 "seed_payload": seed_payload,
@@ -783,7 +784,12 @@ def _harvest_seed_topic_to_bank(
                 dossier=lane_dossier,
                 profile=get_duration_profile(target_length_tier),
             )
-        strict_seed = extract_seed_strict_extractor(topic_data)
+        strict_seed = build_research_seed_data(
+            prompt1_item=prompt1_item,
+            research_dossier=research_dossier,
+            lane_dossier=lane_dossier,
+            topic_title=lane_title,
+        )
         source_info = (lane_dossier.get("sources") or [{}])[0] if lane_dossier.get("sources") else {}
         seed_payload = build_seed_payload(
             prompt1_item,
@@ -792,13 +798,16 @@ def _harvest_seed_topic_to_bank(
             source_title=str(source_info.get("title") or lane_title or prompt1_item.topic).strip() or None,
             source_url=str(source_info.get("url") or "").strip() or None,
             source_summary=str(lane_dossier.get("source_summary") or prompt1_item.caption or prompt1_item.source_summary or "").strip() or None,
+            canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
+            research_title=lane_title,
         )
         seed_payload = attach_caption_bundle(
             seed_payload,
             topic_title=lane_title,
             post_type=post_type,
             script_fallback=topic_data.rotation,
-            context=str(seed_payload.get("description") or seed_payload.get("caption") or lane_title),
+            context=str(seed_payload.get("description") or seed_payload.get("research_caption") or lane_title),
+            canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
         )
         stored_row = _persist_topic_bank_row(
             title=lane_title,

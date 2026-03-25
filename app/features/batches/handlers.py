@@ -73,6 +73,11 @@ def _wants_html(request: Request) -> bool:
     return "text/html" in accept or "application/xhtml+xml" in accept
 
 
+def _is_hx_history_restore_request(request: Request) -> bool:
+    """Detect HTMX back/forward restoration requests that must receive a full document."""
+    return request.headers.get("HX-History-Restore-Request", "").lower() == "true"
+
+
 @router.post("", response_model=SuccessResponse, status_code=status.HTTP_201_CREATED)
 async def create_batch_endpoint(request: Request):
     """
@@ -304,6 +309,17 @@ def _sanitize_meta_connection(meta_connection: Any) -> Dict[str, Any]:
     return _publish_sanitize_meta_connection(normalized)
 
 
+def _resolve_review_caption(post: Dict[str, Any]) -> str:
+    seed_data = post.get("seed_data") or {}
+    caption_bundle = seed_data.get("caption_bundle") or {}
+    return (
+        str(post.get("publish_caption") or "").strip()
+        or str(caption_bundle.get("selected_body") or "").strip()
+        or str(seed_data.get("caption") or "").strip()
+        or str(seed_data.get("description") or "").strip()
+    )
+
+
 def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     """Prepare template-only derived data for the batch detail page."""
     batch_state = batch_detail.get("state")
@@ -322,9 +338,11 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         seed_data = post.get("seed_data") or {}
         review_status = seed_data.get("script_review_status") or "pending"
         is_removed = review_status == "removed" or seed_data.get("video_excluded") is True
+        post_view = dict(post)
+        post_view["review_caption"] = _resolve_review_caption(post)
 
         if batch_state == BatchState.S2_SEEDED.value or not is_removed:
-            visible_posts.append(post)
+            visible_posts.append(post_view)
 
         if review_status == "approved":
             approved_scripts_count += 1
@@ -374,7 +392,19 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
                 "id": post.get("id"),
                 "type": post.get("post_type"),
                 "title": post.get("topic_title"),
+                "canonicalTopic": (post.get("seed_data") or {}).get("canonical_topic") or "",
+                "researchTitle": (post.get("seed_data") or {}).get("research_title") or "",
                 "caption": post.get("publish_caption") or "",
+                "captionOptions": [
+                    {
+                        "key": variant.get("key"),
+                        "label": variant.get("key").replace("_", " ").title() if variant.get("key") else "",
+                        "body": variant.get("body"),
+                    }
+                    for variant in (((post.get("seed_data") or {}).get("caption_bundle") or {}).get("variants") or [])
+                    if isinstance(variant, dict) and variant.get("body")
+                ],
+                "selectedCaptionKey": ((post.get("seed_data") or {}).get("caption_bundle") or {}).get("selected_key") or "",
                 "videoUrl": post.get("video_url"),
             }
             for post in posts
@@ -417,7 +447,7 @@ async def list_batches_endpoint(
             }
             template_name = (
                 "batches/partials/list_content.html"
-                if request.headers.get("HX-Request") == "true"
+                if request.headers.get("HX-Request") == "true" and not _is_hx_history_restore_request(request)
                 else "batches/list.html"
             )
             return templates.TemplateResponse(template_name, context)
@@ -559,7 +589,10 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                 "batch_view": _build_batch_detail_view(batch_payload),
                 "static_version": DETAIL_JS_VERSION,
             }
-            return templates.TemplateResponse("batches/detail.html", context)
+            template_name = "batches/detail.html"
+            if request.headers.get("HX-Request") == "true" and not _is_hx_history_restore_request(request):
+                template_name = "batches/detail.html"
+            return templates.TemplateResponse(template_name, context)
 
         return SuccessResponse(data=BatchDetailResponse(**batch_detail))
     

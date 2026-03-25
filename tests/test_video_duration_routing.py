@@ -4,6 +4,7 @@ from app.core.video_profiles import (
     get_submission_video_status,
 )
 from app.features.videos import handlers as video_handlers
+from app.features.videos.schemas import BatchVideoGenerationRequest
 
 
 def test_resolve_video_submission_plan_preserves_legacy_batch_inputs():
@@ -99,6 +100,17 @@ def test_build_veo_extended_base_prompt_returns_first_segment():
     assert seg_meta["veo_segments"] == ["Erster Satz.", "Zweiter Satz.", "Dritter Satz."]
     assert seg_meta["veo_segments_total"] == 3
     assert seg_meta["veo_current_segment_index"] == 0
+
+
+def test_batch_video_generation_request_accepts_duration_tier_seconds():
+    req = BatchVideoGenerationRequest(
+        provider="veo_3_1",
+        seconds=16,
+        target_length_tier=16,
+    )
+
+    assert req.seconds == 16
+    assert req.target_length_tier == 16
 
 
 def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():

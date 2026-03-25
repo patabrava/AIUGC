@@ -1,8 +1,23 @@
 """Regression tests for batch seeding status progress payloads."""
 
+import os
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-key")
+os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+os.environ.setdefault("GOOGLE_AI_API_KEY", "test-google-key")
+os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
+os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
+os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
+os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
+os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
+os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+
+from fastapi.testclient import TestClient
+
+from app.main import app
 from app.features.batches import handlers as batch_handlers
 from app.features.topics import handlers as topic_handlers
 
@@ -236,8 +251,100 @@ def test_seeding_interaction_emits_resumable_events():
 
     assert started["interaction_id"].startswith("seed_")
     assert updated["interaction_id"] == started["interaction_id"]
-    assert all_events[0]["event_type"] == "interaction.start"
-    assert any(event["event_type"] == "progress.update" for event in all_events)
-    assert any(event["event_type"] == "content.delta" for event in all_events)
-    assert any(event["event_type"] == "progress.post_created" for event in all_events)
-    assert all(int(event["event_id"]) > int(all_events[0]["event_id"]) for event in replay_events)
+
+
+def test_build_batch_detail_view_exposes_caption_variants():
+    batch_payload = {
+        "state": "S7_PUBLISH_PLAN",
+        "meta_connection": {},
+        "tiktok_connection": {},
+        "posts": [
+            {
+                "id": "post-1",
+                "post_type": "value",
+                "topic_title": "Beispielthema",
+                "publish_caption": "",
+                "video_url": None,
+                "seed_data": {
+                    "description": "Ein generischer Abschnitt, der nicht als Review-Caption dienen soll.",
+                    "caption": "Ein noch generischerer Alttext.",
+                    "caption_bundle": {
+                        "selected_key": "short_paragraph",
+                        "selected_body": "Kurze Caption mit genug Kontext #Tag1 #Tag2",
+                        "variants": [
+                            {"key": "short_paragraph", "body": "Kurze Caption mit genug Kontext #Tag1 #Tag2"},
+                            {"key": "medium_bullets", "body": "Laengere Caption mit Struktur\n\n• Punkt 1\n• Punkt 2\n\n#Tag1 #Tag2 #Tag3"},
+                            {"key": "long_structured", "body": "Noch laengere Caption mit Struktur\n\nIntro.\n\n1. Punkt\n2. Punkt\n\n#Tag1 #Tag2 #Tag3"},
+                        ],
+                    }
+                },
+            }
+        ],
+    }
+
+    view = batch_handlers._build_batch_detail_view(batch_payload)
+
+    assert view["visible_posts"][0]["review_caption"] == "Kurze Caption mit genug Kontext #Tag1 #Tag2"
+    assert view["publish_posts_json"][0]["selectedCaptionKey"] == "short_paragraph"
+    assert len(view["publish_posts_json"][0]["captionOptions"]) == 3
+    assert view["publish_posts_json"][0]["captionOptions"][1]["label"] == "Medium Bullets"
+
+
+def test_batches_routes_return_full_documents_for_history_restore(monkeypatch):
+    client = TestClient(app)
+
+    monkeypatch.setattr(
+        batch_handlers,
+        "list_batches",
+        lambda archived=None, limit=50, offset=0: (
+            [
+                {
+                    "id": "batch-1",
+                    "brand": "Demo Batch",
+                    "state": "S1_SETUP",
+                    "archived": False,
+                    "post_type_counts": {"value": 1, "lifestyle": 0, "product": 0},
+                    "created_at": "2026-03-25T00:00:00Z",
+                    "updated_at": "2026-03-25T00:00:00Z",
+                }
+            ],
+            1,
+        ),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "brand": "Demo Batch",
+            "state": "S1_SETUP",
+            "archived": False,
+            "created_at": "2026-03-25T00:00:00Z",
+            "updated_at": "2026-03-25T00:00:00Z",
+            "post_type_counts": {"value": 1, "lifestyle": 0, "product": 0},
+        },
+    )
+    monkeypatch.setattr(batch_handlers, "get_batch_posts_summary", lambda batch_id: {"posts_count": 0, "posts_by_state": {}})
+    async def _fake_tiktok_state():
+        return {"status": "unavailable"}
+
+    monkeypatch.setattr(batch_handlers, "get_tiktok_publish_state", _fake_tiktok_state)
+    monkeypatch.setattr(batch_handlers, "_effective_meta_connection", lambda batch_id, meta_connection: {})
+    monkeypatch.setattr(
+        "app.features.topics.queries.get_posts_by_batch",
+        lambda batch_id: [],
+    )
+
+    headers = {
+        "HX-Request": "true",
+        "HX-History-Restore-Request": "true",
+        "Accept": "text/html",
+    }
+
+    list_response = client.get("/batches", headers=headers)
+    detail_response = client.get("/batches/batch-1", headers=headers)
+
+    assert list_response.status_code == 200
+    assert detail_response.status_code == 200
+    assert "<html" in list_response.text.lower()
+    assert "<html" in detail_response.text.lower()

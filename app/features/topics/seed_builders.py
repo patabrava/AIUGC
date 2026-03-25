@@ -28,6 +28,58 @@ def convert_research_item_to_topic(item: ResearchAgentItem) -> TopicData:
     )
 
 
+def build_research_seed_data(
+    *,
+    prompt1_item: ResearchAgentItem,
+    research_dossier: Optional[Dict[str, Any]] = None,
+    lane_dossier: Optional[Dict[str, Any]] = None,
+    topic_title: Optional[str] = None,
+    canonical_topic: Optional[str] = None,
+) -> SeedData:
+    """Derive factual seed data from the normalized research payload.
+
+    This keeps the topic pipeline on the same raw-research -> normalization -> script
+    flow used by the cron worker and avoids a second Gemini JSON extraction step.
+    """
+
+    research_payload = dict(research_dossier or {})
+    lane_payload = dict(lane_dossier or {})
+    facts: list[str] = []
+    for payload in (lane_payload, research_payload):
+        for fact in list(payload.get("facts") or []):
+            text = str(fact or "").strip()
+            if text and text not in facts:
+                facts.append(text)
+
+    source_context = str(
+        lane_payload.get("source_summary")
+        or research_payload.get("source_summary")
+        or getattr(prompt1_item, "source_summary", "")
+        or getattr(prompt1_item, "caption", "")
+        or ""
+    ).strip()
+    if not facts:
+        fallback_fact = (
+            str(
+                source_context
+                or lane_payload.get("topic")
+                or research_payload.get("topic")
+                or getattr(prompt1_item, "topic", "")
+                or topic_title
+                or getattr(prompt1_item, "script", "")
+                or getattr(prompt1_item, "caption", "")
+                or ""
+            ).strip()
+        )
+        if fallback_fact:
+            facts = [fallback_fact]
+
+    if not facts:
+        raise ValueError("Unable to derive research seed facts")
+
+    return SeedData(facts=facts[:10], source_context=source_context or None)
+
+
 def build_seed_payload(
     item: ResearchAgentItem,
     strict_seed: SeedData,
@@ -36,6 +88,8 @@ def build_seed_payload(
     source_title: Optional[str] = None,
     source_url: Optional[str] = None,
     source_summary: Optional[str] = None,
+    canonical_topic: Optional[str] = None,
+    research_title: Optional[str] = None,
 ) -> Dict[str, Any]:
     primary_source = item.sources[0] if item.sources else None
     framework_map = {
@@ -64,7 +118,10 @@ def build_seed_payload(
     )
     payload: Dict[str, Any] = {
         "script": item.script,
-        "caption": item.caption or build_social_description(item.script, resolved_source_summary),
+        "caption": "",
+        "research_caption": item.caption or "",
+        "canonical_topic": (canonical_topic or item.topic or "").strip(),
+        "research_title": (research_title or item.topic or "").strip(),
         "framework": item.framework,
         "tone": item.tone,
         "estimated_duration_s": item.estimated_duration_s,

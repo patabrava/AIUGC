@@ -226,6 +226,8 @@
                 ...p,
                 timeOverride: '',
                 networksOverride: null,
+                caption: (p.caption || '').trim() || ((p.captionOptions || []).find((item) => item.key === p.selectedCaptionKey)?.body || ''),
+                selectedCaptionKey: p.selectedCaptionKey || ((p.captionOptions || [])[0]?.key || ''),
             })),
             expanded: null,
             showReviewModal: false,
@@ -299,6 +301,15 @@
                 } else {
                     this.networks.push(id);
                 }
+            },
+
+            selectCaption(postId, variantKey) {
+                const post = this.posts.find((item) => item.id === postId);
+                if (!post) return;
+                const variant = (post.captionOptions || []).find((item) => item.key === variantKey);
+                if (!variant || !variant.body) return;
+                post.selectedCaptionKey = variant.key;
+                post.caption = variant.body;
             },
 
             async armDispatch() {
