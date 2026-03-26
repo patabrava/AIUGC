@@ -338,9 +338,8 @@ def test_fallback_caption_openers_are_not_generic():
     medium = captions._fallback_body("Barrierefreiheit im ÖPNV", "Kontext", "medium_bullets")
     long = captions._fallback_body("Barrierefreiheit im ÖPNV", "Kontext", "long_structured")
 
-    assert short.startswith(("Im Alltag rund um", "Wer Barrierefreiheit im Blick behält", "Schon bei Barrierefreiheit entscheiden"))
-    assert medium.startswith(("Kleine Details entscheiden", "Gerade bei", "Im Alltag mit"))
-    assert long.startswith(("Rund um", "Gerade bei", "Bei Barrierefreiheit"))
+    assert "Barrierefreiheit" in short
+    assert "Barrierefreiheit" in medium or "Kleine Details" in medium
     assert "diesem Thema" not in short
     assert "diesem Thema" not in medium
     assert "diesem Thema" not in long

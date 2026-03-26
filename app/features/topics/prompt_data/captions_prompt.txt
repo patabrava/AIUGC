@@ -1,4 +1,3 @@
-CAPTIONS_PROMPT
 Erstelle exakt 3 deutsche Caption-Varianten fuer einen UGC-Post fuer Rollstuhlnutzer:innen in Deutschland.
 
 Thema: {topic_title}

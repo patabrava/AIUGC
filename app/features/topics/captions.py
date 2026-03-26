@@ -270,7 +270,7 @@ def _parse_text_variants(raw: str) -> Dict[str, Any]:
 
 
 
-def _fallback_body(topic_title: str, context: str, key: str) -> str:
+def _fallback_body(topic_title: str, context: str, key: str, *, script: str = "") -> str:
     topic_raw = re.sub(r"\s+", " ", str(topic_title or "Thema").strip())
     topic_words = [word for word in re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", topic_raw) if len(word) > 2]
     hook_topic = " ".join(topic_words[:3]).strip() or "das Thema"
@@ -279,7 +279,8 @@ def _fallback_body(topic_title: str, context: str, key: str) -> str:
     hook_context = " ".join(context_words[:4]).strip() or hook_topic
     if hook_context.lower() in {"kontext", "thema", "details"}:
         hook_context = ""
-    digest = hashlib.sha256(f"{topic_raw}|{context_raw}|{key}".encode("utf-8")).hexdigest()
+    script_raw = re.sub(r"\s+", " ", str(script or "").strip())
+    digest = hashlib.sha256(f"{topic_raw}|{context_raw}|{script_raw}|{key}".encode("utf-8")).hexdigest()
     opener_index = int(digest[:2], 16) % 3
     if key == "short_paragraph":
         openers = (
@@ -333,7 +334,7 @@ def _fallback_body(topic_title: str, context: str, key: str) -> str:
 def _synthesize_fallback_bundle(topic_title: str, post_type: str, script: str, context: str) -> Dict[str, Any]:
     variants = []
     for key in FAMILY_ORDER:
-        variants.append(validate_caption_variant(key, _fallback_body(topic_title, context, key), ""))
+        variants.append(validate_caption_variant(key, _fallback_body(topic_title, context, key, script=script), ""))
     selected_key = select_caption_variant_key(topic_title=topic_title, post_type=post_type, script=script)
     selected_body = next(item["body"] for item in variants if item["key"] == selected_key)
     return {
@@ -396,7 +397,16 @@ def generate_caption_bundle(
     last_error: Optional[ValidationError] = None
     for _ in range(2):
         try:
-            raw_text = llm.generate_gemini_text(prompt=prompt, max_tokens=1400, temperature=0.8)
+            raw_text = llm.generate_gemini_text(
+                prompt=prompt,
+                system_prompt=(
+                    "Du bist ein Social-Media-Texter fuer barrierefreie Inhalte. "
+                    "Antworte ausschliesslich im Markerformat mit [short_paragraph], [medium_bullets] und [long_structured]. "
+                    "Keine Erklaerungen, kein JSON, kein Markdown."
+                ),
+                max_tokens=1400,
+                temperature=0.8,
+            )
             parsed = _parse_text_variants(raw_text)
             bundle = validate_caption_bundle(parsed, script)
             preferred_pool = _caption_variant_pool(post_type)
