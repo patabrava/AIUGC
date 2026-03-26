@@ -47,7 +47,7 @@ Regeln:
 - Jede Variante endet mit 2-4 thematisch passenden Hashtags.
 - Alles vollstaendig auf Deutsch.
 
-Strukturregeln:
-- short_paragraph: 140-260 Zeichen, genau 1 Absatz, keine Stichpunkte.
-- medium_bullets: 220-420 Zeichen, Hook-Absatz + Leerzeile + 2-3 Stichpunkte mit bullet.
-- long_structured: 350-700 Zeichen, 2 Prosa-Absaetze + Leerzeile + 3-4 Stichpunkte oder nummerierte Zeilen.
+Strukturregeln (Zeichenzahl = GESAMTE Caption inklusive Hook, Stichpunkte UND Hashtags):
+- short_paragraph: 140-260 Zeichen gesamt, genau 1 Absatz, keine Stichpunkte.
+- medium_bullets: 220-420 Zeichen gesamt. Aufbau: 1 Hook-Absatz (1-2 Saetze) + Leerzeile + 2-3 Stichpunkte (jeder Stichpunkt ist ein vollstaendiger Satz mit mindestens 40 Zeichen) + Leerzeile + Hashtags.
+- long_structured: 350-700 Zeichen gesamt, 2 Prosa-Absaetze + Leerzeile + 3-4 Stichpunkte oder nummerierte Zeilen (jeweils vollstaendige Saetze).

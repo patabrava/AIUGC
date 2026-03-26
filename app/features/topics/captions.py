@@ -34,6 +34,11 @@ _TITLE_STOPWORDS = {
     "auf", "der", "die", "das", "den", "dem", "des", "eine", "einer", "eines", "einem",
     "ein", "einen", "einem", "forschung", "forschungsdossier", "dossier", "barrierefreiheit",
     "öpnv", "opnv", "alltag", "einstieg", "platzvergabe", "fahrgastinformation", "begleitservice",
+    "fast", "alle", "nicht", "wenn", "sich", "aber", "auch", "noch", "nur", "kann",
+    "wird", "sind", "hat", "dein", "sein", "ihr", "wie", "was", "wer", "dir", "dich",
+    "mich", "mir", "ist", "war", "mal", "denn", "dann", "weil", "dass", "dieser",
+    "diese", "dieses", "diesem", "jeder", "jede", "jedes", "manchmal", "immer",
+    "oft", "sehr", "viel", "mehr", "hier", "dort", "schon", "ganz", "gar",
 }
 
 
@@ -122,7 +127,7 @@ def _caption_looks_like_title(topic_title: str, caption: str) -> bool:
         return True
     caption_tokens = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", first_sentence)
     overlap = sum(1 for token in caption_tokens if token in title_tokens)
-    return overlap >= max(2, len(title_tokens) // 2)
+    return overlap >= max(3, len(title_tokens) * 2 // 3)
 
 
 def _resolve_canonical_topic(*, topic_title: str, payload: Optional[Dict[str, Any]] = None) -> str:
@@ -184,21 +189,24 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
 
 
 
-def validate_caption_bundle(bundle: Dict[str, Any], script: str) -> Dict[str, Any]:
+def validate_caption_bundle(bundle: Dict[str, Any], script: str, post_type: str = "") -> Dict[str, Any]:
     variants = list(bundle.get("variants") or [])
     by_key = {str(item.get("key") or ""): item for item in variants}
-    if not by_key or not any(k in FAMILY_ORDER for k in by_key):
-        raise ValidationError(message="Caption bundle must contain at least one valid family", details={"keys": list(by_key.keys())})
+    required_pool = set(_caption_variant_pool(post_type)) if post_type else set(FAMILY_ORDER)
+    available_required = required_pool & set(by_key.keys())
+    if not available_required:
+        raise ValidationError(
+            message=f"No usable caption variants in LLM response (need one of: {', '.join(sorted(required_pool))})",
+            details={"required": sorted(required_pool), "available_keys": list(by_key.keys())},
+        )
     validated = []
     for key in FAMILY_ORDER:
         body = str((by_key.get(key) or {}).get("body") or "").strip()
-        if body:
-            try:
-                validated.append(validate_caption_variant(key, body, script))
-            except ValidationError:
-                validated.append(validate_caption_variant(key, _fallback_body(script[:60], "", key, script=script), ""))
-        else:
-            validated.append(validate_caption_variant(key, _fallback_body(script[:60], "", key, script=script), ""))
+        if not body:
+            continue
+        validated.append(validate_caption_variant(key, body, script))
+    if not validated:
+        raise ValidationError(message="Caption bundle has no valid variants", details={"keys": list(by_key.keys())})
     selected_key = str(bundle.get("selected_key") or "").strip()
     if selected_key and selected_key not in FAMILY_ORDER:
         raise ValidationError(message="Selected caption family invalid", details={"selected_key": selected_key})
@@ -246,79 +254,6 @@ def _parse_text_variants(raw: str) -> Dict[str, Any]:
 
 
 
-def _fallback_body(topic_title: str, context: str, key: str, *, script: str = "") -> str:
-    topic_raw = re.sub(r"\s+", " ", str(topic_title or "Thema").strip())
-    topic_words = [word for word in re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", topic_raw) if len(word) > 2]
-    hook_topic = " ".join(topic_words[:3]).strip() or "das Thema"
-    context_raw = re.sub(r"\s+", " ", str(context or "").strip())
-    context_words = [word for word in re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", context_raw) if len(word) > 3]
-    hook_context = " ".join(context_words[:4]).strip() or hook_topic
-    if hook_context.lower() in {"kontext", "thema", "details"}:
-        hook_context = ""
-    script_raw = re.sub(r"\s+", " ", str(script or "").strip())
-    digest = hashlib.sha256(f"{topic_raw}|{context_raw}|{script_raw}|{key}".encode("utf-8")).hexdigest()
-    opener_index = int(digest[:2], 16) % 3
-    if key == "short_paragraph":
-        openers = (
-            f"Im Alltag rund um {hook_topic} helfen kleine Details oft mehr als große Ansagen ✨ ",
-            f"Wer {hook_topic} im Blick behält, merkt schnell, wo es im Alltag hakt 🚦 ",
-            f"Schon bei {hook_topic} entscheiden kleine Details oft ueber Ruhe oder Stress ✨ ",
-        )
-        opener = openers[opener_index]
-        return (
-            f"{opener}"
-            "Wenn du die wichtigsten Punkte vorher sortierst, vermeidest du Stress und reagierst unterwegs ruhiger. "
-            f"#Barrierefrei #RollstuhlAlltag"
-        )
-    if key == "medium_bullets":
-        openers = (
-            "Kleine Details entscheiden oft darüber, ob der Alltag ruhig bleibt oder kippt 🚦",
-            f"Gerade bei {hook_topic} zahlt sich ein klarer Plan schnell aus ✨",
-            f"Im Alltag mit {hook_topic} merkt man Reibung oft erst an kleinen Stellen 🚦",
-        )
-        opening = openers[opener_index]
-        short_context = " ".join(context_words[:3]).strip() if context_words else ""
-        if short_context.lower() in {"kontext", "thema", "details"}:
-            short_context = ""
-        return (
-            f"{opening}\n\n"
-            f"{'Mit einem klaren Ablauf bleibst du ruhiger und verlierst den Überblick nicht.' if not short_context else f'Ein klarer Blick auf {short_context} hilft dir, ruhiger zu bleiben.'}\n\n"
-            "• Prüfe zuerst, welche Infos gebraucht werden.\n"
-            "• Notiere Kernpunkte kurz, damit Rueckfragen schneller geklaert sind.\n"
-            "• Plane Puffer ein, falls etwas unklar bleibt.\n\n"
-            f"#Barrierefrei #Alltagstipps #Rollstuhl"
-        )
-    openers = (
-        f"Rund um {hook_topic} kippt es oft an fehlender Vorbereitung 🚀",
-        f"Gerade bei {hook_topic} zeigt sich schnell, ob der Ablauf wirklich passt ✨",
-        f"Bei {hook_topic} wird oft erst unterwegs klar, wo die Reibung entsteht 🚦",
-    )
-    opening = openers[opener_index]
-    return (
-        f"{opening}\n\n"
-        f"{'Ein klarer Ablauf gibt dir Orientierung und spart Energie.' if not hook_context else f'Ein klarer Blick auf {hook_context} gibt dir Orientierung und spart Energie.'} "
-        "Gerade wenn mehrere Stellen beteiligt sind, spart das Zeit und verhindert doppelte Rueckfragen. "
-        "Du bleibst handlungsfaehig, statt jedes Mal bei Null anfangen zu muessen.\n\n"
-        "1. Kläre zuerst das Ziel und sammle die relevanten Fakten an einem Ort.\n"
-        "2. Prüfe danach Zuständigkeiten, Fristen und praktische Hürden Schritt für Schritt.\n"
-        "3. Halte Ergebnisse kurz fest, damit du beim nächsten Kontakt sofort anknüpfen kannst.\n\n"
-        f"#Barrierefrei #Selbstbestimmt #RollstuhlAlltag"
-    )
-
-
-
-def _synthesize_fallback_bundle(topic_title: str, post_type: str, script: str, context: str) -> Dict[str, Any]:
-    variants = []
-    for key in FAMILY_ORDER:
-        variants.append(validate_caption_variant(key, _fallback_body(topic_title, context, key, script=script), ""))
-    selected_key = select_caption_variant_key(topic_title=topic_title, post_type=post_type, script=script)
-    selected_body = next(item["body"] for item in variants if item["key"] == selected_key)
-    return {
-        "variants": variants,
-        "selected_key": selected_key,
-        "selected_body": selected_body,
-        "selection_reason": "fallback_hash_variant",
-    }
 
 
 
@@ -353,6 +288,27 @@ def resolve_selected_caption(seed_data: Dict[str, Any]) -> str:
 
 
 
+def _select_best_variant(
+    variants: List[Dict[str, Any]], preferred_key: str, topic_title: str,
+) -> tuple:
+    by_key = {v["key"]: v["body"] for v in variants}
+    if preferred_key in by_key and not _caption_looks_like_title(topic_title, by_key[preferred_key]):
+        return preferred_key, by_key[preferred_key]
+    for key in FAMILY_ORDER:
+        if key in by_key and not _caption_looks_like_title(topic_title, by_key[key]):
+            if key != preferred_key:
+                logger.info(
+                    "caption_variant_fallback",
+                    preferred_key=preferred_key,
+                    actual_key=key,
+                    reason="title_echo_or_missing_preferred",
+                )
+            return key, by_key[key]
+    first_key = variants[0]["key"]
+    logger.warning("caption_all_variants_echo_title", preferred_key=preferred_key, using=first_key)
+    return first_key, by_key[first_key]
+
+
 def generate_caption_bundle(
     *,
     topic_title: str,
@@ -365,13 +321,10 @@ def generate_caption_bundle(
     canonical_topic = str(canonical_topic or topic_title or "").strip()
     selected_key = select_caption_variant_key(topic_title=canonical_topic, post_type=post_type, script=script)
     llm_factory = llm_factory or get_llm_client
-    try:
-        llm = llm_factory()
-    except Exception:
-        return _synthesize_fallback_bundle(canonical_topic, post_type, script, context)
+    llm = llm_factory()
     prompt = _build_caption_prompt(topic_title=canonical_topic, post_type=post_type, script=script, context=context)
     last_error: Optional[ValidationError] = None
-    for _ in range(2):
+    for attempt in range(3):
         try:
             raw_text = llm.generate_gemini_text(
                 prompt=prompt,
@@ -384,18 +337,15 @@ def generate_caption_bundle(
                 temperature=0.8,
             )
             parsed = _parse_text_variants(raw_text)
-            bundle = validate_caption_bundle(parsed, script)
+            bundle = validate_caption_bundle(parsed, script, post_type=post_type)
             preferred_pool = _caption_variant_pool(post_type)
             if not bundle["selected_key"] or bundle["selected_key"] not in preferred_pool:
                 bundle["selected_key"] = selected_key
-            bundle["selected_body"] = next(
-                item["body"] for item in bundle["variants"] if item["key"] == bundle["selected_key"]
+            final_key, final_body = _select_best_variant(
+                bundle["variants"], bundle["selected_key"], canonical_topic,
             )
-            if _caption_looks_like_title(canonical_topic, bundle["selected_body"]):
-                raise ValidationError(
-                    message="Caption repeats topic title too closely",
-                    details={"topic_title": canonical_topic, "selected_key": bundle["selected_key"]},
-                )
+            bundle["selected_key"] = final_key
+            bundle["selected_body"] = final_body
             logger.info(
                 "caption_bundle_generated",
                 topic_title=canonical_topic[:60],
@@ -403,42 +353,27 @@ def generate_caption_bundle(
                 char_count=len(bundle["selected_body"]),
                 source="gemini",
             )
-            break
+            return {
+                "variants": bundle["variants"],
+                "selected_key": bundle["selected_key"],
+                "selected_body": bundle["selected_body"],
+                "selection_reason": "hash_variant",
+                "last_error": None,
+            }
         except ValidationError as exc:
             last_error = exc
             logger.warning(
                 "caption_generation_retry",
                 topic_title=canonical_topic[:60],
+                attempt=attempt + 1,
                 error=exc.message,
                 details=str(exc.details)[:200],
             )
             prompt = f"{prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, ensure_ascii=False)[:800]}"
-        except Exception as exc:
-            last_error = ValidationError(
-                message="Caption generation failed",
-                details={"reason": type(exc).__name__, "message": str(exc)},
-            )
-            logger.error(
-                "caption_generation_error",
-                topic_title=canonical_topic[:60],
-                error=str(exc),
-            )
-    else:
-        bundle = _synthesize_fallback_bundle(canonical_topic, post_type, script, context)
-        logger.warning(
-            "caption_bundle_fallback",
-            topic_title=canonical_topic[:60],
-            selected_key=bundle["selected_key"],
-            last_error=last_error.message if last_error else None,
-        )
-    result = {
-        "variants": bundle["variants"],
-        "selected_key": bundle["selected_key"],
-        "selected_body": bundle["selected_body"],
-        "selection_reason": bundle.get("selection_reason") or "hash_variant",
-        "last_error": {"message": last_error.message, "details": last_error.details} if last_error else None,
-    }
-    return result
+    raise ValidationError(
+        message="Caption generation failed after 3 attempts",
+        details={"topic_title": canonical_topic, "last_error": last_error.message if last_error else None},
+    )
 
 
 

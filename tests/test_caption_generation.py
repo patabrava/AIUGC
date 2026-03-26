@@ -218,43 +218,37 @@ def test_resolve_selected_caption_uses_selected_body_when_publish_caption_missin
     assert captions.resolve_selected_caption(seed_data) == MEDIUM_BODY
 
 
-def test_generate_caption_bundle_falls_back_to_synthesized_bundle(monkeypatch):
+def test_generate_caption_bundle_raises_on_persistent_llm_failure(monkeypatch):
     class FakeLLM:
         def generate_gemini_text(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    bundle = captions.generate_caption_bundle(
-        topic_title="Topic A",
-        post_type="value",
-        script=(
-            "Erster langer Skripttext mit genug Inhalt, damit auch die längeren Caption-Familien "
-            "ihre Mindestlaenge erreichen koennen."
-        ),
-        context="Kontext A mit ausreichend Text fuer die laengeren Varianten und saubere Validierung.",
-        llm_factory=lambda: FakeLLM(),
-    )
-
-    assert bundle["selected_key"] in {"medium_bullets", "long_structured"}
-    assert len(bundle["variants"]) == 3
-    assert bundle["selected_body"]
-    assert bundle["selection_reason"] in {"fallback_hash_variant", "hash_variant"}
+    with pytest.raises(RuntimeError, match="boom"):
+        captions.generate_caption_bundle(
+            topic_title="Topic A",
+            post_type="value",
+            script=(
+                "Erster langer Skripttext mit genug Inhalt, damit auch die längeren Caption-Familien "
+                "ihre Mindestlaenge erreichen koennen."
+            ),
+            context="Kontext A mit ausreichend Text fuer die laengeren Varianten und saubere Validierung.",
+            llm_factory=lambda: FakeLLM(),
+        )
 
 
-def test_generate_caption_bundle_fallback_handles_long_topic_and_context():
-    class FakeLLM:
+def test_generate_caption_bundle_raises_on_persistent_validation_failure():
+    class BadLLM:
         def generate_gemini_text(self, *args, **kwargs):
-            raise RuntimeError("boom")
+            return "no markers here"
 
-    bundle = captions.generate_caption_bundle(
-        topic_title="Sehr langer Titel " * 20,
-        post_type="value",
-        script="Das ist ein unabhängiges Skript mit ausreichender Länge und klarer Satzstruktur.",
-        context="Kontext " * 200,
-        llm_factory=lambda: FakeLLM(),
-    )
-
-    assert len(bundle["variants"]) == 3
-    assert {item["key"] for item in bundle["variants"]} == set(captions.FAMILY_ORDER)
+    with pytest.raises(captions.ValidationError, match="failed after 3 attempts"):
+        captions.generate_caption_bundle(
+            topic_title="Sehr langer Titel",
+            post_type="value",
+            script="Das ist ein unabhängiges Skript mit ausreichender Länge und klarer Satzstruktur.",
+            context="Kontext",
+            llm_factory=lambda: BadLLM(),
+        )
 
 
 def test_build_caption_prompt_discourages_title_copying():
@@ -303,19 +297,20 @@ def test_generate_caption_bundle_uses_canonical_topic_for_title_checks(monkeypat
     assert "Forschungsdossier" not in captured["prompt"]
 
 
-def test_fallback_caption_openers_are_not_generic():
-    short = captions._fallback_body("Barrierefreiheit im ÖPNV", "Kontext", "short_paragraph")
-    medium = captions._fallback_body("Barrierefreiheit im ÖPNV", "Kontext", "medium_bullets")
-    long = captions._fallback_body("Barrierefreiheit im ÖPNV", "Kontext", "long_structured")
+def test_generate_caption_bundle_raises_after_retries():
+    """Caption generation must raise, not silently fall back."""
+    class BadLLM:
+        def generate_gemini_text(self, **kwargs):
+            return "no markers here"
 
-    assert "Barrierefreiheit" in short
-    assert "Barrierefreiheit" in medium or "Kleine Details" in medium
-    assert "diesem Thema" not in short
-    assert "diesem Thema" not in medium
-    assert "diesem Thema" not in long
-    assert "Kontext" not in medium.split("\n\n")[1]
-    assert "Kontext" not in long.split("\n\n")[1]
-    assert len({short.splitlines()[0], medium.splitlines()[0], long.splitlines()[0]}) == 3
+    with pytest.raises(captions.ValidationError, match="failed after 3 attempts"):
+        captions.generate_caption_bundle(
+            topic_title="Barrierefreiheit im ÖPNV",
+            post_type="value",
+            script="Ein Skript zum Testen.",
+            context="Kontext",
+            llm_factory=lambda: BadLLM(),
+        )
 
 
 def test_validate_caption_variant_rejects_more_than_one_emoji():
@@ -328,21 +323,29 @@ def test_validate_caption_variant_rejects_more_than_one_emoji():
         captions.validate_caption_variant("short_paragraph", broken, "Ein anderes Skript mit genügend Abstand.")
 
 
-def test_generate_caption_bundle_rejects_title_like_opening(monkeypatch):
+def test_generate_caption_bundle_picks_non_echo_variant(monkeypatch):
+    """If the preferred variant echoes the title, pick another one that doesn't."""
     class FakeLLM:
         def generate_gemini_text(self, *args, **kwargs):
-            short = "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick. #Tag1 #Tag2"
+            short = (
+                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf die "
+                "wichtigsten Punkte im Alltag. #Tag1 #Tag2"
+            )
             medium = (
-                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick.\n\n"
-                "• Punkt eins.\n"
-                "• Punkt zwei.\n\n"
+                "Wusstest du, dass kleine Details den Unterschied machen und dir helfen, "
+                "im Alltag ruhiger zu bleiben?\n\n"
+                "• Punkt eins ist wichtig fuer die taegliche Routine.\n"
+                "• Punkt zwei hilft dir, den Ueberblick zu behalten.\n"
+                "• Punkt drei spart dir Zeit und Nerven.\n\n"
                 "#Tag1 #Tag2 #Tag3"
             )
             long = (
-                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick.\n\n"
-                "Noch mehr Einordnung.\n\n"
-                "1. Punkt eins.\n"
-                "2. Punkt zwei.\n\n"
+                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf "
+                "die wichtigsten Punkte im Alltag und in der Freizeit.\n\n"
+                "Noch mehr Einordnung hilft dir, die Zusammenhaenge besser zu verstehen und "
+                "im richtigen Moment die richtige Entscheidung zu treffen.\n\n"
+                "1. Klaere zuerst das Ziel und sammle die relevanten Fakten.\n"
+                "2. Pruefe danach Zustaendigkeiten und Fristen Schritt fuer Schritt.\n\n"
                 "#Tag1 #Tag2 #Tag3"
             )
             return f"[short_paragraph]\n{short}\n\n[medium_bullets]\n{medium}\n\n[long_structured]\n{long}"
@@ -354,8 +357,45 @@ def test_generate_caption_bundle_rejects_title_like_opening(monkeypatch):
         context="Kontext",
         llm_factory=lambda: FakeLLM(),
     )
+    assert bundle["selected_key"] == "medium_bullets"
+    assert "Wusstest du" in bundle["selected_body"]
 
-    assert bundle["selection_reason"] in ("hash_variant", "fallback_hash_variant")
+
+def test_generate_caption_bundle_accepts_all_echo_variants():
+    """If ALL variants echo the title, accept the preferred one anyway."""
+    class FakeLLM:
+        def generate_gemini_text(self, *args, **kwargs):
+            short = (
+                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf die "
+                "wichtigsten Punkte im Alltag. #Tag1 #Tag2"
+            )
+            medium = (
+                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf "
+                "alles was wichtig ist.\n\n"
+                "• Punkt eins ist wichtig fuer die taegliche Routine.\n"
+                "• Punkt zwei hilft dir, den Ueberblick zu behalten.\n"
+                "• Punkt drei spart dir Zeit und Nerven.\n\n"
+                "#Tag1 #Tag2 #Tag3"
+            )
+            long = (
+                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf "
+                "die wichtigsten Punkte im Alltag und in der Freizeit.\n\n"
+                "Noch mehr Einordnung hilft dir, die Zusammenhaenge besser zu verstehen und "
+                "im richtigen Moment die richtige Entscheidung zu treffen.\n\n"
+                "1. Klaere zuerst das Ziel und sammle die relevanten Fakten.\n"
+                "2. Pruefe danach Zustaendigkeiten und Fristen Schritt fuer Schritt.\n\n"
+                "#Tag1 #Tag2 #Tag3"
+            )
+            return f"[short_paragraph]\n{short}\n\n[medium_bullets]\n{medium}\n\n[long_structured]\n{long}"
+
+    bundle = captions.generate_caption_bundle(
+        topic_title="Gesetzliche Rahmenbedingungen Fristen Ausnahmeregelungen",
+        post_type="value",
+        script="Das Skript ist bewusst kurz und endet mit einem Punkt.",
+        context="Kontext",
+        llm_factory=lambda: FakeLLM(),
+    )
+    assert bundle["selected_body"]
     assert len(bundle["variants"]) == 3
 
 
@@ -448,8 +488,8 @@ def test_parse_text_variants_round_trip():
         assert variant["char_count"] >= captions.FAMILY_SPECS[variant["key"]]["min_chars"]
 
 
-def test_parse_text_variants_missing_variant_fills_fallback():
-    """If Gemini only returns 2 of 3 markers, missing variant gets filled from fallback."""
+def test_validate_caption_bundle_accepts_partial_for_lifestyle():
+    """Lifestyle only needs short_paragraph or medium_bullets — missing long_structured is fine."""
     marker_text = (
         "[short_paragraph]\n"
         f"{SHORT_BODY}\n\n"
@@ -459,8 +499,15 @@ def test_parse_text_variants_missing_variant_fills_fallback():
     parsed = captions._parse_text_variants(marker_text)
     assert len(parsed["variants"]) == 2
 
-    validated = captions.validate_caption_bundle(
-        parsed, "Ein unabhaengiges Skript."
-    )
-    assert len(validated["variants"]) == 3
-    assert {v["key"] for v in validated["variants"]} == set(captions.FAMILY_ORDER)
+    validated = captions.validate_caption_bundle(parsed, "Ein unabhaengiges Skript.", post_type="lifestyle")
+    assert len(validated["variants"]) == 2
+    assert {v["key"] for v in validated["variants"]} == {"short_paragraph", "medium_bullets"}
+
+
+def test_validate_caption_bundle_raises_when_no_required_variant():
+    """If none of the required variants are present, must raise."""
+    marker_text = "[long_structured]\nEin langer Text mit genug Inhalt und mehreren Absaetzen.\n\nZweiter Absatz hier.\n\n1. Punkt eins ist wichtig.\n2. Punkt zwei ebenso.\n\n#Tag1 #Tag2"
+    parsed = captions._parse_text_variants(marker_text)
+
+    with pytest.raises(captions.ValidationError, match="No usable caption variants"):
+        captions.validate_caption_bundle(parsed, "Ein unabhaengiges Skript.", post_type="lifestyle")
