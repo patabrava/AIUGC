@@ -1505,9 +1505,9 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
     if _is_removed_post(post):
         raise ValidationError("Post has been removed", details={"post_id": post_id})
 
-    if post["publish_status"] not in ("draft", "scheduled"):
+    if post["publish_status"] not in ("pending", "draft", "scheduled"):
         raise ValidationError(
-            f"Post must be in draft or scheduled status, got {post['publish_status']}",
+            f"Post must be in pending, draft, or scheduled status, got {post['publish_status']}",
             details={"publish_status": post["publish_status"]},
         )
 
