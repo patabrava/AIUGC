@@ -17,6 +17,7 @@ VIDEO_STATUS_SUBMITTED = "submitted"
 VIDEO_STATUS_PROCESSING = "processing"
 VIDEO_STATUS_COMPLETED = "completed"
 VIDEO_STATUS_FAILED = "failed"
+TRIM_TAIL_MS = 200
 VIDEO_STATUS_EXTENDED_SUBMITTED = "extended_submitted"
 VIDEO_STATUS_EXTENDED_PROCESSING = "extended_processing"
 VIDEO_STATUS_CAPTION_PENDING = "caption_pending"
@@ -96,9 +97,9 @@ _PROFILES = {
         prompt1_max_seconds=28,
         prompt1_max_chars_no_spaces=430,
         prompt1_sentence_guidance="3-4 concise sentences",
-        prompt2_min_words=46,
+        prompt2_min_words=40,
         prompt2_max_words=66,
-        prompt2_sentence_guidance="2-4 concise sentences",
+        prompt2_sentence_guidance="3-4 Sätze",
     ),
 }
 
