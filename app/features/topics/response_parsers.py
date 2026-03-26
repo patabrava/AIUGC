@@ -276,6 +276,12 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         buckets["transformation"] = [fallback_script]
         logger.info("single_category_format_detected", message="Using Problem-Agitieren-Lösung script as fallback for other categories")
 
+    if not description_text and buckets["problem_agitate_solution"]:
+        fallback_desc = buckets["problem_agitate_solution"][0]
+        if len(fallback_desc) >= 35:
+            description_text = fallback_desc
+            logger.warning("description_synthesized_from_script", message="Beschreibung section missing, using script as fallback description")
+
     payload = {**buckets, "description": description_text}
     try:
         return DialogScripts(**payload)
@@ -535,7 +541,7 @@ def _extract_markdown_headings(text: str) -> List[str]:
         if not stripped.startswith("#"):
             continue
         heading = stripped.lstrip("#").strip()
-        heading = re.sub(r"^Research-?Dossier:\s*", "", heading, flags=re.IGNORECASE)
+        heading = re.sub(r"^(?:Research-?Dossier|Forschungsdossier):\s*", "", heading, flags=re.IGNORECASE)
         if heading:
             headings.append(heading)
     return headings
@@ -586,7 +592,7 @@ def _synthesize_research_dossier_from_text(
 
     topic = headings[0] if headings else ""
     if topic:
-        topic = re.sub(r"^Research-?Dossier:\s*", "", topic, flags=re.IGNORECASE).strip()
+        topic = re.sub(r"^(?:Research-?Dossier|Forschungsdossier):\s*", "", topic, flags=re.IGNORECASE).strip()
     if not topic:
         topic = seed_topic or (paragraphs[0] if paragraphs else "Thema")
     topic = _shorten_text(topic, 240)
@@ -659,7 +665,13 @@ def _synthesize_research_dossier_from_text(
     return _normalize_research_dossier_payload(payload)
 
 
-def parse_topic_research_response(raw: str) -> ResearchDossier:
+def parse_topic_research_response(
+    raw: str,
+    *,
+    seed_topic: str = "",
+    post_type: str = "value",
+    target_length_tier: int = 8,
+) -> ResearchDossier:
     cleaned = raw.strip()
     if cleaned.startswith("```json"):
         cleaned = cleaned[7:]
@@ -669,16 +681,33 @@ def parse_topic_research_response(raw: str) -> ResearchDossier:
         cleaned = cleaned[:-3]
     cleaned = cleaned.strip()
 
-    parsed = _parse_json_or_yaml(cleaned)
-    payload = parsed if isinstance(parsed, dict) else {}
-    payload = _normalize_research_dossier_payload(payload)
+    try:
+        parsed = _parse_json_or_yaml(cleaned)
+        payload = parsed if isinstance(parsed, dict) else {}
+        payload = _normalize_research_dossier_payload(payload)
+    except ValidationError:
+        payload = _synthesize_research_dossier_from_text(
+            cleaned,
+            seed_topic=seed_topic,
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+        )
     try:
         return ResearchDossier(**payload)
     except PydanticValidationError as exc:
-        raise ValidationError(
-            message="PROMPT_1 research dossier invalid",
-            details=json.loads(exc.json()),
-        ) from exc
+        synthesized = _synthesize_research_dossier_from_text(
+            cleaned,
+            seed_topic=seed_topic,
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+        )
+        try:
+            return ResearchDossier(**synthesized)
+        except PydanticValidationError as synthesized_exc:
+            raise ValidationError(
+                message="PROMPT_1 research dossier invalid",
+                details=json.loads(synthesized_exc.json()),
+            ) from synthesized_exc
 
 
 def _coerce_prompt2_payload(payload: Dict[str, Any], scripts_required: int) -> DialogScripts:

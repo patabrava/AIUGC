@@ -14,7 +14,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.adapters.llm_client import get_llm_client
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.prompts import build_prompt1_variant, build_prompt2, get_hook_bank
@@ -25,8 +25,8 @@ from app.features.topics.queries import (
     get_topic_scripts_for_registry,
     upsert_topic_script_variants,
 )
-from app.features.topics.response_parsers import parse_prompt1_response, _coerce_prompt2_payload
-from app.features.topics.schemas import DialogScripts
+from app.features.topics.response_parsers import parse_prompt1_response, parse_prompt2_response, _coerce_prompt2_payload, _validate_dialog_scripts_payload
+from app.features.topics.schemas import DialogScripts, ResearchAgentItem
 from app.features.topics.topic_validation import estimate_script_duration_seconds
 
 logger = get_logger(__name__)
@@ -162,26 +162,37 @@ def generate_dialog_scripts_variant(
     constrained_prompt = base_prompt + constraint_block
 
     llm = get_llm_client()
-    response = llm.generate_gemini_json(
-        prompt=constrained_prompt,
-        json_schema={
-            "type": "object",
-            "properties": {
-                "problem_agitate_solution": {"type": "array", "items": {"type": "string"}},
-                "testimonial": {"type": "array", "items": {"type": "string"}},
-                "transformation": {"type": "array", "items": {"type": "string"}},
-                "description": {"type": "string"},
-            },
-            "required": ["problem_agitate_solution", "description"],
-        },
-        system_prompt="You are a German UGC script writer. Return valid JSON only.",
-    )
-    scripts = _coerce_prompt2_payload(response, scripts_required=1)
-    return DialogScripts(
-        problem_agitate_solution=scripts.problem_agitate_solution[:1],
-        testimonial=scripts.testimonial[:1],
-        transformation=scripts.transformation[:1],
-        description=scripts.description,
+    current_prompt = constrained_prompt
+
+    for attempt in range(3):
+        try:
+            text_response = llm.generate_gemini_text(
+                prompt=current_prompt,
+                system_prompt=None,
+                max_tokens=1600,
+            )
+            scripts = parse_prompt2_response(text_response, max_per_category=1)
+            _validate_dialog_scripts_payload(scripts, profile, topic)
+            return DialogScripts(
+                problem_agitate_solution=scripts.problem_agitate_solution[:1],
+                testimonial=scripts.testimonial[:1],
+                transformation=scripts.transformation[:1],
+                description=scripts.description,
+            )
+        except (ValidationError, ThirdPartyError) as exc:
+            logger.warning(
+                "dialog_scripts_variant_retry",
+                topic=topic,
+                forced_framework=forced_framework,
+                forced_hook_style=forced_hook_style,
+                attempt=attempt + 1,
+                error=getattr(exc, "message", str(exc)),
+            )
+            current_prompt = f"{current_prompt}\n\nFEEDBACK: {getattr(exc, 'message', str(exc))}"
+
+    raise ValidationError(
+        message="Variant dialog script generation failed after text normalization",
+        details={"topic": topic, "forced_framework": forced_framework, "forced_hook_style": forced_hook_style},
     )
 
 
@@ -268,6 +279,9 @@ def expand_topic_variants(
         try:
             if post_type == "value":
                 lane = _pick_lane_for_framework(lane_candidates, framework, existing_pairs)
+                source_info = (dossier_payload.get("sources") or [{}])[0] if dossier_payload.get("sources") else {}
+                source_title = str(source_info.get("title") or "").strip() or None
+                source_url = str(source_info.get("url") or "").strip() or None
                 lane_fact_texts = [
                     str(fact).strip()
                     for fact in list((lane or {}).get("facts") or []) + list(dossier_payload.get("facts") or [])
@@ -283,32 +297,32 @@ def expand_topic_variants(
                     profile=get_duration_profile(target_length_tier),
                 )
                 llm = get_llm_client()
-                raw = llm.generate_gemini_json(
+                raw = llm.generate_gemini_text(
                     prompt=variant_prompt,
-                    json_schema={
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "title": {"type": "string"},
-                                "script": {"type": "string"},
-                                "caption": {"type": "string"},
-                            },
-                            "required": ["title", "script", "caption"],
-                        },
-                        "minItems": 1,
-                        "maxItems": 1,
-                    },
-                    system_prompt="You are the Flow Forge PROMPT_1 stage-3 script agent. Return only valid JSON. Keep all output fully in German.",
+                    system_prompt="You are the Flow Forge PROMPT_1 stage-3 script agent. Return only the final script text. Keep all output fully in German.",
+                    max_tokens=3200,
                 )
-                batch = parse_prompt1_response(
-                    json.dumps(raw, ensure_ascii=False),
-                    profile=get_duration_profile(target_length_tier),
-                )
-                prompt1_item = batch.items[0] if batch.items else None
-                if not prompt1_item:
+                script_text = re.sub(r"\s+", " ", str(raw or "").strip())
+                if script_text and script_text[-1] not in ".!?":
+                    script_text = script_text.rstrip(",;:") + "."
+                if not script_text:
                     logger.warning("variant_expansion_parse_failed", framework=framework, hook_style=hook_style)
                     continue
+                prompt1_item = ResearchAgentItem(
+                    topic=str((lane or {}).get("title") or dossier_payload.get("topic") or title or "").strip() or "Thema",
+                    script=script_text,
+                    caption=str((lane or {}).get("source_summary") or dossier_payload.get("source_summary") or "").strip() or script_text,
+                    framework=framework if framework in {"PAL", "Testimonial", "Transformation"} else "PAL",
+                    sources=(
+                        [{"title": source_title or str((lane or {}).get("title") or title or "Quelle"), "url": source_url}]
+                        if source_url
+                        else []
+                    ),
+                    source_summary=str((lane or {}).get("source_summary") or dossier_payload.get("source_summary") or "").strip() or script_text,
+                    estimated_duration_s=max(1, min(get_duration_profile(target_length_tier).target_length_tier, estimate_script_duration_seconds(script_text))),
+                    tone="direkt, freundlich, empowernd, du-Form",
+                    disclaimer=str((lane or {}).get("disclaimer") or dossier_payload.get("disclaimer") or "Keine Rechts- oder medizinische Beratung.").strip(),
+                )
                 prompt1_item = _enforce_prompt1_word_envelope(
                     prompt1_item,
                     get_duration_profile(target_length_tier),

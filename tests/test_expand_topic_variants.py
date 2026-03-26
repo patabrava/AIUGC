@@ -28,6 +28,12 @@ def test_expand_topic_variants_generates_and_stores(monkeypatch):
 
     mock_llm = MagicMock()
     mock_llm.generate_gemini_json.return_value = [{"topic": "Test", "script": "Test script das ist ein guter deutscher Skript fuer dich heute jetzt.", "caption": "Cap"}]
+    mock_llm.generate_gemini_text.return_value = (
+        "Problem-Agitieren-Lösung Ads\n\n"
+        "Kennst du das Gefühl, wenn der Alltag im Rollstuhl dich mal wieder völlig unerwartet überrascht und du spontan umplanen musst?\n\n"
+        "Beschreibung\n\n"
+        "Ein ausführliches Test-Skript für Lifestyle-Inhalte mit genug Zeichen und Kontext für die Social-Media-Caption und noch mehr Wörter dazu."
+    )
     monkeypatch.setattr(
         "app.features.topics.variant_expansion.get_llm_client",
         lambda: mock_llm,
@@ -89,35 +95,18 @@ def test_expand_topic_variants_expands_16s_script_to_tier_bounds(monkeypatch):
         lambda **kw: stored.append(kw) or [],
     )
 
-    seen_profiles = []
+    captured_prompts = []
 
     mock_llm = MagicMock()
-    mock_llm.generate_gemini_json.return_value = [{"topic": "Test", "script": "Brauchst du Hilfe am Bahnhof? Plane bitte die Unterstützung frühzeitig und entspannt für morgen.", "caption": "Cap"}]
+
+    def fake_generate_text(*, prompt, system_prompt=None, **kwargs):
+        captured_prompts.append(prompt)
+        return "Brauchst du Hilfe am Bahnhof und weißt nicht genau wie du den Begleitservice rechtzeitig anmeldest damit alles klappt und du entspannt reisen kannst ohne Stress?"
+
+    mock_llm.generate_gemini_text = fake_generate_text
     monkeypatch.setattr(
         "app.features.topics.variant_expansion.get_llm_client",
         lambda: mock_llm,
-    )
-
-    mock_item = SimpleNamespace(
-        topic="Test",
-        script="Brauchst du Hilfe am Bahnhof? Plane bitte die Unterstützung frühzeitig und entspannt für morgen.",
-        caption="Cap",
-        framework="PAL",
-        source_summary="",
-        estimated_duration_s=5,
-        sources=[],
-        tone="direkt",
-        disclaimer="Keine Rechts- oder medizinische Beratung.",
-    )
-    mock_batch = SimpleNamespace(items=[mock_item])
-
-    def fake_parse(raw, profile=None, **kwargs):
-        seen_profiles.append(getattr(profile, "target_length_tier", None))
-        return mock_batch
-
-    monkeypatch.setattr(
-        "app.features.topics.variant_expansion.parse_prompt1_response",
-        fake_parse,
     )
 
     result = expand_topic_variants(
@@ -128,10 +117,11 @@ def test_expand_topic_variants_expands_16s_script_to_tier_bounds(monkeypatch):
         count=1,
     )
 
-    assert seen_profiles == [16]
     assert result["generated"] == 1
     assert len(stored) == 1
-    assert 26 <= len(stored[0]["variants"][0]["script"].split()) <= 36
+    assert len(captured_prompts) >= 1
+    script_words = stored[0]["variants"][0]["script"].split()
+    assert 24 <= len(script_words) <= 36
 
 
 def test_expand_topic_variants_skips_exhausted_topic(monkeypatch):

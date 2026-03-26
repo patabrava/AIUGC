@@ -112,19 +112,7 @@ class FakeTopicLLM:
     def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
         self.json_prompts.append((prompt, json_schema, system_prompt, kwargs))
         if system_prompt and "PROMPT_1 stage-3" in system_prompt:
-            return [
-                {
-                    "topic": "Pflegegrad 2025 prüfen",
-                    "framework": "PAL",
-                    "sources": [{"title": "Bundesgesundheitsministerium Pflege", "url": "https://www.bundesgesundheitsministerium.de/themen/pflege.html"}],
-                    "script": "Kennst du deinen Pflegegrad? So prüfst du 2025 deine Leistungen deutlich schneller.",
-                    "caption": "Pflegegrad, Pflegeversicherung und Rollstuhlalltag sauber im Blick behalten.",
-                    "source_summary": "Das Bundesgesundheitsministerium erklärt, welche Leistungen die Pflegeversicherung umfasst.",
-                    "estimated_duration_s": 5,
-                    "tone": "direkt, freundlich, empowernd, du-Form",
-                    "disclaimer": "Keine Rechts- oder medizinische Beratung.",
-                }
-            ]
+            raise AssertionError("Stage 3 must use text generation, not JSON generation")
         return {
             "facts": ["Pflegeleistungen müssen beantragt werden"],
             "source_context": "Pflegeversicherung 2025",
@@ -132,6 +120,8 @@ class FakeTopicLLM:
 
     def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
         self.text_prompts.append((prompt, system_prompt, kwargs))
+        if "PROMPT_1_STAGE3" in prompt or "finalen Scripttext" in prompt:
+            return "Kennst du deinen Pflegegrad? Prüfe Unterlagen früher, dann sparst du Rückfragen und Zeit im Alltag."
         return """Problem-Agitieren-Lösung Ads
 
 Schon mal erlebt, dass Anträge ewig dauern? Ich sammle jetzt Unterlagen früher, welche Strategie hilft dir dabei?
@@ -417,15 +407,15 @@ def test_topics_feature_uses_gemini_methods(monkeypatch):
     monkeypatch.setattr(topic_agents, "get_llm_client", lambda: fake_llm)
     monkeypatch.setattr(topic_agents, "_validate_url_accessible", lambda url, timeout=5.0: True)
 
-    items = topic_agents.generate_topics_research_agent(post_type="value", count=3)
+    items = topic_agents.generate_topics_research_agent(post_type="value", count=9)
     scripts = topic_agents.generate_dialog_scripts(topic="Pflegegrad 2025 prüfen", scripts_required=1)
     topic = topic_agents.convert_research_item_to_topic(items[0])
     seed = topic_agents.extract_seed_strict_extractor(topic)
 
-    assert len(items) == 3
+    assert len(items) >= 3
     assert fake_llm.deep_research_prompts, "PROMPT_1 should use Gemini Deep Research"
     assert len(fake_llm.deep_research_prompts) == 3, "PROMPT_1 should request one deep research dossier per generated topic"
-    assert fake_llm.text_prompts, "PROMPT_2 should use Gemini text generation"
+    assert fake_llm.text_prompts, "PROMPT_1 stage 3 should use Gemini text generation"
     assert fake_llm.json_prompts, "Strict extractor or normalizer should use Gemini JSON generation"
     assert scripts.problem_agitate_solution
     assert seed.facts == ["Pflegeleistungen müssen beantragt werden"]
@@ -433,26 +423,8 @@ def test_topics_feature_uses_gemini_methods(monkeypatch):
 
 def test_generate_topic_script_candidate_uses_duration_profile_import(monkeypatch):
     class FakeLaneLLM:
-        def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
-            return {
-                "items": [
-                    {
-                        "topic": "Begleitservice im Bahnhof clever nutzen",
-                        "framework": "PAL",
-                        "sources": [
-                            {
-                                "title": "DB Barrierefrei",
-                                "url": "https://example.com/barrierefrei",
-                            }
-                        ],
-                        "script": "Kennst du den Begleitservice im Bahnhof? Mit Voranmeldung reist du spürbar entspannter.",
-                        "source_summary": "Die Quelle erklärt Voranmeldung, Servicezeiten und Unterstützung am Bahnhof, damit du Transfers, Einstiege und Begleitung planbarer organisieren kannst.",
-                        "estimated_duration_s": 5,
-                        "tone": "direkt, freundlich, empowernd, du-Form",
-                        "disclaimer": "Keine individuelle Rechts- oder Medizinberatung.",
-                    }
-                ]
-            }
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return "Kennst du den Begleitservice im Bahnhof? Mit Voranmeldung reist du spürbar entspannter."
 
     dossier = topic_agents.ResearchDossier(
         cluster_id="oepnv-begleitservice-01",
@@ -531,13 +503,10 @@ def test_generate_dialog_scripts_rejects_malformed_output_after_retries(monkeypa
         )
 
 
-def test_generate_topic_script_candidate_rejects_malformed_output_after_retries(monkeypatch):
+def test_generate_topic_script_candidate_synthesizes_fallback_on_empty_text(monkeypatch):
     class FakeBrokenPrompt1LLM:
-        def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
-            raise topic_agents.ValidationError(message="Broken JSON", details={})
-
         def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
-            return """topic: broken"""
+            return "   "
 
     dossier = topic_agents.ResearchDossier(
         cluster_id="teilhabe-beirat-01",
@@ -572,27 +541,22 @@ def test_generate_topic_script_candidate_rejects_malformed_output_after_retries(
 
     monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeBrokenPrompt1LLM())
 
-    with pytest.raises(topic_agents.ValidationError, match="PROMPT_1 lane generation failed"):
-        topic_agents.generate_topic_script_candidate(
-            post_type="value",
-            target_length_tier=8,
-            dossier=dossier,
-            lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
-        )
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=8,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    assert item.topic == "Behindertenbeirat mit Wirkung"
+    assert item.script.endswith(".")
+    assert 12 <= len(item.script.split()) <= 15
 
 
 def test_generate_topic_script_candidate_expands_short_16s_script_to_tier_bounds(monkeypatch):
     class FakeShort16sLLM:
-        def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
-            return {
-                "items": [
-                    {
-                        "topic": "Exoskelette im Alltag",
-                        "script": "Exoskelette helfen dir im Alltag sofort.",
-                        "caption": "Kurz erklärt, was Exoskelette für dich leisten.",
-                    }
-                ]
-            }
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return "Exoskelette helfen dir im Alltag sofort."
 
     dossier = topic_agents.ResearchDossier(
         cluster_id="exo-16s-01",
@@ -641,6 +605,66 @@ def test_generate_topic_script_candidate_expands_short_16s_script_to_tier_bounds
 
     word_count = len(item.script.split())
     assert 26 <= word_count <= 36
+
+
+def test_generate_topic_script_candidate_synthesizes_fallback_on_provider_failures(monkeypatch):
+    class FakeUnavailablePrompt1LLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            raise topic_agents.ThirdPartyError(
+                message="Gemini text generation failed",
+                details={"status_code": 503},
+            )
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="pflegegrad-fallback-01",
+        topic="Pflegegrad verstehen",
+        anchor_topic="Pflegegrad",
+        seed_topic="Pflegegrad",
+        cluster_summary="Das Dossier bündelt Begutachtung, Leistungsanpassungen und typische Fehler im Antragsprozess.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Pflegekasse", "url": "https://example.com/pflege"}],
+        source_summary="Die Quelle erklärt Begutachtung, Leistungsanstiege 2025 und typische Fehler bei der Antragstellung.",
+        facts=[
+            "Pflegeleistungen steigen 2025 um 4,5 Prozent.",
+            "Die Begutachtung bewertet Selbstständigkeit in mehreren Lebensbereichen.",
+            "Unvollständige Angaben führen oft zu einer zu niedrigen Einstufung.",
+        ],
+        angle_options=["Leistungen erklären"],
+        risk_notes=["Ohne Vorbereitung droht eine zu niedrige Einstufung."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            {
+                "lane_key": "pflegegrad-fallback",
+                "lane_family": "value",
+                "title": "Pflegegrad ohne Fehlstart verstehen",
+                "angle": "Leistungen und Begutachtung.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "So ordnest du Begutachtung, Leistungssätze und typische Stolperfallen besser ein.",
+                "facts": [
+                    "Ab 2025 steigen Geld- und Sachleistungen um 4,5 Prozent.",
+                    "Dokumentierte Alltagshilfen verbessern die Einschätzung im Gutachten.",
+                ],
+                "risk_notes": ["Ohne Nachweise wirkt der Hilfebedarf schnell kleiner."],
+                "disclaimer": "Keine individuelle Rechts- oder Medizinberatung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [16],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeUnavailablePrompt1LLM())
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=16,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    assert item.topic == "Pflegegrad ohne Fehlstart verstehen"
+    assert str(item.sources[0].url) == "https://example.com/pflege"
+    assert 26 <= len(item.script.split()) <= 36
 
 
 def test_parse_topic_research_response_accepts_json_followed_by_markdown():
@@ -740,6 +764,33 @@ def test_parse_topic_research_response_expands_lane_fanout_from_angles():
     assert len(dossier.lane_candidates) >= 3
     signatures = {lane.lane_key for lane in dossier.lane_candidates[:3]}
     assert len(signatures) == 3
+
+
+def test_normalize_topic_research_dossier_falls_back_when_normalizer_is_unavailable(monkeypatch):
+    class FakeUnavailableNormalizerLLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            raise topic_agents.ThirdPartyError(
+                message="Gemini generateContent failed",
+                details={"status_code": 503},
+            )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeUnavailableNormalizerLLM())
+
+    dossier = topic_agents.normalize_topic_research_dossier(
+        seed_topic="Pflegegrad",
+        post_type="value",
+        target_length_tier=8,
+        raw_response=(
+            "# Forschungsdossier: Pflegegrad\n\n"
+            "- Pflegeleistungen steigen 2025 um 4,5 Prozent.\n"
+            "- Die Begutachtung bewertet Selbstständigkeit in mehreren Lebensbereichen.\n"
+            "- Widerspruch ist möglich, wenn die Einstufung zu niedrig ausfällt.\n"
+        ),
+    )
+
+    assert dossier.seed_topic == "Pflegegrad"
+    assert dossier.topic
+    assert len(dossier.lane_candidates) >= 1
 
 
 def test_parse_topic_research_response_clips_overlong_disclaimers():

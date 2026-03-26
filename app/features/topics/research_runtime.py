@@ -36,7 +36,7 @@ logger = get_logger(__name__)
 
 PROMPT1_STAGE3_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 stage-3 script agent.
 Follow the user prompt exactly.
-Return only valid JSON.
+Return only the final script text.
 Do not invent facts beyond the provided dossier context.
 Keep all output fully in German."""
 
@@ -83,61 +83,6 @@ def _should_attempt_json_normalization(error: ValidationError) -> bool:
     return False
 
 
-def _normalize_prompt1_response_to_json(llm, raw_response: str, desired_topics: int) -> str:
-    normalizer_prompt = (
-        f"Die folgende Antwort soll GENAU {desired_topics} JSON-Objekte enthalten.\n"
-        "Repariere nur die Struktur. Erfinde keine neuen Fakten oder Formulierungen.\n"
-        "Halte alles vollstaendig auf Deutsch.\n\n"
-        f"ROHANTWORT:\n{raw_response}"
-    )
-    normalized = llm.generate_gemini_text(
-        prompt=normalizer_prompt,
-        system_prompt=PROMPT1_NORMALIZER_SYSTEM_PROMPT,
-        max_tokens=3200,
-    )
-    return normalized.strip()
-
-
-def _normalize_topic_research_response_to_json(
-    llm,
-    raw_response: str,
-    *,
-    seed_topic: str,
-    post_type: str,
-    target_length_tier: int,
-) -> str:
-    prompt = build_topic_normalization_prompt(
-        raw_response=raw_response,
-        seed_topic=seed_topic,
-        post_type=post_type,
-        target_length_tier=target_length_tier,
-    )
-    return llm.generate_gemini_text(
-        prompt=prompt,
-        system_prompt=PROMPT1_RESEARCH_NORMALIZER_SYSTEM_PROMPT,
-        max_tokens=4200,
-    ).strip()
-
-
-def _parse_prompt1_with_normalization(
-    llm,
-    raw_response: str,
-    desired_topics: int,
-    *,
-    profile: Optional[Any] = None,
-) -> tuple[ResearchAgentBatch, str]:
-    try:
-        batch = parse_prompt1_response(raw_response, profile=profile)
-        return batch, raw_response
-    except ValidationError as exc:
-        if not _should_attempt_json_normalization(exc):
-            raise
-        normalized = _normalize_prompt1_response_to_json(llm, raw_response, desired_topics)
-        batch = parse_prompt1_response(normalized, profile=profile)
-        return batch, normalized
-
-
-
 def generate_topics_research_agent(
     *,
     post_type: str,
@@ -165,17 +110,19 @@ def generate_topics_research_agent(
     )
 
     chosen_topics: List[str] = []
-    if shuffled_topics:
-        while len(chosen_topics) < count:
-            remaining = count - len(chosen_topics)
-            if remaining >= len(shuffled_topics):
-                chosen_topics.extend(shuffled_topics)
-                rng.shuffle(shuffled_topics)
-            else:
-                chosen_topics.extend(shuffled_topics[:remaining])
+    seen_topics = set()
+    for seed_topic in shuffled_topics:
+        normalized = re.sub(r"\s+", " ", str(seed_topic or "").strip()).lower()
+        if not normalized or normalized in seen_topics:
+            continue
+        seen_topics.add(normalized)
+        chosen_topics.append(str(seed_topic).strip())
+        if len(chosen_topics) >= 3:
+            break
 
     items: List[ResearchAgentItem] = []
-    for seed_topic in chosen_topics[:count]:
+    max_results = count if count and count > 0 else None
+    for seed_topic in chosen_topics[:3]:
         dossier = generate_topic_research_dossier(
             seed_topic=seed_topic,
             post_type=post_type,
@@ -186,24 +133,31 @@ def generate_topics_research_agent(
         lane_candidates = list(dossier.lane_candidates or [])
         if not lane_candidates:
             continue
-        candidate = generate_topic_script_candidate(
-            post_type=post_type,
-            target_length_tier=profile.target_length_tier,
-            dossier=dossier,
-            lane_candidate=lane_candidates[0],
-            llm_factory=llm_factory,
-        )
-        items.append(candidate)
-        if len(items) >= count:
-            break
+        for lane_candidate in lane_candidates:
+            if max_results is not None and len(items) >= max_results:
+                break
+            candidate = generate_topic_script_candidate(
+                post_type=post_type,
+                target_length_tier=profile.target_length_tier,
+                dossier=dossier,
+                lane_candidate=lane_candidate,
+                llm_factory=llm_factory,
+            )
+            items.append(candidate)
 
-    if len(items) < count:
+    if not items:
         raise ValidationError(
             message="Unable to produce sufficient topics",
-            details={"requested": count, "produced": len(items), "seed_topics": chosen_topics[:count]},
+            details={"requested": count, "produced": len(items), "seed_topics": chosen_topics[:3]},
         )
-    logger.info("research_agent_batch_complete", post_type=post_type, requested=count, produced=len(items))
-    return items[:count]
+    logger.info(
+        "research_agent_batch_complete",
+        post_type=post_type,
+        requested=count,
+        produced=len(items),
+        seed_topics=chosen_topics[:3],
+    )
+    return items
 
 
 def normalize_topic_research_dossier(
@@ -214,9 +168,13 @@ def normalize_topic_research_dossier(
     raw_response: str,
     llm_factory: Callable = get_llm_client,
 ) -> ResearchDossier:
-    llm = llm_factory()
     try:
-        return parse_topic_research_response(raw_response)
+        return parse_topic_research_response(
+            raw_response,
+            seed_topic=seed_topic,
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+        )
     except ValidationError as exc:
         logger.warning(
             "research_dossier_parse_retry",
@@ -225,16 +183,7 @@ def normalize_topic_research_dossier(
             error=exc.message,
             details=exc.details,
         )
-        normalized = _normalize_topic_research_response_to_json(
-            llm,
-            raw_response,
-            seed_topic=seed_topic,
-            post_type=post_type,
-            target_length_tier=target_length_tier,
-        )
         try:
-            return parse_topic_research_response(normalized)
-        except ValidationError:
             synthesized = _synthesize_research_dossier_from_text(
                 raw_response,
                 seed_topic=seed_topic,
@@ -242,6 +191,11 @@ def normalize_topic_research_dossier(
                 target_length_tier=target_length_tier,
             )
             return ResearchDossier(**synthesized)
+        except PydanticValidationError as synthesized_exc:
+            raise ValidationError(
+                message="PROMPT_1 research dossier invalid",
+                details=json.loads(synthesized_exc.json()),
+            ) from synthesized_exc
 
 
 def generate_topic_research_dossier(
@@ -358,22 +312,24 @@ def generate_topic_script_candidate(
         lane_candidate=lane_payload,
     )
     prompt = base_prompt
-
-    item_schema = {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string"},
-            "script": {"type": "string"},
-            "caption": {"type": "string"},
-        },
-        "required": ["title", "script", "caption"],
-    }
-
     lane_fact_texts = [
         str(fact).strip()
-        for fact in list(lane_payload.get("facts") or []) + list((dossier_payload or {}).get("facts") or [])
+        for fact in (
+            list(lane_payload.get("facts") or [])
+            + list((dossier_payload or {}).get("facts") or [])
+            + [
+                lane_payload.get("source_summary"),
+                dossier_payload.get("source_summary"),
+                dossier_payload.get("cluster_summary"),
+                lane_payload.get("angle"),
+            ]
+        )
         if str(fact).strip()
     ]
+    framework_choice = str(
+        (lane_payload.get("framework_candidates") or dossier_payload.get("framework_candidates") or ["PAL"])[0] or "PAL"
+    ).strip()
+    framework_value = framework_choice if framework_choice in {"PAL", "Testimonial", "Transformation"} else "PAL"
 
     def _word_count(text: str) -> int:
         return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", text or ""))
@@ -391,7 +347,6 @@ def generate_topic_script_candidate(
         words = script.split()
         word_count = _word_count(script)
 
-        # Deterministic lane-grounded expansion for short outputs.
         if word_count < min_words:
             for fact in lane_fact_texts:
                 fragment = re.sub(r"\s+", " ", fact).strip().rstrip(".!?")
@@ -404,9 +359,10 @@ def generate_topic_script_candidate(
                 if word_count >= min_words:
                     break
 
-        # Hard cap to keep outputs in the requested tier envelope.
         if _word_count(script) > max_words:
-            tokens = script.split()[:max_words]
+            tokens = script.split()
+            while tokens and _word_count(" ".join(tokens).strip()) > max_words:
+                tokens.pop()
             script = _ensure_terminal_punctuation(" ".join(tokens).strip())
 
         final_count = _word_count(script)
@@ -422,55 +378,108 @@ def generate_topic_script_candidate(
         item.script = script
         return item
 
-    for attempt in range(3):
-        try:
-            response = llm.generate_gemini_json(
-                prompt=prompt,
-                system_prompt=PROMPT1_STAGE3_SYSTEM_PROMPT,
-                json_schema={
-                    "type": "array",
-                    "items": item_schema,
-                    "minItems": 1,
-                    "maxItems": 1,
-                },
-                max_tokens=2200,
-            )
-            batch = parse_prompt1_response(json.dumps(response, ensure_ascii=False), profile=profile)
-            if batch.items:
-                item = batch.items[0]
-                if not item.topic.strip():
-                    item.topic = lane_title or item.topic
-                if not item.caption.strip():
-                    item.caption = lane_caption or item.source_summary or item.script
-                if not item.source_summary.strip():
-                    item.source_summary = lane_caption or item.caption
-                if not item.sources and source_url:
-                    item.sources = [{"title": source_title or lane_title or item.topic, "url": source_url}]
-                if not item.sources and source_title:
-                    item.sources = [{"title": source_title, "url": source_url or ""}]
-                item.estimated_duration_s = max(
-                    1,
-                    min(profile.target_length_tier, estimate_script_duration_seconds(item.script)),
-                )
-                if not item.tone.strip():
-                    item.tone = "direkt, freundlich, empowernd, du-Form"
-                if not item.disclaimer.strip():
-                    item.disclaimer = "Keine Rechts- oder medizinische Beratung."
-                item = _enforce_prompt1_word_envelope(item)
-                return item
+    def _synthesize_prompt1_fallback_item() -> ResearchAgentItem:
+        fragments = [
+            f"Kurz erklärt: {lane_title}." if lane_title else "",
+            lane_caption,
+            str((dossier_payload or {}).get("source_summary") or "").strip(),
+        ]
+        fragments.extend(lane_fact_texts[:6])
+        script = _ensure_terminal_punctuation(" ".join(fragment for fragment in fragments if fragment).strip())
+        item = ResearchAgentItem(
+            topic=lane_title or str(dossier_payload.get("topic") or "").strip() or "Thema",
+            script=script,
+            caption=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip(),
+            framework=framework_value,
+            sources=(
+                [{"title": source_title or lane_title or str(dossier_payload.get("topic") or "Quelle"), "url": source_url}]
+                if source_url
+                else []
+            ),
+            source_summary=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip(),
+            estimated_duration_s=max(1, min(profile.target_length_tier, estimate_script_duration_seconds(script))),
+            tone="direkt, freundlich, empowernd, du-Form",
+            disclaimer=str(
+                lane_payload.get("disclaimer")
+                or dossier_payload.get("disclaimer")
+                or "Keine Rechts- oder medizinische Beratung."
+            ).strip(),
+        )
+        return _enforce_prompt1_word_envelope(item)
+
+    def _extract_script_text(raw_response: str) -> str:
+        cleaned = (raw_response or "").strip()
+        if not cleaned:
+            return ""
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        parsed: Any = None
+        if cleaned[:1] in {"{", "["}:
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                parsed = None
+        if isinstance(parsed, dict):
+            for key in ("script", "text", "content", "body"):
+                candidate = str(parsed.get(key) or "").strip()
+                if candidate:
+                    cleaned = candidate
+                    break
+            else:
+                items = parsed.get("items")
+                if isinstance(items, list) and items:
+                    first = items[0]
+                    if isinstance(first, dict):
+                        cleaned = str(first.get("script") or first.get("text") or first.get("content") or "").strip()
+                    else:
+                        cleaned = str(first).strip()
+        elif isinstance(parsed, list) and parsed:
+            first = parsed[0]
+            if isinstance(first, dict):
+                cleaned = str(first.get("script") or first.get("text") or first.get("content") or "").strip()
+            else:
+                cleaned = str(first).strip()
+        cleaned = re.sub(r"^(?:script|text|inhalt|caption|titel|title)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if cleaned and cleaned[-1] not in ".!?":
+            cleaned = cleaned.rstrip(",;:") + "."
+        return cleaned
+
+    def _build_item_from_text(raw_response: str) -> ResearchAgentItem:
+        script_text = _extract_script_text(raw_response)
+        if not script_text:
             raise ValidationError(
-                message="PROMPT_1 lane response was empty",
-                details={"lane_title": lane_payload.get("title")},
+                message="PROMPT_1 lane output was empty",
+                details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
             )
-        except ValidationError as exc:
-            logger.warning(
-                "topic_script_candidate_retry",
-                lane_title=lane_payload.get("title"),
-                attempt=attempt + 1,
-                error=exc.message,
-                details=exc.details,
-            )
-            prompt = f"{base_prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, default=str)[:600]}"
+        item = ResearchAgentItem(
+            topic=lane_title or str(dossier_payload.get("topic") or "").strip() or "Thema",
+            script=script_text,
+            caption=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip() or script_text,
+            framework=framework_value,
+            sources=(
+                [{"title": source_title or lane_title or str(dossier_payload.get("topic") or "Quelle"), "url": source_url}]
+                if source_url
+                else []
+            ),
+            source_summary=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip() or script_text,
+            estimated_duration_s=max(1, min(profile.target_length_tier, estimate_script_duration_seconds(script_text))),
+            tone="direkt, freundlich, empowernd, du-Form",
+            disclaimer=str(
+                lane_payload.get("disclaimer")
+                or dossier_payload.get("disclaimer")
+                or "Keine Rechts- oder medizinische Beratung."
+            ).strip(),
+        )
+        if not item.sources and source_title and source_url:
+            item.sources = [{"title": source_title, "url": source_url}]
+        return _enforce_prompt1_word_envelope(item)
 
     for attempt in range(2):
         try:
@@ -479,48 +488,33 @@ def generate_topic_script_candidate(
                 system_prompt=PROMPT1_STAGE3_SYSTEM_PROMPT,
                 max_tokens=3200,
             )
-            batch, _ = _parse_prompt1_with_normalization(
-                llm,
-                text_response,
-                1,
-                profile=profile,
-            )
-            if batch.items:
-                item = batch.items[0]
-                if not item.topic.strip():
-                    item.topic = lane_title or item.topic
-                if not item.caption.strip():
-                    item.caption = lane_caption or item.source_summary or item.script
-                if not item.source_summary.strip():
-                    item.source_summary = lane_caption or item.caption
-                if not item.sources and source_url:
-                    item.sources = [{"title": source_title or lane_title or item.topic, "url": source_url}]
-                if not item.sources and source_title:
-                    item.sources = [{"title": source_title, "url": source_url or ""}]
-                item.estimated_duration_s = max(
-                    1,
-                    min(profile.target_length_tier, estimate_script_duration_seconds(item.script)),
-                )
-                if not item.tone.strip():
-                    item.tone = "direkt, freundlich, empowernd, du-Form"
-                if not item.disclaimer.strip():
-                    item.disclaimer = "Keine Rechts- oder medizinische Beratung."
-                item = _enforce_prompt1_word_envelope(item)
-                return item
+            return _build_item_from_text(text_response)
         except ValidationError as exc:
+            logger.warning(
+                "topic_script_candidate_text_invalid",
+                lane_title=lane_payload.get("title"),
+                error=getattr(exc, "message", str(exc)),
+                details=getattr(exc, "details", {}),
+            )
+            return _synthesize_prompt1_fallback_item()
+        except ThirdPartyError as exc:
             logger.warning(
                 "topic_script_candidate_text_retry",
                 lane_title=lane_payload.get("title"),
                 attempt=attempt + 1,
-                error=exc.message,
-                details=exc.details,
+                error=getattr(exc, "message", str(exc)),
+                details=getattr(exc, "details", {}),
             )
-            prompt = f"{base_prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, default=str)[:600]}"
+            if attempt == 0:
+                continue
+            break
 
-    raise ValidationError(
-        message="PROMPT_1 lane generation failed after structured and text normalization",
-        details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
+    logger.warning(
+        "topic_script_candidate_fallback_synthesized",
+        lane_title=lane_payload.get("title"),
+        target_length_tier=target_length_tier,
     )
+    return _synthesize_prompt1_fallback_item()
 
 
 def generate_dialog_scripts(
@@ -547,42 +541,6 @@ def generate_dialog_scripts(
 
     for attempt in range(3):
         try:
-            response = llm.generate_gemini_json(
-                prompt=prompt,
-                system_prompt=None,
-                json_schema={
-                    "type": "object",
-                    "properties": {
-                        "problem_agitate_solution": {"type": "array", "items": {"type": "string"}},
-                        "testimonial": {"type": "array", "items": {"type": "string"}},
-                        "transformation": {"type": "array", "items": {"type": "string"}},
-                        "description": {"type": "string"},
-                    },
-                    "required": ["problem_agitate_solution", "description"],
-                },
-                max_tokens=1600,
-            )
-            scripts = _coerce_prompt2_payload(response, scripts_required=scripts_required)
-            _validate_dialog_scripts_payload(scripts, resolved_profile, topic)
-            return DialogScripts(
-                problem_agitate_solution=scripts.problem_agitate_solution[:scripts_required],
-                testimonial=scripts.testimonial[:scripts_required],
-                transformation=scripts.transformation[:scripts_required],
-                description=scripts.description,
-            )
-        except (ValidationError, ThirdPartyError) as exc:
-            logger.warning(
-                "dialog_scripts_retry",
-                topic=topic,
-                attempt=attempt + 1,
-                error=getattr(exc, "message", str(exc)),
-                details=getattr(exc, "details", {}),
-                response_preview=(json.dumps(response, ensure_ascii=False)[:500] if "response" in locals() else None),
-            )
-            prompt = f"{prompt}\n\nFEEDBACK: {getattr(exc, 'message', str(exc))}. Details: {json.dumps(getattr(exc, 'details', {}), default=str)[:800]}"
-
-    for attempt in range(2):
-        try:
             text_response = llm.generate_gemini_text(
                 prompt=prompt,
                 system_prompt=None,
@@ -598,15 +556,16 @@ def generate_dialog_scripts(
             )
         except (ValidationError, ThirdPartyError) as exc:
             logger.warning(
-                "dialog_scripts_text_retry",
+                "dialog_scripts_retry",
                 topic=topic,
                 attempt=attempt + 1,
                 error=getattr(exc, "message", str(exc)),
                 details=getattr(exc, "details", {}),
             )
+            prompt = f"{prompt}\n\nFEEDBACK: {getattr(exc, 'message', str(exc))}. Details: {json.dumps(getattr(exc, 'details', {}), default=str)[:800]}"
 
     raise ValidationError(
-        message="PROMPT_2 generation failed after structured and text normalization",
+        message="PROMPT_2 generation failed after text normalization",
         details={"topic": topic, "scripts_required": scripts_required, "target_length_tier": resolved_profile.target_length_tier},
     )
 
