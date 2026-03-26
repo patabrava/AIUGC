@@ -390,37 +390,12 @@ def generate_caption_bundle(
     except Exception:
         return _synthesize_fallback_bundle(canonical_topic, post_type, script, context)
     prompt = _build_caption_prompt(topic_title=canonical_topic, post_type=post_type, script=script, context=context)
-    schema = {
-        "type": "object",
-        "properties": {
-            "variants": {
-                "type": "array",
-                "minItems": 3,
-                "maxItems": 3,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string"},
-                        "body": {"type": "string"},
-                    },
-                    "required": ["key", "body"],
-                },
-            },
-            "selected_key": {"type": "string"},
-            "selected_body": {"type": "string"},
-        },
-        "required": ["variants"],
-    }
     last_error: Optional[ValidationError] = None
     for _ in range(2):
         try:
-            raw = llm.generate_gemini_json(prompt=prompt, json_schema=schema, max_tokens=1400, temperature=0.8)
-            if not isinstance(raw, dict):
-                raise ValidationError(
-                    message="Caption structured response invalid",
-                    details={"reason": "not_a_dict", "response_type": type(raw).__name__},
-                )
-            bundle = validate_caption_bundle(raw, script)
+            raw_text = llm.generate_gemini_text(prompt=prompt, max_tokens=1400, temperature=0.8)
+            parsed = _parse_text_variants(raw_text)
+            bundle = validate_caption_bundle(parsed, script)
             preferred_pool = _caption_variant_pool(post_type)
             if not bundle["selected_key"] or bundle["selected_key"] not in preferred_pool:
                 bundle["selected_key"] = selected_key

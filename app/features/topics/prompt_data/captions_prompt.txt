@@ -6,8 +6,17 @@ Post-Typ: {post_type}
 Gesprochenes Skript: {script}
 Kontext: {context}
 
-Gib ausschliesslich valides JSON zurueck mit dem Feld `variants`.
-Jede Variante braucht exakt die Felder `key` und `body`.
+Gib die drei Varianten im folgenden Markerformat zurueck. Schreibe jede Caption direkt unter ihren Marker. Kein JSON, keine Code-Bloecke, keine zusaetzliche Formatierung.
+
+[short_paragraph]
+(Caption hier)
+
+[medium_bullets]
+(Caption hier)
+
+[long_structured]
+(Caption hier)
+
 Das Feld `Thema` ist nur Metadaten-Kontext: wiederhole den exakten Titel nicht im Einstieg und kopiere ihn nicht wörtlich in die Caption.
 Starte nicht mit dem Topic-Titel oder einer fast identischen Umformulierung davon.
 Schreibe die Caption immer als eigenstaendige Social-Caption, nicht als angehaengte Titelzeile.
@@ -19,10 +28,6 @@ Jede der drei Varianten braucht einen klar anderen Einstieg. Verwende unterschie
 Die drei Hooks muessen deutlich verschieden klingen: Frage, Konsequenz, Warnung, Nutzen, Beobachtung oder kurzer Alltagskonflikt sind erlaubt, aber nicht dieselbe Schablone dreimal.
 Verwende nicht fuer alle drei Varianten dieselbe Satzschablone wie "Wenn es um ..." oder "Rund um ...".
 Vermeide generische Platzhalter wie "diesem Thema", "diesem Fall", "hier" oder "Kontext"; nenne lieber den konkreten Alltagseffekt oder die konkrete Situation.
-Die drei keys muessen exakt sein:
-- short_paragraph
-- medium_bullets
-- long_structured
 
 Strukturregeln:
 - short_paragraph: 140-260 Zeichen, genau 1 Absatz, keine Stichpunkte, keine Nummerierung.
