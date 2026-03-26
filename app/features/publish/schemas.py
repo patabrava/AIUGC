@@ -242,7 +242,7 @@ class TikTokAccountResponse(BaseModel):
 
 
 class SlotSpec(BaseModel):
-    day: Literal["mon", "tue", "wed", "thu", "fri"]
+    day: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
     time: str = Field(..., description="Time in HH:MM 24h format")
 
     @field_validator("time")
@@ -271,7 +271,7 @@ class BatchArmRequest(BaseModel):
         """Canon 7.3: enforce 30-minute minimum gap between any two scheduled posts."""
         from zoneinfo import ZoneInfo
 
-        day_offsets = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4}
+        day_offsets = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
         berlin = ZoneInfo("Europe/Berlin")
         base = datetime.strptime(self.week_start, "%Y-%m-%d")
         times = []

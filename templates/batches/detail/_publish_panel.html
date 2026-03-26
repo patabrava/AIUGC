@@ -42,10 +42,11 @@
 
         {# Time slots row #}
         <div class="grid grid-cols-5 gap-3">
-            <template x-for="(slot, i) in slots" :key="slot.day">
+            <template x-for="(slot, i) in slots" :key="i">
                 <div class="bg-white rounded-lg border border-indigo-200 p-3 text-center">
-                    <div class="text-xs font-bold uppercase tracking-wide text-indigo-600 mb-2" x-text="slot.day"></div>
-                    <div class="text-xs text-gray-500 mb-1" x-text="slotDate(i)"></div>
+                    <div class="text-xs font-bold uppercase tracking-wide text-indigo-600 mb-1" x-text="slot.day"></div>
+                    <input type="date" :value="slotDateISO(i)" @change="updateSlotDate(i, $event.target.value)"
+                        class="w-full text-center text-xs text-gray-500 mb-1 border-none bg-transparent focus:outline-none focus:ring-0 cursor-pointer px-0 py-0">
                     <input type="time" x-model="slot.time"
                         class="w-full text-center text-sm font-medium px-2 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                 </div>
@@ -75,14 +76,14 @@
                         </div>
                         <span class="text-xs font-medium text-indigo-600 whitespace-nowrap" x-text="postSlotLabel(i)"></span>
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold"
-                            :class="post.caption && slots[i]?.time ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
-                            x-text="post.caption && slots[i]?.time ? 'Ready' : 'Needs attention'"></span>
+                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700' : post.publishStatus === 'scheduled' ? 'bg-blue-100 text-blue-700' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700' : post.publishStatus === 'failed' ? 'bg-red-100 text-red-700' : (post.caption && slots[i]?.time) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
+                            x-text="post.publishStatus === 'published' ? 'Published' : post.publishStatus === 'scheduled' ? 'Scheduled' : post.publishStatus === 'publishing' ? 'Publishing...' : post.publishStatus === 'failed' ? 'Failed' : (post.caption && slots[i]?.time) ? 'Ready' : 'Needs attention'"></span>
                         <button type="button"
                             @click.stop="postNowTarget = post; showPostNowModal = true"
-                            :disabled="!post.caption || networks.length === 0 || post.publishStatus === 'publishing' || post.publishStatus === 'published'"
+                            :disabled="!post.caption || networks.length === 0 || post.publishStatus === 'publishing' || post.publishStatus === 'published' || post.publishStatus === 'scheduled'"
                             class="inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition"
-                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700 cursor-default' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700 cursor-wait' : (!post.caption || networks.length === 0) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-sm'"
-                            x-text="post.publishStatus === 'published' ? 'Published' : post.publishStatus === 'publishing' ? 'Publishing...' : '&#x25B6; Post Now'">
+                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700 cursor-default' : post.publishStatus === 'scheduled' ? 'bg-blue-100 text-blue-700 cursor-default' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700 cursor-wait' : (!post.caption || networks.length === 0) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-sm'"
+                            x-text="post.publishStatus === 'published' ? 'Published' : post.publishStatus === 'scheduled' ? 'Scheduled' : post.publishStatus === 'publishing' ? 'Publishing...' : '&#x25B6; Post Now'">
                         </button>
                         <svg class="w-4 h-4 text-gray-400 transition-transform" :class="expanded === post.id ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>

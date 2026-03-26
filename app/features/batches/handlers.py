@@ -406,6 +406,9 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
                 ],
                 "selectedCaptionKey": ((post.get("seed_data") or {}).get("caption_bundle") or {}).get("selected_key") or "",
                 "videoUrl": post.get("video_url"),
+                "publishStatus": post.get("publish_status") or "pending",
+                "scheduledAt": post.get("scheduled_at"),
+                "socialNetworks": _normalize_string_list(post.get("social_networks")),
             }
             for post in posts
             if not (post.get("seed_data") or {}).get("video_excluded")

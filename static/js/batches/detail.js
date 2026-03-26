@@ -215,11 +215,11 @@
             batchId: options.batchId,
             weekStart: '',
             slots: [
-                { day: 'Mon', time: '' },
-                { day: 'Tue', time: '' },
-                { day: 'Wed', time: '' },
-                { day: 'Thu', time: '' },
-                { day: 'Fri', time: '' },
+                { day: 'Mon', date: '', time: '' },
+                { day: 'Tue', date: '', time: '' },
+                { day: 'Wed', date: '', time: '' },
+                { day: 'Thu', date: '', time: '' },
+                { day: 'Fri', date: '', time: '' },
             ],
             networks: [],
             posts: (options.posts || []).map((p) => ({
@@ -247,6 +247,10 @@
                 const nextMonday = new Date(now);
                 nextMonday.setDate(now.getDate() + daysUntilMonday);
                 this.weekStart = nextMonday.toISOString().split('T')[0];
+                this._syncSlotDays();
+
+                // Watch weekStart and update slot days when it changes
+                this.$watch('weekStart', () => this._syncSlotDays());
 
                 // Auto-enable connected networks
                 const meta = options.metaState || {};
@@ -270,7 +274,9 @@
                 const nets = this.networks
                     .map((n) => n === 'instagram' ? 'Instagram' : n === 'facebook' ? 'Facebook' : 'TikTok')
                     .join(' + ');
-                return `${this.posts.length} posts \u00b7 Mon\u2013Fri \u00b7 ${nets || 'No networks selected'}`;
+                const days = [...new Set(this.slots.map(s => s.day))];
+                const dayRange = days.length === 1 ? days[0] : `${this.slots[0].day}\u2013${this.slots[this.slots.length - 1].day}`;
+                return `${this.posts.length} posts \u00b7 ${dayRange} \u00b7 ${nets || 'No networks selected'}`;
             },
             get warnings() {
                 const w = [];
@@ -288,17 +294,45 @@
                     && !this.saving;
             },
 
-            slotDate(i) {
-                if (!this.weekStart) return '';
-                const d = new Date(this.weekStart);
-                d.setDate(d.getDate() + i);
-                return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            slotDateISO(i) {
+                return this.slots[i].date || '';
+            },
+            updateSlotDate(i, dateStr) {
+                if (!dateStr) return;
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const d = new Date(dateStr);
+                this.slots[i].date = dateStr;
+                this.slots[i].day = dayNames[d.getDay()];
             },
             postSlotLabel(i) {
+                const post = this.posts[i];
+                if (post?.scheduledAt) {
+                    const d = new Date(post.scheduledAt);
+                    const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
+                    const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                    return `${day} ${time}`;
+                }
                 const slot = this.slots[i];
                 if (!slot) return 'No slot';
                 return `${slot.day} ${slot.time || '\u2014'}`;
             },
+            slotDisplayDate(i) {
+                const iso = this.slotDateISO(i);
+                if (!iso) return '';
+                const d = new Date(iso);
+                return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            },
+            _syncSlotDays() {
+                if (!this.weekStart) return;
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                for (let i = 0; i < this.slots.length; i++) {
+                    const d = new Date(this.weekStart);
+                    d.setDate(d.getDate() + i);
+                    this.slots[i].day = dayNames[d.getDay()];
+                    this.slots[i].date = d.toISOString().split('T')[0];
+                }
+            },
+
             toggleNetwork(id) {
                 if (this.networks.includes(id)) {
                     this.networks = this.networks.filter((n) => n !== id);
@@ -322,7 +356,7 @@
                 this.errorMessage = '';
                 this.successMessage = '';
                 try {
-                    const dayMap = { Mon: 'mon', Tue: 'tue', Wed: 'wed', Thu: 'thu', Fri: 'fri' };
+                    const dayMap = { Mon: 'mon', Tue: 'tue', Wed: 'wed', Thu: 'thu', Fri: 'fri', Sat: 'sat', Sun: 'sun' };
                     const response = await fetch(`/publish/batches/${this.batchId}/arm`, {
                         method: 'POST',
                         headers: {
@@ -333,12 +367,24 @@
                             week_start: this.weekStart,
                             slots: this.slots.map((s) => ({ day: dayMap[s.day], time: s.time })),
                             default_networks: this.networks,
-                            posts: this.posts.map((p) => ({
-                                post_id: p.id,
-                                caption: p.caption.trim(),
-                                time_override: p.timeOverride || null,
-                                networks_override: p.networksOverride,
-                            })),
+                            posts: this.posts.map((p, i) => {
+                                // Use time_override when slot date was customized
+                                let timeOverride = p.timeOverride || null;
+                                if (!timeOverride && i < this.slots.length && this.slots[i].date && this.slots[i].time) {
+                                    const defaultDate = new Date(this.weekStart);
+                                    defaultDate.setDate(defaultDate.getDate() + i);
+                                    const defaultISO = defaultDate.toISOString().split('T')[0];
+                                    if (this.slots[i].date !== defaultISO) {
+                                        timeOverride = `${this.slots[i].date}T${this.slots[i].time}`;
+                                    }
+                                }
+                                return {
+                                    post_id: p.id,
+                                    caption: p.caption.trim(),
+                                    time_override: timeOverride,
+                                    networks_override: p.networksOverride,
+                                };
+                            }),
                         }),
                     });
                     if (!response.ok) {

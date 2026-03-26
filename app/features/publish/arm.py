@@ -14,7 +14,7 @@ from app.features.publish.schemas import BatchArmRequest
 log = get_logger(__name__)
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
-DAY_OFFSETS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4}
+DAY_OFFSETS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 router = APIRouter()
 
@@ -36,7 +36,7 @@ async def arm_batch_dispatch(
 ) -> Dict[str, Any]:
     """Validate and arm all posts in a batch for scheduled dispatch."""
     if db is None:
-        db = get_supabase()
+        db = get_supabase().client
 
     # 1. Validate batch state
     batch_resp = db.table("batches").select("id,state").eq("id", batch_id).execute()
