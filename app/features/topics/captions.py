@@ -7,8 +7,12 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any, Callable, Dict, List, Optional
 
+import structlog
+
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ValidationError
+
+logger = structlog.get_logger(__name__)
 
 FAMILY_ORDER = ("short_paragraph", "medium_bullets", "long_structured")
 FAMILY_SPECS: Dict[str, Dict[str, int]] = {
@@ -392,24 +396,49 @@ def generate_caption_bundle(
                     message="Caption repeats topic title too closely",
                     details={"topic_title": canonical_topic, "selected_key": bundle["selected_key"]},
                 )
+            logger.info(
+                "caption_bundle_generated",
+                topic_title=canonical_topic[:60],
+                selected_key=bundle["selected_key"],
+                char_count=len(bundle["selected_body"]),
+                source="gemini",
+            )
             break
         except ValidationError as exc:
             last_error = exc
+            logger.warning(
+                "caption_generation_retry",
+                topic_title=canonical_topic[:60],
+                error=exc.message,
+                details=str(exc.details)[:200],
+            )
             prompt = f"{prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, ensure_ascii=False)[:800]}"
         except Exception as exc:
             last_error = ValidationError(
                 message="Caption generation failed",
                 details={"reason": type(exc).__name__, "message": str(exc)},
             )
+            logger.error(
+                "caption_generation_error",
+                topic_title=canonical_topic[:60],
+                error=str(exc),
+            )
     else:
         bundle = _synthesize_fallback_bundle(canonical_topic, post_type, script, context)
-    return {
+        logger.warning(
+            "caption_bundle_fallback",
+            topic_title=canonical_topic[:60],
+            selected_key=bundle["selected_key"],
+            last_error=last_error.message if last_error else None,
+        )
+    result = {
         "variants": bundle["variants"],
         "selected_key": bundle["selected_key"],
         "selected_body": bundle["selected_body"],
         "selection_reason": bundle.get("selection_reason") or "hash_variant",
         "last_error": {"message": last_error.message, "details": last_error.details} if last_error else None,
     }
+    return result
 
 
 
