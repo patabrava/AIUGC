@@ -85,14 +85,17 @@ def _attach_publish_captions(
     context: str = "",
     canonical_topic: str = "",
 ) -> Dict[str, Any]:
-    return attach_caption_bundle(
-        seed_payload,
-        topic_title=topic_title,
-        post_type=post_type,
-        script_fallback=script_fallback,
-        context=context,
+    try:
+        return attach_caption_bundle(
+            seed_payload,
+            topic_title=topic_title,
+            post_type=post_type,
+            script_fallback=script_fallback,
+            context=context,
         canonical_topic=canonical_topic or None,
     )
+    except ValidationError:
+        return dict(seed_payload)
 
 
 def _utc_now_iso() -> str:

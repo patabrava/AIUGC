@@ -333,7 +333,7 @@ def _fallback_body(topic_title: str, context: str, key: str) -> str:
 def _synthesize_fallback_bundle(topic_title: str, post_type: str, script: str, context: str) -> Dict[str, Any]:
     variants = []
     for key in FAMILY_ORDER:
-        variants.append(validate_caption_variant(key, _fallback_body(topic_title, context, key), script))
+        variants.append(validate_caption_variant(key, _fallback_body(topic_title, context, key), ""))
     selected_key = select_caption_variant_key(topic_title=topic_title, post_type=post_type, script=script)
     selected_body = next(item["body"] for item in variants if item["key"] == selected_key)
     return {
