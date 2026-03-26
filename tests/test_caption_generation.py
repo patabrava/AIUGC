@@ -207,7 +207,8 @@ def test_default_publish_caption_prefers_caption_bundle_over_legacy_description(
     assert publish_handlers._default_publish_caption(post) == MEDIUM_BODY
 
 
-def test_resolve_selected_caption_prefers_existing_caption_over_fallback_bundle():
+def test_resolve_selected_caption_prefers_bundle_over_caption_even_for_fallback():
+    """caption_bundle.selected_body always wins, even if it's from fallback."""
     seed_data = {
         "caption": "Das ist die eigentlich gewollte Caption mit sauberem Deutsch.",
         "description": "Legacysummary",
@@ -217,7 +218,20 @@ def test_resolve_selected_caption_prefers_existing_caption_over_fallback_bundle(
         },
     }
 
-    assert captions.resolve_selected_caption(seed_data) == seed_data["caption"]
+    assert captions.resolve_selected_caption(seed_data) == seed_data["caption_bundle"]["selected_body"]
+
+
+def test_resolve_selected_caption_prefers_bundle_over_stale_caption():
+    """When caption_bundle.selected_body exists, it wins over seed_data.caption."""
+    seed_data = {
+        "caption": "Stale research caption without hashtags.",
+        "description": "Legacy description",
+        "caption_bundle": {
+            "selected_body": MEDIUM_BODY,
+            "selection_reason": "hash_variant",
+        },
+    }
+    assert captions.resolve_selected_caption(seed_data) == MEDIUM_BODY
 
 
 def test_resolve_selected_caption_uses_selected_body_when_publish_caption_missing():

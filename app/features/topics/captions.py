@@ -360,12 +360,12 @@ def select_caption_variant_key(*, topic_title: str, post_type: str, script: str)
 
 def resolve_selected_caption(seed_data: Dict[str, Any]) -> str:
     bundle = dict(seed_data.get("caption_bundle") or {})
-    caption = str(seed_data.get("caption") or "").strip()
-    if caption:
-        return caption
     selected_body = str(bundle.get("selected_body") or "").strip()
     if selected_body:
         return selected_body
+    caption = str(seed_data.get("caption") or "").strip()
+    if caption:
+        return caption
     description = str(seed_data.get("description") or "").strip()
     if description:
         return description
