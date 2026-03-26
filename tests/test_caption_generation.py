@@ -39,11 +39,14 @@ class _StubLLM:
     def __init__(self, payload):
         self.payload = payload
 
-    def generate_gemini_json(self, **_kwargs):
-        return deepcopy(self.payload)
-
     def generate_gemini_text(self, **_kwargs):
-        return ""
+        variants = self.payload.get("variants", [])
+        parts = []
+        for v in variants:
+            parts.append(f"[{v['key']}]")
+            parts.append(v["body"])
+            parts.append("")
+        return "\n".join(parts)
 
 
 @pytest.mark.parametrize(
@@ -249,9 +252,6 @@ def test_resolve_selected_caption_uses_selected_body_when_publish_caption_missin
 
 def test_generate_caption_bundle_falls_back_to_synthesized_bundle(monkeypatch):
     class FakeLLM:
-        def generate_gemini_json(self, *args, **kwargs):
-            raise RuntimeError("boom")
-
         def generate_gemini_text(self, *args, **kwargs):
             raise RuntimeError("boom")
 
@@ -274,7 +274,7 @@ def test_generate_caption_bundle_falls_back_to_synthesized_bundle(monkeypatch):
 
 def test_generate_caption_bundle_fallback_handles_long_topic_and_context():
     class FakeLLM:
-        def generate_gemini_json(self, *args, **kwargs):
+        def generate_gemini_text(self, *args, **kwargs):
             raise RuntimeError("boom")
 
     bundle = captions.generate_caption_bundle(
@@ -311,17 +311,13 @@ def test_generate_caption_bundle_uses_canonical_topic_for_title_checks(monkeypat
     captured = {}
 
     class FakeLLM:
-        def generate_gemini_json(self, **kwargs):
+        def generate_gemini_text(self, **kwargs):
             captured["prompt"] = kwargs["prompt"]
-            return {
-                "variants": [
-                    {"key": "short_paragraph", "body": SHORT_BODY},
-                    {"key": "medium_bullets", "body": MEDIUM_BODY},
-                    {"key": "long_structured", "body": LONG_BODY},
-                ],
-                "selected_key": "medium_bullets",
-                "selected_body": MEDIUM_BODY,
-            }
+            return (
+                f"[short_paragraph]\n{SHORT_BODY}\n\n"
+                f"[medium_bullets]\n{MEDIUM_BODY}\n\n"
+                f"[long_structured]\n{LONG_BODY}"
+            )
 
     bundle = captions.generate_caption_bundle(
         topic_title="Rechtliche Grundlagen Zielsetzung - Forschungsdossier: Barrierefreiheit im ÖPNV-Alltag",
@@ -365,34 +361,22 @@ def test_validate_caption_variant_rejects_more_than_one_emoji():
 
 def test_generate_caption_bundle_rejects_title_like_opening(monkeypatch):
     class FakeLLM:
-        def generate_gemini_json(self, *args, **kwargs):
-            return {
-                "variants": [
-                    {
-                        "key": "short_paragraph",
-                        "body": "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick. #Tag1 #Tag2",
-                    },
-                    {
-                        "key": "medium_bullets",
-                        "body": (
-                            "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick.\n\n"
-                            "• Punkt eins.\n"
-                            "• Punkt zwei.\n\n"
-                            "#Tag1 #Tag2 #Tag3"
-                        ),
-                    },
-                    {
-                        "key": "long_structured",
-                        "body": (
-                            "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick.\n\n"
-                            "Noch mehr Einordnung.\n\n"
-                            "1. Punkt eins.\n"
-                            "2. Punkt zwei.\n\n"
-                            "#Tag1 #Tag2 #Tag3"
-                        ),
-                    },
-                ]
-            }
+        def generate_gemini_text(self, *args, **kwargs):
+            short = "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick. #Tag1 #Tag2"
+            medium = (
+                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick.\n\n"
+                "• Punkt eins.\n"
+                "• Punkt zwei.\n\n"
+                "#Tag1 #Tag2 #Tag3"
+            )
+            long = (
+                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick.\n\n"
+                "Noch mehr Einordnung.\n\n"
+                "1. Punkt eins.\n"
+                "2. Punkt zwei.\n\n"
+                "#Tag1 #Tag2 #Tag3"
+            )
+            return f"[short_paragraph]\n{short}\n\n[medium_bullets]\n{medium}\n\n[long_structured]\n{long}"
 
     bundle = captions.generate_caption_bundle(
         topic_title="Gesetzliche Rahmenbedingungen Fristen Ausnahmeregelungen",
@@ -429,3 +413,83 @@ def test_attach_caption_bundle_overwrites_preexisting_caption():
     )
     assert enriched["caption"] == enriched["caption_bundle"]["selected_body"]
     assert enriched["caption"] != "Stale research caption that should be overwritten."
+
+
+def test_build_caption_prompt_requests_marker_format_not_json():
+    prompt = captions._build_caption_prompt(
+        topic_title="Barrierefreiheit",
+        post_type="value",
+        script="Ein Skript.",
+        context="Kontext",
+    )
+    assert "[short_paragraph]" in prompt
+    assert "[medium_bullets]" in prompt
+    assert "[long_structured]" in prompt
+    assert "valides JSON" not in prompt
+
+
+def test_generate_caption_bundle_text_first_with_markers():
+    marker_response = (
+        "[short_paragraph]\n"
+        f"{SHORT_BODY}\n\n"
+        "[medium_bullets]\n"
+        f"{MEDIUM_BODY}\n\n"
+        "[long_structured]\n"
+        f"{LONG_BODY}"
+    )
+
+    class TextLLM:
+        def generate_gemini_text(self, **kwargs):
+            return marker_response
+
+    bundle = captions.generate_caption_bundle(
+        topic_title="Barrierefreier ÖPNV",
+        post_type="value",
+        script="Das Skript ist bewusst anders formuliert und endet mit einem Punkt.",
+        context="Kontext mit ausreichend Text fuer die Varianten.",
+        llm_factory=lambda: TextLLM(),
+    )
+
+    assert len(bundle["variants"]) == 3
+    assert {v["key"] for v in bundle["variants"]} == set(captions.FAMILY_ORDER)
+    assert bundle["selected_body"]
+    assert bundle["selection_reason"] == "hash_variant"
+
+
+def test_parse_text_variants_round_trip():
+    """Marker-formatted text should parse and validate as a complete caption bundle."""
+    marker_text = (
+        "[short_paragraph]\n"
+        f"{SHORT_BODY}\n\n"
+        "[medium_bullets]\n"
+        f"{MEDIUM_BODY}\n\n"
+        "[long_structured]\n"
+        f"{LONG_BODY}"
+    )
+    parsed = captions._parse_text_variants(marker_text)
+    assert len(parsed["variants"]) == 3
+    assert {v["key"] for v in parsed["variants"]} == set(captions.FAMILY_ORDER)
+
+    validated = captions.validate_caption_bundle(
+        parsed, "Ein unabhaengiges Skript das absichtlich anders formuliert ist."
+    )
+    assert len(validated["variants"]) == 3
+    for variant in validated["variants"]:
+        assert variant["char_count"] >= captions.FAMILY_SPECS[variant["key"]]["min_chars"]
+
+
+def test_parse_text_variants_missing_variant_raises():
+    """If Gemini only returns 2 of 3 markers, validation should fail."""
+    marker_text = (
+        "[short_paragraph]\n"
+        f"{SHORT_BODY}\n\n"
+        "[medium_bullets]\n"
+        f"{MEDIUM_BODY}"
+    )
+    parsed = captions._parse_text_variants(marker_text)
+    assert len(parsed["variants"]) == 2
+
+    with pytest.raises(ValidationError, match="three expected families"):
+        captions.validate_caption_bundle(
+            parsed, "Ein unabhaengiges Skript."
+        )
