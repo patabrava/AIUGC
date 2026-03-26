@@ -492,5 +492,5 @@ def attach_caption_bundle(
     payload["canonical_topic"] = canonical_topic
     payload["caption_bundle"] = bundle
     payload["description"] = bundle["selected_body"]
-    payload["caption"] = payload.get("caption") or bundle["selected_body"]
+    payload["caption"] = bundle["selected_body"]
     return payload

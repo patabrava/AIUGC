@@ -403,3 +403,29 @@ def test_generate_caption_bundle_rejects_title_like_opening(monkeypatch):
     )
 
     assert bundle["selection_reason"] == "fallback_hash_variant"
+
+
+def test_attach_caption_bundle_overwrites_preexisting_caption():
+    """Even when caption has a value, attach_caption_bundle must overwrite it with bundle body."""
+    llm = _StubLLM(
+        {
+            "variants": [
+                {"key": "short_paragraph", "body": SHORT_BODY},
+                {"key": "medium_bullets", "body": MEDIUM_BODY},
+                {"key": "long_structured", "body": LONG_BODY},
+            ]
+        }
+    )
+    payload = {
+        "script": "Kurzes Skript, aber nicht identisch mit der Caption.",
+        "caption": "Stale research caption that should be overwritten.",
+        "strict_seed": {"facts": ["Fakt eins"]},
+    }
+    enriched = captions.attach_caption_bundle(
+        payload,
+        topic_title="Barrierefreier ÖPNV",
+        post_type="value",
+        llm_factory=lambda: llm,
+    )
+    assert enriched["caption"] == enriched["caption_bundle"]["selected_body"]
+    assert enriched["caption"] != "Stale research caption that should be overwritten."
