@@ -452,11 +452,6 @@ def attach_caption_bundle(
     canonical_topic: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload = dict(seed_payload or {})
-    if (payload.get("caption_bundle") or {}).get("selected_body"):
-        selected = resolve_selected_caption(payload)
-        if selected:
-            payload["description"] = selected
-        return payload
     script = str(payload.get("dialog_script") or payload.get("script") or script_fallback or "").strip()
     if not script:
         return payload
