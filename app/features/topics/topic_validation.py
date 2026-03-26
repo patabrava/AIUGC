@@ -27,7 +27,7 @@ CHARS_PER_SECOND_ESTIMATE = 17.0
 PROMPT2_DIALOG_WORD_BOUNDS = {
     8: (16, 20),
     16: (24, 34),
-    32: (46, 66),
+    32: (40, 66),
 }
 
 GERMAN_SIGNAL_WORDS = {
