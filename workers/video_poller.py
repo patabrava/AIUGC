@@ -32,6 +32,7 @@ from app.core.video_profiles import (
     VIDEO_STATUS_FAILED,
     get_processing_video_status,
     get_submitted_video_status,
+    TRIM_TAIL_MS,
 )
 
 try:  # pragma: no cover - allow worker to run without google-genai on Python 3.9
@@ -688,6 +689,15 @@ def _store_completed_video(
             existing_metadata=existing_metadata,
             correlation_id=correlation_id,
         )
+
+    if isinstance(processed_source, bytes) and TRIM_TAIL_MS > 0:
+        processed_source, trim_metadata = _trim_tail(
+            video_bytes=processed_source,
+            trim_ms=TRIM_TAIL_MS,
+            post_id=post_id,
+            correlation_id=correlation_id,
+        )
+        postprocess_metadata.update(trim_metadata)
 
     upload_method = "url" if isinstance(processed_source, str) else "bytes"
     upload_start = time.monotonic()

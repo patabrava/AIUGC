@@ -16,9 +16,10 @@ from app.core.video_profiles import VIDEO_STATUS_CAPTION_PENDING, VIDEO_STATUS_C
 
 
 class TestPollerCaptionHandoff:
+    @patch("workers.video_poller._trim_tail", return_value=(b"fake_video_bytes", {}))
     @patch("workers.video_poller.get_storage_client")
     @patch("workers.video_poller.get_supabase")
-    def test_store_completed_video_sets_caption_pending(self, mock_sb_factory, mock_storage):
+    def test_store_completed_video_sets_caption_pending(self, mock_sb_factory, mock_storage, mock_trim):
         """After upload, video_status should be caption_pending, not completed."""
         from workers.video_poller import _store_completed_video
 

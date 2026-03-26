@@ -320,7 +320,11 @@ def test_store_completed_video_applies_crop_postprocess():
                      "postprocess_crop_output_size": "720x1280",
                  },
              ),
-         ) as mock_postprocess:
+         ) as mock_postprocess, \
+         patch(
+             "workers.video_poller._trim_tail",
+             return_value=(b"cropped-video", {}),
+         ):
         _store_completed_video(
             post_id="post-crop",
             provider="veo_3_1",
