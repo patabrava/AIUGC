@@ -300,9 +300,12 @@ def _fallback_body(topic_title: str, context: str, key: str) -> str:
             f"Im Alltag mit {hook_topic} merkt man Reibung oft erst an kleinen Stellen 🚦",
         )
         opening = openers[opener_index]
+        short_context = " ".join(context_words[:3]).strip() if context_words else ""
+        if short_context.lower() in {"kontext", "thema", "details"}:
+            short_context = ""
         return (
             f"{opening}\n\n"
-            f"{'Mit einem klaren Ablauf bleibst du ruhiger und verlierst den Überblick nicht.' if not hook_context else f'Ein klarer Blick auf {hook_context} hilft dir, ruhiger zu bleiben und den Überblick nicht zu verlieren.'}\n\n"
+            f"{'Mit einem klaren Ablauf bleibst du ruhiger und verlierst den Überblick nicht.' if not short_context else f'Ein klarer Blick auf {short_context} hilft dir, ruhiger zu bleiben.'}\n\n"
             "• Prüfe zuerst, welche Infos gebraucht werden.\n"
             "• Notiere Kernpunkte kurz, damit Rueckfragen schneller geklaert sind.\n"
             "• Plane Puffer ein, falls etwas unklar bleibt.\n\n"
