@@ -8,7 +8,6 @@ Per Constitution § III: Deterministic Execution
 from typing import Optional, Dict, Any
 
 import httpx
-from google import genai
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -38,7 +37,6 @@ class VeoClient:
             return
         
         settings = get_settings()
-        self.client = genai.Client(api_key=settings.google_ai_api_key)
         self._api_key = settings.google_ai_api_key
         self._http_client = httpx.Client(timeout=30.0, follow_redirects=True)
         self._initialized = True

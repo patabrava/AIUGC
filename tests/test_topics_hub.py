@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -334,6 +334,73 @@ def test_topics_hub_falls_back_to_topic_bank_when_registry_is_empty(monkeypatch)
     ]
     assert payload["selected_topic"]["id"].startswith("topic-bank-")
     assert payload["selected_topic"]["source"] == "topic_bank.yaml"
+
+
+def test_topics_hub_marks_fresh_generated_topics_new_and_sorts_them_first(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(topic_hub, "get_topic_bank", lambda: {"topics": []})
+    monkeypatch.setattr(
+        topic_hub,
+        "get_all_topics_from_registry",
+        lambda: [
+            {"id": "topic-older", "title": "Older topic", "post_type": "value", "last_harvested_at": (now - timedelta(days=3)).isoformat()},
+            {"id": "topic-fresh-2", "title": "Fresh topic B", "post_type": "value", "last_harvested_at": (now - timedelta(hours=2)).isoformat()},
+            {"id": "topic-fresh-1", "title": "Fresh topic A", "post_type": "value", "last_harvested_at": (now - timedelta(hours=1)).isoformat()},
+        ],
+    )
+    monkeypatch.setattr(topic_hub, "_fetch_all_script_counts", lambda: {
+        "topic-older": 1,
+        "topic-fresh-1": 3,
+        "topic-fresh-2": 2,
+    })
+    monkeypatch.setattr(topic_hub, "get_topic_scripts_for_registry", lambda *args, **kwargs: [])
+    monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=12, status=None: [])
+    monkeypatch.setattr(topic_hub, "list_topic_suggestions", lambda **kwargs: [])
+
+    payload = topic_hub.build_topic_hub_payload(
+        SimpleNamespace(
+            query_params={"topic_mode": "generated"},
+            headers={"accept": "text/html"},
+        )
+    )
+
+    assert [topic["id"] for topic in payload["generated_topics"]] == ["topic-fresh-1", "topic-fresh-2", "topic-older"]
+    assert [topic["is_new"] for topic in payload["generated_topics"]] == [True, True, False]
+    assert [topic["script_count"] for topic in payload["generated_topics"]] == [3, 2, 1]
+
+
+def test_topics_hub_html_renders_new_badge_for_fresh_generated_topics(monkeypatch):
+    monkeypatch.setattr(
+        topic_handlers,
+        "build_topic_hub_payload",
+        lambda request: {
+            "filters": {"search": "", "post_type": None, "target_length_tier": None, "topic_id": None, "run_id": None, "status": None, "only_with_scripts": False, "topic_mode": "generated"},
+            "topics": [],
+            "basic_topics": [],
+            "generated_topics": [
+                {"id": "topic-1", "title": "Fresh topic", "post_type": "value", "script_count": 4, "is_new": True},
+                {"id": "topic-2", "title": "Old topic", "post_type": "value", "script_count": 2, "is_new": False},
+            ],
+            "total_topics": 2,
+            "basic_topic_count": 0,
+            "generated_topic_count": 2,
+            "scripts": [],
+            "selected_topic": None,
+            "selected_scripts": [],
+            "selected_script_groups": [],
+            "script_usage_filter": "all",
+            "runs": [],
+            "active_runs": [],
+            "completed_runs": [],
+        },
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert ">New<" in response.text
+    assert response.text.index("Fresh topic") < response.text.index("Old topic")
 
 
 def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):

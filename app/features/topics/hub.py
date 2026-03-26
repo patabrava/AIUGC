@@ -149,6 +149,15 @@ def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
+def _generated_topic_sort_key(topic: Dict[str, Any], fresh_cutoff: datetime) -> tuple:
+    last_harvested_at = _parse_utc_timestamp(topic.get("last_harvested_at") or topic.get("created_at"))
+    is_new = bool(last_harvested_at and last_harvested_at >= fresh_cutoff)
+    freshness_rank = 0 if is_new else 1
+    recency_rank = -(last_harvested_at.timestamp() if last_harvested_at else 0.0)
+    title_rank = str(topic.get("title") or "").lower()
+    return (freshness_rank, recency_rank, title_rank)
+
+
 def _mark_topic_research_task(run_id: str, task: asyncio.Task) -> None:
     TOPIC_RESEARCH_TASKS[run_id] = task
 
@@ -548,9 +557,17 @@ def build_topic_hub_payload(request) -> Dict[str, Any]:
         and (filters["post_type"] is None or str(topic.get("post_type") or "") == filters["post_type"])
         and _topic_has_tier(topic, filters["target_length_tier"])
     ]
-    generated_topics.sort(key=lambda row: str(row.get("last_harvested_at") or row.get("created_at") or ""), reverse=True)
+    fresh_cutoff = datetime.now(timezone.utc) - _TOPIC_NEW_WINDOW
+    generated_topics.sort(key=lambda row: _generated_topic_sort_key(row, fresh_cutoff))
     script_counts = _fetch_all_script_counts()
-    generated_topics = [{**topic, "script_count": _count_topic_scripts(str(topic["id"]), script_counts)} for topic in generated_topics]
+    generated_topics = [
+        {
+            **topic,
+            "script_count": _count_topic_scripts(str(topic["id"]), script_counts),
+            "is_new": bool((_parse_utc_timestamp(topic.get("last_harvested_at") or topic.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= fresh_cutoff),
+        }
+        for topic in generated_topics
+    ]
 
     scripts = list_topic_suggestions(
         target_length_tier=filters["target_length_tier"],

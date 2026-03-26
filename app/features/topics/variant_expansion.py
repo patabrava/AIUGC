@@ -9,10 +9,12 @@ missing, then picks the most diverse next combination.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.adapters.llm_client import get_llm_client
+from app.core.errors import ValidationError
 from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.prompts import build_prompt1_variant, build_prompt2, get_hook_bank
@@ -25,6 +27,7 @@ from app.features.topics.queries import (
 )
 from app.features.topics.response_parsers import parse_prompt1_response, _coerce_prompt2_payload
 from app.features.topics.schemas import DialogScripts
+from app.features.topics.topic_validation import estimate_script_duration_seconds
 
 logger = get_logger(__name__)
 
@@ -43,6 +46,56 @@ DEFAULT_MAX_SCRIPTS_PER_TOPIC = 20
 DEFAULT_MAX_SCRIPTS_PER_CRON_RUN = 30
 
 ALL_TIERS = [8, 16, 32]
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", text or ""))
+
+
+def _ensure_terminal_punctuation(text: str) -> str:
+    stripped = (text or "").strip()
+    if not stripped:
+        return stripped
+    return stripped if stripped[-1] in ".!?" else f"{stripped}."
+
+
+def _enforce_prompt1_word_envelope(prompt1_item, profile, lane_fact_texts: List[str]):
+    min_words = int(getattr(profile, "prompt1_min_words", 12))
+    max_words = int(getattr(profile, "prompt1_max_words", 15))
+    script = _ensure_terminal_punctuation(getattr(prompt1_item, "script", ""))
+    words = script.split()
+
+    if _word_count(script) < min_words:
+        for fact in lane_fact_texts:
+            fragment = re.sub(r"\s+", " ", str(fact or "")).strip().rstrip(".!?")
+            if not fragment:
+                continue
+            candidate = _ensure_terminal_punctuation(f"{' '.join(words)} {fragment}".strip())
+            words = candidate.split()
+            script = candidate
+            if _word_count(script) >= min_words:
+                break
+
+    if _word_count(script) > max_words:
+        script = _ensure_terminal_punctuation(" ".join(script.split()[:max_words]).strip())
+
+    final_count = _word_count(script)
+    if final_count < min_words or final_count > max_words:
+        raise ValidationError(
+            message="PROMPT_1 variant does not match target word envelope",
+            details={
+                "target_length_tier": getattr(profile, "target_length_tier", None),
+                "word_count": final_count,
+                "expected_range": [min_words, max_words],
+            },
+        )
+
+    prompt1_item.script = script
+    prompt1_item.estimated_duration_s = min(
+        int(getattr(profile, "target_length_tier", 8) or 8),
+        max(1, estimate_script_duration_seconds(script)),
+    )
+    return prompt1_item
 
 
 def pick_next_variant(
@@ -215,6 +268,11 @@ def expand_topic_variants(
         try:
             if post_type == "value":
                 lane = _pick_lane_for_framework(lane_candidates, framework, existing_pairs)
+                lane_fact_texts = [
+                    str(fact).strip()
+                    for fact in list((lane or {}).get("facts") or []) + list(dossier_payload.get("facts") or [])
+                    if str(fact).strip()
+                ]
                 variant_prompt = build_prompt1_variant(
                     post_type=post_type,
                     desired_topics=1,
@@ -243,11 +301,19 @@ def expand_topic_variants(
                     },
                     system_prompt="You are the Flow Forge PROMPT_1 stage-3 script agent. Return only valid JSON. Keep all output fully in German.",
                 )
-                batch = parse_prompt1_response(json.dumps(raw, ensure_ascii=False))
+                batch = parse_prompt1_response(
+                    json.dumps(raw, ensure_ascii=False),
+                    profile=get_duration_profile(target_length_tier),
+                )
                 prompt1_item = batch.items[0] if batch.items else None
                 if not prompt1_item:
                     logger.warning("variant_expansion_parse_failed", framework=framework, hook_style=hook_style)
                     continue
+                prompt1_item = _enforce_prompt1_word_envelope(
+                    prompt1_item,
+                    get_duration_profile(target_length_tier),
+                    lane_fact_texts,
+                )
                 script_text = str(prompt1_item.script or "").strip()
                 variant_data: Dict[str, Any] = {
                     "script": script_text,

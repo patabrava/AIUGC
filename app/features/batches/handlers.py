@@ -135,7 +135,7 @@ async def create_batch_endpoint(request: Request):
                 "total": total,
                 "filters": {"archived": None, "limit": 50, "offset": 0}
             }
-            response = templates.TemplateResponse("batches/partials/list_content.html", context)
+            response = templates.TemplateResponse("batches/list.html", context)
             response.headers["HX-Trigger"] = json.dumps({
                 "batch_created": {
                     "batch_id": batch["id"],
@@ -445,12 +445,7 @@ async def list_batches_endpoint(
                     "offset": offset
                 }
             }
-            template_name = (
-                "batches/partials/list_content.html"
-                if request.headers.get("HX-Request") == "true" and not _is_hx_history_restore_request(request)
-                else "batches/list.html"
-            )
-            return templates.TemplateResponse(template_name, context)
+            return templates.TemplateResponse("batches/list.html", context)
 
         return SuccessResponse(
             data=BatchListResponse(batches=batch_responses, total=total)

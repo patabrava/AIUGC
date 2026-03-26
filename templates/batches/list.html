@@ -165,21 +165,27 @@
     <div class="mb-6 flex flex-wrap gap-2 sm:gap-4">
         <button 
             hx-get="/batches?archived=false" 
-            hx-target="#batches-list"
+            hx-target="#batches-list-content"
+            hx-select="#batches-list-content"
+            hx-swap="outerHTML"
             class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             Active
         </button>
         <button 
             hx-get="/batches?archived=true" 
-            hx-target="#batches-list"
+            hx-target="#batches-list-content"
+            hx-select="#batches-list-content"
+            hx-swap="outerHTML"
             class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             Archived
         </button>
         <button 
             hx-get="/batches" 
-            hx-target="#batches-list"
+            hx-target="#batches-list-content"
+            hx-select="#batches-list-content"
+            hx-swap="outerHTML"
             class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             All
@@ -187,15 +193,17 @@
     </div>
 
     <!-- Batches List -->
-    <div 
-        id="batches-list"
-        hx-get="/batches"
-        hx-trigger="load"
-        hx-target="#batches-list"
-        hx-swap="innerHTML"
-        hx-indicator="#list-loading"
-        class="relative"
-    >
+    <div id="batches-list" class="relative">
+        <div
+            hx-get="/batches"
+            hx-trigger="load"
+            hx-target="#batches-list-content"
+            hx-select="#batches-list-content"
+            hx-swap="outerHTML"
+            hx-indicator="#list-loading"
+            class="relative"
+        >
+        </div>
         <div id="list-loading" class="htmx-indicator absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
             <div class="text-center">
                 <svg class="animate-spin h-8 w-8 text-purple-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -205,7 +213,9 @@
                 <p class="mt-2 text-sm text-gray-600">Loading batches...</p>
             </div>
         </div>
-        {% include "batches/partials/list_content.html" %}
+        <div id="batches-list-content">
+            {% include "batches/partials/list_content.html" %}
+        </div>
     </div>
 
     <!-- Create Batch Modal -->
@@ -220,7 +230,9 @@
             
             <form 
                 hx-post="/batches" 
-                hx-target="#batches-list"
+                hx-target="#batches-list-content"
+                hx-select="#batches-list-content"
+                hx-swap="outerHTML"
                 hx-indicator="#batch-spinner"
                 @htmx:before-request="
                     const brand = $event.detail.elt.querySelector('[name=brand]').value;

@@ -66,14 +66,19 @@
                         <h3 class="text-sm font-bold text-slate-900">{{ topic.title }}</h3>
                         <div class="mt-1 text-xs text-slate-500">{{ topic.post_type or 'unknown' }}</div>
                     </div>
-                    {% set count = topic.script_count|default(0) %}
-                    {% if count == 0 %}
-                    <span class="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800">0 scripts</span>
-                    {% elif count <= 2 %}
-                    <span class="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-orange-800">{{ count }} script{{ 's' if count != 1 else '' }}</span>
-                    {% else %}
-                    <span class="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-800">{{ count }} scripts</span>
-                    {% endif %}
+                    <div class="flex flex-col items-end gap-1">
+                        {% if topic.is_new %}
+                        <span class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-900">New</span>
+                        {% endif %}
+                        {% set count = topic.script_count|default(0) %}
+                        {% if count == 0 %}
+                        <span class="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800">0 scripts</span>
+                        {% elif count <= 2 %}
+                        <span class="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-orange-800">{{ count }} script{{ 's' if count != 1 else '' }}</span>
+                        {% else %}
+                        <span class="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-800">{{ count }} scripts</span>
+                        {% endif %}
+                    </div>
                 </div>
             </a>
             {% endfor %}
