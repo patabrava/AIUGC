@@ -136,20 +136,34 @@ def _make_storage(*, batch_state="S7_PUBLISH_PLAN", post_status="draft", network
     }
 
 
+def _run(coro):
+    """Run an async coroutine synchronously."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 class TestPublishPostNowEndpoint:
     def test_happy_path_facebook(self, monkeypatch):
         storage = _make_storage(networks=["facebook"])
         monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
         monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
         monkeypatch.setattr(publish_handlers, "_effective_meta_connection", lambda batch_id, mc: mc)
-        monkeypatch.setattr(publish_handlers, "get_tiktok_publish_state", lambda: asyncio.coroutine(lambda: {"status": "unavailable"})())
+        monkeypatch.setattr(publish_handlers, "_ensure_meta_targets_for_networks", lambda networks, mc: None)
+
+        async def fake_tiktok_state():
+            return {"status": "unavailable"}
+
+        monkeypatch.setattr(publish_handlers, "get_tiktok_publish_state", fake_tiktok_state)
 
         async def fake_fb(post, mc):
             return "fb-remote-123"
 
         monkeypatch.setattr(publish_handlers, "_publish_facebook_video", fake_fb)
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             publish_handlers.publish_post_now("post-1", storage["posts"][0]["social_networks"])
         )
         assert result["publish_status"] == "published"
@@ -161,7 +175,7 @@ class TestPublishPostNowEndpoint:
         monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
 
         with pytest.raises(ValidationError):
-            asyncio.get_event_loop().run_until_complete(
+            _run(
                 publish_handlers.publish_post_now("post-1", ["facebook"])
             )
 
@@ -170,7 +184,7 @@ class TestPublishPostNowEndpoint:
         monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
 
         with pytest.raises(ValidationError):
-            asyncio.get_event_loop().run_until_complete(
+            _run(
                 publish_handlers.publish_post_now("post-1", ["facebook"])
             )
 
@@ -179,6 +193,6 @@ class TestPublishPostNowEndpoint:
         monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
 
         with pytest.raises(ValidationError):
-            asyncio.get_event_loop().run_until_complete(
+            _run(
                 publish_handlers.publish_post_now("post-1", ["facebook"])
             )
