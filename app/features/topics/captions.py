@@ -404,7 +404,7 @@ def generate_caption_bundle(
                     "Antworte ausschliesslich im Markerformat mit [short_paragraph], [medium_bullets] und [long_structured]. "
                     "Keine Erklaerungen, kein JSON, kein Markdown."
                 ),
-                max_tokens=1400,
+                max_tokens=2000,
                 temperature=0.8,
             )
             parsed = _parse_text_variants(raw_text)

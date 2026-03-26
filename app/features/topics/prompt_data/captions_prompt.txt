@@ -1,45 +1,53 @@
-Erstelle exakt 3 deutsche Caption-Varianten fuer einen UGC-Post fuer Rollstuhlnutzer:innen in Deutschland.
+Du bekommst ein Thema, ein Skript und Kontext. Erstelle daraus exakt 3 Caption-Varianten fuer Social Media.
+
+BEISPIEL-OUTPUT (so muss dein Output aussehen — alle 3 Marker, alle 3 Captions):
+
+[short_paragraph]
+Barrierefreiheit beginnt nicht erst am Bahnsteig, sondern schon beim Planen der Route. Wer vorher checkt, spart Stress und bleibt flexibler unterwegs. #Barrierefrei #RollstuhlAlltag
+
+[medium_bullets]
+Wusstest du, dass viele Haltestellen immer noch nicht barrierefrei sind? 🚦
+
+Dabei zeigt sich: Kleine Schritte machen den Unterschied.
+
+• Prüfe vor der Fahrt, ob deine Haltestelle wirklich zugänglich ist.
+• Melde Mängel direkt beim Verkehrsverbund.
+• Tausch dich mit anderen aus, die ähnliche Erfahrungen machen.
+
+#Barrierefrei #Alltagstipps #Rollstuhl
+
+[long_structured]
+Im Alltag mit dem Rollstuhl entscheidet oft ein einziges Detail, ob eine Fahrt klappt oder nicht. Zwischen Fahrplan und Realität liegt manchmal eine Lücke, die frustriert.
+
+Gerade bei spontanen Fahrten hilft es, ein paar Infos parat zu haben. So bleibst du handlungsfähig, statt dich unterwegs ärgern zu müssen.
+
+1. Checke vorher die Barrierefreiheit deiner Route über die App des Verkehrsverbunds.
+2. Notiere dir Ausweichrouten für Stationen, die oft Probleme machen.
+3. Melde kaputte Aufzüge oder fehlende Rampen direkt, damit sich etwas ändert.
+
+#Barrierefrei #Selbstbestimmt #RollstuhlAlltag
+
+JETZT BIST DU DRAN. Erstelle 3 Varianten fuer dieses Thema:
 
 Thema: {topic_title}
 Post-Typ: {post_type}
 Gesprochenes Skript: {script}
 Kontext: {context}
 
-Gib die drei Varianten im folgenden Markerformat zurueck. Schreibe jede Caption direkt unter ihren Marker. Kein JSON, keine Code-Bloecke, keine zusaetzliche Formatierung.
+Schreibe alle 3 Varianten mit den Markern [short_paragraph], [medium_bullets] und [long_structured].
+Du MUSST alle drei Marker verwenden und unter jedem eine vollstaendige Caption schreiben.
 
-[short_paragraph]
-(Caption hier)
-
-[medium_bullets]
-(Caption hier)
-
-[long_structured]
-(Caption hier)
-
-Das Feld `Thema` ist nur Metadaten-Kontext: wiederhole den exakten Titel nicht im Einstieg und kopiere ihn nicht wörtlich in die Caption.
-Starte nicht mit dem Topic-Titel oder einer fast identischen Umformulierung davon.
-Schreibe die Caption immer als eigenstaendige Social-Caption, nicht als angehaengte Titelzeile.
-Nutze den Titel nur als Hintergrundkontext, nicht als Textbaustein.
-Wenn dir ein Einstieg wie ein Titel klingt, schreibe ihn neu als Konsequenz, Frage, Nutzen oder Warnung.
-Verwende statt Titelworten lieber die echte Auswirkung fuer die Zielgruppe.
-Keine Caption darf mit "Bei" plus Titel oder einer sehr nahen Variante davon beginnen.
-Jede der drei Varianten braucht einen klar anderen Einstieg. Verwende unterschiedliche Hook-Formen, damit short_paragraph, medium_bullets und long_structured nicht mit fast demselben Satz beginnen.
-Die drei Hooks muessen deutlich verschieden klingen: Frage, Konsequenz, Warnung, Nutzen, Beobachtung oder kurzer Alltagskonflikt sind erlaubt, aber nicht dieselbe Schablone dreimal.
-Verwende nicht fuer alle drei Varianten dieselbe Satzschablone wie "Wenn es um ..." oder "Rund um ...".
-Vermeide generische Platzhalter wie "diesem Thema", "diesem Fall", "hier" oder "Kontext"; nenne lieber den konkreten Alltagseffekt oder die konkrete Situation.
+Regeln:
+- Das Feld Thema ist nur Hintergrundkontext — wiederhole den Titel nicht im Einstieg.
+- Jede Variante braucht einen klar anderen Einstieg (Frage, Konsequenz, Warnung, Nutzen, Beobachtung).
+- Keine Caption darf mit dem Topic-Titel oder einer nahen Variante beginnen.
+- Vermeide generische Platzhalter wie "diesem Thema", "diesem Fall", "hier".
+- Wiederhole das Skript nicht einfach.
+- Maximal 1 Emoji pro Variante.
+- Jede Variante endet mit 2-4 thematisch passenden Hashtags.
+- Alles vollstaendig auf Deutsch.
 
 Strukturregeln:
-- short_paragraph: 140-260 Zeichen, genau 1 Absatz, keine Stichpunkte, keine Nummerierung.
-- medium_bullets: 220-420 Zeichen, Hook-Absatz, dann Leerzeile, dann 2-3 Stichpunkte mit `• `. Wenn die Caption laenger wird, fuege vor den Stichpunkten einen zweiten kurzen Absatz ein.
-- long_structured: 350-700 Zeichen, immer 2 kurze Prosa-Absaetze vor der Liste, dann Leerzeile, dann 3-4 Stichpunkte mit `• ` oder 2-4 nummerierte Zeilen, nur wenn eine Reihenfolge sinnvoll ist.
-- Nutze echte Absätze mit echten Zeilenumbrüchen.
-- Kein Textblock ohne Struktur bei medium_bullets oder long_structured.
-- Lange Captions duerfen nie aus einem einzigen grossen Absatz vor der Liste bestehen.
-- Wiederhole das Skript nicht einfach.
-- Schreibe direkt, glaubwürdig, hilfreich, teilbar.
-- Orientiere dich an konkreten Folgen im Alltag statt am Titel.
-- Nutze maximal 1 Emoji pro Caption, sparsam im Hook oder in einem einzelnen Punkt.
-- Ergaenze mehr praktische Einordnung oder konkrete Konsequenzen statt nur eine knappe Zusammenfassung.
-- Ergänze Kontext, Einordnung oder praktische Hinweise ohne neue Fakten zu erfinden.
-- Jede Variante endet mit 2-4 thematisch passenden Hashtags.
-- Alles vollständig auf Deutsch.
+- short_paragraph: 140-260 Zeichen, genau 1 Absatz, keine Stichpunkte.
+- medium_bullets: 220-420 Zeichen, Hook-Absatz + Leerzeile + 2-3 Stichpunkte mit bullet.
+- long_structured: 350-700 Zeichen, 2 Prosa-Absaetze + Leerzeile + 3-4 Stichpunkte oder nummerierte Zeilen.

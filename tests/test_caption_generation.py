@@ -297,14 +297,16 @@ def test_build_caption_prompt_discourages_title_copying():
         context="Kontext",
     )
 
-    assert "Das Feld `Thema` ist nur Metadaten-Kontext" in prompt
-    assert "wiederhole den exakten Titel nicht" in prompt
-    assert "Starte nicht mit dem Topic-Titel" in prompt
-    assert "Nutze maximal 1 Emoji pro Caption" in prompt
-    assert "Bei" in prompt and "plus Titel" in prompt
-    assert "Wiederhole den exakten Titel" not in prompt.lower()
-    assert "Jede der drei Varianten braucht einen klar anderen Einstieg" in prompt
+    assert "Thema ist nur Hintergrundkontext" in prompt
+    assert "wiederhole den Titel nicht" in prompt
+    assert "Topic-Titel" in prompt
+    assert "Emoji" in prompt
+    assert "klar anderen Einstieg" in prompt
     assert "Vermeide generische Platzhalter" in prompt
+    assert "[short_paragraph]" in prompt
+    assert "[medium_bullets]" in prompt
+    assert "[long_structured]" in prompt
+    assert "BEISPIEL-OUTPUT" in prompt
 
 
 def test_generate_caption_bundle_uses_canonical_topic_for_title_checks(monkeypatch):
