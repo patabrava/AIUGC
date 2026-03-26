@@ -21,7 +21,6 @@ from app.features.topics.agents import (
     generate_topic_research_dossier,
     generate_topic_script_candidate,
 )
-from app.features.topics.captions import attach_caption_bundle
 from app.features.topics.deduplication import calculate_topic_similarity, deduplicate_topics
 from app.features.topics.prompts import get_topic_bank, pick_topic_bank_topics
 from app.features.topics.queries import (
@@ -818,14 +817,6 @@ def _harvest_seed_topic_to_bank(
             source_summary=str(lane_dossier.get("source_summary") or prompt1_item.caption or prompt1_item.source_summary or "").strip() or None,
             canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
             research_title=lane_title,
-        )
-        seed_payload = attach_caption_bundle(
-            seed_payload,
-            topic_title=lane_title,
-            post_type=post_type,
-            script_fallback=topic_data.rotation,
-            context=str(seed_payload.get("description") or seed_payload.get("research_caption") or lane_title),
-            canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
         )
         stored_row = _persist_topic_bank_row(
             title=lane_title,
