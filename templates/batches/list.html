@@ -773,7 +773,7 @@
                 stopPolling(batchId);
                 stopStream(batchId);
                 clearBanner(batchId);
-                refreshBatchList();
+                window.location.href = `/batches/${batchId}`;
             }, COMPLETION_HOLD_MS);
             completionTimers.set(batchId, timer);
         }
