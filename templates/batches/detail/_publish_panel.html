@@ -77,6 +77,13 @@
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold"
                             :class="post.caption && slots[i]?.time ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
                             x-text="post.caption && slots[i]?.time ? 'Ready' : 'Needs attention'"></span>
+                        <button type="button"
+                            @click.stop="postNowTarget = post; showPostNowModal = true"
+                            :disabled="!post.caption || networks.length === 0 || post.publishStatus === 'publishing' || post.publishStatus === 'published'"
+                            class="inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition"
+                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700 cursor-default' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700 cursor-wait' : (!post.caption || networks.length === 0) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-sm'"
+                            x-text="post.publishStatus === 'published' ? 'Published' : post.publishStatus === 'publishing' ? 'Publishing...' : '&#x25B6; Post Now'">
+                        </button>
                         <svg class="w-4 h-4 text-gray-400 transition-transform" :class="expanded === post.id ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                         </svg>
@@ -245,6 +252,57 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                     </svg>
                     <span x-text="saving ? 'Arming...' : 'Confirm \u2014 Arm All Platforms'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {# ── Post Now Confirmation Modal ── #}
+    <div x-show="showPostNowModal" x-cloak x-transition.opacity
+        class="fixed inset-0 z-50 flex items-center justify-center bg-gray-500 bg-opacity-75 px-4 py-6"
+        @keydown.escape.window="showPostNowModal = false">
+        <div class="absolute inset-0" @click="showPostNowModal = false"></div>
+        <div class="relative z-10 w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl">
+            <div class="border-b border-gray-200 bg-orange-50 px-6 py-4">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">Publish Now</h3>
+                        <p class="mt-1 text-sm text-gray-600">This will publish the post immediately.</p>
+                    </div>
+                    <button type="button" @click="showPostNowModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50">
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="px-6 py-4 space-y-3">
+                <div>
+                    <span class="text-xs font-medium text-gray-500 uppercase">Post</span>
+                    <p class="text-sm font-medium text-gray-900" x-text="postNowTarget?.title"></p>
+                </div>
+                <div>
+                    <span class="text-xs font-medium text-gray-500 uppercase">Networks</span>
+                    <div class="flex gap-1.5 mt-1">
+                        <template x-for="net in networks" :key="net">
+                            <span class="text-[11px] font-semibold px-2 py-0.5 rounded"
+                                :class="net === 'instagram' ? 'bg-purple-100 text-purple-700' : net === 'facebook' ? 'bg-blue-100 text-blue-700' : 'bg-gray-800 text-white'"
+                                x-text="net === 'instagram' ? 'IG' : net === 'facebook' ? 'FB' : 'TT'"></span>
+                        </template>
+                    </div>
+                </div>
+                <div x-show="postNowError" class="rounded-md bg-red-50 border border-red-200 p-3">
+                    <p class="text-xs text-red-800" x-text="postNowError"></p>
+                </div>
+            </div>
+            <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
+                <button type="button" @click="showPostNowModal = false"
+                    class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+                <button type="button" @click="postNow()"
+                    :disabled="postNowSaving"
+                    class="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition"
+                    :class="postNowSaving ? 'bg-gray-300 cursor-wait' : 'bg-orange-500 hover:bg-orange-600'">
+                    <span x-text="postNowSaving ? 'Publishing...' : '&#x25B6; Publish Now'"></span>
                 </button>
             </div>
         </div>

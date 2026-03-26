@@ -234,6 +234,10 @@
             saving: false,
             successMessage: '',
             errorMessage: '',
+            postNowTarget: null,
+            showPostNowModal: false,
+            postNowSaving: false,
+            postNowError: null,
 
             init() {
                 // Default week start to next Monday (or today if Monday)
@@ -347,6 +351,42 @@
                     this.errorMessage = error.message || 'Failed to arm dispatch';
                 } finally {
                     this.saving = false;
+                }
+            },
+
+            async postNow() {
+                if (!this.postNowTarget) return;
+                this.postNowSaving = true;
+                this.postNowError = null;
+                try {
+                    const resp = await fetch(`/publish/posts/${this.postNowTarget.id}/now`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Correlation-ID': `post_now_${this.postNowTarget.id}`,
+                        },
+                        body: JSON.stringify({
+                            post_id: this.postNowTarget.id,
+                            publish_caption: this.postNowTarget.caption,
+                            social_networks: this.networks,
+                        }),
+                    });
+                    if (!resp.ok) {
+                        throw new Error(await window.extractApiError(resp));
+                    }
+                    const data = await resp.json();
+                    // Update local post state
+                    const idx = this.posts.findIndex(p => p.id === this.postNowTarget.id);
+                    if (idx !== -1) {
+                        this.posts[idx].publishStatus = data.data?.publish_status || 'published';
+                    }
+                    this.showPostNowModal = false;
+                    this.successMessage = 'Post published successfully!';
+                    setTimeout(() => this.successMessage = '', 5000);
+                } catch (err) {
+                    this.postNowError = err.message || 'Network error';
+                } finally {
+                    this.postNowSaving = false;
                 }
             },
         };
