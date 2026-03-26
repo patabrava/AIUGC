@@ -48,6 +48,7 @@ from app.features.publish.schemas import (
     SuggestTimesRequest,
     SuggestedTime,
     SuggestTimesResponse,
+    PostNowRequest,
     UpdatePostScheduleRequest,
 )
 from app.features.topics.captions import resolve_selected_caption
@@ -1481,4 +1482,147 @@ async def cron_dispatch_publish(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     result = await dispatch_due_posts(trigger="cron")
+    return SuccessResponse(data=result)
+
+
+async def publish_post_now(post_id: str, social_networks: List[str]) -> Dict[str, Any]:
+    """Immediately dispatch a single post to its selected networks.
+
+    Guards:
+    - Post must exist with publish_status in ('draft', 'scheduled')
+    - Post's batch must be in S7_PUBLISH_PLAN
+    """
+    supabase = get_supabase().client
+
+    # 1. Load post and validate status
+    post_resp = supabase.table("posts").select(
+        "id, batch_id, video_url, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
+    ).eq("id", post_id).execute()
+    if not post_resp.data:
+        raise NotFoundError(f"Post {post_id} not found")
+    post = post_resp.data[0]
+
+    if post["publish_status"] not in ("draft", "scheduled"):
+        raise ValidationError(
+            f"Post must be in draft or scheduled status, got {post['publish_status']}",
+            details={"publish_status": post["publish_status"]},
+        )
+
+    # 2. Validate batch state
+    batch = _load_batch(post["batch_id"], fields="id,state,meta_connection")
+    if batch.get("state") != BatchState.S7_PUBLISH_PLAN.value:
+        raise ValidationError(
+            f"Batch must be in S7_PUBLISH_PLAN state, got {batch.get('state')}",
+            details={"batch_state": batch.get("state")},
+        )
+
+    # 3. Optimistic lock
+    claim = supabase.table("posts").update({"publish_status": "publishing"}).eq(
+        "id", post_id
+    ).eq("publish_status", post["publish_status"]).execute()
+    if not claim.data:
+        raise ValidationError("Post status changed concurrently, please retry")
+
+    post = dict(claim.data[0])
+    post["publish_caption"] = _default_publish_caption(post)
+    post["social_networks"] = social_networks
+    publish_results = _load_json_object(post.get("publish_results"))
+    platform_ids = _load_json_object(post.get("platform_ids"))
+    meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
+    tiktok_connection = await get_tiktok_publish_state()
+
+    # 4. Dispatch to each network (reuse existing per-network functions)
+    try:
+        _ensure_meta_targets_for_networks(
+            [n for n in social_networks if n in (SocialNetwork.FACEBOOK.value, SocialNetwork.INSTAGRAM.value)],
+            meta_connection,
+        )
+    except (ValidationError, FlowForgeException):
+        pass  # Only needed for Meta networks; TikTok-only posts skip this
+
+    for network in social_networks:
+        attempt_count = _network_attempt_count(_load_json_object(publish_results.get(network)))
+        try:
+            if network == SocialNetwork.FACEBOOK.value:
+                remote_id = await _publish_facebook_video(post, meta_connection)
+            elif network == SocialNetwork.INSTAGRAM.value:
+                remote_id = await _publish_instagram_reel(post, meta_connection)
+            elif network == SocialNetwork.TIKTOK.value:
+                tiktok_job = await publish_tiktok_direct_for_post(
+                    post["id"],
+                    caption=post["publish_caption"],
+                    privacy_level=_default_tiktok_privacy_level(tiktok_connection),
+                    disable_comment=bool((tiktok_connection.get("creator_info") or {}).get("comment_disabled")),
+                    disable_duet=bool((tiktok_connection.get("creator_info") or {}).get("duet_disabled")),
+                    disable_stitch=bool((tiktok_connection.get("creator_info") or {}).get("stitch_disabled")),
+                )
+                tiktok_payload = _load_json_object(tiktok_job.get("response_payload_json"))
+                provider_post_ids = tiktok_payload.get("publicaly_available_post_id") or []
+                remote_id = str(provider_post_ids[0]) if provider_post_ids else str(tiktok_job.get("tiktok_publish_id") or tiktok_job.get("id"))
+                publish_results[network] = {
+                    "status": "published" if tiktok_job.get("status") == "published" else "publishing",
+                    "post_mode": "direct",
+                    "remote_id": remote_id,
+                    "published_at": datetime.utcnow().isoformat() if tiktok_job.get("status") == "published" else None,
+                    "last_attempt_at": datetime.utcnow().isoformat(),
+                    "attempt_count": attempt_count,
+                }
+                if tiktok_job.get("status") == "published" and provider_post_ids:
+                    platform_ids[network] = str(provider_post_ids[0])
+                continue
+            else:
+                raise ValidationError(f"{network} publishing is not supported.")
+
+            publish_results[network] = {
+                "status": "published",
+                "remote_id": remote_id,
+                "published_at": datetime.utcnow().isoformat(),
+                "last_attempt_at": datetime.utcnow().isoformat(),
+                "attempt_count": attempt_count,
+            }
+            platform_ids[network] = remote_id
+        except FlowForgeException as exc:
+            publish_results[network] = {
+                "status": "failed",
+                "error_code": exc.code.value,
+                "error_message": exc.message,
+                "details": exc.details,
+                "last_attempt_at": datetime.utcnow().isoformat(),
+                "attempt_count": attempt_count,
+            }
+        except Exception as exc:
+            publish_results[network] = {
+                "status": "failed",
+                "error_code": ErrorCode.INTERNAL_ERROR.value,
+                "error_message": str(exc),
+                "last_attempt_at": datetime.utcnow().isoformat(),
+                "attempt_count": attempt_count,
+            }
+
+    overall_status = _derive_publish_status(social_networks, publish_results)
+    supabase.table("posts").update({
+        "publish_status": overall_status,
+        "publish_results": publish_results,
+        "platform_ids": platform_ids,
+    }).eq("id", post_id).execute()
+
+    # Check batch completion
+    _reconcile_completed_batches([post["batch_id"]])
+
+    logger.info("post_now_dispatched", post_id=post_id, publish_status=overall_status)
+    return {
+        "post_id": post_id,
+        "publish_status": overall_status,
+        "publish_results": publish_results,
+        "platform_ids": platform_ids,
+    }
+
+
+@router.post("/posts/{post_id}/now", response_model=SuccessResponse)
+async def handle_publish_post_now(post_id: str, request: PostNowRequest):
+    """Immediately publish a single post to selected networks."""
+    result = await publish_post_now(
+        post_id,
+        [n.value for n in request.social_networks],
+    )
     return SuccessResponse(data=result)
