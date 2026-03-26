@@ -196,3 +196,58 @@ class TestPublishPostNowEndpoint:
             _run(
                 publish_handlers.publish_post_now("post-1", ["facebook"])
             )
+
+
+class TestPostNowBatchCompletion:
+    def test_last_post_published_completes_batch(self, monkeypatch):
+        """When the last active post is published via Post Now, batch advances to S8_COMPLETE."""
+        storage = {
+            "batches": [{"id": "batch-1", "state": "S7_PUBLISH_PLAN", "meta_connection": {"page_id": "pg1", "page_access_token": "tok", "ig_user_id": "ig1"}, "updated_at": "2026-01-01T00:00:00Z"}],
+            "posts": [
+                {
+                    "id": "post-1",
+                    "batch_id": "batch-1",
+                    "video_url": "https://example.com/video.mp4",
+                    "seed_data": {},
+                    "scheduled_at": None,
+                    "publish_caption": "Caption 1",
+                    "social_networks": ["facebook"],
+                    "publish_status": "published",
+                    "publish_results": {"facebook": {"status": "published"}},
+                    "platform_ids": {"facebook": "fb-1"},
+                },
+                {
+                    "id": "post-2",
+                    "batch_id": "batch-1",
+                    "video_url": "https://example.com/video2.mp4",
+                    "seed_data": {},
+                    "scheduled_at": None,
+                    "publish_caption": "Caption 2",
+                    "social_networks": ["facebook"],
+                    "publish_status": "draft",
+                    "publish_results": {},
+                    "platform_ids": {},
+                },
+            ],
+        }
+
+        monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+        monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
+        monkeypatch.setattr(publish_handlers, "_effective_meta_connection", lambda batch_id, mc: mc)
+        monkeypatch.setattr(publish_handlers, "_ensure_meta_targets_for_networks", lambda networks, mc: None)
+
+        async def fake_tiktok():
+            return {"status": "unavailable"}
+        monkeypatch.setattr(publish_handlers, "get_tiktok_publish_state", fake_tiktok)
+
+        async def fake_fb(post, mc):
+            return "fb-remote-456"
+        monkeypatch.setattr(publish_handlers, "_publish_facebook_video", fake_fb)
+
+        result = _run(
+            publish_handlers.publish_post_now("post-2", ["facebook"])
+        )
+
+        assert result["publish_status"] == "published"
+        # Batch should have been advanced to S8_COMPLETE
+        assert storage["batches"][0]["state"] == BatchState.S8_COMPLETE.value
