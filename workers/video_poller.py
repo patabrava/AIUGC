@@ -134,6 +134,99 @@ def _probe_video_dimensions(video_path: str) -> tuple[int, int]:
     return width, height
 
 
+def _probe_video_duration(video_path: str) -> float:
+    """Return video duration in seconds as a float."""
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        video_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise ValueError(f"ffprobe duration failed: {result.stderr[-200:]}")
+    return float(result.stdout.strip())
+
+
+def _trim_tail(
+    *,
+    video_bytes: bytes,
+    trim_ms: int,
+    post_id: str,
+    correlation_id: str,
+) -> tuple[bytes, Dict[str, Any]]:
+    """Trim the last `trim_ms` milliseconds from a video using ffmpeg stream copy."""
+    if trim_ms <= 0:
+        return video_bytes, {}
+
+    with tempfile.TemporaryDirectory(prefix="video_trim_") as temp_dir:
+        input_path = os.path.join(temp_dir, "input.mp4")
+        output_path = os.path.join(temp_dir, "output.mp4")
+        with open(input_path, "wb") as file_obj:
+            file_obj.write(video_bytes)
+
+        original_duration = _probe_video_duration(input_path)
+        trim_seconds = trim_ms / 1000.0
+
+        if original_duration <= trim_seconds:
+            logger.warning(
+                "trim_tail_skipped_too_short",
+                post_id=post_id,
+                correlation_id=correlation_id,
+                original_duration=original_duration,
+                trim_ms=trim_ms,
+            )
+            return video_bytes, {"trim_tail_skipped": True}
+
+        target_duration = original_duration - trim_seconds
+
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            input_path,
+            "-t",
+            f"{target_duration:.3f}",
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise ValueError(f"ffmpeg trim failed: {result.stderr[-300:]}")
+
+        with open(output_path, "rb") as file_obj:
+            trimmed_bytes = file_obj.read()
+
+    final_duration = None
+    with tempfile.TemporaryDirectory(prefix="video_trim_verify_") as temp_dir:
+        verify_path = os.path.join(temp_dir, "verify.mp4")
+        with open(verify_path, "wb") as file_obj:
+            file_obj.write(trimmed_bytes)
+        final_duration = _probe_video_duration(verify_path)
+
+    logger.info(
+        "trim_tail_applied",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        original_duration_ms=round(original_duration * 1000),
+        final_duration_ms=round(final_duration * 1000),
+        trim_ms=trim_ms,
+    )
+
+    return trimmed_bytes, {
+        "trim_tail_ms": trim_ms,
+        "trim_original_duration_ms": round(original_duration * 1000),
+        "trim_final_duration_ms": round(final_duration * 1000),
+    }
+
+
 def _maybe_postprocess_video_bytes(
     *,
     post_id: str,
