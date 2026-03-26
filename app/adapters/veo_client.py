@@ -257,18 +257,40 @@ class VeoClient:
                     full_response=data
                 )
 
+                video_response = (
+                    data.get("response", {})
+                    .get("generateVideoResponse", {})
+                )
+                rai_count = video_response.get("raiMediaFilteredCount", 0)
+                rai_reasons = video_response.get("raiMediaFilteredReasons", [])
+
+                if rai_count and not video_samples:
+                    reason = rai_reasons[0] if rai_reasons else "Content blocked by safety filter"
+                    logger.warning(
+                        "veo_status_rai_filtered",
+                        correlation_id=correlation_id,
+                        operation_id=operation_id,
+                        rai_count=rai_count,
+                        rai_reasons=rai_reasons,
+                    )
+                    result["status"] = "failed"
+                    result["error"] = {
+                        "code": "RAI_FILTERED",
+                        "message": reason,
+                    }
+
                 if video_samples:
                     sample = video_samples[0]
                     video_info = sample.get("video", {})
                     video_uri = video_info.get("uri")
-                    
+
                     logger.info(
                         "veo_status_video_uri_extracted",
                         correlation_id=correlation_id,
                         video_uri=video_uri,
                         mime_type=video_info.get("mimeType")
                     )
-                    
+
                     result["video_data"] = {
                         "video_uri": video_uri,
                         "mime_type": video_info.get("mimeType"),

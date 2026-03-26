@@ -88,9 +88,15 @@ def _render_caption_frame(
     else:
         fill = (255, 255, 255, 255)  # White
 
-    # Measure text to center it
+    # Measure text to center it — shrink font if word overflows frame
+    max_text_width = int(video_width * 0.9)  # 5% padding each side
     bbox = draw.textbbox((0, 0), word_text, font=font)
     text_width = bbox[2] - bbox[0]
+    while text_width > max_text_width and font_size > 24:
+        font_size -= 4
+        font = _get_font(font_size)
+        bbox = draw.textbbox((0, 0), word_text, font=font)
+        text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
 
     # Position: lower third (75% down), standard TikTok caption zone

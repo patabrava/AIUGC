@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from app.adapters.deepgram_client import DeepgramError, get_deepgram_client
 from app.adapters.caption_renderer import burn_captions, CaptionRendererError
+from app.adapters.caption_aligner import align_transcript_to_script
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
 from app.core.config import get_settings
@@ -77,6 +78,21 @@ def _process_caption_post(post: dict[str, Any]) -> None:
         video_bytes = storage.download_video(video_url=video_url, correlation_id=correlation_id)
 
         transcript = deepgram.transcribe(audio_bytes=video_bytes, correlation_id=correlation_id)
+
+        # Align Deepgram transcription to the known script to fix misspellings
+        seed_data = post.get("seed_data") or {}
+        original_script = seed_data.get("script") or seed_data.get("dialog_script") or ""
+        if original_script and transcript.words:
+            transcript = align_transcript_to_script(
+                transcript=transcript,
+                script=original_script,
+            )
+            logger.info(
+                "caption_transcript_aligned",
+                correlation_id=correlation_id,
+                post_id=post_id,
+                aligned_word_count=len(transcript.words),
+            )
 
         if not transcript.words:
             logger.warning("caption_empty_transcript", correlation_id=correlation_id, post_id=post_id)

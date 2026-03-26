@@ -29,12 +29,6 @@ def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(mon
         "get_settings",
         lambda: SimpleNamespace(google_ai_api_key="test-key"),
     )
-    monkeypatch.setattr(
-        veo_module.genai,
-        "Client",
-        lambda api_key: SimpleNamespace(api_key=api_key),
-    )
-
     fake_http_client = FakeHttpClient()
     veo_module.VeoClient._instance = None
     client = veo_module.VeoClient()
@@ -64,12 +58,6 @@ def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
         "get_settings",
         lambda: SimpleNamespace(google_ai_api_key="test-key"),
     )
-    monkeypatch.setattr(
-        veo_module.genai,
-        "Client",
-        lambda api_key: SimpleNamespace(api_key=api_key),
-    )
-
     fake_http_client = FakeHttpClient()
     veo_module.VeoClient._instance = None
     client = veo_module.VeoClient()

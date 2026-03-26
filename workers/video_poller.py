@@ -56,6 +56,7 @@ if not _veo_available:
 
 POLL_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
+RAI_MAX_RETRIES = 3
 EXPANSION_INTERVAL_SECONDS = 24 * 60 * 60  # 24 hours
 EXPANSION_MAX_SCRIPTS_PER_RUN = 30
 
@@ -332,6 +333,98 @@ def process_video_operation(post: Dict[str, Any]):
             )
 
 
+def _retry_rai_filtered_video(post: Dict[str, Any], correlation_id: str, rai_reason: str) -> None:
+    """Resubmit a video that was blocked by Google's RAI safety filter.
+
+    Fetches the original prompt from video_prompt_audit and resubmits to Veo.
+    Tracks retry count in video_metadata so the UI can show progress.
+    """
+    post_id = post["id"]
+    metadata = dict(post.get("video_metadata") or {})
+    rai_retries = metadata.get("rai_retry_count", 0)
+
+    if rai_retries >= RAI_MAX_RETRIES:
+        logger.warning(
+            "rai_retry_exhausted",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            rai_retries=rai_retries,
+            rai_reason=rai_reason,
+        )
+        raise ValueError(
+            f"Safety filter blocked video after {rai_retries} retries. "
+            f"Reason: {rai_reason}"
+        )
+
+    supabase = get_supabase().client
+
+    # Fetch original prompt from audit table
+    audit_rows = (
+        supabase.table("video_prompt_audit")
+        .select("prompt_text, negative_prompt, aspect_ratio, resolution, requested_seconds")
+        .eq("post_id", post_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data
+
+    if not audit_rows:
+        raise ValueError(
+            f"Cannot retry RAI-filtered video for post {post_id}: "
+            f"no prompt found in video_prompt_audit"
+        )
+
+    audit = audit_rows[0]
+    retry_num = rai_retries + 1
+
+    logger.info(
+        "rai_retry_submitting",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        retry_number=retry_num,
+        max_retries=RAI_MAX_RETRIES,
+        rai_reason=rai_reason,
+    )
+
+    veo_client = get_veo_client()
+    result = veo_client.submit_video_generation(
+        prompt=audit["prompt_text"],
+        negative_prompt=audit.get("negative_prompt"),
+        correlation_id=f"{correlation_id}_rai_retry_{retry_num}",
+        aspect_ratio=audit["aspect_ratio"],
+        resolution=audit["resolution"],
+    )
+
+    new_operation_id = result["operation_id"]
+    operation_ids = list(metadata.get("operation_ids") or [])
+    operation_ids.append(new_operation_id)
+
+    metadata.update({
+        "rai_retry_count": retry_num,
+        "rai_last_reason": rai_reason,
+        "rai_last_retry_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "operation_ids": operation_ids,
+    })
+    # Clear failure fields so the post re-enters the polling loop
+    metadata.pop("error", None)
+    metadata.pop("error_type", None)
+    metadata.pop("failed_at", None)
+
+    supabase.table("posts").update({
+        "video_operation_id": new_operation_id,
+        "video_status": "submitted",
+        "video_metadata": metadata,
+    }).eq("id", post_id).execute()
+
+    logger.info(
+        "rai_retry_submitted",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        retry_number=retry_num,
+        new_operation_id=new_operation_id,
+    )
+
+
 def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:
     post_id = post["id"]
     veo_client = get_veo_client()
@@ -344,6 +437,12 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
         error = status_result.get("error") or {}
         error_message = error.get("message") or "Veo operation failed without an error message"
         error_code = error.get("code")
+
+        # Auto-retry RAI-filtered videos
+        if error_code == "RAI_FILTERED":
+            _retry_rai_filtered_video(post, correlation_id, error_message)
+            return
+
         if error_code is not None:
             raise ValueError(f"Veo operation failed ({error_code}): {error_message}")
         raise ValueError(f"Veo operation failed: {error_message}")

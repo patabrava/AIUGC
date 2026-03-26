@@ -26,10 +26,27 @@
 {% endif %}
 {%- endmacro %}
 
-{% macro video_status_chip(video_status) -%}
-{% if video_status == "completed" %}
+{% macro video_status_chip(video_status, video_metadata=None) -%}
+{% set rai_retry_count = (video_metadata or {}).get('rai_retry_count', 0) if video_metadata else 0 %}
+{% if video_status in ["completed", "caption_completed"] %}
 <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
     ✓ Completed
+</span>
+{% elif video_status == "caption_pending" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+    ⏳ Adding Captions
+</span>
+{% elif video_status == "caption_processing" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+    ⏳ Burning Captions
+</span>
+{% elif video_status == "caption_failed" %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+    ✗ Caption Failed
+</span>
+{% elif video_status in ["processing", "submitted"] and rai_retry_count > 0 %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+    ⟳ Retrying ({{ rai_retry_count }}/3)
 </span>
 {% elif video_status == "processing" %}
 <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">

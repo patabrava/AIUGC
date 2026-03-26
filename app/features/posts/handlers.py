@@ -138,10 +138,14 @@ async def update_post_script_review(post_id: str, request: Request):
             seed_data["script_review_status"] = "pending"
             seed_data.pop("video_excluded", None)
 
-        supabase.table("posts").update({
+        update_payload = {
             "seed_data": seed_data,
-            "video_prompt_json": None if action == "removed" else post.get("video_prompt_json")
-        }).eq("id", post_id).execute()
+            "video_prompt_json": None if action == "removed" else post.get("video_prompt_json"),
+        }
+        if action == "removed":
+            update_payload["video_status"] = None
+
+        supabase.table("posts").update(update_payload).eq("id", post_id).execute()
 
         logger.info(
             "post_script_review_updated",
