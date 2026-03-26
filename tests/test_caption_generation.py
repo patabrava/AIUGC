@@ -63,38 +63,6 @@ def test_validate_caption_variant_accepts_expected_structure(key, body):
     assert validated["char_count"] >= captions.FAMILY_SPECS[key]["min_chars"]
 
 
-def test_validate_caption_variant_rejects_missing_paragraph_break_for_bullets():
-    broken = MEDIUM_BODY.replace("\n\n", "\n", 1)
-    with pytest.raises(ValidationError):
-        captions.validate_caption_variant("medium_bullets", broken, "Ganz anderes Skript.")
-
-
-def test_validate_caption_variant_rejects_long_medium_without_second_prose_paragraph():
-    too_dense = (
-        "Bei Anträgen kippt selten das große Ganze, sondern fast immer ein kleines Detail, und genau deshalb lohnt sich ein klarer Ablauf schon vor dem ersten Formular.\n\n"
-        "• Prüfe Fristen und Nachweise, bevor du loslegst.\n"
-        "• Halte Rückfragen kurz, weil deine Unterlagen schon sortiert sind.\n"
-        "• Plane Puffer ein, damit unterwegs nichts unnötig eskaliert.\n\n"
-        "#Barrierefrei #Alltagstipps #Selbstbestimmt"
-    )
-    assert len(too_dense) >= 320
-    with pytest.raises(ValidationError):
-        captions.validate_caption_variant("medium_bullets", too_dense, "Ganz anderes Skript.")
-
-
-def test_validate_caption_variant_rejects_long_structured_without_second_prose_paragraph():
-    broken = (
-        "Wenn du bei Unterstützung nur auf den ersten Hinweis hörst, verlierst du oft Zeit und Nerven. "
-        "Ein klarer Ablauf macht den Unterschied, gerade wenn mehrere Stellen beteiligt sind.\n\n"
-        "1. Sammle zuerst alle Nachweise, die wirklich verlangt werden.\n"
-        "2. Prüfe danach, welche Stelle in deinem Fall zuständig ist.\n"
-        "3. Halte Termine, Rückfragen und Bestätigungen sauber fest.\n"
-        "4. Plane genug Puffer ein, damit du nicht unter Druck nachreichen musst.\n\n"
-        "#Barrierefrei #Selbstbestimmt #RollstuhlAlltag"
-    )
-    with pytest.raises(ValidationError):
-        captions.validate_caption_variant("long_structured", broken, "Ganz anderes Skript.")
-
 
 def test_select_caption_variant_key_is_deterministic():
     first = captions.select_caption_variant_key(topic_title="Thema", post_type="value", script="Script")

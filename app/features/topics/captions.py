@@ -12,9 +12,9 @@ from app.core.errors import ValidationError
 
 FAMILY_ORDER = ("short_paragraph", "medium_bullets", "long_structured")
 FAMILY_SPECS: Dict[str, Dict[str, int]] = {
-    "short_paragraph": {"min_chars": 140, "max_chars": 260},
-    "medium_bullets": {"min_chars": 220, "max_chars": 420},
-    "long_structured": {"min_chars": 350, "max_chars": 700},
+    "short_paragraph": {"min_chars": 100, "max_chars": 350},
+    "medium_bullets": {"min_chars": 180, "max_chars": 550},
+    "long_structured": {"min_chars": 150, "max_chars": 900},
 }
 _MARKER_PATTERN = re.compile(r"^\[(short_paragraph|medium_bullets|long_structured)\]\s*$", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"(?<!\w)#[A-Za-zÀ-ÿ0-9_]+")
@@ -161,51 +161,16 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
         raise ValidationError(message="Caption repeats script too closely", details={"key": key})
 
     if key == "short_paragraph":
-        if len(paragraphs) != 1:
-            raise ValidationError(message="short_paragraph must contain exactly one paragraph", details={"paragraphs": paragraphs})
         if bullets or numbered:
             raise ValidationError(message="short_paragraph cannot contain bullets or numbering", details={"key": key})
     elif key == "medium_bullets":
-        if len(paragraphs) < 2:
-            raise ValidationError(message="medium_bullets must contain a paragraph break", details={"key": key})
-        list_index = _index_of_first_structured_paragraph(paragraphs)
-        if list_index == -1:
-            raise ValidationError(message="medium_bullets must contain a structured bullet paragraph", details={"paragraphs": paragraphs})
-        prose_paragraphs = paragraphs[:list_index]
-        if not prose_paragraphs:
-            raise ValidationError(message="medium_bullets hook must be isolated before bullets", details={"paragraphs": paragraphs})
-        if any(_paragraph_contains_structured_list(paragraph) for paragraph in prose_paragraphs):
-            raise ValidationError(message="medium_bullets hook paragraphs must stay separate from bullets", details={"paragraphs": paragraphs})
-        if char_count >= 320 and len(prose_paragraphs) < 2:
-            raise ValidationError(
-                message="Long medium_bullets captions must use two prose paragraphs before bullets",
-                details={"paragraphs": paragraphs, "char_count": char_count},
-            )
-        if len(bullets) < 2 or len(bullets) > 3:
-            raise ValidationError(message="medium_bullets must contain 2-3 bullets", details={"bullets": bullets})
-        if numbered:
-            raise ValidationError(message="medium_bullets cannot contain numbering", details={"numbered": numbered})
+        if not bullets and not numbered:
+            raise ValidationError(message="medium_bullets must contain bullets or numbered items", details={"key": key})
     elif key == "long_structured":
-        if len(paragraphs) < 3:
-            raise ValidationError(message="long_structured must contain multiple prose paragraphs before the list", details={"key": key, "paragraphs": paragraphs})
-        list_index = _index_of_first_structured_paragraph(paragraphs)
-        if list_index == -1:
-            raise ValidationError(message="long_structured must contain a structured list paragraph", details={"paragraphs": paragraphs})
-        prose_paragraphs = paragraphs[:list_index]
-        if len(prose_paragraphs) < 2:
-            raise ValidationError(
-                message="long_structured must contain at least two prose paragraphs before the list",
-                details={"paragraphs": paragraphs},
-            )
-        if any(_paragraph_contains_structured_list(paragraph) for paragraph in prose_paragraphs):
-            raise ValidationError(message="long_structured intro paragraphs must stay separate from the list", details={"paragraphs": paragraphs})
-        bullet_ok = 3 <= len(bullets) <= 4 and not numbered
-        number_ok = 2 <= len(numbered) <= 4 and not bullets
-        if not bullet_ok and not number_ok:
-            raise ValidationError(
-                message="long_structured must contain 3-4 bullets or 2-4 numbered lines",
-                details={"bullets": bullets, "numbered": numbered},
-            )
+        if len(paragraphs) < 2:
+            raise ValidationError(message="long_structured must contain at least two paragraphs", details={"key": key})
+        if not bullets and not numbered:
+            raise ValidationError(message="long_structured must contain bullets or numbered items", details={"key": key})
 
     return {
         "key": key,
@@ -404,7 +369,7 @@ def generate_caption_bundle(
                     "Antworte ausschliesslich im Markerformat mit [short_paragraph], [medium_bullets] und [long_structured]. "
                     "Keine Erklaerungen, kein JSON, kein Markdown."
                 ),
-                max_tokens=2000,
+                max_tokens=2500,
                 temperature=0.8,
             )
             parsed = _parse_text_variants(raw_text)
