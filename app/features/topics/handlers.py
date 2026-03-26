@@ -23,12 +23,6 @@ from app.features.topics.schemas import (
     TopicResearchRunRequest,
 )
 from app.features.topics.agents import (
-    generate_topics_research_agent,
-    generate_dialog_scripts,
-    extract_seed_strict_extractor,
-    convert_research_item_to_topic,
-    build_seed_payload,
-    generate_topic_script_candidate,
     generate_lifestyle_topics,
     build_lifestyle_seed_payload,
 )
@@ -360,8 +354,10 @@ def _clear_discovery_task(batch_id: str, task: asyncio.Task) -> None:
 def is_batch_discovery_active(batch_id: str) -> bool:
     with _SEEDING_PROGRESS_LOCK:
         task = _DISCOVERY_TASKS.get(batch_id)
-        if not task:
+        if task is None and batch_id not in _DISCOVERY_TASKS:
             return False
+        if task is None:
+            return True  # sentinel set by schedule_batch_discovery
         if task.done():
             _DISCOVERY_TASKS.pop(batch_id, None)
             return False
@@ -415,9 +411,13 @@ async def _run_batch_discovery_task(batch_id: str) -> None:
 
 
 def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
-    if is_batch_discovery_active(batch_id):
-        logger.info("batch_autoseed_already_active", batch_id=batch_id, reason=reason)
-        return False
+    with _SEEDING_PROGRESS_LOCK:
+        task = _DISCOVERY_TASKS.get(batch_id)
+        if task and not task.done():
+            logger.info("batch_autoseed_already_active", batch_id=batch_id, reason=reason)
+            return False
+        # Mark a sentinel so concurrent callers see the slot as taken
+        _DISCOVERY_TASKS[batch_id] = None  # type: ignore[assignment]
 
     batch = get_batch_by_id(batch_id)
     if batch["state"] != BatchState.S1_SETUP.value:
@@ -427,6 +427,9 @@ def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
             state=batch["state"],
             reason=reason,
         )
+        with _SEEDING_PROGRESS_LOCK:
+            if _DISCOVERY_TASKS.get(batch_id) is None:
+                _DISCOVERY_TASKS.pop(batch_id, None)
         return False
 
     task = asyncio.create_task(_run_batch_discovery_task(batch_id))
@@ -528,7 +531,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             limit=count,
             post_type=post_type,
         )
-        if len(stored_suggestions) >= count:
+        if len(stored_suggestions) >= count and post_type != "lifestyle":
             update_seeding_progress(
                 batch_id,
                 state=batch["state"],
@@ -574,6 +577,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     topic_cta=topic_cta,
                     spoken_duration=float(suggestion.get("spoken_duration") or 5),
                     seed_data=seed_payload,
+                    target_length_tier=batch.get("target_length_tier"),
                 )
                 created_posts.append(post)
                 dedup_topic_record = {
@@ -748,7 +752,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     topic_rotation=topic_data["rotation"],
                     topic_cta=topic_data["cta"],
                     spoken_duration=float(topic_data["spoken_duration"]),
-                    seed_data=seed_payload
+                    seed_data=seed_payload,
+                    target_length_tier=target_length_tier,
                 )
 
                 created_posts.append(post)
@@ -776,273 +781,113 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 }
                 all_generated_topics.append(dedup_topic_record)
         else:
-            # Value/Product pipeline: Deep Research candidates via PROMPT_1 with retries for unique topics.
             required_topics = count
-            collected_candidates: List[Dict[str, Any]] = []
-            attempts = 0
-            max_attempts = 5
-            dedupe_reference = existing_topics + all_generated_topics
-
-            def progress_callback(update: Dict[str, Any]) -> None:
-                provider_status = str(update.get("provider_status") or "").upper()
-                stage = "retry_wait" if update.get("is_retrying") else "researching"
-                stage_label = (
-                    "Retrying the Gemini research interaction"
-                    if update.get("is_retrying")
-                    else "Gemini deep research is running"
-                )
-                if provider_status in {"DONE", "COMPLETED", "SUCCEEDED"}:
-                    stage_label = "Gemini deep research finished"
-
-                update_seeding_progress(
-                    batch_id,
-                    state=batch["state"],
-                    stage=stage,
-                    stage_label=stage_label,
-                    detail_message=update.get("detail_message") or f"Gemini is still researching {post_type} topics.",
-                    posts_created=len(created_posts),
-                    expected_posts=expected_posts,
-                    current_post_type=post_type,
-                    attempt=attempts + 1,
-                    max_attempts=max_attempts,
-                    is_retrying=bool(update.get("is_retrying")),
-                    retry_message=update.get("retry_message"),
-                    provider_interaction_id=update.get("provider_interaction_id"),
-                    provider_status=provider_status or None,
-                )
-
-            while len(collected_candidates) < required_topics and attempts < max_attempts:
-                remaining_topics = required_topics - len(collected_candidates)
-                request_count = remaining_topics if attempts == 0 else min(required_topics, remaining_topics + 2)
+            target_tier = batch.get("target_length_tier") or 8
+            update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="researching",
+                stage_label="Checking stored bank coverage",
+                detail_message=(
+                    f"Looking for {required_topics} stored {post_type} suggestions at {target_tier}s before any warm-up."
+                ),
+                posts_created=len(created_posts),
+                expected_posts=expected_posts,
+                current_post_type=post_type,
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
+            stored_suggestions = list_topic_suggestions(
+                target_length_tier=target_tier,
+                limit=required_topics,
+                post_type=post_type,
+            )
+            if len(stored_suggestions) < required_topics:
                 update_seeding_progress(
                     batch_id,
                     state=batch["state"],
                     stage="researching",
-                    stage_label="Researching current source-backed topics",
+                    stage_label="Warming up the topic bank",
                     detail_message=(
-                        f"Fetching {request_count} fresh {post_type} topic candidates from the research model."
+                        f"Stored bank coverage is short, so a canonical 3-topic warm-up is running for {post_type}."
                     ),
                     posts_created=len(created_posts),
                     expected_posts=expected_posts,
                     current_post_type=post_type,
-                    attempt=attempts + 1,
-                    max_attempts=max_attempts,
-                    is_retrying=attempts > 0,
-                    retry_message=(
-                        "Retrying with extra candidates because earlier results overlapped."
-                        if attempts > 0
-                        else None
-                    ),
-                )
-                items = generate_topics_research_agent(
-                    post_type=post_type,
-                    count=request_count,
-                    progress_callback=progress_callback,
-                )
-
-                update_seeding_progress(
-                    batch_id,
-                    state=batch["state"],
-                    stage="collecting",
-                    stage_label="Collecting distinct topic candidates",
-                    detail_message=(
-                        f"Comparing new {post_type} findings against the registry and current batch to keep topics distinct."
-                    ),
-                    posts_created=len(created_posts),
-                    expected_posts=expected_posts,
-                    current_post_type=post_type,
-                    attempt=attempts + 1,
-                    max_attempts=max_attempts,
+                    attempt=None,
+                    max_attempts=None,
                     is_retrying=False,
                     retry_message=None,
                 )
-                topic_data = [convert_research_item_to_topic(item) for item in items]
-                candidate_dicts: List[Dict[str, Any]] = []
-
-                for idx, data in enumerate(topic_data):
-                    candidate_dicts.append(
-                        {
-                            "title": data.title,
-                            "rotation": data.rotation,
-                            "cta": data.cta,
-                            "spoken_duration": float(data.spoken_duration),
-                            "__payload": {
-                                "topic_model": data,
-                                "original_item": items[idx],
-                            },
-                        }
-                    )
-
-                unique_candidates = deduplicate_topics(
-                    candidate_dicts,
-                    dedupe_reference,
-                    threshold=0.35,
+                harvest_topics_to_bank_sync(
+                    post_type_counts={post_type: _WARMUP_SEED_TOPIC_COUNT},
+                    target_length_tier=target_tier,
+                    trigger_source="batch_discovery_warmup",
                 )
-
-                for candidate in unique_candidates:
-                    if len(collected_candidates) >= required_topics:
-                        break
-                    collected_candidates.append(candidate)
-                    dedupe_reference.append(
-                        {
-                            "title": candidate["title"],
-                            "rotation": candidate["rotation"],
-                            "cta": candidate["cta"],
-                            "spoken_duration": candidate["spoken_duration"],
-                        }
-                    )
-
-                attempts += 1
-
-                logger.info(
-                    "topic_candidate_collection_progress",
-                    batch_id=batch_id,
+                stored_suggestions = list_topic_suggestions(
+                    target_length_tier=target_tier,
+                    limit=required_topics,
                     post_type=post_type,
-                    attempt=attempts,
-                    requested=request_count,
-                    remaining=max(required_topics - len(collected_candidates), 0),
-                    collected=len(collected_candidates),
-                    required=required_topics,
                 )
 
-                remaining_after = max(required_topics - len(collected_candidates), 0)
-                should_retry = remaining_after > 0 and attempts < max_attempts
-                update_seeding_progress(
-                    batch_id,
-                    state=batch["state"],
-                    stage="retry_wait" if should_retry else "collecting",
-                    stage_label=(
-                        "Requesting another research pass"
-                        if should_retry
-                        else "Candidate collection complete"
-                    ),
-                    detail_message=(
-                        f"Collected {len(collected_candidates)} of {required_topics} distinct {post_type} topics so far."
-                    ),
-                    posts_created=len(created_posts),
-                    expected_posts=expected_posts,
-                    current_post_type=post_type,
-                    attempt=attempts,
-                    max_attempts=max_attempts,
-                    is_retrying=should_retry,
-                    retry_message=(
-                        "Still working. Duplicates were filtered out, so another pass is running."
-                        if should_retry
-                        else None
-                    ),
-                )
-
-            for candidate in collected_candidates[:required_topics]:
-                payload = candidate["__payload"]
-                topic_model = payload["topic_model"]
-                original_item = payload["original_item"]
+            if len(stored_suggestions) >= required_topics:
                 update_seeding_progress(
                     batch_id,
                     state=batch["state"],
                     stage="writing_posts",
-                    stage_label="Writing posts from approved topic candidates",
+                    stage_label="Reusing stored topic-bank suggestions",
                     detail_message=(
-                        f"Building scripts and seed payloads for the collected {post_type} topics."
+                        f"Found {len(stored_suggestions)} stored suggestions for {post_type} and writing the requested posts directly from the bank."
                     ),
                     posts_created=len(created_posts),
                     expected_posts=expected_posts,
                     current_post_type=post_type,
-                    attempt=attempts,
-                    max_attempts=max_attempts,
+                    attempt=None,
+                    max_attempts=None,
                     is_retrying=False,
                     retry_message=None,
                 )
-                prompt1_item = generate_topic_script_candidate(
-                    post_type=post_type,
-                    target_length_tier=batch.get("target_length_tier") or 8,
-                    dossier=payload.get("topic_model"),
-                    lane_candidate=payload.get("original_item").model_dump(mode="json")
-                    if hasattr(payload.get("original_item"), "model_dump")
-                    else {"title": original_item.topic},
-                )
-                if hasattr(topic_model, "model_dump"):
-                    topic_model_payload = topic_model.model_dump(mode="json")
-                elif isinstance(topic_model, dict):
-                    topic_model_payload = dict(topic_model)
-                elif hasattr(topic_model, "__dict__"):
-                    topic_model_payload = {key: value for key, value in vars(topic_model).items() if not key.startswith("_")}
-                else:
-                    topic_model_payload = {}
-                topic_title = str(
-                    topic_model_payload.get("topic")
-                    or topic_model_payload.get("title")
-                    or getattr(original_item, "topic", "")
-                    or getattr(prompt1_item, "topic", "")
-                    or ""
-                ).strip()
-                topic_rotation = str(
-                    topic_model_payload.get("rotation")
-                    or getattr(prompt1_item, "script", "")
-                    or topic_title
-                ).strip()
-                topic_cta = str(topic_model_payload.get("cta") or topic_rotation).strip()
-                seed = build_research_seed_data(
-                    prompt1_item=prompt1_item,
-                    research_dossier=topic_model_payload,
-                    topic_title=topic_title,
-                )
-
-                seed_payload = build_seed_payload(
-                    prompt1_item,
-                    strict_seed=seed,
-                    dialog_scripts=None,
-                    source_title=topic_title,
-                    source_summary=str(topic_model_payload.get("source_summary") or getattr(prompt1_item, "source_summary", "") or getattr(prompt1_item, "caption", "") or "").strip() or None,
-                )
-                seed_payload = _attach_publish_captions(
-                    topic_title=topic_title,
-                    post_type=post_type,
-                    seed_payload=seed_payload,
-                    script_fallback=topic_rotation,
-                    context=str(seed_payload.get("description") or seed_payload.get("research_caption") or topic_title),
-                    canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
-                )
-
-                add_topic_to_registry(
-                    title=topic_title,
-                    rotation=topic_rotation,
-                    cta=topic_cta,
-                )
-
-                post = create_post_for_batch(
-                    batch_id=batch_id,
-                    post_type=post_type,
-                    topic_title=topic_title,
-                    topic_rotation=topic_rotation,
-                    topic_cta=topic_cta,
-                    spoken_duration=float(getattr(topic_model, "spoken_duration", 0) or 0),
-                    seed_data=seed_payload,
-                )
-
-                created_posts.append(post)
-                update_seeding_progress(
-                    batch_id,
-                    state=batch["state"],
-                    stage="writing_posts",
-                    stage_label="Writing posts from approved topic candidates",
-                    detail_message=(
-                        f"{len(created_posts)} of {expected_posts} posts are now ready for script review."
-                    ),
-                    posts_created=len(created_posts),
-                    expected_posts=expected_posts,
-                    current_post_type=post_type,
-                    attempt=attempts,
-                    max_attempts=max_attempts,
-                    is_retrying=False,
-                    retry_message=None,
-                )
-                dedup_topic_record = {
-                    "title": topic_model.title,
-                    "rotation": topic_model.rotation,
-                    "cta": topic_model.cta,
-                    "spoken_duration": float(topic_model.spoken_duration),
-                }
-                all_generated_topics.append(dedup_topic_record)
+                for suggestion in stored_suggestions[:required_topics]:
+                    topic_title = suggestion["title"]
+                    topic_rotation = suggestion.get("rotation") or suggestion.get("script") or topic_title
+                    topic_cta = suggestion.get("cta") or topic_rotation
+                    seed_payload = (
+                        suggestion.get("seed_payload")
+                        or {"facts": [topic_rotation]}
+                    )
+                    seed_payload = _attach_publish_captions(
+                        topic_title=topic_title,
+                        post_type=post_type,
+                        seed_payload=seed_payload,
+                        script_fallback=topic_rotation,
+                        context=str(seed_payload.get("description") or seed_payload.get("research_caption") or topic_rotation),
+                        canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
+                    )
+                    add_topic_to_registry(
+                        title=topic_title,
+                        rotation=topic_rotation,
+                        cta=topic_cta,
+                    )
+                    post = create_post_for_batch(
+                        batch_id=batch_id,
+                        post_type=post_type,
+                        topic_title=topic_title,
+                        topic_rotation=topic_rotation,
+                        topic_cta=topic_cta,
+                        spoken_duration=float(suggestion.get("spoken_duration") or 5),
+                        seed_data=seed_payload,
+                        target_length_tier=batch.get("target_length_tier"),
+                    )
+                    created_posts.append(post)
+                    dedup_topic_record = {
+                        "title": topic_title,
+                        "rotation": topic_rotation,
+                        "cta": topic_cta,
+                        "spoken_duration": float(suggestion.get("spoken_duration") or 5),
+                    }
+                    all_generated_topics.append(dedup_topic_record)
 
     if not created_posts:
         logger.warning(
@@ -1123,7 +968,8 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 topic_rotation=fallback_topic["rotation"],
                 topic_cta=fallback_topic["cta"],
                 spoken_duration=float(fallback_topic["spoken_duration"]),
-                seed_data=seed_payload
+                seed_data=seed_payload,
+                target_length_tier=fallback_tier,
             )
 
             created_posts.append(fallback_post)

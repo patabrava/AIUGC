@@ -111,6 +111,7 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
         topic_cta: str,
         spoken_duration: float,
         seed_data,
+        **kwargs,
     ):
         post = {
             "id": f"post-{len(created_posts) + 1}",
@@ -129,12 +130,29 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
         batch["state"] = target_state.value if hasattr(target_state, "value") else target_state
         return dict(batch)
 
+    stored_bank_entries = []
+    stored_variants = []
+
+    def fake_list_topic_suggestions(**kwargs):
+        return []
+
+    def fake_store_topic_bank_entry(**kwargs):
+        entry = {"id": f"bank-{len(stored_bank_entries) + 1}", "title": kwargs.get("title", "")}
+        stored_bank_entries.append(entry)
+        return entry
+
+    def fake_upsert_topic_script_variants(**kwargs):
+        stored_variants.append(kwargs)
+
     monkeypatch.setattr(topic_agents, "generate_dialog_scripts", fake_generate_dialog_scripts)
     monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
     monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", fake_get_all_topics_from_registry)
     monkeypatch.setattr(topic_handlers, "add_topic_to_registry", fake_add_topic_to_registry)
     monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
     monkeypatch.setattr(topic_handlers, "update_batch_state", fake_update_batch_state)
+    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", fake_list_topic_suggestions)
+    monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
     topic_handlers.clear_seeding_progress(batch["id"])
 
     result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
@@ -144,7 +162,7 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
     assert len(created_posts) == 4, created_posts
     assert {post["post_type"] for post in created_posts} == {"lifestyle"}, created_posts
     assert all(post["topic_title"] not in LIFESTYLE_TEMPLATES for post in created_posts), created_posts
-    assert len(registry_rows) == 4, registry_rows
+    assert len(stored_bank_entries) == 4, stored_bank_entries
 
 
 def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(monkeypatch):
@@ -226,6 +244,7 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
         topic_cta: str,
         spoken_duration: float,
         seed_data,
+        **kwargs,
     ):
         post = {
             "id": f"post-{len(created_posts) + 1}",
@@ -240,20 +259,37 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
     def fail_update_batch_state(batch_id: str, target_state):
         raise AssertionError("Batch state should not advance when a requested post type is missing")
 
+    value_suggestion = {
+        "id": "suggestion-value-1",
+        "title": "Value topic title",
+        "rotation": "Value rotation",
+        "cta": "Value cta",
+        "spoken_duration": 6.0,
+        "seed_payload": {"script": "Value dialog script stays valid for the regression harness.", "facts": ["Value fact"]},
+    }
+
+    def fake_list_topic_suggestions(**kwargs):
+        if kwargs.get("post_type") == "value":
+            return [value_suggestion]
+        return []
+
+    def fake_store_topic_bank_entry(**kwargs):
+        return {"id": "bank-1", "title": kwargs.get("title", "")}
+
+    def fake_upsert_topic_script_variants(**kwargs):
+        pass
+
     monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
     monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", fake_get_all_topics_from_registry)
-    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", lambda **kwargs: [])
-    monkeypatch.setattr(topic_handlers, "generate_topics_research_agent", fake_generate_topics_research_agent)
-    monkeypatch.setattr(topic_handlers, "convert_research_item_to_topic", fake_convert_research_item_to_topic)
-    monkeypatch.setattr(topic_handlers, "generate_dialog_scripts", fake_generate_dialog_scripts)
-    monkeypatch.setattr(topic_handlers, "generate_topic_script_candidate", fake_generate_topic_script_candidate)
-    monkeypatch.setattr(topic_handlers, "extract_seed_strict_extractor", fake_extract_seed_strict_extractor)
-    monkeypatch.setattr(topic_handlers, "build_seed_payload", fake_build_seed_payload)
+    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", fake_list_topic_suggestions)
+    monkeypatch.setattr(topic_agents, "generate_dialog_scripts", fake_generate_dialog_scripts)
     monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)
     monkeypatch.setattr(topic_handlers, "build_lifestyle_seed_payload", fake_build_lifestyle_seed_payload)
     monkeypatch.setattr(topic_handlers, "add_topic_to_registry", fake_add_topic_to_registry)
     monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
     monkeypatch.setattr(topic_handlers, "update_batch_state", fail_update_batch_state)
+    monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
     topic_handlers.clear_seeding_progress(batch["id"])
 
     with pytest.raises(ValidationError) as exc_info:
