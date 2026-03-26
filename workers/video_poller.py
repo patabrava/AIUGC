@@ -58,8 +58,6 @@ if not _veo_available:
 POLL_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
 RAI_MAX_RETRIES = 3
-EXPANSION_INTERVAL_SECONDS = 24 * 60 * 60  # 24 hours
-EXPANSION_MAX_SCRIPTS_PER_RUN = 30
 
 
 def _poller_identity() -> str:
@@ -1058,54 +1056,12 @@ def _reconcile_batches_ready_for_qa() -> None:
         )
 
 
-def _maybe_expand_script_bank(last_expansion_time: float) -> float:
-    """Run daily script bank expansion if enough time has passed.
-
-    Returns the updated last_expansion_time.
-    """
-    now = time.time()
-    if not get_settings().video_poller_enable_script_bank_expansion:
-        return now
-    if (now - last_expansion_time) < EXPANSION_INTERVAL_SECONDS:
-        return last_expansion_time
-
-    try:
-        from app.features.topics.variant_expansion import expand_script_bank
-
-        logger.info(
-            "script_bank_expansion_starting",
-            max_scripts=EXPANSION_MAX_SCRIPTS_PER_RUN,
-        )
-        result = expand_script_bank(
-            max_scripts_per_cron_run=EXPANSION_MAX_SCRIPTS_PER_RUN,
-        )
-        logger.info(
-            "script_bank_expansion_complete",
-            total_generated=result["total_generated"],
-            topics_processed=result["topics_processed"],
-        )
-        return now
-    except Exception as exc:
-        logger.exception(
-            "script_bank_expansion_failed",
-            error=str(exc),
-        )
-        # Don't update the timestamp so it retries next cycle
-        return last_expansion_time
-
-
 if __name__ == "__main__":
     logger.info(
         "video_poller_started",
         poll_interval_seconds=POLL_INTERVAL_SECONDS,
-        expansion_interval_hours=EXPANSION_INTERVAL_SECONDS / 3600,
-        expansion_max_scripts=EXPANSION_MAX_SCRIPTS_PER_RUN,
         poller_identity=_poller_identity(),
-        script_bank_expansion_enabled=get_settings().video_poller_enable_script_bank_expansion,
     )
-
-    # Run expansion immediately on first startup, then every 24h
-    _last_expansion = 0.0
 
     while True:
         try:
@@ -1115,13 +1071,5 @@ if __name__ == "__main__":
             break
         except Exception as e:
             logger.exception("video_poller_unexpected_error", error=str(e))
-
-        try:
-            _last_expansion = _maybe_expand_script_bank(_last_expansion)
-        except KeyboardInterrupt:
-            logger.info("video_poller_stopped_by_user")
-            break
-        except Exception as e:
-            logger.exception("script_expansion_unexpected_error", error=str(e))
 
         time.sleep(POLL_INTERVAL_SECONDS)
