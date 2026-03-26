@@ -202,15 +202,10 @@ def _trim_tail(
         if result.returncode != 0:
             raise ValueError(f"ffmpeg trim failed: {result.stderr[-300:]}")
 
+        final_duration = _probe_video_duration(output_path)
+
         with open(output_path, "rb") as file_obj:
             trimmed_bytes = file_obj.read()
-
-    final_duration = None
-    with tempfile.TemporaryDirectory(prefix="video_trim_verify_") as temp_dir:
-        verify_path = os.path.join(temp_dir, "verify.mp4")
-        with open(verify_path, "wb") as file_obj:
-            file_obj.write(trimmed_bytes)
-        final_duration = _probe_video_duration(verify_path)
 
     logger.info(
         "trim_tail_applied",
@@ -691,13 +686,20 @@ def _store_completed_video(
         )
 
     if isinstance(processed_source, bytes) and TRIM_TAIL_MS > 0:
-        processed_source, trim_metadata = _trim_tail(
-            video_bytes=processed_source,
-            trim_ms=TRIM_TAIL_MS,
-            post_id=post_id,
-            correlation_id=correlation_id,
-        )
-        postprocess_metadata.update(trim_metadata)
+        try:
+            processed_source, trim_metadata = _trim_tail(
+                video_bytes=processed_source,
+                trim_ms=TRIM_TAIL_MS,
+                post_id=post_id,
+                correlation_id=correlation_id,
+            )
+            postprocess_metadata.update(trim_metadata)
+        except Exception:
+            logger.exception(
+                "trim_tail_failed_using_original",
+                post_id=post_id,
+                correlation_id=correlation_id,
+            )
 
     upload_method = "url" if isinstance(processed_source, str) else "bytes"
     upload_start = time.monotonic()
