@@ -82,6 +82,17 @@ services:
       web:
         condition: service_healthy
 
+  expansion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "workers/expansion_worker.py"]
+    environment: *flow-forge-env
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+
   topic-researcher:
     build:
       context: .

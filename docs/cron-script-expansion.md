@@ -9,47 +9,43 @@ Automatically generates new script variants for all topics in the topic bank, on
 
 ## Where It Runs
 
-Inside the existing **worker** Docker container (`workers/video_poller.py`). No separate container or external scheduler needed.
+Inside a dedicated **expansion-worker** Docker container (`workers/expansion_worker.py`) that reuses the same image as the API server. No external scheduler needed.
 
 ## How It Works
 
 ```
-Worker main loop (every 10 seconds):
-  1. poll_pending_videos()              <- existing, unchanged
-  2. _maybe_expand_script_bank()        <- NEW
+expansion_worker main loop:
+  1. run_expansion() immediately on startup
        |
-       +-- Has 24 hours passed since last run?
-            |
-            NO  -> return immediately (no-op)
-            |
-            YES -> expand_script_bank()
-                    |
-                    +-- Fetch all topics from topic_registry
-                    +-- Sort by fewest scripts first (neediest topics get priority)
-                    +-- For each topic:
-                    |     For each tier (8s, 16s, 32s):
-                    |       1. Query existing (framework, hook_style) pairs
-                    |       2. pick_next_variant() -> most diverse unused combo
-                    |       3. Generate script via Gemini (value: PROMPT_1, lifestyle: PROMPT_2)
-                    |       4. Store in topic_scripts with framework + hook_style
-                    |       5. Repeat up to 3 times per topic/tier
-                    +-- Stop after 30 total scripts
-                    +-- Log summary
+       +-- expand_script_bank()
+       |     |
+       |     +-- Fetch all topics from topic_registry
+       |     +-- Sort by fewest scripts first (neediest topics get priority)
+       |     +-- For each topic:
+       |     |     For each tier (8s, 16s, 32s):
+       |     |       1. Query existing (framework, hook_style) pairs
+       |     |       2. pick_next_variant() -> most diverse unused combo
+       |     |       3. Generate script via Gemini (value: PROMPT_1, lifestyle: PROMPT_2)
+       |     |       4. Store in topic_scripts with framework + hook_style
+       |     |       5. Repeat up to 3 times per topic/tier
+       |     +-- Stop after 30 total scripts
+       |     +-- Log summary
+  2. sleep 24 hours
+  3. repeat
 ```
 
 ## Timing
 
 | Parameter | Value | Config Location |
 |-----------|-------|-----------------|
-| Check interval | 10 seconds | `POLL_INTERVAL_SECONDS` in video_poller.py |
-| Expansion interval | 24 hours | `EXPANSION_INTERVAL_SECONDS` in video_poller.py |
-| Max scripts per run | 30 | `EXPANSION_MAX_SCRIPTS_PER_RUN` in video_poller.py |
+| Expansion interval | 24 hours | `EXPANSION_INTERVAL_SECONDS` in expansion_worker.py |
+| Max scripts per run | 30 | `MAX_SCRIPTS_PER_RUN` in expansion_worker.py |
 | Max scripts per topic | 20 | `DEFAULT_MAX_SCRIPTS_PER_TOPIC` in variant_expansion.py |
 | Scripts per topic/tier per run | 3 | Hardcoded in `expand_script_bank()` |
 
 ## First Run Behavior
 
-On container startup, `_last_expansion` is set to `0.0`, so the expansion runs immediately on the first loop iteration. After that, it runs every 24 hours.
+On container startup, the worker runs `expand_script_bank()` immediately, then sleeps for 24 hours before the next cycle.
 
 ## What It Generates
 
@@ -80,9 +76,9 @@ For each topic, the system picks the most diverse unused (framework, hook_style)
 
 - Each script generation is independent — if one fails, the cron logs it and moves to the next
 - If Gemini rate-limits or errors, the script is skipped (logged as `variant_expansion_failed`)
-- If the entire expansion crashes, the timestamp is NOT updated, so it retries on the next 10-second cycle
+- If the entire expansion crashes, the worker logs the exception, sleeps, and retries on the next 24-hour cycle
 - The unique constraint on `topic_scripts` prevents duplicate inserts even if the cron runs twice
-- Video polling is never blocked — expansion runs after `poll_pending_videos()` returns
+- Video polling is never blocked because expansion no longer shares the video poller process
 
 ## Log Events
 
@@ -100,7 +96,7 @@ For each topic, the system picks the most diverse unused (framework, hook_style)
 
 | File | Role |
 |------|------|
-| `workers/video_poller.py` | Worker loop + `_maybe_expand_script_bank()` |
+| `workers/expansion_worker.py` | Dedicated daily expansion loop |
 | `app/features/topics/variant_expansion.py` | `expand_script_bank()`, `expand_topic_variants()`, `pick_next_variant()` |
 | `app/features/topics/prompts.py` | `build_prompt1_variant()` (value), `build_prompt2()` (lifestyle) |
 | `app/features/topics/prompt_data/hook_bank.yaml` | Hook styles for value scripts |
