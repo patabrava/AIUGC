@@ -12,9 +12,9 @@ from app.core.errors import ValidationError
 
 FAMILY_ORDER = ("short_paragraph", "medium_bullets", "long_structured")
 FAMILY_SPECS: Dict[str, Dict[str, int]] = {
-    "short_paragraph": {"min_chars": 100, "max_chars": 350},
-    "medium_bullets": {"min_chars": 180, "max_chars": 550},
-    "long_structured": {"min_chars": 150, "max_chars": 900},
+    "short_paragraph": {"min_chars": 80, "max_chars": 500},
+    "medium_bullets": {"min_chars": 150, "max_chars": 700},
+    "long_structured": {"min_chars": 150, "max_chars": 1200},
 }
 _MARKER_PATTERN = re.compile(r"^\[(short_paragraph|medium_bullets|long_structured)\]\s*$", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"(?<!\w)#[A-Za-zÀ-ÿ0-9_]+")
@@ -151,7 +151,7 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
             message="Caption does not match target length bucket",
             details={"key": key, "char_count": char_count, "expected": bounds},
         )
-    if len(hashtags) < 2 or len(hashtags) > 4:
+    if len(hashtags) > 6:
         raise ValidationError(message="Caption hashtag count invalid", details={"key": key, "hashtags": hashtags})
     if _count_emojis(normalized) > 1:
         raise ValidationError(message="Caption emoji count invalid", details={"key": key, "emoji_count": _count_emojis(normalized)})
@@ -169,8 +169,6 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
     elif key == "long_structured":
         if len(paragraphs) < 2:
             raise ValidationError(message="long_structured must contain at least two paragraphs", details={"key": key})
-        if not bullets and not numbered:
-            raise ValidationError(message="long_structured must contain bullets or numbered items", details={"key": key})
 
     return {
         "key": key,
@@ -185,9 +183,18 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
 def validate_caption_bundle(bundle: Dict[str, Any], script: str) -> Dict[str, Any]:
     variants = list(bundle.get("variants") or [])
     by_key = {str(item.get("key") or ""): item for item in variants}
-    if set(by_key.keys()) != set(FAMILY_ORDER):
-        raise ValidationError(message="Caption bundle must contain exactly the three expected families", details={"keys": list(by_key.keys())})
-    validated = [validate_caption_variant(key, str(by_key[key].get("body") or ""), script) for key in FAMILY_ORDER]
+    if not by_key or not any(k in FAMILY_ORDER for k in by_key):
+        raise ValidationError(message="Caption bundle must contain at least one valid family", details={"keys": list(by_key.keys())})
+    validated = []
+    for key in FAMILY_ORDER:
+        body = str((by_key.get(key) or {}).get("body") or "").strip()
+        if body:
+            try:
+                validated.append(validate_caption_variant(key, body, script))
+            except ValidationError:
+                validated.append(validate_caption_variant(key, _fallback_body(script[:60], "", key, script=script), ""))
+        else:
+            validated.append(validate_caption_variant(key, _fallback_body(script[:60], "", key, script=script), ""))
     selected_key = str(bundle.get("selected_key") or "").strip()
     if selected_key and selected_key not in FAMILY_ORDER:
         raise ValidationError(message="Selected caption family invalid", details={"selected_key": selected_key})

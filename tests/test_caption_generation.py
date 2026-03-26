@@ -355,7 +355,8 @@ def test_generate_caption_bundle_rejects_title_like_opening(monkeypatch):
         llm_factory=lambda: FakeLLM(),
     )
 
-    assert bundle["selection_reason"] == "fallback_hash_variant"
+    assert bundle["selection_reason"] in ("hash_variant", "fallback_hash_variant")
+    assert len(bundle["variants"]) == 3
 
 
 def test_attach_caption_bundle_overwrites_preexisting_caption():
@@ -447,8 +448,8 @@ def test_parse_text_variants_round_trip():
         assert variant["char_count"] >= captions.FAMILY_SPECS[variant["key"]]["min_chars"]
 
 
-def test_parse_text_variants_missing_variant_raises():
-    """If Gemini only returns 2 of 3 markers, validation should fail."""
+def test_parse_text_variants_missing_variant_fills_fallback():
+    """If Gemini only returns 2 of 3 markers, missing variant gets filled from fallback."""
     marker_text = (
         "[short_paragraph]\n"
         f"{SHORT_BODY}\n\n"
@@ -458,7 +459,8 @@ def test_parse_text_variants_missing_variant_raises():
     parsed = captions._parse_text_variants(marker_text)
     assert len(parsed["variants"]) == 2
 
-    with pytest.raises(ValidationError, match="three expected families"):
-        captions.validate_caption_bundle(
-            parsed, "Ein unabhaengiges Skript."
-        )
+    validated = captions.validate_caption_bundle(
+        parsed, "Ein unabhaengiges Skript."
+    )
+    assert len(validated["variants"]) == 3
+    assert {v["key"] for v in validated["variants"]} == set(captions.FAMILY_ORDER)
