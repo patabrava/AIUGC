@@ -32,7 +32,7 @@ class UpdateScriptReviewRequest(BaseModel):
 
 def _load_post_seed_data(post_id: str, supabase_client):
     """Fetch post plus normalized seed data for localized S2 review updates."""
-    response = supabase_client.table("posts").select("id", "batch_id", "seed_data", "video_prompt_json").eq("id", post_id).execute()
+    response = supabase_client.table("posts").select("id, batch_id, seed_data, video_prompt_json").eq("id", post_id).execute()
 
     if not response.data:
         raise FlowForgeException(
@@ -143,7 +143,8 @@ async def update_post_script_review(post_id: str, request: Request):
             "video_prompt_json": None if action == "removed" else post.get("video_prompt_json"),
         }
         if action == "removed":
-            update_payload["video_status"] = None
+            # Keep the existing non-null video_status; removal is expressed via seed_data flags.
+            update_payload["video_status"] = post.get("video_status") or "pending"
 
         supabase.table("posts").update(update_payload).eq("id", post_id).execute()
 
@@ -306,7 +307,7 @@ def _maybe_transition_batch_to_prompts_built(*, batch_id: str, supabase_client, 
             )
             return
 
-        posts_response = supabase_client.table("posts").select("id", "video_prompt_json", "seed_data").eq("batch_id", batch_id).execute()
+            posts_response = supabase_client.table("posts").select("id, video_prompt_json, seed_data").eq("batch_id", batch_id).execute()
         posts = posts_response.data or []
         if not posts:
             logger.warning(
