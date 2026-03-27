@@ -25,6 +25,8 @@
 - Before any dossier-derived text reaches `script`, `caption`, or `source_summary`, Stage 3 runs a local spoken-text sanitizer that strips research labels, markdown residue, artifact tails, and incomplete trailing fragments
 - Long-form fallback expansion now prefers cleaned fact sentences and treats `source_summary` / `cluster_summary` as optional metadata only, never as raw script material
 - A final spoken-copy cleanliness gate rejects label leakage such as `Demografische Dringlichkeit:` or truncated endings before persistence
+- Hook bank (`app/features/topics/prompt_data/hook_bank.yaml`) provides 14 prioritized families with emotional-core matching; `_format_hook_bank_section()` renders them sorted by priority (high → medium → low) with before/after negative examples
+- All three tier prompts include HOOK-REGELN (emotional hook mechanics), SCROLL-STOPP-TEST (self-evaluation), and TONALITAET (disability-appropriate tone: systemic barriers over personal overcoming, no inspiration porn)
 
 ### Stage 4 — Topic bank harvesting
 - Code: `app/features/topics/hub._harvest_seed_topic_to_bank`
