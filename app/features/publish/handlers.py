@@ -1577,21 +1577,29 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
                 elif network == SocialNetwork.INSTAGRAM.value:
                     remote_id = await _publish_instagram_reel(post, meta_connection)
                 elif network == SocialNetwork.TIKTOK.value:
-                    tiktok_job = await publish_tiktok_direct_for_post(
-                        post["id"],
-                        caption=post["publish_caption"],
-                        privacy_level=_default_tiktok_privacy_level(tiktok_connection),
-                        disable_comment=bool((tiktok_connection.get("creator_info") or {}).get("comment_disabled")),
-                        disable_duet=bool((tiktok_connection.get("creator_info") or {}).get("duet_disabled")),
-                        disable_stitch=bool((tiktok_connection.get("creator_info") or {}).get("stitch_disabled")),
-                    )
+                    tiktok_env = str(tiktok_connection.get("environment") or "").lower()
+                    if tiktok_env == "sandbox":
+                        tiktok_job = await upload_tiktok_draft_for_post(
+                            post["id"],
+                            caption=post["publish_caption"],
+                        )
+                    else:
+                        tiktok_job = await publish_tiktok_direct_for_post(
+                            post["id"],
+                            caption=post["publish_caption"],
+                            privacy_level=_default_tiktok_privacy_level(tiktok_connection),
+                            disable_comment=bool((tiktok_connection.get("creator_info") or {}).get("comment_disabled")),
+                            disable_duet=bool((tiktok_connection.get("creator_info") or {}).get("duet_disabled")),
+                            disable_stitch=bool((tiktok_connection.get("creator_info") or {}).get("stitch_disabled")),
+                        )
                     tiktok_payload = _load_json_object(tiktok_job.get("response_payload_json"))
                     provider_post_ids = tiktok_payload.get("publicaly_available_post_id") or []
                     remote_id = str(provider_post_ids[0]) if provider_post_ids else str(tiktok_job.get("tiktok_publish_id") or tiktok_job.get("id"))
                     provider_status = str(tiktok_payload.get("provider_status") or tiktok_job.get("status") or "").upper()
+                    post_mode = "draft" if tiktok_env == "sandbox" else "direct"
                     publish_results[network] = {
                         "status": "published" if tiktok_job.get("status") == "published" else "publishing",
-                        "post_mode": "direct",
+                        "post_mode": post_mode,
                         "provider_status": provider_status,
                         "publish_id": tiktok_job.get("tiktok_publish_id"),
                         "remote_id": remote_id,
