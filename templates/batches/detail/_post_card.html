@@ -23,6 +23,19 @@
     {% endif %}
     <div class="mt-3 flex items-center gap-2">
         {{ review_status_chip(review_status, post_removed) }}
+        {% if post.blog_enabled and post.blog_status in ['pending', 'generating'] %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-500/15 text-purple-400">
+            Blog Queued
+        </span>
+        {% elif post.blog_enabled and post.blog_status == 'draft' %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-500/15 text-green-400">
+            Blog Draft Ready
+        </span>
+        {% elif post.blog_enabled and post.blog_status == 'published' %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-500/15 text-green-400">
+            Blog Published
+        </span>
+        {% endif %}
     </div>
 
     {% if primary_script %}
@@ -50,38 +63,59 @@
     {% endif %}
 
     {% if batch.state == 'S2_SEEDED' %}
-    <div class="mt-4 flex flex-wrap gap-2">
-        {% if post_removed %}
-        <button
-            hx-put="/posts/{{ post.id }}/script-review"
-            hx-vals='{"action":"reset"}'
-            hx-swap="none"
-            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-            class="px-3 py-2 text-sm font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition"
-        >
-            Restore
-        </button>
-        {% else %}
-        <button
-            hx-put="/posts/{{ post.id }}/script-review"
-            hx-vals='{"action":"approved"}'
-            hx-swap="none"
-            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-            class="px-3 py-2 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition"
-        >
-            Approve Script
-        </button>
-        <button
-            hx-put="/posts/{{ post.id }}/script-review"
-            hx-vals='{"action":"removed"}'
-            hx-confirm="Remove this script from the batch before prompt and video generation?"
-            hx-swap="none"
-            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-            class="px-3 py-2 text-sm font-medium rounded-md border border-red-200 text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition"
-        >
-            Remove Script
-        </button>
-        {% endif %}
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap gap-2">
+            {% if post_removed %}
+            <button
+                hx-put="/posts/{{ post.id }}/script-review"
+                hx-vals='{"action":"reset"}'
+                hx-swap="none"
+                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                class="px-3 py-2 text-sm font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition"
+            >
+                Restore
+            </button>
+            {% else %}
+            <button
+                hx-put="/posts/{{ post.id }}/script-review"
+                hx-vals='{"action":"approved"}'
+                hx-swap="none"
+                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                class="px-3 py-2 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition"
+            >
+                Approve Script
+            </button>
+            <button
+                hx-put="/posts/{{ post.id }}/script-review"
+                hx-vals='{"action":"removed"}'
+                hx-confirm="Remove this script from the batch before prompt and video generation?"
+                hx-swap="none"
+                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                class="px-3 py-2 text-sm font-medium rounded-md border border-red-200 text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition"
+            >
+                Remove Script
+            </button>
+            {% endif %}
+        </div>
+        {# Blog Post Toggle #}
+        <div class="flex items-center gap-2 bg-purple-500/10 border border-purple-500/20 rounded-lg px-3 py-1.5"
+             x-data="{ blogEnabled: {{ 'true' if post.blog_enabled else 'false' }} }">
+            <span class="text-sm text-purple-400">Blog Post</span>
+            <button
+                type="button"
+                class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none"
+                :class="blogEnabled ? 'bg-purple-600' : 'bg-gray-600'"
+                @click="blogEnabled = !blogEnabled"
+                hx-put="/blog/posts/{{ post.id }}/blog-toggle"
+                hx-vals='js:JSON.stringify({enabled: !document.querySelector("[x-data]").closest("[x-data]").__x.$data.blogEnabled})'
+                hx-trigger="click"
+                hx-swap="none"
+            >
+                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                      :class="blogEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+                      style="margin-top: 2px;"></span>
+            </button>
+        </div>
     </div>
     {% endif %}
 
