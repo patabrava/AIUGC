@@ -221,6 +221,7 @@
                 { day: 'Thu', date: '', time: '' },
                 { day: 'Fri', date: '', time: '' },
             ],
+            timezone: 'Europe/Berlin',
             networks: [],
             posts: (options.posts || []).map((p) => ({
                 ...p,
@@ -365,18 +366,14 @@
                         },
                         body: JSON.stringify({
                             week_start: this.weekStart,
+                            timezone: this.timezone,
                             slots: this.slots.map((s) => ({ day: dayMap[s.day], time: s.time })),
                             default_networks: this.networks,
                             posts: this.posts.map((p, i) => {
-                                // Use time_override when slot date was customized
+                                // Always send time_override using the slot's actual date
                                 let timeOverride = p.timeOverride || null;
                                 if (!timeOverride && i < this.slots.length && this.slots[i].date && this.slots[i].time) {
-                                    const defaultDate = new Date(this.weekStart);
-                                    defaultDate.setDate(defaultDate.getDate() + i);
-                                    const defaultISO = defaultDate.toISOString().split('T')[0];
-                                    if (this.slots[i].date !== defaultISO) {
-                                        timeOverride = `${this.slots[i].date}T${this.slots[i].time}`;
-                                    }
+                                    timeOverride = `${this.slots[i].date}T${this.slots[i].time}`;
                                 }
                                 return {
                                     post_id: p.id,

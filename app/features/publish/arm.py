@@ -51,6 +51,7 @@ async def arm_batch_dispatch(
     posts_by_id = {p["id"]: p for p in posts_resp.data}
 
     # 3. Validate and schedule each post
+    user_tz = ZoneInfo(request.timezone) if request.timezone else BERLIN_TZ
     scheduled_posts = []
     for i, post_spec in enumerate(request.posts):
         db_post = posts_by_id.get(post_spec.post_id)
@@ -62,7 +63,7 @@ async def arm_batch_dispatch(
         # Compute scheduled_at
         if post_spec.time_override:
             local_dt = datetime.strptime(post_spec.time_override, "%Y-%m-%dT%H:%M")
-            local_dt = local_dt.replace(tzinfo=BERLIN_TZ)
+            local_dt = local_dt.replace(tzinfo=user_tz)
             scheduled_at = local_dt.astimezone(ZoneInfo("UTC")).isoformat()
         elif i < len(request.slots):
             slot = request.slots[i]

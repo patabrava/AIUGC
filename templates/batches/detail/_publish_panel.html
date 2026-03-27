@@ -25,6 +25,17 @@
                 <input type="date" x-model="weekStart"
                     class="px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
             </div>
+            <div>
+                <label class="block text-xs font-medium text-indigo-700 mb-1">Timezone</label>
+                <select x-model="timezone"
+                    class="px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                    <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
+                    <option value="Europe/London">Europe/London (GMT/BST)</option>
+                    <option value="America/New_York">America/New York (EST/EDT)</option>
+                    <option value="America/Los_Angeles">America/Los Angeles (PST/PDT)</option>
+                    <option value="UTC">UTC</option>
+                </select>
+            </div>
             <div class="flex items-center gap-2 ml-auto">
                 <label class="text-xs font-medium text-indigo-700">Networks</label>
                 <template x-for="net in [{id:'instagram',label:'IG',color:'purple'},{id:'facebook',label:'FB',color:'blue'},{id:'tiktok',label:'TT',color:'gray'}]" :key="net.id">

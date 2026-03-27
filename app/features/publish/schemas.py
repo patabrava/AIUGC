@@ -261,10 +261,11 @@ class PostArmSpec(BaseModel):
 
 
 class BatchArmRequest(BaseModel):
-    week_start: str = Field(..., description="ISO date YYYY-MM-DD, must be a Monday")
+    week_start: str = Field(..., description="ISO date YYYY-MM-DD")
     slots: List[SlotSpec] = Field(..., min_length=1, max_length=5)
     default_networks: List[str] = Field(..., min_length=1)
     posts: List[PostArmSpec] = Field(..., min_length=1)
+    timezone: str = Field(default="Europe/Berlin", description="IANA timezone for schedule times")
 
     @model_validator(mode="after")
     def validate_min_gap(self) -> "BatchArmRequest":
@@ -272,16 +273,16 @@ class BatchArmRequest(BaseModel):
         from zoneinfo import ZoneInfo
 
         day_offsets = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
-        berlin = ZoneInfo("Europe/Berlin")
+        tz = ZoneInfo(self.timezone)
         base = datetime.strptime(self.week_start, "%Y-%m-%d")
         times = []
         for i, post in enumerate(self.posts):
             if post.time_override:
-                dt = datetime.strptime(post.time_override, "%Y-%m-%dT%H:%M").replace(tzinfo=berlin)
+                dt = datetime.strptime(post.time_override, "%Y-%m-%dT%H:%M").replace(tzinfo=tz)
             elif i < len(self.slots):
                 slot = self.slots[i]
                 h, m = int(slot.time[:2]), int(slot.time[3:])
-                dt = base.replace(hour=h, minute=m, tzinfo=berlin) + timedelta(days=day_offsets[slot.day])
+                dt = base.replace(hour=h, minute=m, tzinfo=tz) + timedelta(days=day_offsets[slot.day])
             else:
                 continue
             times.append(dt)
