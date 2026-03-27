@@ -55,6 +55,8 @@ def test_build_prompt1_uses_32s_text_template():
     assert "Nur der Scripttext" in prompt
     assert "Keine Zwischenueberschriften" in prompt
     assert "keine Zitate wie `[cite: 1]`" in prompt
+    assert "HOOK-BANK" in prompt
+    assert "Fragen" in prompt
     assert "Nur valides JSON-Array" not in prompt
     assert "caption" not in prompt
     assert "source_summary" not in prompt
@@ -131,3 +133,12 @@ def test_parse_prompt1_response_accepts_minimal_stage3_contract(monkeypatch):
     assert batch.items[0].source_summary.startswith("Klare Arbeitshilfen")
     assert batch.items[0].framework == "PAL"
     assert batch.items[0].estimated_duration_s > 0
+
+
+def test_prompt1_8s_contains_hook_mechanics():
+    """8s prompt must contain explicit hook mechanics, not just 'klaren Hook-Start'."""
+    prompt = build_prompt1(post_type="value", desired_topics=1)
+    assert "klaren Hook-Start" not in prompt, "Old vague hook instruction still present"
+    assert "HOOK-REGELN" in prompt
+    assert "Scroll-Stopp" in prompt
+    assert "TONALITAET" in prompt
