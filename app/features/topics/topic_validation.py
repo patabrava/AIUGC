@@ -30,6 +30,18 @@ PROMPT2_DIALOG_WORD_BOUNDS = {
     32: (40, 66),
 }
 
+PROMPT1_WORD_BOUNDS = {
+    8: (12, 15),
+    16: (26, 36),
+    32: (54, 74),
+}
+
+PROMPT1_SENTENCE_BOUNDS = {
+    8: (1, 1),
+    16: (2, 2),
+    32: (3, 4),
+}
+
 GERMAN_SIGNAL_WORDS = {
     "und", "oder", "mit", "ohne", "für", "deutschland", "deutsche", "deutschen",
     "rollstuhl", "rollstuhlnutzer", "rollstuhlnutzerinnen", "alltag", "pflege",
@@ -51,6 +63,123 @@ ACCEPTED_GERMAN_LOAN_PHRASES = {
     "peer support",
 }
 
+SPOKEN_COPY_LABEL_MARKERS = (
+    "demografische dringlichkeit",
+    "zentrale erkenntnisse",
+    "leitende zusammenfassung",
+    "einordnung",
+    "einordnung der faktenlage",
+    "faktenlage",
+    "quellenlage",
+    "fazit",
+    "kontext",
+    "quelle",
+    "quellen",
+    "studie",
+    "studienlage",
+)
+
+INCOMPLETE_TRAILING_TOKENS = {
+    "aber",
+    "als",
+    "am",
+    "an",
+    "auch",
+    "auf",
+    "aus",
+    "bei",
+    "bist",
+    "damit",
+    "dann",
+    "darauf",
+    "dass",
+    "dem",
+    "den",
+    "der",
+    "des",
+    "die",
+    "durch",
+    "ein",
+    "eine",
+    "einem",
+    "einen",
+    "einer",
+    "eines",
+    "fuer",
+    "für",
+    "haeufig",
+    "häufig",
+    "im",
+    "in",
+    "massiv",
+    "mit",
+    "nach",
+    "oder",
+    "ohne",
+    "pro",
+    "seit",
+    "sind",
+    "somit",
+    "ueber",
+    "über",
+    "um",
+    "und",
+    "vom",
+    "von",
+    "vor",
+    "waehrend",
+    "während",
+    "weil",
+    "wenn",
+    "zunehmender",
+    "zunehmende",
+    "zunehmendem",
+    "zunehmenden",
+    "chronischer",
+    "chronische",
+    "chronischem",
+    "chronischen",
+    "zu",
+    "zum",
+    "zur",
+}
+
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_CITATION_PATTERN = re.compile(r"\[cite:\s*\d+(?:\s*,\s*\d+)*\]", flags=re.IGNORECASE)
+_URL_PATTERN = re.compile(r"https?://\S+")
+_BULLET_PREFIX_PATTERN = re.compile(r"(?m)^\s*[-*•]+\s*")
+_MULTISPACE_PATTERN = re.compile(r"\s+")
+_SCRIPT_ARTIFACT_PATTERN = re.compile(r"[\u200d\uFE0E\uFE0F]")
+_RESEARCH_LABEL_PATTERN = re.compile(
+    r"(?i)(?:^|[\s(\\[\"'])"
+    r"(demografische dringlichkeit|zentrale erkenntnisse|leitende zusammenfassung|"
+    r"einordnung(?: der faktenlage)?|faktenlage|quellenlage|quelle|quellen|"
+    r"studie|studienlage|fazit|kontext)"
+    r"(?:\s*:\s*|(?=[\s.?!,;:]|$))"
+)
+_ABBREVIATION_REPLACEMENTS = (
+    (re.compile(r"\bz\.\s*b\.", flags=re.IGNORECASE), "__ABB_ZB__"),
+    (re.compile(r"\bu\.\s*a\.", flags=re.IGNORECASE), "__ABB_UA__"),
+    (re.compile(r"\bd\.\s*h\.", flags=re.IGNORECASE), "__ABB_DH__"),
+    (re.compile(r"\bbzw\.", flags=re.IGNORECASE), "__ABB_BZW__"),
+)
+
+
+def _protect_abbreviations(text: str) -> str:
+    protected = str(text or "")
+    for pattern, placeholder in _ABBREVIATION_REPLACEMENTS:
+        protected = pattern.sub(placeholder, protected)
+    return protected
+
+
+def _restore_abbreviations(text: str) -> str:
+    restored = str(text or "")
+    restored = restored.replace("__ABB_ZB__", "z.B.")
+    restored = restored.replace("__ABB_UA__", "u.a.")
+    restored = restored.replace("__ABB_DH__", "d.h.")
+    restored = restored.replace("__ABB_BZW__", "bzw.")
+    return restored
+
 
 def _validate_url_accessible(url: str, timeout: float = 5.0) -> bool:
     try:
@@ -69,6 +198,102 @@ def _validate_url_accessible(url: str, timeout: float = 5.0) -> bool:
     except Exception as exc:
         logger.debug("url_validation_failed", url=url, error=str(exc))
         return False
+
+
+def get_prompt1_word_bounds(tier: int | None) -> tuple[int, int]:
+    return PROMPT1_WORD_BOUNDS.get(int(tier or 8), (12, 15))
+
+
+def get_prompt1_sentence_bounds(tier: int | None) -> tuple[int, int]:
+    return PROMPT1_SENTENCE_BOUNDS.get(int(tier or 8), (1, 1))
+
+
+def normalize_spoken_whitespace(text: Any) -> str:
+    return _MULTISPACE_PATTERN.sub(" ", str(text or "")).strip()
+
+
+def _strip_research_labels(text: Any) -> str:
+    cleaned = str(text or "")
+    previous = None
+    while cleaned != previous:
+        previous = cleaned
+        cleaned = _RESEARCH_LABEL_PATTERN.sub(" ", cleaned)
+    return cleaned
+
+
+def sanitize_spoken_fragment(text: Any, *, ensure_terminal: bool = True) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    cleaned = _MARKDOWN_LINK_PATTERN.sub(r"\1", cleaned)
+    cleaned = _CITATION_PATTERN.sub(" ", cleaned)
+    cleaned = _URL_PATTERN.sub(" ", cleaned)
+    cleaned = cleaned.replace("**", " ").replace("__", " ").replace("`", " ")
+    cleaned = _BULLET_PREFIX_PATTERN.sub("", cleaned)
+    cleaned = _SCRIPT_ARTIFACT_PATTERN.sub("", cleaned)
+    cleaned = _strip_research_labels(cleaned)
+    cleaned = re.sub(r"[|]+", " ", cleaned)
+    cleaned = re.sub(r"(\w):\s+in(nen)?\b", r"\1:in\2", cleaned)
+    cleaned = normalize_spoken_whitespace(cleaned)
+    if not cleaned:
+        return ""
+
+    sentence_candidates = re.split(r"(?<=[.!?])\s+|\n+", _protect_abbreviations(cleaned))
+    sentences: List[str] = []
+    seen = set()
+    for candidate in sentence_candidates:
+        fragment = normalize_spoken_whitespace(_restore_abbreviations(candidate).strip(" -*•"))
+        if not fragment:
+            continue
+        fragment = _strip_research_labels(fragment).strip(" ,;:-")
+        fragment = normalize_spoken_whitespace(fragment)
+        if not fragment or not re.search(r"[A-Za-zÄÖÜäöüß]", fragment):
+            continue
+        if ":" in fragment:
+            prefix, suffix = fragment.split(":", 1)
+            if len(prefix.split()) <= 4:
+                fragment = suffix.strip()
+        fragment = normalize_spoken_whitespace(fragment)
+        if not fragment:
+            continue
+        bare_fragment = fragment.rstrip(".!?")
+        trailing_tokens = re.findall(r"[A-Za-zÄÖÜäöüß]+", bare_fragment.lower())
+        if trailing_tokens and trailing_tokens[-1] in INCOMPLETE_TRAILING_TOKENS:
+            continue
+        if ensure_terminal and fragment[-1] not in ".!?":
+            fragment = fragment.rstrip(",;:") + "."
+        if detect_spoken_copy_issues(fragment):
+            continue
+        signature = fragment.lower()
+        if signature in seen:
+            continue
+        seen.add(signature)
+        sentences.append(fragment)
+
+    return normalize_spoken_whitespace(" ".join(sentences))
+
+
+def sanitize_metadata_text(text: Any, *, max_sentences: int = 2) -> str:
+    cleaned = sanitize_spoken_fragment(text, ensure_terminal=True)
+    if not cleaned:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    return normalize_spoken_whitespace(" ".join(sentences[:max_sentences]))
+
+
+def sanitize_fact_fragments(values: List[Any]) -> List[str]:
+    fragments: List[str] = []
+    seen = set()
+    for value in values:
+        cleaned = sanitize_spoken_fragment(value, ensure_terminal=True)
+        if not cleaned:
+            continue
+        signature = cleaned.lower()
+        if signature in seen:
+            continue
+        seen.add(signature)
+        fragments.append(cleaned)
+    return fragments
 
 
 def compute_bigram_jaccard(a: str, b: str) -> float:
@@ -231,6 +456,55 @@ def _find_english_markers(text: str) -> List[str]:
 def _count_german_markers(text: str) -> int:
     tokens = _tokenize_language_words(text)
     return sum(1 for token in tokens if token in GERMAN_SIGNAL_WORDS)
+
+
+def detect_spoken_copy_issues(text: str) -> List[Dict[str, Any]]:
+    value = str(text or "").strip()
+    if not value:
+        return []
+
+    issues: List[Dict[str, Any]] = []
+    lowered = value.lower()
+    for marker in SPOKEN_COPY_LABEL_MARKERS:
+        if re.search(rf"(^|[\s(\\[\"']){re.escape(marker)}(?:\s*:|(?=[\s.?!,;:]|$))", lowered):
+            issues.append({"kind": "label_fragment", "marker": marker})
+            break
+
+    if "**" in value or "__" in value or "`" in value or re.search(r"(?m)^\s*[-*•]\s+", value):
+        issues.append({"kind": "markdown_residue"})
+
+    if re.search(r"\[cite:\s*\d+(?:\s*,\s*\d+)*\]", value, flags=re.IGNORECASE):
+        issues.append({"kind": "citation_residue"})
+
+    if re.search(r"[\u200d\uFE0E\uFE0F]", value):
+        issues.append({"kind": "artifact_tail"})
+
+    if re.search(r"\b\w+:\s+in(?:nen)?\b", value):
+        issues.append({"kind": "broken_inclusive_form"})
+
+    stripped = value.rstrip()
+    if stripped.endswith((",", ";", ":")):
+        issues.append({"kind": "incomplete_clause", "tail": stripped[-24:]})
+    else:
+        text_without_punct = stripped.rstrip(".!?")
+        trailing_tokens = _tokenize_language_words(text_without_punct)
+        if trailing_tokens and trailing_tokens[-1] in INCOMPLETE_TRAILING_TOKENS:
+            issues.append({"kind": "incomplete_clause", "tail_token": trailing_tokens[-1]})
+
+    return issues
+
+
+def validate_spoken_copy_cleanliness(item: ResearchAgentItem, profile: Any | None = None) -> None:
+    issues = detect_spoken_copy_issues(item.script)
+    if issues:
+        raise ValidationError(
+            message="PROMPT_1 script contains research-note leakage or malformed spoken copy",
+            details={
+                "target_length_tier": getattr(profile, "target_length_tier", None),
+                "issues": issues,
+                "script": item.script[:240],
+            },
+        )
 
 
 def validate_german_content(item: ResearchAgentItem) -> None:

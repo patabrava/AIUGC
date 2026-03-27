@@ -8,7 +8,10 @@ import json
 import random
 import re
 import secrets
+from itertools import combinations
 from typing import Any, Callable, Dict, List, Optional
+
+from pydantic import ValidationError as PydanticValidationError
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
@@ -30,7 +33,17 @@ from app.features.topics.response_parsers import (
     parse_topic_research_response,
 )
 from app.features.topics.schemas import DialogScripts, ResearchAgentBatch, ResearchAgentItem, ResearchDossier, SeedData, TopicData
-from app.features.topics.topic_validation import estimate_script_duration_seconds
+from app.features.topics.topic_validation import (
+    detect_spoken_copy_issues,
+    estimate_script_duration_seconds,
+    get_prompt1_sentence_bounds,
+    get_prompt1_word_bounds,
+    normalize_spoken_whitespace,
+    sanitize_fact_fragments,
+    sanitize_metadata_text,
+    sanitize_spoken_fragment,
+    validate_spoken_copy_cleanliness,
+)
 
 logger = get_logger(__name__)
 
@@ -81,6 +94,8 @@ def _should_attempt_json_normalization(error: ValidationError) -> bool:
     if "empty" in (error.message or "").lower():
         return True
     return False
+
+
 
 
 def generate_topics_research_agent(
@@ -293,8 +308,10 @@ def generate_topic_script_candidate(
     profile = get_duration_profile(target_length_tier)
     dossier_payload = dossier.model_dump(mode="json") if hasattr(dossier, "model_dump") else (dossier or {})
     lane_payload = lane_candidate.model_dump(mode="json") if hasattr(lane_candidate, "model_dump") else dict(lane_candidate or {})
-    lane_title = str(lane_payload.get("title") or "").strip()
-    lane_caption = str(lane_payload.get("source_summary") or lane_payload.get("caption") or "").strip()
+    lane_title = normalize_spoken_whitespace(str(lane_payload.get("title") or "").strip())
+    lane_caption = sanitize_metadata_text(lane_payload.get("source_summary") or lane_payload.get("caption") or "")
+    dossier_source_summary = sanitize_metadata_text((dossier_payload or {}).get("source_summary") or "")
+    cluster_summary = sanitize_metadata_text((dossier_payload or {}).get("cluster_summary") or "")
     lane_sources = list((dossier_payload or {}).get("sources") or [])
     source_title = None
     source_url = None
@@ -312,24 +329,36 @@ def generate_topic_script_candidate(
         lane_candidate=lane_payload,
     )
     prompt = base_prompt
-    lane_fact_texts = [
-        str(fact).strip()
-        for fact in (
-            list(lane_payload.get("facts") or [])
-            + list((dossier_payload or {}).get("facts") or [])
-            + [
-                lane_payload.get("source_summary"),
-                dossier_payload.get("source_summary"),
-                dossier_payload.get("cluster_summary"),
-                lane_payload.get("angle"),
-            ]
-        )
-        if str(fact).strip()
+    lane_fact_texts = sanitize_fact_fragments(
+        list(lane_payload.get("facts") or [])
+        + list((dossier_payload or {}).get("facts") or [])
+        + [
+            lane_payload.get("angle"),
+            *(lane_payload.get("risk_notes") or []),
+            *((dossier_payload or {}).get("risk_notes") or []),
+        ]
+    )
+    filler_sentence_pool = sanitize_fact_fragments(
+        [
+            f"Kurz gesagt: {lane_title}." if lane_title else "",
+            f"Bei {lane_title} lohnt sich der genaue Blick auf die Details." if lane_title else "",
+            "So kannst du das Thema im Alltag klarer einordnen.",
+            "Genau das hilft dir bei sichereren Entscheidungen im Alltag.",
+            "Damit erkennst du die Unterschiede früher und vermeidest unnötige Rückfragen.",
+            "So planst du im Alltag ruhiger und mit deutlich mehr Klarheit.",
+        ]
+    )
+    short_clause_pool = [
+        "für mehr Klarheit im Alltag",
+        "damit du sicherer entscheiden kannst",
+        "ohne unnötigen Stress im Alltag",
     ]
     framework_choice = str(
         (lane_payload.get("framework_candidates") or dossier_payload.get("framework_candidates") or ["PAL"])[0] or "PAL"
     ).strip()
     framework_value = framework_choice if framework_choice in {"PAL", "Testimonial", "Transformation"} else "PAL"
+    min_words, max_words = get_prompt1_word_bounds(profile.target_length_tier)
+    min_sentences, max_sentences = get_prompt1_sentence_bounds(profile.target_length_tier)
 
     def _word_count(text: str) -> int:
         return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", text or ""))
@@ -340,72 +369,187 @@ def generate_topic_script_candidate(
             return stripped
         return stripped if stripped[-1] in ".!?" else f"{stripped}."
 
-    def _enforce_prompt1_word_envelope(item: ResearchAgentItem) -> ResearchAgentItem:
-        min_words = int(getattr(profile, "prompt1_min_words", 12))
-        max_words = int(getattr(profile, "prompt1_max_words", 15))
-        script = _ensure_terminal_punctuation(item.script)
-        words = script.split()
-        word_count = _word_count(script)
+    def _split_sentences(text: Any) -> List[str]:
+        cleaned = sanitize_spoken_fragment(text, ensure_terminal=True)
+        if not cleaned:
+            return []
+        return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", cleaned) if sentence.strip()]
 
-        if word_count < min_words:
-            for fact in lane_fact_texts:
-                fragment = re.sub(r"\s+", " ", fact).strip().rstrip(".!?")
-                if not fragment:
+    def _dedupe_sentences(values: List[Any]) -> List[str]:
+        sentences: List[str] = []
+        seen = set()
+        for value in values:
+            for sentence in _split_sentences(value):
+                signature = sentence.lower()
+                if signature in seen:
                     continue
-                candidate = _ensure_terminal_punctuation(f"{' '.join(words)} {fragment}".strip())
-                words = candidate.split()
+                seen.add(signature)
+                sentences.append(sentence)
+        return sentences
+
+    clean_fact_sentences = _dedupe_sentences(lane_fact_texts)
+    clean_filler_sentences = _dedupe_sentences(filler_sentence_pool)
+
+    def _join_sentences(sentences: List[str]) -> str:
+        return normalize_spoken_whitespace(" ".join(sentence.strip() for sentence in sentences if sentence.strip()))
+
+    def _extend_selected_sentences(selected_sentences: List[str], clause_pool: List[str]) -> str:
+        if not selected_sentences:
+            return ""
+        used = {sentence.rstrip(".!?").strip().lower() for sentence in selected_sentences}
+        extended = list(selected_sentences)
+        for clause in sorted(clause_pool, key=_word_count):
+            signature = clause.lower()
+            if signature in used:
+                continue
+            used.add(signature)
+            extended[-1] = _ensure_terminal_punctuation(f"{extended[-1].rstrip('.!?')}, {clause}".strip(" ,"))
+            candidate = _join_sentences(extended)
+            candidate_words = _word_count(candidate)
+            if min_words <= candidate_words <= max_words:
+                return candidate
+            if candidate_words > max_words:
+                break
+        return ""
+
+    def _choose_multi_sentence_script(preferred_sentences: List[str]) -> str:
+        sentence_pool = _dedupe_sentences(preferred_sentences + clean_fact_sentences + clean_filler_sentences)
+        if not sentence_pool:
+            return ""
+        max_pool_size = min(len(sentence_pool), 8)
+        capped_pool = sentence_pool[:max_pool_size]
+        clause_pool = [sentence.rstrip(".!?").strip() for sentence in capped_pool if sentence.strip()]
+        best_under: List[str] = []
+        best_under_words = -1
+        for sentence_count in range(min_sentences, max_sentences + 1):
+            for indexes in combinations(range(len(capped_pool)), sentence_count):
+                selected = [capped_pool[index] for index in indexes]
+                candidate = _join_sentences(selected)
                 word_count = _word_count(candidate)
-                script = candidate
-                if word_count >= min_words:
-                    break
+                if min_words <= word_count <= max_words:
+                    return candidate
+                if word_count < min_words and word_count > best_under_words:
+                    best_under = selected
+                    best_under_words = word_count
+        if best_under:
+            return _extend_selected_sentences(best_under, clause_pool)
+        return ""
 
-        if _word_count(script) > max_words:
-            tokens = script.split()
-            while tokens and _word_count(" ".join(tokens).strip()) > max_words:
-                tokens.pop()
-            script = _ensure_terminal_punctuation(" ".join(tokens).strip())
-
-        final_count = _word_count(script)
-        if final_count < min_words or final_count > max_words:
-            raise ValidationError(
-                message="PROMPT_1 script does not match target word envelope",
-                details={
-                    "target_length_tier": profile.target_length_tier,
-                    "word_count": final_count,
-                    "expected_range": [min_words, max_words],
-                },
-            )
-        item.script = script
-        return item
-
-    def _synthesize_prompt1_fallback_item() -> ResearchAgentItem:
-        fragments = [
-            f"Kurz erklärt: {lane_title}." if lane_title else "",
-            lane_caption,
-            str((dossier_payload or {}).get("source_summary") or "").strip(),
+    def _choose_single_sentence_script(preferred_sentences: List[str]) -> str:
+        clause_pool = [
+            sentence.rstrip(".!?").strip()
+            for sentence in _dedupe_sentences(preferred_sentences + clean_fact_sentences + clean_filler_sentences)
+            if sentence.strip()
         ]
-        fragments.extend(lane_fact_texts[:6])
-        script = _ensure_terminal_punctuation(" ".join(fragment for fragment in fragments if fragment).strip())
+        clause_pool.extend(short_clause_pool)
+        clause_pool = [clause for clause in clause_pool if clause]
+        if not clause_pool:
+            return ""
+        base_candidates = clause_pool[:]
+        if lane_title:
+            base_candidates.append(f"Kurz gesagt: {lane_title}")
+        for base in base_candidates:
+            candidate = _ensure_terminal_punctuation(base)
+            if min_words <= _word_count(candidate) <= max_words:
+                return candidate
+            used = {base.lower()}
+            current = base.rstrip(".!?")
+            for clause in sorted(clause_pool, key=_word_count):
+                signature = clause.lower()
+                if signature in used:
+                    continue
+                used.add(signature)
+                candidate = _ensure_terminal_punctuation(f"{current}, {clause}".strip(" ,"))
+                word_count = _word_count(candidate)
+                if min_words <= word_count <= max_words:
+                    return candidate
+                if word_count < max_words:
+                    current = candidate.rstrip(".!?")
+        return ""
+
+    def _compile_prompt1_script(*, preferred_text: Any = "") -> str:
+        preferred_sentences = _split_sentences(preferred_text)
+        if not preferred_sentences and not clean_fact_sentences:
+            return ""
+        if min_sentences == max_sentences == 1:
+            compiled = _choose_single_sentence_script(preferred_sentences)
+        else:
+            compiled = _choose_multi_sentence_script(preferred_sentences)
+        return sanitize_spoken_fragment(compiled, ensure_terminal=True) if compiled else ""
+
+    def _build_clean_item(*, script_text: str, metadata_summary: str) -> ResearchAgentItem:
+        cleaned_script = sanitize_spoken_fragment(script_text, ensure_terminal=True)
+        if not cleaned_script:
+            raise ValidationError(
+                message="PROMPT_1 script was empty after spoken-text sanitization",
+                details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
+            )
+        cleaned_summary = sanitize_metadata_text(metadata_summary or lane_caption or dossier_source_summary)
         item = ResearchAgentItem(
-            topic=lane_title or str(dossier_payload.get("topic") or "").strip() or "Thema",
-            script=script,
-            caption=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip(),
+            topic=lane_title or sanitize_metadata_text(dossier_payload.get("topic") or "", max_sentences=1) or "Thema",
+            script=cleaned_script,
+            caption=cleaned_summary,
             framework=framework_value,
             sources=(
                 [{"title": source_title or lane_title or str(dossier_payload.get("topic") or "Quelle"), "url": source_url}]
                 if source_url
                 else []
             ),
-            source_summary=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip(),
-            estimated_duration_s=max(1, min(profile.target_length_tier, estimate_script_duration_seconds(script))),
+            source_summary=cleaned_summary,
+            estimated_duration_s=max(1, min(profile.target_length_tier, estimate_script_duration_seconds(cleaned_script))),
             tone="direkt, freundlich, empowernd, du-Form",
-            disclaimer=str(
+            disclaimer=sanitize_metadata_text(
                 lane_payload.get("disclaimer")
                 or dossier_payload.get("disclaimer")
-                or "Keine Rechts- oder medizinische Beratung."
-            ).strip(),
+                or "Keine Rechts- oder medizinische Beratung.",
+                max_sentences=1,
+            )
+            or "Keine Rechts- oder medizinische Beratung.",
         )
-        return _enforce_prompt1_word_envelope(item)
+        if not item.sources and source_title and source_url:
+            item.sources = [{"title": source_title, "url": source_url}]
+        item = _enforce_prompt1_word_envelope(item)
+        validate_spoken_copy_cleanliness(item, profile=profile)
+        if detect_spoken_copy_issues(item.source_summary):
+            item.source_summary = ""
+            item.caption = ""
+        return item
+
+    def _enforce_prompt1_word_envelope(item: ResearchAgentItem) -> ResearchAgentItem:
+        script = _compile_prompt1_script(preferred_text=item.script) or sanitize_spoken_fragment(item.script, ensure_terminal=True)
+        sentence_count = len(_split_sentences(script))
+        final_count = _word_count(script)
+        if (
+            final_count < min_words
+            or final_count > max_words
+            or sentence_count < min_sentences
+            or sentence_count > max_sentences
+        ):
+            raise ValidationError(
+                message="PROMPT_1 script does not match target word/sentence envelope",
+                details={
+                    "target_length_tier": profile.target_length_tier,
+                    "word_count": final_count,
+                    "expected_range": [min_words, max_words],
+                    "sentence_count": sentence_count,
+                    "expected_sentences": [min_sentences, max_sentences],
+                },
+            )
+        item.script = script
+        item.estimated_duration_s = max(1, min(profile.target_length_tier, estimate_script_duration_seconds(script)))
+        return item
+
+    def _synthesize_prompt1_fallback_item() -> ResearchAgentItem:
+        script = _compile_prompt1_script()
+        if not script:
+            raise ValidationError(
+                message="PROMPT_1 script could not be reconstructed from clean facts",
+                details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
+            )
+        return _build_clean_item(
+            script_text=script,
+            metadata_summary=lane_caption or dossier_source_summary or cluster_summary,
+        )
 
     def _extract_script_text(raw_response: str) -> str:
         cleaned = (raw_response or "").strip()
@@ -446,40 +590,28 @@ def generate_topic_script_candidate(
             else:
                 cleaned = str(first).strip()
         cleaned = re.sub(r"^(?:script|text|inhalt|caption|titel|title)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = sanitize_spoken_fragment(cleaned, ensure_terminal=True)
         if cleaned and cleaned[-1] not in ".!?":
             cleaned = cleaned.rstrip(",;:") + "."
         return cleaned
 
     def _build_item_from_text(raw_response: str) -> ResearchAgentItem:
+        raw_issues = detect_spoken_copy_issues(raw_response or "")
+        if raw_issues:
+            raise ValidationError(
+                message="PROMPT_1 raw draft contains research-note leakage",
+                details={"lane_title": lane_payload.get("title"), "issues": raw_issues},
+            )
         script_text = _extract_script_text(raw_response)
         if not script_text:
             raise ValidationError(
                 message="PROMPT_1 lane output was empty",
                 details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
             )
-        item = ResearchAgentItem(
-            topic=lane_title or str(dossier_payload.get("topic") or "").strip() or "Thema",
-            script=script_text,
-            caption=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip() or script_text,
-            framework=framework_value,
-            sources=(
-                [{"title": source_title or lane_title or str(dossier_payload.get("topic") or "Quelle"), "url": source_url}]
-                if source_url
-                else []
-            ),
-            source_summary=lane_caption or str((dossier_payload or {}).get("source_summary") or "").strip() or script_text,
-            estimated_duration_s=max(1, min(profile.target_length_tier, estimate_script_duration_seconds(script_text))),
-            tone="direkt, freundlich, empowernd, du-Form",
-            disclaimer=str(
-                lane_payload.get("disclaimer")
-                or dossier_payload.get("disclaimer")
-                or "Keine Rechts- oder medizinische Beratung."
-            ).strip(),
+        return _build_clean_item(
+            script_text=script_text,
+            metadata_summary=lane_caption or dossier_source_summary or cluster_summary or script_text,
         )
-        if not item.sources and source_title and source_url:
-            item.sources = [{"title": source_title, "url": source_url}]
-        return _enforce_prompt1_word_envelope(item)
 
     for attempt in range(2):
         try:

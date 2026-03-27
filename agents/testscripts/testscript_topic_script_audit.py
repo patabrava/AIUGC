@@ -1,15 +1,19 @@
 """
-EYE testscript: multi-topic, multi-tier script-generation audit.
+EYE testscript: audit persisted topic_scripts rows for spoken-copy contamination.
 
-Validates both boundary behaviors:
-- malformed Gemini output must be rejected before bad scripts can pass validation
-- valid structured tiered output must pass for 8s, 16s, and 32s
+Fails if Supabase contains:
+- research-label leakage
+- citation residue
+- malformed artifact tails
+- incomplete trailing clauses
+- canonical value/product rows outside the tier word/sentence envelope
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -17,174 +21,97 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.core.video_profiles import get_duration_profile
-from app.core.errors import ValidationError
-from app.features.topics import agents as topic_agents
+from app.adapters.supabase_client import get_supabase
+from app.features.topics.topic_validation import (
+    detect_spoken_copy_issues,
+    get_prompt1_sentence_bounds,
+    get_prompt1_word_bounds,
+)
 
 
-class AlwaysFailingLLM:
-    def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
-        raise ValidationError(
-            message="Gemini structured output produced invalid JSON",
-            details={"raw_content": '{"problem_agitate_solution":["zu kurz"]'},
-        )
+def _word_count(text: Any) -> int:
+    import re
 
-    def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
-        return "Problem-Agitieren-Lösung Ads\n\nViel zu kurz.\n\nBeschreibung\n\nKurz. #A #B #C"
+    return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
 
 
-class ValidTieredLLM:
-    def generate_gemini_json(self, prompt, json_schema, system_prompt=None, **kwargs):
-        if "32-Sekunden-UGC-Videos" in prompt:
-            return {
-                "problem_agitate_solution": [
-                    "Was viele bei der BahnCard-Ermäßigung übersehen, merkst du meist erst mitten im Buchungsprozess. Wenn Nachweise fehlen oder Angaben nicht sauber vorbereitet sind, ziehen sich Rückfragen unnötig. Genau deshalb spare ich Zeit, Geld und Nerven, wenn ich Berechtigung, Unterlagen und Fristen vor der Reise einmal komplett sortiere."
-                ],
-                "testimonial": [
-                    "Ich dachte lange, die BahnCard-Ermäßigung wäre vor allem bürokratisch und deshalb kaum planbar. In Wirklichkeit entsteht der Stress meistens erst, wenn Nachweise fehlen oder zu spät geprüft werden. Seit ich alles vor der Buchung sammle, laufen Kontrolle, Preisfindung und Reiseplanung deutlich ruhiger und verlässlicher für mich."
-                ],
-                "transformation": [
-                    "Früher habe ich Ermäßigungen oft erst dann geprüft, wenn die Reise schon fast feststand. Genau das hat bei mir Rückfragen, Unsicherheit und unnötigen Zeitdruck ausgelöst. Heute kläre ich Berechtigung, Nachweise und Buchungsdetails vorher, und dadurch fühlt sich die gesamte Planung deutlich kontrollierter und wirklich entspannter an."
-                ],
-                "description": "Die passende BahnCard-Ermäßigung hängt an sauberen Nachweisen, klaren Fristen und einer ruhigen Vorbereitung vor der Buchung. Wenn du Unterlagen vorher prüfst, vermeidest du unnötige Rückfragen und behältst dein Reisebudget besser im Blick. #BahnCard #Schwerbehinderung #BarrierefreiReisen",
-            }
-        if "16-Sekunden-UGC-Videos" in prompt:
-            return {
-                "problem_agitate_solution": [
-                    "Was viele bei der BahnCard-Ermäßigung übersehen, merkst du oft erst beim Buchen. Wenn Unterlagen oder Nachweise fehlen, kosten dich Rückfragen Zeit, Nerven und manchmal sogar den günstigeren Tarif."
-                ],
-                "testimonial": [
-                    "Ich habe die Ermäßigung früher immer zu spät geprüft und mich dann geärgert. Seit ich Nachweise vorher sortiere, laufen Buchung, Kontrolle und Reiseplanung spürbar ruhiger."
-                ],
-                "transformation": [
-                    "Früher war jede Buchung unnötig chaotisch und voller Rückfragen zur Berechtigung. Heute prüfe ich Unterlagen früher und bekomme die passende BahnCard-Ermäßigung viel planbarer organisiert."
-                ],
-                "description": "Für eine passende BahnCard-Ermäßigung zählen vor allem klare Nachweise, der richtige Zeitpunkt und eine saubere Vorbereitung. Wenn du das vorher sortierst, sparst du Rückfragen und planst Reisen verlässlicher. #BahnCard #Schwerbehinderung #Mobilitaet",
-            }
-        return {
-            "problem_agitate_solution": [
-                "Was viele bei der BahnCard-Ermäßigung übersehen, merkst du erst beim Buchen, wenn fehlende Nachweise plötzlich alles ausbremsen."
-            ],
-            "testimonial": [
-                "Ich prüfe die Unterlagen heute früher, weil mir fehlende Nachweise sonst kurz vor der Reise alles blockieren."
-            ],
-            "transformation": [
-                "Früh sortierte Nachweise machen die BahnCard-Ermäßigung für mich planbarer, ruhiger und deutlich leichter im Alltag unterwegs."
-            ],
-            "description": "Die BahnCard-Ermäßigung wird leichter, wenn du Nachweise früh prüfst und die Buchung sauber vorbereitest. So sparst du Rückfragen, Zeit und unnötigen Stress im Reisealltag. #BahnCard #Schwerbehinderung #Reiseplanung",
-        }
+def _sentence_count(text: Any) -> int:
+    import re
 
-    def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
-        raise AssertionError("Structured output should satisfy this audit without text fallback.")
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return 0
+    return len([segment for segment in re.split(r"(?<=[.!?])\s+", cleaned) if segment.strip()])
 
 
-def _word_count(script: str) -> int:
-    return len(str(script or "").split())
-
-
-def _audit_case(topic: str, dossier: Dict[str, Any]) -> Dict[str, Any]:
-    results: List[Dict[str, Any]] = []
-    for tier in (8, 16, 32):
-        scripts = topic_agents.generate_dialog_scripts(
-            topic=topic,
-            scripts_required=1,
-            dossier=dossier,
-            profile=get_duration_profile(tier),
-        )
-        bucket_summary = {}
-        for bucket in ("problem_agitate_solution", "testimonial", "transformation"):
-            script = getattr(scripts, bucket)[0]
-            bucket_summary[bucket] = {
-                "script": script,
-                "words": _word_count(script),
-            }
-            topic_agents._validate_dialog_script_tier(
-                script,
-                get_duration_profile(tier),
-                context=f"{topic}:{bucket}",
-            )
-            topic_agents._validate_dialog_script_semantics(
-                script,
-                context=f"{topic}:{bucket}",
-            )
-        results.append(
-            {
-                "tier": tier,
-                "description": scripts.description,
-                "buckets": bucket_summary,
-            }
-        )
-    return {"topic": topic, "tiers": results}
-
-
-def _assert_rejection(topic: str, dossier: Dict[str, Any]) -> Dict[str, Any]:
-    topic_agents.get_llm_client = lambda: AlwaysFailingLLM()
-    try:
-        topic_agents.generate_dialog_scripts(
-            topic=topic,
-            scripts_required=1,
-            dossier=dossier,
-            profile=get_duration_profile(8),
-        )
-    except ValidationError as exc:
-        return {"topic": topic, "rejected": exc.message}
-    raise AssertionError("Malformed PROMPT_2 output should have been rejected.")
+def _load_rows() -> List[Dict[str, Any]]:
+    sb = get_supabase()
+    response = (
+        sb.client.table("topic_scripts")
+        .select("id,title,post_type,target_length_tier,bucket,lane_key,script")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return list(response.data or [])
 
 
 def main() -> int:
-    cases = [
-        (
-            "BahnCard & Schwerbehinderung",
-            {
-                "topic": "BahnCard & Schwerbehinderung",
-                "seed_topic": "BahnCard & Schwerbehinderung",
-                "source_summary": "Die Deutsche Bahn bietet ermäßigte BahnCards für berechtigte Personen mit Schwerbehindertenausweis an. Früh prüfen spart Rückfragen und Geld.",
-                "facts": [
-                    "Menschen mit Schwerbehindertenausweis können unter den Voraussetzungen ermäßigte BahnCards erhalten.",
-                    "Frühe Prüfung der Unterlagen spart spätere Rückfragen und Verzögerungen.",
-                    "Die Ermäßigung entlastet das Reisebudget und macht Fahrten planbarer.",
-                ],
-                "angle_options": ["Rabatte früh prüfen und Unterlagen sauber vorbereiten"],
-            },
-        ),
-        (
-            "Barrierefreie Wege im Alltag",
-            {
-                "topic": "Barrierefreie Wege im Alltag",
-                "seed_topic": "Barrierefreie Wege und Schwellen",
-                "source_summary": "Breite Wege, wenig Gefaelle und klare Flaechen sparen im Alltag Kraft und vermeiden Unsicherheit.",
-                "facts": [
-                    "Barrierefreie Wege brauchen genug Breite und wenig Gefaelle.",
-                    "Kleine Schwellen kosten im Alltag oft unnoetig Kraft.",
-                ],
-                "angle_options": ["barrierefreie Wege im Alltag"],
-            },
-        ),
-        (
-            "Hilfsmittelantrag sauber dokumentieren",
-            {
-                "topic": "Hilfsmittelantrag sauber dokumentieren",
-                "seed_topic": "Fotodokumentation und Nachweise",
-                "source_summary": "Gute Fotodokumentation spart Rueckfragen und macht Antraege klarer. Wichtige Punkte sind strukturierte Bilder, klare Reihenfolge und nachvollziehbare Details.",
-                "facts": [
-                    "Klare Bildserien helfen bei Rueckfragen.",
-                    "Struktur spart Zeit bei Nachweisen und Nachpruefungen.",
-                ],
-                "angle_options": ["Dokumentation so aufbauen, dass Rueckfragen seltener werden"],
-            },
-        ),
-    ]
+    rows = _load_rows()
+    issue_rows: List[Dict[str, Any]] = []
+    issue_kinds = Counter()
 
-    summary = {"rejections": [], "valid_runs": []}
-    for topic, dossier in cases:
-        summary["rejections"].append(_assert_rejection(topic, dossier))
+    for row in rows:
+        script = str(row.get("script") or "").strip()
+        row_issues = list(detect_spoken_copy_issues(script))
+        tier = int(row.get("target_length_tier") or 0)
+        bucket = str(row.get("bucket") or "").strip()
+        post_type = str(row.get("post_type") or "").strip()
+        if bucket == "canonical" and post_type in {"value", "product"}:
+            min_words, max_words = get_prompt1_word_bounds(tier)
+            min_sentences, max_sentences = get_prompt1_sentence_bounds(tier)
+            word_count = _word_count(script)
+            sentence_count = _sentence_count(script)
+            if word_count < min_words or word_count > max_words:
+                row_issues.append(
+                    {
+                        "kind": "canonical_word_envelope",
+                        "word_count": word_count,
+                        "expected_words": [min_words, max_words],
+                    }
+                )
+            if sentence_count < min_sentences or sentence_count > max_sentences:
+                row_issues.append(
+                    {
+                        "kind": "canonical_sentence_envelope",
+                        "sentence_count": sentence_count,
+                        "expected_sentences": [min_sentences, max_sentences],
+                    }
+                )
+        if not row_issues:
+            continue
+        for issue in row_issues:
+            issue_kinds[issue["kind"]] += 1
+        issue_rows.append(
+            {
+                "id": row.get("id"),
+                "title": row.get("title"),
+                "post_type": post_type,
+                "target_length_tier": tier,
+                "bucket": bucket,
+                "lane_key": row.get("lane_key"),
+                "issues": row_issues,
+                "script": script,
+            }
+        )
 
-    topic_agents.get_llm_client = lambda: ValidTieredLLM()
-    for topic, dossier in cases:
-        summary["valid_runs"].append(_audit_case(topic, dossier))
-
+    summary = {
+        "total_rows": len(rows),
+        "issue_count": len(issue_rows),
+        "issues_by_kind": dict(issue_kinds),
+        "rows": issue_rows,
+    }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    return 0
+    return 1 if issue_rows else 0
 
 
 if __name__ == "__main__":

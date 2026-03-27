@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Dict, List, Optional
 
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import NotFoundError
 from app.core.logging import get_logger
 from app.features.topics.captions import resolve_selected_caption
+from app.features.topics.topic_validation import (
+    detect_spoken_copy_issues,
+    get_prompt1_sentence_bounds,
+    get_prompt1_word_bounds,
+    sanitize_metadata_text,
+    sanitize_spoken_fragment,
+)
 
 logger = get_logger(__name__)
 
@@ -54,6 +62,21 @@ def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _normalize_script_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _count_script_words(text: Any) -> int:
+    return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
+
+
+def _count_script_sentences(text: Any) -> int:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return 0
+    return len([segment for segment in re.split(r"(?<=[.!?])\s+", cleaned) if segment.strip()])
+
+
 def _fetch_topic_script_rows(
     *,
     target_length_tier: Optional[int] = None,
@@ -95,9 +118,13 @@ def _normalize_dossier_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_all_topics_from_registry() -> List[Dict[str, Any]]:
     """Get all topics from the registry for deduplication and hub browsing."""
-    supabase = get_supabase()
-    response = supabase.client.table("topic_registry").select("*").execute()
-    return [_normalize_registry_row(row) for row in (response.data or [])]
+    try:
+        supabase = get_supabase()
+        response = supabase.client.table("topic_registry").select("*").execute()
+        return [_normalize_registry_row(row) for row in (response.data or [])]
+    except Exception as exc:
+        logger.warning("topic_registry_fetch_failed", error=str(exc))
+        return []
 
 
 def get_topic_registry_by_id(topic_registry_id: str) -> Dict[str, Any]:
@@ -225,10 +252,14 @@ def create_post_for_batch(
     topic_rotation: str,
     topic_cta: str,
     spoken_duration: float,
-    seed_data: Dict[str, Any]
+    seed_data: Dict[str, Any],
+    target_length_tier: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Create a post record for a batch with topic and seed data."""
     supabase = get_supabase()
+    resolved_seed_data = dict(seed_data or {})
+    if target_length_tier is not None and "target_length_tier" not in resolved_seed_data:
+        resolved_seed_data["target_length_tier"] = target_length_tier
     
     post_data = {
         "batch_id": batch_id,
@@ -237,8 +268,8 @@ def create_post_for_batch(
         "topic_rotation": topic_rotation,
         "topic_cta": topic_cta,
         "spoken_duration": spoken_duration,
-        "seed_data": seed_data,
-        "publish_caption": resolve_selected_caption(seed_data),
+        "seed_data": resolved_seed_data,
+        "publish_caption": resolve_selected_caption(resolved_seed_data),
     }
     
     response = supabase.client.table("posts").insert(post_data).execute()
@@ -531,61 +562,192 @@ def upsert_topic_script_variants(
         supabase.client.table("topic_scripts")
         .select("*")
         .eq("topic_registry_id", topic_registry_id)
-        .eq("target_length_tier", target_length_tier)
         .execute()
         .data
         or []
     )
-    existing_by_script = {
-        str(row.get("script") or "").strip(): row
-        for row in existing_rows
-        if str(row.get("script") or "").strip()
-    }
-    stored_variants: List[Dict[str, Any]] = []
-    for variant in variants:
-        script = str(variant.get("script") or "").strip()
+    dossier_rows: List[Dict[str, Any]] = []
+    if topic_research_dossier_id:
+        dossier_rows = (
+            supabase.client.table("topic_scripts")
+            .select("*")
+            .eq("topic_research_dossier_id", topic_research_dossier_id)
+            .execute()
+            .data
+            or []
+        )
+
+    combined_rows = []
+    seen_ids = set()
+    for row in existing_rows + dossier_rows:
+        row_id = str(row.get("id") or "")
+        if row_id and row_id in seen_ids:
+            continue
+        if row_id:
+            seen_ids.add(row_id)
+        combined_rows.append(row)
+
+    existing_signatures_by_tier: Dict[int, set[str]] = {}
+    existing_lane_signatures_by_tier: Dict[tuple[int, str], set[str]] = {}
+    existing_exact_rows: Dict[tuple[int, str, str], Dict[str, Any]] = {}
+    for row in combined_rows:
+        script = str(row.get("script") or "").strip()
         if not script:
+            continue
+        tier = int(row.get("target_length_tier") or target_length_tier or 0)
+        signature = _normalize_script_text(script)
+        bucket = str(row.get("bucket") or "").strip()
+        lane_key = str(row.get("lane_key") or "").strip()
+        if signature:
+            existing_signatures_by_tier.setdefault(tier, set()).add(signature)
+            if topic_research_dossier_id and lane_key and str(row.get("topic_research_dossier_id") or "") == str(topic_research_dossier_id):
+                existing_lane_signatures_by_tier.setdefault((tier, lane_key), set()).add(signature)
+        if bucket and lane_key:
+            existing_exact_rows[(tier, bucket, lane_key)] = row
+
+    stored_variants: List[Dict[str, Any]] = []
+    duplicate_scripts_skipped = 0
+    for variant in variants:
+        raw_script = str(variant.get("script") or "").strip()
+        script = sanitize_spoken_fragment(raw_script, ensure_terminal=True)
+        if not script:
+            logger.warning(
+                "topic_script_integrity_rejected",
+                topic_registry_id=topic_registry_id,
+                topic_research_dossier_id=topic_research_dossier_id,
+                target_length_tier=int(variant.get("target_length_tier") or target_length_tier or 0),
+                bucket=str(variant.get("bucket") or "").strip(),
+                lane_key=str(variant.get("lane_key") or "").strip(),
+                reason="empty_after_sanitization",
+            )
+            continue
+        script_signature = _normalize_script_text(script)
+        lane_key = str(variant.get("lane_key") or "").strip()
+        tier = int(variant.get("target_length_tier") or target_length_tier or 0)
+        bucket = str(variant.get("bucket") or "").strip()
+        post_type_value = str(variant.get("post_type") or post_type or "").strip()
+        script_issues = detect_spoken_copy_issues(script)
+        if script_issues:
+            logger.warning(
+                "topic_script_integrity_rejected",
+                topic_registry_id=topic_registry_id,
+                topic_research_dossier_id=topic_research_dossier_id,
+                target_length_tier=tier,
+                bucket=bucket,
+                lane_key=lane_key,
+                reason="spoken_copy_issues",
+                issues=script_issues,
+                script_preview=script[:240],
+            )
+            continue
+        if bucket == "canonical" and post_type_value in {"value", "product"}:
+            min_words, max_words = get_prompt1_word_bounds(tier)
+            min_sentences, max_sentences = get_prompt1_sentence_bounds(tier)
+            word_count = _count_script_words(script)
+            sentence_count = _count_script_sentences(script)
+            if (
+                word_count < min_words
+                or word_count > max_words
+                or sentence_count < min_sentences
+                or sentence_count > max_sentences
+            ):
+                logger.warning(
+                    "topic_script_integrity_rejected",
+                    topic_registry_id=topic_registry_id,
+                    topic_research_dossier_id=topic_research_dossier_id,
+                    target_length_tier=tier,
+                    bucket=bucket,
+                    lane_key=lane_key,
+                    reason="canonical_envelope_mismatch",
+                    word_count=word_count,
+                    sentence_count=sentence_count,
+                    expected_words=[min_words, max_words],
+                    expected_sentences=[min_sentences, max_sentences],
+                    script_preview=script[:240],
+                )
+                continue
+        if script_signature and script_signature in existing_signatures_by_tier.get(tier, set()):
+            logger.info(
+                "topic_script_duplicate_skipped",
+                topic_registry_id=topic_registry_id,
+                target_length_tier=tier,
+                bucket=bucket,
+                lane_key=lane_key,
+            )
+            duplicate_scripts_skipped += 1
+            continue
+        if topic_research_dossier_id and lane_key:
+            same_lane_duplicate = script_signature in existing_lane_signatures_by_tier.get((tier, lane_key), set())
+            if same_lane_duplicate:
+                logger.info(
+                    "topic_script_lane_duplicate_skipped",
+                    topic_research_dossier_id=topic_research_dossier_id,
+                    target_length_tier=tier,
+                    bucket=bucket,
+                    lane_key=lane_key,
+                )
+                duplicate_scripts_skipped += 1
+                continue
+        exact_row = existing_exact_rows.get((tier, bucket, lane_key))
+        if exact_row is not None:
+            existing_signature = _normalize_script_text(exact_row.get("script"))
+            if existing_signature and existing_signature == script_signature:
+                logger.info(
+                    "topic_script_existing_row_skipped",
+                    topic_registry_id=topic_registry_id,
+                    topic_research_dossier_id=topic_research_dossier_id,
+                    target_length_tier=tier,
+                    bucket=bucket,
+                    lane_key=lane_key,
+                )
+                duplicate_scripts_skipped += 1
+                continue
+            logger.info(
+                "topic_script_conflict_skipped",
+                topic_registry_id=topic_registry_id,
+                topic_research_dossier_id=topic_research_dossier_id,
+                target_length_tier=tier,
+                bucket=bucket,
+                lane_key=lane_key,
+            )
+            duplicate_scripts_skipped += 1
             continue
         payload = {
             "topic_registry_id": topic_registry_id,
             "topic_research_dossier_id": topic_research_dossier_id,
-            "post_type": post_type,
+            "post_type": post_type_value or post_type,
             "title": title,
             "script": script,
-            "target_length_tier": target_length_tier,
-            "bucket": variant.get("bucket"),
+            "target_length_tier": tier,
+            "bucket": bucket,
             "hook_style": variant.get("hook_style") or "default",
             "framework": variant.get("framework") or "PAL",
-            "tone": variant.get("tone"),
+            "tone": sanitize_metadata_text(variant.get("tone"), max_sentences=1),
             "estimated_duration_s": variant.get("estimated_duration_s"),
             "lane_key": variant.get("lane_key"),
             "lane_family": variant.get("lane_family"),
             "cluster_id": variant.get("cluster_id"),
             "anchor_topic": variant.get("anchor_topic"),
-            "disclaimer": variant.get("disclaimer"),
-            "source_summary": variant.get("source_summary"),
+            "disclaimer": sanitize_metadata_text(variant.get("disclaimer"), max_sentences=1),
+            "source_summary": sanitize_metadata_text(variant.get("source_summary")),
             "primary_source_url": variant.get("primary_source_url"),
             "primary_source_title": variant.get("primary_source_title"),
             "source_urls": variant.get("source_urls") or [],
             "seed_payload": variant.get("seed_payload") or {},
-            "quality_notes": variant.get("quality_notes") or "",
+            "quality_notes": sanitize_metadata_text(variant.get("quality_notes"), max_sentences=2),
             "use_count": int(variant.get("use_count") or 0),
             "last_used_at": variant.get("last_used_at"),
         }
-        existing = existing_by_script.get(script)
-        if existing:
-            response = (
-                supabase.client.table("topic_scripts")
-                .update(payload)
-                .eq("id", existing["id"])
-                .execute()
-            )
-        else:
-            response = supabase.client.table("topic_scripts").insert(payload).execute()
+        response = supabase.client.table("topic_scripts").insert(payload).execute()
         if response.data:
             normalized = _normalize_script_row(response.data[0])
             stored_variants.append(normalized)
-            existing_by_script[script] = normalized
+            existing_exact_rows[(tier, bucket, lane_key)] = normalized
+            normalized_signature = _normalize_script_text(script)
+            if normalized_signature:
+                existing_signatures_by_tier.setdefault(tier, set()).add(normalized_signature)
+                if topic_research_dossier_id and lane_key:
+                    existing_lane_signatures_by_tier.setdefault((tier, lane_key), set()).add(normalized_signature)
     return stored_variants
 
 

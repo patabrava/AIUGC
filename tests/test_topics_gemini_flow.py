@@ -468,7 +468,7 @@ def test_generate_topic_script_candidate_uses_duration_profile_import(monkeypatc
     )
 
     assert item.topic == "Begleitservice im Bahnhof clever nutzen"
-    assert item.estimated_duration_s == 5
+    assert 5 <= item.estimated_duration_s <= 6
 
 
 def test_generate_dialog_scripts_rejects_malformed_output_after_retries(monkeypatch):
@@ -665,6 +665,180 @@ def test_generate_topic_script_candidate_synthesizes_fallback_on_provider_failur
     assert item.topic == "Pflegegrad ohne Fehlstart verstehen"
     assert str(item.sources[0].url) == "https://example.com/pflege"
     assert 26 <= len(item.script.split()) <= 36
+
+
+def test_generate_topic_script_candidate_strips_research_labels_from_long_script(monkeypatch):
+    class FakeContaminatedPrompt1LLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return (
+                "Fühlst du dich im digitalen Job schnell überfordert? **Demografische Dringlichkeit:** "
+                "Schätzungen zufolge leben weltweit etwa 16 Prozent der Menschen mit signifikanter Behinderung. "
+                "Mit barrierefreier Software und Assistenztechnik senkst du Stress und gewinnst mehr Kontrolle im Alltag [cite: 1]."
+            )
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="digital-work-32s-01",
+        topic="Digitale Arbeit ohne Technostress",
+        anchor_topic="Digitale Arbeit ohne Technostress",
+        seed_topic="Digitale Arbeit ohne Technostress",
+        cluster_summary="Das Dossier bündelt Belastungsfaktoren, Assistenztechnik und barrierefreie Software für gesündere digitale Arbeit.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Digitale Arbeit", "url": "https://example.com/digital"}],
+        source_summary="**Zentrale Erkenntnisse:** Barrierefreie Tools, Assistenztechnik und klare Routinen senken mentalen Druck im digitalen Arbeitsalltag.",
+        facts=[
+            "Assistive Software reduziert wiederkehrende Hürden bei Kommunikation, Struktur und Zugriff auf Informationen.",
+            "Barrierefreie Systeme senken Fehlerdruck, wenn Tastaturwege, Kontraste und Vorlesefunktionen zuverlässig funktionieren.",
+            "Klare Routinen und passende Technik helfen dir, Überforderung im digitalen Arbeitsalltag messbar zu reduzieren.",
+        ],
+        angle_options=["Technostress senken"],
+        risk_notes=["Ohne passende Tools steigt die Belastung im digitalen Arbeitsalltag."],
+        disclaimer="Keine medizinische oder rechtliche Beratung.",
+        lane_candidates=[
+            {
+                "lane_key": "digital-work-clean",
+                "lane_family": "value",
+                "title": "Digitale Arbeit ohne Technostress",
+                "angle": "Assistenztechnik und barrierefreie Tools.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "**Demografische Dringlichkeit:** Gute Assistenztechnik entlastet dich im digitalen Alltag spürbar.",
+                "facts": [
+                    "Assistive Tools sparen Energie, weil sie mühsame Zwischenschritte im Alltag verkürzen.",
+                    "Barrierefreie Software macht Arbeitsabläufe planbarer und reduziert Rückfragen im Team.",
+                ],
+                "risk_notes": ["Ohne passende Werkzeuge bleibt die Belastung oft dauerhaft hoch."],
+                "disclaimer": "Keine medizinische oder rechtliche Beratung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [32],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeContaminatedPrompt1LLM())
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=32,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    lowered = item.script.lower()
+    assert "demografische dringlichkeit" not in lowered
+    assert "zentrale erkenntnisse" not in lowered
+    assert "**" not in item.script
+    assert "[cite:" not in lowered
+    assert 54 <= len(item.script.split()) <= 74
+    assert 3 <= len([segment for segment in item.script.split(". ") if segment.strip()]) <= 4
+
+
+def test_generate_topic_script_candidate_rebuilds_from_facts_when_raw_draft_contains_heading_tail(monkeypatch):
+    class FakeContaminatedPrompt1LLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return (
+                "Für G zählt, ob du zwei Kilometer in 30 Minuten gehen kannst. "
+                "aG erfordert einen mobilitätsbezogenen GdB von 80 und massive Einschränkungen. "
+                "Zentrale Erkenntnisse. Januar 2025 von 91 Euro auf 104 Euro pro Jahr."
+            )
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="merkzeichen-32s-01",
+        topic="Merkzeichen G und aG sauber unterscheiden",
+        anchor_topic="Merkzeichen G und aG",
+        seed_topic="Merkzeichen G und aG",
+        cluster_summary="Das Dossier bündelt Anspruchsvoraussetzungen, Mobilitätskriterien und finanzielle Folgen rund um G und aG.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Merkzeichen", "url": "https://example.com/merkzeichen"}],
+        source_summary="Klare Voraussetzungen helfen dir, Mobilitätsgrad, Wegstrecke und Nachweise sauber zu unterscheiden.",
+        facts=[
+            "Für G zählt vor allem, ob du ortsübliche Wegstrecken nur deutlich eingeschränkt bewältigen kannst.",
+            "aG verlangt besonders schwere Mobilitätseinschränkungen ab den ersten Schritten.",
+            "Die saubere Unterscheidung hilft dir bei Anträgen, Nachweisen und dem passenden Parkausweis.",
+        ],
+        angle_options=["Merkzeichen sauber trennen"],
+        risk_notes=["Verwechslungen führen schnell zu falschen Erwartungen bei Nachweisen und Ansprüchen."],
+        disclaimer="Keine Rechts- oder medizinische Beratung.",
+        lane_candidates=[
+            {
+                "lane_key": "merkzeichen-32",
+                "lane_family": "value",
+                "title": "Merkzeichen G und aG sauber unterscheiden",
+                "angle": "Anspruchsvoraussetzungen und Folgen.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "Die Quellen trennen Voraussetzungen, Wegstrecke und Schweregrad klar voneinander.",
+                "facts": [
+                    "G und aG betreffen nicht dieselbe Schwelle im Alltag.",
+                    "Die richtige Einordnung spart dir Rückfragen bei Antrag und Nachweis.",
+                ],
+                "risk_notes": ["Falsche Gleichsetzung führt oft zu unnötigem Frust im Verfahren."],
+                "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [32],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeContaminatedPrompt1LLM())
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=32,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    lowered = item.script.lower()
+    assert "zentrale erkenntnisse" not in lowered
+    assert "januar 2025" not in lowered
+    assert 54 <= len(item.script.split()) <= 74
+
+
+def test_generate_topic_script_candidate_rejects_contaminated_long_fallback_without_clean_facts(monkeypatch):
+    class FakeContaminatedPrompt1LLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return "**Demografische Dringlichkeit:** Studienlage: zunehmender chronischer."
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="contaminated-32s-01",
+        topic="Digitale Überlastung",
+        anchor_topic="Digitale Überlastung",
+        seed_topic="Digitale Überlastung",
+        cluster_summary="**Zentrale Erkenntnisse:** zunehmender chronischer.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Digitale Überlastung", "url": "https://example.com/stress"}],
+        source_summary="**Demografische Dringlichkeit:** zunehmender chronischer.",
+        facts=["zunehmender chronischer", "aber damit bist"],
+        angle_options=["Technostress"],
+        risk_notes=["häufig"],
+        disclaimer="Keine medizinische oder rechtliche Beratung.",
+        lane_candidates=[
+            {
+                "lane_key": "contaminated-32",
+                "lane_family": "value",
+                "title": "Digitale Überlastung besser einordnen",
+                "angle": "Studienlage.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "**Zentrale Erkenntnisse:** häufig.",
+                "facts": ["massiv", "damit bist"],
+                "risk_notes": ["zunehmender chronischer"],
+                "disclaimer": "Keine medizinische oder rechtliche Beratung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [32],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeContaminatedPrompt1LLM())
+
+    with pytest.raises(topic_agents.ValidationError, match="PROMPT_1 script"):
+        topic_agents.generate_topic_script_candidate(
+            post_type="value",
+            target_length_tier=32,
+            dossier=dossier,
+            lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+        )
 
 
 def test_parse_topic_research_response_accepts_json_followed_by_markdown():

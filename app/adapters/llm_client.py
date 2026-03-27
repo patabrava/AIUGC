@@ -742,10 +742,31 @@ class LLMClient:
             consecutive_retryable_poll_errors = 0
             max_retryable_poll_errors = 5
             while time.monotonic() < deadline:
-                poll_response = self.gemini_http_client.get(
-                    f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
-                    params=self._gemini_params(),
-                )
+                try:
+                    poll_response = self.gemini_http_client.get(
+                        f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
+                        params=self._gemini_params(),
+                    )
+                except httpx.ReadTimeout as exc:
+                    consecutive_retryable_poll_errors += 1
+                    logger.warning(
+                        "gemini_deep_research_poll_retryable_timeout",
+                        interaction_id=interaction_id,
+                        consecutive_errors=consecutive_retryable_poll_errors,
+                        max_retryable_errors=max_retryable_poll_errors,
+                        error=str(exc),
+                    )
+                    if consecutive_retryable_poll_errors >= max_retryable_poll_errors:
+                        raise ThirdPartyError(
+                            message="Gemini Deep Research polling failed",
+                            details={
+                                "interaction_id": interaction_id,
+                                "consecutive_errors": consecutive_retryable_poll_errors,
+                                "error": str(exc),
+                            },
+                        ) from exc
+                    time.sleep(min(max(poll_interval_seconds, 1) * consecutive_retryable_poll_errors, 15))
+                    continue
                 if poll_response.status_code >= 400:
                     if poll_response.status_code in {429, 500, 502, 503, 504}:
                         consecutive_retryable_poll_errors += 1
@@ -1158,10 +1179,33 @@ class LLMClient:
         max_retryable_poll_errors = 5
 
         while time.monotonic() < deadline:
-            poll_response = self.gemini_http_client.get(
-                f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
-                params=self._gemini_params(),
-            )
+            try:
+                poll_response = self.gemini_http_client.get(
+                    f"/{interaction_id}" if str(interaction_id).startswith("interactions/") else f"/interactions/{interaction_id}",
+                    params=self._gemini_params(),
+                )
+            except httpx.ReadTimeout:
+                consecutive_retryable_poll_errors += 1
+                if consecutive_retryable_poll_errors >= max_retryable_poll_errors:
+                    raise ThirdPartyError(
+                        message="Gemini Deep Research polling failed",
+                        details={
+                            "interaction_id": interaction_id,
+                            "consecutive_errors": consecutive_retryable_poll_errors,
+                        },
+                    )
+                progress_callback(
+                    {
+                        "provider_interaction_id": interaction_id,
+                        "provider_status": "TIMEOUT",
+                        "detail_message": "Gemini polling timed out while waiting for a status update. Retrying automatically.",
+                        "retry_message": "Retrying the Deep Research poll after a temporary read timeout.",
+                        "is_retrying": True,
+                    }
+                )
+                backoff_seconds = min(max(poll_interval_seconds, 1) * consecutive_retryable_poll_errors, 15)
+                time.sleep(backoff_seconds)
+                continue
             if poll_response.status_code >= 400:
                 if poll_response.status_code in {429, 500, 502, 503, 504}:
                     consecutive_retryable_poll_errors += 1

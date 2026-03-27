@@ -4,30 +4,32 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
+import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
+from app.adapters.llm_client import get_llm_client
 from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
 from app.core.errors import FlowForgeException, ThirdPartyError, ValidationError
 from app.features.topics.agents import (
     build_seed_payload,
     convert_research_item_to_topic,
-    extract_seed_strict_extractor,
-    generate_dialog_scripts,
     generate_topic_research_dossier,
     generate_topic_script_candidate,
 )
 from app.features.topics.deduplication import calculate_topic_similarity, deduplicate_topics
-from app.features.topics.prompts import get_topic_bank, pick_topic_bank_topics
+from app.features.topics.prompts import get_topic_bank
 from app.features.topics.queries import (
     create_topic_research_run,
     get_all_topics_from_registry,
     get_topic_registry_by_id,
     get_topic_research_run,
+    get_topic_scripts_for_dossier,
     get_topic_scripts_for_registry,
     list_topic_research_runs,
     list_topic_suggestions,
@@ -36,12 +38,15 @@ from app.features.topics.queries import (
     upsert_topic_script_variants,
 )
 from app.features.topics.seed_builders import build_research_seed_data
+from app.features.topics.topic_validation import sanitize_metadata_text, sanitize_spoken_fragment
 
 logger = get_logger(__name__)
 
 TOPIC_RESEARCH_TASKS: Dict[str, asyncio.Task] = {}
 _UUID_LIKE_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _TOPIC_NEW_WINDOW = timedelta(hours=24)
+_WARMUP_SEED_TOPIC_COUNT = 3
+_CANONICAL_TIERS = (8, 16, 32)
 
 
 def _topic_bank_rows() -> List[Dict[str, Any]]:
@@ -114,7 +119,11 @@ def fuzzy_match_topic(query: str, threshold: float = 0.35) -> Optional[Dict[str,
 def _fetch_all_script_counts() -> Dict[str, int]:
     """Fetch script counts for all topics in a single query."""
     from app.features.topics.queries import _fetch_topic_script_rows
-    all_scripts = _fetch_topic_script_rows()
+    try:
+        all_scripts = _fetch_topic_script_rows()
+    except Exception as exc:
+        logger.warning("topic_script_counts_unavailable", error=str(exc))
+        return {}
     counts: Dict[str, int] = {}
     for script in all_scripts:
         rid = str(script.get("topic_registry_id") or "")
@@ -690,6 +699,115 @@ def _build_value_dialog_scripts_from_prompt1(prompt1_item) -> Any:
     })
 
 
+def _normalize_topic_signature(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _choose_unique_seed_topics(seed_topics: List[str], *, count: int, seed: Optional[int] = None) -> List[str]:
+    unique_topics = []
+    seen = set()
+    for topic in seed_topics:
+        normalized = _normalize_topic_signature(topic)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_topics.append(str(topic).strip())
+    if count <= 0 or not unique_topics:
+        return []
+    rng = random.Random(seed if seed is not None else secrets.randbits(64))
+    rng.shuffle(unique_topics)
+    return unique_topics[:count]
+
+
+def _generate_fallback_seed_topics(missing_count: int, *, post_type: str) -> List[str]:
+    if missing_count <= 0:
+        return []
+    llm = get_llm_client()
+    prompt = (
+        "Erzeuge genau "
+        f"{missing_count} neue, kurze, einzigartige deutsche Seed-Topics fuer einen {post_type}-Warm-up-Lauf. "
+        "Antworte nur als JSON-Array von Strings. "
+        "Keine Duplikate zu typischen UGC-Themen, keine Deep-Research-Fakten, keine Erklaerungen."
+    )
+    response = llm.generate_gemini_json(
+        prompt=prompt,
+        system_prompt="You generate short German seed topics only.",
+        json_schema={
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": missing_count,
+            "maxItems": missing_count,
+        },
+        max_tokens=800,
+    )
+    topics = [str(item).strip() for item in list(response or []) if str(item).strip()]
+    return _choose_unique_seed_topics(topics, count=missing_count)
+
+
+def _select_warmup_seed_topics(
+    *,
+    post_type: str,
+    seed_topic_count: int = _WARMUP_SEED_TOPIC_COUNT,
+    seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    payload = get_topic_bank()
+    catalog = [str(topic).strip() for topic in list(payload.get("topics") or []) if str(topic).strip()]
+    chosen = _choose_unique_seed_topics(catalog, count=seed_topic_count, seed=seed)
+    seed_generation_used = False
+    if len(chosen) < seed_topic_count:
+        fallback_topics = _generate_fallback_seed_topics(seed_topic_count - len(chosen), post_type=post_type)
+        seed_generation_used = bool(fallback_topics)
+        for topic in fallback_topics:
+            if len(chosen) >= seed_topic_count:
+                break
+            normalized = _normalize_topic_signature(topic)
+            if normalized and normalized not in {_normalize_topic_signature(item) for item in chosen}:
+                chosen.append(topic)
+    return {
+        "seed_topics": chosen[:seed_topic_count],
+        "seed_generation_used": seed_generation_used,
+    }
+
+
+def _build_canonical_script_variant(
+    *,
+    prompt1_item,
+    lane_candidate: Dict[str, Any],
+    research_dossier: Dict[str, Any],
+    tier: int,
+    post_type: str,
+    seed_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    source_urls = [
+        {"title": source.get("title"), "url": source.get("url")}
+        for source in list(research_dossier.get("sources") or [])
+        if isinstance(source, dict) and source.get("url")
+    ]
+    return {
+        "bucket": "canonical",
+        "target_length_tier": tier,
+        "hook_style": str(lane_candidate.get("lane_family") or "canonical").strip() or "canonical",
+        "framework": str(prompt1_item.framework or "PAL").strip() or "PAL",
+        "tone": sanitize_metadata_text(prompt1_item.tone or "direkt, freundlich, empowernd, du-Form", max_sentences=1),
+        "estimated_duration_s": int(getattr(prompt1_item, "estimated_duration_s", 0) or 0) or tier,
+        "lane_key": str(lane_candidate.get("lane_key") or "").strip(),
+        "lane_family": str(lane_candidate.get("lane_family") or "").strip(),
+        "cluster_id": str(research_dossier.get("cluster_id") or "").strip(),
+        "anchor_topic": str(research_dossier.get("anchor_topic") or lane_candidate.get("title") or "").strip(),
+        "disclaimer": sanitize_metadata_text(prompt1_item.disclaimer or research_dossier.get("disclaimer") or "", max_sentences=1),
+        "source_summary": sanitize_metadata_text(
+            research_dossier.get("source_summary") or lane_candidate.get("source_summary") or ""
+        ),
+        "primary_source_url": source_urls[0]["url"] if source_urls else None,
+        "primary_source_title": source_urls[0]["title"] if source_urls else None,
+        "source_urls": source_urls,
+        "seed_payload": seed_payload,
+        "quality_notes": "",
+        "script": sanitize_spoken_fragment(prompt1_item.script or "", ensure_terminal=True),
+        "post_type": post_type,
+    }
+
+
 def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[str, Any]) -> Dict[str, Any]:
     lane = dict(lane_candidate or {})
     return {
@@ -700,7 +818,7 @@ def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[s
         "cluster_summary": research_dossier.get("cluster_summary"),
         "framework_candidates": list(lane.get("framework_candidates") or research_dossier.get("framework_candidates") or []),
         "sources": list(research_dossier.get("sources") or []),
-        "source_summary": str(lane.get("source_summary") or research_dossier.get("source_summary") or "").strip(),
+        "source_summary": sanitize_metadata_text(lane.get("source_summary") or research_dossier.get("source_summary") or ""),
         "facts": list(lane.get("facts") or research_dossier.get("facts") or []),
         "angle_options": [str(lane.get("angle") or "").strip()] + [
             str(item).strip()
@@ -708,7 +826,7 @@ def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[s
             if str(item).strip() and str(item).strip() != str(lane.get("angle") or "").strip()
         ],
         "risk_notes": list(lane.get("risk_notes") or research_dossier.get("risk_notes") or []),
-        "disclaimer": str(lane.get("disclaimer") or research_dossier.get("disclaimer") or "").strip(),
+        "disclaimer": sanitize_metadata_text(lane.get("disclaimer") or research_dossier.get("disclaimer") or "", max_sentences=1),
         "lane_candidates": [lane],
         "lane_candidate": lane,
     }
@@ -723,8 +841,9 @@ def _persist_topic_bank_row(
     dialog_scripts,
     post_type: str,
     seed_payload: Dict[str, Any],
+    variants: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    script_variants = _build_script_variants(
+    script_variants = variants if variants is not None else _build_script_variants(
         topic_title=title,
         post_type=post_type,
         target_length_tier=target_length_tier,
@@ -735,13 +854,13 @@ def _persist_topic_bank_row(
     )
     stored_row = store_topic_bank_entry(
         title=title,
-        topic_script=prompt1_item.script,
+        topic_script=sanitize_spoken_fragment(prompt1_item.script, ensure_terminal=True),
         post_type=post_type,
         target_length_tier=target_length_tier,
         research_payload=research_dossier,
     )
     topic_research_dossier_id = str(stored_row.get("topic_research_dossier_id") or stored_row.get("research_dossier_id") or "").strip() or None
-    upsert_topic_script_variants(
+    stored_variants = upsert_topic_script_variants(
         topic_registry_id=stored_row["id"],
         title=stored_row["title"],
         post_type=post_type,
@@ -749,94 +868,163 @@ def _persist_topic_bank_row(
         topic_research_dossier_id=topic_research_dossier_id,
         variants=script_variants,
     )
-    return stored_row
+    if not isinstance(stored_variants, list):
+        stored_variants = []
+    return {
+        "stored_row": stored_row,
+        "stored_variants": stored_variants,
+    }
 
 
 def _harvest_seed_topic_to_bank(
     *,
     seed_topic: str,
     post_type: str,
-    target_length_tier: int,
+    target_length_tier: Optional[int] = None,
     existing_topics: List[Dict[str, Any]],
     collected_topics: List[Dict[str, Any]],
     progress_callback: Optional[Any] = None,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     research_dossier = generate_topic_research_dossier(
         seed_topic=seed_topic,
         post_type=post_type,
-        target_length_tier=target_length_tier,
+        target_length_tier=8,
         progress_callback=progress_callback,
     ).model_dump(mode="json")
-    stored_rows: List[Dict[str, Any]] = []
+    summary: Dict[str, Any] = {
+        "seed_topic": seed_topic,
+        "dossiers_completed": 1,
+        "lanes_seen": 0,
+        "lanes_persisted": 0,
+        "scripts_persisted_by_tier": {str(tier): 0 for tier in _CANONICAL_TIERS},
+        "duplicate_scripts_skipped": 0,
+        "stored_rows": [],
+    }
     for lane_candidate in list(research_dossier.get("lane_candidates") or []):
-        lane_dossier = _build_lane_dossier(research_dossier, lane_candidate)
-        prompt1_item = generate_topic_script_candidate(
-            post_type=post_type,
-            target_length_tier=target_length_tier,
-            dossier=lane_dossier,
-            lane_candidate=lane_candidate,
-        )
-        topic_data = convert_research_item_to_topic(prompt1_item)
-        lane_title = str(lane_candidate.get("title") or prompt1_item.topic or topic_data.title).strip()
-        dedupe_candidate = {
-            "title": lane_title,
-            "rotation": topic_data.rotation,
-            "cta": topic_data.cta,
-        }
-        unique_candidates = deduplicate_topics(
-            [dedupe_candidate],
-            existing_topics + collected_topics,
-            threshold=0.35,
-        )
-        if not unique_candidates:
-            logger.info("topic_bank_lane_deduped", seed_topic=seed_topic, lane_title=lane_title)
+        summary["lanes_seen"] += 1
+        try:
+            lane_dossier = _build_lane_dossier(research_dossier, lane_candidate)
+            lane_title_hint = str(lane_candidate.get("title") or lane_dossier.get("topic") or research_dossier.get("topic") or seed_topic).strip()
+            base_prompt1_item = generate_topic_script_candidate(
+                post_type=post_type,
+                target_length_tier=8,
+                dossier=lane_dossier,
+                lane_candidate=lane_candidate,
+            )
+            topic_data = convert_research_item_to_topic(base_prompt1_item)
+            lane_title = str(lane_candidate.get("title") or base_prompt1_item.topic or topic_data.title or lane_title_hint).strip()
+            dedupe_candidate = {
+                "title": lane_title,
+                "rotation": topic_data.rotation,
+                "cta": topic_data.cta,
+            }
+            unique_candidates = deduplicate_topics(
+                [dedupe_candidate],
+                existing_topics + collected_topics,
+                threshold=0.35,
+            )
+            if not unique_candidates:
+                logger.info("topic_bank_lane_deduped", seed_topic=seed_topic, lane_title=lane_title)
+                continue
+
+            source_info = (lane_dossier.get("sources") or [{}])[0] if lane_dossier.get("sources") else {}
+            tier_prompt_items: Dict[int, Any] = {8: base_prompt1_item}
+            for tier in _CANONICAL_TIERS:
+                if tier == 8:
+                    continue
+                tier_prompt_items[tier] = generate_topic_script_candidate(
+                    post_type=post_type,
+                    target_length_tier=tier,
+                    dossier=lane_dossier,
+                    lane_candidate=lane_candidate,
+                )
+
+            base_strict_seed = build_research_seed_data(
+                prompt1_item=base_prompt1_item,
+                research_dossier=research_dossier,
+                lane_dossier=lane_dossier,
+                topic_title=lane_title,
+            )
+            base_seed_payload = build_seed_payload(
+                base_prompt1_item,
+                base_strict_seed,
+                None,
+                source_title=str(source_info.get("title") or lane_title or base_prompt1_item.topic).strip() or None,
+                source_url=str(source_info.get("url") or "").strip() or None,
+                source_summary=str(lane_dossier.get("source_summary") or base_prompt1_item.caption or base_prompt1_item.source_summary or "").strip() or None,
+                canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
+                research_title=lane_title,
+            )
+            persisted_result = _persist_topic_bank_row(
+                title=lane_title,
+                target_length_tier=8,
+                research_dossier=lane_dossier,
+                prompt1_item=base_prompt1_item,
+                dialog_scripts=None,
+                post_type=post_type,
+                seed_payload=base_seed_payload,
+                variants=[
+                    _build_canonical_script_variant(
+                        prompt1_item=tier_prompt_items[tier],
+                        lane_candidate=lane_candidate,
+                        research_dossier=research_dossier,
+                        tier=tier,
+                        post_type=post_type,
+                        seed_payload=build_seed_payload(
+                            tier_prompt_items[tier],
+                            build_research_seed_data(
+                                prompt1_item=tier_prompt_items[tier],
+                                research_dossier=research_dossier,
+                                lane_dossier=lane_dossier,
+                                topic_title=lane_title,
+                            ),
+                            None,
+                            source_title=str(source_info.get("title") or lane_title or tier_prompt_items[tier].topic).strip() or None,
+                            source_url=str(source_info.get("url") or "").strip() or None,
+                            source_summary=str(lane_dossier.get("source_summary") or tier_prompt_items[tier].caption or tier_prompt_items[tier].source_summary or "").strip() or None,
+                            canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
+                            research_title=lane_title,
+                        ),
+                    )
+                    for tier in _CANONICAL_TIERS
+                ],
+            )
+            stored_row = dict(persisted_result.get("stored_row") or {})
+            stored_variants = list(persisted_result.get("stored_variants") or [])
+            dedupe_record = {
+                "id": stored_row.get("id"),
+                "title": lane_title,
+                "rotation": topic_data.rotation,
+                "cta": topic_data.cta,
+            }
+            topic_research_dossier_id = str(
+                stored_row.get("topic_research_dossier_id") or stored_row.get("research_dossier_id") or ""
+            ).strip() or None
+            persisted_by_tier = {
+                str(tier): len(
+                    get_topic_scripts_for_dossier(topic_research_dossier_id, target_length_tier=tier)
+                )
+                if topic_research_dossier_id
+                else 0
+                for tier in _CANONICAL_TIERS
+            }
+            existing_topics.append(dedupe_record)
+            collected_topics.append(dedupe_record)
+            summary["lanes_persisted"] += 1
+            summary["stored_rows"].append(stored_row)
+            for tier, count in persisted_by_tier.items():
+                summary["scripts_persisted_by_tier"][tier] += count
+            summary["duplicate_scripts_skipped"] += max(0, len(_CANONICAL_TIERS) - len(stored_variants))
+        except Exception as exc:
+            logger.warning(
+                "topic_bank_lane_harvest_failed",
+                seed_topic=seed_topic,
+                lane_title=str(lane_candidate.get("title") or lane_candidate.get("angle") or "").strip() or None,
+                error=str(exc),
+            )
             continue
 
-        if post_type == "value":
-            dialog_scripts = _build_value_dialog_scripts_from_prompt1(prompt1_item)
-        else:
-            dialog_scripts = generate_dialog_scripts(
-                topic=lane_title,
-                scripts_required=1,
-                dossier=lane_dossier,
-                profile=get_duration_profile(target_length_tier),
-            )
-        strict_seed = build_research_seed_data(
-            prompt1_item=prompt1_item,
-            research_dossier=research_dossier,
-            lane_dossier=lane_dossier,
-            topic_title=lane_title,
-        )
-        source_info = (lane_dossier.get("sources") or [{}])[0] if lane_dossier.get("sources") else {}
-        seed_payload = build_seed_payload(
-            prompt1_item,
-            strict_seed,
-            dialog_scripts,
-            source_title=str(source_info.get("title") or lane_title or prompt1_item.topic).strip() or None,
-            source_url=str(source_info.get("url") or "").strip() or None,
-            source_summary=str(lane_dossier.get("source_summary") or prompt1_item.caption or prompt1_item.source_summary or "").strip() or None,
-            canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
-            research_title=lane_title,
-        )
-        stored_row = _persist_topic_bank_row(
-            title=lane_title,
-            target_length_tier=target_length_tier,
-            research_dossier=lane_dossier,
-            prompt1_item=prompt1_item,
-            dialog_scripts=dialog_scripts,
-            post_type=post_type,
-            seed_payload=seed_payload,
-        )
-        dedupe_record = {
-            "id": stored_row.get("id"),
-            "title": lane_title,
-            "rotation": topic_data.rotation,
-            "cta": topic_data.cta,
-        }
-        existing_topics.append(dedupe_record)
-        collected_topics.append(dedupe_record)
-        stored_rows.append(stored_row)
-    return stored_rows
+    return summary
 
 
 def _run_topic_research_pipeline_sync(
@@ -860,23 +1048,38 @@ def _run_topic_research_pipeline_sync(
         },
     )
 
-    tiers = [target_length_tier] if target_length_tier else [8, 16, 32]
-    all_stored_topics: List[Dict[str, Any]] = []
-
-    for i, tier in enumerate(tiers):
-        if progress_callback:
-            progress_callback(stage="researching", stage_label=f"Tier {tier}s ({i+1}/{len(tiers)})", detail_message=f"Starting deep research for {tier}s tier...")
-        stored_topics = _harvest_seed_topic_to_bank(
-            seed_topic=topic["title"],
-            post_type=post_type,
-            target_length_tier=tier,
-            existing_topics=get_all_topics_from_registry(),
-            collected_topics=[],
-            progress_callback=progress_callback,
+    if progress_callback:
+        progress_callback(
+            stage="researching",
+            stage_label="Starting canonical bank warm-up",
+            detail_message="Starting deep research for the canonical 8/16/32 warm-up set.",
         )
-        if progress_callback:
-            progress_callback(stage="collecting", stage_label=f"Tier {tier}s ({i+1}/{len(tiers)})", detail_message=f"Tier {tier}s complete — {len(stored_topics)} topics stored.")
-        all_stored_topics.extend(stored_topics)
+    harvest_summary = _harvest_seed_topic_to_bank(
+        seed_topic=topic["title"],
+        post_type=post_type,
+        target_length_tier=target_length_tier,
+        existing_topics=get_all_topics_from_registry(),
+        collected_topics=[],
+        progress_callback=progress_callback,
+    )
+    if isinstance(harvest_summary, list):
+        all_stored_topics = list(harvest_summary)
+        harvest_summary = {
+            "dossiers_completed": 0,
+            "lanes_seen": len(all_stored_topics),
+            "lanes_persisted": len(all_stored_topics),
+            "scripts_persisted_by_tier": {str(tier): 0 for tier in _CANONICAL_TIERS},
+            "duplicate_scripts_skipped": 0,
+            "stored_rows": all_stored_topics,
+        }
+    else:
+        all_stored_topics = list(harvest_summary.get("stored_rows") or [])
+    if progress_callback:
+        progress_callback(
+            stage="collecting",
+            stage_label="Canonical bank warm-up complete",
+            detail_message=f"Warm-up complete — {len(all_stored_topics)} lane rows stored with canonical 8/16/32 coverage.",
+        )
 
     run_summary = {
         "topic_registry_id": topic_registry_id,
@@ -884,8 +1087,14 @@ def _run_topic_research_pipeline_sync(
         "stored_topic_ids": [row["id"] for row in all_stored_topics],
         "stored_count": len(all_stored_topics),
         "target_length_tier": target_length_tier,
-        "tiers_processed": tiers,
+        "tiers_processed": list(_CANONICAL_TIERS),
         "post_type": post_type,
+        "seed_topics_used": [topic["title"]],
+        "dossiers_completed": int(harvest_summary.get("dossiers_completed") or 0),
+        "lanes_seen": int(harvest_summary.get("lanes_seen") or 0),
+        "lanes_persisted": int(harvest_summary.get("lanes_persisted") or 0),
+        "scripts_persisted_by_tier": dict(harvest_summary.get("scripts_persisted_by_tier") or {}),
+        "duplicate_scripts_skipped": int(harvest_summary.get("duplicate_scripts_skipped") or 0),
     }
     update_topic_research_run(
         run_id,
@@ -944,6 +1153,20 @@ def harvest_topics_to_bank_sync(
     )
     stored_by_type: Dict[str, int] = defaultdict(int)
     stored_topics: List[Dict[str, Any]] = []
+    seed_topics_used: List[str] = []
+    run_summary: Dict[str, Any] = {
+        "trigger_source": trigger_source,
+        "target_length_tier": target_length_tier,
+        "stored_by_type": {},
+        "stored_topics": [],
+        "seed_topics_used": [],
+        "dossiers_completed": 0,
+        "lanes_seen": 0,
+        "lanes_persisted": 0,
+        "scripts_persisted_by_tier": {str(tier): 0 for tier in _CANONICAL_TIERS},
+        "duplicate_scripts_skipped": 0,
+        "seed_generation_used": False,
+    }
 
     try:
         existing_topics = get_all_topics_from_registry()
@@ -951,21 +1174,35 @@ def harvest_topics_to_bank_sync(
         for post_type, count in post_type_counts.items():
             if count <= 0:
                 continue
-            seed_topics = pick_topic_bank_topics(
-                count,
+            warmup = _select_warmup_seed_topics(
+                post_type=post_type,
+                seed_topic_count=_WARMUP_SEED_TOPIC_COUNT,
                 seed=hash((trigger_source, post_type, target_length_tier, count)),
             )
+            seed_topics = list(warmup.get("seed_topics") or [])
+            run_summary["seed_generation_used"] = run_summary["seed_generation_used"] or bool(warmup.get("seed_generation_used"))
             for seed_topic in seed_topics:
-                stored_rows = _harvest_seed_topic_to_bank(
+                if seed_topic not in seed_topics_used:
+                    seed_topics_used.append(seed_topic)
+                harvest_summary = _harvest_seed_topic_to_bank(
                     seed_topic=seed_topic,
                     post_type=post_type,
-                    target_length_tier=target_length_tier,
                     existing_topics=existing_topics,
                     collected_topics=collected_topics,
                 )
-                stored_by_type[post_type] += len(stored_rows)
+                stored_by_type[post_type] += int(harvest_summary.get("lanes_persisted") or 0)
+                run_summary["dossiers_completed"] += int(harvest_summary.get("dossiers_completed") or 0)
+                run_summary["lanes_seen"] += int(harvest_summary.get("lanes_seen") or 0)
+                run_summary["lanes_persisted"] += int(harvest_summary.get("lanes_persisted") or 0)
+                run_summary["duplicate_scripts_skipped"] += int(harvest_summary.get("duplicate_scripts_skipped") or 0)
+                for tier, count_value in dict(harvest_summary.get("scripts_persisted_by_tier") or {}).items():
+                    run_summary["scripts_persisted_by_tier"][str(tier)] += int(count_value or 0)
+                stored_rows = list(harvest_summary.get("stored_rows") or [])
                 stored_topics.extend(stored_rows)
 
+        run_summary["seed_topics_used"] = seed_topics_used
+        run_summary["stored_by_type"] = dict(stored_by_type)
+        run_summary["stored_topics"] = [topic["id"] for topic in stored_topics]
         update_topic_research_run(
             run_row["id"],
             status="completed",
@@ -974,6 +1211,13 @@ def harvest_topics_to_bank_sync(
                 "target_length_tier": target_length_tier,
                 "stored_by_type": dict(stored_by_type),
                 "stored_topics": [topic["id"] for topic in stored_topics],
+                "seed_topics_used": seed_topics_used,
+                "dossiers_completed": run_summary["dossiers_completed"],
+                "lanes_seen": run_summary["lanes_seen"],
+                "lanes_persisted": run_summary["lanes_persisted"],
+                "scripts_persisted_by_tier": run_summary["scripts_persisted_by_tier"],
+                "duplicate_scripts_skipped": run_summary["duplicate_scripts_skipped"],
+                "seed_generation_used": run_summary["seed_generation_used"],
             },
             error_message="",
         )
@@ -990,9 +1234,5 @@ def harvest_topics_to_bank_sync(
         )
         raise
 
-    return {
-        "run_id": run_row["id"],
-        "stored_by_type": dict(stored_by_type),
-        "stored_topics": stored_topics,
-        "target_length_tier": target_length_tier,
-    }
+    run_summary["run_id"] = run_row["id"]
+    return run_summary

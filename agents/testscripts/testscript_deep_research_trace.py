@@ -213,6 +213,10 @@ def run_trace(*, post_type_counts: Dict[str, int], target_length_tier: int, trig
         except Exception:
             run_row = {"error": "Failed to read topic_research_runs row", "traceback": traceback.format_exc()}
 
+    deep_research_count = sum(1 for entry in trace_entries if entry.get("method") == "generate_gemini_deep_research")
+    json_count = sum(1 for entry in trace_entries if entry.get("method") == "generate_gemini_json")
+    text_count = sum(1 for entry in trace_entries if entry.get("method") == "generate_gemini_text")
+
     return {
         "started_at": datetime.now(timezone.utc).isoformat(),
         "environment": {
@@ -231,6 +235,9 @@ def run_trace(*, post_type_counts: Dict[str, int], target_length_tier: int, trig
         "run_error": run_error,
         "run_row": run_row,
         "trace_count": len(trace_entries),
+        "deep_research_count": deep_research_count,
+        "json_count": json_count,
+        "text_count": text_count,
         "trace_entries": trace_entries,
     }
 
@@ -333,9 +340,49 @@ def main() -> int:
         target_length_tier=args.target_tier,
         trigger_source=args.trigger_source,
     )
+    run_result = report.get("run_result") or {}
+    seed_topics_used = list(run_result.get("seed_topics_used") or [])
+    stored_topic_ids = list(run_result.get("stored_topics") or [])
+    scripts_persisted_by_tier = dict(run_result.get("scripts_persisted_by_tier") or {})
+
+    if report.get("deep_research_count") != 3:
+        raise RuntimeError(f"Expected exactly 3 Deep Research calls, got: {report.get('deep_research_count')}")
+    if int(report.get("json_count") or 0) != 0:
+        raise RuntimeError(f"Expected zero Gemini JSON calls in the value warm-up path, got: {report.get('json_count')}")
+    if len(seed_topics_used) != 3 or len(set(seed_topics_used)) != 3:
+        raise RuntimeError(f"Expected 3 unique seed topics, got: {seed_topics_used}")
+    if int(run_result.get("dossiers_completed") or 0) != 3:
+        raise RuntimeError(f"Expected 3 completed dossiers, got: {_json(run_result)}")
+    if int(run_result.get("lanes_persisted") or 0) < 3:
+        raise RuntimeError(f"Expected multiple persisted lanes, got: {_json(run_result)}")
+    for tier in ("8", "16", "32"):
+        if int(scripts_persisted_by_tier.get(tier) or 0) < 1:
+            raise RuntimeError(f"Expected canonical coverage for tier {tier}, got: {_json(run_result)}")
+
+    if not stored_topic_ids:
+        raise RuntimeError(f"Expected stored topic ids in run result, got: {_json(run_result)}")
+
+    supabase = get_supabase().client
+    for topic_id in stored_topic_ids:
+        rows = (
+            supabase.table("topic_scripts")
+            .select("*")
+            .eq("topic_registry_id", topic_id)
+            .execute()
+            .data
+            or []
+        )
+        canonical_rows = [row for row in rows if str(row.get("bucket") or "") == "canonical"]
+        if not canonical_rows:
+            raise RuntimeError(f"Expected canonical rows for {topic_id}, got: {_json(rows)}")
+        for tier in (8, 16, 32):
+            if not any(int(row.get("target_length_tier") or 0) == tier for row in canonical_rows):
+                raise RuntimeError(f"Missing canonical tier {tier} for {topic_id}, got: {_json(canonical_rows)}")
+
     write_markdown(report, output_path)
     print(f"TRACE_WRITTEN={output_path}")
     print(f"TRACE_CALLS={report.get('trace_count')}")
+    print(f"DEEP_RESEARCH_CALLS={report.get('deep_research_count')}")
     if report.get("run_error"):
         return 1
     return 0

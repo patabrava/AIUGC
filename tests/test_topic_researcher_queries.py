@@ -102,3 +102,272 @@ def test_get_cron_run_stats(mock_get_sb):
     result = get_cron_run_stats()
     assert "total_runs" in result
     assert "total_topics_researched" in result
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_skips_identical_scripts_within_registry_tier(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = []
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def update(self, payload):
+            self._mode = "update"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                filtered = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self._filters.items())
+                ]
+                return _FakeResponse(filtered)
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            if self._mode == "update":
+                for row in self.rows:
+                    if all(row.get(key) == value for key, value in self._filters.items()):
+                        row.update(self._payload)
+                        return _FakeResponse([row])
+                return _FakeResponse([])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = MagicMock(client=MagicMock(table=MagicMock(return_value=fake_table)))
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="Pflegegrad verstehen",
+        post_type="value",
+        target_length_tier=8,
+        topic_research_dossier_id="dossier-1",
+        variants=[
+            {
+                "bucket": "canonical",
+                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause.",
+                "hook_style": "canonical",
+                "lane_key": "lane-1",
+            },
+            {
+                "bucket": "testimonial",
+                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause.",
+                "hook_style": "testimonial",
+                "lane_key": "lane-1",
+            },
+            {
+                "bucket": "transformation",
+                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause.",
+                "hook_style": "transformation",
+                "lane_key": "lane-1",
+            },
+        ],
+    )
+
+    assert len(stored) == 1
+    assert stored[0]["bucket"] == "canonical"
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_rejects_contaminated_canonical_scripts(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = []
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                filtered = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self._filters.items())
+                ]
+                return _FakeResponse(filtered)
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = MagicMock(client=MagicMock(table=MagicMock(return_value=fake_table)))
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="Merkzeichen richtig unterscheiden",
+        post_type="value",
+        target_length_tier=8,
+        topic_research_dossier_id="dossier-1",
+        variants=[
+            {
+                "bucket": "canonical",
+                "script": "aG erfordert GdB 80 und massive Einschränkungen, G misst deine Wegstrecke. Zentrale Erkenntnisse.",
+                "hook_style": "canonical",
+                "lane_key": "lane-1",
+                "target_length_tier": 8,
+            }
+        ],
+    )
+
+    assert stored == []
+    assert fake_table.rows == []
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_repairs_citation_residue_before_insert(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = []
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                filtered = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self._filters.items())
+                ]
+                return _FakeResponse(filtered)
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = MagicMock(client=MagicMock(table=MagicMock(return_value=fake_table)))
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="Merkzeichen richtig unterscheiden",
+        post_type="value",
+        target_length_tier=16,
+        topic_research_dossier_id="dossier-1",
+        variants=[
+            {
+                "bucket": "canonical",
+                "script": (
+                    "Wenn dir bei G und aG die Unterschiede unklar bleiben, verlierst du schnell Orientierung im Alltag. "
+                    "Mit klar geprüften Voraussetzungen trennst du Wegstrecke, Einschränkung und Berechtigung endlich sauber voneinander [cite: 1]."
+                ),
+                "hook_style": "canonical",
+                "lane_key": "lane-1",
+                "target_length_tier": 16,
+            }
+        ],
+    )
+
+    assert len(stored) == 1
+    assert "[cite:" not in stored[0]["script"].lower()
+    assert fake_table.rows[0]["script"] == stored[0]["script"]
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_create_post_for_batch_injects_target_tier_into_seed_data(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.payload = None
+
+        def table(self, *_args, **_kwargs):
+            return self
+
+        def insert(self, payload):
+            self.payload = payload
+            return self
+
+        def execute(self):
+            row = dict(self.payload or {})
+            row["id"] = "post-1"
+            return _FakeResponse([row])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = type("SB", (), {"client": fake_table})()
+
+    from app.features.topics.queries import create_post_for_batch
+
+    post = create_post_for_batch(
+        batch_id="batch-1",
+        post_type="value",
+        topic_title="Pflegegrad prüfen",
+        topic_rotation="Rotation",
+        topic_cta="CTA",
+        spoken_duration=16,
+        seed_data={"script": "Script", "dialog_script": "Dialog"},
+        target_length_tier=16,
+    )
+
+    assert post["id"] == "post-1"
+    assert fake_table.payload["seed_data"]["target_length_tier"] == 16

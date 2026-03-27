@@ -466,6 +466,85 @@ def test_generate_caption_bundle_text_first_with_markers():
     assert bundle["selection_reason"] == "hash_variant"
 
 
+def test_attach_caption_bundle_repairs_invalid_value_bundle_from_clean_facts():
+    class BrokenLLM:
+        def generate_gemini_text(self, **kwargs):
+            return (
+                "[short_paragraph]\n"
+                "Viel zu kurz.\n\n"
+                "[medium_bullets]\n"
+                "• Viel zu kurz.\n\n"
+                "[long_structured]\n"
+                "Das ist fast identisch mit dem Skript und deshalb absichtlich unbrauchbar."
+            )
+
+    payload = {
+        "script": (
+            "Wusstest du, dass fehlende soziale Kontakte so schädlich wie Rauchen sein können? "
+            "Baue dir eine Wahlfamilie in deiner Nachbarschaft auf und stärke damit dein Wohlbefinden."
+        ),
+        "strict_seed": {
+            "source_context": (
+                "Ein stabiles soziales Netz entlastet im Alltag und wirkt sich auch langfristig auf die Gesundheit aus."
+            ),
+            "facts": [
+                "Fehlende soziale Kontakte erhöhen das Gesundheitsrisiko deutlich und wirken sich langfristig auf den Alltag aus.",
+                "Nachbarschaften und Wahlfamilien übernehmen heute oft Aufgaben, die früher enger in Familien gebunden waren.",
+                "Klare Absprachen und erreichbare Kontakte entlasten, wenn Unterstützung kurzfristig gebraucht wird.",
+                "Telefonketten oder feste Check-ins helfen, damit Sorgen nicht unbemerkt größer werden.",
+            ],
+        },
+    }
+
+    enriched = captions.attach_caption_bundle(
+        payload,
+        topic_title="Soziales Umfeld stärken",
+        post_type="value",
+        llm_factory=lambda: BrokenLLM(),
+    )
+
+    bundle = enriched["caption_bundle"]
+    assert len(bundle["variants"]) == 3
+    assert bundle["selected_key"] in {"medium_bullets", "long_structured"}
+    for variant in bundle["variants"]:
+        captions.validate_caption_variant(variant["key"], variant["body"], payload["script"])
+
+
+def test_attach_caption_bundle_repair_strips_dangling_example_fragments():
+    class BrokenLLM:
+        def generate_gemini_text(self, **kwargs):
+            return (
+                "[short_paragraph]\nKurz.\n\n"
+                "[medium_bullets]\nKurz.\n\n"
+                "[long_structured]\nKurz."
+            )
+
+    payload = {
+        "script": (
+            "Die Zuständigkeit richtet sich nach Ursache der Behinderung und dem zuständigen Kostenträger."
+        ),
+        "strict_seed": {
+            "facts": [
+                "Die Zuständigkeit ist hochgradig fragmentiert und richtet sich nach der Ursache der Behinderung (z.B. Arbeitsunfall) oder der Dauer der bisherigen Rentenversicherungsbeiträge.",
+                "Der Markt bietet hochspezialisierte Lösungen – von extrem flachen Kassettenliften bis zu elektronischen Handbediengeräten.",
+                "Missachtest du die Antragsreihenfolge, kann der Förderanspruch vollständig verloren gehen.",
+            ],
+        },
+    }
+
+    enriched = captions.attach_caption_bundle(
+        payload,
+        topic_title="Fahrzeuganpassung und Kostenübernahme",
+        post_type="value",
+        llm_factory=lambda: BrokenLLM(),
+    )
+
+    selected = enriched["caption_bundle"]["selected_body"]
+    assert "(z.B." not in selected
+    assert "\n2. Der Markt bietet" in selected or "Der Markt bietet hochspezialisierte Lösungen" in selected
+    assert "oder der Dauer" not in selected or "oder der Dauer der bisherigen Rentenversicherungsbeiträge." in selected
+
+
 def test_parse_text_variants_round_trip():
     """Marker-formatted text should parse and validate as a complete caption bundle."""
     marker_text = (

@@ -411,7 +411,6 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
     monkeypatch.setattr(topic_hub, "create_topic_research_run", lambda **kwargs: {"id": "run-1"})
     monkeypatch.setattr(topic_hub, "update_topic_research_run", lambda run_id, **kwargs: updated_runs.append((run_id, kwargs)))
     monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
-    monkeypatch.setattr(topic_hub, "pick_topic_bank_topics", lambda count, seed=None: ["Seed Thema"][:count] or ["Seed Thema"])
 
     dossier = ResearchDossier(
         cluster_id="cluster-1",
@@ -463,6 +462,7 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
         ],
     )
     monkeypatch.setattr(topic_hub, "generate_topic_research_dossier", lambda **kwargs: dossier)
+    monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
 
     def fake_generate_topic_script_candidate(**kwargs):
         lane = kwargs["lane_candidate"]
@@ -478,15 +478,6 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
         )
 
     monkeypatch.setattr(topic_hub, "generate_topic_script_candidate", fake_generate_topic_script_candidate)
-    def fail_if_prompt2_called(**kwargs):
-        raise AssertionError(f"PROMPT_2 path should not run for value posts: {kwargs}")
-
-    monkeypatch.setattr(topic_hub, "generate_dialog_scripts", fail_if_prompt2_called)
-    monkeypatch.setattr(
-        topic_hub,
-        "extract_seed_strict_extractor",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("strict extractor should not run in the harvest path")),
-    )
 
     def fake_store_topic_bank_entry(**kwargs):
         stored_entries.append(kwargs)
@@ -504,6 +495,7 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
         "upsert_topic_script_variants",
         lambda **kwargs: (variant_calls.append(kwargs), variant_counts.setdefault(kwargs["title"], len(kwargs["variants"])))[1],
     )
+    monkeypatch.setattr(topic_hub, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}, {"id": "script-2"}, {"id": "script-3"}])
 
     result = topic_hub.harvest_topics_to_bank_sync(
         post_type_counts={"value": 1},
@@ -512,6 +504,8 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
     )
 
     assert result["stored_by_type"]["value"] == 2
+    assert len(result["seed_topics_used"]) == 3
+    assert len(set(result["seed_topics_used"])) == 3
     assert [entry["title"] for entry in stored_entries] == [
         "Rampe vorher anmelden",
         "Entschädigung bei Ausfall prüfen",
@@ -758,7 +752,7 @@ def test_launch_research_with_new_topic_title(monkeypatch):
 
 
 def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
-    """When target_length_tier is None, pipeline should harvest for all 3 tiers."""
+    """When target_length_tier is None, pipeline should run one canonical harvest."""
     from app.features.topics import hub as topic_hub
 
     harvested_tiers = []
@@ -788,7 +782,7 @@ def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
         post_type="value",
     )
 
-    assert sorted(harvested_tiers) == [8, 16, 32]
+    assert harvested_tiers == [None]
 
 
 def test_build_launch_hub_payload_includes_active_runs(monkeypatch):

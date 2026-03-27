@@ -52,8 +52,11 @@ def test_build_prompt1_uses_32s_text_template():
     assert "DREI oder VIER vollstaendige Saetze" in prompt
     assert "54-74 Woerter" in prompt
     assert "Lane-Titel:" in prompt
-    assert "title" in prompt
-    assert "caption" in prompt
+    assert "Nur der Scripttext" in prompt
+    assert "Keine Zwischenueberschriften" in prompt
+    assert "keine Zitate wie `[cite: 1]`" in prompt
+    assert "Nur valides JSON-Array" not in prompt
+    assert "caption" not in prompt
     assert "source_summary" not in prompt
 
 
@@ -84,7 +87,7 @@ def test_build_prompt2_uses_16s_text_template():
     assert "core:" not in prompt
 
 
-def test_parse_prompt1_response_rejects_trailing_fragment(monkeypatch):
+def test_parse_prompt1_response_normalizes_trailing_fragment(monkeypatch):
     monkeypatch.setattr(topic_agents, "validate_sources_accessible", lambda item: None)
     profile = get_duration_profile(32)
     raw = """{
@@ -102,10 +105,9 @@ def test_parse_prompt1_response_rejects_trailing_fragment(monkeypatch):
       ]
     }"""
 
-    with pytest.raises(ValidationError) as exc_info:
-        topic_agents.parse_prompt1_response(raw, profile=profile)
+    batch = topic_agents.parse_prompt1_response(raw, profile=profile)
 
-    assert "incomplete fragment" in exc_info.value.message.lower()
+    assert batch.items[0].script.endswith(".")
 
 
 def test_parse_prompt1_response_accepts_minimal_stage3_contract(monkeypatch):

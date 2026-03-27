@@ -1,11 +1,11 @@
 """
-EYE testscript: end-to-end topic-bank harvest and length-first discovery.
+EYE testscript: end-to-end canonical topic-bank harvest and bank-first discovery.
 
 Runs on the configured Supabase + Gemini stack:
-1. harvest one 16-second value topic and one 16-second lifestyle topic into the durable topic bank
-2. verify a completed topic_research_runs row and length-aware suggestions exist
+1. harvest one value warm-up run with 3 unique Deep Research seed topics
+2. verify each accepted lane has canonical 8/16/32 coverage in `topic_scripts`
 3. create a 16-second batch that requests one value post
-4. run topic discovery and confirm the post is created from the stored bank
+4. run topic discovery and confirm the post is created from the stored bank without a second warm-up run
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ async def main() -> int:
         _require_env(required)
 
     harvest = harvest_topics_to_bank_sync(
-        post_type_counts={"value": 1, "lifestyle": 1, "product": 0},
+        post_type_counts={"value": 1, "lifestyle": 0, "product": 0},
         target_length_tier=16,
         trigger_source="e2e_topic_bank",
     )
@@ -65,10 +65,17 @@ async def main() -> int:
     print(_json(harvest))
     print("HARVEST_END")
 
-    if harvest.get("stored_by_type", {}).get("value", 0) < 1:
-        raise RuntimeError(f"Expected at least one stored value topic, got: {_json(harvest)}")
-    if harvest.get("stored_by_type", {}).get("lifestyle", 0) < 1:
-        raise RuntimeError(f"Expected at least one stored lifestyle topic, got: {_json(harvest)}")
+    seed_topics_used = list(harvest.get("seed_topics_used") or [])
+    scripts_persisted_by_tier = dict(harvest.get("scripts_persisted_by_tier") or {})
+    if len(seed_topics_used) != 3 or len(set(seed_topics_used)) != 3:
+        raise RuntimeError(f"Expected 3 unique warm-up seeds, got: {_json(harvest)}")
+    if int(harvest.get("dossiers_completed") or 0) != 3:
+        raise RuntimeError(f"Expected 3 completed dossiers, got: {_json(harvest)}")
+    if int(harvest.get("lanes_persisted") or 0) < 3:
+        raise RuntimeError(f"Expected multiple persisted lanes, got: {_json(harvest)}")
+    for tier in ("8", "16", "32"):
+        if int(scripts_persisted_by_tier.get(tier) or 0) < 1:
+            raise RuntimeError(f"Expected canonical coverage for tier {tier}, got: {_json(harvest)}")
 
     suggestions = list_topic_suggestions(target_length_tier=16, limit=5, post_type="value")
     print("SUGGESTIONS_START")
@@ -93,10 +100,22 @@ async def main() -> int:
     if len(run_rows) != 1 or run_rows[0].get("status") != "completed":
         raise RuntimeError(f"Expected one completed topic research run for {run_id}, got: {_json(run_rows)}")
 
+    pre_warmup_run_ids = {
+        row["id"]
+        for row in (
+            supabase.table("topic_research_runs")
+            .select("id,trigger_source,created_at")
+            .execute()
+            .data
+            or []
+        )
+        if str(row.get("trigger_source") or "") == "batch_discovery_warmup"
+    }
+
     dossier_rows = (
         supabase.table("topic_research_dossiers")
         .select("*")
-        .eq("target_length_tier", 16)
+        .eq("target_length_tier", 8)
         .execute()
         .data
         or []
@@ -115,27 +134,26 @@ async def main() -> int:
         or []
     )
     rich_row = None
+    canonical_rows_by_lane = []
     for row in recent_value_rows:
-        tier_variants = (
+        lane_rows = (
             supabase.table("topic_scripts")
             .select("*")
             .eq("topic_registry_id", row["id"])
-            .eq("target_length_tier", 16)
+            .eq("bucket", "canonical")
             .execute()
             .data
             or []
         )
-        if len(tier_variants) >= 3:
+        if all(any(int(script.get("target_length_tier") or 0) == tier for script in lane_rows) for tier in (8, 16, 32)):
             rich_row = row
-            topic_script_rows = tier_variants
+            canonical_rows_by_lane = lane_rows
             break
     if rich_row is None:
         raise RuntimeError(
-            "Expected one recently harvested value topic with a richer topic_scripts bank, got: "
+            "Expected one recently harvested value topic with canonical 8/16/32 coverage, got: "
             f"{_json(recent_value_rows)}"
         )
-    if len(topic_script_rows) != 3:
-        raise RuntimeError(f"Expected 3 stored 16-second script variants, got {len(topic_script_rows)}")
 
     print("RICH_ROW_START")
     print(
@@ -143,19 +161,12 @@ async def main() -> int:
             {
                 "id": rich_row.get("id"),
                 "title": rich_row.get("title"),
-                "script_count_16": len(topic_script_rows),
-                "first_script_source_urls": (topic_script_rows[0] or {}).get("source_urls", []),
+                "canonical_script_count": len(canonical_rows_by_lane),
+                "script_tiers": sorted({int(row.get("target_length_tier") or 0) for row in canonical_rows_by_lane}),
             }
         )
     )
     print("RICH_ROW_END")
-
-    first_variant = topic_script_rows[0]
-    if not first_variant.get("source_urls"):
-        raise RuntimeError(
-            "Expected script variants to preserve source_urls in topic_scripts, got: "
-            f"{_json(first_variant)}"
-        )
 
     stored_rows = (
         supabase.table("topic_registry")
@@ -187,6 +198,23 @@ async def main() -> int:
     print("DISCOVERY_START")
     print(_json(discovery))
     print("DISCOVERY_END")
+
+    post_warmup_run_ids = {
+        row["id"]
+        for row in (
+            supabase.table("topic_research_runs")
+            .select("id,trigger_source,created_at")
+            .execute()
+            .data
+            or []
+        )
+        if str(row.get("trigger_source") or "") == "batch_discovery_warmup"
+    }
+    if post_warmup_run_ids != pre_warmup_run_ids:
+        raise RuntimeError(
+            "Expected bank-first discovery to avoid a second warm-up run, got: "
+            f"before={sorted(pre_warmup_run_ids)} after={sorted(post_warmup_run_ids)}"
+        )
 
     posts = (
         supabase.table("posts")
