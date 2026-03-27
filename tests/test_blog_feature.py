@@ -183,3 +183,27 @@ def test_blog_toggle_endpoint_is_registered():
     response = client.put("/blog/posts/nonexistent/blog-toggle")
     # Should not be 404 (route not found) — 500 is expected with test Supabase credentials
     assert response.status_code != 404
+
+
+def test_blog_generate_endpoint_is_registered():
+    """Verify the generate endpoint is registered."""
+    client = TestClient(app)
+    response = client.post("/blog/posts/00000000-0000-0000-0000-000000000000/blog/generate")
+    assert response.status_code != 404
+
+
+def test_blog_content_update_endpoint_rejects_empty():
+    """Verify content update rejects empty payload."""
+    client = TestClient(app)
+    response = client.put(
+        "/blog/posts/00000000-0000-0000-0000-000000000000/blog/content",
+        json={},
+    )
+    assert response.status_code in (422, 500)
+
+
+def test_blog_publish_endpoint_is_registered():
+    """Verify the publish endpoint is registered."""
+    client = TestClient(app)
+    response = client.post("/blog/posts/00000000-0000-0000-0000-000000000000/blog/publish")
+    assert response.status_code != 404
