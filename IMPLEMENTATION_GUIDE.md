@@ -5,7 +5,7 @@
 ## Quick Reference
 
 **Architecture:** Vanilla Vertical-Slice Monolith  
-**Deployment:** Vercel (API) + Vercel Cron + Railway (Worker)  
+**Deployment:** Hostinger Docker workers + Supabase  
 **Stack:** Python/FastAPI + Jinja2 + htmx + Alpine.js + Tailwind + Supabase
 
 ---
@@ -50,7 +50,7 @@ flow-forge/
 ### Phase 2: Topic Discovery
 - PROMPT 1 (Research) + PROMPT 2 (Community Ads)
 - Deduplication (Jaccard, registry)
-- Vercel Cron endpoint
+- Hostinger worker cron endpoint
 - Manual script override UI
 - Approve scripts → advance S2 to S4
 - **Testscript:** Run agent, verify 10 unique topics, check registry, approve scripts
@@ -139,7 +139,7 @@ Artifacts: API responses, browser screenshot
 1. Install Vercel CLI: `npm i -g vercel`
 2. Link project: `vercel link`
 3. Set env vars: `vercel env add` (all keys from .env.example)
-4. Deploy: `vercel --prod`
+4. Deploy the API only: `vercel --prod`
 
 ### Railway Worker Setup
 1. Create new project on Railway
@@ -148,11 +148,15 @@ Artifacts: API responses, browser screenshot
 4. Add env vars (same as Vercel + SUPABASE_URL)
 5. Deploy
 
-### Vercel Cron
-- Configured in `vercel.json`
-- Endpoint: `/api/cron/topic-discovery`
-- Schedule: Every 6 hours
-- Auth: Bearer token (CRON_SECRET)
+### Daily Topic Discovery
+- Runs inside the Hostinger `topic-researcher` worker container
+- Schedule: once per day via the worker loop in `workers/topic_researcher.py`
+- Auth: Bearer token on `POST /topics/cron/discover` when triggered manually or by an external scheduler
+
+### Script Bank Expansion
+- Runs inside the Hostinger `expansion-worker` container
+- Schedule: once per day via the worker loop in `workers/expansion_worker.py`
+- Optional: controlled by `video_poller_enable_script_bank_expansion`
 
 ---
 

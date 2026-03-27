@@ -9,7 +9,7 @@ Automatically discovers new topics via Gemini deep research, once per day. Reads
 
 ## Where It Runs
 
-Inside the dedicated **topic-researcher** Docker container (`workers/topic_researcher.py`). Runs as a separate service alongside the web and worker containers.
+Inside the dedicated **topic-researcher** Docker container (`workers/topic_researcher.py`) on Hostinger. Runs as a separate service alongside the web and worker containers.
 
 ## How It Works
 
@@ -96,3 +96,7 @@ On container startup, the worker calls `get_latest_cron_run()` to check the data
 ## Health Endpoint
 
 `GET /topics/cron-status` — returns the last run timestamp, next scheduled run, and status of the topic researcher cron job.
+
+## Deployment Note
+
+This job should be scheduled on the Hostinger worker path. Vercel should only serve the API surface for manual triggering and status checks.

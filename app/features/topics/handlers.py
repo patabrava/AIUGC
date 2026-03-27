@@ -1388,9 +1388,9 @@ async def cron_topic_discovery(
     authorization: Optional[str] = Header(None)
 ):
     """
-    Vercel Cron endpoint for automated topic discovery.
-    Runs every 6 hours to discover topics for batches in S1_SETUP.
-    Per Implementation Guide: Vercel Cron
+    Hostinger cron endpoint for automated topic discovery.
+    Runs once per day to discover topics for batches in S1_SETUP.
+    Per Implementation Guide: Hostinger worker cron
     """
     settings = get_settings()
     

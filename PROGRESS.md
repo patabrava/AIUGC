@@ -343,7 +343,7 @@
 ### Deployment
 - Vercel (API) - configured
 - Railway (Worker) - ready for Phase 4 deployment
-- Vercel Cron - configured
+- Hostinger worker cron - configured
 
 ---
 

@@ -9,7 +9,7 @@ Automatically generates new script variants for all topics in the topic bank, on
 
 ## Where It Runs
 
-Inside a dedicated **expansion-worker** Docker container (`workers/expansion_worker.py`) that reuses the same image as the API server. No external scheduler needed.
+Inside a dedicated **expansion-worker** Docker container (`workers/expansion_worker.py`) on Hostinger that reuses the same image as the API server. No external scheduler needed.
 
 ## How It Works
 
@@ -46,6 +46,10 @@ expansion_worker main loop:
 ## First Run Behavior
 
 On container startup, the worker runs `expand_script_bank()` immediately, then sleeps for 24 hours before the next cycle.
+
+## Necessity
+
+This job is optional. The system still works without daily expansion because canonical topic warm-up already fills the base `8/16/32` bank. Keep the worker enabled only if you want extra variant diversity and replenishment beyond the canonical bank.
 
 ## What It Generates
 
