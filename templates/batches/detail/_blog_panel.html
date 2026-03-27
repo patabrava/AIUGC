@@ -1,0 +1,179 @@
+{# _blog_panel.html — Blog Posts Panel #}
+{% set blog_posts = posts | selectattr('blog_enabled') | list %}
+{% if blog_posts %}
+<div class="mt-6 rounded-xl border border-white/10 bg-[#1a1a2e] overflow-hidden"
+     x-data="blogPanelComponent({{ blog_posts | tojson }})"
+     id="blog-panel">
+
+    {# Panel Header #}
+    <div class="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div class="flex items-center gap-3">
+            <h3 class="text-base font-semibold text-gray-100">Blog Posts</h3>
+            <span class="bg-purple-500/20 text-purple-400 text-xs font-semibold px-2 py-0.5 rounded-full"
+                  x-text="posts.length + ' of {{ posts | length }} posts'"></span>
+        </div>
+        <button class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+                hx-post="/blog/batches/{{ batch.id }}/blog/generate-all"
+                hx-swap="none"
+                hx-indicator="#blog-generate-spinner">
+            Generate All Drafts
+        </button>
+        <span id="blog-generate-spinner" class="htmx-indicator text-purple-400 text-sm">Generating...</span>
+    </div>
+
+    {# Blog Post Rows #}
+    <template x-for="post in posts" :key="post.id">
+        <div class="border-b border-white/5">
+            {# Collapsed Row #}
+            <div class="flex items-center justify-between px-6 py-3 cursor-pointer hover:bg-white/5 transition"
+                 @click="toggleExpand(post.id)">
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase flex-shrink-0"
+                          :class="{
+                              'bg-purple-600 text-white': post.post_type === 'value',
+                              'bg-sky-500 text-white': post.post_type === 'lifestyle',
+                              'bg-amber-500 text-white': post.post_type === 'product'
+                          }"
+                          x-text="post.post_type"></span>
+                    <span class="text-sm text-gray-200 truncate" x-text="post.topic_title"></span>
+                </div>
+                <div class="flex items-center gap-3 flex-shrink-0">
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full"
+                          :class="{
+                              'bg-green-500/15 text-green-400': post.blog_status === 'draft' || post.blog_status === 'published',
+                              'bg-amber-500/15 text-amber-400': post.blog_status === 'pending',
+                              'bg-purple-500/15 text-purple-400': post.blog_status === 'generating',
+                              'bg-red-500/15 text-red-400': post.blog_status === 'failed',
+                          }"
+                          x-text="post.blog_status === 'draft' ? 'Draft Ready' : post.blog_status === 'published' ? 'Published' : post.blog_status.charAt(0).toUpperCase() + post.blog_status.slice(1)"></span>
+                    <template x-if="post.blog_status === 'pending' || post.blog_status === 'failed'">
+                        <button class="bg-purple-600 text-white text-xs font-medium px-3 py-1 rounded transition hover:bg-purple-700"
+                                @click.stop
+                                :hx-post="'/blog/posts/' + post.id + '/blog/generate'"
+                                hx-swap="none">
+                            Generate
+                        </button>
+                    </template>
+                    <span class="text-gray-500 text-sm" x-text="expanded === post.id ? '&#9660;' : '&#9654;'"></span>
+                </div>
+            </div>
+
+            {# Expanded Content #}
+            <template x-if="expanded === post.id && post.blog_content && post.blog_content.body">
+                <div class="px-6 pb-5">
+                    {# Title #}
+                    <div class="mb-4">
+                        <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Title</label>
+                        <input type="text"
+                               class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 font-medium focus:border-purple-500 focus:outline-none"
+                               :value="post.blog_content.title"
+                               @blur="saveField(post.id, 'title', $event.target.value)">
+                    </div>
+
+                    {# Body #}
+                    <div class="mb-4">
+                        <div class="flex justify-between mb-1">
+                            <label class="text-xs text-gray-400 uppercase tracking-wide">Body</label>
+                            <span class="text-xs text-gray-500" x-text="(post.blog_content.word_count || 0) + ' words'"></span>
+                        </div>
+                        <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-3 text-sm text-gray-300 leading-relaxed focus:border-purple-500 focus:outline-none resize-y"
+                                  rows="8"
+                                  @blur="saveField(post.id, 'body', $event.target.value)"
+                                  x-text="post.blog_content.body"></textarea>
+                    </div>
+
+                    {# Meta Row #}
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Sources (from dossier)</label>
+                            <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed">
+                                <template x-for="src in (post.blog_content.sources || [])" :key="src.url">
+                                    <div x-text="'&#8226; ' + src.title"></div>
+                                </template>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">SEO Slug</label>
+                            <input type="text"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.slug"
+                                   @blur="saveField(post.id, 'slug', $event.target.value)">
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1 mt-2">Meta Description</label>
+                            <input type="text"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.meta_description"
+                                   @blur="saveField(post.id, 'meta_description', $event.target.value)">
+                        </div>
+                    </div>
+
+                    {# Actions #}
+                    <div class="flex items-center justify-between">
+                        <div class="flex gap-2">
+                            <button class="text-purple-400 border border-purple-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-purple-500/10 transition"
+                                    :hx-post="'/blog/posts/' + post.id + '/blog/generate'"
+                                    hx-swap="none">
+                                Regenerate Draft
+                            </button>
+                            <button class="text-gray-400 border border-white/10 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-white/5 transition"
+                                    @click="$dispatch('open-blog-modal', { postId: post.id })">
+                                Edit in Full Screen
+                            </button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500">Webflow:</span>
+                            <template x-if="post.blog_webflow_item_id">
+                                <button class="bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition"
+                                        :hx-post="'/blog/posts/' + post.id + '/blog/publish'"
+                                        hx-swap="none">
+                                    Update on Webflow
+                                </button>
+                            </template>
+                            <template x-if="!post.blog_webflow_item_id">
+                                <button class="bg-emerald-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-600 transition"
+                                        :hx-post="'/blog/posts/' + post.id + '/blog/publish'"
+                                        hx-swap="none">
+                                    Publish Now
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    {# Panel Footer #}
+    <div class="flex items-center justify-between px-6 py-3 bg-purple-500/5">
+        <span class="text-xs text-gray-500"
+              x-text="posts.filter(p => p.blog_status === 'draft').length + ' draft(s) ready · ' + posts.filter(p => p.blog_status === 'pending').length + ' pending'"></span>
+    </div>
+</div>
+
+<script>
+function blogPanelComponent(blogPosts) {
+    return {
+        posts: blogPosts || [],
+        expanded: null,
+        toggleExpand(postId) {
+            this.expanded = this.expanded === postId ? null : postId;
+        },
+        saveField(postId, field, value) {
+            const body = {};
+            body[field] = value;
+            fetch('/blog/posts/' + postId + '/blog/content', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            }).then(resp => {
+                if (!resp.ok) console.error('Failed to save blog field', field);
+                const post = this.posts.find(p => p.id === postId);
+                if (post && post.blog_content) {
+                    post.blog_content[field] = value;
+                    if (field === 'body') post.blog_content.word_count = value.split(/\s+/).filter(Boolean).length;
+                }
+            });
+        },
+    };
+}
+</script>
+{% endif %}

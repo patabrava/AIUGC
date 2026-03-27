@@ -28,4 +28,8 @@
         <p>No posts yet. Seed generation may still be running.</p>
     </div>
     {% endif %}
+
+    {# Blog Posts Panel — visible when any post has blog_enabled #}
+    {% include "batches/detail/_blog_panel.html" %}
+    {% include "batches/detail/_blog_modal.html" %}
 </div>
