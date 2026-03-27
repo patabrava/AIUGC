@@ -1,5 +1,6 @@
 """Tests for Veo extension chaining in the video poller."""
 from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta, timezone
 
 
 def test_poll_pending_videos_includes_extended_statuses(monkeypatch):
@@ -35,6 +36,86 @@ def test_poll_pending_videos_includes_extended_statuses(monkeypatch):
     assert "extended_processing" in queried
     assert "submitted" in queried
     assert "processing" in queried
+
+
+def test_claim_video_poll_lease_uses_updated_at_compare_and_set(monkeypatch):
+    from workers.video_poller import _claim_video_poll_lease
+
+    captured = {}
+
+    class FakeUpdateQuery:
+        def __init__(self, row):
+            self._row = row
+            self._eq_calls = []
+
+        def eq(self, column, value):
+            self._eq_calls.append((column, value))
+            captured["eq_calls"] = list(self._eq_calls)
+            return self
+
+        def execute(self):
+            return MagicMock(data=[self._row])
+
+    class FakeTable:
+        def update(self, payload):
+            captured["payload"] = payload
+            return FakeUpdateQuery(
+                {
+                    "id": "post-claim",
+                    "updated_at": "2026-03-27T09:30:01Z",
+                    "video_metadata": payload["video_metadata"],
+                }
+            )
+
+    fake_supabase = MagicMock()
+    fake_supabase.client.table.return_value = FakeTable()
+
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("workers.video_poller._poller_identity", lambda: "worker-a")
+
+    post = {
+        "id": "post-claim",
+        "updated_at": "2026-03-27T09:30:00Z",
+        "video_metadata": {},
+    }
+
+    claimed = _claim_video_poll_lease(post, "corr-claim")
+
+    assert claimed is not None
+    assert captured["eq_calls"] == [
+        ("id", "post-claim"),
+        ("updated_at", "2026-03-27T09:30:00Z"),
+    ]
+    metadata = captured["payload"]["video_metadata"]
+    assert metadata["video_poll_lease_owner"] == "worker-a"
+    assert metadata["last_polled_by"] == "worker-a"
+    assert "video_poll_lease_expires_at" in metadata
+
+
+def test_claim_video_poll_lease_skips_when_other_worker_owns_active_lease(monkeypatch):
+    from workers.video_poller import _claim_video_poll_lease
+
+    future_expiry = (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    fake_supabase = MagicMock()
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("workers.video_poller._poller_identity", lambda: "worker-b")
+
+    post = {
+        "id": "post-skip",
+        "updated_at": "2026-03-27T09:30:00Z",
+        "video_metadata": {
+            "video_poll_lease_owner": "worker-a",
+            "video_poll_lease_expires_at": future_expiry,
+        },
+    }
+
+    claimed = _claim_video_poll_lease(post, "corr-skip")
+
+    assert claimed is None
+    fake_supabase.client.table.assert_not_called()
 
 
 from workers.video_poller import _needs_extension_hop

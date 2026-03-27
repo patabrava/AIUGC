@@ -12,6 +12,7 @@ import json
 import socket
 import subprocess
 import tempfile
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Union
 import httpx
 
@@ -58,6 +59,10 @@ if not _veo_available:
 POLL_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
 RAI_MAX_RETRIES = 3
+VIDEO_POLL_LEASE_SECONDS = max(POLL_INTERVAL_SECONDS * 3, 30)
+VIDEO_POLL_LEASE_OWNER_KEY = "video_poll_lease_owner"
+VIDEO_POLL_LEASE_ACQUIRED_KEY = "video_poll_lease_acquired_at"
+VIDEO_POLL_LEASE_EXPIRES_KEY = "video_poll_lease_expires_at"
 
 
 def _poller_identity() -> str:
@@ -66,6 +71,122 @@ def _poller_identity() -> str:
     if configured:
         return configured
     return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso(now: Optional[datetime] = None) -> str:
+    current = now or _utc_now()
+    return current.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
+
+
+def _lease_is_active(metadata: Optional[Dict[str, Any]], *, now: Optional[datetime] = None) -> bool:
+    if not metadata:
+        return False
+
+    expires_at = _parse_utc_timestamp(metadata.get(VIDEO_POLL_LEASE_EXPIRES_KEY))
+    if expires_at is None:
+        return False
+
+    current = now or _utc_now()
+    return expires_at > current
+
+
+def _claim_video_poll_lease(post: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
+    post_id = post["id"]
+    poller_identity = _poller_identity()
+    metadata = dict(post.get("video_metadata") or {})
+    now = _utc_now()
+
+    lease_owner = metadata.get(VIDEO_POLL_LEASE_OWNER_KEY)
+    if lease_owner and lease_owner != poller_identity and _lease_is_active(metadata, now=now):
+        logger.info(
+            "video_poll_lease_held_by_other_worker",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            poller_identity=poller_identity,
+            lease_owner=lease_owner,
+            lease_expires_at=metadata.get(VIDEO_POLL_LEASE_EXPIRES_KEY),
+        )
+        return None
+
+    updated_at = post.get("updated_at")
+    if not updated_at:
+        logger.warning(
+            "video_poll_lease_missing_updated_at",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            message="Proceeding without compare-and-set lease guard",
+        )
+        return post
+
+    lease_acquired_at = _utc_now_iso(now)
+    lease_expires_at = _utc_now_iso(now + timedelta(seconds=VIDEO_POLL_LEASE_SECONDS))
+    claimed_metadata = {
+        **metadata,
+        VIDEO_POLL_LEASE_OWNER_KEY: poller_identity,
+        VIDEO_POLL_LEASE_ACQUIRED_KEY: lease_acquired_at,
+        VIDEO_POLL_LEASE_EXPIRES_KEY: lease_expires_at,
+        "last_polled_by": poller_identity,
+        "last_polled_at": lease_acquired_at,
+    }
+
+    supabase = get_supabase().client
+    claim_response = (
+        supabase.table("posts")
+        .update({"video_metadata": claimed_metadata})
+        .eq("id", post_id)
+        .eq("updated_at", updated_at)
+        .execute()
+    )
+    claimed_rows = claim_response.data or []
+
+    if not claimed_rows:
+        logger.info(
+            "video_poll_lease_claim_conflict",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            poller_identity=poller_identity,
+            expected_updated_at=updated_at,
+        )
+        return None
+
+    claimed_post = dict(post)
+    claimed_post.update(claimed_rows[0])
+    claimed_post["video_metadata"] = claimed_metadata
+
+    logger.debug(
+        "video_poll_lease_claimed",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        poller_identity=poller_identity,
+        lease_expires_at=lease_expires_at,
+    )
+    return claimed_post
 
 
 def _failure_metadata(
@@ -347,10 +468,16 @@ def process_video_operation(post: Dict[str, Any]):
     Per Constitution § X: Hypothesis-driven debugging with structured evidence.
     """
     post_id = post["id"]
+    correlation_id = f"poll_{post_id}"
+
+    claimed_post = _claim_video_poll_lease(post, correlation_id)
+    if claimed_post is None:
+        return
+
+    post = claimed_post
     operation_id = post.get("video_operation_id")
     provider = post.get("video_provider")
-    correlation_id = f"poll_{post_id}"
-    
+
     if not operation_id or not provider:
         logger.warning(
             "missing_operation_data",
