@@ -42,8 +42,9 @@ def test_build_prompt1_includes_yaml_hook_bank_for_canonical_path():
     """Canonical PROMPT_1 must also inject the YAML hook bank."""
     prompt = build_prompt1(post_type="value", desired_topics=1)
     assert "HOOK-BANK" in prompt
-    assert "Fragen" in prompt
-    assert "Du wirst nicht glauben" in prompt
+    assert "Fragen" in prompt  # matches "Fragen (nur mit Punch und konkreter Zahl)"
+    assert "Du wirst nicht glauben" in prompt  # still in banned list
+    assert "Heute erklaere ich" in prompt  # new banned pattern
 
 
 def test_hook_bank_has_high_engagement_families():
