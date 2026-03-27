@@ -171,3 +171,13 @@ def test_blog_runtime_handles_invalid_llm_response():
     result = _parse_blog_response("This is not JSON at all", dossier_id="dossier-123")
 
     assert result.get("error") is not None
+
+
+from fastapi.testclient import TestClient
+from app.main import app
+
+
+def test_blog_toggle_endpoint_returns_422_for_missing_body():
+    client = TestClient(app)
+    response = client.put("/blog/posts/nonexistent/blog-toggle")
+    assert response.status_code == 422
