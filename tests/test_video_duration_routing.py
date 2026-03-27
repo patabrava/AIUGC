@@ -102,6 +102,20 @@ def test_build_veo_extended_base_prompt_returns_first_segment():
     assert seg_meta["veo_current_segment_index"] == 0
 
 
+def test_build_veo_extended_base_prompt_caps_hops_when_chain_needs_more_segments():
+    seed_data = {"script": "Satz eins. Satz zwei. Satz drei. Satz vier.", "estimated_duration_s": 28}
+
+    _prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        planned_extension_hops=4,
+        target_length_tier=32,
+    )
+
+    assert seg_meta["veo_planned_extension_hops_target"] == 4
+    assert seg_meta["veo_extension_hops_target"] == 3
+    assert seg_meta["veo_chain_shortened_to_available_segments"] is True
+
+
 def test_batch_video_generation_request_accepts_duration_tier_seconds():
     req = BatchVideoGenerationRequest(
         provider="veo_3_1",
@@ -138,10 +152,15 @@ def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():
             "veo_segments": ["S1.", "S2.", "S3.", "S4."],
             "veo_segments_total": 4,
             "veo_current_segment_index": 0,
+            "veo_extension_hops_target": 3,
+            "veo_planned_extension_hops_target": 4,
+            "veo_chain_shortened_to_available_segments": True,
         },
     )
 
-    assert metadata["veo_extension_hops_target"] == 4
+    assert metadata["veo_extension_hops_target"] == 3
+    assert metadata["veo_planned_extension_hops_target"] == 4
+    assert metadata["veo_chain_shortened_to_available_segments"] is True
     assert metadata["veo_extension_hops_completed"] == 0
     assert metadata["veo_segments"] == ["S1.", "S2.", "S3.", "S4."]
     assert metadata["chain_status"] == "submitted"

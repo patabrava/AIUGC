@@ -1,6 +1,7 @@
 """Tests for Veo extension chaining in the video poller."""
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta, timezone
+import pytest
 
 
 def test_poll_pending_videos_includes_extended_statuses(monkeypatch):
@@ -208,8 +209,8 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
     assert meta["chain_status"] == "extending"
 
 
-def test_submit_extension_hop_reuses_last_segment_when_fewer_segments_than_hops():
-    """If segments list is shorter than hops, reuse the last segment."""
+def test_submit_extension_hop_raises_when_fewer_segments_than_hops():
+    """Under-segmented chains must fail instead of repeating the last line."""
     from workers.video_poller import _submit_extension_hop
 
     previous_video_data = {"video_uri": "gs://bucket/base.mp4"}
@@ -242,11 +243,10 @@ def test_submit_extension_hop_reuses_last_segment_when_fewer_segments_than_hops(
 
     with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
          patch("workers.video_poller.get_supabase", return_value=mock_supabase):
-        _submit_extension_hop(post, correlation_id="test-corr", previous_video_data=previous_video_data)
+        with pytest.raises(Exception, match="ran out of distinct dialogue segments"):
+            _submit_extension_hop(post, correlation_id="test-corr", previous_video_data=previous_video_data)
 
-    call_kwargs = mock_veo.submit_video_extension.call_args[1]
-    assert "Nur ein Satz." in call_kwargs["prompt"]
-    assert call_kwargs["aspect_ratio"] == "9:16"
+    mock_veo.submit_video_extension.assert_not_called()
 
 
 def test_handle_veo_video_chains_when_hops_remaining():

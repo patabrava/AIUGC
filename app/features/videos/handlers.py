@@ -159,17 +159,58 @@ def _build_submission_metadata(
     return metadata
 
 
-def _build_veo_extended_base_prompt(seed_data: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+def _required_veo_segments_for_profile_hops(hops_target: int) -> int:
+    return max(int(hops_target or 0), 0) + 1
+
+
+def _resolve_veo_extension_hops_target(*, segment_count: int, planned_hops: int) -> int:
+    if segment_count <= 0:
+        return 0
+    return min(max(int(planned_hops or 0), 0), max(segment_count - 1, 0))
+
+
+def _build_veo_extended_base_prompt(
+    seed_data: Dict[str, Any],
+    *,
+    planned_extension_hops: Optional[int] = None,
+    target_length_tier: Optional[int] = None,
+) -> tuple[str, Dict[str, Any]]:
     script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
     segments = split_dialogue_sentences(script) if script else []
     if not segments and script:
         segments = [script]
+
+    effective_hops: Optional[int] = None
+    if planned_extension_hops is not None:
+        effective_hops = _resolve_veo_extension_hops_target(
+            segment_count=len(segments),
+            planned_hops=planned_extension_hops,
+        )
+        if effective_hops < planned_extension_hops:
+            logger.warning(
+                "veo_extension_hops_capped_by_segments",
+                target_length_tier=target_length_tier,
+                planned_extension_hops=planned_extension_hops,
+                effective_extension_hops=effective_hops,
+                segments_available=len(segments),
+                estimated_duration_s=seed_data.get("estimated_duration_s"),
+            )
+
     base_segment = segments[0] if segments else ""
     segment_metadata = {
         "veo_segments": segments,
         "veo_segments_total": len(segments),
         "veo_current_segment_index": 0,
     }
+    if planned_extension_hops is not None:
+        segment_metadata.update(
+            {
+                "veo_required_segments": _required_veo_segments_for_profile_hops(planned_extension_hops),
+                "veo_planned_extension_hops_target": planned_extension_hops,
+                "veo_extension_hops_target": effective_hops,
+                "veo_chain_shortened_to_available_segments": effective_hops < planned_extension_hops,
+            }
+        )
     return build_veo_prompt_segment(base_segment, include_quotes=False, include_ending=False), segment_metadata
 
 
@@ -516,7 +557,11 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
 
                 if is_extended:
-                    prompt_text, segment_metadata = _build_veo_extended_base_prompt(seed_data)
+                    prompt_text, segment_metadata = _build_veo_extended_base_prompt(
+                        seed_data,
+                        planned_extension_hops=profile.veo_extension_hops,
+                        target_length_tier=profile.target_length_tier,
+                    )
                     negative_prompt = None
                 else:
                     prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])

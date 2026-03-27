@@ -24,6 +24,7 @@ from app.adapters.sora_client import get_sora_client
 from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
+from app.core.errors import ValidationError
 from app.core.video_profiles import (
     get_pollable_video_statuses,
     VEO_EXTENDED_VIDEO_ROUTE,
@@ -940,10 +941,15 @@ def _build_veo_extension_prompt(
     idx = segment_index if segment_index is not None else 0
     if idx < len(segments):
         segment_text = segments[idx]
-    elif segments:
-        segment_text = segments[-1]
     else:
-        segment_text = script
+        raise ValidationError(
+            "Veo extension prompt requested a segment beyond the available dialogue segments.",
+            details={
+                "segment_index": idx,
+                "segments_available": len(segments),
+                "veo_extension_hops_target": (post.get("video_metadata") or {}).get("veo_extension_hops_target", 0),
+            },
+        )
 
     metadata = post.get("video_metadata") or {}
     hops_target = metadata.get("veo_extension_hops_target", 0)
@@ -991,10 +997,17 @@ def _submit_extension_hop(
 
     if next_segment_idx < len(segments):
         segment_text = segments[next_segment_idx]
-    elif segments:
-        segment_text = segments[-1]
     else:
-        segment_text = ""
+        raise ValidationError(
+            "Veo extension chain ran out of distinct dialogue segments before the final hop.",
+            details={
+                "next_segment_index": next_segment_idx,
+                "segments_available": len(segments),
+                "veo_extension_hops_target": metadata.get("veo_extension_hops_target", 0),
+                "veo_extension_hops_completed": hops_completed,
+                "post_id": post_id,
+            },
+        )
 
     is_final_hop = (hops_completed + 1) >= metadata.get("veo_extension_hops_target", 0)
 
