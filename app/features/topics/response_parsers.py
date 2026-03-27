@@ -191,6 +191,7 @@ def parse_prompt1_response(
 def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts:
     max_per_category = max(1, min(5, max_per_category))
     hook_prefixes = (
+        # Original families
         "kennst du", "weißt du", "hast du", "brauchst du", "suchst du", "check mal", "schau dir",
         "hier kommt", "das musst", "stell dir", "ich zeig", "lass mich", "die größte", "wenn du",
         "fast alle", "der unangenehme", "die meisten", "was dir", "bevor du", "alles verändert",
@@ -199,6 +200,28 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         "ehrlich gesagt", "von außen", "was viele", "kaum jemand", "dieser eine", "niemand sagt",
         "alle denken", "was meinen alltag", "seit ich", "viele meinen", "der moment", "erst wenn",
         "das frustigste", "eine sache",
+        # Provokation und Faktenkonflikt
+        "das sagt dir", "hoert auf", "hört auf", "sorry, aber", "niemand redet",
+        # Identitaet und Zugehoerigkeit
+        "als rollstuhlnutzer", "das betrifft dich", "du kennst dieses", "jeder, der",
+        "wenn du schon mal",
+        # Zahlen und Spezifitaet
+        "nur 2 prozent", "nur jede", "eine einzige zahl", "3 sekunden",
+        # Neugier und Alltagsfragen
+        "wie kommt man", "was passiert, wenn", "wie funktioniert", "was machst du",
+        # Fehler und Warnung
+        "dieser fehler", "hoer auf mit", "hör auf mit", "mach diesen fehler",
+        "3 dinge, die du",
+        # Absurditaet und Realitaetscheck
+        "was das gesetz", "deutschland 2025", "deutschland 2026", "2022 sollte",
+        # Kurveneffekt
+        "das betrifft nicht nur", "barrierefreie",
+        # POV
+        "pov:",
+        # Fragen mit Punch
+        "warum ist", "wie kann es sein",
+        # Kontrast shorthand
+        "dein recht", "auf dem papier",
     )
 
     def normalize_heading(line: str) -> str:
@@ -215,6 +238,7 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         "testimonial ads": "testimonial",
         "testimonial-stil ads": "testimonial",
         "transformations-geschichten ads": "transformation",
+        "transformation ads": "transformation",
         "beschreibung": "description",
     }
     buckets: Dict[str, List[str]] = {

@@ -164,3 +164,28 @@ def test_prompt1_32s_contains_hook_mechanics():
     assert "HOOK-REGELN" in prompt
     assert "Scroll-Stopp" in prompt
     assert "TONALITAET" in prompt
+
+
+def test_prompt2_hook_prefixes_include_new_families():
+    """PROMPT_2 parser must recognize hooks from new bank families."""
+    from app.features.topics.response_parsers import parse_prompt2_response
+
+    raw = """## Problem-Agitieren-Lösung Ads
+Das sagt dir dein Verkehrsbetrieb nicht, aber die Rampe fehlt seit Monaten.
+Dieser Fehler kostet dich als Rollstuhlfahrerin Zeit und Nerven jeden Tag.
+Nur 2 Prozent aller Wohnungen sind rollstuhlgerecht in ganz Deutschland.
+
+## Testimonial Ads
+Wie kommt man als Rollstuhlfahrerin eigentlich ins Flugzeug ohne fremde Hilfe?
+Deutschland 2025 und du kommst trotzdem nicht in den verdammten Bus.
+Als Rollstuhlnutzerin kennst du das Gefuehl wenn der Aufzug kaputt ist.
+
+## Transformation Ads
+Dein Recht auf Mitfahrt existiert auf dem Papier aber nicht an der Haltestelle.
+POV: Du willst einfach nur in den Bus einsteigen und es geht nicht.
+Warum ist Barrierefreiheit in Deutschland immer noch so verdammt schwer?
+"""
+    result = parse_prompt2_response(raw, max_per_category=5)
+    assert len(result.problem_agitate_solution) >= 1
+    assert len(result.testimonial) >= 1
+    assert len(result.transformation) >= 1
