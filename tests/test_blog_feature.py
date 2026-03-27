@@ -65,3 +65,41 @@ def test_blog_content_rejects_empty_body():
             generated_at="2026-03-27T14:00:00Z",
             dossier_id="550e8400-e29b-41d4-a716-446655440000",
         )
+
+
+from unittest.mock import patch, MagicMock
+
+
+def _mock_supabase_post(post_data):
+    """Helper: create a mock supabase client that returns given post data."""
+    mock_response = MagicMock()
+    mock_response.data = [post_data]
+
+    mock_table = MagicMock()
+    mock_table.select.return_value = mock_table
+    mock_table.eq.return_value = mock_table
+    mock_table.execute.return_value = mock_response
+    mock_table.update.return_value = mock_table
+
+    mock_client = MagicMock()
+    mock_client.client.table.return_value = mock_table
+
+    return mock_client
+
+
+def test_toggle_blog_enabled_on():
+    from app.features.blog.queries import toggle_blog_enabled
+
+    post_data = {
+        "id": "post-1",
+        "blog_enabled": True,
+        "blog_status": "pending",
+        "seed_data": {"script_review_status": "approved"},
+    }
+    mock_sb = _mock_supabase_post(post_data)
+
+    with patch("app.features.blog.queries.get_supabase", return_value=mock_sb):
+        result = toggle_blog_enabled("post-1", enabled=True)
+
+    assert result["blog_enabled"] is True
+    assert result["blog_status"] == "pending"
