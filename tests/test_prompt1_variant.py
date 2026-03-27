@@ -90,3 +90,20 @@ def test_hook_bank_has_negative_examples():
         assert "bad" in ex, "Negative example missing 'bad' key"
         assert "good" in ex, "Negative example missing 'good' key"
         assert "why" in ex, "Negative example missing 'why' key"
+
+
+def test_format_hook_bank_includes_priority_ordering():
+    """High-priority families must appear before low-priority in rendered output."""
+    prompt = build_prompt1(post_type="value", desired_topics=1)
+    high_pos = prompt.find("Provokation und Faktenkonflikt")
+    low_pos = prompt.find("Fragen (nur mit Punch")
+    assert high_pos != -1, "High-priority family not found in prompt"
+    assert low_pos != -1, "Low-priority family not found in prompt"
+    assert high_pos < low_pos, "High-priority families must appear before low-priority"
+
+
+def test_format_hook_bank_includes_negative_examples():
+    """Rendered hook bank must include before/after examples."""
+    prompt = build_prompt1(post_type="value", desired_topics=1)
+    assert "SCHLECHT:" in prompt
+    assert "GUT:" in prompt

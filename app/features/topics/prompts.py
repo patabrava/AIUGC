@@ -275,20 +275,66 @@ def _format_hook_bank_section() -> str:
     payload = get_hook_bank()
     families = list(payload.get("families") or [])
     banned = [str(item).strip() for item in list(payload.get("banned_patterns") or []) if str(item).strip()]
+    negative_examples = list(payload.get("negative_examples") or [])
     if not families and not banned:
         return ""
 
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    sorted_families = sorted(
+        families,
+        key=lambda f: priority_order.get(str(f.get("priority", "medium")), 1),
+    )
+
     lines = ["HOOK-BANK (verbindlich):"]
-    for family in families:
+    current_priority = None
+    for family in sorted_families:
         name = str(family.get("name") or "").strip()
         examples = [str(item).strip() for item in list(family.get("examples") or []) if str(item).strip()]
+        priority = str(family.get("priority", "medium"))
         if not name or not examples:
             continue
+        if priority != current_priority:
+            label = {"high": "BEVORZUGT", "medium": "SOLIDE", "low": "SPARSAM EINSETZEN"}.get(priority, "")
+            if label:
+                lines.append(f"\n[{label}]")
+            current_priority = priority
         lines.append(f"- {name}: " + ", ".join(f'"{example}"' for example in examples))
+
     if banned:
-        lines.append("Verbotene oder zu vermeidende Hook-Starter:")
+        lines.append("\nVerbotene Hook-Starter (NIEMALS verwenden):")
         lines.extend(f"- {item}" for item in banned)
+
+    if negative_examples:
+        lines.append("\nBeispiele (vorher/nachher):")
+        for ex in negative_examples:
+            bad = str(ex.get("bad", "")).strip()
+            good = str(ex.get("good", "")).strip()
+            why = str(ex.get("why", "")).strip()
+            if bad and good:
+                lines.append(f'SCHLECHT: "{bad}"')
+                lines.append(f'GUT: "{good}"')
+                if why:
+                    lines.append(f"Warum: {why}")
+                lines.append("")
+
     return "\n".join(lines).strip()
+
+
+def _render_prompt1_template(
+    *,
+    template: str,
+    desired_topics: int,
+    research_context_section: str,
+    hook_bank_section: str,
+) -> str:
+    rendered = template.format(
+        desired_topics=desired_topics,
+        research_context_section=research_context_section,
+        hook_bank_section=hook_bank_section,
+    )
+    if hook_bank_section and "{hook_bank_section}" not in template:
+        rendered = rendered.rstrip() + "\n\n" + hook_bank_section
+    return rendered
 
 
 def _format_prompt1_research_context(
@@ -355,10 +401,12 @@ def build_prompt1(
     with prompt_path.open("r", encoding="utf-8") as fp:
         template = fp.read().strip()
     research_context_section = _format_prompt1_research_context(dossier, lane_candidate)
-    return template.format(
+    hook_bank_section = _format_hook_bank_section()
+    return _render_prompt1_template(
+        template=template,
         desired_topics=desired_topics,
         research_context_section=research_context_section,
-        hook_bank_section="",
+        hook_bank_section=hook_bank_section,
     )
 
 
@@ -393,16 +441,12 @@ def build_prompt1_variant(
     )
     hook_bank_section = (hook_bank_section + constraint_block).strip()
 
-    rendered = template.format(
+    return _render_prompt1_template(
+        template=template,
         desired_topics=desired_topics,
         research_context_section=research_context_section,
         hook_bank_section=hook_bank_section,
     )
-    # If the template does not contain a {hook_bank_section} placeholder,
-    # append the hook bank and constraints at the end of the prompt.
-    if hook_bank_section and "{hook_bank_section}" not in template:
-        rendered = rendered.rstrip() + "\n\n" + hook_bank_section
-    return rendered
 
 
 def build_prompt1_batch(
