@@ -111,7 +111,12 @@ class Settings(BaseSettings):
     privacy_policy_url: str = Field(default="", description="Privacy policy URL")
     terms_url: str = Field(default="", description="Terms URL")
     token_encryption_key: str = Field(default="", description="Secret for provider token encryption at rest")
-    
+
+    # Webflow
+    webflow_api_token: str = Field("", description="Webflow site-level API token")
+    webflow_collection_id: str = Field("", description="Webflow CMS collection ID for blog posts")
+    webflow_site_id: str = Field("", description="Webflow site ID for publish triggers")
+
     # Cron Security
     cron_secret: str = Field("", description="Secret for cron endpoint authentication")
     

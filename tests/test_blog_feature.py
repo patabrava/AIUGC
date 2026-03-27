@@ -103,3 +103,29 @@ def test_toggle_blog_enabled_on():
 
     assert result["blog_enabled"] is True
     assert result["blog_status"] == "pending"
+
+
+def test_webflow_client_create_item_sends_correct_payload():
+    import httpx
+    from unittest.mock import patch, MagicMock
+    from app.features.blog.webflow_client import WebflowClient
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "wf-item-123", "fieldData": {"name": "Test"}}
+
+    with patch.object(httpx.Client, "post", return_value=mock_response) as mock_post:
+        client = WebflowClient(api_token="test-token", collection_id="col-1", site_id="site-1")
+        item_id = client.create_item({
+            "name": "Test Blog",
+            "slug": "test-blog",
+            "post-body": "<p>Hello</p>",
+            "meta-description": "Test",
+        })
+
+    assert item_id == "wf-item-123"
+    mock_post.assert_called_once()
+    call_kwargs = mock_post.call_args
+    payload = call_kwargs.kwargs.get("json") or (call_kwargs[1].get("json") if len(call_kwargs) > 1 else None)
+    assert payload is not None
+    assert "fieldData" in payload
