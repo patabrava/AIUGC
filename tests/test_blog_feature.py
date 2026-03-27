@@ -129,3 +129,45 @@ def test_webflow_client_create_item_sends_correct_payload():
     payload = call_kwargs.kwargs.get("json") or (call_kwargs[1].get("json") if len(call_kwargs) > 1 else None)
     assert payload is not None
     assert "fieldData" in payload
+
+
+def test_blog_runtime_builds_prompt_from_dossier():
+    from app.features.blog.blog_runtime import _build_blog_prompt
+
+    dossier_payload = {
+        "topic": "Inflation und Sparkonten",
+        "cluster_summary": "Deutsche Sparer verlieren real Geld durch Niedrigzinsen.",
+        "facts": ["Inflation 3.8%", "Sparzins 0.5%"],
+        "angle_options": ["Kaufkraftverlust", "Alternativen zum Sparen"],
+        "sources": [{"title": "Bundesbank.de", "url": "https://bundesbank.de"}],
+        "source_summary": "Bundesbank-Daten zeigen realen Verlust.",
+        "risk_notes": ["Keine Anlageberatung"],
+        "disclaimer": "Dieser Artikel stellt keine Finanzberatung dar.",
+    }
+
+    prompt = _build_blog_prompt(dossier_payload)
+
+    assert "Inflation und Sparkonten" in prompt
+    assert "Bundesbank.de" in prompt
+    assert "500–800 Wörter" in prompt
+
+
+def test_blog_runtime_parses_valid_llm_response():
+    from app.features.blog.blog_runtime import _parse_blog_response
+
+    raw_response = '{"title": "Test Titel", "body": "Ein Absatz. Noch ein Absatz.", "slug": "test-titel", "meta_description": "Kurze Beschreibung"}'
+
+    result = _parse_blog_response(raw_response, dossier_id="dossier-123")
+
+    assert result["title"] == "Test Titel"
+    assert result["slug"] == "test-titel"
+    assert result["dossier_id"] == "dossier-123"
+    assert result["word_count"] == 5
+
+
+def test_blog_runtime_handles_invalid_llm_response():
+    from app.features.blog.blog_runtime import _parse_blog_response
+
+    result = _parse_blog_response("This is not JSON at all", dossier_id="dossier-123")
+
+    assert result.get("error") is not None
