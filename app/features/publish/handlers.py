@@ -584,6 +584,15 @@ def _ensure_meta_targets_for_networks(networks: List[str], meta_connection: Dict
             raise ValidationError("Instagram target is not selected for this batch.")
 
 
+def _resolve_video_url(post: Dict[str, Any]) -> str:
+    """Prefer captioned video over raw video when available."""
+    metadata = _load_json_object(post.get("video_metadata"))
+    captioned_url = metadata.get("caption_video_url")
+    if captioned_url:
+        return captioned_url
+    return post.get("video_url") or ""
+
+
 def _default_publish_caption(post: Dict[str, Any]) -> str:
     """Use stored caption when available, otherwise fall back to the generated seed bundle."""
     caption = (post.get("publish_caption") or "").strip()
@@ -1309,7 +1318,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
     now = datetime.utcnow().isoformat()
     supabase = get_supabase().client
     due_response = supabase.table("posts").select(
-        "id, batch_id, video_url, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
+        "id, batch_id, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
     ).eq("publish_status", "scheduled").lte("scheduled_at", now).order("scheduled_at").limit(limit).execute()
 
     due_posts = due_response.data or []
@@ -1330,6 +1339,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
 
         post = dict(claim.data[0])
         post["publish_caption"] = _default_publish_caption(post)
+        post["video_url"] = _resolve_video_url(post)
         post["social_networks"] = _load_string_list(post.get("social_networks"))
         publish_results = _load_json_object(post.get("publish_results"))
         platform_ids = _load_json_object(post.get("platform_ids"))
@@ -1496,7 +1506,7 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
 
     # 1. Load post and validate status
     post_resp = supabase.table("posts").select(
-        "id, batch_id, video_url, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
+        "id, batch_id, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
     ).eq("id", post_id).execute()
     if not post_resp.data:
         raise NotFoundError(f"Post {post_id} not found")
@@ -1519,7 +1529,25 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
             details={"batch_state": batch.get("state")},
         )
 
-    # 3. Optimistic lock
+    # 3. Validate networks selected
+    if not social_networks:
+        raise ValidationError(
+            "No social networks selected. Please select at least one network (IG, FB, or TT) before publishing.",
+            details={"social_networks": social_networks},
+        )
+
+    # 4. Validate Meta connection for Meta networks
+    meta_networks = [n for n in social_networks if n in (SocialNetwork.FACEBOOK.value, SocialNetwork.INSTAGRAM.value)]
+    if meta_networks:
+        meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
+        selected_page = (meta_connection.get("selected_page") or {})
+        if not selected_page.get("id") or not selected_page.get("access_token"):
+            raise ValidationError(
+                "Facebook/Instagram is not connected. Please connect a Meta account before publishing.",
+                details={"missing": "meta_connection", "networks": meta_networks},
+            )
+
+    # 5. Optimistic lock
     claim = supabase.table("posts").update({"publish_status": "publishing"}).eq(
         "id", post_id
     ).eq("publish_status", post["publish_status"]).execute()
@@ -1528,6 +1556,7 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
 
     post = dict(claim.data[0])
     post["publish_caption"] = publish_caption if publish_caption else _default_publish_caption(post)
+    post["video_url"] = _resolve_video_url(post)
     post["social_networks"] = social_networks
     publish_results = _load_json_object(post.get("publish_results"))
     platform_ids = _load_json_object(post.get("platform_ids"))

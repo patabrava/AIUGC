@@ -120,11 +120,12 @@ class _FakeSupabase:
 def _make_storage(*, batch_state="S7_PUBLISH_PLAN", post_status="draft", networks=None):
     """Build standard fake DB storage for post-now tests."""
     return {
-        "batches": [{"id": "batch-1", "state": batch_state, "meta_connection": {"page_id": "pg1", "page_access_token": "tok", "ig_user_id": "ig1"}, "updated_at": "2026-01-01T00:00:00Z"}],
+        "batches": [{"id": "batch-1", "state": batch_state, "meta_connection": {"status": "connected", "selected_page": {"id": "pg1", "access_token": "tok"}, "selected_instagram": {"id": "ig1"}}, "updated_at": "2026-01-01T00:00:00Z"}],
         "posts": [{
             "id": "post-1",
             "batch_id": "batch-1",
             "video_url": "https://example.com/video.mp4",
+            "video_metadata": {},
             "seed_data": {},
             "scheduled_at": None,
             "publish_caption": "Test caption",
@@ -202,12 +203,13 @@ class TestPostNowBatchCompletion:
     def test_last_post_published_completes_batch(self, monkeypatch):
         """When the last active post is published via Post Now, batch advances to S8_COMPLETE."""
         storage = {
-            "batches": [{"id": "batch-1", "state": "S7_PUBLISH_PLAN", "meta_connection": {"page_id": "pg1", "page_access_token": "tok", "ig_user_id": "ig1"}, "updated_at": "2026-01-01T00:00:00Z"}],
+            "batches": [{"id": "batch-1", "state": "S7_PUBLISH_PLAN", "meta_connection": {"status": "connected", "selected_page": {"id": "pg1", "access_token": "tok"}, "selected_instagram": {"id": "ig1"}}, "updated_at": "2026-01-01T00:00:00Z"}],
             "posts": [
                 {
                     "id": "post-1",
                     "batch_id": "batch-1",
                     "video_url": "https://example.com/video.mp4",
+                    "video_metadata": {},
                     "seed_data": {},
                     "scheduled_at": None,
                     "publish_caption": "Caption 1",
@@ -220,6 +222,7 @@ class TestPostNowBatchCompletion:
                     "id": "post-2",
                     "batch_id": "batch-1",
                     "video_url": "https://example.com/video2.mp4",
+                    "video_metadata": {},
                     "seed_data": {},
                     "scheduled_at": None,
                     "publish_caption": "Caption 2",
