@@ -142,3 +142,25 @@ def test_prompt1_8s_contains_hook_mechanics():
     assert "HOOK-REGELN" in prompt
     assert "Scroll-Stopp" in prompt
     assert "TONALITAET" in prompt
+
+
+def test_prompt1_16s_contains_hook_mechanics():
+    """16s prompt must contain explicit hook mechanics."""
+    prompt = build_prompt1(
+        post_type="value", desired_topics=1, profile=get_duration_profile(16),
+    )
+    assert "klaren Hook" not in prompt, "Old vague hook instruction still present in 16s"
+    assert "HOOK-REGELN" in prompt
+    assert "Scroll-Stopp" in prompt
+    assert "TONALITAET" in prompt
+
+
+def test_prompt1_32s_contains_hook_mechanics():
+    """32s prompt must contain explicit hook mechanics."""
+    prompt = build_prompt1(
+        post_type="value", desired_topics=1, profile=get_duration_profile(32),
+    )
+    assert "klaren Hook" not in prompt, "Old vague hook instruction still present in 32s"
+    assert "HOOK-REGELN" in prompt
+    assert "Scroll-Stopp" in prompt
+    assert "TONALITAET" in prompt
