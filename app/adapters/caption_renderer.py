@@ -60,6 +60,48 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
+def _measure_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int]:
+    """Measure rendered text size."""
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def _fit_caption_layout(
+    *,
+    draw: ImageDraw.ImageDraw,
+    word_text: str,
+    video_width: int,
+    base_font_size: int,
+) -> tuple[ImageFont.FreeTypeFont, int, int, int, int, int]:
+    """Pick a single-line caption size that fits including outline and shadow."""
+    max_text_width = int(video_width * 0.9)
+    absolute_min_font_size = max(int(video_width * 0.04), 24)
+    best_font = _get_font(absolute_min_font_size)
+    best_font_size = absolute_min_font_size
+    best_text_width, best_text_height = _measure_text(draw, word_text, best_font)
+    best_outline = max(int(best_font_size * 0.06), 4)
+    best_shadow = max(int(best_font_size * 0.04), 3)
+
+    font_size = base_font_size
+    while font_size >= absolute_min_font_size:
+        font = _get_font(font_size)
+        text_width, text_height = _measure_text(draw, word_text, font)
+        outline_range = max(int(font_size * 0.06), 4)
+        shadow_offset = max(int(font_size * 0.04), 3)
+        padded_width = text_width + (outline_range * 2) + shadow_offset
+        if padded_width <= max_text_width:
+            return font, font_size, text_width, text_height, outline_range, shadow_offset
+        best_font = font
+        best_font_size = font_size
+        best_text_width = text_width
+        best_text_height = text_height
+        best_outline = outline_range
+        best_shadow = shadow_offset
+        font_size -= 4
+
+    return best_font, best_font_size, best_text_width, best_text_height, best_outline, best_shadow
+
+
 def _render_caption_frame(
     text: str,
     highlight_index: int,
@@ -76,10 +118,14 @@ def _render_caption_frame(
     """
     img = Image.new("RGBA", (video_width, video_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = _get_font(font_size)
-
     # Hormozi style: show only the active word, ALL CAPS
     word_text = words[highlight_index].word.upper()
+    font, resolved_font_size, text_width, text_height, outline_range, shadow_offset = _fit_caption_layout(
+        draw=draw,
+        word_text=word_text,
+        video_width=video_width,
+        base_font_size=font_size,
+    )
 
     # Color cycling: alternate white and yellow based on global word index
     # Every other word gets yellow for visual rhythm
@@ -88,33 +134,19 @@ def _render_caption_frame(
     else:
         fill = (255, 255, 255, 255)  # White
 
-    # Measure text to center it — shrink font if word overflows frame
-    max_text_width = int(video_width * 0.9)  # 5% padding each side
-    bbox = draw.textbbox((0, 0), word_text, font=font)
-    text_width = bbox[2] - bbox[0]
-    while text_width > max_text_width and font_size > 24:
-        font_size -= 4
-        font = _get_font(font_size)
-        bbox = draw.textbbox((0, 0), word_text, font=font)
-        text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-
     # Position: lower third (75% down), standard TikTok caption zone
     # Above the TikTok UI buttons but clearly in the subtitle area
-    x = (video_width - text_width) / 2
-    y = int(video_height * 0.75) - text_height / 2
+    padded_width = text_width + (outline_range * 2) + shadow_offset
+    padded_height = text_height + (outline_range * 2) + shadow_offset
+    x = ((video_width - padded_width) / 2) + outline_range
+    y = int(video_height * 0.75) - (padded_height / 2) + outline_range
 
-    # Thick black outline (4px stroke for Hormozi readability)
-    outline_range = 4
     for dx in range(-outline_range, outline_range + 1):
         for dy in range(-outline_range, outline_range + 1):
             if dx * dx + dy * dy <= outline_range * outline_range:
                 draw.text((x + dx, y + dy), word_text, font=font, fill=(0, 0, 0, 255))
 
-    # Drop shadow
-    draw.text((x + 3, y + 3), word_text, font=font, fill=(0, 0, 0, 180))
-
-    # Draw main text
+    draw.text((x + shadow_offset, y + shadow_offset), word_text, font=font, fill=(0, 0, 0, 180))
     draw.text((x, y), word_text, font=font, fill=fill)
 
     return img
@@ -201,7 +233,7 @@ def burn_captions(
     if video_width == 0 or video_height == 0:
         video_width, video_height = _get_video_dimensions(video_path)
 
-    font_size = max(int(video_width * 0.1), 72)  # Hormozi: large text
+    font_size = max(int(video_width * 0.1), 72)
 
     # Create temp directory for overlay frames
     frames_dir = tempfile.mkdtemp(prefix="caption_frames_")

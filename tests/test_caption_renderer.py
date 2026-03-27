@@ -7,8 +7,10 @@ from app.adapters.caption_renderer import (
     group_words_into_phrases,
     burn_captions,
     CaptionRendererError,
+    _fit_caption_layout,
     _render_caption_frame,
 )
+from PIL import Image, ImageDraw
 
 
 class TestPhraseGrouping:
@@ -42,6 +44,19 @@ class TestPhraseGrouping:
 
 
 class TestCaptionFrameRendering:
+    def test_fit_caption_layout_keeps_long_german_word_on_one_line_within_width(self):
+        img = Image.new("RGBA", (720, 1280), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        _font, resolved_size, text_width, _text_height, outline_range, shadow_offset = _fit_caption_layout(
+            draw=draw,
+            word_text="PFLEGESCHULUNGEN",
+            video_width=720,
+            base_font_size=72,
+        )
+        assert resolved_size <= 72
+        padded_width = text_width + (outline_range * 2) + shadow_offset
+        assert padded_width <= int(720 * 0.9)
+
     def test_render_produces_rgba_image(self):
         words = [Word("Hallo", 0.0, 0.5), Word("Welt", 0.6, 1.0)]
         img = _render_caption_frame(
