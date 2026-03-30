@@ -5,34 +5,31 @@ import pytest
 from app.core.errors import ValidationError
 from app.features.publish import handlers as publish_handlers
 from app.features.topics import captions
-from app.features.topics.seed_builders import build_seed_payload
-from app.features.topics.schemas import DialogScripts, ResearchAgentItem, ResearchAgentSource, SeedData
 
 
-SHORT_BODY = (
-    "Viele merken bei barrierefreien Wegen erst zu spät, wie viel an kleinen Details hängt. "
-    "Wenn du vorher sortierst, sparst du Stress, Rückfragen und unnötige Umwege im Alltag. "
-    "#Barrierefrei #RollstuhlAlltag"
+CURIOSITY_BODY = (
+    "Das sagt dir dein Verkehrsbetrieb nicht: "
+    "Viele Kommunen nutzten Ausnahmen, um Barrierefreiheit zu umgehen. "
+    "Ab 2026 ist Schluss.\n\n"
+    "Speicher dir das.\n\n"
+    "#BarriereFreiheit #ÖPNV #Inklusion"
 )
 
-MEDIUM_BODY = (
-    "Bei Anträgen kippt selten das große Ganze, sondern fast immer ein kleines Detail.\n\n"
-    "• Prüfe Fristen und Nachweise, bevor du loslegst.\n"
-    "• Halte Rückfragen kurz, weil deine Unterlagen schon sortiert sind.\n"
-    "• Plane Puffer ein, damit unterwegs nichts unnötig eskaliert.\n\n"
-    "#Barrierefrei #Alltagstipps #Selbstbestimmt"
+PERSONAL_BODY = (
+    "Wenn du ÖPNV fährst, betrifft dich das ab 2026. "
+    "Viele Haltestellen sind bis heute nicht barrierefrei.\n\n"
+    "Schick das jemandem, der das wissen muss.\n\n"
+    "#Barrierefrei #Alltag #Selbstbestimmt"
 )
 
-LONG_BODY = (
-    "Wenn du bei Unterstützung nur auf den ersten Hinweis hörst, verlierst du oft Zeit und Nerven. "
-    "Ein klarer Ablauf macht den Unterschied, gerade wenn mehrere Stellen beteiligt sind.\n\n"
-    "Gerade bei längeren Themen hilft ein zweiter kurzer Absatz, damit die Einordnung nicht als Wand aus Text endet.\n\n"
-    "1. Sammle zuerst alle Nachweise, die wirklich verlangt werden.\n"
-    "2. Prüfe danach, welche Stelle in deinem Fall zuständig ist.\n"
-    "3. Halte Termine, Rückfragen und Bestätigungen sauber fest.\n"
-    "4. Plane genug Puffer ein, damit du nicht unter Druck nachreichen musst.\n\n"
-    "#Barrierefrei #Selbstbestimmt #RollstuhlAlltag"
+PROVOCATIVE_BODY = (
+    "Keine Rampe, kein Aufzug — und trotzdem barrierefrei? "
+    "Ab 2026 gibt es für Kommunen keine Ausreden mehr.\n\n"
+    "Kommentier, wenn deine Haltestelle betroffen ist.\n\n"
+    "#BarriereFreiheit #ÖPNV #Teilhabe"
 )
+
+VARIANT_KEYS = ("curiosity", "personal", "provocative")
 
 
 class _StubLLM:
@@ -49,544 +46,331 @@ class _StubLLM:
         return "\n".join(parts)
 
 
-@pytest.mark.parametrize(
-    ("key", "body"),
-    [
-        ("short_paragraph", SHORT_BODY),
-        ("medium_bullets", MEDIUM_BODY),
-        ("long_structured", LONG_BODY),
-    ],
-)
-def test_validate_caption_variant_accepts_expected_structure(key, body):
-    validated = captions.validate_caption_variant(key, body, "Das Skript selbst ist bewusst anders formuliert.")
-    assert validated["key"] == key
-    assert validated["char_count"] >= captions.FAMILY_SPECS[key]["min_chars"]
-
-
-
-def test_select_caption_variant_key_is_deterministic():
-    first = captions.select_caption_variant_key(topic_title="Thema", post_type="value", script="Script")
-    second = captions.select_caption_variant_key(topic_title="Thema", post_type="value", script="Script")
-    assert first == second
-    assert first in {"medium_bullets", "long_structured"}
-
-
-def test_attach_caption_bundle_sets_description_and_short_caption():
-    llm = _StubLLM(
+def _make_stub_llm():
+    return _StubLLM(
         {
             "variants": [
-                {"key": "short_paragraph", "body": SHORT_BODY},
-                {"key": "medium_bullets", "body": MEDIUM_BODY},
-                {"key": "long_structured", "body": LONG_BODY},
+                {"key": "curiosity", "body": CURIOSITY_BODY},
+                {"key": "personal", "body": PERSONAL_BODY},
+                {"key": "provocative", "body": PROVOCATIVE_BODY},
             ]
         }
     )
-    payload = {"script": "Kurzes Skript, aber nicht identisch mit der Caption.", "strict_seed": {"facts": ["Fakt eins"]}}
-    enriched = captions.attach_caption_bundle(
-        payload,
-        topic_title="Barrierefreier ÖPNV",
-        post_type="value",
-        llm_factory=lambda: llm,
+
+
+# --- Validation ---
+
+
+@pytest.mark.parametrize(
+    ("key", "body"),
+    [
+        ("curiosity", CURIOSITY_BODY),
+        ("personal", PERSONAL_BODY),
+        ("provocative", PROVOCATIVE_BODY),
+    ],
+)
+def test_validate_caption_variant_accepts_new_structure(key, body):
+    result = captions.validate_caption_variant(
+        key, body, "Ein ganz anderes Skript das nichts mit der Caption zu tun hat."
     )
-    assert enriched["caption_bundle"]["selected_key"] in captions.FAMILY_ORDER
-    assert enriched["description"] == enriched["caption_bundle"]["selected_body"]
-    assert enriched["caption"] == enriched["caption_bundle"]["selected_body"]
+    assert result["key"] == key
+    assert 150 <= result["char_count"] <= 300
 
 
-def test_build_seed_payload_keeps_caption_blank_until_bundle_applied():
-    item = ResearchAgentItem(
-        topic="Barrierefreiheit im ÖPNV",
-        script="Das Skript ist bewusst kurz und endet mit einem Punkt.",
-        caption="",
-        sources=[ResearchAgentSource(title="Quelle", url="https://example.com")],
-        source_summary="Eine kurze Zusammenfassung mit genug Kontext.",
-        estimated_duration_s=8,
-    )
-    strict_seed = SeedData(facts=["Fakt eins"], source_context="Kontext")
-    dialog_scripts = DialogScripts(
-        problem_agitate_solution=["Skript Problem."],
-        testimonial=["Skript Testimonial."],
-        transformation=["Skript Transformation."],
-        description="Eine ausreichend lange Beschreibung fuer den Testlauf.",
-    )
-
-    payload = build_seed_payload(
-        item,
-        strict_seed,
-        dialog_scripts,
-        source_title="Quelle",
-        source_url="https://example.com",
-        source_summary="Eine kurze Zusammenfassung mit genug Kontext.",
-    )
-
-    assert payload["caption"] == ""
-
-    enriched = captions.attach_caption_bundle(
-        payload,
-        topic_title="Barrierefreiheit im ÖPNV",
-        post_type="value",
-        llm_factory=lambda: _StubLLM(
-            {
-                "variants": [
-                    {"key": "short_paragraph", "body": SHORT_BODY},
-                    {"key": "medium_bullets", "body": MEDIUM_BODY},
-                    {"key": "long_structured", "body": LONG_BODY},
-                ]
-            }
-        ),
-    )
-
-    assert enriched["caption"] == enriched["caption_bundle"]["selected_body"]
-    assert enriched["description"] == enriched["caption_bundle"]["selected_body"]
-
-
-def test_build_seed_payload_separates_research_caption_from_publish_caption():
-    item = ResearchAgentItem(
-        topic="Barrierefreiheit im ÖPNV",
-        script="Das Skript ist bewusst kurz und endet mit einem Punkt.",
-        caption="Kurzer Forschungs-Hook mit Social-Ton.",
-        sources=[ResearchAgentSource(title="Quelle", url="https://example.com")],
-        source_summary="Eine kurze Zusammenfassung mit genug Kontext.",
-        estimated_duration_s=8,
-    )
-    strict_seed = SeedData(facts=["Fakt eins"], source_context="Kontext")
-    payload = build_seed_payload(
-        item,
-        strict_seed,
-        None,
-        source_title="Quelle",
-        source_url="https://example.com",
-        source_summary="Eine kurze Zusammenfassung mit genug Kontext.",
-    )
-
-    assert payload["caption"] == ""
-    assert payload["research_caption"] == "Kurzer Forschungs-Hook mit Social-Ton."
-    assert payload["canonical_topic"] == "Barrierefreiheit im ÖPNV"
-    assert payload["research_title"] == "Barrierefreiheit im ÖPNV"
-
-
-def test_default_publish_caption_prefers_caption_bundle_over_legacy_description():
-    post = {
-        "publish_caption": "",
-        "seed_data": {
-            "description": "Legacy description",
-            "caption_bundle": {
-                "selected_body": MEDIUM_BODY,
-            },
-        },
-    }
-    assert publish_handlers._default_publish_caption(post) == MEDIUM_BODY
-
-
-def test_resolve_selected_caption_prefers_bundle_over_caption_even_for_fallback():
-    """caption_bundle.selected_body always wins, even if it's from fallback."""
-    seed_data = {
-        "caption": "Das ist die eigentlich gewollte Caption mit sauberem Deutsch.",
-        "description": "Legacysummary",
-        "caption_bundle": {
-            "selected_body": "Titel wurde irrtuemlich in die Caption kopiert.",
-            "selection_reason": "fallback_hash_variant",
-        },
-    }
-
-    assert captions.resolve_selected_caption(seed_data) == seed_data["caption_bundle"]["selected_body"]
-
-
-def test_resolve_selected_caption_prefers_bundle_over_stale_caption():
-    """When caption_bundle.selected_body exists, it wins over seed_data.caption."""
-    seed_data = {
-        "caption": "Stale research caption without hashtags.",
-        "description": "Legacy description",
-        "caption_bundle": {
-            "selected_body": MEDIUM_BODY,
-            "selection_reason": "hash_variant",
-        },
-    }
-    assert captions.resolve_selected_caption(seed_data) == MEDIUM_BODY
-
-
-def test_resolve_selected_caption_uses_selected_body_when_publish_caption_missing():
-    seed_data = {
-        "caption": "",
-        "description": "Legacysummary",
-        "caption_bundle": {
-            "selected_body": MEDIUM_BODY,
-            "selection_reason": "fallback_hash_variant",
-        },
-    }
-
-    assert captions.resolve_selected_caption(seed_data) == MEDIUM_BODY
-
-
-def test_generate_caption_bundle_raises_on_persistent_llm_failure(monkeypatch):
-    class FakeLLM:
-        def generate_gemini_text(self, *args, **kwargs):
-            raise RuntimeError("boom")
-
-    with pytest.raises(RuntimeError, match="boom"):
-        captions.generate_caption_bundle(
-            topic_title="Topic A",
-            post_type="value",
-            script=(
-                "Erster langer Skripttext mit genug Inhalt, damit auch die längeren Caption-Familien "
-                "ihre Mindestlaenge erreichen koennen."
-            ),
-            context="Kontext A mit ausreichend Text fuer die laengeren Varianten und saubere Validierung.",
-            llm_factory=lambda: FakeLLM(),
+def test_validate_caption_variant_rejects_unknown_key():
+    with pytest.raises(ValidationError, match="Unknown caption family"):
+        captions.validate_caption_variant(
+            "short_paragraph", CURIOSITY_BODY, "Ein anderes Skript."
         )
 
 
-def test_generate_caption_bundle_raises_on_persistent_validation_failure():
-    class BadLLM:
-        def generate_gemini_text(self, *args, **kwargs):
-            return "no markers here"
-
-    with pytest.raises(captions.ValidationError, match="failed after 3 attempts"):
-        captions.generate_caption_bundle(
-            topic_title="Sehr langer Titel",
-            post_type="value",
-            script="Das ist ein unabhängiges Skript mit ausreichender Länge und klarer Satzstruktur.",
-            context="Kontext",
-            llm_factory=lambda: BadLLM(),
+def test_validate_caption_variant_rejects_too_short():
+    with pytest.raises(ValidationError, match="target length"):
+        captions.validate_caption_variant(
+            "curiosity", "Zu kurz. #Tag", "Ein anderes Skript."
         )
 
 
-def test_build_caption_prompt_discourages_title_copying():
+def test_validate_caption_variant_rejects_too_long():
+    long = "A" * 301 + "\n\nSpeicher dir das.\n\n#Tag1 #Tag2"
+    with pytest.raises(ValidationError, match="target length"):
+        captions.validate_caption_variant("curiosity", long, "Ein anderes Skript.")
+
+
+def test_validate_caption_variant_rejects_more_than_one_emoji():
+    body = (
+        "Das wissen die wenigsten über Barrierefreiheit im ÖPNV ✨ 🚦 "
+        "Viele Haltestellen sind nicht barrierefrei.\n\n"
+        "Speicher dir das.\n\n"
+        "#Barrierefrei #ÖPNV"
+    )
+    with pytest.raises(ValidationError):
+        captions.validate_caption_variant("curiosity", body, "Ein anderes Skript.")
+
+
+def test_validate_caption_variant_rejects_research_label_leakage():
+    body = (
+        "Zentrale Erkenntnisse auf einen Blick:** Barrierefreiheit ist wichtig. "
+        "Viele wissen das nicht und merken es erst zu spaet.\n\n"
+        "Speicher dir das fuer spaeter.\n\n"
+        "#Barrierefrei #ÖPNV #Inklusion"
+    )
+    with pytest.raises(ValidationError, match="research-note leakage"):
+        captions.validate_caption_variant("curiosity", body, "Ein anderes Skript.")
+
+
+def test_validate_caption_variant_rejects_high_script_overlap():
+    script = "Viele Kommunen nutzten Ausnahmen um Barrierefreiheit zu umgehen und das betrifft fast alle Haltestellen im ganzen Land."
+    body = (
+        "Viele Kommunen nutzten Ausnahmen um Barrierefreiheit zu umgehen. "
+        "Das betrifft fast alle Haltestellen im ganzen Land.\n\n"
+        "Speicher dir das fuer spaeter.\n\n"
+        "#Barrierefrei #ÖPNV #Inklusion"
+    )
+    with pytest.raises(ValidationError, match="repeats script"):
+        captions.validate_caption_variant("curiosity", body, script)
+
+
+def test_validate_caption_variant_rejects_missing_hashtags():
+    body = (
+        "Das sagt dir keiner: Viele Kommunen nutzten Ausnahmen, um Barrierefreiheit zu umgehen. "
+        "Ab 2026 ist damit endgueltig Schluss und es gibt keine Ausreden mehr.\n\n"
+        "Speicher dir das fuer spaeter."
+    )
+    with pytest.raises(ValidationError, match="hashtag"):
+        captions.validate_caption_variant("curiosity", body, "Ein anderes Skript.")
+
+
+# --- Bundle validation ---
+
+
+def test_validate_caption_bundle_accepts_three_variants():
+    parsed = {
+        "variants": [
+            {"key": "curiosity", "body": CURIOSITY_BODY},
+            {"key": "personal", "body": PERSONAL_BODY},
+            {"key": "provocative", "body": PROVOCATIVE_BODY},
+        ]
+    }
+    result = captions.validate_caption_bundle(
+        parsed, "Ein unabhängiges Skript das bewusst anders formuliert ist."
+    )
+    assert len(result["variants"]) == 3
+    assert {v["key"] for v in result["variants"]} == set(VARIANT_KEYS)
+
+
+def test_validate_caption_bundle_accepts_partial():
+    parsed = {
+        "variants": [
+            {"key": "curiosity", "body": CURIOSITY_BODY},
+            {"key": "provocative", "body": PROVOCATIVE_BODY},
+        ]
+    }
+    result = captions.validate_caption_bundle(
+        parsed, "Ein unabhängiges Skript."
+    )
+    assert len(result["variants"]) == 2
+
+
+def test_validate_caption_bundle_raises_when_no_valid_variants():
+    parsed = {"variants": [{"key": "curiosity", "body": "Zu kurz."}]}
+    with pytest.raises(ValidationError):
+        captions.validate_caption_bundle(parsed, "Ein Skript.")
+
+
+# --- Selection ---
+
+
+def test_select_caption_variant_key_is_deterministic():
+    first = captions.select_caption_variant_key(
+        topic_title="Thema", post_type="value", script="Script"
+    )
+    second = captions.select_caption_variant_key(
+        topic_title="Thema", post_type="value", script="Script"
+    )
+    assert first == second
+    assert first in VARIANT_KEYS
+
+
+# --- Script hook extraction ---
+
+
+def test_extract_script_hook_gets_first_sentence():
+    script = (
+        "Das sagt dir dein Verkehrsbetrieb nicht: Viele Kommunen nutzten Ausnahmen. "
+        "Noch mehr Details hier."
+    )
+    hook = captions.extract_script_hook(script)
+    assert hook == "Das sagt dir dein Verkehrsbetrieb nicht: Viele Kommunen nutzten Ausnahmen."
+
+
+def test_extract_script_hook_returns_full_short_script():
+    script = "Kurzer Satz ohne zweiten"
+    hook = captions.extract_script_hook(script)
+    assert hook == script
+
+
+# --- Prompt building ---
+
+
+def test_build_caption_prompt_includes_new_fields():
     prompt = captions._build_caption_prompt(
-        topic_title="Gesetzliche Rahmenbedingungen Fristen Ausnahmeregelungen",
+        topic_title="Barrierefreiheit",
         post_type="value",
-        script="Das Skript ist bewusst kurz und endet mit einem Punkt.",
-        context="Kontext",
+        script="Ein Skript.",
+        script_hook="Der Hook.",
+        research_facts=["Fakt eins.", "Fakt zwei."],
     )
-
-    assert "Thema ist nur Hintergrundkontext" in prompt
-    assert "wiederhole den Titel nicht" in prompt
-    assert "Topic-Titel" in prompt
-    assert "Emoji" in prompt
-    assert "klar anderen Einstieg" in prompt
-    assert "Vermeide generische Platzhalter" in prompt
-    assert "[short_paragraph]" in prompt
-    assert "[medium_bullets]" in prompt
-    assert "[long_structured]" in prompt
-    assert "BEISPIEL-OUTPUT" in prompt
+    assert "Der Hook." in prompt
+    assert "1. Fakt eins." in prompt
+    assert "2. Fakt zwei." in prompt
+    assert "[curiosity]" in prompt
+    assert "[personal]" in prompt
+    assert "[provocative]" in prompt
+    assert "[short_paragraph]" not in prompt
 
 
-def test_generate_caption_bundle_uses_canonical_topic_for_title_checks(monkeypatch):
-    captured = {}
+# --- Parse ---
 
+
+def test_parse_text_variants_with_new_markers():
+    text = (
+        f"[curiosity]\n{CURIOSITY_BODY}\n\n"
+        f"[personal]\n{PERSONAL_BODY}\n\n"
+        f"[provocative]\n{PROVOCATIVE_BODY}"
+    )
+    parsed = captions._parse_text_variants(text)
+    assert len(parsed["variants"]) == 3
+    assert {v["key"] for v in parsed["variants"]} == set(VARIANT_KEYS)
+
+
+# --- End-to-end generation ---
+
+
+def test_generate_caption_bundle_with_new_structure():
     class FakeLLM:
         def generate_gemini_text(self, **kwargs):
-            captured["prompt"] = kwargs["prompt"]
             return (
-                f"[short_paragraph]\n{SHORT_BODY}\n\n"
-                f"[medium_bullets]\n{MEDIUM_BODY}\n\n"
-                f"[long_structured]\n{LONG_BODY}"
+                f"[curiosity]\n{CURIOSITY_BODY}\n\n"
+                f"[personal]\n{PERSONAL_BODY}\n\n"
+                f"[provocative]\n{PROVOCATIVE_BODY}"
             )
 
     bundle = captions.generate_caption_bundle(
-        topic_title="Rechtliche Grundlagen Zielsetzung - Forschungsdossier: Barrierefreiheit im ÖPNV-Alltag",
-        canonical_topic="Barrierefreiheit im ÖPNV",
+        topic_title="Barrierefreiheit im ÖPNV",
         post_type="value",
-        script="Das Skript ist bewusst anders formuliert und endet mit einem Punkt.",
+        script="Ein komplett anderes Skript das bewusst nichts wiederholt.",
         context="Kontext",
+        research_facts=["Viele Kommunen nutzten Ausnahmen.", "Ab 2026 gelten neue Regeln."],
         llm_factory=lambda: FakeLLM(),
     )
+    assert len(bundle["variants"]) == 3
+    assert bundle["selected_key"] in VARIANT_KEYS
+    assert bundle["selected_body"]
+    assert bundle["selection_reason"] == "hash_variant"
 
-    assert bundle["selected_key"] == "medium_bullets"
-    assert "Barrierefreiheit im ÖPNV" in captured["prompt"]
-    assert "Forschungsdossier" not in captured["prompt"]
 
-
-def test_generate_caption_bundle_raises_after_retries():
-    """Caption generation must raise, not silently fall back."""
+def test_generate_caption_bundle_raises_on_persistent_failure():
     class BadLLM:
         def generate_gemini_text(self, **kwargs):
             return "no markers here"
 
-    with pytest.raises(captions.ValidationError, match="failed after 3 attempts"):
+    with pytest.raises(ValidationError, match="failed after 3 attempts"):
         captions.generate_caption_bundle(
             topic_title="Barrierefreiheit im ÖPNV",
             post_type="value",
             script="Ein Skript zum Testen.",
             context="Kontext",
+            research_facts=[],
             llm_factory=lambda: BadLLM(),
         )
 
 
-def test_validate_caption_variant_rejects_more_than_one_emoji():
-    broken = (
-        "Bei diesem Thema hilft dir ein klarer Blick auf die kleinen Details im Alltag ✨ 🚦 "
-        "Wenn du die wichtigsten Punkte vorher sortierst, vermeidest du Stress und reagierst unterwegs ruhiger. "
-        "#Barrierefrei #RollstuhlAlltag"
-    )
-    with pytest.raises(ValidationError):
-        captions.validate_caption_variant("short_paragraph", broken, "Ein anderes Skript mit genügend Abstand.")
+def test_generate_caption_bundle_raises_on_llm_error():
+    class ErrorLLM:
+        def generate_gemini_text(self, **kwargs):
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        captions.generate_caption_bundle(
+            topic_title="Topic",
+            post_type="value",
+            script="Skript.",
+            context="Kontext.",
+            research_facts=[],
+            llm_factory=lambda: ErrorLLM(),
+        )
 
 
-def test_generate_caption_bundle_picks_non_echo_variant(monkeypatch):
-    """If the preferred variant echoes the title, pick another one that doesn't."""
-    class FakeLLM:
-        def generate_gemini_text(self, *args, **kwargs):
-            short = (
-                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf die "
-                "wichtigsten Punkte im Alltag. #Tag1 #Tag2"
-            )
-            medium = (
-                "Wusstest du, dass kleine Details den Unterschied machen und dir helfen, "
-                "im Alltag ruhiger zu bleiben?\n\n"
-                "• Punkt eins ist wichtig fuer die taegliche Routine.\n"
-                "• Punkt zwei hilft dir, den Ueberblick zu behalten.\n"
-                "• Punkt drei spart dir Zeit und Nerven.\n\n"
-                "#Tag1 #Tag2 #Tag3"
-            )
-            long = (
-                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf "
-                "die wichtigsten Punkte im Alltag und in der Freizeit.\n\n"
-                "Noch mehr Einordnung hilft dir, die Zusammenhaenge besser zu verstehen und "
-                "im richtigen Moment die richtige Entscheidung zu treffen.\n\n"
-                "1. Klaere zuerst das Ziel und sammle die relevanten Fakten.\n"
-                "2. Pruefe danach Zustaendigkeiten und Fristen Schritt fuer Schritt.\n\n"
-                "#Tag1 #Tag2 #Tag3"
-            )
-            return f"[short_paragraph]\n{short}\n\n[medium_bullets]\n{medium}\n\n[long_structured]\n{long}"
+# --- attach_caption_bundle ---
 
-    bundle = captions.generate_caption_bundle(
-        topic_title="Gesetzliche Rahmenbedingungen Fristen Ausnahmeregelungen",
+
+def test_attach_caption_bundle_sets_description_and_caption():
+    payload = {
+        "script": "Ein komplett anderes Skript das bewusst nichts wiederholt.",
+        "strict_seed": {
+            "facts": [
+                "Viele Kommunen nutzten Ausnahmen.",
+                "Ab 2026 gelten neue Regeln.",
+            ],
+        },
+    }
+    enriched = captions.attach_caption_bundle(
+        payload,
+        topic_title="Barrierefreier ÖPNV",
         post_type="value",
-        script="Das Skript ist bewusst kurz und endet mit einem Punkt.",
-        context="Kontext",
-        llm_factory=lambda: FakeLLM(),
+        llm_factory=lambda: _make_stub_llm(),
     )
-    assert bundle["selected_key"] == "medium_bullets"
-    assert "Wusstest du" in bundle["selected_body"]
-
-
-def test_generate_caption_bundle_accepts_all_echo_variants():
-    """If ALL variants echo the title, accept the preferred one anyway."""
-    class FakeLLM:
-        def generate_gemini_text(self, *args, **kwargs):
-            short = (
-                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf die "
-                "wichtigsten Punkte im Alltag. #Tag1 #Tag2"
-            )
-            medium = (
-                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf "
-                "alles was wichtig ist.\n\n"
-                "• Punkt eins ist wichtig fuer die taegliche Routine.\n"
-                "• Punkt zwei hilft dir, den Ueberblick zu behalten.\n"
-                "• Punkt drei spart dir Zeit und Nerven.\n\n"
-                "#Tag1 #Tag2 #Tag3"
-            )
-            long = (
-                "Bei Gesetzliche Rahmenbedingungen Fristen hilft dir ein klarer Blick auf "
-                "die wichtigsten Punkte im Alltag und in der Freizeit.\n\n"
-                "Noch mehr Einordnung hilft dir, die Zusammenhaenge besser zu verstehen und "
-                "im richtigen Moment die richtige Entscheidung zu treffen.\n\n"
-                "1. Klaere zuerst das Ziel und sammle die relevanten Fakten.\n"
-                "2. Pruefe danach Zustaendigkeiten und Fristen Schritt fuer Schritt.\n\n"
-                "#Tag1 #Tag2 #Tag3"
-            )
-            return f"[short_paragraph]\n{short}\n\n[medium_bullets]\n{medium}\n\n[long_structured]\n{long}"
-
-    bundle = captions.generate_caption_bundle(
-        topic_title="Gesetzliche Rahmenbedingungen Fristen Ausnahmeregelungen",
-        post_type="value",
-        script="Das Skript ist bewusst kurz und endet mit einem Punkt.",
-        context="Kontext",
-        llm_factory=lambda: FakeLLM(),
-    )
-    assert bundle["selected_body"]
-    assert len(bundle["variants"]) == 3
+    assert enriched["caption_bundle"]["selected_key"] in VARIANT_KEYS
+    assert enriched["description"] == enriched["caption_bundle"]["selected_body"]
+    assert enriched["caption"] == enriched["caption_bundle"]["selected_body"]
 
 
 def test_attach_caption_bundle_overwrites_preexisting_caption():
-    """Even when caption has a value, attach_caption_bundle must overwrite it with bundle body."""
-    llm = _StubLLM(
-        {
-            "variants": [
-                {"key": "short_paragraph", "body": SHORT_BODY},
-                {"key": "medium_bullets", "body": MEDIUM_BODY},
-                {"key": "long_structured", "body": LONG_BODY},
-            ]
-        }
-    )
     payload = {
-        "script": "Kurzes Skript, aber nicht identisch mit der Caption.",
-        "caption": "Stale research caption that should be overwritten.",
-        "strict_seed": {"facts": ["Fakt eins"]},
+        "script": "Ein komplett anderes Skript das bewusst nichts wiederholt.",
+        "caption": "Stale caption that should be overwritten.",
+        "strict_seed": {"facts": ["Fakt eins."]},
     }
     enriched = captions.attach_caption_bundle(
         payload,
         topic_title="Barrierefreier ÖPNV",
         post_type="value",
-        llm_factory=lambda: llm,
+        llm_factory=lambda: _make_stub_llm(),
     )
+    assert enriched["caption"] != "Stale caption that should be overwritten."
     assert enriched["caption"] == enriched["caption_bundle"]["selected_body"]
-    assert enriched["caption"] != "Stale research caption that should be overwritten."
 
 
-def test_build_caption_prompt_requests_marker_format_not_json():
-    prompt = captions._build_caption_prompt(
-        topic_title="Barrierefreiheit",
-        post_type="value",
-        script="Ein Skript.",
-        context="Kontext",
-    )
-    assert "[short_paragraph]" in prompt
-    assert "[medium_bullets]" in prompt
-    assert "[long_structured]" in prompt
-    assert "valides JSON" not in prompt
+# --- resolve_selected_caption ---
 
 
-def test_generate_caption_bundle_text_first_with_markers():
-    marker_response = (
-        "[short_paragraph]\n"
-        f"{SHORT_BODY}\n\n"
-        "[medium_bullets]\n"
-        f"{MEDIUM_BODY}\n\n"
-        "[long_structured]\n"
-        f"{LONG_BODY}"
-    )
-
-    class TextLLM:
-        def generate_gemini_text(self, **kwargs):
-            return marker_response
-
-    bundle = captions.generate_caption_bundle(
-        topic_title="Barrierefreier ÖPNV",
-        post_type="value",
-        script="Das Skript ist bewusst anders formuliert und endet mit einem Punkt.",
-        context="Kontext mit ausreichend Text fuer die Varianten.",
-        llm_factory=lambda: TextLLM(),
-    )
-
-    assert len(bundle["variants"]) == 3
-    assert {v["key"] for v in bundle["variants"]} == set(captions.FAMILY_ORDER)
-    assert bundle["selected_body"]
-    assert bundle["selection_reason"] == "hash_variant"
-
-
-def test_attach_caption_bundle_repairs_invalid_value_bundle_from_clean_facts():
-    class BrokenLLM:
-        def generate_gemini_text(self, **kwargs):
-            return (
-                "[short_paragraph]\n"
-                "Viel zu kurz.\n\n"
-                "[medium_bullets]\n"
-                "• Viel zu kurz.\n\n"
-                "[long_structured]\n"
-                "Das ist fast identisch mit dem Skript und deshalb absichtlich unbrauchbar."
-            )
-
-    payload = {
-        "script": (
-            "Wusstest du, dass fehlende soziale Kontakte so schädlich wie Rauchen sein können? "
-            "Baue dir eine Wahlfamilie in deiner Nachbarschaft auf und stärke damit dein Wohlbefinden."
-        ),
-        "strict_seed": {
-            "source_context": (
-                "Ein stabiles soziales Netz entlastet im Alltag und wirkt sich auch langfristig auf die Gesundheit aus."
-            ),
-            "facts": [
-                "Fehlende soziale Kontakte erhöhen das Gesundheitsrisiko deutlich und wirken sich langfristig auf den Alltag aus.",
-                "Nachbarschaften und Wahlfamilien übernehmen heute oft Aufgaben, die früher enger in Familien gebunden waren.",
-                "Klare Absprachen und erreichbare Kontakte entlasten, wenn Unterstützung kurzfristig gebraucht wird.",
-                "Telefonketten oder feste Check-ins helfen, damit Sorgen nicht unbemerkt größer werden.",
-            ],
+def test_resolve_selected_caption_prefers_bundle():
+    seed_data = {
+        "caption": "Stale.",
+        "description": "Legacy.",
+        "caption_bundle": {
+            "selected_body": CURIOSITY_BODY,
+            "selection_reason": "hash_variant",
         },
     }
-
-    enriched = captions.attach_caption_bundle(
-        payload,
-        topic_title="Soziales Umfeld stärken",
-        post_type="value",
-        llm_factory=lambda: BrokenLLM(),
-    )
-
-    bundle = enriched["caption_bundle"]
-    assert len(bundle["variants"]) == 3
-    assert bundle["selected_key"] in {"medium_bullets", "long_structured"}
-    for variant in bundle["variants"]:
-        captions.validate_caption_variant(variant["key"], variant["body"], payload["script"])
+    assert captions.resolve_selected_caption(seed_data) == CURIOSITY_BODY
 
 
-def test_attach_caption_bundle_repair_strips_dangling_example_fragments():
-    class BrokenLLM:
-        def generate_gemini_text(self, **kwargs):
-            return (
-                "[short_paragraph]\nKurz.\n\n"
-                "[medium_bullets]\nKurz.\n\n"
-                "[long_structured]\nKurz."
-            )
+def test_resolve_selected_caption_falls_back_to_caption():
+    seed_data = {"caption": "Fallback caption.", "description": "Legacy."}
+    assert captions.resolve_selected_caption(seed_data) == "Fallback caption."
 
-    payload = {
-        "script": (
-            "Die Zuständigkeit richtet sich nach Ursache der Behinderung und dem zuständigen Kostenträger."
-        ),
-        "strict_seed": {
-            "facts": [
-                "Die Zuständigkeit ist hochgradig fragmentiert und richtet sich nach der Ursache der Behinderung (z.B. Arbeitsunfall) oder der Dauer der bisherigen Rentenversicherungsbeiträge.",
-                "Der Markt bietet hochspezialisierte Lösungen – von extrem flachen Kassettenliften bis zu elektronischen Handbediengeräten.",
-                "Missachtest du die Antragsreihenfolge, kann der Förderanspruch vollständig verloren gehen.",
-            ],
+
+# --- default_publish_caption ---
+
+
+def test_default_publish_caption_prefers_caption_bundle():
+    post = {
+        "publish_caption": "",
+        "seed_data": {
+            "description": "Legacy description",
+            "caption_bundle": {"selected_body": CURIOSITY_BODY},
         },
     }
-
-    enriched = captions.attach_caption_bundle(
-        payload,
-        topic_title="Fahrzeuganpassung und Kostenübernahme",
-        post_type="value",
-        llm_factory=lambda: BrokenLLM(),
-    )
-
-    selected = enriched["caption_bundle"]["selected_body"]
-    assert "(z.B." not in selected
-    assert "\n2. Der Markt bietet" in selected or "Der Markt bietet hochspezialisierte Lösungen" in selected
-    assert "oder der Dauer" not in selected or "oder der Dauer der bisherigen Rentenversicherungsbeiträge." in selected
-
-
-def test_parse_text_variants_round_trip():
-    """Marker-formatted text should parse and validate as a complete caption bundle."""
-    marker_text = (
-        "[short_paragraph]\n"
-        f"{SHORT_BODY}\n\n"
-        "[medium_bullets]\n"
-        f"{MEDIUM_BODY}\n\n"
-        "[long_structured]\n"
-        f"{LONG_BODY}"
-    )
-    parsed = captions._parse_text_variants(marker_text)
-    assert len(parsed["variants"]) == 3
-    assert {v["key"] for v in parsed["variants"]} == set(captions.FAMILY_ORDER)
-
-    validated = captions.validate_caption_bundle(
-        parsed, "Ein unabhaengiges Skript das absichtlich anders formuliert ist."
-    )
-    assert len(validated["variants"]) == 3
-    for variant in validated["variants"]:
-        assert variant["char_count"] >= captions.FAMILY_SPECS[variant["key"]]["min_chars"]
-
-
-def test_validate_caption_bundle_accepts_partial_for_lifestyle():
-    """Lifestyle only needs short_paragraph or medium_bullets — missing long_structured is fine."""
-    marker_text = (
-        "[short_paragraph]\n"
-        f"{SHORT_BODY}\n\n"
-        "[medium_bullets]\n"
-        f"{MEDIUM_BODY}"
-    )
-    parsed = captions._parse_text_variants(marker_text)
-    assert len(parsed["variants"]) == 2
-
-    validated = captions.validate_caption_bundle(parsed, "Ein unabhaengiges Skript.", post_type="lifestyle")
-    assert len(validated["variants"]) == 2
-    assert {v["key"] for v in validated["variants"]} == {"short_paragraph", "medium_bullets"}
-
-
-def test_validate_caption_bundle_raises_when_no_required_variant():
-    """If none of the required variants are present, must raise."""
-    marker_text = "[long_structured]\nEin langer Text mit genug Inhalt und mehreren Absaetzen.\n\nZweiter Absatz hier.\n\n1. Punkt eins ist wichtig.\n2. Punkt zwei ebenso.\n\n#Tag1 #Tag2"
-    parsed = captions._parse_text_variants(marker_text)
-
-    with pytest.raises(captions.ValidationError, match="No usable caption variants"):
-        captions.validate_caption_bundle(parsed, "Ein unabhaengiges Skript.", post_type="lifestyle")
+    assert publish_handlers._default_publish_caption(post) == CURIOSITY_BODY
