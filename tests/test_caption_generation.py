@@ -1,5 +1,3 @@
-from copy import deepcopy
-
 import pytest
 
 from app.core.errors import ValidationError
