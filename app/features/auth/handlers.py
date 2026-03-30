@@ -97,6 +97,47 @@ async def handle_verify_otp(request: Request, email: str = Form(...), token: str
     return response
 
 
+@router.get("/callback", response_class=HTMLResponse)
+async def auth_callback(request: Request):
+    """
+    Handle Supabase magic link redirect.
+    Supabase puts tokens in the URL hash (#access_token=...&refresh_token=...).
+    This page captures them client-side and posts to /auth/session to set the cookie.
+    """
+    return templates.TemplateResponse("auth/callback.html", {"request": request})
+
+
+@router.post("/session")
+async def handle_session(request: Request):
+    """Accept tokens from the magic link callback and set session cookie."""
+    body = await request.json()
+    access_token = body.get("access_token")
+    refresh_token = body.get("refresh_token")
+
+    if not access_token or not refresh_token:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    settings = get_settings()
+    cookie_data = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
+    cookie_value = encode_session_cookie(cookie_data, settings.token_encryption_key)
+
+    from fastapi.responses import JSONResponse
+    response = JSONResponse(content={"ok": True, "redirect": "/batches"})
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=cookie_value,
+        max_age=settings.session_max_age,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+    )
+    logger.info("auth_magic_link_login")
+    return response
+
+
 @router.post("/logout")
 async def handle_logout(request: Request):
     """Sign out and clear session cookie."""

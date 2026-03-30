@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signing in... — FLOW-FORGE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { animation: spin 1s linear infinite; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, #f5f0ff 0%, #ede7f6 100%);">
+    <div class="bg-white rounded-2xl shadow-lg p-10 text-center max-w-sm">
+        <div class="w-12 h-12 mx-auto mb-4 rounded-xl flex items-center justify-center" style="background: #6750A4;">
+            <span class="text-white text-xl font-bold">FF</span>
+        </div>
+        <div id="loading">
+            <div class="w-8 h-8 mx-auto mb-3 border-3 border-gray-200 rounded-full spinner" style="border-top-color: #6750A4; border-width: 3px;"></div>
+            <p class="text-gray-600 text-sm">Signing you in...</p>
+        </div>
+        <div id="error" class="hidden">
+            <p class="text-red-600 text-sm mb-3">Something went wrong. Please try logging in again.</p>
+            <a href="/auth/login" class="inline-block px-4 py-2 rounded-lg text-white text-sm font-semibold" style="background: #6750A4;">Back to login</a>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token');
+            const refreshToken = params.get('refresh_token');
+
+            if (!accessToken || !refreshToken) {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('error').classList.remove('hidden');
+                return;
+            }
+
+            fetch('/auth/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    access_token: accessToken,
+                    refresh_token: refreshToken
+                })
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    window.location.href = data.redirect || '/batches';
+                } else {
+                    throw new Error('Session creation failed');
+                }
+            })
+            .catch(function() {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('error').classList.remove('hidden');
+            });
+        })();
+    </script>
+</body>
+</html>
