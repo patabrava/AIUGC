@@ -1,53 +1,57 @@
-Du bekommst ein Thema, ein Skript und Kontext. Erstelle daraus exakt 3 Caption-Varianten fuer Social Media.
+Du bekommst ein Thema, ein Skript, den Skript-Hook und Recherche-Fakten.
+Erstelle exakt 3 Caption-Varianten mit UNTERSCHIEDLICHEN emotionalen Winkeln.
+Jede Caption folgt der gleichen Struktur: Hook, Body, CTA, Hashtags.
+
+SKRIPT-HOOK (das sagt das Video am Anfang — NICHT wiederholen):
+{script_hook}
+
+RECHERCHE-FAKTEN (waehle die ueberraschendsten fuer den Body):
+{research_facts}
+
+THEMA: {topic_title}
+POST-TYP: {post_type}
+SKRIPT: {script}
 
 BEISPIEL-OUTPUT (so muss dein Output aussehen — alle 3 Marker, alle 3 Captions):
 
-[short_paragraph]
-Barrierefreiheit beginnt nicht erst am Bahnsteig, sondern schon beim Planen der Route. Wer vorher checkt, spart Stress und bleibt flexibler unterwegs. #Barrierefrei #RollstuhlAlltag
+[curiosity]
+Das sagt dir dein Verkehrsbetrieb nicht: Viele Kommunen nutzten jahrelang Ausnahmen, um Barrierefreiheit zu umgehen. Ab 2026 ist damit Schluss.
 
-[medium_bullets]
-Wusstest du, dass viele Haltestellen immer noch nicht barrierefrei sind? 🚦
+Speicher dir das, bevor es untergeht.
 
-Dabei zeigt sich: Kleine Schritte machen den Unterschied.
+#BarriereFreiheit #ÖPNV #Inklusion
 
-• Prüfe vor der Fahrt, ob deine Haltestelle wirklich zugänglich ist.
-• Melde Mängel direkt beim Verkehrsverbund.
-• Tausch dich mit anderen aus, die ähnliche Erfahrungen machen.
+[personal]
+Wenn du ÖPNV faehrst, betrifft dich das ab 2026. Viele Haltestellen sind bis heute nicht barrierefrei, obwohl das Gesetz es laengst verlangt.
 
-#Barrierefrei #Alltagstipps #Rollstuhl
+Schick das jemandem, der das wissen muss.
 
-[long_structured]
-Im Alltag mit dem Rollstuhl entscheidet oft ein einziges Detail, ob eine Fahrt klappt oder nicht. Zwischen Fahrplan und Realität liegt manchmal eine Lücke, die frustriert.
+#Barrierefrei #Alltag #Selbstbestimmt
 
-Gerade bei spontanen Fahrten hilft es, ein paar Infos parat zu haben. So bleibst du handlungsfähig, statt dich unterwegs ärgern zu müssen.
+[provocative]
+Keine Rampe, kein Aufzug, keine Ansage — und trotzdem nennen sie es barrierefrei. Ab 2026 gibt es fuer Kommunen keine Ausreden mehr.
 
-1. Checke vorher die Barrierefreiheit deiner Route über die App des Verkehrsverbunds.
-2. Notiere dir Ausweichrouten für Stationen, die oft Probleme machen.
-3. Melde kaputte Aufzüge oder fehlende Rampen direkt, damit sich etwas ändert.
+Kommentier, wenn deine Haltestelle betroffen ist.
 
-#Barrierefrei #Selbstbestimmt #RollstuhlAlltag
+#BarriereFreiheit #ÖPNV #Teilhabe
 
-JETZT BIST DU DRAN. Erstelle 3 Varianten fuer dieses Thema:
+JETZT BIST DU DRAN. Erstelle 3 Varianten fuer dieses Thema.
 
-Thema: {topic_title}
-Post-Typ: {post_type}
-Gesprochenes Skript: {script}
-Kontext: {context}
+Struktur JEDER Caption:
+- HOOK: Max 100 Zeichen. Hauptkeyword in den ersten 30 Zeichen. Anderer emotionaler Winkel als der Skript-Hook. Nie den Skript-Hook woertlich kopieren.
+- BODY: 1-2 Saetze, max 150 Zeichen. Nutze einen KONKRETEN Fakt aus den Recherche-Fakten.
+- CTA: Direkte Handlungsaufforderung (Speichern, Teilen oder Kommentieren). Immer eine eigene Zeile.
+- HASHTAGS: 3-5 thematische Hashtags in CamelCase. Eigene Zeile.
 
-Schreibe alle 3 Varianten mit den Markern [short_paragraph], [medium_bullets] und [long_structured].
-Du MUSST alle drei Marker verwenden und unter jedem eine vollstaendige Caption schreiben.
+Emotionale Winkel:
+- [curiosity]: Neugier oder Social-Proof (Was verschwiegen wird, was wenige wissen, ueberraschende Zahlen)
+- [personal]: Persoenliche Betroffenheit (Du-Ansprache, Alltagsbezug, direkte Konsequenz)
+- [provocative]: Herausforderung oder Widerspruch (Kritik, Gegensatz, Forderung)
 
 Regeln:
-- Das Feld Thema ist nur Hintergrundkontext — wiederhole den Titel nicht im Einstieg.
-- Jede Variante braucht einen klar anderen Einstieg (Frage, Konsequenz, Warnung, Nutzen, Beobachtung).
-- Keine Caption darf mit dem Topic-Titel oder einer nahen Variante beginnen.
-- Vermeide generische Platzhalter wie "diesem Thema", "diesem Fall", "hier".
-- Wiederhole das Skript nicht einfach.
-- Maximal 1 Emoji pro Variante.
-- Jede Variante endet mit 2-4 thematisch passenden Hashtags.
-- Alles vollstaendig auf Deutsch.
-
-Strukturregeln (Zeichenzahl = GESAMTE Caption inklusive Hook, Stichpunkte UND Hashtags):
-- short_paragraph: 140-260 Zeichen gesamt, genau 1 Absatz, keine Stichpunkte.
-- medium_bullets: 220-420 Zeichen gesamt. Aufbau: 1 Hook-Absatz (1-2 Saetze) + Leerzeile + 2-3 Stichpunkte (jeder Stichpunkt ist ein vollstaendiger Satz mit mindestens 40 Zeichen) + Leerzeile + Hashtags.
-- long_structured: 350-700 Zeichen gesamt, 2 Prosa-Absaetze + Leerzeile + 3-4 Stichpunkte oder nummerierte Zeilen (jeweils vollstaendige Saetze).
+- Jeder Hook muss einen ANDEREN emotionalen Winkel haben als die anderen zwei.
+- Body muss einen KONKRETEN Fakt aus den Recherche-Fakten enthalten — keine generischen Saetze.
+- Gesamtlaenge pro Caption (inkl. Hook, Body, CTA, Hashtags): 150-300 Zeichen.
+- Alles auf Deutsch, natuerlich gesprochen, keine Uebersetzungsartefakte.
+- Max 1 Emoji pro Caption.
+- Schreibe alle 3 Varianten mit den Markern [curiosity], [personal] und [provocative].
