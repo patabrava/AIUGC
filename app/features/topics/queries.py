@@ -6,11 +6,15 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Dict, List, Optional
 
-from app.adapters.supabase_client import get_supabase
+from app.adapters.supabase_client import get_supabase, SupabaseAdapter
+
+# Module-level singleton used by audit query functions (patchable in tests).
+supabase: SupabaseAdapter = get_supabase()
 from app.core.errors import NotFoundError
 from app.core.logging import get_logger
 from app.features.topics.captions import resolve_selected_caption
 from app.features.topics.topic_validation import (
+    detect_metadata_bleed,
     detect_spoken_copy_issues,
     get_prompt1_sentence_bounds,
     get_prompt1_word_bounds,
@@ -640,6 +644,25 @@ def upsert_topic_script_variants(
                 script_preview=script[:240],
             )
             continue
+        bleed_issue = detect_metadata_bleed(
+            script,
+            source_summary=str(variant.get("source_summary") or ""),
+            cluster_summary=str(variant.get("cluster_summary") or ""),
+        )
+        if bleed_issue:
+            logger.warning(
+                "topic_script_integrity_rejected",
+                topic_registry_id=topic_registry_id,
+                topic_research_dossier_id=topic_research_dossier_id,
+                target_length_tier=tier,
+                bucket=bucket,
+                lane_key=lane_key,
+                reason="metadata_bleed",
+                bleed_field=bleed_issue.get("field"),
+                bleed_window=bleed_issue.get("window"),
+                script_preview=script[:240],
+            )
+            continue
         if bucket == "canonical" and post_type_value in {"value", "product"}:
             min_words, max_words = get_prompt1_word_bounds(tier)
             min_sentences, max_sentences = get_prompt1_sentence_bounds(tier)
@@ -856,3 +879,22 @@ def get_cron_run_stats() -> Dict[str, Any]:
     total_runs = len(rows)
     total_topics = sum(r.get("topics_completed", 0) for r in rows)
     return {"total_runs": total_runs, "total_topics_researched": total_topics}
+
+
+def get_unaudited_scripts(*, limit: int = 50) -> List[Dict[str, Any]]:
+    """Fetch topic_scripts rows where quality_score is NULL (unaudited)."""
+    response = (
+        supabase.client.table("topic_scripts")
+        .select("id, title, script, target_length_tier, post_type, bucket, lane_key, source_summary, cluster_id")
+        .is_("quality_score", "null")
+        .limit(limit)
+        .execute()
+    )
+    return list(response.data or [])
+
+
+def update_script_quality(*, script_id: str, quality_score: int, quality_notes: str) -> None:
+    """Write audit results to a topic_scripts row."""
+    supabase.client.table("topic_scripts").update(
+        {"quality_score": quality_score, "quality_notes": quality_notes}
+    ).eq("id", script_id).execute()

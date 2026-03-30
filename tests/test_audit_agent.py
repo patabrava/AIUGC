@@ -97,3 +97,45 @@ def test_audit_single_script_malformed_llm_response():
     assert result.total_score == 0
     assert result.status == "reject"
     assert "parse_error" in result.quality_notes
+
+
+from unittest.mock import patch, MagicMock
+
+
+def test_get_unaudited_scripts_returns_null_quality_rows():
+    """Query must filter for quality_score IS NULL."""
+    mock_response = MagicMock()
+    mock_response.data = [
+        {"id": "row-1", "script": "Test script.", "target_length_tier": 8, "title": "Test"},
+    ]
+    mock_table = MagicMock()
+    mock_table.select.return_value.is_.return_value.limit.return_value.execute.return_value = mock_response
+
+    mock_client = MagicMock()
+    mock_client.client.table.return_value = mock_table
+
+    with patch("app.features.topics.queries.supabase", mock_client):
+        from app.features.topics.queries import get_unaudited_scripts
+        rows = get_unaudited_scripts(limit=50)
+    assert len(rows) == 1
+    assert rows[0]["id"] == "row-1"
+
+
+def test_update_script_quality_writes_score_and_notes():
+    """Update must write quality_score and quality_notes."""
+    mock_response = MagicMock()
+    mock_response.data = [{"id": "row-1", "quality_score": 85}]
+    mock_table = MagicMock()
+    mock_table.update.return_value.eq.return_value.execute.return_value = mock_response
+
+    mock_client = MagicMock()
+    mock_client.client.table.return_value = mock_table
+
+    with patch("app.features.topics.queries.supabase", mock_client):
+        from app.features.topics.queries import update_script_quality
+        update_script_quality(script_id="row-1", quality_score=85, quality_notes='{"status": "pass"}')
+
+    mock_table.update.assert_called_once()
+    call_args = mock_table.update.call_args[0][0]
+    assert call_args["quality_score"] == 85
+    assert "pass" in call_args["quality_notes"]
