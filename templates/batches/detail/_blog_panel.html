@@ -3,8 +3,10 @@
 {% set blog_posts = all_posts | selectattr('blog_enabled') | list %}
 {% if blog_posts %}
 <div class="mt-6 rounded-xl border border-white/10 bg-[#1a1a2e] overflow-hidden"
-     x-data="blogPanelComponent({{ blog_posts | tojson }})"
+     x-data="blogPanelComponent()"
+     x-init="posts = JSON.parse($refs.blogData.textContent)"
      id="blog-panel">
+    <script type="application/json" x-ref="blogData">{{ blog_posts | tojson }}</script>
 
     {# Panel Header #}
     <div class="flex items-center justify-between px-6 py-4 border-b border-white/10">
@@ -89,7 +91,9 @@
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Sources (from dossier)</label>
                             <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed">
                                 <template x-for="src in (post.blog_content.sources || [])" :key="src.url">
-                                    <div x-text="'&#8226; ' + src.title"></div>
+                                    <a :href="src.url" target="_blank" rel="noopener noreferrer"
+                                       class="block text-purple-400 hover:text-purple-300 hover:underline cursor-pointer"
+                                       x-text="'&#8226; ' + src.title"></a>
                                 </template>
                             </div>
                         </div>
@@ -151,12 +155,13 @@
 </div>
 
 <script>
-function blogPanelComponent(blogPosts) {
+function blogPanelComponent() {
     return {
-        posts: blogPosts || [],
+        posts: [],
         expanded: null,
         toggleExpand(postId) {
             this.expanded = this.expanded === postId ? null : postId;
+            window.batchDetailExpanded = !!this.expanded;
         },
         saveField(postId, field, value) {
             const body = {};
