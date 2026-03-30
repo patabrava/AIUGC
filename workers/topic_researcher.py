@@ -175,6 +175,15 @@ def run_discovery_cycle():
         error_message=error_msg,
     )
 
+    # Audit newly persisted scripts immediately
+    if topics_completed > 0:
+        try:
+            from workers.audit_worker import run_audit_cycle
+            logger.info("topic_research_triggering_audit")
+            run_audit_cycle()
+        except Exception:
+            logger.exception("topic_research_audit_trigger_failed")
+
     logger.info(
         "topic_research_cron_complete",
         run_id=run_id,
