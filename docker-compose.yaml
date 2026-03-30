@@ -1,8 +1,10 @@
+x-flow-forge-build: &flow-forge-build
+  context: ${DOCKER_BUILD_CONTEXT:-.}
+  dockerfile: Dockerfile
+
 services:
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     env_file:
       - .env
@@ -29,9 +31,7 @@ services:
       start_period: 20s
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["python", "workers/video_poller.py"]
     env_file:
       - .env
@@ -41,9 +41,7 @@ services:
         condition: service_healthy
 
   topic-researcher:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["python", "workers/topic_researcher.py"]
     env_file:
       - .env
@@ -53,9 +51,7 @@ services:
         condition: service_healthy
 
   caption-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["python", "-m", "workers.caption_worker"]
     env_file:
       - .env

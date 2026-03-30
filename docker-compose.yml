@@ -1,3 +1,7 @@
+x-flow-forge-build: &flow-forge-build
+  context: ${DOCKER_BUILD_CONTEXT:-.}
+  dockerfile: Dockerfile
+
 x-flow-forge-env: &flow-forge-env
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_KEY: ${SUPABASE_KEY}
@@ -38,15 +42,14 @@ x-flow-forge-env: &flow-forge-env
   TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
   CRON_SECRET: ${CRON_SECRET}
   CRON_RESEARCH_NICHE: ${CRON_RESEARCH_NICHE:-Schwerbehinderung, Treppenlifte, Barrierefreiheit}
+  VIDEO_POLLER_IDENTITY: ${VIDEO_POLLER_IDENTITY:-}
   DEBUG: ${DEBUG:-0}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   ENVIRONMENT: ${ENVIRONMENT:-development}
 
 services:
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment: *flow-forge-env
     ports:
@@ -72,9 +75,7 @@ services:
       start_period: 20s
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["python", "workers/video_poller.py"]
     environment: *flow-forge-env
     restart: unless-stopped
@@ -83,9 +84,7 @@ services:
         condition: service_healthy
 
   topic-researcher:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["python", "workers/topic_researcher.py"]
     environment: *flow-forge-env
     restart: unless-stopped
@@ -94,9 +93,7 @@ services:
         condition: service_healthy
 
   caption-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["python", "-m", "workers.caption_worker"]
     environment: *flow-forge-env
     restart: unless-stopped
