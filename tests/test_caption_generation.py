@@ -72,7 +72,7 @@ def test_validate_caption_variant_accepts_new_structure(key, body):
         key, body, "Ein ganz anderes Skript das nichts mit der Caption zu tun hat."
     )
     assert result["key"] == key
-    assert 150 <= result["char_count"] <= 300
+    assert 120 <= result["char_count"] <= 400
 
 
 def test_validate_caption_variant_rejects_unknown_key():
@@ -90,7 +90,7 @@ def test_validate_caption_variant_rejects_too_short():
 
 
 def test_validate_caption_variant_rejects_too_long():
-    long = "A" * 301 + "\n\nSpeicher dir das.\n\n#Tag1 #Tag2"
+    long = "A" * 401 + "\n\nSpeicher dir das.\n\n#Tag1 #Tag2"
     with pytest.raises(ValidationError, match="target length"):
         captions.validate_caption_variant("curiosity", long, "Ein anderes Skript.")
 

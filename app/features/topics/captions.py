@@ -18,8 +18,8 @@ from app.features.topics.topic_validation import (
 logger = structlog.get_logger(__name__)
 
 VARIANT_KEYS = ("curiosity", "personal", "provocative")
-CAPTION_MIN_CHARS = 150
-CAPTION_MAX_CHARS = 300
+CAPTION_MIN_CHARS = 120
+CAPTION_MAX_CHARS = 400
 
 _MARKER_PATTERN = re.compile(r"^\[(curiosity|personal|provocative)\]\s*$", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"(?<!\w)#[A-Za-zÀ-ÿ0-9_]+")
