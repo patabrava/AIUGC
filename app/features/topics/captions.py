@@ -357,7 +357,6 @@ def attach_caption_bundle(
     topic_title: str,
     post_type: str,
     script_fallback: str = "",
-    context: str = "",
     llm_factory: Callable = get_llm_client,
     canonical_topic: Optional[str] = None,
 ) -> Dict[str, Any]:

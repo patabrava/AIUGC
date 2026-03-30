@@ -76,7 +76,6 @@ def _attach_publish_captions(
     post_type: str,
     seed_payload: Dict[str, Any],
     script_fallback: str = "",
-    context: str = "",
     canonical_topic: str = "",
 ) -> Dict[str, Any]:
     return attach_caption_bundle(
@@ -84,7 +83,6 @@ def _attach_publish_captions(
         topic_title=topic_title,
         post_type=post_type,
         script_fallback=script_fallback,
-        context=context,
         canonical_topic=canonical_topic or None,
     )
 
@@ -558,7 +556,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     post_type=post_type,
                     seed_payload=seed_payload,
                     script_fallback=topic_rotation,
-                    context=str(seed_payload.get("description") or seed_payload.get("research_caption") or topic_rotation),
                     canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
                 )
                 add_topic_to_registry(
@@ -709,7 +706,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     post_type=post_type,
                     seed_payload=seed_payload,
                     script_fallback=topic_data["rotation"],
-                    context=str(seed_payload.get("description") or topic_data["title"]),
                     canonical_topic=str(seed_payload.get("canonical_topic") or topic_data["title"]),
                 )
 
@@ -859,7 +855,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                         post_type=post_type,
                         seed_payload=seed_payload,
                         script_fallback=topic_rotation,
-                        context=str(seed_payload.get("description") or seed_payload.get("research_caption") or topic_rotation),
                         canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
                     )
                     add_topic_to_registry(
@@ -925,7 +920,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 post_type="lifestyle",
                 seed_payload=seed_payload,
                 script_fallback=fallback_topic["rotation"],
-                context=str(seed_payload.get("description") or fallback_topic["title"]),
                 canonical_topic=str(seed_payload.get("canonical_topic") or fallback_topic["title"]),
             )
 
