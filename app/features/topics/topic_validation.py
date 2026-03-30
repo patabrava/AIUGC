@@ -67,15 +67,9 @@ SPOKEN_COPY_LABEL_MARKERS = (
     "demografische dringlichkeit",
     "zentrale erkenntnisse",
     "leitende zusammenfassung",
-    "einordnung",
     "einordnung der faktenlage",
     "faktenlage",
     "quellenlage",
-    "fazit",
-    "kontext",
-    "quelle",
-    "quellen",
-    "studie",
     "studienlage",
 )
 
@@ -83,7 +77,6 @@ INCOMPLETE_TRAILING_TOKENS = {
     "aber",
     "als",
     "am",
-    "an",
     "auch",
     "auf",
     "aus",
@@ -112,13 +105,11 @@ INCOMPLETE_TRAILING_TOKENS = {
     "im",
     "in",
     "massiv",
-    "mit",
     "nach",
     "oder",
     "ohne",
     "pro",
     "seit",
-    "sind",
     "somit",
     "ueber",
     "über",
@@ -143,6 +134,17 @@ INCOMPLETE_TRAILING_TOKENS = {
     "zum",
     "zur",
 }
+
+_ALLOWED_PARTICLE_ENDINGS = (
+    re.compile(r"(?i)\b(?:ruf(?:e|st|t|en)?|meld(?:e|est|et|en)?|frag(?:e|st|t|en)?|sprich|sprecht|sprechen)\b.*\ban[.!?]$"),
+    re.compile(r"(?i)\b(?:fahr(?:e|st|t|en)?|fährt|fahren|komm(?:e|st|t|en)?|kommen|nimm(?:st|t)?|nehmt|nehmen)\b.*\bmit[.!?]$"),
+)
+_DEFINITION_RESIDUE_PATTERNS = (
+    re.compile(r"(?i)\bmaßnahmen zur feststellung und beurteilung\b"),
+    re.compile(r"(?i)\büberlassung einer sache auf zeit\b"),
+    re.compile(r"(?i)\bist-zustands\b"),
+    re.compile(r"(?i)\beines kopierger[aä]tes\b"),
+)
 
 _MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _CITATION_PATTERN = re.compile(r"\[cite:\s*\d+(?:\s*,\s*\d+)*\]", flags=re.IGNORECASE)
@@ -273,6 +275,83 @@ def sanitize_spoken_fragment(text: Any, *, ensure_terminal: bool = True) -> str:
     return normalize_spoken_whitespace(" ".join(sentences))
 
 
+def _has_unbalanced_parenthetical(text: str) -> bool:
+    round_balance = 0
+    square_balance = 0
+    stray_close = False
+    for char in str(text or ""):
+        if char == "(":
+            round_balance += 1
+        elif char == ")":
+            if round_balance == 0:
+                stray_close = True
+            round_balance = max(0, round_balance - 1)
+        elif char == "[":
+            square_balance += 1
+        elif char == "]":
+            if square_balance == 0:
+                stray_close = True
+            square_balance = max(0, square_balance - 1)
+    return stray_close or round_balance > 0 or square_balance > 0
+
+
+def _detect_core_copy_issues(value: str, *, allow_structured_markers: bool) -> List[Dict[str, Any]]:
+    issues: List[Dict[str, Any]] = []
+    lowered = value.lower()
+    for marker in SPOKEN_COPY_LABEL_MARKERS:
+        if re.search(rf"(^|[\s(\\[\"']){re.escape(marker)}(?:\s*:|(?=[\s.?!,;:]|$))", lowered):
+            issues.append({"kind": "label_fragment", "marker": marker})
+            break
+
+    if allow_structured_markers:
+        if "**" in value or "__" in value or "`" in value:
+            issues.append({"kind": "markdown_residue"})
+    elif "**" in value or "__" in value or "`" in value or re.search(r"(?m)^\s*[-*•]\s+", value):
+        issues.append({"kind": "markdown_residue"})
+
+    if re.search(r"\[cite:\s*\d+(?:\s*,\s*\d+)*\]", value, flags=re.IGNORECASE):
+        issues.append({"kind": "citation_residue"})
+
+    if re.search(r"[\u200d\uFE0E\uFE0F]", value):
+        issues.append({"kind": "artifact_tail"})
+
+    if re.search(r"\b\w+:\s+in(?:nen)?\b", value):
+        issues.append({"kind": "broken_inclusive_form"})
+
+    if _has_unbalanced_parenthetical(value):
+        issues.append({"kind": "dangling_parenthetical"})
+
+    for pattern in _DEFINITION_RESIDUE_PATTERNS:
+        if pattern.search(value):
+            issues.append({"kind": "definition_residue"})
+            break
+
+    return issues
+
+
+def _detect_incomplete_clause_issue(value: str) -> Dict[str, Any] | None:
+    stripped = str(value or "").rstrip()
+    if not stripped:
+        return None
+    if any(pattern.search(stripped) for pattern in _ALLOWED_PARTICLE_ENDINGS):
+        return None
+    compact = normalize_spoken_whitespace(stripped)
+    compact_without_punct = compact.rstrip(".!?")
+    short_clause_tokens = _tokenize_language_words(compact_without_punct)
+    if (
+        len(short_clause_tokens) <= 4
+        and short_clause_tokens
+        and short_clause_tokens[-1] in {"ist", "sind", "war", "waren", "bleibt", "bleiben"}
+    ):
+        return {"kind": "incomplete_clause", "tail_token": short_clause_tokens[-1]}
+    if stripped.endswith((",", ";", ":")):
+        return {"kind": "incomplete_clause", "tail": stripped[-24:]}
+    trailing_tokens = _tokenize_language_words(compact_without_punct)
+    if trailing_tokens and trailing_tokens[-1] in INCOMPLETE_TRAILING_TOKENS:
+        return {"kind": "incomplete_clause", "tail_token": trailing_tokens[-1]}
+    return None
+
+
 def sanitize_metadata_text(text: Any, *, max_sentences: int = 2) -> str:
     cleaned = sanitize_spoken_fragment(text, ensure_terminal=True)
     if not cleaned:
@@ -294,6 +373,40 @@ def sanitize_fact_fragments(values: List[Any]) -> List[str]:
         seen.add(signature)
         fragments.append(cleaned)
     return fragments
+
+
+def _clean_fact_pool(raw_values: List[Any]) -> List[str]:
+    """Clean and validate individual fact sentences before they enter the script pool.
+
+    Each fact is split into sentences, sanitized independently, and rejected
+    if it triggers spoken-copy issues or is too short to be meaningful.
+    """
+    clean: List[str] = []
+    seen: set = set()
+    for value in raw_values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if detect_spoken_copy_issues(text):
+            continue
+        sanitized = sanitize_spoken_fragment(text, ensure_terminal=True)
+        if not sanitized:
+            continue
+        for sentence in re.split(r"(?<=[.!?])\s+", sanitized):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            word_count = len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", sentence))
+            if word_count < 4:
+                continue
+            if detect_spoken_copy_issues(sentence):
+                continue
+            sig = sentence.lower()
+            if sig in seen:
+                continue
+            seen.add(sig)
+            clean.append(sentence)
+    return clean
 
 
 def compute_bigram_jaccard(a: str, b: str) -> float:
@@ -462,35 +575,28 @@ def detect_spoken_copy_issues(text: str) -> List[Dict[str, Any]]:
     value = str(text or "").strip()
     if not value:
         return []
+    issues = _detect_core_copy_issues(value, allow_structured_markers=False)
+    incomplete_issue = _detect_incomplete_clause_issue(value)
+    if incomplete_issue:
+        issues.append(incomplete_issue)
+    return issues
 
-    issues: List[Dict[str, Any]] = []
-    lowered = value.lower()
-    for marker in SPOKEN_COPY_LABEL_MARKERS:
-        if re.search(rf"(^|[\s(\\[\"']){re.escape(marker)}(?:\s*:|(?=[\s.?!,;:]|$))", lowered):
-            issues.append({"kind": "label_fragment", "marker": marker})
+
+def detect_metadata_copy_issues(text: str) -> List[Dict[str, Any]]:
+    value = str(text or "").strip()
+    if not value:
+        return []
+
+    issues = _detect_core_copy_issues(value, allow_structured_markers=True)
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    for line in lines:
+        plain_line = re.sub(r"^\s*(?:[-*•]|\d+\.)\s*", "", line).strip()
+        if not plain_line or plain_line.startswith("#"):
+            continue
+        incomplete_issue = _detect_incomplete_clause_issue(plain_line)
+        if incomplete_issue:
+            issues.append(incomplete_issue)
             break
-
-    if "**" in value or "__" in value or "`" in value or re.search(r"(?m)^\s*[-*•]\s+", value):
-        issues.append({"kind": "markdown_residue"})
-
-    if re.search(r"\[cite:\s*\d+(?:\s*,\s*\d+)*\]", value, flags=re.IGNORECASE):
-        issues.append({"kind": "citation_residue"})
-
-    if re.search(r"[\u200d\uFE0E\uFE0F]", value):
-        issues.append({"kind": "artifact_tail"})
-
-    if re.search(r"\b\w+:\s+in(?:nen)?\b", value):
-        issues.append({"kind": "broken_inclusive_form"})
-
-    stripped = value.rstrip()
-    if stripped.endswith((",", ";", ":")):
-        issues.append({"kind": "incomplete_clause", "tail": stripped[-24:]})
-    else:
-        text_without_punct = stripped.rstrip(".!?")
-        trailing_tokens = _tokenize_language_words(text_without_punct)
-        if trailing_tokens and trailing_tokens[-1] in INCOMPLETE_TRAILING_TOKENS:
-            issues.append({"kind": "incomplete_clause", "tail_token": trailing_tokens[-1]})
-
     return issues
 
 
