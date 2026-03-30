@@ -53,3 +53,26 @@ def test_clean_fact_pool_handles_none_and_empty():
     result = _clean_fact_pool(facts)
     assert len(result) == 1
     assert "Arbeitshilfen" in result[0]
+
+
+def test_prompt_research_context_sanitizes_facts():
+    """Facts injected into the prompt must be sanitized."""
+    from app.features.topics.prompts import _format_prompt1_research_context
+
+    dossier = {
+        "topic": "Barrierefreiheit",
+        "seed_topic": "OEPNV",
+        "source_summary": "Zentrale Erkenntnisse: Das PBefG fordert Barrierefreiheit.",
+        "framework_candidates": ["PAL"],
+    }
+    lane = {
+        "title": "Haltestellen",
+        "facts": ["Leitende Zusammenfassung: Nur 20% barrierefrei.", "Rampen fehlen oft."],
+        "risk_notes": ["Demografische Dringlichkeit: Bedarf steigt."],
+        "framework_candidates": ["PAL"],
+    }
+    context = _format_prompt1_research_context(dossier, lane)
+    assert "Zentrale Erkenntnisse" not in context
+    assert "Leitende Zusammenfassung" not in context
+    assert "Demografische Dringlichkeit" not in context
+    assert "Rampen fehlen" in context

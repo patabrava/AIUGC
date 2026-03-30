@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 from app.core.video_profiles import DurationProfile, get_duration_profile
 from app.features.topics.schemas import ResearchDossier
+from app.features.topics.topic_validation import sanitize_spoken_fragment, sanitize_metadata_text
 
 PROMPT_DATA_DIR = Path(__file__).resolve().parent / "prompt_data"
 TOPIC_BANK_PATH = PROMPT_DATA_DIR / "topic_bank.yaml"
@@ -346,8 +347,16 @@ def _format_prompt1_research_context(
 
     payload = _coerce_prompt_payload(dossier)
     lane = dict(lane_candidate or {})
-    lane_facts = [f"- {fact}" for fact in list(lane.get("facts") or [])[:4]]
-    lane_risks = [f"- {risk}" for risk in list(lane.get("risk_notes") or [])[:3]]
+    lane_facts = [
+        f"- {sanitize_spoken_fragment(fact, ensure_terminal=True)}"
+        for fact in list(lane.get("facts") or [])[:4]
+        if sanitize_spoken_fragment(fact, ensure_terminal=True)
+    ]
+    lane_risks = [
+        f"- {sanitize_spoken_fragment(risk, ensure_terminal=True)}"
+        for risk in list(lane.get("risk_notes") or [])[:3]
+        if sanitize_spoken_fragment(risk, ensure_terminal=True)
+    ]
     lane_frameworks = ", ".join(str(item) for item in list(lane.get("framework_candidates") or payload.get("framework_candidates") or [])[:4])
 
     sections = [
@@ -358,7 +367,7 @@ def _format_prompt1_research_context(
         f"Lane-Familie: {str(lane.get('lane_family') or '').strip()}",
         f"Lane-Winkel: {str(lane.get('angle') or '').strip()}",
         f"Framework-Kandidaten: {lane_frameworks}",
-        f"Lane Source Summary: {_clip_text(lane.get('source_summary') or payload.get('source_summary') or '', 450)}",
+        f"Lane Source Summary: {_clip_text(sanitize_metadata_text(lane.get('source_summary') or payload.get('source_summary') or ''), 450)}",
     ]
     if lane_facts:
         sections.extend(["Lane-Fakten:", *lane_facts])

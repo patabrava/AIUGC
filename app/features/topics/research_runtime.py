@@ -34,6 +34,7 @@ from app.features.topics.response_parsers import (
 )
 from app.features.topics.schemas import DialogScripts, ResearchAgentBatch, ResearchAgentItem, ResearchDossier, SeedData, TopicData
 from app.features.topics.topic_validation import (
+    _clean_fact_pool,
     detect_spoken_copy_issues,
     estimate_script_duration_seconds,
     get_prompt1_sentence_bounds,
@@ -329,7 +330,7 @@ def generate_topic_script_candidate(
         lane_candidate=lane_payload,
     )
     prompt = base_prompt
-    lane_fact_texts = sanitize_fact_fragments(
+    lane_fact_texts = _clean_fact_pool(
         list(lane_payload.get("facts") or [])
         + list((dossier_payload or {}).get("facts") or [])
         + [
