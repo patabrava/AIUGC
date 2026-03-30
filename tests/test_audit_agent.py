@@ -139,3 +139,32 @@ def test_update_script_quality_writes_score_and_notes():
     call_args = mock_table.update.call_args[0][0]
     assert call_args["quality_score"] == 85
     assert "pass" in call_args["quality_notes"]
+
+
+def test_audit_worker_run_audit_cycle(monkeypatch):
+    """Audit cycle must fetch unaudited rows, audit them, and write results."""
+    mock_rows = [
+        {"id": "r1", "script": "Dein Recht auf Mitfahrt existiert nur auf dem Papier.", "target_length_tier": 8, "title": "OEPNV"},
+        {"id": "r2", "script": "Nur 2 Prozent aller Wohnungen sind rollstuhlgerecht.", "target_length_tier": 8, "title": "Wohnen"},
+    ]
+
+    updated = []
+
+    def mock_get_unaudited(*, limit=50):
+        return mock_rows
+
+    def mock_update(*, script_id, quality_score, quality_notes):
+        updated.append({"id": script_id, "score": quality_score})
+
+    monkeypatch.setattr("workers.audit_worker.get_unaudited_scripts", mock_get_unaudited)
+    monkeypatch.setattr("workers.audit_worker.update_script_quality", mock_update)
+
+    mock_llm = MagicMock()
+    mock_llm.generate_gemini_text.return_value = _mock_llm_response(80, "pass")
+    monkeypatch.setattr("workers.audit_worker.get_llm_client", lambda: mock_llm)
+
+    from workers.audit_worker import run_audit_cycle
+    run_audit_cycle()
+
+    assert len(updated) == 2
+    assert all(u["score"] == 80 for u in updated)
