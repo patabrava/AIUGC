@@ -260,7 +260,6 @@ def test_generate_caption_bundle_with_new_structure():
         topic_title="Barrierefreiheit im ÖPNV",
         post_type="value",
         script="Ein komplett anderes Skript das bewusst nichts wiederholt.",
-        context="Kontext",
         research_facts=["Viele Kommunen nutzten Ausnahmen.", "Ab 2026 gelten neue Regeln."],
         llm_factory=lambda: FakeLLM(),
     )
@@ -280,7 +279,6 @@ def test_generate_caption_bundle_raises_on_persistent_failure():
             topic_title="Barrierefreiheit im ÖPNV",
             post_type="value",
             script="Ein Skript zum Testen.",
-            context="Kontext",
             research_facts=[],
             llm_factory=lambda: BadLLM(),
         )
@@ -296,7 +294,6 @@ def test_generate_caption_bundle_raises_on_llm_error():
             topic_title="Topic",
             post_type="value",
             script="Skript.",
-            context="Kontext.",
             research_facts=[],
             llm_factory=lambda: ErrorLLM(),
         )

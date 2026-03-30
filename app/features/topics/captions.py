@@ -13,7 +13,6 @@ from app.core.errors import ValidationError
 from app.features.topics.topic_validation import (
     detect_metadata_copy_issues,
     sanitize_fact_fragments,
-    sanitize_metadata_text,
 )
 
 logger = structlog.get_logger(__name__)
@@ -60,18 +59,6 @@ def _extract_hashtags(text: str) -> List[str]:
 
 def _count_emojis(text: str) -> int:
     return len(_EMOJI_PATTERN.findall(str(text or "")))
-
-
-def _dedupe_preserve_order(values: List[str]) -> List[str]:
-    seen = set()
-    ordered: List[str] = []
-    for value in values:
-        normalized = _normalize_line_breaks(value).lower()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        ordered.append(_normalize_line_breaks(value))
-    return ordered
 
 
 def _script_overlap_ratio(script: str, caption: str) -> float:
@@ -295,17 +282,14 @@ def generate_caption_bundle(
     topic_title: str,
     post_type: str,
     script: str,
-    context: str,
     llm_factory: Optional[Callable] = None,
     canonical_topic: Optional[str] = None,
     research_facts: Optional[List[str]] = None,
-    fallback_facts: Optional[List[str]] = None,
-    allow_repair: bool = False,
 ) -> Dict[str, Any]:
     canonical_topic = str(canonical_topic or topic_title or "").strip()
     selected_key = select_caption_variant_key(topic_title=canonical_topic, post_type=post_type, script=script)
     script_hook = extract_script_hook(script)
-    facts = list(research_facts or fallback_facts or [])
+    facts = list(research_facts or [])
     llm_factory = llm_factory or get_llm_client
     llm = llm_factory()
     prompt = _build_caption_prompt(
@@ -383,19 +367,6 @@ def attach_caption_bundle(
         return payload
     strict_seed = payload.get("strict_seed") or {}
     research_facts = sanitize_fact_fragments(list(strict_seed.get("facts") or []))
-    context_candidates = [
-        context,
-        payload.get("source_summary"),
-        payload.get("description"),
-        payload.get("research_caption"),
-        strict_seed.get("source_context"),
-    ]
-    derived_context_parts = _dedupe_preserve_order(
-        [sanitize_metadata_text(value, max_sentences=3) for value in context_candidates if sanitize_metadata_text(value, max_sentences=3)]
-    )
-    derived_context = " ".join(derived_context_parts).strip()
-    if not derived_context:
-        derived_context = sanitize_metadata_text(script, max_sentences=3)
     canonical_topic = _resolve_canonical_topic(
         topic_title=topic_title,
         payload={**payload, **({"canonical_topic": canonical_topic} if canonical_topic else {})},
@@ -404,7 +375,6 @@ def attach_caption_bundle(
         topic_title=canonical_topic,
         post_type=post_type,
         script=script,
-        context=derived_context,
         llm_factory=llm_factory,
         canonical_topic=canonical_topic,
         research_facts=research_facts,
