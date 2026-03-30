@@ -90,3 +90,89 @@ def test_session_cookie_wrong_secret():
     encoded = encode_session_cookie(data, "secret-one")
     result = decode_session_cookie(encoded, "secret-two")
     assert result is None
+
+
+import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
+
+
+@pytest.mark.asyncio
+async def test_send_otp_success():
+    from app.features.auth.queries import send_otp
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {}
+
+    with patch("app.features.auth.queries.httpx.AsyncClient") as MockClient:
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = mock_client
+
+        result = await send_otp("user@lippelift.de")
+        assert result is True
+
+
+@pytest.mark.asyncio
+async def test_send_otp_rate_limited():
+    from app.features.auth.queries import send_otp
+
+    mock_response = MagicMock()
+    mock_response.status_code = 429
+    mock_response.json.return_value = {"msg": "Rate limit exceeded"}
+
+    with patch("app.features.auth.queries.httpx.AsyncClient") as MockClient:
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = mock_client
+
+        with pytest.raises(Exception) as exc_info:
+            await send_otp("user@lippelift.de")
+        assert "Rate limit" in str(exc_info.value) or exc_info.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_verify_otp_success():
+    from app.features.auth.queries import verify_otp
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "access_token": "jwt-token",
+        "refresh_token": "refresh-token",
+        "user": {"email": "user@lippelift.de"},
+    }
+
+    with patch("app.features.auth.queries.httpx.AsyncClient") as MockClient:
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = mock_client
+
+        result = await verify_otp("user@lippelift.de", "123456")
+        assert result["access_token"] == "jwt-token"
+        assert result["refresh_token"] == "refresh-token"
+
+
+@pytest.mark.asyncio
+async def test_verify_otp_invalid_code():
+    from app.features.auth.queries import verify_otp
+
+    mock_response = MagicMock()
+    mock_response.status_code = 422
+    mock_response.json.return_value = {"msg": "Token has expired or is invalid"}
+
+    with patch("app.features.auth.queries.httpx.AsyncClient") as MockClient:
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = mock_client
+
+        result = await verify_otp("user@lippelift.de", "000000")
+        assert result is None
