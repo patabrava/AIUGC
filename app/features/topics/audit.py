@@ -116,7 +116,7 @@ def audit_single_script(row: Dict[str, Any], *, llm: Any) -> AuditResult:
         raw_response = llm.generate_gemini_text(
             prompt=prompt,
             system_prompt=AUDIT_SYSTEM_PROMPT,
-            max_tokens=1000,
+            max_tokens=2048,
             temperature=0.2,
         )
     except Exception as exc:

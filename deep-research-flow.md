@@ -27,6 +27,8 @@
 - A final spoken-copy cleanliness gate rejects label leakage such as `Demografische Dringlichkeit:` or truncated endings before persistence
 - Hook bank (`app/features/topics/prompt_data/hook_bank.yaml`) provides 14 prioritized families with emotional-core matching; `_format_hook_bank_section()` renders them sorted by priority (high → medium → low) with before/after negative examples
 - All three tier prompts include HOOK-REGELN (emotional hook mechanics), SCROLL-STOPP-TEST (self-evaluation), and TONALITAET (disability-appropriate tone: systemic barriers over personal overcoming, no inspiration porn)
+- Pre-prompt fact pool now uses `_clean_fact_pool()` which validates each sentence independently: strips labels/citations/markdown, rejects fragments < 4 words, rejects sentences with spoken-copy issues
+- Persistence firewall includes `detect_metadata_bleed()` check: rejects scripts containing 6+ consecutive words from `source_summary` or `cluster_summary`
 
 ### Stage 4 — Topic bank harvesting
 - Code: `app/features/topics/hub._harvest_seed_topic_to_bank`
@@ -36,6 +38,14 @@
 - Deduplication: `app/features/topics/deduplication.deduplicate_topics`
 - No caption generation at this stage — captions are generated later at post creation time
 - Bank-first discovery checks stored suggestions before any new warm-up run and only warms the bank if canonical coverage is missing
+
+### Stage 4b — Script audit (async, post-persistence)
+- Code: `app/features/topics/audit.audit_single_script` (called via `workers/audit_worker.py`)
+- Worker runs every 12 hours on `topic_scripts` rows where `quality_score IS NULL`
+- Deterministic pre-check: `detect_spoken_copy_issues()` rejects structural failures (score 0) without LLM call
+- LLM evaluation: Gemini scores 4 dimensions (german_nativeness, hook_quality, prompt_compliance, virality_potential), each 0-25
+- Status thresholds: pass (>= 70), needs_repair (40-69), reject (< 40)
+- Results written to `topic_scripts.quality_score` (numeric) and `topic_scripts.quality_notes` (JSON)
 
 ### Stage 5 — Caption generation (at post creation)
 - Code: `app/features/topics/captions.generate_caption_bundle` (called via `handlers._attach_publish_captions`)
