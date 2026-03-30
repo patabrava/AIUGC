@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In — FLOW-FORGE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, #f5f0ff 0%, #ede7f6 100%);">
+    <div class="w-full max-w-sm mx-4">
+        <div class="bg-white rounded-2xl shadow-lg p-10 text-center" x-data="{ step: '{{ step }}', loading: false }">
+            <!-- Logo -->
+            <div class="mb-2">
+                <div class="w-12 h-12 mx-auto mb-3 rounded-xl flex items-center justify-center" style="background: #6750A4;">
+                    <span class="text-white text-xl font-bold">FF</span>
+                </div>
+                <h1 class="text-xl font-semibold text-gray-900" x-show="step === 'email'">FLOW-FORGE</h1>
+                <h1 class="text-xl font-semibold text-gray-900" x-show="step === 'otp'" x-cloak>Check your email</h1>
+                <p class="text-sm text-gray-500 mt-1" x-show="step === 'email'">Sign in to your workspace</p>
+                <p class="text-sm text-gray-500 mt-1" x-show="step === 'otp'" x-cloak>
+                    We sent a code to <strong class="text-gray-900">{{ email }}</strong>
+                </p>
+            </div>
+
+            {% if error %}
+            <div class="mt-4 mb-2 p-3 rounded-lg bg-red-50 border border-red-200">
+                <p class="text-sm text-red-700">{{ error }}</p>
+            </div>
+            {% endif %}
+
+            <!-- Step 1: Email -->
+            <form
+                x-show="step === 'email'"
+                method="post"
+                action="/auth/send-otp"
+                class="mt-6 text-left"
+                @submit="loading = true"
+            >
+                <label class="block text-xs font-medium mb-1.5" style="color: #6750A4;">Email address</label>
+                <input
+                    type="email"
+                    name="email"
+                    value="{{ email }}"
+                    required
+                    autofocus
+                    placeholder="you@lippelift.de"
+                    class="w-full px-3.5 py-3 rounded-lg border-2 text-sm text-gray-900 focus:outline-none transition"
+                    style="border-color: #6750A4; background: #f9f7fc;"
+                >
+                <button
+                    type="submit"
+                    class="w-full mt-4 py-3 rounded-lg text-white font-semibold text-sm transition disabled:opacity-50"
+                    style="background: #6750A4;"
+                    :disabled="loading"
+                >
+                    <span x-show="!loading">Send verification code</span>
+                    <span x-show="loading" x-cloak>Sending...</span>
+                </button>
+                <p class="mt-4 text-xs text-gray-400 text-center">Only @lippelift.de emails and approved accounts</p>
+            </form>
+
+            <!-- Step 2: OTP -->
+            <form
+                x-show="step === 'otp'"
+                x-cloak
+                method="post"
+                action="/auth/verify-otp"
+                class="mt-6 text-left"
+                @submit="loading = true"
+                x-data="otpForm()"
+            >
+                <input type="hidden" name="email" value="{{ email }}">
+                <input type="hidden" name="token" :value="digits.join('')" x-ref="tokenField">
+
+                <div class="flex gap-2.5 justify-center mb-5">
+                    <template x-for="(digit, index) in digits" :key="index">
+                        <input
+                            type="text"
+                            inputmode="numeric"
+                            maxlength="1"
+                            class="w-11 h-13 text-center text-xl font-semibold rounded-lg border-2 focus:outline-none transition"
+                            :style="digit ? 'border-color: #6750A4; background: #f9f7fc;' : 'border-color: #CAC4D0; background: white;'"
+                            :value="digit"
+                            @input="handleInput($event, index)"
+                            @keydown.backspace="handleBackspace($event, index)"
+                            @paste.prevent="handlePaste($event)"
+                            x-ref="otpInput"
+                        >
+                    </template>
+                </div>
+
+                <button
+                    type="submit"
+                    class="w-full py-3 rounded-lg text-white font-semibold text-sm transition disabled:opacity-50"
+                    style="background: #6750A4;"
+                    :disabled="loading || digits.join('').length < 6"
+                >
+                    <span x-show="!loading">Verify & sign in</span>
+                    <span x-show="loading" x-cloak>Verifying...</span>
+                </button>
+
+                <div class="mt-4 text-center">
+                    <button
+                        type="button"
+                        class="text-sm font-medium hover:underline"
+                        style="color: #6750A4;"
+                        @click="
+                            step = 'email';
+                            loading = false;
+                        "
+                    >
+                        Resend code
+                    </button>
+                    <p class="text-xs text-gray-400 mt-1.5">Code expires in 10 minutes</p>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function otpForm() {
+            return {
+                digits: ['', '', '', '', '', ''],
+                handleInput(event, index) {
+                    const value = event.target.value.replace(/\D/g, '');
+                    this.digits[index] = value.charAt(0) || '';
+                    event.target.value = this.digits[index];
+                    if (this.digits[index] && index < 5) {
+                        const inputs = this.$refs.otpInput;
+                        if (Array.isArray(inputs)) inputs[index + 1].focus();
+                    }
+                },
+                handleBackspace(event, index) {
+                    if (!this.digits[index] && index > 0) {
+                        const inputs = this.$refs.otpInput;
+                        if (Array.isArray(inputs)) {
+                            this.digits[index - 1] = '';
+                            inputs[index - 1].focus();
+                        }
+                    } else {
+                        this.digits[index] = '';
+                    }
+                },
+                handlePaste(event) {
+                    const text = (event.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
+                    for (let i = 0; i < 6; i++) {
+                        this.digits[i] = text.charAt(i) || '';
+                    }
+                    const inputs = this.$refs.otpInput;
+                    if (Array.isArray(inputs)) {
+                        const focusIdx = Math.min(text.length, 5);
+                        inputs[focusIdx].focus();
+                    }
+                },
+            };
+        }
+    </script>
+</body>
+</html>
