@@ -18,7 +18,7 @@ from app.features.topics.topic_validation import (
 logger = structlog.get_logger(__name__)
 
 VARIANT_KEYS = ("curiosity", "personal", "provocative")
-CAPTION_MIN_CHARS = 120
+CAPTION_MIN_CHARS = 80
 CAPTION_MAX_CHARS = 400
 
 _MARKER_PATTERN = re.compile(r"^\[(curiosity|personal|provocative)\]\s*$", re.IGNORECASE)
@@ -165,7 +165,9 @@ def _parse_text_variants(raw: str) -> Dict[str, Any]:
     return {"variants": variants}
 
 
-def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]:
+def validate_caption_variant(
+    key: str, body: str, script: str, *, max_overlap: float = 0.55,
+) -> Dict[str, Any]:
     if key not in VARIANT_KEYS:
         raise ValidationError(message="Unknown caption family", details={"key": key})
     normalized = _normalize_line_breaks(body)
@@ -188,7 +190,7 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
         raise ValidationError(message="Caption emoji count invalid", details={"key": key, "emoji_count": _count_emojis(normalized)})
     if _looks_mixed_language(normalized):
         raise ValidationError(message="Caption appears mixed-language", details={"key": key})
-    if _script_overlap_ratio(script, normalized) > 0.55:
+    if _script_overlap_ratio(script, normalized) > max_overlap:
         raise ValidationError(message="Caption repeats script too closely", details={"key": key})
 
     metadata_issues = detect_metadata_copy_issues(normalized)
@@ -206,7 +208,10 @@ def validate_caption_variant(key: str, body: str, script: str) -> Dict[str, Any]
     }
 
 
-def validate_caption_bundle(bundle: Dict[str, Any], script: str, post_type: str = "") -> Dict[str, Any]:
+def validate_caption_bundle(
+    bundle: Dict[str, Any], script: str, post_type: str = "", *, has_research_facts: bool = True,
+) -> Dict[str, Any]:
+    max_overlap = 0.55 if has_research_facts else 0.85
     variants = list(bundle.get("variants") or [])
     by_key = {str(item.get("key") or ""): item for item in variants}
     available = set(by_key.keys()) & set(VARIANT_KEYS)
@@ -221,7 +226,7 @@ def validate_caption_bundle(bundle: Dict[str, Any], script: str, post_type: str 
         if not body:
             continue
         try:
-            validated.append(validate_caption_variant(key, body, script))
+            validated.append(validate_caption_variant(key, body, script, max_overlap=max_overlap))
         except ValidationError:
             continue
     if not validated:
@@ -313,7 +318,7 @@ def generate_caption_bundle(
                 temperature=0.8,
             )
             parsed = _parse_text_variants(raw_text)
-            bundle = validate_caption_bundle(parsed, script, post_type=post_type)
+            bundle = validate_caption_bundle(parsed, script, post_type=post_type, has_research_facts=bool(facts))
             if not bundle["selected_key"] or bundle["selected_key"] not in VARIANT_KEYS:
                 bundle["selected_key"] = selected_key
             final_key, final_body = _select_best_variant(

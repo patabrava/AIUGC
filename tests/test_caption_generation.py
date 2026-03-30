@@ -72,7 +72,7 @@ def test_validate_caption_variant_accepts_new_structure(key, body):
         key, body, "Ein ganz anderes Skript das nichts mit der Caption zu tun hat."
     )
     assert result["key"] == key
-    assert 120 <= result["char_count"] <= 400
+    assert 80 <= result["char_count"] <= 400
 
 
 def test_validate_caption_variant_rejects_unknown_key():
