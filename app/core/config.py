@@ -119,6 +119,12 @@ class Settings(BaseSettings):
 
     # Cron Security
     cron_secret: str = Field("", description="Secret for cron endpoint authentication")
+
+    # Auth
+    allowed_email_domain: str = Field("lippelift.de", description="Email domain allowed for login")
+    allowed_emails: str = Field("caposk817@gmail.com", description="Comma-separated list of explicitly allowed emails")
+    session_cookie_name: str = Field("ff_session", description="Name of the session cookie")
+    session_max_age: int = Field(2592000, description="Session cookie max age in seconds (default 30 days)")
     
     @field_validator("supabase_url")
     @classmethod
