@@ -62,3 +62,31 @@ def test_is_email_allowed_case_insensitive():
 def test_is_email_allowed_rejected():
     from app.features.auth.queries import is_email_allowed
     assert is_email_allowed("hacker@evil.com") is False
+
+
+def test_session_cookie_roundtrip():
+    from app.features.auth.middleware import encode_session_cookie, decode_session_cookie
+    data = {"access_token": "abc123", "refresh_token": "def456"}
+    secret = "test-secret-key-for-signing"
+    encoded = encode_session_cookie(data, secret)
+    decoded = decode_session_cookie(encoded, secret)
+    assert decoded["access_token"] == "abc123"
+    assert decoded["refresh_token"] == "def456"
+
+
+def test_session_cookie_tampered():
+    from app.features.auth.middleware import encode_session_cookie, decode_session_cookie
+    data = {"access_token": "abc123", "refresh_token": "def456"}
+    secret = "test-secret-key-for-signing"
+    encoded = encode_session_cookie(data, secret)
+    tampered = encoded[:-5] + "xxxxx"
+    result = decode_session_cookie(tampered, secret)
+    assert result is None
+
+
+def test_session_cookie_wrong_secret():
+    from app.features.auth.middleware import encode_session_cookie, decode_session_cookie
+    data = {"access_token": "abc123", "refresh_token": "def456"}
+    encoded = encode_session_cookie(data, "secret-one")
+    result = decode_session_cookie(encoded, "secret-two")
+    assert result is None
