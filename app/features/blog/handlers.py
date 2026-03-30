@@ -42,8 +42,7 @@ async def toggle_blog(post_id: str, request: Request):
 
         result = toggle_blog_enabled(post_id, enabled=enabled)
         return SuccessResponse(
-            message=f"Blog {'enabled' if enabled else 'disabled'} for post",
-            details=BlogToggleResponse(
+            data=BlogToggleResponse(
                 post_id=post_id,
                 blog_enabled=result.get("blog_enabled", False),
                 blog_status=result.get("blog_status", "disabled"),
@@ -66,12 +65,10 @@ async def generate_blog_draft(post_id: str):
         if result.get("error"):
             return SuccessResponse(
                 ok=False,
-                message=result["error"],
-                details=result,
+                data=result,
             )
         return SuccessResponse(
-            message="Blog draft generated",
-            details=result,
+            data=result,
         )
     except FlowForgeException:
         raise
@@ -103,8 +100,7 @@ async def generate_all_blog_drafts(batch_id: str):
             results.append({"post_id": post["id"], "status": "draft" if not result.get("error") else "failed"})
 
         return SuccessResponse(
-            message=f"Generated {len(results)} blog draft(s)",
-            details={"results": results},
+            data={"results": results},
         )
     except FlowForgeException:
         raise
@@ -132,7 +128,7 @@ async def update_blog_content(post_id: str, request: Request):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No fields to update")
 
         update_blog_content_fields(post_id, updates=updates)
-        return SuccessResponse(message="Blog content updated", details={"post_id": post_id, "updated_fields": list(updates.keys())})
+        return SuccessResponse(data={"post_id": post_id, "updated_fields": list(updates.keys())})
     except FlowForgeException:
         raise
     except Exception as exc:
@@ -186,8 +182,7 @@ async def publish_blog_to_webflow(post_id: str):
         )
 
         return SuccessResponse(
-            message="Blog published to Webflow",
-            details=BlogPublishResponse(
+            data=BlogPublishResponse(
                 post_id=post_id,
                 blog_status="published",
                 webflow_item_id=item_id,
