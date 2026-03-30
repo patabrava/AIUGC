@@ -802,7 +802,8 @@ def _build_canonical_script_variant(
         "primary_source_title": source_urls[0]["title"] if source_urls else None,
         "source_urls": source_urls,
         "seed_payload": seed_payload,
-        "quality_notes": "",
+        "quality_score": getattr(prompt1_item, "quality_score", None),
+        "quality_notes": getattr(prompt1_item, "quality_notes", None) or "",
         "script": sanitize_spoken_fragment(prompt1_item.script or "", ensure_terminal=True),
         "post_type": post_type,
     }

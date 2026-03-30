@@ -757,7 +757,8 @@ def upsert_topic_script_variants(
             "primary_source_title": variant.get("primary_source_title"),
             "source_urls": variant.get("source_urls") or [],
             "seed_payload": variant.get("seed_payload") or {},
-            "quality_notes": sanitize_metadata_text(variant.get("quality_notes"), max_sentences=2),
+            "quality_score": variant.get("quality_score"),
+            "quality_notes": variant.get("quality_notes") or sanitize_metadata_text(variant.get("quality_notes"), max_sentences=2),
             "use_count": int(variant.get("use_count") or 0),
             "last_used_at": variant.get("last_used_at"),
         }

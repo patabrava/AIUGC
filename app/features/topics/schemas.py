@@ -104,6 +104,8 @@ class ResearchAgentItem(BaseModel):
     estimated_duration_s: int = Field(default=0, ge=0, le=32, description="Conservative natural-speech duration estimate")
     tone: str = Field(default="direkt, freundlich, empowernd, du-Form", min_length=5, max_length=120, description="Tone descriptor")
     disclaimer: str = Field(default="Keine Rechts- oder medizinische Beratung.", min_length=5, max_length=200, description="Compliance disclaimer")
+    quality_score: Optional[int] = Field(default=None, ge=0, le=100, description="Audit quality score (0-100)")
+    quality_notes: Optional[str] = Field(default=None, description="Audit quality notes (JSON)")
 
     @validator("script")
     def validate_script_line(cls, v: str) -> str:

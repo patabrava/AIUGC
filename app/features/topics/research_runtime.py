@@ -614,6 +614,63 @@ def generate_topic_script_candidate(
             metadata_summary=lane_caption or dossier_source_summary or cluster_summary or script_text,
         )
 
+    def _audit_gate(item: ResearchAgentItem) -> ResearchAgentItem:
+        """Inline quality gate: audit the script before returning it for persistence."""
+        from app.features.topics.audit import audit_single_script
+
+        row = {
+            "id": f"inline-{lane_title[:20]}",
+            "script": item.script,
+            "target_length_tier": target_length_tier,
+            "title": item.topic,
+        }
+        try:
+            result = audit_single_script(row, llm=llm)
+        except Exception as exc:
+            logger.warning(
+                "topic_script_inline_audit_error",
+                lane_title=lane_payload.get("title"),
+                error=str(exc),
+            )
+            return item  # let it through if audit itself fails
+
+        item.quality_score = result.total_score
+        item.quality_notes = result.quality_notes
+
+        if result.status == "pass":
+            logger.info(
+                "topic_script_inline_audit_pass",
+                lane_title=lane_payload.get("title"),
+                score=result.total_score,
+            )
+            return item
+
+        if result.status == "needs_repair":
+            logger.warning(
+                "topic_script_inline_audit_needs_repair",
+                lane_title=lane_payload.get("title"),
+                score=result.total_score,
+                notes=result.quality_notes[:200],
+            )
+            # Still return — the score travels with the item for downstream decisions
+            return item
+
+        # reject
+        logger.warning(
+            "topic_script_inline_audit_reject",
+            lane_title=lane_payload.get("title"),
+            score=result.total_score,
+            notes=result.quality_notes[:200],
+        )
+        raise ValidationError(
+            message="PROMPT_1 script rejected by inline audit",
+            details={
+                "lane_title": lane_payload.get("title"),
+                "score": result.total_score,
+                "status": result.status,
+            },
+        )
+
     for attempt in range(2):
         try:
             text_response = llm.generate_gemini_text(
@@ -621,7 +678,8 @@ def generate_topic_script_candidate(
                 system_prompt=PROMPT1_STAGE3_SYSTEM_PROMPT,
                 max_tokens=3200,
             )
-            return _build_item_from_text(text_response)
+            item = _build_item_from_text(text_response)
+            return _audit_gate(item)
         except ValidationError as exc:
             logger.warning(
                 "topic_script_candidate_text_invalid",
@@ -629,6 +687,8 @@ def generate_topic_script_candidate(
                 error=getattr(exc, "message", str(exc)),
                 details=getattr(exc, "details", {}),
             )
+            if attempt == 0 and "rejected by inline audit" in getattr(exc, "message", ""):
+                continue  # retry once if audit rejected
             return _synthesize_prompt1_fallback_item()
         except ThirdPartyError as exc:
             logger.warning(
