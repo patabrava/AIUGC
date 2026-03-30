@@ -324,9 +324,18 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     """Prepare template-only derived data for the batch detail page."""
     batch_state = batch_detail.get("state")
     posts = batch_detail.get("posts") or []
+    polling_video_statuses = {
+        "submitted",
+        "processing",
+        "extended_submitted",
+        "extended_processing",
+        "caption_pending",
+        "caption_processing",
+    }
 
     visible_posts = []
     active_posts_count = 0
+    active_video_poll_count = 0
     prompt_ready_count = 0
     qa_passed_count = 0
     scheduled_count = 0
@@ -355,6 +364,8 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         active_posts_count += 1
+        if post.get("video_status") in polling_video_statuses or not post.get("video_url"):
+            active_video_poll_count += 1
         if post.get("video_prompt_json"):
             prompt_ready_count += 1
         if post.get("qa_pass"):
@@ -367,6 +378,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "should_poll_prompts": batch_state == BatchState.S5_PROMPTS_BUILT.value,
+        "should_poll_videos": active_video_poll_count > 0,
         "progress_states": [
             {"code": BatchState.S1_SETUP.value, "label": "Setup"},
             {"code": BatchState.S2_SEEDED.value, "label": "Seeded"},
@@ -563,6 +575,11 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     publish_status=p.get("publish_status"),
                     platform_ids=platform_ids,
                     publish_results=publish_results,
+                    blog_enabled=p.get("blog_enabled", False),
+                    blog_status=p.get("blog_status", "disabled"),
+                    blog_content=p.get("blog_content") or {},
+                    blog_webflow_item_id=p.get("blog_webflow_item_id"),
+                    blog_published_at=p.get("blog_published_at"),
                     created_at=p.get("created_at"),
                     updated_at=p.get("updated_at"),
                 )
