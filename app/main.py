@@ -26,6 +26,8 @@ from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
 from app.features.publish.handlers import router as publish_router, run_scheduled_publish_job
 from app.features.blog.handlers import router as blog_router
+from app.features.auth.handlers import router as auth_router
+from app.features.auth.middleware import require_auth, is_public_path
 
 try:
     from app.features.publish.tiktok import router as tiktok_router
@@ -113,10 +115,41 @@ async def correlation_id_middleware(request: Request, call_next):
     """Add correlation ID to each request."""
     correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
     set_correlation_id(correlation_id)
-    
+
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
-    
+
+    return response
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Redirect unauthenticated requests to login."""
+    redirect = await require_auth(request)
+    if redirect is not None:
+        return redirect
+
+    response = await call_next(request)
+
+    # If middleware flagged a refreshed session, update the cookie
+    new_session = getattr(request.state, "new_session", None)
+    if new_session:
+        from app.features.auth.middleware import encode_session_cookie
+        settings = get_settings()
+        cookie_data = {
+            "access_token": new_session["access_token"],
+            "refresh_token": new_session["refresh_token"],
+        }
+        cookie_value = encode_session_cookie(cookie_data, settings.token_encryption_key)
+        response.set_cookie(
+            key=settings.session_cookie_name,
+            value=cookie_value,
+            max_age=settings.session_max_age,
+            httponly=True,
+            secure=settings.is_production,
+            samesite="lax",
+        )
+
     return response
 
 
@@ -216,6 +249,7 @@ async def health_check():
 
 
 # Register routers
+app.include_router(auth_router)
 app.include_router(batches_router)
 app.include_router(topics_router)
 app.include_router(posts_router)
