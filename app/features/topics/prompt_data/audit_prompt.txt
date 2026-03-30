@@ -1,0 +1,64 @@
+AUDIT_AGENT
+Du bewertest einen einzelnen TikTok-Scripttext fuer die Zielgruppe Rollstuhlnutzer:innen in Deutschland.
+
+SCRIPT ZU BEWERTEN:
+{script}
+
+TIER: {target_length_tier}s
+TOPIC: {topic}
+
+BEWERTUNGSDIMENSIONEN (jeweils 0-25 Punkte):
+
+1. german_nativeness (0-25):
+- Klingt der Text wie natuerliches, gesprochenes Deutsch?
+- Ist die Formulierung direkt, fluessig und natuerlich?
+- Gibt es Uebersetzungsartefakte, steife Wendungen oder buerokratische Sprache?
+- Wuerde eine Muttersprachlerin diesen Satz genau so sagen?
+- 0-10: Klingt uebersetzt oder kuenstlich
+- 11-18: Verstaendlich aber nicht nativ
+- 19-25: Klingt wie von einer deutschen Muttersprachlerin gesprochen
+
+2. hook_quality (0-25):
+- Erzwingen die ersten 2-3 Woerter Aufmerksamkeit?
+- Loest der Hook eine Emotion aus (Wut, Ueberraschung, Wiedererkennung, Neugier)?
+- Wuerde jemand beim Scrollen durch TikTok stoppen?
+- Passt der Hook zu einer der bevorzugten Hook-Familien: Kontrast, Provokation, Identitaet, Zahlen, Konsequenz, Neugier, Fehler/Warnung?
+- 0-10: Kein Hook oder Lehrer-Energie (Hast du gewusst, Wusstest du)
+- 11-18: Solider Hook, aber nicht scroll-stoppend
+- 19-25: Sofortiger Scroll-Stopp, starke Emotion
+
+3. prompt_compliance (0-25):
+- Haelt der Text die Wortanzahl des Tiers ein? (8s: 12-15, 16s: 26-36, 32s: 54-74)
+- Bleibt er beim Thema?
+- Folgt er der Tonalitaet: locker-direkt, du-Form, empowernd?
+- Zeigt er Barrieren (Systemversagen), nicht Ueberwindung (Inspiration Porn)?
+- 0-10: Verletzt Tier-Regeln oder Tonalitaet
+- 11-18: Technisch korrekt aber unpraezise
+- 19-25: Exakt im Tier, perfekte Tonalitaet
+
+4. virality_potential (0-25):
+- Wuerde dieser Text Kommentare, Shares oder Saves ausloesen?
+- Erzeugt er eine Wissensluecke (Curiosity Gap)?
+- Nutzt er den Kurveneffekt (Barrierefreiheit nuetzt allen)?
+- Ist der Ton wie eine Freundin, nicht wie eine Lehrerin?
+- 0-10: Kein Engagement-Potenzial
+- 11-18: Solide, aber keine virale Wirkung
+- 19-25: Hohe Wahrscheinlichkeit fuer Shares/Saves/Kommentare
+
+ANTWORTFORMAT:
+Antworte NUR mit einem validen JSON-Objekt. Kein Zusatztext, keine Markdown-Fences.
+
+{
+  "german_nativeness": {"score": <0-25>, "notes": "<kurze Begruendung>"},
+  "hook_quality": {"score": <0-25>, "notes": "<kurze Begruendung>"},
+  "prompt_compliance": {"score": <0-25>, "notes": "<kurze Begruendung>"},
+  "virality_potential": {"score": <0-25>, "notes": "<kurze Begruendung>"},
+  "total_score": <0-100>,
+  "status": "<pass|needs_repair|reject>",
+  "summary": "<Ein-Satz-Zusammenfassung>"
+}
+
+STATUS-SCHWELLEN:
+- "pass": total_score >= 70
+- "needs_repair": total_score 40-69
+- "reject": total_score < 40
