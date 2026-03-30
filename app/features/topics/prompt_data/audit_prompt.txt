@@ -47,15 +47,16 @@ BEWERTUNGSDIMENSIONEN (jeweils 0-25 Punkte):
 
 ANTWORTFORMAT:
 Antworte NUR mit einem validen JSON-Objekt. Kein Zusatztext, keine Markdown-Fences.
+WICHTIG: Halte die "notes" Felder KURZ — maximal 10 Woerter pro Feld. Keine langen Erklaerungen.
 
 {
-  "german_nativeness": {"score": <0-25>, "notes": "<kurze Begruendung>"},
-  "hook_quality": {"score": <0-25>, "notes": "<kurze Begruendung>"},
-  "prompt_compliance": {"score": <0-25>, "notes": "<kurze Begruendung>"},
-  "virality_potential": {"score": <0-25>, "notes": "<kurze Begruendung>"},
+  "german_nativeness": {"score": <0-25>, "notes": "<max 10 Woerter>"},
+  "hook_quality": {"score": <0-25>, "notes": "<max 10 Woerter>"},
+  "prompt_compliance": {"score": <0-25>, "notes": "<max 10 Woerter>"},
+  "virality_potential": {"score": <0-25>, "notes": "<max 10 Woerter>"},
   "total_score": <0-100>,
   "status": "<pass|needs_repair|reject>",
-  "summary": "<Ein-Satz-Zusammenfassung>"
+  "summary": "<max 15 Woerter>"
 }
 
 STATUS-SCHWELLEN:
