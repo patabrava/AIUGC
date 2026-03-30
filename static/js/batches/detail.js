@@ -214,13 +214,7 @@
         return {
             batchId: options.batchId,
             weekStart: '',
-            slots: [
-                { day: 'Mon', date: '', time: '' },
-                { day: 'Tue', date: '', time: '' },
-                { day: 'Wed', date: '', time: '' },
-                { day: 'Thu', date: '', time: '' },
-                { day: 'Fri', date: '', time: '' },
-            ],
+            slots: [],
             timezone: 'Europe/Berlin',
             networks: [],
             posts: (options.posts || []).map((p) => ({
@@ -240,6 +234,17 @@
             postNowSaving: false,
             postNowError: null,
 
+            _buildSlots(count) {
+                const total = Math.max(1, count || 0);
+                return Array.from({ length: total }, () => ({ day: 'Mon', date: '', time: '' }));
+            },
+
+            get slotGridStyle() {
+                return {
+                    gridTemplateColumns: `repeat(${Math.max(this.slots.length, 1)}, minmax(0, 1fr))`,
+                };
+            },
+
             init() {
                 // Default week start to next Monday (or today if Monday)
                 const now = new Date();
@@ -248,6 +253,7 @@
                 const nextMonday = new Date(now);
                 nextMonday.setDate(now.getDate() + daysUntilMonday);
                 this.weekStart = nextMonday.toISOString().split('T')[0];
+                this.slots = this._buildSlots(this.posts.length);
                 this._syncSlotDays();
 
                 // Watch weekStart and update slot days when it changes
@@ -266,7 +272,7 @@
             },
 
             get allSlotsSet() {
-                return this.slots.every((s) => s.time);
+                return this.slots.length > 0 && this.slots.every((s) => s.time);
             },
             get slotsSetCount() {
                 return this.slots.filter((s) => s.time).length;
@@ -289,7 +295,9 @@
                 return w;
             },
             get canArm() {
-                return this.allSlotsSet
+                return this.posts.length > 0
+                    && this.slots.length >= this.posts.length
+                    && this.allSlotsSet
                     && this.networks.length > 0
                     && this.posts.every((p, i) => p.caption?.trim() && (i < this.slots.length || p.timeOverride))
                     && !this.saving;

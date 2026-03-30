@@ -198,6 +198,29 @@ class TestBatchArmHandler:
             assert post["publish_status"] == "scheduled"
             assert post["social_networks"] == ["instagram", "facebook"]
 
+    def test_arm_accepts_single_post_and_single_slot(self):
+        storage = _make_storage(num_posts=1)
+        client = _FakeClient(storage)
+
+        from app.features.publish.arm import arm_batch_dispatch
+        result = asyncio.get_event_loop().run_until_complete(
+            arm_batch_dispatch(
+                batch_id="b1",
+                request=BatchArmRequest(
+                    week_start="2026-03-23",
+                    slots=[SlotSpec(day="mon", time="09:00")],
+                    default_networks=["instagram"],
+                    posts=[PostArmSpec(post_id="p1", caption="Caption 1")],
+                ),
+                db=client,
+            )
+        )
+        assert result["ok"] is True
+        assert result["armed_count"] == 1
+        assert storage["posts"][0]["scheduled_at"] is not None
+        assert storage["posts"][0]["publish_status"] == "scheduled"
+        assert storage["posts"][0]["social_networks"] == ["instagram"]
+
     def test_arm_rejects_batch_not_in_s7(self):
         storage = _make_storage()
         storage["batches"][0]["state"] = "S6_QA"

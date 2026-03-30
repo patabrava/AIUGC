@@ -15,7 +15,7 @@
             </div>
             <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold"
                 :class="allSlotsSet ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
-                x-text="allSlotsSet ? '5/5 slots set' : slotsSetCount + '/5 slots set'"></span>
+                x-text="slotsSetCount + '/' + slots.length + ' slots set'"></span>
         </div>
 
         {# Week start + network toggles #}
@@ -52,7 +52,7 @@
         </div>
 
         {# Time slots row #}
-        <div class="grid grid-cols-5 gap-3">
+        <div class="grid gap-3" :style="slotGridStyle">
             <template x-for="(slot, i) in slots" :key="i">
                 <div class="bg-white rounded-lg border border-indigo-200 p-3 text-center">
                     <div class="text-xs font-bold uppercase tracking-wide text-indigo-600 mb-1" x-text="slot.day"></div>
