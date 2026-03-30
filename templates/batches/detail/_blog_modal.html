@@ -1,0 +1,16 @@
+{# _blog_modal.html — Full-screen blog editor modal #}
+<div x-data="{ open: false, postId: null }"
+     @open-blog-modal.window="open = true; postId = $event.detail.postId"
+     x-show="open"
+     x-cloak
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+     @keydown.escape.window="open = false">
+    <div class="bg-[#1a1a2e] rounded-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-white/10 p-6"
+         @click.outside="open = false">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-100">Edit Blog Post</h3>
+            <button @click="open = false" class="text-gray-400 hover:text-white text-xl">&times;</button>
+        </div>
+        <p class="text-sm text-gray-400">Full-screen editing coming soon. Use the inline editor for now.</p>
+    </div>
+</div>

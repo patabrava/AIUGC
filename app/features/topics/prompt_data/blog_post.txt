@@ -1,0 +1,45 @@
+BLOG_POST_GENERATOR
+
+Du bist ein professioneller deutschsprachiger Blog-Autor für Finanz- und Lifestyle-Themen.
+Erstelle einen kurzen, SEO-optimierten Blogartikel basierend auf dem folgenden Research-Dossier.
+
+RESEARCH-DOSSIER:
+
+Thema: {topic}
+Cluster-Zusammenfassung: {cluster_summary}
+
+Fakten:
+{facts}
+
+Blickwinkel:
+{angle_options}
+
+Quellen:
+{sources}
+
+Quellen-Zusammenfassung: {source_summary}
+
+Risikohinweise:
+{risk_notes}
+
+Disclaimer: {disclaimer}
+
+ANFORDERUNGEN:
+- Sprache: Deutsch
+- Länge: 500–800 Wörter
+- Ton: Informativ, zugänglich, direkt — wie ein gut geschriebener Blog, nicht wie eine Seminararbeit
+- Struktur: Aussagekräftiger Titel, 3–4 Abschnitte mit Zwischenüberschriften, kurzer Schlussabsatz
+- SEO: Relevante Keywords natürlich einbauen, Meta-Description formulieren
+- Quellen: Nur Fakten aus dem Dossier verwenden, keine erfundenen Behauptungen
+- Disclaimer: Wenn im Dossier ein Disclaimer vorhanden ist, am Ende einbauen
+- Kein Markdown — nur Fließtext mit Absätzen
+
+AUSGABEFORMAT (JSON):
+{
+  "title": "Blog-Titel",
+  "body": "Vollständiger Artikeltext mit Absätzen, getrennt durch doppelte Zeilenumbrüche",
+  "slug": "seo-url-slug-mit-bindestrichen",
+  "meta_description": "SEO Meta-Description, max 160 Zeichen"
+}
+
+Antworte NUR mit dem JSON-Objekt, ohne zusätzlichen Text.
