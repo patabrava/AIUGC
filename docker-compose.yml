@@ -84,9 +84,7 @@ services:
         condition: service_healthy
 
   expansion-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *flow-forge-build
     command: ["python", "workers/expansion_worker.py"]
     environment: *flow-forge-env
     restart: unless-stopped
