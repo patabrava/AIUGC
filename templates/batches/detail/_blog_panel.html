@@ -16,9 +16,8 @@
                   x-text="posts.length + ' of {{ all_posts | length }} posts'"></span>
         </div>
         <button class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-                hx-post="/blog/batches/{{ batch.id }}/blog/generate-all"
-                hx-swap="none"
-                hx-indicator="#blog-generate-spinner">
+                type="button"
+                @click="generateAllDrafts()">
             Generate All Drafts
         </button>
         <span id="blog-generate-spinner" class="htmx-indicator text-purple-400 text-sm">Generating...</span>
@@ -51,9 +50,8 @@
                           x-text="post.blog_status === 'draft' ? 'Draft Ready' : post.blog_status === 'published' ? 'Published' : post.blog_status.charAt(0).toUpperCase() + post.blog_status.slice(1)"></span>
                     <template x-if="post.blog_status === 'pending' || post.blog_status === 'failed'">
                         <button class="bg-purple-600 text-white text-xs font-medium px-3 py-1 rounded transition hover:bg-purple-700"
-                                @click.stop
-                                :hx-post="'/blog/posts/' + post.id + '/blog/generate'"
-                                hx-swap="none">
+                                type="button"
+                                @click.stop="generateDraft(post.id)">
                             Generate
                         </button>
                     </template>
@@ -115,8 +113,8 @@
                     <div class="flex items-center justify-between">
                         <div class="flex gap-2">
                             <button class="text-purple-400 border border-purple-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-purple-500/10 transition"
-                                    :hx-post="'/blog/posts/' + post.id + '/blog/generate'"
-                                    hx-swap="none">
+                                    type="button"
+                                    @click="generateDraft(post.id)">
                                 Regenerate Draft
                             </button>
                             <button class="text-gray-400 border border-white/10 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-white/5 transition"
@@ -159,9 +157,48 @@ function blogPanelComponent() {
     return {
         posts: [],
         expanded: null,
+        isGenerating: false,
         toggleExpand(postId) {
             this.expanded = this.expanded === postId ? null : postId;
             window.batchDetailExpanded = !!this.expanded;
+        },
+        async generateDraft(postId) {
+            if (!postId || this.isGenerating) return;
+            this.isGenerating = true;
+            try {
+                const response = await fetch('/blog/posts/' + postId + '/blog/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (!response.ok) {
+                    throw new Error(await response.text() || `Generate failed (${response.status})`);
+                }
+                window.location.reload();
+            } catch (error) {
+                console.error('Failed to generate blog draft', error);
+                alert(error instanceof Error ? error.message : 'Failed to generate blog draft');
+            } finally {
+                this.isGenerating = false;
+            }
+        },
+        async generateAllDrafts() {
+            if (this.isGenerating) return;
+            this.isGenerating = true;
+            try {
+                const response = await fetch('/blog/batches/{{ batch.id }}/blog/generate-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (!response.ok) {
+                    throw new Error(await response.text() || `Generate all failed (${response.status})`);
+                }
+                window.location.reload();
+            } catch (error) {
+                console.error('Failed to generate all blog drafts', error);
+                alert(error instanceof Error ? error.message : 'Failed to generate all blog drafts');
+            } finally {
+                this.isGenerating = false;
+            }
         },
         saveField(postId, field, value) {
             const body = {};
