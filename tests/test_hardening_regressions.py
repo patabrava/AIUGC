@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import app
+import app.main as main_module
 from app.features.qa.handlers import _active_posts_ready_for_publish
 
 
@@ -48,3 +49,23 @@ def test_removed_posts_do_not_block_qa_advancement():
 
     assert _active_posts_ready_for_publish(posts) is True
 
+
+def test_app_lifespan_does_not_eagerly_create_supabase_client(monkeypatch):
+    calls = {"count": 0}
+
+    def _fail_if_called():
+        calls["count"] += 1
+        raise AssertionError("get_supabase should not be called during startup")
+
+    monkeypatch.setattr(main_module, "get_supabase", _fail_if_called)
+    monkeypatch.setattr(main_module, "recover_stalled_batches", lambda **kwargs: [])
+    monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: [])
+
+    async def _run():
+        async with main_module.lifespan(app):
+            return True
+
+    import asyncio
+
+    assert asyncio.run(_run()) is True
+    assert calls["count"] == 0

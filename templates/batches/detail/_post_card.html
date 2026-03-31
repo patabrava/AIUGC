@@ -257,14 +257,55 @@
     </div>
     {% endif %}
 
-    {% if batch.state in ['S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_prompt_json %}
+    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_prompt_json %}
+    {% set video_status = post.video_status or 'pending' %}
+    {% set in_progress_statuses = ['submitted', 'processing', 'extended_submitted', 'extended_processing'] %}
+    {% set caption_statuses = ['caption_pending', 'caption_processing'] %}
+    {% set is_generating = video_status in in_progress_statuses %}
+    {% set is_captioning = video_status in caption_statuses %}
     <div class="mt-6 border-t border-gray-200 pt-4">
         <div class="flex items-center justify-between">
             <div class="flex-1">
                 <div class="flex items-center gap-2 mb-2">
                     <span class="text-sm font-medium text-gray-700">Video Generation</span>
-                    {{ video_status_chip(post.video_status, post.video_metadata) }}
+                    {{ video_status_chip(video_status, post.video_metadata) }}
                 </div>
+
+                {% if is_generating %}
+                <div class="mt-2 text-sm text-gray-600">
+                    {% if post.video_metadata and post.video_metadata.get('rai_retry_count', 0) > 0 %}
+                    <div class="bg-amber-50 border border-amber-200 rounded-md p-2 mb-2">
+                        <p class="text-amber-700 font-medium">Safety filter triggered — auto-retrying (attempt {{ post.video_metadata.get('rai_retry_count') }}/3)</p>
+                        <p class="text-xs text-amber-600 mt-1">Google's content filter flagged this prompt. The system is automatically resubmitting. This is common with non-English dialogue or medical/disability topics.</p>
+                    </div>
+                    {% else %}
+                    <p>Video is being generated. This typically takes 2-3 minutes.</p>
+                    {% endif %}
+                    <p class="text-xs text-gray-500 mt-1">Operation ID: {{ post.video_operation_id }}</p>
+                    {% if post.video_url %}
+                    <p class="text-xs text-gray-500 mt-1">Displaying the previous video while the new generation is still in progress.</p>
+                    {% endif %}
+                </div>
+                {% elif is_captioning %}
+                <div class="mt-2 text-sm text-gray-600">
+                    <p>Video is ready and captions are still being processed.</p>
+                    <p class="text-xs text-gray-500 mt-1">Operation ID: {{ post.video_operation_id }}</p>
+                </div>
+                {% elif video_status == 'failed' %}
+                <div class="mt-2 text-sm text-red-600">
+                    {% if post.video_metadata and post.video_metadata.get('rai_retry_count', 0) >= 3 %}
+                    <div class="bg-red-50 border border-red-200 rounded-md p-2 mb-1">
+                        <p class="font-medium">Safety filter blocked after 3 retries</p>
+                        <p class="text-xs text-red-500 mt-1">Google's content filter repeatedly rejected this prompt. Try modifying the dialogue — removing specific financial amounts or medical terms may help. Non-English prompts have higher false-positive rates.</p>
+                    </div>
+                    {% else %}
+                    <p>Video generation failed. Please try again.</p>
+                    {% endif %}
+                    {% if post.video_metadata and post.video_metadata.get('error') %}
+                    <p class="text-xs text-red-500 mt-1">Error: {{ post.video_metadata.get('error') }}</p>
+                    {% endif %}
+                </div>
+                {% endif %}
 
                 {% if post.video_url %}
                 {% set display_video_url = (post.video_metadata or {}).get('caption_video_url') or post.video_url %}
@@ -379,32 +420,6 @@
                     </div>
                 </div>
                 {% endif %}
-                {% elif post.video_status in ['submitted', 'processing'] %}
-                <div class="mt-2 text-sm text-gray-600">
-                    {% if post.video_metadata and post.video_metadata.get('rai_retry_count', 0) > 0 %}
-                    <div class="bg-amber-50 border border-amber-200 rounded-md p-2 mb-2">
-                        <p class="text-amber-700 font-medium">Safety filter triggered — auto-retrying (attempt {{ post.video_metadata.get('rai_retry_count') }}/3)</p>
-                        <p class="text-xs text-amber-600 mt-1">Google's content filter flagged this prompt. The system is automatically resubmitting. This is common with non-English dialogue or medical/disability topics.</p>
-                    </div>
-                    {% else %}
-                    <p>Video is being generated. This typically takes 2-3 minutes.</p>
-                    {% endif %}
-                    <p class="text-xs text-gray-500 mt-1">Operation ID: {{ post.video_operation_id }}</p>
-                </div>
-                {% elif post.video_status == 'failed' %}
-                <div class="mt-2 text-sm text-red-600">
-                    {% if post.video_metadata and post.video_metadata.get('rai_retry_count', 0) >= 3 %}
-                    <div class="bg-red-50 border border-red-200 rounded-md p-2 mb-1">
-                        <p class="font-medium">Safety filter blocked after 3 retries</p>
-                        <p class="text-xs text-red-500 mt-1">Google's content filter repeatedly rejected this prompt. Try modifying the dialogue — removing specific financial amounts or medical terms may help. Non-English prompts have higher false-positive rates.</p>
-                    </div>
-                    {% else %}
-                    <p>Video generation failed. Please try again.</p>
-                    {% endif %}
-                    {% if post.video_metadata and post.video_metadata.get('error') %}
-                    <p class="text-xs text-red-500 mt-1">Error: {{ post.video_metadata.get('error') }}</p>
-                    {% endif %}
-                </div>
                 {% endif %}
             </div>
 

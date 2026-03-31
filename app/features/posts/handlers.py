@@ -13,6 +13,7 @@ from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
 from app.features.posts.prompt_builder import build_video_prompt_from_seed, validate_video_prompt
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.states import BatchState
 
 logger = get_logger(__name__)
@@ -288,78 +289,10 @@ async def build_post_prompt(post_id: str):
 def _maybe_transition_batch_to_prompts_built(*, batch_id: str, supabase_client, correlation_id: str) -> None:
     """Advance batch to S5_PROMPTS_BUILT when all posts have prompts."""
     try:
-        batch_response = supabase_client.table("batches").select("state").eq("id", batch_id).execute()
-        if not batch_response.data:
-            logger.warning(
-                "batch_not_found_for_prompts_transition",
-                batch_id=batch_id,
-                correlation_id=correlation_id
-            )
-            return
-
-        current_state = batch_response.data[0].get("state")
-        if current_state not in {BatchState.S4_SCRIPTED.value, BatchState.S5_PROMPTS_BUILT.value}:
-            logger.debug(
-                "batch_state_not_ready_for_prompts_transition",
-                batch_id=batch_id,
-                correlation_id=correlation_id,
-                current_state=current_state
-            )
-            return
-
-        posts_response = supabase_client.table("posts").select("id, video_prompt_json, seed_data").eq("batch_id", batch_id).execute()
-        posts = posts_response.data or []
-        if not posts:
-            logger.warning(
-                "no_posts_for_batch_prompts_transition",
-                batch_id=batch_id,
-                correlation_id=correlation_id
-            )
-            return
-
-        active_posts = []
-        for post in posts:
-            seed_data = post.get("seed_data") or {}
-            if isinstance(seed_data, str):
-                try:
-                    seed_data = json.loads(seed_data)
-                except json.JSONDecodeError:
-                    seed_data = {}
-            if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
-                continue
-            active_posts.append(post)
-
-        if not active_posts:
-            logger.warning(
-                "no_active_posts_for_prompts_transition",
-                batch_id=batch_id,
-                correlation_id=correlation_id
-            )
-            return
-
-        prompts_ready = sum(1 for post in active_posts if post.get("video_prompt_json"))
-        if prompts_ready != len(active_posts):
-            logger.debug(
-                "prompts_not_complete",
-                batch_id=batch_id,
-                correlation_id=correlation_id,
-                total=len(active_posts),
-                prompts_ready=prompts_ready
-            )
-            return
-
-        if current_state == BatchState.S5_PROMPTS_BUILT.value:
-            return
-
-        supabase_client.table("batches").update({
-            "state": BatchState.S5_PROMPTS_BUILT.value
-        }).eq("id", batch_id).execute()
-
-        logger.info(
-            "batch_transitioned_to_prompts_built",
+        reconcile_batch_video_pipeline_state(
             batch_id=batch_id,
             correlation_id=correlation_id,
-            new_state=BatchState.S5_PROMPTS_BUILT.value
+            supabase_client=supabase_client,
         )
     except Exception as transition_error:
         logger.exception(

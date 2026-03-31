@@ -92,6 +92,66 @@ def test_session_cookie_wrong_secret():
     assert result is None
 
 
+def test_local_request_detection_marks_localhost_as_bypassed():
+    from starlette.requests import Request
+    from app.features.auth.middleware import _is_local_request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/auth/login",
+        "raw_path": b"/auth/login",
+        "query_string": b"",
+        "headers": [(b"host", b"localhost:8000")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("localhost", 8000),
+        "scheme": "http",
+        "http_version": "1.1",
+    }
+    request = Request(scope)
+    assert _is_local_request(request) is True
+
+
+def test_local_request_detection_uses_host_header():
+    from starlette.requests import Request
+    from app.features.auth.middleware import _is_local_request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/auth/login",
+        "raw_path": b"/auth/login",
+        "query_string": b"",
+        "headers": [(b"host", b"localhost:8000")],
+        "client": ("10.0.0.2", 12345),
+        "server": ("10.0.0.2", 8000),
+        "scheme": "http",
+        "http_version": "1.1",
+    }
+    request = Request(scope)
+    assert _is_local_request(request) is False
+
+
+def test_local_request_detection_uses_client_loopback():
+    from starlette.requests import Request
+    from app.features.auth.middleware import _is_local_request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/auth/login",
+        "raw_path": b"/auth/login",
+        "query_string": b"",
+        "headers": [(b"host", b"aiugc-prod.srv1498567.hstgr.cloud")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("aiugc-prod.srv1498567.hstgr.cloud", 80),
+        "scheme": "http",
+        "http_version": "1.1",
+    }
+    request = Request(scope)
+    assert _is_local_request(request) is True
+
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -176,3 +236,18 @@ async def test_verify_otp_invalid_code():
 
         result = await verify_otp("user@lippelift.de", "00000000")
         assert result is None
+
+
+@pytest.mark.asyncio
+async def test_local_auth_bypass_skips_supabase_calls(monkeypatch):
+    import app.core.config as config_module
+    from app.features.auth.queries import send_otp, verify_otp, get_user_from_token
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("BYPASS_AUTH_IN_DEVELOPMENT", "true")
+
+    assert await send_otp("user@lippelift.de") is True
+    session = await verify_otp("user@lippelift.de", "12345678")
+    assert session["user"]["email"] == "user@lippelift.de"
+    assert await get_user_from_token(session["access_token"]) == {"email": "user@lippelift.de"}

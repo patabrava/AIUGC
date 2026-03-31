@@ -53,6 +53,11 @@ def _callback_url() -> str:
 
 async def send_otp(email: str) -> bool:
     """Send a magic OTP code to the given email via Supabase Auth."""
+    settings = get_settings()
+    if settings.is_auth_bypassed:
+        logger.info("auth_otp_bypassed_local", email=email)
+        return True
+
     redirect_to = _callback_url()
     url = f"{_auth_url()}/otp?redirect_to={redirect_to}"
     payload = {"email": email}
@@ -78,6 +83,15 @@ async def send_otp(email: str) -> bool:
 
 async def verify_otp(email: str, token: str) -> Optional[Dict[str, Any]]:
     """Verify an OTP code with Supabase Auth. Returns session dict or None."""
+    settings = get_settings()
+    if settings.is_auth_bypassed:
+        logger.info("auth_otp_bypassed_local_verified", email=email)
+        return {
+            "access_token": f"local-access-token:{email}",
+            "refresh_token": f"local-refresh-token:{email}",
+            "user": {"email": email},
+        }
+
     url = f"{_auth_url()}/verify"
     payload = {"email": email, "token": token, "type": "email"}
 
@@ -99,6 +113,10 @@ async def verify_otp(email: str, token: str) -> Optional[Dict[str, Any]]:
 
 async def get_user_from_token(access_token: str) -> Optional[Dict[str, Any]]:
     """Validate an access token and return user info, or None if invalid."""
+    settings = get_settings()
+    if settings.is_auth_bypassed and access_token.startswith("local-access-token:"):
+        return {"email": access_token.split(":", 1)[1]}
+
     url = f"{_auth_url()}/user"
     headers = {**_auth_headers(), "Authorization": f"Bearer {access_token}"}
 
@@ -113,6 +131,15 @@ async def get_user_from_token(access_token: str) -> Optional[Dict[str, Any]]:
 
 async def refresh_session(refresh_token: str) -> Optional[Dict[str, Any]]:
     """Refresh an expired session. Returns new session dict or None."""
+    settings = get_settings()
+    if settings.is_auth_bypassed and refresh_token.startswith("local-refresh-token:"):
+        email = refresh_token.split(":", 1)[1]
+        return {
+            "access_token": f"local-access-token:{email}",
+            "refresh_token": refresh_token,
+            "user": {"email": email},
+        }
+
     url = f"{_auth_url()}/token?grant_type=refresh_token"
     payload = {"refresh_token": refresh_token}
 

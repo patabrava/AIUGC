@@ -60,10 +60,9 @@ async def lifespan(app: FastAPI):
         debug=settings.debug
     )
     
-    # Initialize Supabase connection
-    supabase = get_supabase()
-    if not supabase.health_check():
-        logger.error("supabase_connection_failed_on_startup")
+    # Defer Supabase client creation until the first real database operation.
+    # A bad deployment secret should not prevent the web process from booting.
+    logger.info("supabase_client_initialization_deferred")
 
     scheduler.add_job(
         run_scheduled_publish_job,
@@ -224,9 +223,14 @@ async def health_check():
     Per Constitution § IX: Observable Implementation
     """
     settings = get_settings()
-    supabase = get_supabase()
-    
-    db_healthy = supabase.health_check()
+    db_healthy = True
+    db_error = None
+    try:
+        supabase = get_supabase()
+        db_healthy = supabase.health_check()
+    except Exception as exc:
+        db_healthy = False
+        db_error = str(exc)
     
     health_status = {
         "status": "healthy" if db_healthy else "unhealthy",
@@ -236,6 +240,8 @@ async def health_check():
             "database": "ok" if db_healthy else "fail"
         }
     }
+    if db_error:
+        health_status["checks"]["database_error"] = db_error
     
     logger.info("health_check", **health_status)
     

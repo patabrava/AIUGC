@@ -27,6 +27,7 @@ from app.core.video_profiles import (
     uses_duration_routing,
 )
 from app.features.batches.queries import get_batch_by_id
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.posts.prompt_text import build_full_prompt_text
 from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
 from app.features.videos.prompt_audit import record_prompt_audit
@@ -701,6 +702,12 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             submitted_count=submitted_count,
             skipped_count=skipped_count,
             provider=request.provider
+        )
+
+        reconcile_batch_video_pipeline_state(
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            supabase_client=supabase,
         )
         
         return SuccessResponse(

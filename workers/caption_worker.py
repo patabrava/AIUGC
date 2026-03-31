@@ -19,6 +19,7 @@ from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.video_profiles import (
     VIDEO_STATUS_CAPTION_PENDING,
     VIDEO_STATUS_CAPTION_PROCESSING,
@@ -190,30 +191,10 @@ def _handle_caption_failure(*, post_id, existing_metadata, error, correlation_id
 def _check_batch_caption_complete(batch_id, correlation_id):
     if not batch_id:
         return
-    supabase = get_supabase().client
-    batch_result = (
-        supabase.table("batches").select("state").eq("id", batch_id).single().execute()
+    reconcile_batch_video_pipeline_state(
+        batch_id=batch_id,
+        correlation_id=correlation_id,
     )
-    batch_state = batch_result.data.get("state")
-    if batch_state != "S5_PROMPTS_BUILT":
-        return
-    posts_result = (
-        supabase.table("posts").select("id, video_status, seed_data").eq("batch_id", batch_id).execute()
-    )
-    posts = posts_result.data or []
-    active_posts = [
-        p for p in posts
-        if (p.get("seed_data") or {}).get("script_review_status") != "removed"
-        and not (p.get("seed_data") or {}).get("video_excluded")
-    ]
-    if not active_posts:
-        return
-    all_captioned = all(
-        p.get("video_status") == VIDEO_STATUS_CAPTION_COMPLETED for p in active_posts
-    )
-    if all_captioned:
-        supabase.table("batches").update({"state": "S6_QA"}).eq("id", batch_id).execute()
-        logger.info("batch_advanced_to_qa_after_captions", correlation_id=correlation_id, batch_id=batch_id)
 
 
 def main():

@@ -27,6 +27,13 @@
                 </p>
             </div>
 
+            {% if bypass_auth_in_development %}
+            <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left">
+                <p class="text-xs font-semibold uppercase tracking-wide text-amber-800">Local auth bypass</p>
+                <p class="mt-1 text-sm text-amber-900">Development mode skips Supabase auth and signs you in locally so rate limits do not block test runs.</p>
+            </div>
+            {% endif %}
+
             {% if error %}
             <div class="mt-4 mb-2 p-3 rounded-lg bg-red-50 border border-red-200">
                 <p class="text-sm text-red-700">{{ error }}</p>

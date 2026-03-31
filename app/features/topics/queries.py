@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional
 
 from app.adapters.supabase_client import get_supabase, SupabaseAdapter
 
-# Module-level singleton used by audit query functions (patchable in tests).
-supabase: SupabaseAdapter = get_supabase()
+# Module-level singleton placeholder used by patchable test seams; initialize lazily.
+supabase: Optional[SupabaseAdapter] = None
 from app.core.errors import NotFoundError
 from app.core.logging import get_logger
 from app.features.topics.captions import resolve_selected_caption

@@ -126,6 +126,10 @@ class Settings(BaseSettings):
     session_cookie_name: str = Field("ff_session", description="Name of the session cookie")
     session_max_age: int = Field(2592000, description="Session cookie max age in seconds (default 30 days)")
     auth_otp_code_length: int = Field(8, ge=6, le=10, description="Expected Supabase email OTP length")
+    bypass_auth_in_development: bool = Field(
+        False,
+        description="Skip end-user auth in development so local test runs do not depend on Supabase rate limits",
+    )
     
     @field_validator("supabase_url")
     @classmethod
@@ -167,6 +171,10 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment == "development"
+
+    @property
+    def is_auth_bypassed(self) -> bool:
+        return self.is_development and self.bypass_auth_in_development
 
 
 # Singleton instance

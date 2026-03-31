@@ -3,6 +3,7 @@
 import os
 import asyncio
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -15,10 +16,12 @@ os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
 os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
 os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 
+from jinja2 import Environment, FileSystemLoader
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.features.batches import handlers as batch_handlers
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.topics import handlers as topic_handlers
 
 
@@ -316,6 +319,22 @@ def test_build_batch_detail_view_polls_while_video_is_submitted():
     assert view["should_poll_videos"] is True
 
 
+def test_batch_detail_template_shows_video_feedback_in_s4_and_extended_states():
+    template_path = Path("templates/batches/detail/_post_card.html")
+    content = template_path.read_text(encoding="utf-8")
+
+    assert "S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'" in content
+    assert "in_progress_statuses = ['submitted', 'processing', 'extended_submitted', 'extended_processing']" in content
+    assert "Displaying the previous video while the new generation is still in progress." in content
+
+
+def test_batch_detail_templates_compile_without_syntax_errors():
+    env = Environment(loader=FileSystemLoader("templates"))
+    env.get_template("batches/detail/_post_card.html")
+    env.get_template("batches/detail/_posts_section.html")
+    env.get_template("batches/detail.html")
+
+
 class _FakeResponse:
     def __init__(self, data):
         self.data = data
@@ -380,6 +399,68 @@ def test_maybe_transition_batch_to_prompts_built_advances_when_all_posts_ready()
     )
 
     assert db["batches"][0]["state"] == "S5_PROMPTS_BUILT"
+
+
+def test_reconcile_batch_video_pipeline_state_promotes_s4_to_s5():
+    db = {
+        "batches": [{"id": "batch-1", "state": "S4_SCRIPTED"}],
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "video_prompt_json": {"prompt": 1},
+                "video_status": "pending",
+                "seed_data": {"script_review_status": "approved"},
+            },
+            {
+                "id": "post-2",
+                "batch_id": "batch-1",
+                "video_prompt_json": None,
+                "video_status": "pending",
+                "seed_data": {"script_review_status": "removed", "video_excluded": True},
+            },
+        ],
+    }
+
+    state = reconcile_batch_video_pipeline_state(
+        batch_id="batch-1",
+        correlation_id="test-corr",
+        supabase_client=_FakeSupabaseClient(db),
+    )
+
+    assert state == "S5_PROMPTS_BUILT"
+    assert db["batches"][0]["state"] == "S5_PROMPTS_BUILT"
+
+
+def test_reconcile_batch_video_pipeline_state_promotes_stale_s4_to_s6_when_video_done():
+    db = {
+        "batches": [{"id": "batch-1", "state": "S4_SCRIPTED"}],
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "video_prompt_json": {"prompt": 1},
+                "video_status": "caption_completed",
+                "seed_data": {"script_review_status": "approved"},
+            },
+            {
+                "id": "post-2",
+                "batch_id": "batch-1",
+                "video_prompt_json": None,
+                "video_status": "pending",
+                "seed_data": {"script_review_status": "removed", "video_excluded": True},
+            },
+        ],
+    }
+
+    state = reconcile_batch_video_pipeline_state(
+        batch_id="batch-1",
+        correlation_id="test-corr",
+        supabase_client=_FakeSupabaseClient(db),
+    )
+
+    assert state == "S6_QA"
+    assert db["batches"][0]["state"] == "S6_QA"
 
 
 def test_batches_routes_return_full_documents_for_history_restore(monkeypatch):
