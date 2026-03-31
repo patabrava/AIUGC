@@ -1,8 +1,5 @@
 from pathlib import Path
 
-import pytest
-
-from app.core.errors import ValidationError
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2
 from app.features.topics import agents as topic_agents
@@ -49,7 +46,7 @@ def test_build_prompt1_uses_32s_text_template():
         },
     )
 
-    assert "DREI oder VIER vollstaendige Saetze" in prompt
+    assert "FUENF oder SECHS vollstaendige Saetze" in prompt
     assert "54-74 Woerter" in prompt
     assert "Lane-Titel:" in prompt
     assert "Nur der Scripttext" in prompt
@@ -72,8 +69,21 @@ def test_build_prompt1_batch_keeps_rotation_context():
 
     assert "ZUFALLS-THEMEN FÜR DIESEN DURCHLAUF:" in prompt
     assert "26-36 Woerter" in prompt
-    assert "2 concise sentences" in prompt
+    assert "DREI oder VIER vollstaendige Saetze" in prompt
     assert "Barrierefreie Bahnreisen" in prompt
+
+
+def test_build_prompt2_uses_32s_text_template():
+    prompt = build_prompt2(
+        topic="Barrierefreie Bahnreisen",
+        scripts_per_category=5,
+        profile=get_duration_profile(32),
+    )
+
+    assert "32-Sekunden-UGC-Videos" in prompt
+    assert "40-66 Wörter" in prompt
+    assert "5-6 Sätze" in prompt
+    assert "core:" not in prompt
 
 
 def test_build_prompt2_uses_16s_text_template():
@@ -85,7 +95,7 @@ def test_build_prompt2_uses_16s_text_template():
 
     assert "16-Sekunden-UGC-Videos" in prompt
     assert "24-34 Wörter" in prompt
-    assert "1-2 concise sentences" in prompt
+    assert "3-4 Sätze" in prompt
     assert "core:" not in prompt
 
 
@@ -150,6 +160,7 @@ def test_prompt1_16s_contains_hook_mechanics():
         post_type="value", desired_topics=1, profile=get_duration_profile(16),
     )
     assert "klaren Hook" not in prompt, "Old vague hook instruction still present in 16s"
+    assert "DREI oder VIER vollstaendige Saetze" in prompt
     assert "HOOK-REGELN" in prompt
     assert "Scroll-Stopp" in prompt
     assert "TONALITAET" in prompt

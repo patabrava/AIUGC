@@ -307,7 +307,7 @@ def _maybe_transition_batch_to_prompts_built(*, batch_id: str, supabase_client, 
             )
             return
 
-            posts_response = supabase_client.table("posts").select("id, video_prompt_json, seed_data").eq("batch_id", batch_id).execute()
+        posts_response = supabase_client.table("posts").select("id, video_prompt_json, seed_data").eq("batch_id", batch_id).execute()
         posts = posts_response.data or []
         if not posts:
             logger.warning(

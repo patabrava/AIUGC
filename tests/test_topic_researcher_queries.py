@@ -261,6 +261,84 @@ def test_upsert_topic_script_variants_rejects_contaminated_canonical_scripts(moc
 
 
 @patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_skips_global_duplicate_scripts(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = [
+                {
+                    "id": "row-existing",
+                    "topic_registry_id": "topic-existing",
+                    "topic_research_dossier_id": "dossier-existing",
+                    "title": "Bestehendes Thema",
+                    "script": "Diese Rampe musst du vor der Fahrt anmelden, sonst bleibst du am Bahnsteig stehen.",
+                    "target_length_tier": 8,
+                    "bucket": "canonical",
+                    "lane_key": "lane-existing",
+                }
+            ]
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                filtered = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self._filters.items())
+                ]
+                return _FakeResponse(filtered)
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = MagicMock(client=MagicMock(table=MagicMock(return_value=fake_table)))
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-new",
+        title="Neues Thema",
+        post_type="value",
+        target_length_tier=8,
+        topic_research_dossier_id="dossier-new",
+        variants=[
+            {
+                "bucket": "canonical",
+                "script": "Diese Rampe musst du vor der Fahrt anmelden, sonst bleibst du am Bahnsteig stehen.",
+                "hook_style": "canonical",
+                "lane_key": "lane-new",
+                "target_length_tier": 8,
+            }
+        ],
+    )
+
+    assert stored == []
+    assert len(fake_table.rows) == 1
+
+
+@patch("app.features.topics.queries.get_supabase")
 def test_upsert_topic_script_variants_repairs_citation_residue_before_insert(mock_get_sb):
     class _FakeResponse:
         def __init__(self, data):
@@ -317,7 +395,8 @@ def test_upsert_topic_script_variants_repairs_citation_residue_before_insert(moc
                 "bucket": "canonical",
                 "script": (
                     "Wenn dir bei G und aG die Unterschiede unklar bleiben, verlierst du schnell Orientierung im Alltag. "
-                    "Mit klar geprüften Voraussetzungen trennst du Wegstrecke, Einschränkung und Berechtigung endlich sauber voneinander [cite: 1]."
+                    "Mit klar geprüften Voraussetzungen trennst du Wegstrecke, Einschränkung und Berechtigung endlich sauber voneinander. "
+                    "So vermeidest du typische Fehlannahmen [cite: 1]."
                 ),
                 "hook_style": "canonical",
                 "lane_key": "lane-1",

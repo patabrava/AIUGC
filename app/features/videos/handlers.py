@@ -166,7 +166,27 @@ def _required_veo_segments_for_profile_hops(hops_target: int) -> int:
 def _resolve_veo_extension_hops_target(*, segment_count: int, planned_hops: int) -> int:
     if segment_count <= 0:
         return 0
-    return min(max(int(planned_hops or 0), 0), max(segment_count - 1, 0))
+    return max(int(planned_hops or 0), 0)
+
+
+def _validate_veo_extension_segment_budget(
+    *,
+    segment_count: int,
+    planned_extension_hops: int,
+    target_length_tier: Optional[int],
+) -> None:
+    required_segments = _required_veo_segments_for_profile_hops(planned_extension_hops)
+    if segment_count >= required_segments:
+        return
+    raise ValidationError(
+        "Veo extended chains need one complete dialogue segment per hop plus a base segment.",
+        {
+            "target_length_tier": target_length_tier,
+            "planned_extension_hops": planned_extension_hops,
+            "segments_available": segment_count,
+            "segments_required": required_segments,
+        },
+    )
 
 
 def _build_veo_extended_base_prompt(
@@ -182,19 +202,15 @@ def _build_veo_extended_base_prompt(
 
     effective_hops: Optional[int] = None
     if planned_extension_hops is not None:
+        _validate_veo_extension_segment_budget(
+            segment_count=len(segments),
+            planned_extension_hops=planned_extension_hops,
+            target_length_tier=target_length_tier,
+        )
         effective_hops = _resolve_veo_extension_hops_target(
             segment_count=len(segments),
             planned_hops=planned_extension_hops,
         )
-        if effective_hops < planned_extension_hops:
-            logger.warning(
-                "veo_extension_hops_capped_by_segments",
-                target_length_tier=target_length_tier,
-                planned_extension_hops=planned_extension_hops,
-                effective_extension_hops=effective_hops,
-                segments_available=len(segments),
-                estimated_duration_s=seed_data.get("estimated_duration_s"),
-            )
 
     base_segment = segments[0] if segments else ""
     segment_metadata = {
@@ -208,7 +224,7 @@ def _build_veo_extended_base_prompt(
                 "veo_required_segments": _required_veo_segments_for_profile_hops(planned_extension_hops),
                 "veo_planned_extension_hops_target": planned_extension_hops,
                 "veo_extension_hops_target": effective_hops,
-                "veo_chain_shortened_to_available_segments": effective_hops < planned_extension_hops,
+                "veo_chain_shortened_to_available_segments": False,
             }
         )
     return build_veo_prompt_segment(base_segment, include_quotes=False, include_ending=False), segment_metadata

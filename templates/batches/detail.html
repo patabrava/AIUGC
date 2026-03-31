@@ -7,7 +7,7 @@
     id="batch-detail-root"
     data-batch-id="{{ batch.id }}"
     data-batch-state="{{ batch.state }}"
-    {% if batch_view.should_poll_prompts %}
+    {% if batch_view.should_poll_prompts or batch_view.should_poll_videos %}
     hx-get="/batches/{{ batch.id }}"
     hx-trigger="every 5s"
     hx-swap="outerHTML"

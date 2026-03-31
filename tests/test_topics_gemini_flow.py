@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from types import SimpleNamespace
 import httpx
 import pytest
@@ -10,6 +11,7 @@ from app.adapters import llm_client as llm_client_module
 from app.core.config import Settings
 from app.features.topics import agents as topic_agents
 from app.features.topics import handlers as topic_handlers
+from app.features.topics.topic_validation import detect_spoken_copy_issues
 
 
 class FakeResponse:
@@ -120,6 +122,18 @@ class FakeTopicLLM:
 
     def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
         self.text_prompts.append((prompt, system_prompt, kwargs))
+        if system_prompt and "audit agent" in system_prompt.lower():
+            return json.dumps(
+                {
+                    "total_score": 88,
+                    "status": "pass",
+                    "german_nativeness": {"score": 22},
+                    "hook_quality": {"score": 22},
+                    "prompt_compliance": {"score": 22},
+                    "virality_potential": {"score": 22},
+                },
+                ensure_ascii=False,
+            )
         if "PROMPT_1_STAGE3" in prompt or "finalen Scripttext" in prompt:
             return "Kennst du deinen Pflegegrad? Prüfe Unterlagen früher, dann sparst du Rückfragen und Zeit im Alltag."
         return """Problem-Agitieren-Lösung Ads
@@ -424,7 +438,19 @@ def test_topics_feature_uses_gemini_methods(monkeypatch):
 def test_generate_topic_script_candidate_uses_duration_profile_import(monkeypatch):
     class FakeLaneLLM:
         def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
-            return "Kennst du den Begleitservice im Bahnhof? Mit Voranmeldung reist du spürbar entspannter."
+            if system_prompt and "audit agent" in system_prompt.lower():
+                return json.dumps(
+                    {
+                        "total_score": 90,
+                        "status": "pass",
+                        "german_nativeness": {"score": 23},
+                        "hook_quality": {"score": 22},
+                        "prompt_compliance": {"score": 23},
+                        "virality_potential": {"score": 22},
+                    },
+                    ensure_ascii=False,
+                )
+            return "Kennst du den Begleitservice im Bahnhof? Mit Voranmeldung reist du entspannter."
 
     dossier = topic_agents.ResearchDossier(
         cluster_id="oepnv-begleitservice-01",
@@ -664,7 +690,7 @@ def test_generate_topic_script_candidate_synthesizes_fallback_on_provider_failur
 
     assert item.topic == "Pflegegrad ohne Fehlstart verstehen"
     assert str(item.sources[0].url) == "https://example.com/pflege"
-    assert 26 <= len(item.script.split()) <= 36
+    assert 26 <= len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", item.script)) <= 36
 
 
 def test_generate_topic_script_candidate_strips_research_labels_from_long_script(monkeypatch):
@@ -729,7 +755,7 @@ def test_generate_topic_script_candidate_strips_research_labels_from_long_script
     assert "**" not in item.script
     assert "[cite:" not in lowered
     assert 54 <= len(item.script.split()) <= 74
-    assert 3 <= len([segment for segment in item.script.split(". ") if segment.strip()]) <= 4
+    assert 5 <= len([segment for segment in item.script.split(". ") if segment.strip()]) <= 6
 
 
 def test_generate_topic_script_candidate_rebuilds_from_facts_when_raw_draft_contains_heading_tail(monkeypatch):
@@ -839,6 +865,86 @@ def test_generate_topic_script_candidate_rejects_contaminated_long_fallback_with
             dossier=dossier,
             lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
         )
+
+
+def test_detect_spoken_copy_issues_allows_valid_separable_verb_endings():
+    assert detect_spoken_copy_issues(
+        "Deine barrierefreie Bahnreise organisierst du einfach: Ruf die MSZ unter 030 65212888 an!"
+    ) == []
+    assert detect_spoken_copy_issues(
+        "Wenn du das Merkzeichen B hast, fährt deine Begleitperson gratis im Nah- und Fernverkehr mit!"
+    ) == []
+
+
+def test_detect_spoken_copy_issues_flags_definition_residue_and_parenthetical_artifacts():
+    issues = detect_spoken_copy_issues(
+        "Pflege, Überprüfung, Justieren, rechtzeitiger Austausch von Verschleißteilen), eines Kopiergerätes) liegt."
+    )
+    kinds = {issue["kind"] for issue in issues}
+    assert "dangling_parenthetical" in kinds
+    assert "definition_residue" in kinds
+
+
+def test_generate_topic_script_candidate_rebuilds_when_model_returns_definition_residue(monkeypatch):
+    class FakeDefinitionResidueLLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return (
+                "Hast du dir mal Gedanken über deine Serviceverträge gemacht? "
+                "Maßnahmen zur Feststellung und Beurteilung des Ist-Zustands einer Einheit, "
+                "um potenzielle Mängel und deren Ursachen zu identifizieren."
+            )
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="servicevertrag-16s-01",
+        topic="Serviceverträge für Rollstuhlwartung besser verstehen",
+        anchor_topic="Serviceverträge für Rollstuhlwartung",
+        seed_topic="Serviceverträge für Rollstuhlwartung",
+        cluster_summary="Das Dossier trennt Wartung, Reparatur und Leihservice mit Blick auf Alltag und Vertragsfolgen.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Servicevertrag", "url": "https://example.com/servicevertrag"}],
+        source_summary="Klare Unterschiede bei Wartung, Reparatur und Ersatzservice helfen dir bei Verträgen und Ausfällen.",
+        facts=[
+            "Wartung verhindert Ausfälle durch Prüfung, Pflege und rechtzeitigen Teiletausch.",
+            "Klare Vertragsregeln helfen dir, Ersatzservice und Fristen besser einzuordnen.",
+            "Wenn du den Leistungsumfang kennst, reagierst du bei Ausfällen deutlich ruhiger.",
+        ],
+        angle_options=["Vertragsfolgen im Alltag"],
+        risk_notes=["Ohne klare Servicegrenzen bleibt im Ausfall oft zu viel Interpretationsspielraum."],
+        disclaimer="Keine Rechts- oder medizinische Beratung.",
+        lane_candidates=[
+            {
+                "lane_key": "servicevertrag-16",
+                "lane_family": "value",
+                "title": "Serviceverträge für Rollstuhlwartung besser verstehen",
+                "angle": "Vertragsfolgen und Ausfallrisiko.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "So erkennst du schneller, was Wartung, Reparatur und Ersatzservice für dich praktisch bedeuten.",
+                "facts": [
+                    "Ein klarer Servicevertrag spart dir Rückfragen, wenn dein Rollstuhl kurzfristig ausfällt.",
+                ],
+                "risk_notes": ["Ohne klaren Vertrag fehlt im Notfall oft die verlässliche Zuständigkeit."],
+                "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [16],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeDefinitionResidueLLM())
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=16,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    lowered = item.script.lower()
+    assert "maßnahmen zur feststellung" not in lowered
+    assert "ist-zustands" not in lowered
+    assert "überlassung einer sache" not in lowered
+    assert 26 <= len(item.script.split()) <= 36
 
 
 def test_parse_topic_research_response_accepts_json_followed_by_markdown():

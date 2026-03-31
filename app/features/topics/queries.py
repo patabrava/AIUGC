@@ -515,6 +515,36 @@ def get_topic_research_dossiers(
     return [_normalize_dossier_row(row) for row in (response.data or [])]
 
 
+def get_researched_topic_texts(*, limit: int = 500) -> List[str]:
+    """Return unique historical research seed/topic texts for future dedupe."""
+    supabase = get_supabase()
+    try:
+        response = (
+            supabase.client.table("topic_research_dossiers")
+            .select("seed_topic, topic, anchor_topic")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("topic_research_texts_fetch_failed", error=str(exc))
+        return []
+
+    values: List[str] = []
+    seen: set[str] = set()
+    for row in response.data or []:
+        for field in ("seed_topic", "topic", "anchor_topic"):
+            text = str((row or {}).get(field) or "").strip()
+            if not text:
+                continue
+            signature = _normalize_script_text(text)
+            if not signature or signature in seen:
+                continue
+            seen.add(signature)
+            values.append(text)
+    return values
+
+
 def store_topic_bank_entry(
     *,
     title: str,
@@ -580,6 +610,13 @@ def upsert_topic_script_variants(
             .data
             or []
         )
+    global_rows = (
+        supabase.client.table("topic_scripts")
+        .select("id, topic_registry_id, target_length_tier, script")
+        .execute()
+        .data
+        or []
+    )
 
     combined_rows = []
     seen_ids = set()
@@ -608,6 +645,16 @@ def upsert_topic_script_variants(
                 existing_lane_signatures_by_tier.setdefault((tier, lane_key), set()).add(signature)
         if bucket and lane_key:
             existing_exact_rows[(tier, bucket, lane_key)] = row
+    global_signatures_by_tier: Dict[int, Dict[str, str]] = {}
+    for row in global_rows:
+        script = str(row.get("script") or "").strip()
+        if not script:
+            continue
+        signature = _normalize_script_text(script)
+        tier = int(row.get("target_length_tier") or 0)
+        topic_id = str(row.get("topic_registry_id") or "").strip()
+        if signature and tier:
+            global_signatures_by_tier.setdefault(tier, {}).setdefault(signature, topic_id)
 
     stored_variants: List[Dict[str, Any]] = []
     duplicate_scripts_skipped = 0
@@ -693,6 +740,18 @@ def upsert_topic_script_variants(
             logger.info(
                 "topic_script_duplicate_skipped",
                 topic_registry_id=topic_registry_id,
+                target_length_tier=tier,
+                bucket=bucket,
+                lane_key=lane_key,
+            )
+            duplicate_scripts_skipped += 1
+            continue
+        global_existing_topic_id = global_signatures_by_tier.get(tier, {}).get(script_signature)
+        if script_signature and global_existing_topic_id and global_existing_topic_id != topic_registry_id:
+            logger.info(
+                "topic_script_global_duplicate_skipped",
+                topic_registry_id=topic_registry_id,
+                existing_topic_registry_id=global_existing_topic_id,
                 target_length_tier=tier,
                 bucket=bucket,
                 lane_key=lane_key,

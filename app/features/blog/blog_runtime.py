@@ -7,7 +7,6 @@ Per Constitution § V: Locality & Vertical Slices
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -55,43 +54,31 @@ def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
     return prompt
 
 
-def _parse_blog_response(raw_response: str, *, dossier_id: str) -> Dict[str, Any]:
-    """Parse and validate LLM response into BlogContent dict."""
-    try:
-        text = raw_response.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3].strip()
-        if text.startswith("json"):
-            text = text[4:].strip()
+BLOG_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "description": "Blog-Titel"},
+        "body": {"type": "string", "description": "Vollständiger Artikeltext mit Absätzen"},
+        "slug": {"type": "string", "description": "SEO-URL-Slug mit Bindestrichen"},
+        "meta_description": {"type": "string", "description": "SEO Meta-Description, max 160 Zeichen"},
+    },
+    "required": ["title", "body", "slug", "meta_description"],
+}
 
-        data = json.loads(text)
 
-        body = data.get("body", "")
-        return {
-            "title": data.get("title", ""),
-            "body": body,
-            "slug": data.get("slug", ""),
-            "meta_description": data.get("meta_description", ""),
-            "sources": [],
-            "word_count": len(body.split()),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "dossier_id": dossier_id,
-        }
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        logger.error("blog_response_parse_error", error=str(exc), raw_preview=raw_response[:500])
-        return {
-            "title": "",
-            "body": "",
-            "slug": "",
-            "meta_description": "",
-            "sources": [],
-            "word_count": 0,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "dossier_id": dossier_id,
-            "error": f"Failed to parse LLM response: {exc}",
-        }
+def _parse_blog_json(data: Dict[str, Any], *, dossier_id: str) -> Dict[str, Any]:
+    """Convert structured LLM JSON output into BlogContent dict."""
+    body = data.get("body", "")
+    return {
+        "title": data.get("title", ""),
+        "body": body,
+        "slug": data.get("slug", ""),
+        "meta_description": data.get("meta_description", ""),
+        "sources": [],
+        "word_count": len(body.split()),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "dossier_id": dossier_id,
+    }
 
 
 def _lookup_dossier(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -157,13 +144,14 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
         prompt = _build_blog_prompt(dossier_payload)
 
         llm = get_llm_client()
-        raw_response = llm.generate_gemini_text(
+        parsed = llm.generate_gemini_json(
             prompt=prompt,
+            json_schema=BLOG_JSON_SCHEMA,
             temperature=0.7,
-            max_tokens=4096,
+            max_tokens=8192,
         )
 
-        blog_content = _parse_blog_response(raw_response, dossier_id=dossier_id)
+        blog_content = _parse_blog_json(parsed, dossier_id=dossier_id)
 
         dossier_sources = dossier_payload.get("sources") or []
         blog_content["sources"] = [

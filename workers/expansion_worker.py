@@ -26,6 +26,11 @@ def run_expansion() -> None:
     """Run one cycle of script bank expansion."""
     from app.features.topics.variant_expansion import expand_script_bank
 
+    settings = get_settings()
+    if not settings.video_poller_enable_script_bank_expansion:
+        logger.info("script_bank_expansion_disabled_by_config")
+        return
+
     logger.info(
         "script_bank_expansion_starting",
         max_scripts=MAX_SCRIPTS_PER_RUN,

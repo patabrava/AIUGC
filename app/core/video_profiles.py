@@ -78,10 +78,10 @@ _PROFILES = {
         prompt1_min_seconds=12,
         prompt1_max_seconds=14,
         prompt1_max_chars_no_spaces=220,
-        prompt1_sentence_guidance="2 concise sentences",
+        prompt1_sentence_guidance="DREI oder VIER vollstaendige Saetze",
         prompt2_min_words=24,
         prompt2_max_words=34,
-        prompt2_sentence_guidance="1-2 concise sentences",
+        prompt2_sentence_guidance="3-4 Saetze",
     ),
     32: DurationProfile(
         target_length_tier=32,
@@ -96,10 +96,10 @@ _PROFILES = {
         prompt1_min_seconds=24,
         prompt1_max_seconds=28,
         prompt1_max_chars_no_spaces=430,
-        prompt1_sentence_guidance="3-4 concise sentences",
+        prompt1_sentence_guidance="FUENF oder SECHS vollstaendige Saetze",
         prompt2_min_words=40,
         prompt2_max_words=66,
-        prompt2_sentence_guidance="3-4 Sätze",
+        prompt2_sentence_guidance="5-6 Saetze",
     ),
 }
 

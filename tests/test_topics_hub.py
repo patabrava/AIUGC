@@ -205,7 +205,7 @@ def test_prompt_builders_include_bank_and_research_context():
     )
 
     assert "DOSSIER-KONTEXT FÜR DIESEN DURCHLAUF:" in prompt1
-    assert "HOOK-BANK (verbindlich):" not in prompt1
+    assert "HOOK-BANK (verbindlich):" in prompt1
     assert "Lane-Titel: Mobilitätsservice richtig buchen" in prompt1
     assert "RESEARCH-KONTEXT FÜR DIE SKRIPTE:" in prompt2
     assert "HOOK-BANK (verbindlich):" in prompt2

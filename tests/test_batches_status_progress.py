@@ -290,6 +290,98 @@ def test_build_batch_detail_view_exposes_caption_variants():
     assert view["publish_posts_json"][0]["captionOptions"][1]["label"] == "Medium Bullets"
 
 
+def test_build_batch_detail_view_polls_while_video_is_submitted():
+    batch_payload = {
+        "state": "S6_QA",
+        "meta_connection": {},
+        "tiktok_connection": {},
+        "posts": [
+            {
+                "id": "post-1",
+                "post_type": "value",
+                "topic_title": "Beispielthema",
+                "publish_caption": "",
+                "video_url": None,
+                "video_status": "submitted",
+                "seed_data": {
+                    "description": "Ein generischer Abschnitt.",
+                    "script_review_status": "approved",
+                },
+            }
+        ],
+    }
+
+    view = batch_handlers._build_batch_detail_view(batch_payload)
+
+    assert view["should_poll_videos"] is True
+
+
+class _FakeResponse:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeQuery:
+    def __init__(self, db, table_name):
+        self.db = db
+        self.table_name = table_name
+        self.filters = []
+        self.payload = None
+        self.operation = "select"
+        self.fields = None
+
+    def select(self, fields):
+        self.fields = fields
+        self.operation = "select"
+        return self
+
+    def update(self, payload):
+        self.payload = payload
+        self.operation = "update"
+        return self
+
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+
+    def execute(self):
+        rows = self.db[self.table_name]
+        matches = [row for row in rows if all(row.get(key) == value for key, value in self.filters)]
+        if self.operation == "update":
+            for row in matches:
+                row.update(self.payload)
+            return _FakeResponse([row.copy() for row in matches])
+        return _FakeResponse([row.copy() for row in matches])
+
+
+class _FakeSupabaseClient:
+    def __init__(self, db):
+        self.db = db
+
+    def table(self, table_name):
+        return _FakeQuery(self.db, table_name)
+
+
+def test_maybe_transition_batch_to_prompts_built_advances_when_all_posts_ready():
+    db = {
+        "batches": [{"id": "batch-1", "state": "S4_SCRIPTED"}],
+        "posts": [
+            {"id": "post-1", "batch_id": "batch-1", "video_prompt_json": {"prompt": 1}, "seed_data": {"script_review_status": "approved"}},
+            {"id": "post-2", "batch_id": "batch-1", "video_prompt_json": {"prompt": 2}, "seed_data": {"script_review_status": "approved"}},
+        ],
+    }
+
+    from app.features.posts import handlers as posts_handlers
+
+    posts_handlers._maybe_transition_batch_to_prompts_built(
+        batch_id="batch-1",
+        supabase_client=_FakeSupabaseClient(db),
+        correlation_id="test-corr",
+    )
+
+    assert db["batches"][0]["state"] == "S5_PROMPTS_BUILT"
+
+
 def test_batches_routes_return_full_documents_for_history_restore(monkeypatch):
     client = TestClient(app)
 

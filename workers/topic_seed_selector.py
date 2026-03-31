@@ -11,7 +11,7 @@ import yaml
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.core.logging import get_logger
-from app.features.topics.queries import get_all_topics_from_registry
+from app.features.topics.queries import get_all_topics_from_registry, get_researched_topic_texts
 from app.features.topics.deduplication import tokenize, jaccard_similarity
 
 logger = get_logger(__name__)
@@ -27,6 +27,24 @@ TOPIC_BANK_PATH = os.path.join(
 )
 
 DEFAULT_NICHE = "Schwerbehinderung, Treppenlifte, Barrierefreiheit"
+
+
+def _get_existing_research_titles() -> List[str]:
+    """Collect historical seed/topic texts so new runs stay in new territory."""
+    existing = get_all_topics_from_registry()
+    historical = get_researched_topic_texts()
+    titles: List[str] = []
+    seen = set()
+    for raw in [t.get("title") for t in existing if t.get("title")] + historical:
+        title = str(raw or "").strip()
+        if not title:
+            continue
+        signature = " ".join(sorted(tokenize(title))) or title.lower()
+        if signature in seen:
+            continue
+        seen.add(signature)
+        titles.append(title)
+    return titles
 
 
 def load_seed_topics_from_yaml() -> List[str]:
@@ -61,15 +79,15 @@ def load_seed_topics_from_yaml() -> List[str]:
 
 
 def filter_unresearched_seeds(seed_topics: List[str]) -> List[str]:
-    """Filter out seeds that already exist in topic_registry (by title similarity)."""
-    existing = get_all_topics_from_registry()
-    existing_titles = {t["title"].lower().strip() for t in existing if t.get("title")}
+    """Filter out seeds that overlap with previous seed/topic families."""
+    existing_titles = [title.lower().strip() for title in _get_existing_research_titles()]
+    exact_titles = set(existing_titles)
 
     unresearched = []
     for seed in seed_topics:
         seed_lower = seed.lower().strip()
         # Exact match check
-        if seed_lower in existing_titles:
+        if seed_lower in exact_titles:
             continue
         # Fuzzy match: Jaccard > 0.7 means too similar
         is_dup = False
@@ -134,8 +152,7 @@ def select_seeds(
     llm_added = 0
 
     if remaining > 0:
-        existing = get_all_topics_from_registry()
-        existing_titles = [t["title"] for t in existing if t.get("title")]
+        existing_titles = _get_existing_research_titles()
         llm_seeds = _generate_llm_seeds(existing_titles, remaining, niche)
         llm_filtered = filter_unresearched_seeds(llm_seeds)
         seeds.extend(llm_filtered[:remaining])

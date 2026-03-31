@@ -41,13 +41,15 @@ def test_load_seed_topics_malformed_yaml(tmp_path, monkeypatch):
     assert topics == []
 
 
+@patch("workers.topic_seed_selector.get_researched_topic_texts")
 @patch("workers.topic_seed_selector.get_all_topics_from_registry")
-def test_filter_unresearched_seeds(mock_get_topics):
+def test_filter_unresearched_seeds(mock_get_topics, mock_get_researched):
     """Filters out seeds that already have registry entries."""
     mock_get_topics.return_value = [
         {"title": "Topic A", "id": "1"},
         {"title": "Topic B", "id": "2"},
     ]
+    mock_get_researched.return_value = []
     from workers.topic_seed_selector import filter_unresearched_seeds
     seeds = ["Topic A", "Topic C", "Topic D"]
     result = filter_unresearched_seeds(seeds)
@@ -56,10 +58,28 @@ def test_filter_unresearched_seeds(mock_get_topics):
     assert "Topic D" in result
 
 
+@patch("workers.topic_seed_selector.get_researched_topic_texts")
 @patch("workers.topic_seed_selector.get_all_topics_from_registry")
-def test_select_seeds_phase1_sufficient(mock_get_topics):
+def test_filter_unresearched_seeds_excludes_previously_researched_topics(mock_get_topics, mock_get_researched):
+    mock_get_topics.return_value = []
+    mock_get_researched.return_value = [
+        "Barrierefreiheit im OePNV und Regionalverkehr",
+        "Merkzeichen B im Nahverkehr",
+    ]
+    from workers.topic_seed_selector import filter_unresearched_seeds
+    result = filter_unresearched_seeds([
+        "Barrierefreiheit im OePNV und Regionalverkehr",
+        "Neuer Anspruch bei Rollstuhlrampe im Bus",
+    ])
+    assert result == ["Neuer Anspruch bei Rollstuhlrampe im Bus"]
+
+
+@patch("workers.topic_seed_selector.get_researched_topic_texts")
+@patch("workers.topic_seed_selector.get_all_topics_from_registry")
+def test_select_seeds_phase1_sufficient(mock_get_topics, mock_get_researched):
     """When YAML bank has enough unresearched seeds, uses only Phase 1."""
     mock_get_topics.return_value = []
+    mock_get_researched.return_value = []
     from workers.topic_seed_selector import select_seeds
     with patch("workers.topic_seed_selector.load_seed_topics_from_yaml") as mock_yaml:
         mock_yaml.return_value = [f"Seed {i}" for i in range(20)]
@@ -68,12 +88,14 @@ def test_select_seeds_phase1_sufficient(mock_get_topics):
     assert source == "yaml_bank"
 
 
+@patch("workers.topic_seed_selector.get_researched_topic_texts")
 @patch("workers.topic_seed_selector.get_all_topics_from_registry")
-def test_select_seeds_phase2_fallback(mock_get_topics):
+def test_select_seeds_phase2_fallback(mock_get_topics, mock_get_researched):
     """When YAML bank is empty, falls back to LLM generation."""
     mock_get_topics.return_value = [
         {"title": f"Seed {i}", "id": str(i)} for i in range(20)
     ]
+    mock_get_researched.return_value = []
     from workers.topic_seed_selector import select_seeds
     with patch("workers.topic_seed_selector.load_seed_topics_from_yaml") as mock_yaml:
         mock_yaml.return_value = [f"Seed {i}" for i in range(20)]

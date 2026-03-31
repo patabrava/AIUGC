@@ -44,8 +44,8 @@ Scroll-Stopp ist Pflicht:
 SCRIPT-REGELN:
 - `script` muss GENAU 26-36 Woerter haben.
 - Wenn `script` unter 26 oder ueber 36 Woerter liegt, ist die Antwort ungueltig.
-- `script` muss genau ZWEI vollstaendige Saetze haben.
-- Der erste Satz ist der Hook. Der zweite Satz liefert die konkrete Einordnung, Konsequenz oder den Nutzen.
+- `script` muss genau DREI oder VIER vollstaendige Saetze haben.
+- Der erste Satz ist der Hook. Die folgenden Saetze liefern konkrete Einordnung, Konsequenz oder den Nutzen.
 - `script` muss mit `.`, `!` oder `?` enden.
 - `script` muss vollstaendig auf Deutsch sein.
 - Kein Clickbait, keine Panikmache, keine Passiv-Starts wie `Ab 2025 gibt es`.

@@ -33,3 +33,23 @@ def test_expand_script_bank_respects_max_per_run(monkeypatch):
         target_length_tiers=[8],
     )
     assert result["total_generated"] <= 3
+
+
+def test_expansion_worker_can_be_disabled_by_config(monkeypatch):
+    from workers import expansion_worker
+
+    calls = []
+
+    monkeypatch.setattr(
+        expansion_worker,
+        "get_settings",
+        lambda: type("Settings", (), {"video_poller_enable_script_bank_expansion": False})(),
+    )
+    monkeypatch.setattr(
+        "app.features.topics.variant_expansion.expand_script_bank",
+        lambda **kw: calls.append(kw) or {"total_generated": 99, "topics_processed": 7},
+    )
+
+    expansion_worker.run_expansion()
+
+    assert calls == []

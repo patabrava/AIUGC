@@ -76,3 +76,38 @@ def test_prompt_research_context_sanitizes_facts():
     assert "Leitende Zusammenfassung" not in context
     assert "Demografische Dringlichkeit" not in context
     assert "Rampen fehlen" in context
+
+
+from app.features.topics.topic_validation import detect_metadata_bleed
+
+
+def test_detect_metadata_bleed_catches_verbatim_summary():
+    """Script containing 6+ consecutive words from summary is flagged."""
+    script = "Das PBefG forderte vollstaendige Barrierefreiheit bis zum Januar 2022."
+    summary = "Das PBefG forderte vollstaendige Barrierefreiheit bis zum Januar 2022 fuer den gesamten OEPNV."
+    result = detect_metadata_bleed(script, source_summary=summary)
+    assert result is not None
+    assert result["kind"] == "metadata_bleed"
+
+
+def test_detect_metadata_bleed_allows_partial_overlap():
+    """Script sharing fewer than 6 consecutive words is OK."""
+    script = "Dein Recht auf Mitfahrt existiert nur auf dem Papier."
+    summary = "Das PBefG forderte vollstaendige Barrierefreiheit bis 2022."
+    result = detect_metadata_bleed(script, source_summary=summary)
+    assert result is None
+
+
+def test_detect_metadata_bleed_checks_cluster_summary():
+    """Cluster summary is also checked for bleed."""
+    script = "Barrierefreiheit im OEPNV bleibt eine gesellschaftliche Herausforderung fuer alle Beteiligten."
+    cluster = "Barrierefreiheit im OEPNV bleibt eine gesellschaftliche Herausforderung fuer alle Beteiligten und Verkehrsbetriebe."
+    result = detect_metadata_bleed(script, cluster_summary=cluster)
+    assert result is not None
+
+
+def test_detect_metadata_bleed_empty_inputs():
+    """Empty or None inputs return None."""
+    assert detect_metadata_bleed("", source_summary="Foo bar baz.") is None
+    assert detect_metadata_bleed("Script text.", source_summary="") is None
+    assert detect_metadata_bleed("Script text.") is None

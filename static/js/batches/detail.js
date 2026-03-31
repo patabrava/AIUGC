@@ -176,6 +176,7 @@
                     if (submittedCount > 0) {
                         this.submitStatusKind = 'success';
                         this.submitStatusMessage = `Submitted ${submittedCount} prompt(s) to Veo 3.1.`;
+                        window.setTimeout(() => window.location.reload(), 250);
                     } else {
                         this.submitStatusKind = 'warning';
                         this.submitStatusMessage = payload?.message

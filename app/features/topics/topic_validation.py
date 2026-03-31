@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -38,8 +38,8 @@ PROMPT1_WORD_BOUNDS = {
 
 PROMPT1_SENTENCE_BOUNDS = {
     8: (1, 1),
-    16: (2, 2),
-    32: (3, 4),
+    16: (3, 4),
+    32: (5, 6),
 }
 
 GERMAN_SIGNAL_WORDS = {
@@ -407,6 +407,46 @@ def _clean_fact_pool(raw_values: List[Any]) -> List[str]:
             seen.add(sig)
             clean.append(sentence)
     return clean
+
+
+def detect_metadata_bleed(
+    script: str,
+    *,
+    source_summary: str = "",
+    cluster_summary: str = "",
+    min_consecutive_words: int = 6,
+) -> Optional[Dict[str, Any]]:
+    """Detect if a script contains long verbatim runs from metadata fields.
+
+    Returns a dict with kind='metadata_bleed' if any metadata field shares
+    min_consecutive_words or more consecutive words with the script.
+    Returns None if clean.
+    """
+    script_text = str(script or "").strip().lower()
+    if not script_text:
+        return None
+
+    script_words = re.findall(r"[a-zäöüß0-9-]+", script_text)
+    if len(script_words) < min_consecutive_words:
+        return None
+
+    for field_name, field_value in [("source_summary", source_summary), ("cluster_summary", cluster_summary)]:
+        value = str(field_value or "").strip().lower()
+        if not value:
+            continue
+        meta_words = re.findall(r"[a-zäöüß0-9-]+", value)
+        if len(meta_words) < min_consecutive_words:
+            continue
+        for i in range(len(meta_words) - min_consecutive_words + 1):
+            window = " ".join(meta_words[i : i + min_consecutive_words])
+            if window in " ".join(script_words):
+                return {
+                    "kind": "metadata_bleed",
+                    "field": field_name,
+                    "matched_words": min_consecutive_words,
+                    "window": window,
+                }
+    return None
 
 
 def compute_bigram_jaccard(a: str, b: str) -> float:

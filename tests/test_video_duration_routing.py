@@ -1,3 +1,6 @@
+import pytest
+
+from app.core.errors import ValidationError
 from app.core.video_profiles import (
     VEO_EXTENDED_VIDEO_ROUTE,
     get_pollable_video_statuses,
@@ -102,8 +105,22 @@ def test_build_veo_extended_base_prompt_returns_first_segment():
     assert seg_meta["veo_current_segment_index"] == 0
 
 
-def test_build_veo_extended_base_prompt_caps_hops_when_chain_needs_more_segments():
+def test_build_veo_extended_base_prompt_rejects_under_segmented_32s_chain():
     seed_data = {"script": "Satz eins. Satz zwei. Satz drei. Satz vier.", "estimated_duration_s": 28}
+
+    with pytest.raises(ValidationError, match="one complete dialogue segment per hop"):
+        video_handlers._build_veo_extended_base_prompt(
+            seed_data,
+            planned_extension_hops=4,
+            target_length_tier=32,
+        )
+
+
+def test_build_veo_extended_base_prompt_preserves_full_32s_chain_budget():
+    seed_data = {
+        "script": "Satz eins. Satz zwei. Satz drei. Satz vier. Satz fuenf.",
+        "estimated_duration_s": 30,
+    }
 
     _prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
         seed_data,
@@ -111,9 +128,10 @@ def test_build_veo_extended_base_prompt_caps_hops_when_chain_needs_more_segments
         target_length_tier=32,
     )
 
+    assert seg_meta["veo_required_segments"] == 5
     assert seg_meta["veo_planned_extension_hops_target"] == 4
-    assert seg_meta["veo_extension_hops_target"] == 3
-    assert seg_meta["veo_chain_shortened_to_available_segments"] is True
+    assert seg_meta["veo_extension_hops_target"] == 4
+    assert seg_meta["veo_chain_shortened_to_available_segments"] is False
 
 
 def test_batch_video_generation_request_accepts_duration_tier_seconds():
