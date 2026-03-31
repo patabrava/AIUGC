@@ -579,6 +579,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     blog_status=p.get("blog_status", "disabled"),
                     blog_content=p.get("blog_content") or {},
                     blog_webflow_item_id=p.get("blog_webflow_item_id"),
+                    blog_scheduled_at=p.get("blog_scheduled_at"),
                     blog_published_at=p.get("blog_published_at"),
                     created_at=p.get("created_at"),
                     updated_at=p.get("updated_at"),

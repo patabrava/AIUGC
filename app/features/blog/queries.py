@@ -8,6 +8,7 @@ Per Constitution § V: Locality & Vertical Slices
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.adapters.supabase_client import get_supabase
@@ -22,7 +23,7 @@ def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
     supabase = get_supabase()
     response = (
         supabase.client.table("posts")
-        .select("id", "batch_id", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_published_at", "topic_title")
+        .select("id", "batch_id", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_scheduled_at", "blog_published_at", "topic_title")
         .eq("id", post_id)
         .execute()
     )
@@ -65,7 +66,9 @@ def toggle_blog_enabled(post_id: str, *, enabled: bool) -> Dict[str, Any]:
 
     if enabled:
         new_status = "pending"
-        if post.get("blog_content", {}).get("body"):
+        if post.get("blog_scheduled_at"):
+            new_status = "scheduled"
+        elif post.get("blog_content", {}).get("body"):
             new_status = "draft"
     else:
         new_status = "disabled"
@@ -74,6 +77,8 @@ def toggle_blog_enabled(post_id: str, *, enabled: bool) -> Dict[str, Any]:
         "blog_enabled": enabled,
         "blog_status": new_status,
     }
+    if not enabled:
+        update_payload["blog_scheduled_at"] = None
 
     response = (
         supabase.client.table("posts")
@@ -91,7 +96,16 @@ def toggle_blog_enabled(post_id: str, *, enabled: bool) -> Dict[str, Any]:
     return response.data[0]
 
 
-def update_blog_status(post_id: str, *, status: str, blog_content: Optional[Dict[str, Any]] = None, webflow_item_id: Optional[str] = None, published_at: Optional[str] = None) -> Dict[str, Any]:
+def update_blog_status(
+    post_id: str,
+    *,
+    status: str,
+    blog_content: Optional[Dict[str, Any]] = None,
+    webflow_item_id: Optional[str] = None,
+    published_at: Optional[str] = None,
+    scheduled_at: Optional[str] = None,
+    clear_scheduled_at: bool = False,
+) -> Dict[str, Any]:
     """Update blog_status and optionally blog_content/webflow fields."""
     supabase = get_supabase()
     update_payload: Dict[str, Any] = {"blog_status": status}
@@ -101,6 +115,10 @@ def update_blog_status(post_id: str, *, status: str, blog_content: Optional[Dict
         update_payload["blog_webflow_item_id"] = webflow_item_id
     if published_at is not None:
         update_payload["blog_published_at"] = published_at
+    if scheduled_at is not None:
+        update_payload["blog_scheduled_at"] = scheduled_at
+    elif clear_scheduled_at:
+        update_payload["blog_scheduled_at"] = None
 
     response = (
         supabase.client.table("posts")
@@ -149,9 +167,26 @@ def get_blog_enabled_posts(batch_id: str) -> List[Dict[str, Any]]:
     supabase = get_supabase()
     response = (
         supabase.client.table("posts")
-        .select("id", "batch_id", "post_type", "topic_title", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_published_at")
+        .select("id", "batch_id", "post_type", "topic_title", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_scheduled_at", "blog_published_at")
         .eq("batch_id", batch_id)
         .eq("blog_enabled", True)
+        .execute()
+    )
+    return response.data or []
+
+
+def get_due_scheduled_blog_posts(limit: int = 10) -> List[Dict[str, Any]]:
+    """Return blog posts that should be published now."""
+    supabase = get_supabase()
+    now = datetime.now(timezone.utc).isoformat()
+    response = (
+        supabase.client.table("posts")
+        .select("id", "batch_id", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_scheduled_at", "blog_published_at", "topic_title")
+        .eq("blog_enabled", True)
+        .eq("blog_status", "scheduled")
+        .lte("blog_scheduled_at", now)
+        .order("blog_scheduled_at")
+        .limit(limit)
         .execute()
     )
     return response.data or []

@@ -5,6 +5,7 @@ Pydantic models for blog post generation and Webflow publishing.
 Per Constitution § II: Validated Boundaries
 """
 
+from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -49,3 +50,15 @@ class BlogPublishResponse(BaseModel):
     blog_status: str
     webflow_item_id: Optional[str] = None
     blog_published_at: Optional[str] = None
+
+
+class BlogScheduleRequest(BaseModel):
+    """Request to schedule a generated blog post for later publishing."""
+    scheduled_at: datetime = Field(..., description="Scheduled publish time in UTC")
+
+
+class BlogScheduleResponse(BaseModel):
+    """Response after scheduling a blog post."""
+    post_id: str
+    blog_status: str
+    blog_scheduled_at: str

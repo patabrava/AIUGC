@@ -25,7 +25,7 @@ from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
 from app.features.publish.handlers import router as publish_router, run_scheduled_publish_job
-from app.features.blog.handlers import router as blog_router
+from app.features.blog.handlers import router as blog_router, run_scheduled_blog_publish_job
 from app.features.auth.handlers import router as auth_router
 from app.features.auth.middleware import require_auth, is_public_path
 
@@ -76,6 +76,17 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("publish_scheduler_started", interval_minutes=1)
 
+    scheduler.add_job(
+        run_scheduled_blog_publish_job,
+        "interval",
+        minutes=1,
+        id="blog_publish_dispatch",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
+    logger.info("blog_publish_scheduler_started", interval_minutes=1)
+
     recovered_batches = recover_stalled_batches(limit=1, max_age_hours=6)
     if recovered_batches:
         logger.info("startup_batch_recovery_scheduled", batch_ids=recovered_batches)
@@ -88,6 +99,7 @@ async def lifespan(app: FastAPI):
 
     scheduler.shutdown(wait=False)
     logger.info("publish_scheduler_stopped")
+    logger.info("blog_publish_scheduler_stopped")
     logger.info("application_shutdown")
 
 

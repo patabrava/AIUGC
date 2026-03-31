@@ -4,6 +4,8 @@ FastAPI route handlers for blog post operations.
 Per Constitution § V: Locality & Vertical Slices
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
@@ -11,11 +13,19 @@ from app.core.config import get_settings
 from app.core.errors import FlowForgeException, SuccessResponse
 from app.core.logging import get_logger
 from app.features.blog.queries import (
+    _load_post_for_blog,
     get_blog_enabled_posts,
     toggle_blog_enabled,
+    update_blog_status,
     update_blog_content_fields,
 )
-from app.features.blog.schemas import BlogContentUpdateRequest, BlogPublishResponse, BlogToggleResponse
+from app.features.blog.schemas import (
+    BlogContentUpdateRequest,
+    BlogPublishResponse,
+    BlogScheduleRequest,
+    BlogScheduleResponse,
+    BlogToggleResponse,
+)
 
 logger = get_logger(__name__)
 
@@ -94,7 +104,7 @@ async def generate_all_blog_drafts(batch_id: str):
                 seed_data = json.loads(seed_data)
             if seed_data.get("script_review_status") != "approved":
                 continue
-            if post.get("blog_status") in ("generating", "draft", "published"):
+            if post.get("blog_status") in ("generating", "draft", "scheduled", "publishing", "published"):
                 continue
             result = run_generate(post["id"])
             results.append({"post_id": post["id"], "status": "draft" if not result.get("error") else "failed"})
@@ -106,6 +116,46 @@ async def generate_all_blog_drafts(batch_id: str):
         raise
     except Exception as exc:
         logger.error("blog_generate_all_error", batch_id=batch_id, error=str(exc))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.put("/posts/{post_id}/blog/schedule", response_model=SuccessResponse)
+async def schedule_blog_publish(post_id: str, request: BlogScheduleRequest):
+    """Schedule a generated blog post for later publishing."""
+    try:
+        if request.scheduled_at.tzinfo is None:
+            scheduled_at = request.scheduled_at.replace(tzinfo=timezone.utc)
+        else:
+            scheduled_at = request.scheduled_at.astimezone(timezone.utc)
+
+        if scheduled_at <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Blog schedule must be in the future.")
+
+        post = _load_post_for_blog(post_id)
+        blog_content = post.get("blog_content") or {}
+        if not post.get("blog_enabled"):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enable blog generation before scheduling.")
+        if not blog_content.get("body"):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Generate the blog draft before scheduling.")
+
+        updated = update_blog_status(
+            post_id,
+            status="scheduled",
+            scheduled_at=scheduled_at.isoformat(),
+        )
+        return SuccessResponse(
+            data=BlogScheduleResponse(
+                post_id=post_id,
+                blog_status=updated.get("blog_status", "scheduled"),
+                blog_scheduled_at=str(updated.get("blog_scheduled_at") or scheduled_at.isoformat()),
+            ).model_dump(),
+        )
+    except FlowForgeException:
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("blog_schedule_error", post_id=post_id, error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
@@ -140,57 +190,42 @@ async def update_blog_content(post_id: str, request: Request):
 async def publish_blog_to_webflow(post_id: str):
     """Push blog post to Webflow CMS."""
     try:
-        from datetime import datetime, timezone
-        from app.features.blog.queries import _load_post_for_blog, update_blog_status
-        from app.features.blog.webflow_client import WebflowClient
+        from app.features.blog.blog_runtime import publish_blog_post
 
-        settings = get_settings()
-        post = _load_post_for_blog(post_id)
-        blog_content = post.get("blog_content") or {}
-
-        if not blog_content.get("body"):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No blog content to publish")
-
-        client = WebflowClient(
-            api_token=settings.webflow_api_token,
-            collection_id=settings.webflow_collection_id,
-            site_id=settings.webflow_site_id,
-        )
-
-        field_data = {
-            "name": blog_content.get("title", ""),
-            "slug": blog_content.get("slug", ""),
-            "post-body": blog_content.get("body", ""),
-            "meta-description": blog_content.get("meta_description", ""),
-        }
-
-        existing_item_id = post.get("blog_webflow_item_id")
-        if existing_item_id:
-            client.update_item(existing_item_id, field_data)
-            item_id = existing_item_id
-        else:
-            item_id = client.create_item(field_data)
-
-        client.publish_site()
-        published_at = datetime.now(timezone.utc).isoformat()
-
-        update_blog_status(
-            post_id,
-            status="published",
-            webflow_item_id=item_id,
-            published_at=published_at,
-        )
-
+        result = publish_blog_post(post_id)
         return SuccessResponse(
             data=BlogPublishResponse(
                 post_id=post_id,
-                blog_status="published",
-                webflow_item_id=item_id,
-                blog_published_at=published_at,
+                blog_status=result["blog_status"],
+                webflow_item_id=result["webflow_item_id"],
+                blog_published_at=result["blog_published_at"],
             ).model_dump(),
         )
     except FlowForgeException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     except Exception as exc:
         logger.error("blog_publish_error", post_id=post_id, error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+async def run_scheduled_blog_publish_job() -> dict:
+    """Entry point used by the in-process scheduler in app lifespan."""
+    from app.features.blog.blog_runtime import run_scheduled_blog_publish_job as run_job
+
+    return await run_job()
+
+
+@router.post("/cron/dispatch", response_model=SuccessResponse)
+async def cron_dispatch_blog_publish(request: Request):
+    """Cron-compatible endpoint for dispatching due Webflow blog posts."""
+    settings = get_settings()
+    authorization = request.headers.get("authorization")
+    if not authorization or authorization != f"Bearer {settings.cron_secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from app.features.blog.blog_runtime import dispatch_due_blog_posts
+
+    result = await dispatch_due_blog_posts(trigger="cron")
+    return SuccessResponse(data=result)

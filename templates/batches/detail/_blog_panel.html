@@ -4,7 +4,7 @@
 {% if blog_posts %}
 <div class="mt-6 rounded-xl border border-white/10 bg-[#1a1a2e] overflow-hidden"
      x-data="blogPanelComponent()"
-     x-init="posts = JSON.parse($refs.blogData.textContent)"
+     x-init="initPosts(JSON.parse($refs.blogData.textContent))"
      id="blog-panel">
     <script type="application/json" x-ref="blogData">{{ blog_posts | tojson }}</script>
 
@@ -43,11 +43,12 @@
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full"
                           :class="{
                               'bg-green-500/15 text-green-400': post.blog_status === 'draft' || post.blog_status === 'published',
+                              'bg-blue-500/15 text-blue-400': post.blog_status === 'scheduled',
                               'bg-amber-500/15 text-amber-400': post.blog_status === 'pending',
-                              'bg-purple-500/15 text-purple-400': post.blog_status === 'generating',
+                              'bg-purple-500/15 text-purple-400': post.blog_status === 'generating' || post.blog_status === 'publishing',
                               'bg-red-500/15 text-red-400': post.blog_status === 'failed',
                           }"
-                          x-text="post.blog_status === 'draft' ? 'Draft Ready' : post.blog_status === 'published' ? 'Published' : post.blog_status.charAt(0).toUpperCase() + post.blog_status.slice(1)"></span>
+                          x-text="post.blog_status === 'draft' ? 'Draft Ready' : post.blog_status === 'published' ? 'Published' : post.blog_status === 'scheduled' ? 'Scheduled' : post.blog_status.charAt(0).toUpperCase() + post.blog_status.slice(1)"></span>
                     <template x-if="post.blog_status === 'pending' || post.blog_status === 'failed'">
                         <button class="bg-purple-600 text-white text-xs font-medium px-3 py-1 rounded transition hover:bg-purple-700"
                                 type="button"
@@ -122,24 +123,37 @@
                                 Edit in Full Screen
                             </button>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 flex-wrap justify-end">
                             <span class="text-xs text-gray-500">Webflow:</span>
+                            <input type="datetime-local"
+                                   x-model="post.blogScheduledAtLocal"
+                                   class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:border-purple-500 focus:outline-none">
+                            <button class="text-blue-300 border border-blue-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-500/10 transition"
+                                    type="button"
+                                    @click="scheduleDraft(post)">
+                                <span x-text="post.blog_status === 'scheduled' ? 'Reschedule' : 'Schedule'"></span>
+                            </button>
                             <template x-if="post.blog_webflow_item_id">
                                 <button class="bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition"
-                                        :hx-post="'/blog/posts/' + post.id + '/blog/publish'"
-                                        hx-swap="none">
+                                        type="button"
+                                        @click="publishNow(post.id)">
                                     Update on Webflow
                                 </button>
                             </template>
                             <template x-if="!post.blog_webflow_item_id">
                                 <button class="bg-emerald-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-600 transition"
-                                        :hx-post="'/blog/posts/' + post.id + '/blog/publish'"
-                                        hx-swap="none">
+                                        type="button"
+                                        @click="publishNow(post.id)">
                                     Publish Now
                                 </button>
                             </template>
                         </div>
                     </div>
+                    <template x-if="post.blog_scheduled_at">
+                        <p class="mt-3 text-xs text-blue-300">
+                            Scheduled for <span x-text="formatScheduled(post.blog_scheduled_at)"></span>
+                        </p>
+                    </template>
                 </div>
             </template>
         </div>
@@ -148,7 +162,7 @@
     {# Panel Footer #}
     <div class="flex items-center justify-between px-6 py-3 bg-purple-500/5">
         <span class="text-xs text-gray-500"
-              x-text="posts.filter(p => p.blog_status === 'draft').length + ' draft(s) ready · ' + posts.filter(p => p.blog_status === 'pending').length + ' pending'"></span>
+              x-text="posts.filter(p => p.blog_status === 'draft').length + ' draft(s) ready · ' + posts.filter(p => p.blog_status === 'scheduled').length + ' scheduled · ' + posts.filter(p => p.blog_status === 'pending').length + ' pending'"></span>
     </div>
 </div>
 
@@ -158,9 +172,34 @@ function blogPanelComponent() {
         posts: [],
         expanded: null,
         isGenerating: false,
+        initPosts(rawPosts) {
+            this.posts = (rawPosts || []).map((post) => ({
+                ...post,
+                blogScheduledAtLocal: this.toLocalInput(post.blog_scheduled_at),
+            }));
+        },
         toggleExpand(postId) {
             this.expanded = this.expanded === postId ? null : postId;
             window.batchDetailExpanded = !!this.expanded;
+        },
+        toLocalInput(value) {
+            if (!value) return '';
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return '';
+            if (typeof window.zoneDateToLocalValue === 'function') {
+                return window.zoneDateToLocalValue(parsed, 'Europe/Berlin');
+            }
+            return String(value).slice(0, 16);
+        },
+        formatScheduled(value) {
+            if (!value) return '';
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return value;
+            return parsed.toLocaleString('de-DE', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+                timeZone: 'Europe/Berlin',
+            });
         },
         async generateDraft(postId) {
             if (!postId || this.isGenerating) return;
@@ -177,6 +216,56 @@ function blogPanelComponent() {
             } catch (error) {
                 console.error('Failed to generate blog draft', error);
                 alert(error instanceof Error ? error.message : 'Failed to generate blog draft');
+            } finally {
+                this.isGenerating = false;
+            }
+        },
+        async publishNow(postId) {
+            if (!postId || this.isGenerating) return;
+            this.isGenerating = true;
+            try {
+                const response = await fetch('/blog/posts/' + postId + '/blog/publish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (!response.ok) {
+                    throw new Error(await response.text() || `Publish failed (${response.status})`);
+                }
+                window.location.reload();
+            } catch (error) {
+                console.error('Failed to publish blog post', error);
+                alert(error instanceof Error ? error.message : 'Failed to publish blog post');
+            } finally {
+                this.isGenerating = false;
+            }
+        },
+        async scheduleDraft(post) {
+            if (!post?.id || this.isGenerating) return;
+            if (!post.blogScheduledAtLocal) {
+                alert('Choose a schedule date first.');
+                return;
+            }
+            const scheduledDate = typeof window.zonedLocalValueToUtcDate === 'function'
+                ? window.zonedLocalValueToUtcDate(post.blogScheduledAtLocal, 'Europe/Berlin')
+                : new Date(post.blogScheduledAtLocal);
+            if (!(scheduledDate instanceof Date) || Number.isNaN(scheduledDate.getTime())) {
+                alert('Invalid schedule date.');
+                return;
+            }
+            this.isGenerating = true;
+            try {
+                const response = await fetch('/blog/posts/' + post.id + '/blog/schedule', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scheduled_at: scheduledDate.toISOString() }),
+                });
+                if (!response.ok) {
+                    throw new Error(await response.text() || `Schedule failed (${response.status})`);
+                }
+                window.location.reload();
+            } catch (error) {
+                console.error('Failed to schedule blog post', error);
+                alert(error instanceof Error ? error.message : 'Failed to schedule blog post');
             } finally {
                 this.isGenerating = false;
             }

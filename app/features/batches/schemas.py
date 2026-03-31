@@ -112,6 +112,7 @@ class PostDetail(BaseModel):
     blog_status: str = "disabled"
     blog_content: Optional[Dict[str, Any]] = None
     blog_webflow_item_id: Optional[str] = None
+    blog_scheduled_at: Optional[datetime] = None
     blog_published_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
