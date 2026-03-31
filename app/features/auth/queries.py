@@ -44,9 +44,17 @@ def _auth_headers() -> Dict[str, str]:
     }
 
 
+def _callback_url() -> str:
+    """Build the auth callback URL for magic link redirects."""
+    settings = get_settings()
+    base = settings.app_url or "http://localhost:8000"
+    return f"{base}/auth/callback"
+
+
 async def send_otp(email: str) -> bool:
     """Send a magic OTP code to the given email via Supabase Auth."""
-    url = f"{_auth_url()}/otp"
+    redirect_to = _callback_url()
+    url = f"{_auth_url()}/otp?redirect_to={redirect_to}"
     payload = {"email": email}
 
     async with httpx.AsyncClient() as client:
