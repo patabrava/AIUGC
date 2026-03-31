@@ -25,6 +25,7 @@ from app.features.blog.schemas import (
     BlogScheduleRequest,
     BlogScheduleResponse,
     BlogToggleResponse,
+    blog_has_draft_content,
 )
 
 logger = get_logger(__name__)
@@ -135,7 +136,7 @@ async def schedule_blog_publish(post_id: str, request: BlogScheduleRequest):
         blog_content = post.get("blog_content") or {}
         if not post.get("blog_enabled"):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enable blog generation before scheduling.")
-        if not blog_content.get("body"):
+        if not blog_has_draft_content(blog_content):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Generate the blog draft before scheduling.")
 
         updated = update_blog_status(
@@ -143,6 +144,7 @@ async def schedule_blog_publish(post_id: str, request: BlogScheduleRequest):
             status="scheduled",
             scheduled_at=scheduled_at.isoformat(),
         )
+        update_blog_content_fields(post_id, updates={"publication_date": scheduled_at.isoformat()})
         return SuccessResponse(
             data=BlogScheduleResponse(
                 post_id=post_id,
@@ -180,6 +182,8 @@ async def update_blog_content(post_id: str, request: Request):
         update_blog_content_fields(post_id, updates=updates)
         return SuccessResponse(data={"post_id": post_id, "updated_fields": list(updates.keys())})
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as exc:
         logger.error("blog_content_update_error", post_id=post_id, error=str(exc))

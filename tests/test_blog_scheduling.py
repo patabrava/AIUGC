@@ -58,12 +58,12 @@ def test_dispatch_due_blog_posts_processes_due_rows(monkeypatch):
     monkeypatch.setattr(
         blog_runtime,
         "publish_blog_post",
-        lambda post_id: published.append(post_id) or {"post_id": post_id},
+        lambda post_id, publication_date=None: published.append((post_id, publication_date)) or {"post_id": post_id},
     )
 
     result = asyncio.run(blog_runtime.dispatch_due_blog_posts(trigger="test"))
 
-    assert published == ["post-1"]
+    assert published == [("post-1", None)]
     assert result["processed"] == 1
     assert result["published"] == 1
     assert result["failed"] == 0

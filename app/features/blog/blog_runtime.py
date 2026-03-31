@@ -13,24 +13,98 @@ from typing import Any, Dict, Optional
 
 from app.adapters.llm_client import get_llm_client
 from app.adapters.supabase_client import get_supabase
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.blog.queries import (
     _load_post_for_blog,
     get_due_scheduled_blog_posts,
     update_blog_status,
 )
-from app.features.topics.queries import get_topic_research_dossiers
+from app.features.blog.schemas import (
+    blog_has_draft_content,
+    build_blog_content_from_llm,
+    merge_blog_content_updates,
+)
 from app.features.blog.webflow_client import WebflowClient
-from app.core.config import get_settings
+from app.features.topics.queries import get_topic_research_dossiers
 
 logger = get_logger(__name__)
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "topics" / "prompt_data" / "blog_post.txt"
 
+BLOG_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "description": "Titel des Blogbeitrags"},
+        "slug": {"type": "string", "description": "SEO-URL-Slug mit Bindestrichen"},
+        "merksatz": {"type": "string", "description": "Ein prägnanter Kernsatz in genau einem Satz"},
+        "tipp": {"type": "string", "description": "Ein konkreter Tipp in genau einem Satz"},
+        "summary_bullets": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3 bis 6 kurze Stichpunkte für die Zusammenfassung",
+        },
+        "intro_heading": {"type": "string", "description": "Zwischenüberschrift für die Einleitung"},
+        "introduction_paragraphs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "1 bis 3 Einleitungsabsätze",
+        },
+        "sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "heading": {"type": "string"},
+                    "paragraphs": {"type": "array", "items": {"type": "string"}},
+                    "bullets": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["heading", "paragraphs", "bullets"],
+            },
+            "description": "3 bis 6 Hauptabschnitte des Artikels",
+        },
+        "conclusion_heading": {"type": "string", "description": "Zwischenüberschrift für den Schluss"},
+        "conclusion_paragraphs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "1 bis 3 Schlussabsätze",
+        },
+        "preview_text": {"type": "string", "description": "Kurzer Vorschauteaser für Blog-Grid oder Listing"},
+        "meta_title": {"type": "string", "description": "SEO-Meta-Titel"},
+        "meta_description": {"type": "string", "description": "SEO-Meta-Beschreibung, maximal 160 Zeichen"},
+    },
+    "required": [
+        "name",
+        "slug",
+        "merksatz",
+        "tipp",
+        "summary_bullets",
+        "intro_heading",
+        "introduction_paragraphs",
+        "sections",
+        "conclusion_heading",
+        "conclusion_paragraphs",
+        "preview_text",
+        "meta_title",
+        "meta_description",
+    ],
+}
+
 
 def _load_prompt_template() -> str:
     """Load the blog post prompt template from disk."""
     return _PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _isoformat_optional(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+    text = str(value).strip()
+    return text or None
 
 
 def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
@@ -61,30 +135,22 @@ def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
     return prompt
 
 
-BLOG_JSON_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "title": {"type": "string", "description": "Blog-Titel"},
-        "body": {"type": "string", "description": "Vollständiger Artikeltext mit Absätzen"},
-        "slug": {"type": "string", "description": "SEO-URL-Slug mit Bindestrichen"},
-        "meta_description": {"type": "string", "description": "SEO Meta-Description, max 160 Zeichen"},
-    },
-    "required": ["title", "body", "slug", "meta_description"],
-}
-
-
-def _parse_blog_json(data: Dict[str, Any], *, dossier_id: str) -> Dict[str, Any]:
-    """Convert structured LLM JSON output into BlogContent dict."""
-    body = data.get("body", "")
+def _build_error_content(post: Dict[str, Any], error: str) -> Dict[str, Any]:
     return {
-        "title": data.get("title", ""),
-        "body": body,
-        "slug": data.get("slug", ""),
-        "meta_description": data.get("meta_description", ""),
+        "title": post.get("topic_title") or post.get("seed_data", {}).get("canonical_topic", ""),
+        "name": post.get("topic_title") or post.get("seed_data", {}).get("canonical_topic", ""),
+        "body": "",
+        "body_html": "",
+        "slug": "",
+        "meta_description": "",
+        "meta_title": "",
+        "summary_html": "",
+        "summary_bullets": [],
         "sources": [],
-        "word_count": len(body.split()),
+        "word_count": 0,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "dossier_id": dossier_id,
+        "dossier_id": "",
+        "error": error,
     }
 
 
@@ -94,9 +160,7 @@ def _lookup_dossier(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not topic_title:
         return None
 
-    from app.adapters.supabase_client import get_supabase
     supabase = get_supabase()
-
     response = (
         supabase.client.table("topic_registry")
         .select("id")
@@ -131,17 +195,7 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
     try:
         dossier = _lookup_dossier(post)
         if not dossier:
-            error_content = {
-                "title": "",
-                "body": "",
-                "slug": "",
-                "meta_description": "",
-                "sources": [],
-                "word_count": 0,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "dossier_id": "",
-                "error": "No research dossier found for this topic.",
-            }
+            error_content = _build_error_content(post, "No research dossier found for this topic.")
             update_blog_status(post_id, status="failed", blog_content=error_content)
             return error_content
 
@@ -158,40 +212,30 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
             max_tokens=8192,
         )
 
-        blog_content = _parse_blog_json(parsed, dossier_id=dossier_id)
-
         dossier_sources = dossier_payload.get("sources") or []
-        blog_content["sources"] = [
-            {"title": s.get("title", ""), "url": str(s.get("url", ""))}
-            for s in dossier_sources
-        ]
+        blog_content = build_blog_content_from_llm(
+            parsed,
+            dossier_id=dossier_id,
+            sources=[
+                {"title": s.get("title", ""), "url": str(s.get("url", ""))}
+                for s in dossier_sources
+                if s.get("title") and s.get("url")
+            ],
+            scheduled_at=_isoformat_optional(post.get("blog_scheduled_at")),
+        )
 
-        if blog_content.get("error"):
-            update_blog_status(post_id, status="failed", blog_content=blog_content)
-        else:
-            next_status = "scheduled" if post.get("blog_scheduled_at") else "draft"
-            update_blog_status(post_id, status=next_status, blog_content=blog_content)
-
+        next_status = "scheduled" if post.get("blog_scheduled_at") else "draft"
+        update_blog_status(post_id, status=next_status, blog_content=blog_content)
         return blog_content
 
     except Exception as exc:
         logger.error("blog_generation_failed", post_id=post_id, error=str(exc))
-        error_content = {
-            "title": "",
-            "body": "",
-            "slug": "",
-            "meta_description": "",
-            "sources": [],
-            "word_count": 0,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "dossier_id": "",
-            "error": str(exc),
-        }
+        error_content = _build_error_content(post, str(exc))
         update_blog_status(post_id, status="failed", blog_content=error_content)
         return error_content
 
 
-def publish_blog_post(post_id: str) -> Dict[str, Any]:
+def publish_blog_post(post_id: str, *, publication_date: Optional[str] = None) -> Dict[str, Any]:
     """Publish a generated blog post to Webflow immediately."""
     settings = get_settings()
     post = _load_post_for_blog(post_id)
@@ -199,7 +243,7 @@ def publish_blog_post(post_id: str) -> Dict[str, Any]:
 
     if not post.get("blog_enabled"):
         raise ValueError(f"Blog not enabled for post {post_id}")
-    if not blog_content.get("body"):
+    if not blog_has_draft_content(blog_content):
         raise ValueError(f"No blog content to publish for post {post_id}")
 
     client = WebflowClient(
@@ -208,12 +252,8 @@ def publish_blog_post(post_id: str) -> Dict[str, Any]:
         site_id=settings.webflow_site_id,
     )
 
-    field_data = {
-        "name": blog_content.get("title", ""),
-        "slug": blog_content.get("slug", ""),
-        "post-body": blog_content.get("body", ""),
-        "meta-description": blog_content.get("meta_description", ""),
-    }
+    effective_publication_date = publication_date or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    field_data = client.build_blog_field_data(blog_content, publication_date=effective_publication_date)
 
     update_blog_status(post_id, status="publishing")
 
@@ -224,12 +264,17 @@ def publish_blog_post(post_id: str) -> Dict[str, Any]:
     else:
         item_id = client.create_item(field_data)
 
-    client.publish_site()
-    published_at = datetime.now(timezone.utc).isoformat()
+    client.publish_item(item_id)
+    published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    updated_content = merge_blog_content_updates(
+        blog_content,
+        updates={"publication_date": effective_publication_date},
+    )
 
     update_blog_status(
         post_id,
         status="published",
+        blog_content=updated_content,
         webflow_item_id=item_id,
         published_at=published_at,
         clear_scheduled_at=True,
@@ -262,7 +307,7 @@ async def dispatch_due_blog_posts(limit: int = 10, *, trigger: str = "scheduler"
             ).eq("blog_status", "scheduled").execute()
             if not claim.data:
                 continue
-            publish_blog_post(post_id)
+            publish_blog_post(post_id, publication_date=_isoformat_optional(row.get("blog_scheduled_at")))
             processed += 1
             published += 1
             logger.info("blog_due_post_published", trigger=trigger, post_id=post_id)

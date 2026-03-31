@@ -8,7 +8,6 @@
      id="blog-panel">
     <script type="application/json" x-ref="blogData">{{ blog_posts | tojson }}</script>
 
-    {# Panel Header #}
     <div class="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div class="flex items-center gap-3">
             <h3 class="text-base font-semibold text-gray-100">Blog Posts</h3>
@@ -20,13 +19,10 @@
                 @click="generateAllDrafts()">
             Generate All Drafts
         </button>
-        <span id="blog-generate-spinner" class="htmx-indicator text-purple-400 text-sm">Generating...</span>
     </div>
 
-    {# Blog Post Rows #}
     <template x-for="post in posts" :key="post.id">
         <div class="border-b border-white/5">
-            {# Collapsed Row #}
             <div class="flex items-center justify-between px-6 py-3 cursor-pointer hover:bg-white/5 transition"
                  @click="toggleExpand(post.id)">
                 <div class="flex items-center gap-3 min-w-0 flex-1">
@@ -37,7 +33,8 @@
                               'bg-amber-500 text-white': post.post_type === 'product'
                           }"
                           x-text="post.post_type"></span>
-                    <span class="text-sm text-gray-200 truncate" x-text="post.topic_title"></span>
+                    <span class="text-sm text-gray-200 truncate"
+                          x-text="post.blog_content?.name || post.topic_title"></span>
                 </div>
                 <div class="flex items-center gap-3 flex-shrink-0">
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -48,7 +45,7 @@
                               'bg-purple-500/15 text-purple-400': post.blog_status === 'generating' || post.blog_status === 'publishing',
                               'bg-red-500/15 text-red-400': post.blog_status === 'failed',
                           }"
-                          x-text="post.blog_status === 'draft' ? 'Draft Ready' : post.blog_status === 'published' ? 'Published' : post.blog_status === 'scheduled' ? 'Scheduled' : post.blog_status.charAt(0).toUpperCase() + post.blog_status.slice(1)"></span>
+                          x-text="statusLabel(post.blog_status)"></span>
                     <template x-if="post.blog_status === 'pending' || post.blog_status === 'failed'">
                         <button class="bg-purple-600 text-white text-xs font-medium px-3 py-1 rounded transition hover:bg-purple-700"
                                 type="button"
@@ -60,79 +57,154 @@
                 </div>
             </div>
 
-            {# Expanded Content #}
-            <template x-if="expanded === post.id && post.blog_content && post.blog_content.body">
-                <div class="px-6 pb-5">
-                    {# Title #}
-                    <div class="mb-4">
-                        <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Title</label>
-                        <input type="text"
-                               class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 font-medium focus:border-purple-500 focus:outline-none"
-                               :value="post.blog_content.title"
-                               @blur="saveField(post.id, 'title', $event.target.value)">
-                    </div>
-
-                    {# Body #}
-                    <div class="mb-4">
-                        <div class="flex justify-between mb-1">
-                            <label class="text-xs text-gray-400 uppercase tracking-wide">Body</label>
-                            <span class="text-xs text-gray-500" x-text="(post.blog_content.word_count || 0) + ' words'"></span>
-                        </div>
-                        <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-3 text-sm text-gray-300 leading-relaxed focus:border-purple-500 focus:outline-none resize-y"
-                                  rows="8"
-                                  @blur="saveField(post.id, 'body', $event.target.value)"
-                                  x-text="post.blog_content.body"></textarea>
-                    </div>
-
-                    {# Meta Row #}
-                    <div class="grid grid-cols-2 gap-4 mb-4">
+            <template x-if="expanded === post.id && post.blog_content && post.blog_content.body_html">
+                <div class="px-6 pb-5 space-y-6">
+                    <div class="grid gap-4 md:grid-cols-2">
                         <div>
-                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Sources (from dossier)</label>
-                            <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed">
-                                <template x-for="src in (post.blog_content.sources || [])" :key="src.url">
-                                    <a :href="src.url" target="_blank" rel="noopener noreferrer"
-                                       class="block text-purple-400 hover:text-purple-300 hover:underline cursor-pointer"
-                                       x-text="'&#8226; ' + src.title"></a>
-                                </template>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">SEO Slug</label>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Name</label>
                             <input type="text"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 font-medium focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.name"
+                                   @blur="saveField(post.id, 'name', $event.target.value)">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Slug</label>
+                            <input type="text"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
                                    :value="post.blog_content.slug"
                                    @blur="saveField(post.id, 'slug', $event.target.value)">
-                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1 mt-2">Meta Description</label>
-                            <input type="text"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
-                                   :value="post.blog_content.meta_description"
-                                   @blur="saveField(post.id, 'meta_description', $event.target.value)">
                         </div>
                     </div>
 
-                    {# Actions #}
-                    <div class="flex items-center justify-between">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Merksatz</label>
+                            <input type="text"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.merksatz"
+                                   @blur="saveField(post.id, 'merksatz', $event.target.value)">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Tipp</label>
+                            <input type="text"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.tipp"
+                                   @blur="saveField(post.id, 'tipp', $event.target.value)">
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide">Zusammenfassung</label>
+                            <span class="text-xs text-gray-500">Rich text preview</span>
+                        </div>
+                        <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-4 py-4 text-sm text-gray-100 prose prose-invert max-w-none prose-p:my-3 prose-ul:my-3 prose-li:my-1 prose-headings:text-gray-100"
+                             x-html="post.blog_content.summary_html"></div>
+                    </div>
+
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide">Inhalt</label>
+                            <span class="text-xs text-gray-500" x-text="(post.blog_content.word_count || 0) + ' words'"></span>
+                        </div>
+                        <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-4 py-4 text-sm text-gray-100 prose prose-invert max-w-none prose-p:my-3 prose-ul:my-3 prose-li:my-1 prose-headings:text-gray-100 max-h-[32rem] overflow-y-auto"
+                             x-html="post.blog_content.body_html"></div>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Veroeffentlichungsdatum</label>
+                            <input type="datetime-local"
+                                   x-model="post.blogScheduledAtLocal"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none">
+                            <p class="mt-2 text-xs text-blue-300" x-show="post.blog_scheduled_at">
+                                Scheduled for <span x-text="formatScheduled(post.blog_scheduled_at)"></span>
+                            </p>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Vorschautext</label>
+                            <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none resize-y"
+                                      rows="3"
+                                      @blur="saveField(post.id, 'preview_text', $event.target.value)"
+                                      x-text="post.blog_content.preview_text"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Lesedauer</label>
+                            <input type="text"
+                                   readonly
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-400 focus:outline-none"
+                                   :value="post.blog_content.reading_time">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Autor</label>
+                            <input type="text"
+                                   placeholder="Exact Webflow option label"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.author_name || ''"
+                                   @blur="saveField(post.id, 'author_name', $event.target.value)">
+                        </div>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Vorschaubild</label>
+                            <input type="url"
+                                   placeholder="https://..."
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.preview_image_url || ''"
+                                   @blur="saveField(post.id, 'preview_image_url', $event.target.value)">
+                            <template x-if="post.blog_content.preview_image_url">
+                                <img :src="post.blog_content.preview_image_url"
+                                     alt="Preview image"
+                                     class="mt-3 h-24 w-auto rounded-lg border border-white/10 object-cover">
+                            </template>
+                        </div>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Meta-Titel</label>
+                                <input type="text"
+                                       class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                       :value="post.blog_content.meta_title"
+                                       @blur="saveField(post.id, 'meta_title', $event.target.value)">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Meta-Beschreibung</label>
+                                <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none resize-y"
+                                          rows="3"
+                                          @blur="saveField(post.id, 'meta_description', $event.target.value)"
+                                          x-text="post.blog_content.meta_description"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Sources (from dossier)</label>
+                        <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed">
+                            <template x-for="src in (post.blog_content.sources || [])" :key="src.url">
+                                <a :href="src.url" target="_blank" rel="noopener noreferrer"
+                                   class="block text-purple-400 hover:text-purple-300 hover:underline cursor-pointer"
+                                   x-text="'• ' + src.title"></a>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between gap-3 flex-wrap">
                         <div class="flex gap-2">
                             <button class="text-purple-400 border border-purple-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-purple-500/10 transition"
                                     type="button"
                                     @click="generateDraft(post.id)">
                                 Regenerate Draft
                             </button>
-                            <button class="text-gray-400 border border-white/10 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-white/5 transition"
-                                    @click="$dispatch('open-blog-modal', { postId: post.id })">
-                                Edit in Full Screen
-                            </button>
-                        </div>
-                        <div class="flex items-center gap-2 flex-wrap justify-end">
-                            <span class="text-xs text-gray-500">Webflow:</span>
-                            <input type="datetime-local"
-                                   x-model="post.blogScheduledAtLocal"
-                                   class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:border-purple-500 focus:outline-none">
                             <button class="text-blue-300 border border-blue-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-500/10 transition"
                                     type="button"
                                     @click="scheduleDraft(post)">
                                 <span x-text="post.blog_status === 'scheduled' ? 'Reschedule' : 'Schedule'"></span>
                             </button>
+                        </div>
+                        <div class="flex items-center gap-2">
                             <template x-if="post.blog_webflow_item_id">
                                 <button class="bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition"
                                         type="button"
@@ -149,17 +221,11 @@
                             </template>
                         </div>
                     </div>
-                    <template x-if="post.blog_scheduled_at">
-                        <p class="mt-3 text-xs text-blue-300">
-                            Scheduled for <span x-text="formatScheduled(post.blog_scheduled_at)"></span>
-                        </p>
-                    </template>
                 </div>
             </template>
         </div>
     </template>
 
-    {# Panel Footer #}
     <div class="flex items-center justify-between px-6 py-3 bg-purple-500/5">
         <span class="text-xs text-gray-500"
               x-text="posts.filter(p => p.blog_status === 'draft').length + ' draft(s) ready · ' + posts.filter(p => p.blog_status === 'scheduled').length + ' scheduled · ' + posts.filter(p => p.blog_status === 'pending').length + ' pending'"></span>
@@ -175,8 +241,14 @@ function blogPanelComponent() {
         initPosts(rawPosts) {
             this.posts = (rawPosts || []).map((post) => ({
                 ...post,
-                blogScheduledAtLocal: this.toLocalInput(post.blog_scheduled_at),
+                blogScheduledAtLocal: this.toLocalInput(post.blog_scheduled_at || post.blog_content?.publication_date),
             }));
+        },
+        statusLabel(status) {
+            if (status === 'draft') return 'Draft Ready';
+            if (status === 'published') return 'Published';
+            if (status === 'scheduled') return 'Scheduled';
+            return (status || '').charAt(0).toUpperCase() + (status || '').slice(1);
         },
         toggleExpand(postId) {
             this.expanded = this.expanded === postId ? null : postId;
@@ -301,7 +373,10 @@ function blogPanelComponent() {
                 const post = this.posts.find(p => p.id === postId);
                 if (post && post.blog_content) {
                     post.blog_content[field] = value;
-                    if (field === 'body') post.blog_content.word_count = value.split(/\s+/).filter(Boolean).length;
+                    if (field === 'name' || field === 'title') {
+                        post.blog_content.name = value;
+                        post.blog_content.title = value;
+                    }
                 }
             });
         },

@@ -46,6 +46,7 @@ from app.features.publish.handlers import (
     _effective_meta_connection,
     _sanitize_meta_connection as _publish_sanitize_meta_connection,
 )
+from app.features.blog.schemas import normalize_blog_content
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -577,7 +578,12 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     publish_results=publish_results,
                     blog_enabled=p.get("blog_enabled", False),
                     blog_status=p.get("blog_status", "disabled"),
-                    blog_content=p.get("blog_content") or {},
+                    blog_content=normalize_blog_content(
+                        p.get("blog_content") or {},
+                        fallback_name=p.get("topic_title") or normalized_seed.get("canonical_topic", ""),
+                        scheduled_at=str(p.get("blog_scheduled_at") or "") or None,
+                        published_at=str(p.get("blog_published_at") or "") or None,
+                    ),
                     blog_webflow_item_id=p.get("blog_webflow_item_id"),
                     blog_scheduled_at=p.get("blog_scheduled_at"),
                     blog_published_at=p.get("blog_published_at"),

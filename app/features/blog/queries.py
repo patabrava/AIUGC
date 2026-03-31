@@ -14,8 +14,24 @@ from typing import Any, Dict, List, Optional
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, ErrorCode
 from app.core.logging import get_logger
+from app.features.blog.schemas import (
+    blog_has_draft_content,
+    merge_blog_content_updates,
+    normalize_blog_content,
+)
 
 logger = get_logger(__name__)
+
+
+def _isoformat_optional(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+    text = str(value).strip()
+    return text or None
 
 
 def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
@@ -47,7 +63,12 @@ def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
             blog_content = json.loads(blog_content)
         except json.JSONDecodeError:
             blog_content = {}
-    post["blog_content"] = blog_content
+    post["blog_content"] = normalize_blog_content(
+        blog_content,
+        fallback_name=post.get("topic_title") or seed_data.get("canonical_topic", ""),
+        scheduled_at=_isoformat_optional(post.get("blog_scheduled_at")),
+        published_at=_isoformat_optional(post.get("blog_published_at")),
+    )
     return post
 
 
@@ -68,7 +89,7 @@ def toggle_blog_enabled(post_id: str, *, enabled: bool) -> Dict[str, Any]:
         new_status = "pending"
         if post.get("blog_scheduled_at"):
             new_status = "scheduled"
-        elif post.get("blog_content", {}).get("body"):
+        elif blog_has_draft_content(post.get("blog_content", {})):
             new_status = "draft"
     else:
         new_status = "disabled"
@@ -140,12 +161,7 @@ def update_blog_content_fields(post_id: str, *, updates: Dict[str, Any]) -> Dict
     supabase = get_supabase()
     post = _load_post_for_blog(post_id)
     current_content = post.get("blog_content") or {}
-
-    for key, value in updates.items():
-        if key in ("title", "body", "slug", "meta_description"):
-            current_content[key] = value
-    if "body" in updates:
-        current_content["word_count"] = len(updates["body"].split())
+    current_content = merge_blog_content_updates(current_content, updates=updates)
 
     response = (
         supabase.client.table("posts")
