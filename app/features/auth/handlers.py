@@ -10,25 +10,22 @@ from fastapi.templating import Jinja2Templates
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.auth.queries import is_email_allowed, send_otp, verify_otp, sign_out
-from app.features.auth.middleware import encode_session_cookie, decode_session_cookie
+from app.features.auth.middleware import (
+    encode_session_cookie,
+    decode_session_cookie,
+    should_bypass_auth,
+)
 
 logger = get_logger(__name__)
 templates = Jinja2Templates(directory="templates")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-
-def _is_local_request(request: Request) -> bool:
-    client = request.client
-    client_host = (client.host if client else "") or ""
-    return client_host in {"127.0.0.1", "::1", "localhost"}
-
-
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render the login page."""
     settings = get_settings()
-    if settings.is_auth_bypassed or _is_local_request(request):
+    if should_bypass_auth(request):
         return RedirectResponse(url="/batches", status_code=302)
     return templates.TemplateResponse("auth/login.html", {
         "request": request,
@@ -46,7 +43,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
     normalized_email = email.strip().lower()
     settings = get_settings()
 
-    if settings.is_auth_bypassed or _is_local_request(request):
+    if should_bypass_auth(request):
         cookie_data = {
             "access_token": f"local-access-token:{normalized_email}",
             "refresh_token": f"local-refresh-token:{normalized_email}",
@@ -105,7 +102,7 @@ async def handle_verify_otp(request: Request, email: str = Form(...), token: str
     clean_token = token.strip()
     settings = get_settings()
 
-    if settings.is_auth_bypassed or _is_local_request(request):
+    if should_bypass_auth(request):
         cookie_data = {
             "access_token": f"local-access-token:{normalized_email}",
             "refresh_token": f"local-refresh-token:{normalized_email}",

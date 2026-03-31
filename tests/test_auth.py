@@ -129,10 +129,10 @@ def test_local_request_detection_uses_host_header():
         "http_version": "1.1",
     }
     request = Request(scope)
-    assert _is_local_request(request) is False
+    assert _is_local_request(request) is True
 
 
-def test_local_request_detection_uses_client_loopback():
+def test_local_request_detection_rejects_proxy_loopback_for_production_host():
     from starlette.requests import Request
     from app.features.auth.middleware import _is_local_request
 
@@ -149,7 +149,7 @@ def test_local_request_detection_uses_client_loopback():
         "http_version": "1.1",
     }
     request = Request(scope)
-    assert _is_local_request(request) is True
+    assert _is_local_request(request) is False
 
 
 import pytest
@@ -251,3 +251,35 @@ async def test_local_auth_bypass_skips_supabase_calls(monkeypatch):
     session = await verify_otp("user@lippelift.de", "12345678")
     assert session["user"]["email"] == "user@lippelift.de"
     assert await get_user_from_token(session["access_token"]) == {"email": "user@lippelift.de"}
+
+
+@pytest.mark.asyncio
+async def test_production_proxy_loopback_still_requires_login(monkeypatch):
+    import app.core.config as config_module
+    from starlette.requests import Request
+    from app.features.auth.middleware import require_auth
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://aiugc-prod.srv1498567.hstgr.cloud")
+    monkeypatch.delenv("BYPASS_AUTH_IN_DEVELOPMENT", raising=False)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/batches",
+        "raw_path": b"/batches",
+        "query_string": b"",
+        "headers": [(b"host", b"aiugc-prod.srv1498567.hstgr.cloud")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("aiugc-prod.srv1498567.hstgr.cloud", 443),
+        "scheme": "https",
+        "http_version": "1.1",
+    }
+    request = Request(scope)
+
+    response = await require_auth(request)
+
+    assert response is not None
+    assert response.status_code == 302
+    assert response.headers["location"] == "/auth/login"

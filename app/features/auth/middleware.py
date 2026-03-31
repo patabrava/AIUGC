@@ -25,9 +25,21 @@ PUBLIC_PATHS_EXACT = ("/health",)
 
 
 def _is_local_request(request: Request) -> bool:
-    client = request.client
-    client_host = (client.host if client else "") or ""
-    return client_host in {"127.0.0.1", "::1", "localhost"}
+    forwarded_host = request.headers.get("x-forwarded-host", "")
+    raw_host = forwarded_host.split(",", 1)[0].strip() or request.headers.get("host", "")
+    host = raw_host.split(",", 1)[0].strip()
+    if host.startswith("[") and "]" in host:
+        host = host[1:host.index("]")]
+    else:
+        host = host.split(":", 1)[0]
+    normalized_host = host.lower()
+    return normalized_host in {"127.0.0.1", "::1", "localhost"} or normalized_host.endswith(".localhost")
+
+
+def should_bypass_auth(request: Request) -> bool:
+    """Only bypass auth for real local development hosts."""
+    settings = get_settings()
+    return settings.is_auth_bypassed or (settings.is_development and _is_local_request(request))
 
 
 def encode_session_cookie(data: Dict[str, Any], secret: str) -> str:
@@ -76,7 +88,7 @@ async def require_auth(request: Request) -> Optional[RedirectResponse]:
         return None
 
     settings = get_settings()
-    if settings.is_auth_bypassed or _is_local_request(request):
+    if should_bypass_auth(request):
         request.state.user_email = "local-dev@lippelift.de"
         return None
 

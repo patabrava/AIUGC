@@ -45,7 +45,7 @@ x-flow-forge-env: &flow-forge-env
   VIDEO_POLLER_IDENTITY: ${VIDEO_POLLER_IDENTITY:-}
   DEBUG: ${DEBUG:-0}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  ENVIRONMENT: ${ENVIRONMENT:-development}
+  ENVIRONMENT: ${ENVIRONMENT:-production}
 
 services:
   web:
