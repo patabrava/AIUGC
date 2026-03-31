@@ -11,8 +11,9 @@ RUN set -eux; \
     apt-get update -o Acquire::Retries=3; \
     apt-get install -y --no-install-recommends ffmpeg; \
     rm -rf /var/lib/apt/lists/*
-RUN pip install --upgrade pip \
-    && pip install --retries 5 --timeout 120 -r requirements.txt
+RUN set -eux; \
+    pip install --upgrade pip >/tmp/pip-upgrade.log 2>&1 || (cat /tmp/pip-upgrade.log && exit 1); \
+    pip install --retries 5 --timeout 120 -r requirements.txt >/tmp/pip-install.log 2>&1 || (tail -n 200 /tmp/pip-install.log && exit 1)
 
 COPY . .
 
