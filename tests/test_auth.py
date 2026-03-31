@@ -28,8 +28,8 @@ def test_otp_request_invalid_email():
 
 
 def test_otp_verify_valid():
-    schema = OTPVerifySchema(email="user@lippelift.de", token="123456")
-    assert schema.token == "123456"
+    schema = OTPVerifySchema(email="user@lippelift.de", token="12345678")
+    assert schema.token == "12345678"
 
 
 def test_otp_verify_token_too_short():
@@ -41,7 +41,7 @@ def test_otp_verify_token_too_short():
 def test_otp_verify_token_too_long():
     import pytest
     with pytest.raises(Exception):
-        OTPVerifySchema(email="user@lippelift.de", token="1234567")
+        OTPVerifySchema(email="user@lippelift.de", token="123456789")
 
 
 def test_is_email_allowed_domain():
@@ -154,7 +154,7 @@ async def test_verify_otp_success():
         mock_client.__aexit__ = AsyncMock(return_value=False)
         MockClient.return_value = mock_client
 
-        result = await verify_otp("user@lippelift.de", "123456")
+        result = await verify_otp("user@lippelift.de", "12345678")
         assert result["access_token"] == "jwt-token"
         assert result["refresh_token"] == "refresh-token"
 
@@ -174,5 +174,5 @@ async def test_verify_otp_invalid_code():
         mock_client.__aexit__ = AsyncMock(return_value=False)
         MockClient.return_value = mock_client
 
-        result = await verify_otp("user@lippelift.de", "000000")
+        result = await verify_otp("user@lippelift.de", "00000000")
         assert result is None

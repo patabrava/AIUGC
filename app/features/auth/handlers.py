@@ -21,11 +21,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render the login page."""
+    settings = get_settings()
     return templates.TemplateResponse("auth/login.html", {
         "request": request,
         "step": "email",
         "email": "",
         "error": None,
+        "otp_code_length": settings.auth_otp_code_length,
     })
 
 
@@ -33,6 +35,7 @@ async def login_page(request: Request):
 async def handle_send_otp(request: Request, email: str = Form(...)):
     """Validate email and send OTP code."""
     normalized_email = email.strip().lower()
+    settings = get_settings()
 
     if not is_email_allowed(normalized_email):
         logger.warning("auth_email_rejected", email=normalized_email)
@@ -41,6 +44,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
             "step": "email",
             "email": normalized_email,
             "error": "This email is not authorized to access FLOW-FORGE.",
+            "otp_code_length": settings.auth_otp_code_length,
         })
 
     try:
@@ -52,6 +56,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
             "step": "email",
             "email": normalized_email,
             "error": str(e),
+            "otp_code_length": settings.auth_otp_code_length,
         })
 
     return templates.TemplateResponse("auth/login.html", {
@@ -59,6 +64,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
         "step": "otp",
         "email": normalized_email,
         "error": None,
+        "otp_code_length": settings.auth_otp_code_length,
     })
 
 
@@ -67,6 +73,7 @@ async def handle_verify_otp(request: Request, email: str = Form(...), token: str
     """Verify OTP code and create session."""
     normalized_email = email.strip().lower()
     clean_token = token.strip()
+    settings = get_settings()
 
     session = await verify_otp(normalized_email, clean_token)
     if not session:
@@ -75,6 +82,7 @@ async def handle_verify_otp(request: Request, email: str = Form(...), token: str
             "step": "otp",
             "email": normalized_email,
             "error": "Invalid or expired code. Please try again.",
+            "otp_code_length": settings.auth_otp_code_length,
         })
 
     settings = get_settings()

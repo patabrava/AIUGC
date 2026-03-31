@@ -72,18 +72,18 @@
                 action="/auth/verify-otp"
                 class="mt-6 text-left"
                 @submit="loading = true"
-                x-data="otpForm()"
+                x-data="otpForm({{ otp_code_length }})"
             >
                 <input type="hidden" name="email" value="{{ email }}">
                 <input type="hidden" name="token" :value="digits.join('')" x-ref="tokenField">
 
-                <div class="flex gap-2.5 justify-center mb-5">
+                <div class="grid gap-1.5 sm:gap-2 mb-5" :style="`grid-template-columns: repeat(${otpLength}, minmax(0, 1fr));`">
                     <template x-for="(digit, index) in digits" :key="index">
                         <input
                             type="text"
                             inputmode="numeric"
                             maxlength="1"
-                            class="w-11 h-13 text-center text-xl font-semibold rounded-lg border-2 focus:outline-none transition"
+                            class="w-full h-10 sm:h-11 text-center text-lg sm:text-xl font-semibold rounded-lg border-2 focus:outline-none transition"
                             :style="digit ? 'border-color: #6750A4; background: #f9f7fc;' : 'border-color: #CAC4D0; background: white;'"
                             :value="digit"
                             @input="handleInput($event, index)"
@@ -98,7 +98,7 @@
                     type="submit"
                     class="w-full py-3 rounded-lg text-white font-semibold text-sm transition disabled:opacity-50"
                     style="background: #6750A4;"
-                    :disabled="loading || digits.join('').length < 6"
+                    :disabled="loading || digits.join('').length < otpLength"
                 >
                     <span x-show="!loading">Verify & sign in</span>
                     <span x-show="loading" x-cloak>Verifying...</span>
@@ -123,14 +123,15 @@
     </div>
 
     <script>
-        function otpForm() {
+        function otpForm(otpLength) {
             return {
-                digits: ['', '', '', '', '', ''],
+                otpLength: otpLength || 8,
+                digits: Array.from({ length: otpLength || 8 }, () => ''),
                 handleInput(event, index) {
                     const value = event.target.value.replace(/\D/g, '');
                     this.digits[index] = value.charAt(0) || '';
                     event.target.value = this.digits[index];
-                    if (this.digits[index] && index < 5) {
+                    if (this.digits[index] && index < this.otpLength - 1) {
                         const inputs = this.$refs.otpInput;
                         if (Array.isArray(inputs)) inputs[index + 1].focus();
                     }
@@ -147,13 +148,13 @@
                     }
                 },
                 handlePaste(event) {
-                    const text = (event.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
-                    for (let i = 0; i < 6; i++) {
+                    const text = (event.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, this.otpLength);
+                    for (let i = 0; i < this.otpLength; i++) {
                         this.digits[i] = text.charAt(i) || '';
                     }
                     const inputs = this.$refs.otpInput;
                     if (Array.isArray(inputs)) {
-                        const focusIdx = Math.min(text.length, 5);
+                        const focusIdx = Math.min(text.length, this.otpLength - 1);
                         inputs[focusIdx].focus();
                     }
                 },

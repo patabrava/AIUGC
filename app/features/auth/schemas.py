@@ -5,6 +5,8 @@ Pydantic models for OTP login request and verification.
 
 from pydantic import BaseModel, EmailStr, field_validator
 
+from app.core.config import get_settings
+
 
 class OTPRequestSchema(BaseModel):
     """Schema for requesting an OTP email."""
@@ -19,6 +21,7 @@ class OTPVerifySchema(BaseModel):
     @field_validator("token")
     @classmethod
     def validate_token_length(cls, v: str) -> str:
-        if len(v) < 6 or len(v) > 6:
-            raise ValueError("Token must be exactly 6 characters")
+        expected_length = get_settings().auth_otp_code_length
+        if len(v) != expected_length:
+            raise ValueError(f"Token must be exactly {expected_length} characters")
         return v

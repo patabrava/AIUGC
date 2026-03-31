@@ -125,6 +125,7 @@ class Settings(BaseSettings):
     allowed_emails: str = Field("caposk817@gmail.com", description="Comma-separated list of explicitly allowed emails")
     session_cookie_name: str = Field("ff_session", description="Name of the session cookie")
     session_max_age: int = Field(2592000, description="Session cookie max age in seconds (default 30 days)")
+    auth_otp_code_length: int = Field(8, ge=6, le=10, description="Expected Supabase email OTP length")
     
     @field_validator("supabase_url")
     @classmethod
