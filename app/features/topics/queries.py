@@ -207,6 +207,22 @@ def add_topic_to_registry(
             raise
 
 
+def touch_topic_registry(
+    topic_registry_id: str,
+    *,
+    last_harvested_at: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Update the registry row's harvest timestamp without changing its content."""
+    supabase = get_supabase()
+    payload: Dict[str, Any] = {
+        "last_harvested_at": (last_harvested_at or datetime.now(timezone.utc)).isoformat(),
+    }
+    response = supabase.client.table("topic_registry").update(payload).eq("id", topic_registry_id).execute()
+    if not response.data:
+        raise RuntimeError("Failed to update topic registry timestamp")
+    return _normalize_registry_row(response.data[0])
+
+
 def _registry_row_to_topic_suggestion(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = _normalize_registry_row(row)
     script = normalized["script"]

@@ -15,7 +15,12 @@
                 </span>
             </div>
             <p class="mt-2 text-base font-semibold text-slate-900">{{ run.result_summary.topic_title if run.result_summary and run.result_summary.topic_title else run.trigger_source }}</p>
+            {% set tiers_processed = run.result_summary.tiers_processed if run.result_summary and run.result_summary.tiers_processed else [] %}
+            {% if tiers_processed == [8, 16, 32] %}
+            <p class="mt-1 text-sm text-slate-600">Canonical 8/16/32 · {{ run.trigger_source }}</p>
+            {% else %}
             <p class="mt-1 text-sm text-slate-600">Tier {{ run.target_length_tier or 'n/a' }} · {{ run.trigger_source }}</p>
+            {% endif %}
         </div>
         <div class="text-right text-xs text-slate-500">
             <div>{{ run.created_at }}</div>

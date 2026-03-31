@@ -59,6 +59,8 @@ def test_research_single_topic_success():
         )
     assert result is not None
     assert len(result) > 0
+    assert mock_harvest.call_count == 1
+    assert mock_harvest.call_args.kwargs["target_length_tier"] == 8
 
 
 def test_research_single_topic_normalizes_harvest_summary():

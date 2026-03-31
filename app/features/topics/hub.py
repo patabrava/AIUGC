@@ -16,13 +16,8 @@ from app.adapters.llm_client import get_llm_client
 from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
 from app.core.errors import FlowForgeException, ThirdPartyError, ValidationError
-from app.features.topics.agents import (
-    build_seed_payload,
-    convert_research_item_to_topic,
-    generate_topic_research_dossier,
-    generate_topic_script_candidate,
-)
-from app.features.topics.deduplication import calculate_topic_similarity, deduplicate_topics
+from app.features.topics.bank_warmup import run_single_seed_topic_warmup
+from app.features.topics.deduplication import calculate_topic_similarity
 from app.features.topics.prompts import get_topic_bank
 from app.features.topics.queries import (
     create_topic_research_run,
@@ -886,146 +881,14 @@ def _harvest_seed_topic_to_bank(
     collected_topics: List[Dict[str, Any]],
     progress_callback: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    research_dossier = generate_topic_research_dossier(
+    return run_single_seed_topic_warmup(
         seed_topic=seed_topic,
         post_type=post_type,
-        target_length_tier=8,
+        existing_topics=existing_topics,
+        collected_topics=collected_topics,
+        target_length_tier=target_length_tier,
         progress_callback=progress_callback,
-    ).model_dump(mode="json")
-    summary: Dict[str, Any] = {
-        "seed_topic": seed_topic,
-        "dossiers_completed": 1,
-        "lanes_seen": 0,
-        "lanes_persisted": 0,
-        "scripts_persisted_by_tier": {str(tier): 0 for tier in _CANONICAL_TIERS},
-        "duplicate_scripts_skipped": 0,
-        "stored_rows": [],
-    }
-    for lane_candidate in list(research_dossier.get("lane_candidates") or []):
-        summary["lanes_seen"] += 1
-        try:
-            lane_dossier = _build_lane_dossier(research_dossier, lane_candidate)
-            lane_title_hint = str(lane_candidate.get("title") or lane_dossier.get("topic") or research_dossier.get("topic") or seed_topic).strip()
-            base_prompt1_item = generate_topic_script_candidate(
-                post_type=post_type,
-                target_length_tier=8,
-                dossier=lane_dossier,
-                lane_candidate=lane_candidate,
-            )
-            topic_data = convert_research_item_to_topic(base_prompt1_item)
-            lane_title = str(lane_candidate.get("title") or base_prompt1_item.topic or topic_data.title or lane_title_hint).strip()
-            dedupe_candidate = {
-                "title": lane_title,
-                "rotation": topic_data.rotation,
-                "cta": topic_data.cta,
-            }
-            unique_candidates = deduplicate_topics(
-                [dedupe_candidate],
-                existing_topics + collected_topics,
-                threshold=0.35,
-            )
-            if not unique_candidates:
-                logger.info("topic_bank_lane_deduped", seed_topic=seed_topic, lane_title=lane_title)
-                continue
-
-            source_info = (lane_dossier.get("sources") or [{}])[0] if lane_dossier.get("sources") else {}
-            tier_prompt_items: Dict[int, Any] = {8: base_prompt1_item}
-            for tier in _CANONICAL_TIERS:
-                if tier == 8:
-                    continue
-                tier_prompt_items[tier] = generate_topic_script_candidate(
-                    post_type=post_type,
-                    target_length_tier=tier,
-                    dossier=lane_dossier,
-                    lane_candidate=lane_candidate,
-                )
-
-            base_strict_seed = build_research_seed_data(
-                prompt1_item=base_prompt1_item,
-                research_dossier=research_dossier,
-                lane_dossier=lane_dossier,
-                topic_title=lane_title,
-            )
-            base_seed_payload = build_seed_payload(
-                base_prompt1_item,
-                base_strict_seed,
-                None,
-                source_title=str(source_info.get("title") or lane_title or base_prompt1_item.topic).strip() or None,
-                source_url=str(source_info.get("url") or "").strip() or None,
-                source_summary=str(lane_dossier.get("source_summary") or base_prompt1_item.caption or base_prompt1_item.source_summary or "").strip() or None,
-                canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
-                research_title=lane_title,
-            )
-            persisted_result = _persist_topic_bank_row(
-                title=lane_title,
-                target_length_tier=8,
-                research_dossier=lane_dossier,
-                prompt1_item=base_prompt1_item,
-                dialog_scripts=None,
-                post_type=post_type,
-                seed_payload=base_seed_payload,
-                variants=[
-                    _build_canonical_script_variant(
-                        prompt1_item=tier_prompt_items[tier],
-                        lane_candidate=lane_candidate,
-                        research_dossier=research_dossier,
-                        tier=tier,
-                        post_type=post_type,
-                        seed_payload=build_seed_payload(
-                            tier_prompt_items[tier],
-                            build_research_seed_data(
-                                prompt1_item=tier_prompt_items[tier],
-                                research_dossier=research_dossier,
-                                lane_dossier=lane_dossier,
-                                topic_title=lane_title,
-                            ),
-                            None,
-                            source_title=str(source_info.get("title") or lane_title or tier_prompt_items[tier].topic).strip() or None,
-                            source_url=str(source_info.get("url") or "").strip() or None,
-                            source_summary=str(lane_dossier.get("source_summary") or tier_prompt_items[tier].caption or tier_prompt_items[tier].source_summary or "").strip() or None,
-                            canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
-                            research_title=lane_title,
-                        ),
-                    )
-                    for tier in _CANONICAL_TIERS
-                ],
-            )
-            stored_row = dict(persisted_result.get("stored_row") or {})
-            stored_variants = list(persisted_result.get("stored_variants") or [])
-            dedupe_record = {
-                "id": stored_row.get("id"),
-                "title": lane_title,
-                "rotation": topic_data.rotation,
-                "cta": topic_data.cta,
-            }
-            topic_research_dossier_id = str(
-                stored_row.get("topic_research_dossier_id") or stored_row.get("research_dossier_id") or ""
-            ).strip() or None
-            persisted_by_tier = {
-                str(tier): len(
-                    get_topic_scripts_for_dossier(topic_research_dossier_id, target_length_tier=tier)
-                )
-                if topic_research_dossier_id
-                else 0
-                for tier in _CANONICAL_TIERS
-            }
-            existing_topics.append(dedupe_record)
-            collected_topics.append(dedupe_record)
-            summary["lanes_persisted"] += 1
-            summary["stored_rows"].append(stored_row)
-            for tier, count in persisted_by_tier.items():
-                summary["scripts_persisted_by_tier"][tier] += count
-            summary["duplicate_scripts_skipped"] += max(0, len(_CANONICAL_TIERS) - len(stored_variants))
-        except Exception as exc:
-            logger.warning(
-                "topic_bank_lane_harvest_failed",
-                seed_topic=seed_topic,
-                lane_title=str(lane_candidate.get("title") or lane_candidate.get("angle") or "").strip() or None,
-                error=str(exc),
-            )
-            continue
-
-    return summary
+    )
 
 
 def _run_topic_research_pipeline_sync(
@@ -1045,6 +908,7 @@ def _run_topic_research_pipeline_sync(
             "topic_registry_id": topic_registry_id,
             "topic_title": topic["title"],
             "target_length_tier": target_length_tier,
+            "requested_target_length_tier": target_length_tier,
             "trigger_source": trigger_source,
         },
     )
@@ -1066,12 +930,17 @@ def _run_topic_research_pipeline_sync(
     if isinstance(harvest_summary, list):
         all_stored_topics = list(harvest_summary)
         harvest_summary = {
+            "seed_topic": topic["title"],
+            "post_type": post_type,
+            "requested_target_length_tier": target_length_tier,
+            "tiers_processed": list(_CANONICAL_TIERS),
             "dossiers_completed": 0,
             "lanes_seen": len(all_stored_topics),
             "lanes_persisted": len(all_stored_topics),
             "scripts_persisted_by_tier": {str(tier): 0 for tier in _CANONICAL_TIERS},
             "duplicate_scripts_skipped": 0,
             "stored_rows": all_stored_topics,
+            "seed_topics_used": [topic["title"]],
         }
     else:
         all_stored_topics = list(harvest_summary.get("stored_rows") or [])
@@ -1088,14 +957,16 @@ def _run_topic_research_pipeline_sync(
         "stored_topic_ids": [row["id"] for row in all_stored_topics],
         "stored_count": len(all_stored_topics),
         "target_length_tier": target_length_tier,
-        "tiers_processed": list(_CANONICAL_TIERS),
+        "requested_target_length_tier": target_length_tier,
+        "tiers_processed": list(harvest_summary.get("tiers_processed") or _CANONICAL_TIERS),
         "post_type": post_type,
-        "seed_topics_used": [topic["title"]],
+        "seed_topics_used": list(harvest_summary.get("seed_topics_used") or [topic["title"]]),
         "dossiers_completed": int(harvest_summary.get("dossiers_completed") or 0),
         "lanes_seen": int(harvest_summary.get("lanes_seen") or 0),
         "lanes_persisted": int(harvest_summary.get("lanes_persisted") or 0),
         "scripts_persisted_by_tier": dict(harvest_summary.get("scripts_persisted_by_tier") or {}),
         "duplicate_scripts_skipped": int(harvest_summary.get("duplicate_scripts_skipped") or 0),
+        "research_source": str(harvest_summary.get("research_source") or "provider"),
     }
     update_topic_research_run(
         run_id,
@@ -1209,12 +1080,13 @@ def harvest_topics_to_bank_sync(
             status="completed",
             result_summary={
                 "trigger_source": trigger_source,
-                "target_length_tier": target_length_tier,
-                "stored_by_type": dict(stored_by_type),
-                "stored_topics": [topic["id"] for topic in stored_topics],
-                "seed_topics_used": seed_topics_used,
-                "dossiers_completed": run_summary["dossiers_completed"],
-                "lanes_seen": run_summary["lanes_seen"],
+            "target_length_tier": target_length_tier,
+            "requested_target_length_tier": target_length_tier,
+            "stored_by_type": dict(stored_by_type),
+            "stored_topics": [topic["id"] for topic in stored_topics],
+            "seed_topics_used": seed_topics_used,
+            "dossiers_completed": run_summary["dossiers_completed"],
+            "lanes_seen": run_summary["lanes_seen"],
                 "lanes_persisted": run_summary["lanes_persisted"],
                 "scripts_persisted_by_tier": run_summary["scripts_persisted_by_tier"],
                 "duplicate_scripts_skipped": run_summary["duplicate_scripts_skipped"],

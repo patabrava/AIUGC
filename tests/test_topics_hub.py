@@ -15,6 +15,7 @@ from app.features.topics.schemas import (
     ResearchDossier,
     ResearchLaneCandidate,
 )
+from app.core.errors import ThirdPartyError
 from app.core.video_profiles import get_duration_profile
 
 
@@ -407,6 +408,7 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
     stored_entries = []
     updated_runs = []
     variant_counts = {}
+    from app.features.topics import queries as topic_queries
 
     monkeypatch.setattr(topic_hub, "create_topic_research_run", lambda **kwargs: {"id": "run-1"})
     monkeypatch.setattr(topic_hub, "update_topic_research_run", lambda run_id, **kwargs: updated_runs.append((run_id, kwargs)))
@@ -461,7 +463,11 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(topic_hub, "generate_topic_research_dossier", lambda **kwargs: dossier)
+    from app.features.topics import bank_warmup as topic_warmup
+
+    monkeypatch.setattr(topic_warmup, "_generate_research_dossier_raw", lambda **kwargs: "# Forschungsdossier: Barrierefreie Bahnreisen\n\nRaw research prose.")
+    monkeypatch.setattr(topic_warmup, "parse_topic_research_response", lambda raw, **kwargs: dossier)
+    monkeypatch.setattr(topic_warmup, "touch_topic_registry", lambda *args, **kwargs: {})
     monkeypatch.setattr(topic_hub, "get_all_topics_from_registry", lambda: [])
 
     def fake_generate_topic_script_candidate(**kwargs):
@@ -477,7 +483,7 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
             disclaimer="Keine Rechts- oder medizinische Beratung.",
         )
 
-    monkeypatch.setattr(topic_hub, "generate_topic_script_candidate", fake_generate_topic_script_candidate)
+    monkeypatch.setattr(topic_warmup, "generate_topic_script_candidate", fake_generate_topic_script_candidate)
 
     def fake_store_topic_bank_entry(**kwargs):
         stored_entries.append(kwargs)
@@ -495,7 +501,8 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
         "upsert_topic_script_variants",
         lambda **kwargs: (variant_calls.append(kwargs), variant_counts.setdefault(kwargs["title"], len(kwargs["variants"])))[1],
     )
-    monkeypatch.setattr(topic_hub, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}, {"id": "script-2"}, {"id": "script-3"}])
+    monkeypatch.setattr(topic_warmup, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}, {"id": "script-2"}, {"id": "script-3"}])
+    monkeypatch.setattr(topic_queries, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}, {"id": "script-2"}, {"id": "script-3"}])
 
     result = topic_hub.harvest_topics_to_bank_sync(
         post_type_counts={"value": 1},
@@ -503,13 +510,14 @@ def test_harvest_topics_to_bank_expands_every_research_lane(monkeypatch):
         trigger_source="test",
     )
 
-    assert result["stored_by_type"]["value"] == 2
+    assert result["stored_by_type"]["value"] == 6
     assert len(result["seed_topics_used"]) == 3
     assert len(set(result["seed_topics_used"])) == 3
-    assert [entry["title"] for entry in stored_entries] == [
+    assert len(stored_entries) == 6
+    assert {entry["title"] for entry in stored_entries} == {
         "Rampe vorher anmelden",
         "Entschädigung bei Ausfall prüfen",
-    ]
+    }
     assert all(entry["research_payload"]["topic"] == entry["title"] for entry in stored_entries)
     assert all(len(entry["research_payload"]["lane_candidates"]) == 1 for entry in stored_entries)
     assert all(call["topic_research_dossier_id"] for call in variant_calls)
@@ -756,10 +764,24 @@ def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
     from app.features.topics import hub as topic_hub
 
     harvested_tiers = []
+    updated_runs = []
 
     def fake_harvest(*, seed_topic, post_type, target_length_tier, existing_topics, collected_topics, progress_callback=None):
         harvested_tiers.append(target_length_tier)
-        return []
+        return {
+            "seed_topic": seed_topic,
+            "post_type": post_type,
+            "requested_target_length_tier": target_length_tier,
+            "tiers_processed": [8, 16, 32],
+            "dossiers_completed": 1,
+            "lanes_seen": 1,
+            "lanes_persisted": 1,
+            "scripts_persisted_by_tier": {"8": 1, "16": 1, "32": 1},
+            "duplicate_scripts_skipped": 0,
+            "stored_rows": [{"id": "topic-1", "title": "Test Topic"}],
+            "stored_topic_ids": ["topic-1"],
+            "seed_topics_used": ["Test Topic"],
+        }
 
     monkeypatch.setattr(topic_hub, "_harvest_seed_topic_to_bank", fake_harvest)
     monkeypatch.setattr(
@@ -771,7 +793,7 @@ def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
     )
     monkeypatch.setattr(
         topic_hub, "update_topic_research_run",
-        lambda run_id, **kwargs: None,
+        lambda run_id, **kwargs: updated_runs.append((run_id, kwargs)),
     )
 
     topic_hub._run_topic_research_pipeline_sync(
@@ -783,6 +805,8 @@ def test_pipeline_sync_runs_all_tiers_when_tier_is_none(monkeypatch):
     )
 
     assert harvested_tiers == [None]
+    assert updated_runs[-1][1]["result_summary"]["tiers_processed"] == [8, 16, 32]
+    assert updated_runs[-1][1]["result_summary"]["stored_topic_ids"] == ["topic-1"]
 
 
 def test_build_launch_hub_payload_includes_active_runs(monkeypatch):
@@ -830,6 +854,126 @@ def test_run_status_compact_endpoint(monkeypatch):
     response = client.get("/topics/runs/run-1?compact=1", headers={"HX-Request": "true"})
     assert response.status_code == 200
     assert "Test Topic" in response.text
+
+
+def test_run_status_card_shows_canonical_warmup(monkeypatch):
+    """The expanded run card should surface canonical 8/16/32 coverage."""
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(
+        topic_queries, "get_topic_research_run",
+        lambda run_id: {
+            "id": "run-1",
+            "status": "completed",
+            "result_summary": {
+                "topic_title": "Test Topic",
+                "stored_count": 3,
+                "tiers_processed": [8, 16, 32],
+                "requested_target_length_tier": 16,
+            },
+            "error_message": None,
+            "created_at": "2026-03-22",
+            "updated_at": "2026-03-22",
+            "target_length_tier": 16,
+            "trigger_source": "hub",
+        },
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics/runs/run-1", headers={"HX-Request": "true", "accept": "text/html"})
+
+    assert response.status_code == 200
+    assert "Canonical 8/16/32" in response.text
+
+
+def test_shared_warmup_falls_back_to_synthesized_dossier(monkeypatch):
+    """Provider deep-research failures should still complete via local dossier synthesis."""
+    from app.features.topics import bank_warmup
+    from app.features.topics import hub as topic_hub
+
+    fallback_dossier = ResearchDossier(
+        cluster_id="cluster-1",
+        topic="Barrierefreie Wohnung nach DIN 18040",
+        anchor_topic="Barrierefreie Wohnung nach DIN 18040",
+        seed_topic="Barrierefreie Wohnung nach DIN 18040",
+        cluster_summary="Barrierefreie Wohnungen brauchen klare Planung, verlässliche Maße und saubere Abläufe.",
+        framework_candidates=["PAL"],
+        sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
+        source_summary="Die Wohnraumanpassung braucht im Alltag eine gute Abstimmung von Maß, Zugang und Ausstattung.",
+        facts=["Wohnraumanpassung muss früh geplant werden.", "Barrierefreiheit hängt an konkreten Maßen."],
+        angle_options=["Planung und Maße", "Zugang und Ausstattung"],
+        risk_notes=["Zu enge Durchgänge blockieren Nutzung.", "Späte Änderungen verursachen Mehrkosten."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            ResearchLaneCandidate(
+                lane_key="lane-1",
+                lane_family="sub_angle",
+                title="Planung und Maße",
+                angle="Wie Maße und Wege die Nutzung bestimmen",
+                priority=1,
+                framework_candidates=["PAL"],
+                source_summary="Planung und Maße entscheiden oft über die praktische Nutzbarkeit.",
+                facts=["Planung muss vor dem Umbau stehen."],
+                risk_notes=["Späte Anpassungen sind teuer."],
+                disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+                lane_overlap_warnings=[],
+                suggested_length_tiers=[8, 16, 32],
+            )
+        ],
+    )
+
+    monkeypatch.setattr(
+        bank_warmup,
+        "_generate_research_dossier_raw",
+        lambda **kwargs: (_ for _ in ()).throw(ThirdPartyError("Gemini Deep Research polling failed", {"status_code": 500})),
+    )
+    parse_calls = []
+    monkeypatch.setattr(
+        bank_warmup,
+        "parse_topic_research_response",
+        lambda raw, **kwargs: parse_calls.append(raw) or fallback_dossier,
+    )
+    monkeypatch.setattr(bank_warmup.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        bank_warmup,
+        "generate_topic_script_candidate",
+        lambda **kwargs: ResearchAgentItem(
+            topic="Planung und Maße",
+            script="Kennst du die richtige Planung fuer barrierefreie Wohnungen?",
+            caption="Kurz gesagt: Planung entscheidet.",
+            framework="PAL",
+            sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
+            source_summary="Planung entscheidet im Alltag über Nutzbarkeit.",
+            estimated_duration_s=8,
+            tone="direkt, freundlich, empowernd, du-Form",
+            disclaimer="Keine Rechts- oder medizinische Beratung.",
+        ),
+    )
+    monkeypatch.setattr(bank_warmup, "deduplicate_topics", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        topic_hub,
+        "_persist_topic_bank_row",
+        lambda **kwargs: {
+            "stored_row": {
+                "id": "topic-1",
+                "title": kwargs["title"],
+            },
+            "stored_variants": [{"id": "v1"}, {"id": "v2"}, {"id": "v3"}],
+        },
+    )
+
+    summary = bank_warmup.run_single_seed_topic_warmup(
+        seed_topic="Barrierefreie Wohnung nach DIN 18040",
+        post_type="value",
+        existing_topics=[],
+        collected_topics=[],
+    )
+
+    assert parse_calls
+    assert summary["research_source"] == "synthetic_fallback"
+    assert summary["tiers_processed"] == [8, 16, 32]
+    assert summary["stored_topic_ids"] == ["topic-1"]
+    assert summary["lanes_persisted"] == 1
 
 
 def test_launch_redirects_and_hub_shows_active_runs(monkeypatch):
