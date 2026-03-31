@@ -70,6 +70,7 @@ _SEEDING_EVENT_COUNTERS: Dict[str, int] = {}
 _SEEDING_PROGRESS_LOCK = RLock()
 _DISCOVERY_TASKS: Dict[str, asyncio.Task] = {}
 _PROGRESS_TTL_SECONDS = 45
+_WARMUP_SEED_TOPIC_COUNT = 3
 
 
 def _attach_publish_captions(
@@ -100,6 +101,52 @@ def _topic_family_signature(topic: Dict[str, Any]) -> str:
         token for token in re.sub(r"[^\w\s]", " ", canonical_topic.lower()).split() if token
     )
     return normalized
+
+
+def _unique_topic_suggestions(
+    suggestions: List[Dict[str, Any]],
+    limit: int,
+    *,
+    existing_topics: Optional[List[Dict[str, Any]]] = None,
+    semantic_threshold: float = 0.35,
+) -> List[Dict[str, Any]]:
+    unique: List[Dict[str, Any]] = []
+    seen_topic_families: set[str] = set()
+    for suggestion in suggestions:
+        family_signature = _topic_family_signature(suggestion)
+        if family_signature and family_signature in seen_topic_families:
+            continue
+        if family_signature:
+            seen_topic_families.add(family_signature)
+        unique.append(suggestion)
+        if len(unique) >= limit:
+            break
+    if existing_topics is None:
+        existing_topics = []
+    semantic_candidates: List[Dict[str, Any]] = []
+    for suggestion in unique:
+        seed_payload = suggestion.get("seed_payload") if isinstance(suggestion, dict) else None
+        canonical_topic = ""
+        if isinstance(seed_payload, dict):
+            canonical_topic = str(seed_payload.get("canonical_topic") or "").strip()
+        rotation = str(
+            suggestion.get("rotation")
+            or canonical_topic
+            or suggestion.get("script")
+            or suggestion.get("title")
+            or ""
+        ).strip()
+        cta = str(suggestion.get("cta") or rotation or suggestion.get("title") or "").strip()
+        semantic_candidates.append(
+            {
+                **suggestion,
+                "rotation": rotation,
+                "cta": cta,
+                "script": str(suggestion.get("script") or rotation or suggestion.get("title") or "").strip(),
+            }
+        )
+    filtered = deduplicate_topics(semantic_candidates, existing_topics, threshold=semantic_threshold)
+    return filtered[:limit]
 
 
 def _utc_now_iso() -> str:
@@ -538,10 +585,16 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
 
         stored_suggestions = list_topic_suggestions(
             target_length_tier=batch.get("target_length_tier"),
-            limit=count,
+            limit=max(count * 3, count),
             post_type=post_type,
         )
-        if len(stored_suggestions) >= count and post_type != "lifestyle":
+        unique_stored_suggestions = _unique_topic_suggestions(
+            stored_suggestions,
+            count,
+            existing_topics=existing_topics + all_generated_topics,
+        )
+
+        if len(unique_stored_suggestions) >= count and post_type != "lifestyle":
             update_seeding_progress(
                 batch_id,
                 state=batch["state"],
@@ -558,7 +611,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 is_retrying=False,
                 retry_message=None,
             )
-            for suggestion in stored_suggestions[:count]:
+            for suggestion in unique_stored_suggestions[:count]:
                 topic_title = suggestion["title"]
                 topic_rotation = suggestion.get("rotation") or suggestion.get("script") or topic_title
                 topic_cta = suggestion.get("cta") or topic_rotation
@@ -835,10 +888,16 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             )
             stored_suggestions = list_topic_suggestions(
                 target_length_tier=target_tier,
-                limit=required_topics,
+                limit=max(required_topics * 3, required_topics),
                 post_type=post_type,
             )
-            if len(stored_suggestions) < required_topics:
+            unique_stored_suggestions = _unique_topic_suggestions(
+                stored_suggestions,
+                required_topics,
+                existing_topics=existing_topics + all_generated_topics,
+            )
+
+            if len(unique_stored_suggestions) < required_topics:
                 update_seeding_progress(
                     batch_id,
                     state=batch["state"],
@@ -862,11 +921,16 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
                 stored_suggestions = list_topic_suggestions(
                     target_length_tier=target_tier,
-                    limit=required_topics,
+                    limit=max(required_topics * 3, required_topics),
                     post_type=post_type,
                 )
+                unique_stored_suggestions = _unique_topic_suggestions(
+                    stored_suggestions,
+                    required_topics,
+                    existing_topics=existing_topics + all_generated_topics,
+                )
 
-            if len(stored_suggestions) >= required_topics:
+            if len(unique_stored_suggestions) >= required_topics:
                 update_seeding_progress(
                     batch_id,
                     state=batch["state"],
@@ -883,7 +947,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     is_retrying=False,
                     retry_message=None,
                 )
-                for suggestion in stored_suggestions[:required_topics]:
+                for suggestion in unique_stored_suggestions[:required_topics]:
                     topic_title = suggestion["title"]
                     topic_rotation = suggestion.get("rotation") or suggestion.get("script") or topic_title
                     topic_cta = suggestion.get("cta") or topic_rotation

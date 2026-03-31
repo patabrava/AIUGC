@@ -170,6 +170,11 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
     def fake_upsert_topic_script_variants(**kwargs):
         stored_variants.append(kwargs)
 
+    def fake_attach_publish_captions(**kwargs):
+        seed_payload = dict(kwargs["seed_payload"])
+        seed_payload["caption"] = seed_payload.get("caption") or f"Caption for {kwargs['topic_title']}"
+        return seed_payload
+
     monkeypatch.setattr(topic_agents, "generate_dialog_scripts", fake_generate_dialog_scripts)
     monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
     monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", fake_get_all_topics_from_registry)
@@ -179,6 +184,7 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
     monkeypatch.setattr(topic_handlers, "list_topic_suggestions", fake_list_topic_suggestions)
     monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
     monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", fake_attach_publish_captions)
     topic_handlers.clear_seeding_progress(batch["id"])
 
     result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
@@ -189,6 +195,45 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
     assert {post["post_type"] for post in created_posts} == {"lifestyle"}, created_posts
     assert all(post["topic_title"] not in LIFESTYLE_TEMPLATES for post in created_posts), created_posts
     assert len(stored_bank_entries) == 4, stored_bank_entries
+
+
+def test_unique_topic_suggestions_collapses_same_family_topics():
+    suggestions = [
+        {"title": "Merkzeichen B: Freifahrt", "seed_payload": {"canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B"}},
+        {"title": "Begleitperson gratis mitfahren", "seed_payload": {"canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B"}},
+        {"title": "Barrierefreiheit im ÖPNV-Alltag", "seed_payload": {"canonical_topic": "Barrierefreiheit im ÖPNV-Alltag"}},
+        {"title": "Noch ein B-Thema", "seed_payload": {"canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B"}},
+    ]
+
+    unique = topic_handlers._unique_topic_suggestions(suggestions, limit=10)
+
+    assert [item["title"] for item in unique] == [
+        "Merkzeichen B: Freifahrt",
+        "Barrierefreiheit im ÖPNV-Alltag",
+    ]
+
+
+def test_unique_topic_suggestions_filters_semantic_near_duplicates():
+    suggestions = [
+        {
+            "title": "Freifahrt für Begleitpersonen",
+            "seed_payload": {"canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B"},
+        },
+        {
+            "title": "Begleitperson gratis im Nahverkehr",
+            "seed_payload": {"canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B"},
+        },
+        {
+            "title": "Barrierefreiheit im Alltag",
+            "seed_payload": {"canonical_topic": "Barrierefreiheit im Alltag"},
+        },
+    ]
+
+    unique = topic_handlers._unique_topic_suggestions(suggestions, limit=10, existing_topics=[])
+
+    assert len(unique) == 2
+    assert unique[0]["title"] == "Freifahrt für Begleitpersonen"
+    assert unique[1]["title"] == "Barrierefreiheit im Alltag"
 
 
 def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(monkeypatch):
