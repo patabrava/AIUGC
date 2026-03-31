@@ -7,11 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --upgrade pip \
-    && pip install -r requirements.txt
+RUN set -eux; \
+    apt-get update -o Acquire::Retries=3; \
+    apt-get install -y --no-install-recommends ffmpeg; \
+    rm -rf /var/lib/apt/lists/*
+RUN pip install --upgrade pip \
+    && pip install --retries 5 --timeout 120 -r requirements.txt
 
 COPY . .
 
