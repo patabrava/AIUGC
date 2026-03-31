@@ -26,6 +26,15 @@ from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
 from app.core.errors import ValidationError
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
+from app.features.videos.prompt_audit import record_prompt_audit
+from app.features.videos.quota_guard import (
+    build_reservation_key,
+    consume_quota,
+    ensure_immediate_submit_slot,
+    maybe_freeze_after_provider_429,
+    release_quota,
+    reserve_quota,
+)
 from app.core.video_profiles import (
     get_pollable_video_statuses,
     VEO_EXTENDED_VIDEO_ROUTE,
@@ -120,6 +129,33 @@ def _lease_is_active(metadata: Optional[Dict[str, Any]], *, now: Optional[dateti
 
     current = now or _utc_now()
     return expires_at > current
+
+
+def _quota_reservation_key(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not metadata:
+        return None
+    value = metadata.get("quota_reservation_key")
+    if not value:
+        return None
+    return str(value)
+
+
+def _release_post_quota_reservation(
+    post: Dict[str, Any],
+    *,
+    reason: str,
+    final_status: str,
+    error_code: Optional[str] = None,
+) -> None:
+    reservation_key = _quota_reservation_key(post.get("video_metadata") or {})
+    if not reservation_key:
+        return
+    release_quota(
+        reservation_key=reservation_key,
+        reason=reason,
+        final_status=final_status,
+        error_code=error_code,
+    )
 
 
 def _claim_video_poll_lease(post: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
@@ -610,6 +646,31 @@ def process_video_operation(post: Dict[str, Any]):
             poller_identity=_poller_identity(),
             error=str(e)
         )
+
+        metadata = post.get("video_metadata") or {}
+        if provider == "veo_3_1":
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
+                maybe_freeze_after_provider_429(
+                    provider="veo_3_1",
+                    reason=str(e),
+                )
+                _release_post_quota_reservation(
+                    post,
+                    reason=str(e),
+                    final_status="failed",
+                    error_code="provider_429",
+                )
+            else:
+                chain_done = (metadata.get("video_pipeline_route") != VEO_EXTENDED_VIDEO_ROUTE) or (
+                    not _needs_extension_hop(metadata)
+                )
+                if not chain_done:
+                    _release_post_quota_reservation(
+                        post,
+                        reason=str(e),
+                        final_status="failed",
+                        error_code=e.__class__.__name__,
+                    )
         
         # Mark as failed after exception
         try:
@@ -693,13 +754,53 @@ def _retry_rai_filtered_video(post: Dict[str, Any], correlation_id: str, rai_rea
     )
 
     veo_client = get_veo_client()
-    result = veo_client.submit_video_generation(
-        prompt=audit["prompt_text"],
-        negative_prompt=audit.get("negative_prompt"),
-        correlation_id=f"{correlation_id}_rai_retry_{retry_num}",
-        aspect_ratio=audit["aspect_ratio"],
-        resolution=audit["resolution"],
+    duration_seconds = (
+        metadata.get("veo_base_seconds")
+        if metadata.get("video_pipeline_route") == VEO_EXTENDED_VIDEO_ROUTE
+        else audit["requested_seconds"]
     )
+    if duration_seconds not in {4, 6, 8}:
+        duration_seconds = 8
+    ensure_immediate_submit_slot(provider="veo_3_1")
+    retry_reservation_key = build_reservation_key(
+        provider="veo_3_1",
+        post_id=post_id,
+        correlation_id=f"{correlation_id}_rai_retry_{retry_num}",
+        kind="retry_submit",
+    )
+    reserve_quota(
+        provider="veo_3_1",
+        post_id=post_id,
+        batch_id=post.get("batch_id"),
+        reservation_key=retry_reservation_key,
+        requested_units=1,
+        require_immediate_slot=False,
+        reservation_kind="retry_submit",
+    )
+    try:
+        result = veo_client.submit_video_generation(
+            prompt=audit["prompt_text"],
+            negative_prompt=audit.get("negative_prompt"),
+            correlation_id=f"{correlation_id}_rai_retry_{retry_num}",
+            aspect_ratio=audit["aspect_ratio"],
+            resolution=audit["resolution"],
+            duration_seconds=duration_seconds,
+        )
+        consume_quota(
+            reservation_key=retry_reservation_key,
+            operation_id=result["operation_id"],
+            units=1,
+        )
+    except Exception as exc:
+        release_quota(
+            reservation_key=retry_reservation_key,
+            reason=str(exc),
+            final_status="released",
+            error_code=exc.__class__.__name__,
+        )
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+            maybe_freeze_after_provider_429(provider="veo_3_1", reason=str(exc))
+        raise
 
     new_operation_id = result["operation_id"]
     operation_ids = list(metadata.get("operation_ids") or [])
@@ -986,6 +1087,43 @@ def _store_completed_video(
         upload_duration_seconds=upload_duration
     )
 
+    reservation_key = _quota_reservation_key(existing_metadata)
+    if reservation_key:
+        try:
+            release_quota(
+                reservation_key=reservation_key,
+                reason="Video chain completed successfully.",
+                final_status="completed",
+            )
+        except Exception:
+            logger.exception(
+                "quota_completion_finalize_failed",
+                post_id=post_id,
+                correlation_id=correlation_id,
+                reservation_key=reservation_key,
+            )
+
+    segments = existing_metadata.get("veo_segments") or []
+    operation_ids = list(existing_metadata.get("operation_ids") or [])
+    word_count = sum(len(str(segment).split()) for segment in segments) if segments else None
+    requested_base_duration = (
+        existing_metadata.get("veo_base_seconds")
+        if existing_metadata.get("video_pipeline_route") == VEO_EXTENDED_VIDEO_ROUTE
+        else existing_metadata.get("provider_target_seconds") or existing_metadata.get("requested_seconds")
+    )
+
+    logger.info(
+        "video_completion_summary",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        provider=provider,
+        script_word_count=word_count,
+        segment_count=len(segments) if segments else None,
+        requested_base_duration_seconds=requested_base_duration,
+        trimmed_duration_ms=merged_metadata.get("trim_final_duration_ms"),
+        total_operation_count=len(operation_ids) if operation_ids else 1,
+    )
+
 
 def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> None:
     supabase = get_supabase().client
@@ -1028,6 +1166,9 @@ def _build_veo_extension_prompt(
     segments = split_dialogue_sentences(script) if script else []
     if not segments and script:
         segments = [script]
+    if not segments:
+        metadata_segments = (post.get("video_metadata") or {}).get("veo_segments") or []
+        segments = [str(segment).strip() for segment in metadata_segments if str(segment).strip()]
 
     idx = segment_index if segment_index is not None else 0
     if idx < len(segments):
@@ -1113,15 +1254,12 @@ def _submit_extension_hop(
         )
 
     is_final_hop = (hops_completed + 1) >= metadata.get("veo_extension_hops_target", 0)
-
-    from app.features.posts.prompt_builder import build_veo_prompt_segment
-    prompt = build_veo_prompt_segment(
-        segment_text,
-        include_quotes=False,
-        include_ending=is_final_hop,
-    )
+    prompt_payload = _build_veo_extension_prompt(post, segment_index=next_segment_idx)
+    prompt = prompt_payload["prompt_text"]
+    segment_text = prompt_payload["segment_text"]
 
     veo_client = get_veo_client()
+    reservation_key = _quota_reservation_key(metadata)
 
     video_uri = (previous_video_data or {}).get("video_uri")
     if not video_uri:
@@ -1129,6 +1267,8 @@ def _submit_extension_hop(
             f"Cannot extend video for post {post_id}: previous video_data "
             f"missing video_uri"
         )
+
+    ensure_immediate_submit_slot(provider="veo_3_1")
 
     try:
         result = veo_client.submit_video_extension(
@@ -1150,8 +1290,28 @@ def _submit_extension_hop(
         raise
 
     new_operation_id = result["operation_id"]
+    if reservation_key:
+        consume_quota(
+            reservation_key=reservation_key,
+            operation_id=new_operation_id,
+            units=1,
+        )
     operation_ids = list(metadata.get("operation_ids") or [])
     operation_ids.append(new_operation_id)
+
+    record_prompt_audit(
+        post_id=post_id,
+        batch_id=post.get("batch_id"),
+        operation_id=new_operation_id,
+        provider="veo_3_1",
+        prompt_text=prompt,
+        negative_prompt=None,
+        prompt_path="veo_extension_hop",
+        aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
+        resolution=metadata.get("requested_resolution", "720p"),
+        requested_seconds=metadata.get("veo_extension_seconds", 7),
+        correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
+    )
 
     extension_seconds = metadata.get("veo_extension_seconds", 7)
     generated_seconds = metadata.get("generated_seconds", 0) + extension_seconds

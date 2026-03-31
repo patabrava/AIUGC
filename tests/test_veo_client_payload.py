@@ -40,11 +40,13 @@ def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(mon
         correlation_id="test-correlation",
         aspect_ratio="9:16",
         resolution="720p",
+        duration_seconds=8,
     )
 
     payload = fake_http_client.post_calls[0]["json"]
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
+    assert payload["parameters"]["durationSeconds"] == 8
     assert payload["parameters"]["negativePrompt"] == "subtitles, watermark"
     assert payload["instances"][0]["prompt"] == "portrait product demo"
     assert submission["operation_id"] == "operations/test-operation"
@@ -74,6 +76,7 @@ def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
     payload = fake_http_client.post_calls[0]["json"]
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
+    assert "durationSeconds" not in payload["parameters"]
     assert payload["instances"][0]["prompt"] == "continue the scene"
     assert payload["instances"][0]["video"]["uri"].endswith(":download?alt=media")
     assert submission["operation_id"] == "operations/test-operation"

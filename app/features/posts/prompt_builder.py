@@ -13,7 +13,7 @@ from app.core.errors import ValidationError
 
 
 __all__ = [
-    "STANDARD_AUDIO_BLOCK",
+    "STANDARD_FINAL_AUDIO_BLOCK",
     "SORA_NEGATIVE_CONSTRAINTS",
     "VEO_NEGATIVE_PROMPT",
     "build_video_prompt_from_seed",
@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 
-STANDARD_AUDIO_BLOCK = (
+STANDARD_FINAL_AUDIO_BLOCK = (
     "Audio: Recorded with a modern smartphone microphone in a quiet indoor room. "
     "The voice is clear, natural, and close to the microphone. No music and no "
     "background voices. Subtle natural room acoustics typical of a small bedroom. "
@@ -32,10 +32,29 @@ STANDARD_AUDIO_BLOCK = (
     "brief moment before the clip ends."
 )
 
-ENDING_HOLD_DIRECTIVE = (
+EXTENDED_CONTINUATION_AUDIO_BLOCK = (
+    "Audio: Recorded with a modern smartphone microphone in a quiet indoor room. "
+    "The voice is clear, natural, and close to the microphone. No music and no "
+    "background voices. Subtle natural room acoustics typical of a small bedroom. "
+    "Keep the spoken delivery continuous and steady with no dramatic pause, no "
+    "trailing silence, and no settling room tone at the end of this segment."
+)
+
+STANDARD_FINAL_ENDING_DIRECTIVE = (
     "After the final spoken word, speech stops completely. She does not begin a new word or "
     "syllable. Her mouth comes to rest, she holds a gentle smile, and remains still for a brief "
     "moment before the clip ends."
+)
+
+EXTENDED_FINAL_ENDING_DIRECTIVE = (
+    "After the final spoken word, speech stops completely. She does not begin a new word or "
+    "syllable. Her mouth closes and comes fully to rest, she holds a gentle smile, and remains "
+    "still for a brief moment before the clip ends."
+)
+
+EXTENDED_CONTINUATION_ENDING_DIRECTIVE = (
+    "Do not end the speech yet. Continue directly into the next segment with no concluding pause "
+    "or scene-ending hold."
 )
 
 SORA_NEGATIVE_CONSTRAINTS = (
@@ -61,9 +80,7 @@ OPTIMIZED_PROMPT_TEMPLATE = (
     "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
     "soft flattering indoor light, and natural skin texture.\n\n"
     "Action:\n"
-    "Seated in a wheelchair, she delivers the line directly to camera in one continuous take. "
-    "She speaks at a natural conversational pace, using small natural hand gestures and subtle "
-    "upper-body nods while speaking.\n\n"
+    "{action_direction}\n\n"
     "Scene:\n"
     "A modern, tidy bedroom with blush-pink walls and minimal decor. Bright soft vanity light "
     "and natural daylight from camera-right create an even, flattering indoor look. The "
@@ -81,6 +98,38 @@ OPTIMIZED_PROMPT_TEMPLATE = (
 )
 
 logger = get_logger(__name__)
+
+
+def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
+    if prompt_mode == "extended_base_or_continuation":
+        return {
+            "action_direction": (
+                "Seated in a wheelchair, she delivers the line directly to camera in one continuous "
+                "take. She speaks with brisk but natural pacing, clear articulation, and no dramatic "
+                "pauses, using small natural hand gestures and subtle upper-body nods while speaking."
+            ),
+            "audio_block": EXTENDED_CONTINUATION_AUDIO_BLOCK,
+            "ending_directive": EXTENDED_CONTINUATION_ENDING_DIRECTIVE,
+        }
+    if prompt_mode == "extended_final":
+        return {
+            "action_direction": (
+                "Seated in a wheelchair, she delivers the line directly to camera in one continuous "
+                "take. She speaks with brisk but natural pacing, clear articulation, and controlled "
+                "energy, using small natural hand gestures and subtle upper-body nods while speaking."
+            ),
+            "audio_block": STANDARD_FINAL_AUDIO_BLOCK,
+            "ending_directive": EXTENDED_FINAL_ENDING_DIRECTIVE,
+        }
+    return {
+        "action_direction": (
+            "Seated in a wheelchair, she delivers the line directly to camera in one continuous take. "
+            "She speaks at a natural conversational pace, using small natural hand gestures and subtle "
+            "upper-body nods while speaking."
+        ),
+        "audio_block": STANDARD_FINAL_AUDIO_BLOCK,
+        "ending_directive": STANDARD_FINAL_ENDING_DIRECTIVE,
+    }
 
 
 def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -121,16 +170,21 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
             normalized_dialogue = normalized_dialogue[: -len(suffix)].rstrip()
             break
 
-    script_line = f"{normalized_dialogue} ({ENDING_HOLD_DIRECTIVE})"
+    script_line = f"{normalized_dialogue} ({STANDARD_FINAL_ENDING_DIRECTIVE})"
 
     optimized_prompt = build_optimized_prompt(
         normalized_dialogue,
         negative_constraints=SORA_NEGATIVE_CONSTRAINTS,
+        prompt_mode="standard_final",
     )
-    veo_prompt = build_optimized_prompt(normalized_dialogue, negative_constraints=None)
+    veo_prompt = build_optimized_prompt(
+        normalized_dialogue,
+        negative_constraints=None,
+        prompt_mode="standard_final",
+    )
 
     # Keep a single audio block in the final prompt to avoid contradictory synthesis cues.
-    audio_section = AudioSection(dialogue=STANDARD_AUDIO_BLOCK, capture="")
+    audio_section = AudioSection(dialogue=STANDARD_FINAL_AUDIO_BLOCK, capture="")
 
     # Assemble complete prompt using template defaults
     base_prompt = VideoPrompt(
@@ -187,12 +241,19 @@ def validate_video_prompt(prompt_data: Dict[str, Any]) -> bool:
         )
 
 
-def build_optimized_prompt(dialogue: str, negative_constraints: Optional[str] = SORA_NEGATIVE_CONSTRAINTS) -> str:
+def build_optimized_prompt(
+    dialogue: str,
+    negative_constraints: Optional[str] = SORA_NEGATIVE_CONSTRAINTS,
+    *,
+    prompt_mode: str = "standard_final",
+) -> str:
     cleaned_dialogue = dialogue.strip()
+    contract = _get_prompt_contract(prompt_mode)
     return OPTIMIZED_PROMPT_TEMPLATE.format(
+        action_direction=contract["action_direction"],
         dialogue=cleaned_dialogue,
-        ending=ENDING_HOLD_DIRECTIVE,
-        audio=STANDARD_AUDIO_BLOCK,
+        ending=contract["ending_directive"],
+        audio=contract["audio_block"],
         negatives_section=f"\n\n{negative_constraints}" if negative_constraints else "",
     )
 
@@ -216,11 +277,13 @@ def split_dialogue_sentences(dialogue: str) -> list[str]:
 def build_veo_prompt_segment(dialogue: str, *, include_quotes: bool = False, include_ending: bool = False) -> str:
     cleaned_dialogue = dialogue.strip()
     prompt_dialogue = f"\"{cleaned_dialogue}\"" if include_quotes else cleaned_dialogue
-    ending = ENDING_HOLD_DIRECTIVE if include_ending else "Do not end the speech yet; continue into the next segment with no pause."
+    prompt_mode = "extended_final" if include_ending else "extended_base_or_continuation"
+    contract = _get_prompt_contract(prompt_mode)
     template = OPTIMIZED_PROMPT_TEMPLATE
     return template.format(
+        action_direction=contract["action_direction"],
         dialogue=prompt_dialogue,
-        ending=ending,
-        audio=STANDARD_AUDIO_BLOCK,
+        ending=contract["ending_directive"],
+        audio=contract["audio_block"],
         negatives_section=f"\n\n{VEO_NEGATIVE_PROMPT}" if not include_quotes else f"\n\n{SORA_NEGATIVE_CONSTRAINTS}",
     )

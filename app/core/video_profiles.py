@@ -147,6 +147,10 @@ def get_submission_video_status(route: Optional[str], provider_status: Optional[
     return normalized
 
 
+def get_profile_request_cost_units(profile: DurationProfile) -> int:
+    return 1 + max(int(profile.veo_extension_hops or 0), 0)
+
+
 def get_processing_video_status(route: Optional[str]) -> str:
     if route == VEO_EXTENDED_VIDEO_ROUTE:
         return VIDEO_STATUS_EXTENDED_PROCESSING

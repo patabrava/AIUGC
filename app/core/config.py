@@ -92,6 +92,29 @@ class Settings(BaseSettings):
         default="",
         description="Optional stable identity label for the video poller worker instance",
     )
+    veo_daily_generation_limit: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum Veo generations allowed per Pacific day for this project ledger",
+    )
+    veo_minute_generation_limit: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum Veo generations allowed per UTC minute for this project ledger",
+    )
+    veo_quota_soft_buffer: int = Field(
+        default=0,
+        ge=0,
+        description="Optional safety buffer subtracted from the configured Veo daily limit",
+    )
+    veo_quota_freeze_on_unexpected_429: bool = Field(
+        default=True,
+        description="Freeze further Veo submits until next Pacific reset after an unexpected provider 429",
+    )
+    veo_quota_project_scope: str = Field(
+        default="default-gemini-project",
+        description="Operator label for the Google project whose Veo quota is being guarded",
+    )
     
     # Social Media
     tiktok_client_key: str = Field(default="", description="TikTok client key")

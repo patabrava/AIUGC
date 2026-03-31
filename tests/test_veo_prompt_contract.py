@@ -15,6 +15,8 @@ def test_veo_prompt_requires_exact_german_dialogue():
     assert "Character:" in veo_prompt
     assert "Dialogue:" in veo_prompt
     assert script in veo_prompt
+    assert "After the final spoken word, speech stops completely." in veo_prompt
+    assert "mouth comes to rest" in veo_prompt
 
 
 def test_veo_extension_prompt_preserves_approved_german_script():
@@ -47,7 +49,11 @@ def test_veo_extension_prompt_preserves_approved_german_script():
     prompt_text = prompt["prompt_text"]
     assert "Character:" in prompt_text
     assert "Die Pflegekasse zahlt bis zu viertausend Euro pro Person." in prompt_text
-    assert "Do not end the speech yet" in prompt_text
+    assert "Do not end the speech yet." in prompt_text
+    assert "brisk but natural pacing" in prompt_text
+    assert "no settling room tone" in prompt_text
+    assert "mouth closes" not in prompt_text
+    assert "After the final spoken word" not in prompt_text
 
 
 def test_veo_extension_prompt_uses_requested_next_segment():
@@ -73,6 +79,37 @@ def test_veo_extension_prompt_uses_requested_next_segment():
     assert "Zweiter Satz." in prompt_text
     assert "Erster Satz." not in prompt_text
     assert "Dritter Satz." not in prompt_text
+
+
+def test_veo_extension_prompt_final_hop_uses_explicit_stop_and_mouth_rest():
+    os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+    os.environ.setdefault("SUPABASE_KEY", "test-key")
+    os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+    os.environ.setdefault("GOOGLE_AI_API_KEY", "test-google-key")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
+    os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
+    os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
+    os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
+    os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+    video_poller = importlib.import_module("workers.video_poller")
+
+    prompt = video_poller._build_veo_extension_prompt(
+        {
+            "seed_data": {"script": "Erster Satz. Letzter Satz."},
+            "video_metadata": {
+                "veo_extension_hops_target": 2,
+                "veo_extension_hops_completed": 1,
+            },
+        },
+        segment_index=1,
+    )
+
+    prompt_text = prompt["prompt_text"]
+    assert "Letzter Satz." in prompt_text
+    assert "After the final spoken word, speech stops completely." in prompt_text
+    assert "mouth closes and comes fully to rest" in prompt_text
+    assert "no settling room tone" not in prompt_text
 
 
 def test_split_dialogue_sentences_keeps_sentence_boundaries():

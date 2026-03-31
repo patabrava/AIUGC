@@ -100,6 +100,9 @@ def test_build_veo_extended_base_prompt_returns_first_segment():
     prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(seed_data)
 
     assert "Erster Satz." in prompt
+    assert "brisk but natural pacing" in prompt
+    assert "Do not end the speech yet." in prompt
+    assert "mouth closes" not in prompt
     assert seg_meta["veo_segments"] == ["Erster Satz.", "Zweiter Satz.", "Dritter Satz."]
     assert seg_meta["veo_segments_total"] == 3
     assert seg_meta["veo_current_segment_index"] == 0
@@ -183,3 +186,31 @@ def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():
     assert metadata["veo_segments"] == ["S1.", "S2.", "S3.", "S4."]
     assert metadata["chain_status"] == "submitted"
     assert metadata["provider_aspect_ratio"] == "9:16"
+
+
+def test_submit_video_request_passes_explicit_veo_duration_seconds(monkeypatch):
+    captured = {}
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured.update(kwargs)
+            return {"operation_id": "operations/test", "status": "submitted"}
+
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=32,
+        size=None,
+        correlation_id="corr",
+        provider_duration_seconds=4,
+    )
+
+    assert captured["duration_seconds"] == 4
+    assert result["operation_id"] == "operations/test"

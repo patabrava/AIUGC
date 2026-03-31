@@ -31,6 +31,15 @@ from app.features.batches.state_machine import reconcile_batch_video_pipeline_st
 from app.features.posts.prompt_text import build_full_prompt_text
 from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
 from app.features.videos.prompt_audit import record_prompt_audit
+from app.features.videos.quota_guard import (
+    build_reservation_key,
+    chain_cost_units,
+    consume_quota,
+    ensure_immediate_submit_slot,
+    maybe_freeze_after_provider_429,
+    release_quota,
+    reserve_quota,
+)
 from app.features.videos.schemas import (
     VideoGenerationRequest,
     VideoGenerationResponse,
@@ -252,6 +261,9 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         HTTPException: If post not found or video_prompt_json missing
     """
     correlation_id = f"gen_video_{post_id}"
+    quota_reservation_key: Optional[str] = None
+    quota_reserved = False
+    quota_consumed = False
     
     try:
         supabase = get_supabase().client
@@ -290,6 +302,24 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         
         prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
 
+        requested_units = 0
+        if request.provider == VEO_PROVIDER:
+            requested_units = chain_cost_units(None, provider=request.provider)
+            quota_reservation_key = build_reservation_key(
+                provider=request.provider,
+                post_id=post_id,
+                correlation_id=correlation_id,
+            )
+            reserve_quota(
+                provider=request.provider,
+                post_id=post_id,
+                batch_id=post.get("batch_id"),
+                reservation_key=quota_reservation_key,
+                requested_units=requested_units,
+                require_immediate_slot=True,
+            )
+            quota_reserved = True
+
         submission_result = _submit_video_request(
             provider=request.provider,
             prompt_text=prompt_request["prompt_text"] or "",
@@ -301,11 +331,16 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             seconds=request.seconds,
             size=request.size,
             correlation_id=correlation_id,
+            provider_duration_seconds=request.seconds if request.provider == "veo_3_1" else None,
         )
 
         operation_id = submission_result["operation_id"]
         provider_model = submission_result.get("provider_model")
         requested_size = submission_result.get("requested_size")
+
+        if quota_reservation_key:
+            consume_quota(reservation_key=quota_reservation_key, operation_id=operation_id, units=1)
+            quota_consumed = True
 
         record_prompt_audit(
             post_id=post_id,
@@ -328,6 +363,9 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             "requested_seconds": request.seconds,
             "requested_size": requested_size,
         }
+        if quota_reservation_key:
+            submission_metadata["quota_reservation_key"] = quota_reservation_key
+            submission_metadata["quota_reserved_units"] = requested_units
         if provider_model:
             submission_metadata["provider_model"] = provider_model
         if submission_result.get("provider_metadata"):
@@ -395,11 +433,32 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             ).model_dump()
         )
     
-    except FlowForgeException:
+    except FlowForgeException as exc:
+        if quota_reservation_key and quota_reserved and not quota_consumed:
+            release_quota(
+                reservation_key=quota_reservation_key,
+                reason=exc.message,
+                final_status="released",
+                error_code=str(exc.code),
+            )
+        if (
+            quota_reservation_key
+            and request.provider == VEO_PROVIDER
+            and exc.status_code == 429
+            and not exc.details.get("blocked_before_submit")
+        ):
+            maybe_freeze_after_provider_429(provider=VEO_PROVIDER, reason=exc.message)
         raise
     except HTTPException:
         raise
     except Exception as e:
+        if quota_reservation_key and quota_reserved and not quota_consumed:
+            release_quota(
+                reservation_key=quota_reservation_key,
+                reason=str(e),
+                final_status="released",
+                error_code="unexpected_error",
+            )
         logger.exception(
             "video_generation_failed",
             post_id=post_id,
@@ -517,7 +576,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         submitted_count = 0
         skipped_count = 0
         submitted_post_ids = []
-        
+        prepared_submissions = []
         last_provider_model: Optional[str] = None
 
         for post in posts:
@@ -558,34 +617,91 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 )
                 skipped_count += 1
                 continue
-            
-            # Build prompt and submit
-            try:
-                submission_plan = _resolve_video_submission_plan(
-                    batch=batch,
-                    requested_provider=request.provider,
-                    requested_seconds=request.seconds,
-                    aspect_ratio=request.aspect_ratio,
-                    resolution=request.resolution,
-                    size=request.size,
+
+            submission_plan = _resolve_video_submission_plan(
+                batch=batch,
+                requested_provider=request.provider,
+                requested_seconds=request.seconds,
+                aspect_ratio=request.aspect_ratio,
+                resolution=request.resolution,
+                size=request.size,
+            )
+
+            profile = submission_plan.get("profile")
+            is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
+
+            if is_extended:
+                prompt_text, segment_metadata = _build_veo_extended_base_prompt(
+                    seed_data,
+                    planned_extension_hops=profile.veo_extension_hops,
+                    target_length_tier=profile.target_length_tier,
                 )
+                negative_prompt = None
+            else:
+                prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
+                prompt_text = prompt_request["prompt_text"] or ""
+                negative_prompt = prompt_request.get("negative_prompt")
+                segment_metadata = None
 
-                profile = submission_plan.get("profile")
-                is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
+            prepared_submissions.append(
+                {
+                    "post": post,
+                    "post_id": post_id,
+                    "seed_data": seed_data,
+                    "submission_plan": submission_plan,
+                    "profile": profile,
+                    "is_extended": is_extended,
+                    "prompt_text": prompt_text,
+                    "negative_prompt": negative_prompt,
+                    "segment_metadata": segment_metadata,
+                    "quota_requested_units": chain_cost_units(profile, provider=submission_plan["provider"]),
+                }
+            )
 
-                if is_extended:
-                    prompt_text, segment_metadata = _build_veo_extended_base_prompt(
-                        seed_data,
-                        planned_extension_hops=profile.veo_extension_hops,
-                        target_length_tier=profile.target_length_tier,
+        veo_submissions = [item for item in prepared_submissions if item["submission_plan"]["provider"] == VEO_PROVIDER]
+        reserved_keys = []
+        if veo_submissions:
+            ensure_immediate_submit_slot(requested_units=len(veo_submissions), provider=VEO_PROVIDER)
+            try:
+                for item in veo_submissions:
+                    reservation_key = build_reservation_key(
+                        provider=VEO_PROVIDER,
+                        post_id=item["post_id"],
+                        correlation_id=correlation_id,
                     )
-                    negative_prompt = None
-                else:
-                    prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
-                    prompt_text = prompt_request["prompt_text"] or ""
-                    negative_prompt = prompt_request.get("negative_prompt")
-                    segment_metadata = None
+                    reserve_quota(
+                        provider=VEO_PROVIDER,
+                        post_id=item["post_id"],
+                        batch_id=batch_id,
+                        reservation_key=reservation_key,
+                        requested_units=item["quota_requested_units"],
+                        require_immediate_slot=False,
+                    )
+                    item["quota_reservation_key"] = reservation_key
+                    reserved_keys.append(reservation_key)
+            except FlowForgeException:
+                for reservation_key in reserved_keys:
+                    release_quota(
+                        reservation_key=reservation_key,
+                        reason="Batch preflight failed before any Veo submission.",
+                        final_status="released",
+                        error_code="batch_preflight_aborted",
+                    )
+                raise
 
+        for index, item in enumerate(prepared_submissions):
+            post = item["post"]
+            post_id = item["post_id"]
+            submission_plan = item["submission_plan"]
+            profile = item["profile"]
+            is_extended = item["is_extended"]
+            prompt_text = item["prompt_text"]
+            negative_prompt = item["negative_prompt"]
+            segment_metadata = item["segment_metadata"]
+            quota_reservation_key = item.get("quota_reservation_key")
+            quota_consumed = False
+
+            try:
                 submission_result = _submit_video_request(
                     provider=submission_plan["provider"],
                     prompt_text=prompt_text,
@@ -597,9 +713,20 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     seconds=submission_plan["seconds"],
                     size=submission_plan["size"],
                     correlation_id=f"{correlation_id}_{post_id}",
+                    provider_duration_seconds=(
+                        profile.veo_base_seconds
+                        if is_extended and profile is not None
+                        else submission_plan["provider_target_seconds"]
+                        if submission_plan["provider"] == VEO_PROVIDER
+                        else None
+                    ),
                 )
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
+
+                if quota_reservation_key:
+                    consume_quota(reservation_key=quota_reservation_key, operation_id=operation_id, units=1)
+                    quota_consumed = True
 
                 record_prompt_audit(
                     post_id=post_id,
@@ -622,6 +749,9 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     submission_result=submission_result,
                     segment_metadata=segment_metadata,
                 )
+                if quota_reservation_key:
+                    submission_metadata["quota_reservation_key"] = quota_reservation_key
+                    submission_metadata["quota_reserved_units"] = item["quota_requested_units"]
 
                 route = profile.route if profile else None
                 provider_status = submission_result.get("status", "submitted")
@@ -675,8 +805,15 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     operation_id=operation_id,
                     duration_routed=submission_plan["duration_routed"],
                 )
-                
+
             except FlowForgeException as exc:
+                if quota_reservation_key and not quota_consumed:
+                    release_quota(
+                        reservation_key=quota_reservation_key,
+                        reason=exc.message,
+                        final_status="released",
+                        error_code=str(exc.code),
+                    )
                 logger.warning(
                     "batch_video_submission_skipped",
                     post_id=post_id,
@@ -686,7 +823,30 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     details=exc.details
                 )
                 skipped_count += 1
+                if (
+                    submission_plan["provider"] == VEO_PROVIDER
+                    and exc.status_code == 429
+                    and not exc.details.get("blocked_before_submit")
+                ):
+                    maybe_freeze_after_provider_429(provider=VEO_PROVIDER, reason=exc.message)
+                    for pending in prepared_submissions[index + 1:]:
+                        pending_key = pending.get("quota_reservation_key")
+                        if pending_key:
+                            release_quota(
+                                reservation_key=pending_key,
+                                reason="Batch stopped after provider quota drift.",
+                                final_status="released",
+                                error_code="batch_provider_quota_drift",
+                            )
+                    break
             except Exception as e:
+                if quota_reservation_key and not quota_consumed:
+                    release_quota(
+                        reservation_key=quota_reservation_key,
+                        reason=str(e),
+                        final_status="released",
+                        error_code="unexpected_error",
+                    )
                 logger.exception(
                     "batch_video_submission_failed",
                     post_id=post_id,
@@ -849,6 +1009,7 @@ def _submit_video_request(
     seconds: int,
     size: Optional[str],
     correlation_id: str,
+    provider_duration_seconds: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Submit a video generation request to the selected provider."""
 
@@ -856,6 +1017,9 @@ def _submit_video_request(
         veo_client = get_veo_client()
         provider_aspect = provider_aspect_ratio or aspect_ratio
         requested_aspect = requested_aspect_ratio or aspect_ratio
+        veo_duration_seconds = provider_duration_seconds or seconds
+        if veo_duration_seconds not in {4, 6, 8}:
+            veo_duration_seconds = 8
         try:
             result = veo_client.submit_video_generation(
                 prompt=prompt_text,
@@ -863,6 +1027,7 @@ def _submit_video_request(
                 correlation_id=correlation_id,
                 aspect_ratio=provider_aspect,
                 resolution=resolution,
+                duration_seconds=veo_duration_seconds,
             )
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code

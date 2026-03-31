@@ -183,12 +183,18 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
         "operation_id": "op-ext-1",
         "status": "submitted",
     }
+    mock_prompt_audit = MagicMock()
+    mock_consume_quota = MagicMock()
+    mock_ensure_slot = MagicMock()
 
     mock_supabase = MagicMock()
     mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
 
     with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
-         patch("workers.video_poller.get_supabase", return_value=mock_supabase):
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch("workers.video_poller.record_prompt_audit", mock_prompt_audit), \
+         patch("workers.video_poller.consume_quota", mock_consume_quota), \
+         patch("workers.video_poller.ensure_immediate_submit_slot", mock_ensure_slot):
         _submit_extension_hop(post, correlation_id="test-corr", previous_video_data=previous_video_data)
 
     # Must use submit_video_extension with video_uri via REST.
@@ -208,6 +214,13 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
     assert meta["veo_current_segment_index"] == 1
     assert "op-ext-1" in meta["operation_ids"]
     assert meta["chain_status"] == "extending"
+    mock_ensure_slot.assert_called_once()
+    mock_consume_quota.assert_not_called()
+    mock_prompt_audit.assert_called_once()
+    audit_kwargs = mock_prompt_audit.call_args.kwargs
+    assert audit_kwargs["prompt_path"] == "veo_extension_hop"
+    assert audit_kwargs["requested_seconds"] == 7
+    assert audit_kwargs["operation_id"] == "op-ext-1"
 
 
 def test_submit_extension_hop_raises_when_fewer_segments_than_hops():
@@ -302,7 +315,8 @@ def test_submit_extension_hop_defers_retryable_processed_video_error():
     mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
 
     with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
-         patch("workers.video_poller.get_supabase", return_value=mock_supabase):
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch("workers.video_poller.ensure_immediate_submit_slot", return_value={"ok": True}):
         _submit_extension_hop(post, correlation_id="corr-retryable", previous_video_data=previous_video_data)
 
     update_payload = mock_supabase.client.table.return_value.update.call_args[0][0]
@@ -397,6 +411,7 @@ def test_handle_veo_video_chains_when_hops_remaining():
 
     with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
          patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch("workers.video_poller.ensure_immediate_submit_slot", return_value={"ok": True}), \
          patch("workers.video_poller._store_completed_video") as mock_store:
         _handle_veo_video(post, "op-base", "corr-chain")
 
@@ -563,3 +578,65 @@ def test_full_32s_chain_lifecycle():
 
     assert metadata["generated_seconds"] == 32
     assert metadata["veo_extension_hops_completed"] == 4
+
+
+def test_process_video_operation_releases_quota_and_freezes_after_provider_429(monkeypatch):
+    from workers.video_poller import process_video_operation
+
+    response = httpx.Response(
+        status_code=429,
+        request=httpx.Request("POST", "https://example.com"),
+        text='{"error":{"message":"quota exhausted"}}',
+    )
+    error = httpx.HTTPStatusError("quota exhausted", request=response.request, response=response)
+
+    post = {
+        "id": "post-429",
+        "video_operation_id": "op-429",
+        "video_provider": "veo_3_1",
+        "updated_at": "2026-03-31T10:00:00Z",
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 2,
+            "veo_extension_hops_completed": 1,
+            "quota_reservation_key": "res-429",
+        },
+    }
+
+    captured_update = {}
+
+    class FakeUpdate:
+        def __init__(self, payload):
+            captured_update["payload"] = payload
+
+        def eq(self, *args, **kwargs):
+            return self
+
+        def execute(self):
+            return MagicMock()
+
+    class FakeTable:
+        def update(self, payload):
+            return FakeUpdate(payload)
+
+    fake_supabase = MagicMock()
+    fake_supabase.client.table.return_value = FakeTable()
+
+    monkeypatch.setattr("workers.video_poller._claim_video_poll_lease", lambda post, correlation_id: post)
+    monkeypatch.setattr("workers.video_poller._handle_veo_video", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_supabase)
+    freeze_mock = MagicMock()
+    release_mock = MagicMock()
+    monkeypatch.setattr("workers.video_poller.maybe_freeze_after_provider_429", freeze_mock)
+    monkeypatch.setattr("workers.video_poller._release_post_quota_reservation", release_mock)
+
+    process_video_operation(post)
+
+    freeze_mock.assert_called_once()
+    release_mock.assert_called_once_with(
+        post,
+        reason=str(error),
+        final_status="failed",
+        error_code="provider_429",
+    )
+    assert captured_update["payload"]["video_status"] == "failed"

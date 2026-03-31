@@ -225,7 +225,8 @@ def diagnose_veo_adapter() -> Dict[str, Any]:
             negative_prompt="subtitles, watermark, text overlays",
             correlation_id="diagnostic_test",
             aspect_ratio="9:16",
-            resolution="720p"
+            resolution="720p",
+            duration_seconds=8,
         )
         
         passed = "operation_id" in test_result

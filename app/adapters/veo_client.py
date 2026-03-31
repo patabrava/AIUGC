@@ -49,6 +49,7 @@ class VeoClient:
         correlation_id: str,
         aspect_ratio: str,
         resolution: str,
+        duration_seconds: int,
         reference_images: Optional[list] = None
     ) -> Dict[str, Any]:
         """
@@ -64,6 +65,7 @@ class VeoClient:
             correlation_id: Unique correlation ID for tracking
             aspect_ratio: Aspect ratio for video generation
             resolution: Resolution for video generation
+            duration_seconds: Requested Veo clip duration in seconds
             reference_images: Optional list of reference images
             
         Returns:
@@ -82,6 +84,7 @@ class VeoClient:
                 "parameters": {
                     "aspectRatio": aspect_ratio,
                     "resolution": resolution,
+                    "durationSeconds": duration_seconds,
                 },
             }
 
@@ -99,6 +102,7 @@ class VeoClient:
                 correlation_id=correlation_id,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
+                duration_seconds=duration_seconds,
                 negative_prompt_length=len(negative_prompt) if negative_prompt else 0,
                 request_payload=payload,
                 prompt_length=len(prompt),
@@ -127,7 +131,8 @@ class VeoClient:
                     response_text=exc.response.text,
                     request_payload=payload,
                     aspect_ratio=aspect_ratio,
-                    resolution=resolution
+                    resolution=resolution,
+                    duration_seconds=duration_seconds,
                 )
                 raise
 
@@ -140,7 +145,8 @@ class VeoClient:
                     response_text=response.text,
                     request_payload=payload,
                     aspect_ratio=aspect_ratio,
-                    resolution=resolution
+                    resolution=resolution,
+                    duration_seconds=duration_seconds,
                 )
                 raise
             operation_name = data.get("name")
@@ -153,7 +159,8 @@ class VeoClient:
                 correlation_id=correlation_id,
                 operation_id=operation_name,
                 prompt_length=len(prompt),
-                has_reference_images=bool(reference_images)
+                has_reference_images=bool(reference_images),
+                duration_seconds=duration_seconds,
             )
 
             return {
@@ -169,7 +176,8 @@ class VeoClient:
                 error=str(e),
                 request_payload=payload if 'payload' in locals() else None,
                 aspect_ratio=aspect_ratio,
-                resolution=resolution
+                resolution=resolution,
+                duration_seconds=duration_seconds,
             )
             raise
     
