@@ -5,6 +5,7 @@ Per Constitution § V: Locality & Vertical Slices
 """
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from threading import RLock
 from collections import Counter
@@ -30,6 +31,7 @@ from app.features.topics.captions import attach_caption_bundle
 from app.features.topics.deduplication import deduplicate_topics
 from app.features.topics.variant_expansion import expand_topic_variants
 from app.features.topics.seed_builders import build_research_seed_data
+from app.features.topics.topic_validation import classify_script_overlap
 from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
@@ -85,6 +87,19 @@ def _attach_publish_captions(
         script_fallback=script_fallback,
         canonical_topic=canonical_topic or None,
     )
+
+
+def _topic_family_signature(topic: Dict[str, Any]) -> str:
+    payload = topic.get("seed_payload") if isinstance(topic, dict) else None
+    canonical_topic = ""
+    if isinstance(payload, dict):
+        canonical_topic = str(payload.get("canonical_topic") or "").strip()
+    if not canonical_topic:
+        canonical_topic = str(topic.get("canonical_topic") or topic.get("title") or topic.get("script") or "").strip()
+    normalized = " ".join(
+        token for token in re.sub(r"[^\w\s]", " ", canonical_topic.lower()).split() if token
+    )
+    return normalized
 
 
 def _utc_now_iso() -> str:
@@ -596,6 +611,11 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 for topic in dedupe_reference
                 if isinstance(topic, dict) and str(topic.get("title") or "").strip()
             }
+            existing_scripts = [
+                str(topic.get("script") or topic.get("rotation") or "").strip()
+                for topic in dedupe_reference
+                if isinstance(topic, dict) and str(topic.get("script") or topic.get("rotation") or "").strip()
+            ]
 
             while len(collected_candidates) < required_topics and attempts < max_attempts:
                 remaining_topics = required_topics - len(collected_candidates)
@@ -637,16 +657,37 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     if len(collected_candidates) >= required_topics:
                         break
                     candidate_title = str(candidate.get("title") or "").strip().lower()
+                    candidate_script = str(candidate.get("script") or candidate.get("rotation") or "").strip()
                     if candidate_title and candidate_title in existing_titles:
+                        continue
+                    overlap_reason = next(
+                        (
+                            reason
+                            for existing_script in existing_scripts
+                            for reason in [classify_script_overlap(candidate_script, existing_script)]
+                            if reason
+                        ),
+                        "",
+                    )
+                    if overlap_reason:
+                        logger.info(
+                            "lifestyle_candidate_script_overlap_filtered",
+                            batch_id=batch_id,
+                            title=candidate.get("title"),
+                            reason=overlap_reason,
+                        )
                         continue
                     collected_candidates.append(candidate)
                     if candidate_title:
                         existing_titles.add(candidate_title)
+                    if candidate_script:
+                        existing_scripts.append(candidate_script)
                     dedupe_reference.append(
                         {
                             "title": candidate["title"],
                             "rotation": candidate["rotation"],
                             "cta": candidate["cta"],
+                            "script": candidate_script,
                             "spoken_duration": float(candidate["spoken_duration"]),
                         }
                     )

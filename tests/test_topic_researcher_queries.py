@@ -194,6 +194,87 @@ def test_upsert_topic_script_variants_skips_identical_scripts_within_registry_ti
 
 
 @patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_skips_high_confidence_suffix_pattern(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = [
+                {
+                    "id": "row-existing",
+                    "topic_registry_id": "topic-1",
+                    "topic_research_dossier_id": "dossier-1",
+                    "title": "Merkzeichen B",
+                    "script": (
+                        "Merkzeichen B spart dir Rückfragen, weil du Begleitfahrt, Nachweise und Fristen deutlich ruhiger einordnest."
+                    ),
+                    "target_length_tier": 8,
+                    "bucket": "canonical",
+                    "lane_key": "lane-1",
+                }
+            ]
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                filtered = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self._filters.items())
+                ]
+                return _FakeResponse(filtered)
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = MagicMock(client=MagicMock(table=MagicMock(return_value=fake_table)))
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="Freifahrt im Nahverkehr",
+        post_type="value",
+        target_length_tier=8,
+        topic_research_dossier_id="dossier-1",
+        variants=[
+            {
+                "bucket": "testimonial",
+                "script": (
+                    "Freifahrt im Nahverkehr spart dir Rückfragen, weil du Begleitfahrt, Nachweise und Fristen deutlich ruhiger einordnest."
+                ),
+                "hook_style": "testimonial",
+                "lane_key": "lane-2",
+            }
+        ],
+    )
+
+    assert stored == []
+    assert len(fake_table.rows) == 1
+
+
+@patch("app.features.topics.queries.get_supabase")
 def test_upsert_topic_script_variants_rejects_contaminated_canonical_scripts(mock_get_sb):
     class _FakeResponse:
         def __init__(self, data):
@@ -258,6 +339,52 @@ def test_upsert_topic_script_variants_rejects_contaminated_canonical_scripts(moc
 
     assert stored == []
     assert fake_table.rows == []
+
+
+def test_list_topic_suggestions_prefers_low_use_count_and_older_last_used(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {"id": "topic-1", "title": "Pflegegrad Tipps", "script": "A", "use_count": 8, "last_used_at": "2026-03-31T10:00:00+00:00", "post_type": "value"},
+        {"id": "topic-2", "title": "Rollstuhl Rampen", "script": "B", "use_count": 1, "last_used_at": "2026-03-20T10:00:00+00:00", "post_type": "value"},
+        {"id": "topic-3", "title": "ÖPNV Hilfe", "script": "C", "use_count": 1, "last_used_at": "2026-03-29T10:00:00+00:00", "post_type": "value"},
+    ]
+    script_rows = [
+        {"topic_registry_id": "topic-1", "title": "Pflegegrad Tipps", "script": "A"},
+        {"topic_registry_id": "topic-2", "title": "Rollstuhl Rampen", "script": "B"},
+        {"topic_registry_id": "topic-3", "title": "ÖPNV Hilfe", "script": "C"},
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+
+    result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=3, post_type="value")
+
+    assert [row["topic_registry_id"] for row in result] == ["topic-2", "topic-3", "topic-1"]
+
+
+def test_list_topic_suggestions_deduplicates_same_topic_family_title(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {"id": "topic-1", "title": "Pflegegrad: Schnell-Check!", "script": "A", "use_count": 0, "last_used_at": "2026-03-20T10:00:00+00:00", "post_type": "value"},
+        {"id": "topic-2", "title": "Pflegegrad Schnell Check", "script": "B", "use_count": 0, "last_used_at": "2026-03-21T10:00:00+00:00", "post_type": "value"},
+        {"id": "topic-3", "title": "Barrierefreiheit im Alltag", "script": "C", "use_count": 0, "last_used_at": "2026-03-22T10:00:00+00:00", "post_type": "value"},
+    ]
+    script_rows = [
+        {"topic_registry_id": "topic-1", "title": "Pflegegrad: Schnell-Check!", "script": "A"},
+        {"topic_registry_id": "topic-2", "title": "Pflegegrad Schnell Check", "script": "B"},
+        {"topic_registry_id": "topic-3", "title": "Barrierefreiheit im Alltag", "script": "C"},
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+
+    result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=5, post_type="value")
+
+    titles = [row["title"] for row in result]
+    assert "Barrierefreiheit im Alltag" in titles
+    assert len([title for title in titles if "Pflegegrad" in title]) == 1
 
 
 @patch("app.features.topics.queries.get_supabase")
@@ -336,6 +463,84 @@ def test_upsert_topic_script_variants_skips_global_duplicate_scripts(mock_get_sb
 
     assert stored == []
     assert len(fake_table.rows) == 1
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_allows_distinct_scripts_within_same_topic(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = [
+                {
+                    "id": "row-existing",
+                    "topic_registry_id": "topic-1",
+                    "topic_research_dossier_id": "dossier-1",
+                    "title": "Bestehendes Thema",
+                    "script": "Diese Rampe musst du vorher anmelden, sonst stehst du am Bahnsteig fest.",
+                    "target_length_tier": 8,
+                    "bucket": "canonical",
+                    "lane_key": "lane-existing",
+                }
+            ]
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                filtered = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self._filters.items())
+                ]
+                return _FakeResponse(filtered)
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = MagicMock(client=MagicMock(table=MagicMock(return_value=fake_table)))
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="Neues Thema",
+        post_type="value",
+        target_length_tier=8,
+        topic_research_dossier_id="dossier-1",
+        variants=[
+            {
+                "bucket": "testimonial",
+                "script": "Beim Ersatzverkehr hilft dir frühes Nachfragen, damit du Aufzüge, Umstiege und Wartezeiten sauber einplanst.",
+                "hook_style": "testimonial",
+                "lane_key": "lane-new",
+                "target_length_tier": 8,
+            }
+        ],
+    )
+
+    assert len(stored) == 1
+    assert len(fake_table.rows) == 2
 
 
 @patch("app.features.topics.queries.get_supabase")

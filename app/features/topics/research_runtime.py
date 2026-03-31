@@ -43,6 +43,7 @@ from app.features.topics.topic_validation import (
     sanitize_fact_fragments,
     sanitize_metadata_text,
     sanitize_spoken_fragment,
+    select_distinct_lane_candidates,
     validate_spoken_copy_cleanliness,
 )
 
@@ -125,6 +126,9 @@ def generate_topics_research_agent(
         candidate_count=len(shuffled_topics),
     )
 
+    requested_count = max(1, int(count or 0))
+    desired_seed_topics = 3 if requested_count <= 3 else 4 if requested_count <= 6 else 5
+
     chosen_topics: List[str] = []
     seen_topics = set()
     for seed_topic in shuffled_topics:
@@ -133,12 +137,12 @@ def generate_topics_research_agent(
             continue
         seen_topics.add(normalized)
         chosen_topics.append(str(seed_topic).strip())
-        if len(chosen_topics) >= 3:
+        if len(chosen_topics) >= desired_seed_topics:
             break
 
     items: List[ResearchAgentItem] = []
     max_results = count if count and count > 0 else None
-    for seed_topic in chosen_topics[:3]:
+    for seed_topic in chosen_topics[:desired_seed_topics]:
         dossier = generate_topic_research_dossier(
             seed_topic=seed_topic,
             post_type=post_type,
@@ -146,7 +150,15 @@ def generate_topics_research_agent(
             progress_callback=progress_callback,
             llm_factory=llm_factory,
         )
-        lane_candidates = list(dossier.lane_candidates or [])
+        raw_lane_candidates = list(dossier.lane_candidates or [])
+        lane_candidates = select_distinct_lane_candidates(raw_lane_candidates, max_candidates=4)
+        if len(lane_candidates) != len(raw_lane_candidates):
+            logger.info(
+                "research_agent_lane_candidates_filtered",
+                seed_topic=seed_topic,
+                original_count=len(raw_lane_candidates),
+                selected_count=len(lane_candidates),
+            )
         if not lane_candidates:
             continue
         for lane_candidate in lane_candidates:
@@ -339,21 +351,17 @@ def generate_topic_script_candidate(
             *((dossier_payload or {}).get("risk_notes") or []),
         ]
     )
-    filler_sentence_pool = sanitize_fact_fragments(
+    context_sentence_pool = sanitize_fact_fragments(
         [
-            f"Kurz gesagt: {lane_title}." if lane_title else "",
-            f"Bei {lane_title} lohnt sich der genaue Blick auf die Details." if lane_title else "",
-            "So kannst du das Thema im Alltag klarer einordnen.",
-            "Genau das hilft dir bei sichereren Entscheidungen im Alltag.",
-            "Damit erkennst du die Unterschiede früher und vermeidest unnötige Rückfragen.",
-            "So planst du im Alltag ruhiger und mit deutlich mehr Klarheit.",
+            lane_payload.get("source_summary"),
+            dossier_source_summary,
+            cluster_summary,
+            lane_payload.get("angle"),
+            lane_title,
+            *(lane_payload.get("risk_notes") or []),
+            *((dossier_payload or {}).get("risk_notes") or []),
         ]
     )
-    short_clause_pool = [
-        "für mehr Klarheit im Alltag",
-        "damit du sicherer entscheiden kannst",
-        "ohne unnötigen Stress im Alltag",
-    ]
     framework_choice = str(
         (lane_payload.get("framework_candidates") or dossier_payload.get("framework_candidates") or ["PAL"])[0] or "PAL"
     ).strip()
@@ -389,7 +397,7 @@ def generate_topic_script_candidate(
         return sentences
 
     clean_fact_sentences = _dedupe_sentences(lane_fact_texts)
-    clean_filler_sentences = _dedupe_sentences(filler_sentence_pool)
+    clean_context_sentences = _dedupe_sentences(context_sentence_pool)
 
     def _join_sentences(sentences: List[str]) -> str:
         return normalize_spoken_whitespace(" ".join(sentence.strip() for sentence in sentences if sentence.strip()))
@@ -414,7 +422,7 @@ def generate_topic_script_candidate(
         return ""
 
     def _choose_multi_sentence_script(preferred_sentences: List[str]) -> str:
-        sentence_pool = _dedupe_sentences(preferred_sentences + clean_fact_sentences + clean_filler_sentences)
+        sentence_pool = _dedupe_sentences(preferred_sentences + clean_fact_sentences + clean_context_sentences)
         if not sentence_pool:
             return ""
         max_pool_size = min(len(sentence_pool), 8)
@@ -439,10 +447,9 @@ def generate_topic_script_candidate(
     def _choose_single_sentence_script(preferred_sentences: List[str]) -> str:
         clause_pool = [
             sentence.rstrip(".!?").strip()
-            for sentence in _dedupe_sentences(preferred_sentences + clean_fact_sentences + clean_filler_sentences)
+            for sentence in _dedupe_sentences(preferred_sentences + clean_fact_sentences + clean_context_sentences)
             if sentence.strip()
         ]
-        clause_pool.extend(short_clause_pool)
         clause_pool = [clause for clause in clause_pool if clause]
         if not clause_pool:
             return ""
@@ -671,6 +678,7 @@ def generate_topic_script_candidate(
             },
         )
 
+    fallback_reason = ""
     for attempt in range(2):
         try:
             text_response = llm.generate_gemini_text(
@@ -687,9 +695,10 @@ def generate_topic_script_candidate(
                 error=getattr(exc, "message", str(exc)),
                 details=getattr(exc, "details", {}),
             )
-            if attempt == 0 and "rejected by inline audit" in getattr(exc, "message", ""):
-                continue  # retry once if audit rejected
-            return _synthesize_prompt1_fallback_item()
+            fallback_reason = getattr(exc, "message", str(exc))
+            if attempt == 0:
+                continue
+            break
         except ThirdPartyError as exc:
             logger.warning(
                 "topic_script_candidate_text_retry",
@@ -698,6 +707,7 @@ def generate_topic_script_candidate(
                 error=getattr(exc, "message", str(exc)),
                 details=getattr(exc, "details", {}),
             )
+            fallback_reason = getattr(exc, "message", str(exc))
             if attempt == 0:
                 continue
             break
@@ -706,6 +716,7 @@ def generate_topic_script_candidate(
         "topic_script_candidate_fallback_synthesized",
         lane_title=lane_payload.get("title"),
         target_length_tier=target_length_tier,
+        reason=fallback_reason or "provider_retry_exhausted",
     )
     return _synthesize_prompt1_fallback_item()
 

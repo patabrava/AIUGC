@@ -428,7 +428,7 @@ def test_topics_feature_uses_gemini_methods(monkeypatch):
 
     assert len(items) >= 3
     assert fake_llm.deep_research_prompts, "PROMPT_1 should use Gemini Deep Research"
-    assert len(fake_llm.deep_research_prompts) == 3, "PROMPT_1 should request one deep research dossier per generated topic"
+    assert len(fake_llm.deep_research_prompts) == 5, "PROMPT_1 should widen seed-topic coverage for larger runs"
     assert fake_llm.text_prompts, "PROMPT_1 stage 3 should use Gemini text generation"
     assert fake_llm.json_prompts, "Strict extractor or normalizer should use Gemini JSON generation"
     assert scripts.problem_agitate_solution
@@ -577,6 +577,8 @@ def test_generate_topic_script_candidate_synthesizes_fallback_on_empty_text(monk
     assert item.topic == "Behindertenbeirat mit Wirkung"
     assert item.script.endswith(".")
     assert 12 <= len(item.script.split()) <= 15
+    assert "für mehr klarheit im alltag" not in item.script.lower()
+    assert "damit du sicherer entscheiden kannst" not in item.script.lower()
 
 
 def test_generate_topic_script_candidate_expands_short_16s_script_to_tier_bounds(monkeypatch):

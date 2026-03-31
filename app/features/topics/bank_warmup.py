@@ -19,6 +19,7 @@ from app.features.topics.seed_builders import build_research_seed_data
 from app.features.topics.research_runtime import PROMPT1_RESEARCH_SYSTEM_PROMPT
 from app.features.topics.queries import get_topic_scripts_for_dossier, touch_topic_registry
 from app.adapters.llm_client import get_llm_client
+from app.features.topics.topic_validation import select_distinct_lane_candidates
 logger = get_logger(__name__)
 
 _CANONICAL_TIERS = (8, 16, 32)
@@ -232,8 +233,18 @@ def run_single_seed_topic_warmup(
     }
     force_fallback_lane_persistence = research_source == "synthetic_fallback"
 
-    for lane_candidate in list(research_dossier.get("lane_candidates") or []):
-        summary["lanes_seen"] += 1
+    raw_lane_candidates = list(research_dossier.get("lane_candidates") or [])
+    summary["lanes_seen"] = len(raw_lane_candidates)
+    lane_candidates = select_distinct_lane_candidates(raw_lane_candidates, max_candidates=4)
+    if len(lane_candidates) != len(raw_lane_candidates):
+        logger.info(
+            "topic_bank_lane_candidates_filtered",
+            seed_topic=seed_topic,
+            original_count=len(raw_lane_candidates),
+            selected_count=len(lane_candidates),
+        )
+
+    for lane_candidate in lane_candidates:
         lane_title_hint = str(
             lane_candidate.get("title")
             or research_dossier.get("topic")

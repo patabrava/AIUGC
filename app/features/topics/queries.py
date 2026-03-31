@@ -14,6 +14,7 @@ from app.core.errors import NotFoundError
 from app.core.logging import get_logger
 from app.features.topics.captions import resolve_selected_caption
 from app.features.topics.topic_validation import (
+    classify_script_overlap,
     detect_metadata_bleed,
     detect_spoken_copy_issues,
     get_prompt1_sentence_bounds,
@@ -70,6 +71,12 @@ def _normalize_script_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
 
 
+def _normalize_topic_signature(value: Any) -> str:
+    cleaned = re.sub(r"[^\w\s]", " ", str(value or "").lower())
+    tokens = [token for token in cleaned.split() if token]
+    return " ".join(tokens)
+
+
 def _count_script_words(text: Any) -> int:
     return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
 
@@ -79,6 +86,24 @@ def _count_script_sentences(text: Any) -> int:
     if not cleaned:
         return 0
     return len([segment for segment in re.split(r"(?<=[.!?])\s+", cleaned) if segment.strip()])
+
+
+def _find_script_overlap(
+    candidate_script: str,
+    rows: List[Dict[str, Any]],
+    *,
+    skip_topic_registry_id: Optional[str] = None,
+) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    for row in list(rows or []):
+        if skip_topic_registry_id and str(row.get("topic_registry_id") or "") == skip_topic_registry_id:
+            continue
+        existing_script = str(row.get("script") or "").strip()
+        if not existing_script:
+            continue
+        reason = classify_script_overlap(candidate_script, existing_script)
+        if reason:
+            return reason, row
+    return None, None
 
 
 def _fetch_topic_script_rows(
@@ -260,6 +285,8 @@ def _hydrate_script_suggestion(
         1, int(round(max(len(str(hydrated.get("script") or "").split()), 1) / 2.6))
     )
     hydrated["last_harvested_at"] = registry.get("last_harvested_at")
+    hydrated["last_used_at"] = hydrated.get("last_used_at") or registry.get("last_used_at")
+    hydrated["use_count"] = int(hydrated.get("use_count") or registry.get("use_count") or 0)
     hydrated["created_at"] = hydrated.get("created_at") or registry.get("created_at")
     hydrated["updated_at"] = hydrated.get("updated_at") or registry.get("updated_at")
     return hydrated
@@ -387,39 +414,52 @@ def list_topic_suggestions(
             post_type=post_type,
         )
         if rows:
-            rows.sort(
-                key=lambda row: (
-                    -int(row.get("use_count") or 0),
-                    str(row.get("last_used_at") or ""),
-                    str(row.get("created_at") or ""),
-                ),
-            )
             suggestions: List[Dict[str, Any]] = []
-            seen_topic_ids = set()
+            seen_topic_ids: set[str] = set()
+            seen_topic_signatures: set[str] = set()
             for row in rows:
                 topic_registry_id = str(row.get("topic_registry_id") or "")
                 if not topic_registry_id or topic_registry_id in seen_topic_ids:
                     continue
+                hydrated = _hydrate_script_suggestion(row, registry_by_id.get(topic_registry_id))
+                signature = _normalize_topic_signature(hydrated.get("title") or hydrated.get("script") or "")
+                if signature and signature in seen_topic_signatures:
+                    continue
                 seen_topic_ids.add(topic_registry_id)
-                suggestions.append(_hydrate_script_suggestion(row, registry_by_id.get(topic_registry_id)))
-                if len(suggestions) >= limit:
-                    break
+                if signature:
+                    seen_topic_signatures.add(signature)
+                suggestions.append(hydrated)
+            suggestions.sort(
+                key=lambda row: (
+                    int(row.get("use_count") or 0),
+                    str(row.get("last_used_at") or row.get("created_at") or ""),
+                    str(row.get("created_at") or ""),
+                    _normalize_topic_signature(row.get("title") or ""),
+                ),
+            )
             if suggestions:
-                return suggestions
+                return suggestions[:limit]
     except Exception as exc:
         logger.warning("topic_scripts_query_failed", error=str(exc))
 
     suggestions = []
+    seen_topic_signatures: set[str] = set()
     for row in registry_rows:
         if post_type and row.get("post_type") and row.get("post_type") != post_type:
             continue
-        suggestions.append(_registry_row_to_topic_suggestion(row))
+        candidate = _registry_row_to_topic_suggestion(row)
+        signature = _normalize_topic_signature(candidate.get("title") or candidate.get("script") or "")
+        if signature and signature in seen_topic_signatures:
+            continue
+        if signature:
+            seen_topic_signatures.add(signature)
+        suggestions.append(candidate)
     suggestions.sort(
         key=lambda row: (
-            str(row.get("last_harvested_at") or row.get("created_at") or ""),
-            str(row.get("title") or ""),
+            int(row.get("use_count") or 0),
+            str(row.get("last_used_at") or row.get("last_harvested_at") or row.get("created_at") or ""),
+            _normalize_topic_signature(row.get("title") or ""),
         ),
-        reverse=True,
     )
     return suggestions[:limit]
 
@@ -647,6 +687,7 @@ def upsert_topic_script_variants(
     existing_signatures_by_tier: Dict[int, set[str]] = {}
     existing_lane_signatures_by_tier: Dict[tuple[int, str], set[str]] = {}
     existing_exact_rows: Dict[tuple[int, str, str], Dict[str, Any]] = {}
+    existing_rows_by_tier: Dict[int, List[Dict[str, Any]]] = {}
     for row in combined_rows:
         script = str(row.get("script") or "").strip()
         if not script:
@@ -659,9 +700,11 @@ def upsert_topic_script_variants(
             existing_signatures_by_tier.setdefault(tier, set()).add(signature)
             if topic_research_dossier_id and lane_key and str(row.get("topic_research_dossier_id") or "") == str(topic_research_dossier_id):
                 existing_lane_signatures_by_tier.setdefault((tier, lane_key), set()).add(signature)
+        existing_rows_by_tier.setdefault(tier, []).append(row)
         if bucket and lane_key:
             existing_exact_rows[(tier, bucket, lane_key)] = row
     global_signatures_by_tier: Dict[int, Dict[str, str]] = {}
+    global_rows_by_tier: Dict[int, List[Dict[str, Any]]] = {}
     for row in global_rows:
         script = str(row.get("script") or "").strip()
         if not script:
@@ -671,6 +714,7 @@ def upsert_topic_script_variants(
         topic_id = str(row.get("topic_registry_id") or "").strip()
         if signature and tier:
             global_signatures_by_tier.setdefault(tier, {}).setdefault(signature, topic_id)
+            global_rows_by_tier.setdefault(tier, []).append(row)
 
     stored_variants: List[Dict[str, Any]] = []
     duplicate_scripts_skipped = 0
@@ -759,6 +803,7 @@ def upsert_topic_script_variants(
                 target_length_tier=tier,
                 bucket=bucket,
                 lane_key=lane_key,
+                duplicate_reason="duplicate_exact",
             )
             duplicate_scripts_skipped += 1
             continue
@@ -771,6 +816,38 @@ def upsert_topic_script_variants(
                 target_length_tier=tier,
                 bucket=bucket,
                 lane_key=lane_key,
+                duplicate_reason="duplicate_exact",
+            )
+            duplicate_scripts_skipped += 1
+            continue
+        overlap_reason, overlap_row = _find_script_overlap(script, existing_rows_by_tier.get(tier, []))
+        if overlap_reason:
+            logger.info(
+                "topic_script_duplicate_skipped",
+                topic_registry_id=topic_registry_id,
+                matched_script_id=overlap_row.get("id") if overlap_row else None,
+                target_length_tier=tier,
+                bucket=bucket,
+                lane_key=lane_key,
+                duplicate_reason=overlap_reason,
+            )
+            duplicate_scripts_skipped += 1
+            continue
+        global_overlap_reason, global_overlap_row = _find_script_overlap(
+            script,
+            global_rows_by_tier.get(tier, []),
+            skip_topic_registry_id=topic_registry_id,
+        )
+        if global_overlap_reason:
+            logger.info(
+                "topic_script_global_duplicate_skipped",
+                topic_registry_id=topic_registry_id,
+                existing_topic_registry_id=global_overlap_row.get("topic_registry_id") if global_overlap_row else None,
+                matched_script_id=global_overlap_row.get("id") if global_overlap_row else None,
+                target_length_tier=tier,
+                bucket=bucket,
+                lane_key=lane_key,
+                duplicate_reason=global_overlap_reason,
             )
             duplicate_scripts_skipped += 1
             continue
@@ -783,6 +860,7 @@ def upsert_topic_script_variants(
                     target_length_tier=tier,
                     bucket=bucket,
                     lane_key=lane_key,
+                    duplicate_reason="duplicate_exact",
                 )
                 duplicate_scripts_skipped += 1
                 continue
@@ -797,6 +875,7 @@ def upsert_topic_script_variants(
                     target_length_tier=tier,
                     bucket=bucket,
                     lane_key=lane_key,
+                    duplicate_reason="duplicate_exact",
                 )
                 duplicate_scripts_skipped += 1
                 continue
@@ -807,6 +886,7 @@ def upsert_topic_script_variants(
                 target_length_tier=tier,
                 bucket=bucket,
                 lane_key=lane_key,
+                duplicate_reason="duplicate_exact",
             )
             duplicate_scripts_skipped += 1
             continue
@@ -843,8 +923,11 @@ def upsert_topic_script_variants(
             stored_variants.append(normalized)
             existing_exact_rows[(tier, bucket, lane_key)] = normalized
             normalized_signature = _normalize_script_text(script)
+            existing_rows_by_tier.setdefault(tier, []).append(normalized)
+            global_rows_by_tier.setdefault(tier, []).append(normalized)
             if normalized_signature:
                 existing_signatures_by_tier.setdefault(tier, set()).add(normalized_signature)
+                global_signatures_by_tier.setdefault(tier, {}).setdefault(normalized_signature, topic_registry_id)
                 if topic_research_dossier_id and lane_key:
                     existing_lane_signatures_by_tier.setdefault((tier, lane_key), set()).add(normalized_signature)
     return stored_variants

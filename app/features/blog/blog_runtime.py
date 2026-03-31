@@ -32,65 +32,6 @@ logger = get_logger(__name__)
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "topics" / "prompt_data" / "blog_post.txt"
 
-BLOG_JSON_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "name": {"type": "string", "description": "Titel des Blogbeitrags"},
-        "slug": {"type": "string", "description": "SEO-URL-Slug mit Bindestrichen"},
-        "merksatz": {"type": "string", "description": "Ein prägnanter Kernsatz in genau einem Satz"},
-        "tipp": {"type": "string", "description": "Ein konkreter Tipp in genau einem Satz"},
-        "summary_bullets": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "3 bis 6 kurze Stichpunkte für die Zusammenfassung",
-        },
-        "intro_heading": {"type": "string", "description": "Zwischenüberschrift für die Einleitung"},
-        "introduction_paragraphs": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "1 bis 3 Einleitungsabsätze",
-        },
-        "sections": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "heading": {"type": "string"},
-                    "paragraphs": {"type": "array", "items": {"type": "string"}},
-                    "bullets": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["heading", "paragraphs", "bullets"],
-            },
-            "description": "3 bis 6 Hauptabschnitte des Artikels",
-        },
-        "conclusion_heading": {"type": "string", "description": "Zwischenüberschrift für den Schluss"},
-        "conclusion_paragraphs": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "1 bis 3 Schlussabsätze",
-        },
-        "preview_text": {"type": "string", "description": "Kurzer Vorschauteaser für Blog-Grid oder Listing"},
-        "meta_title": {"type": "string", "description": "SEO-Meta-Titel"},
-        "meta_description": {"type": "string", "description": "SEO-Meta-Beschreibung, maximal 160 Zeichen"},
-    },
-    "required": [
-        "name",
-        "slug",
-        "merksatz",
-        "tipp",
-        "summary_bullets",
-        "intro_heading",
-        "introduction_paragraphs",
-        "sections",
-        "conclusion_heading",
-        "conclusion_paragraphs",
-        "preview_text",
-        "meta_title",
-        "meta_description",
-    ],
-}
-
-
 def _load_prompt_template() -> str:
     """Load the blog post prompt template from disk."""
     return _PROMPT_PATH.read_text(encoding="utf-8")
@@ -133,6 +74,193 @@ def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
     prompt = prompt.replace("{disclaimer}", dossier_payload.get("disclaimer", ""))
 
     return prompt
+
+
+def _parse_labeled_blog_text(raw_text: str, dossier_payload: Dict[str, Any]) -> Dict[str, Any]:
+    lines = [line.rstrip() for line in str(raw_text or "").splitlines()]
+    sections: list[Dict[str, Any]] = []
+    current_section: Optional[Dict[str, Any]] = None
+    current_block: Optional[str] = None
+    intro_heading = ""
+    conclusion_heading = ""
+    intro_paragraphs: list[str] = []
+    conclusion_paragraphs: list[str] = []
+    summary_bullets: list[str] = []
+    name = slug = merksatz = tipp = preview_text = meta_title = meta_description = ""
+
+    def add_paragraph(target: list[str], text: str) -> None:
+        cleaned = text.strip()
+        if cleaned:
+            target.append(cleaned)
+
+    def split_sentences(text: str) -> list[str]:
+        parts = []
+        for chunk in text.replace("\r", "\n").split("\n"):
+            cleaned_chunk = chunk.strip()
+            if not cleaned_chunk:
+                continue
+            pieces = [piece.strip() for piece in cleaned_chunk.split(". ") if piece.strip()]
+            if len(pieces) == 1:
+                parts.append(cleaned_chunk)
+            else:
+                for piece in pieces:
+                    if piece and piece[-1] not in ".!?":
+                        piece += "."
+                    parts.append(piece)
+        return [part for part in parts if part]
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("Name:"):
+            name = line.removeprefix("Name:").strip()
+            current_block = None
+            continue
+        if line.startswith("Slug:"):
+            slug = line.removeprefix("Slug:").strip()
+            current_block = None
+            continue
+        if line.startswith("Merksatz:"):
+            merksatz = line.removeprefix("Merksatz:").strip()
+            current_block = None
+            continue
+        if line.startswith("Tipp:"):
+            tipp = line.removeprefix("Tipp:").strip()
+            current_block = None
+            continue
+        if line.startswith("Vorschautext:"):
+            preview_text = line.removeprefix("Vorschautext:").strip()
+            current_block = None
+            continue
+        if line.startswith("Meta-Titel:"):
+            meta_title = line.removeprefix("Meta-Titel:").strip()
+            current_block = None
+            continue
+        if line.startswith("Meta-Beschreibung:"):
+            meta_description = line.removeprefix("Meta-Beschreibung:").strip()
+            current_block = None
+            continue
+        if line == "Zusammenfassung:":
+            current_block = "summary"
+            continue
+        if line == "Einleitung:":
+            current_block = "intro"
+            continue
+        if line == "Schluss:":
+            current_block = "conclusion"
+            continue
+        if line.startswith("Abschnitt "):
+            current_section = {"heading": "", "paragraphs": [], "bullets": []}
+            sections.append(current_section)
+            current_block = "section"
+            continue
+        if line.startswith("### "):
+            heading = line.removeprefix("### ").strip()
+            if current_block == "intro":
+                intro_heading = heading
+            elif current_block == "conclusion":
+                conclusion_heading = heading
+            elif current_section is not None:
+                current_section["heading"] = heading
+            continue
+        if line.startswith("- "):
+            bullet = line[2:].strip()
+            if current_block == "summary":
+                summary_bullets.append(bullet)
+            elif current_section is not None:
+                current_section["bullets"].append(bullet)
+            continue
+
+        if current_block == "intro":
+            add_paragraph(intro_paragraphs, line)
+        elif current_block == "conclusion":
+            add_paragraph(conclusion_paragraphs, line)
+        elif current_section is not None:
+            add_paragraph(current_section["paragraphs"], line)
+
+    facts = list(dossier_payload.get("facts") or [])
+    angles = list(dossier_payload.get("angle_options") or [])
+    if len(sections) < 3:
+        for index in range(3 - len(sections)):
+            focus = angles[index] if index < len(angles) else (facts[index] if index < len(facts) else dossier_payload.get("topic", "Thema"))
+            sections.append(
+                {
+                    "heading": f"Einordnung {index + 1}",
+                    "paragraphs": [f"Dieser Abschnitt ordnet den Punkt '{focus}' ein und zeigt die praktische Konsequenz."],
+                    "bullets": [],
+                }
+            )
+
+    if len(summary_bullets) < 3:
+        for fact in facts[: 3 - len(summary_bullets)]:
+            summary_bullets.append(str(fact).strip())
+
+    if not merksatz:
+        merksatz = str(facts[0]).strip() if facts else str(dossier_payload.get("topic", "")).strip()
+    if not tipp:
+        tipp = str(facts[1]).strip() if len(facts) > 1 else merksatz
+    if not preview_text:
+        preview_text = str(dossier_payload.get("source_summary") or dossier_payload.get("cluster_summary") or merksatz)[:220]
+    if not meta_title:
+        meta_title = name or str(dossier_payload.get("topic", "")).strip()
+    if not meta_description:
+        meta_description = preview_text or str(dossier_payload.get("disclaimer", "")).strip()[:160]
+
+    if not sections:
+        body_sentences = split_sentences(str(dossier_payload.get("source_summary") or raw_text or ""))
+        if not body_sentences:
+            body_sentences = [str(dossier_payload.get("cluster_summary") or dossier_payload.get("topic") or "").strip()]
+        body_sentences = [sentence for sentence in body_sentences if sentence]
+        intro_heading = intro_heading or "Worum es geht"
+        conclusion_heading = conclusion_heading or "Was daraus folgt"
+        if body_sentences:
+            intro_paragraphs = intro_paragraphs or body_sentences[:2]
+        if len(body_sentences) > 2:
+            remaining = body_sentences[2:]
+            chunk_size = max(1, len(remaining) // 3)
+            fallback_headings = [
+                "Die rechtliche Einordnung",
+                "Die praktische Realität",
+                "Was Betroffene beachten sollten",
+            ]
+            for idx, heading in enumerate(fallback_headings):
+                start = idx * chunk_size
+                end = len(remaining) if idx == len(fallback_headings) - 1 else (idx + 1) * chunk_size
+                section_sentences = remaining[start:end] or remaining[-1:]
+                sections.append(
+                    {
+                        "heading": heading,
+                        "paragraphs": section_sentences[:2],
+                        "bullets": [],
+                    }
+                )
+        if not conclusion_paragraphs:
+            conclusion_paragraphs = [
+                "Die zentrale Frage ist nicht nur, was auf dem Papier steht, sondern was im Alltag verlässlich funktioniert.",
+                "Genau dort entsteht der Unterschied zwischen Anspruch und Praxis.",
+            ]
+        if not summary_bullets and body_sentences:
+            summary_bullets = body_sentences[:4]
+        preview_text = _truncate(body_sentences[0] if body_sentences else preview_text, 180)
+        if not meta_description:
+            meta_description = _truncate(preview_text, 160)
+
+    return {
+        "name": name or dossier_payload.get("topic", ""),
+        "slug": slug or "",
+        "merksatz": merksatz or "",
+        "tipp": tipp or "",
+        "summary_bullets": summary_bullets,
+        "intro_heading": intro_heading or "Einleitung",
+        "introduction_paragraphs": intro_paragraphs,
+        "sections": sections,
+        "conclusion_heading": conclusion_heading or "Schluss",
+        "conclusion_paragraphs": conclusion_paragraphs,
+        "preview_text": preview_text or "",
+        "meta_title": meta_title or name or "",
+        "meta_description": meta_description or "",
+    }
 
 
 def _build_error_content(post: Dict[str, Any], error: str) -> Dict[str, Any]:
@@ -205,12 +333,12 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
         prompt = _build_blog_prompt(dossier_payload)
 
         llm = get_llm_client()
-        parsed = llm.generate_gemini_json(
+        raw_text = llm.generate_gemini_text(
             prompt=prompt,
-            json_schema=BLOG_JSON_SCHEMA,
             temperature=0.7,
             max_tokens=8192,
         )
+        parsed = _parse_labeled_blog_text(raw_text, dossier_payload)
 
         dossier_sources = dossier_payload.get("sources") or []
         blog_content = build_blog_content_from_llm(

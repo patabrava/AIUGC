@@ -57,6 +57,32 @@ def test_generate_lifestyle_topics_derives_content_titles(monkeypatch):
     assert all(title not in LIFESTYLE_TEMPLATES for title in generated_titles), generated_titles
 
 
+def test_generate_lifestyle_topics_retries_when_request_level_script_shape_repeats(monkeypatch):
+    scripts = [
+        "Kennst du dieses Schlagloch jeden Morgen und planst deshalb schon vor dem Kaffee Umwege.",
+        "Kennst du dieses Schlagloch jeden Morgen und planst deshalb schon vor dem Kaffee Umwege.",
+        "Schon ein schmaler Eingang kippt deinen Tagesplan sofort, wenn niemand an Wendeflächen denkt.",
+    ]
+    call_index = {"value": 0}
+
+    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
+        script = scripts[call_index["value"]]
+        call_index["value"] += 1
+        return _dialog_scripts(
+            script,
+            description=f"Ausführliche Lifestyle-Beschreibung für {topic} mit genug Kontext.",
+        )
+
+    monkeypatch.setattr(topic_agents, "generate_dialog_scripts", fake_generate_dialog_scripts)
+
+    generated = topic_agents.generate_lifestyle_topics(count=2, seed=11)
+
+    rotations = [item["rotation"] for item in generated]
+    assert len(rotations) == 2
+    assert rotations[0] != rotations[1]
+    assert call_index["value"] == 3
+
+
 def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_template_titles(monkeypatch):
     created_posts = []
     registry_rows = []

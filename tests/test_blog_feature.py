@@ -18,8 +18,10 @@ os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
 os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 
 from app.main import app
+from app.features.blog import queries as blog_queries
 from app.features.blog.schemas import BlogContent, BlogSource, build_blog_content_from_llm, normalize_blog_content
 from app.features.blog.webflow_client import WebflowClient
+from pathlib import Path
 
 
 def test_blog_content_from_llm_is_webflow_ready():
@@ -216,3 +218,48 @@ def test_blog_publish_endpoint_is_registered():
     client = TestClient(app)
     response = client.post("/blog/posts/00000000-0000-0000-0000-000000000000/blog/publish", allow_redirects=False)
     assert response.status_code != 404
+
+
+def test_blog_prompt_requests_plain_text_output():
+    prompt = Path("app/features/topics/prompt_data/blog_post.txt").read_text(encoding="utf-8")
+    assert "reiner Text" in prompt
+    assert "kein JSON" in prompt
+    assert "AUSGABEFORMAT (reiner Text" in prompt
+
+
+def test_update_blog_status_falls_back_for_legacy_status_constraint(monkeypatch):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.update_calls = []
+
+        def update(self, payload):
+            self.update_calls.append(dict(payload))
+            self._payload = payload
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def execute(self):
+            if len(self.update_calls) == 1:
+                raise Exception("violates check constraint posts_blog_status_check")
+            return _FakeResponse([self._payload])
+
+    table = _FakeTable()
+
+    class _FakeSupabase:
+        client = type("Client", (), {"table": staticmethod(lambda _name: table)})()
+
+    monkeypatch.setattr(blog_queries, "get_supabase", lambda: _FakeSupabase())
+
+    updated = blog_queries.update_blog_status("post-1", status="publishing", scheduled_at="2026-04-01T09:00:00Z")
+
+    assert table.update_calls[0]["blog_status"] == "publishing"
+    assert table.update_calls[0]["blog_scheduled_at"] == "2026-04-01T09:00:00Z"
+    assert table.update_calls[1]["blog_status"] == "draft"
+    assert "blog_scheduled_at" not in table.update_calls[1]
+    assert updated["blog_status"] == "draft"

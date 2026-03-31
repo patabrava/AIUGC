@@ -1046,9 +1046,10 @@ def harvest_topics_to_bank_sync(
         for post_type, count in post_type_counts.items():
             if count <= 0:
                 continue
+            seed_topic_count = 3 if count <= 3 else 4 if count <= 6 else 5
             warmup = _select_warmup_seed_topics(
                 post_type=post_type,
-                seed_topic_count=_WARMUP_SEED_TOPIC_COUNT,
+                seed_topic_count=seed_topic_count,
                 seed=hash((trigger_source, post_type, target_length_tier, count)),
             )
             seed_topics = list(warmup.get("seed_topics") or [])

@@ -37,12 +37,20 @@ def _isoformat_optional(value: Any) -> Optional[str]:
 def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
     """Fetch a post with blog-relevant fields."""
     supabase = get_supabase()
-    response = (
-        supabase.client.table("posts")
-        .select("id", "batch_id", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_scheduled_at", "blog_published_at", "topic_title")
-        .eq("id", post_id)
-        .execute()
-    )
+    try:
+        response = (
+            supabase.client.table("posts")
+            .select("id, batch_id, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_scheduled_at, blog_published_at, topic_title")
+            .eq("id", post_id)
+            .execute()
+        )
+    except Exception:
+        response = (
+            supabase.client.table("posts")
+            .select("id, batch_id, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_published_at, topic_title")
+            .eq("id", post_id)
+            .execute()
+        )
     if not response.data:
         raise FlowForgeException(
             code=ErrorCode.NOT_FOUND,
@@ -66,7 +74,7 @@ def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
     post["blog_content"] = normalize_blog_content(
         blog_content,
         fallback_name=post.get("topic_title") or seed_data.get("canonical_topic", ""),
-        scheduled_at=_isoformat_optional(post.get("blog_scheduled_at")),
+        scheduled_at=_isoformat_optional(post.get("blog_scheduled_at") or post["blog_content"].get("publication_date")),
         published_at=_isoformat_optional(post.get("blog_published_at")),
     )
     return post
@@ -101,12 +109,11 @@ def toggle_blog_enabled(post_id: str, *, enabled: bool) -> Dict[str, Any]:
     if not enabled:
         update_payload["blog_scheduled_at"] = None
 
-    response = (
-        supabase.client.table("posts")
-        .update(update_payload)
-        .eq("id", post_id)
-        .execute()
-    )
+    try:
+        response = supabase.client.table("posts").update(update_payload).eq("id", post_id).execute()
+    except Exception:
+        update_payload.pop("blog_scheduled_at", None)
+        response = supabase.client.table("posts").update(update_payload).eq("id", post_id).execute()
     if not response.data:
         raise FlowForgeException(
             code=ErrorCode.NOT_FOUND,
@@ -141,12 +148,21 @@ def update_blog_status(
     elif clear_scheduled_at:
         update_payload["blog_scheduled_at"] = None
 
-    response = (
-        supabase.client.table("posts")
-        .update(update_payload)
-        .eq("id", post_id)
-        .execute()
-    )
+    try:
+        response = supabase.client.table("posts").update(update_payload).eq("id", post_id).execute()
+    except Exception as exc:
+        error_text = str(exc).lower()
+        if "posts_blog_status_check" in error_text and status in {"publishing", "scheduled"}:
+            fallback_status = "draft"
+            logger.warning(
+                "blog_status_legacy_constraint_fallback",
+                post_id=post_id,
+                requested_status=status,
+                fallback_status=fallback_status,
+            )
+            update_payload["blog_status"] = fallback_status
+        update_payload.pop("blog_scheduled_at", None)
+        response = supabase.client.table("posts").update(update_payload).eq("id", post_id).execute()
     if not response.data:
         raise FlowForgeException(
             code=ErrorCode.NOT_FOUND,
@@ -181,13 +197,22 @@ def update_blog_content_fields(post_id: str, *, updates: Dict[str, Any]) -> Dict
 def get_blog_enabled_posts(batch_id: str) -> List[Dict[str, Any]]:
     """Get all blog-enabled posts for a batch."""
     supabase = get_supabase()
-    response = (
-        supabase.client.table("posts")
-        .select("id", "batch_id", "post_type", "topic_title", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_scheduled_at", "blog_published_at")
-        .eq("batch_id", batch_id)
-        .eq("blog_enabled", True)
-        .execute()
-    )
+    try:
+        response = (
+            supabase.client.table("posts")
+            .select("id, batch_id, post_type, topic_title, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_scheduled_at, blog_published_at")
+            .eq("batch_id", batch_id)
+            .eq("blog_enabled", True)
+            .execute()
+        )
+    except Exception:
+        response = (
+            supabase.client.table("posts")
+            .select("id, batch_id, post_type, topic_title, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_published_at")
+            .eq("batch_id", batch_id)
+            .eq("blog_enabled", True)
+            .execute()
+        )
     return response.data or []
 
 
@@ -195,14 +220,17 @@ def get_due_scheduled_blog_posts(limit: int = 10) -> List[Dict[str, Any]]:
     """Return blog posts that should be published now."""
     supabase = get_supabase()
     now = datetime.now(timezone.utc).isoformat()
-    response = (
-        supabase.client.table("posts")
-        .select("id", "batch_id", "seed_data", "blog_enabled", "blog_status", "blog_content", "blog_webflow_item_id", "blog_scheduled_at", "blog_published_at", "topic_title")
-        .eq("blog_enabled", True)
-        .eq("blog_status", "scheduled")
-        .lte("blog_scheduled_at", now)
-        .order("blog_scheduled_at")
-        .limit(limit)
-        .execute()
-    )
-    return response.data or []
+    try:
+        response = (
+            supabase.client.table("posts")
+            .select("id, batch_id, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_scheduled_at, blog_published_at, topic_title")
+            .eq("blog_enabled", True)
+            .eq("blog_status", "scheduled")
+            .lte("blog_scheduled_at", now)
+            .order("blog_scheduled_at")
+            .limit(limit)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        return []

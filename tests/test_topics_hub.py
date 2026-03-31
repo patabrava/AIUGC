@@ -976,6 +976,118 @@ def test_shared_warmup_falls_back_to_synthesized_dossier(monkeypatch):
     assert summary["lanes_persisted"] == 1
 
 
+def test_shared_warmup_filters_near_duplicate_lane_candidates(monkeypatch):
+    from app.features.topics import bank_warmup
+    from app.features.topics import hub as topic_hub
+
+    dossier = ResearchDossier(
+        cluster_id="cluster-2",
+        topic="Barrierefreie Arzttermine",
+        anchor_topic="Barrierefreie Arzttermine",
+        seed_topic="Barrierefreie Arzttermine",
+        cluster_summary="Barrierefreie Arzttermine brauchen verlässliche Wege, Rückrufoptionen und klare Abläufe.",
+        framework_candidates=["PAL"],
+        sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
+        source_summary="Formulare, Rückrufwege und Terminabstimmung entscheiden über alltagstaugliche Arzttermine.",
+        facts=["Klare Rückrufwege sparen dir unnötige Schleifen.", "Digitale Terminwege müssen erreichbar bleiben."],
+        angle_options=["Terminwege", "Rückrufwege"],
+        risk_notes=["Ohne erreichbare Wege kippt der ganze Terminablauf."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            ResearchLaneCandidate(
+                lane_key="lane-1",
+                lane_family="sub_angle",
+                title="Barrierefreie Terminwege",
+                angle="Wie digitale und telefonische Wege den Arzttermin absichern",
+                priority=1,
+                framework_candidates=["PAL"],
+                source_summary="Digitale und telefonische Wege sichern den Arzttermin im Alltag besser ab.",
+                facts=["Klare Wege helfen dir schon vor dem Termin."],
+                risk_notes=["Ohne Plan bleiben Termine unnötig fragil."],
+                disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+                lane_overlap_warnings=[],
+                suggested_length_tiers=[8, 16, 32],
+            ),
+            ResearchLaneCandidate(
+                lane_key="lane-2",
+                lane_family="sub_angle",
+                title="Digitale Terminwege barrierefrei halten",
+                angle="Warum erreichbare Formulare und Rückrufe denselben Terminweg absichern",
+                priority=2,
+                framework_candidates=["PAL"],
+                source_summary="Erreichbare Formulare und Rückrufe sichern denselben Terminweg ebenfalls ab.",
+                facts=["Erreichbare Wege helfen dir schon vor dem Termin."],
+                risk_notes=["Ohne Plan bleiben Termine unnötig fragil."],
+                disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+                lane_overlap_warnings=[],
+                suggested_length_tiers=[8, 16, 32],
+            ),
+            ResearchLaneCandidate(
+                lane_key="lane-3",
+                lane_family="sub_angle",
+                title="Rückrufoptionen ohne Wartefrust",
+                angle="Wie klare Rückrufregeln deinen Termin nach Fehlversuchen retten",
+                priority=3,
+                framework_candidates=["PAL"],
+                source_summary="Klare Rückrufregeln verhindern, dass ein Fehlversuch den ganzen Tag kippt.",
+                facts=["Klare Rückrufregeln geben dir wieder Kontrolle."],
+                risk_notes=["Ohne Rückrufoption versanden Anliegen schnell."],
+                disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+                lane_overlap_warnings=[],
+                suggested_length_tiers=[8, 16, 32],
+            ),
+        ],
+    )
+
+    monkeypatch.setattr(bank_warmup, "_generate_research_dossier_raw", lambda **kwargs: "raw")
+    monkeypatch.setattr(bank_warmup, "parse_topic_research_response", lambda raw, **kwargs: dossier)
+    monkeypatch.setattr(bank_warmup, "touch_topic_registry", lambda *args, **kwargs: {})
+
+    seen_lane_keys = []
+
+    def fake_generate_topic_script_candidate(**kwargs):
+        lane = kwargs["lane_candidate"]
+        seen_lane_keys.append(lane["lane_key"])
+        return ResearchAgentItem(
+            topic=lane["title"],
+            script=f"{lane['title']} hilft dir, Termine, Rückrufe und Wege deutlich ruhiger zu ordnen.",
+            caption="Kurze Zusammenfassung.",
+            framework="PAL",
+            sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
+            source_summary=lane["source_summary"],
+            estimated_duration_s=8,
+            tone="direkt, freundlich, empowernd, du-Form",
+            disclaimer="Keine Rechts- oder medizinische Beratung.",
+        )
+
+    monkeypatch.setattr(bank_warmup, "generate_topic_script_candidate", fake_generate_topic_script_candidate)
+    monkeypatch.setattr(bank_warmup, "deduplicate_topics", lambda topics, *_args, **_kwargs: topics)
+    monkeypatch.setattr(bank_warmup, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}])
+    monkeypatch.setattr(
+        topic_hub,
+        "_persist_topic_bank_row",
+        lambda **kwargs: {
+            "stored_row": {
+                "id": f"topic-{kwargs['title']}",
+                "title": kwargs["title"],
+                "topic_research_dossier_id": f"dossier-{kwargs['title']}",
+            },
+            "stored_variants": [{"id": "v1"}, {"id": "v2"}, {"id": "v3"}],
+        },
+    )
+
+    summary = bank_warmup.run_single_seed_topic_warmup(
+        seed_topic="Barrierefreie Arzttermine",
+        post_type="value",
+        existing_topics=[],
+        collected_topics=[],
+    )
+
+    assert seen_lane_keys == ["lane-1", "lane-3"]
+    assert summary["lanes_seen"] == 3
+    assert summary["lanes_persisted"] == 2
+
+
 def test_launch_redirects_and_hub_shows_active_runs(monkeypatch):
     """After launching research, redirecting to /topics should show the active run."""
     from app.features.topics import hub as topic_hub

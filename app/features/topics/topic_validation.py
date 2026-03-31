@@ -461,6 +461,81 @@ def compute_bigram_jaccard(a: str, b: str) -> float:
     return len(bigrams_a & bigrams_b) / len(bigrams_a | bigrams_b)
 
 
+def normalize_similarity_text(text: Any) -> str:
+    cleaned = sanitize_spoken_fragment(text, ensure_terminal=True).lower()
+    cleaned = re.sub(r"[^\w\säöüß-]", " ", cleaned)
+    return normalize_spoken_whitespace(cleaned)
+
+
+def _script_window_signature(text: str, *, size: int, from_end: bool = False) -> str:
+    tokens = re.findall(r"[a-z0-9äöüß-]+", text.lower())
+    if len(tokens) < size:
+        return ""
+    window = tokens[-size:] if from_end else tokens[:size]
+    return " ".join(window)
+
+
+def classify_script_overlap(candidate: str, existing: str) -> Optional[str]:
+    candidate_norm = normalize_similarity_text(candidate)
+    existing_norm = normalize_similarity_text(existing)
+    if not candidate_norm or not existing_norm:
+        return None
+    if candidate_norm == existing_norm:
+        return "duplicate_exact"
+
+    bigram_overlap = compute_bigram_jaccard(candidate_norm, existing_norm)
+    prefix_match = _script_window_signature(candidate_norm, size=5) == _script_window_signature(existing_norm, size=5)
+    suffix_match = _script_window_signature(candidate_norm, size=7, from_end=True) == _script_window_signature(existing_norm, size=7, from_end=True)
+
+    if suffix_match and bigram_overlap >= 0.45:
+        return "duplicate_suffix_pattern"
+    if (prefix_match and bigram_overlap >= 0.55) or bigram_overlap >= 0.78:
+        return "duplicate_semantic_signature"
+    return None
+
+
+def _lane_similarity_signature(candidate: Dict[str, Any]) -> str:
+    fragments: List[str] = []
+    for value in (
+        candidate.get("title"),
+        candidate.get("angle"),
+        candidate.get("source_summary"),
+        " ".join(str(item).strip() for item in list(candidate.get("facts") or [])[:2] if str(item).strip()),
+    ):
+        cleaned = normalize_similarity_text(value)
+        if cleaned:
+            fragments.append(" ".join(cleaned.split()[:14]))
+    return " | ".join(fragments)
+
+
+def select_distinct_lane_candidates(
+    candidates: List[Dict[str, Any]],
+    *,
+    max_candidates: Optional[int] = None,
+    threshold: float = 0.58,
+) -> List[Dict[str, Any]]:
+    selected: List[Dict[str, Any]] = []
+    signatures: List[str] = []
+
+    for candidate in list(candidates or []):
+        signature = _lane_similarity_signature(candidate)
+        if signature:
+            is_duplicate = any(
+                signature == existing or compute_bigram_jaccard(signature, existing) >= threshold
+                for existing in signatures
+            )
+            if is_duplicate:
+                continue
+            signatures.append(signature)
+        selected.append(candidate)
+        if max_candidates is not None and len(selected) >= max_candidates:
+            break
+
+    if not selected and candidates:
+        return [candidates[0]]
+    return selected
+
+
 def validate_round_robin(items: List[ResearchAgentItem]) -> None:
     topics = [item.topic for item in items]
     unique_topics = list(dict.fromkeys(topics))

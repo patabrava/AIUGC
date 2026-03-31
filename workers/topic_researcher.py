@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
+from app.features.topics.bank_warmup import run_single_seed_topic_warmup
 from app.features.topics.queries import (
     create_cron_run,
     update_cron_run,
@@ -35,10 +36,6 @@ TARGET_TIERS = [8, 16, 32]
 POST_TYPE = "value"
 NICHE = os.environ.get("CRON_RESEARCH_NICHE", "Schwerbehinderung, Treppenlifte, Barrierefreiheit")
 CRON_STALE_AFTER_SECONDS = 15 * 60
-
-# Gemini rate limit backoff
-BACKOFF_DELAYS = [30, 60, 120]
-
 
 def _get_last_run_timestamp() -> float:
     """Get timestamp of last completed cron run from DB. Returns 0.0 if none."""
@@ -82,15 +79,15 @@ def _harvest_seed_topic_to_bank(
     existing_topics: List[Dict[str, Any]],
     collected_topics: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Wrapper around hub._harvest_seed_topic_to_bank for the worker context."""
-    from app.features.topics.hub import _harvest_seed_topic_to_bank as harvest
-    return harvest(
+    """Wrapper around the shared canonical warm-up for the worker context."""
+    summary = run_single_seed_topic_warmup(
         seed_topic=seed_topic,
         post_type=post_type,
         target_length_tier=target_length_tier,
         existing_topics=existing_topics,
         collected_topics=collected_topics,
     )
+    return list(summary.get("stored_rows") or [])
 
 
 def _normalize_stored_rows(result: Any) -> List[Dict[str, Any]]:
@@ -205,52 +202,31 @@ def _research_single_topic(
     post_type: str,
     tiers: List[int],
 ) -> Optional[List[Dict[str, Any]]]:
-    """Research a single topic across all tiers. Returns stored rows or None on failure."""
+    """Research a single topic using the shared canonical warm-up. Returns stored rows or None on failure."""
     existing_topics = get_all_topics_from_registry()
-    collected: List[Dict[str, Any]] = []
+    try:
+        rows = _harvest_seed_topic_to_bank(
+            seed_topic=seed_topic,
+            post_type=post_type,
+            target_length_tier=tiers[0] if tiers else None,
+            existing_topics=existing_topics,
+            collected_topics=[],
+        )
+        normalized_rows = _normalize_stored_rows(rows)
+        if normalized_rows:
+            logger.info(
+                "topic_research_topic_completed",
+                seed_topic=seed_topic,
+                tier="canonical",
+                rows_stored=len(normalized_rows),
+            )
+            return normalized_rows
 
-    for tier in tiers:
-        for attempt in range(len(BACKOFF_DELAYS) + 1):
-            try:
-                rows = _harvest_seed_topic_to_bank(
-                    seed_topic=seed_topic,
-                    post_type=post_type,
-                    target_length_tier=tier,
-                    existing_topics=existing_topics,
-                    collected_topics=collected,
-                )
-                normalized_rows = _normalize_stored_rows(rows)
-                collected.extend(normalized_rows)
-                logger.info(
-                    "topic_research_topic_completed",
-                    seed_topic=seed_topic,
-                    tier=tier,
-                    rows_stored=len(normalized_rows),
-                )
-                break
-            except Exception as exc:
-                error_msg = str(exc)
-                is_rate_limit = "429" in error_msg or "rate" in error_msg.lower()
-                if is_rate_limit and attempt < len(BACKOFF_DELAYS):
-                    delay = BACKOFF_DELAYS[attempt]
-                    logger.warning(
-                        "topic_research_rate_limit",
-                        seed_topic=seed_topic,
-                        tier=tier,
-                        attempt=attempt + 1,
-                        backoff_seconds=delay,
-                    )
-                    time.sleep(delay)
-                    continue
-                logger.exception(
-                    "topic_research_topic_failed",
-                    seed_topic=seed_topic,
-                    tier=tier,
-                    error=error_msg,
-                )
-                break  # Skip remaining tiers but keep partial results
-
-    return collected if collected else None
+        logger.warning("topic_research_topic_empty", seed_topic=seed_topic)
+        return None
+    except Exception as exc:
+        logger.exception("topic_research_topic_failed", seed_topic=seed_topic, error=str(exc))
+        return None
 
 
 def run_discovery_cycle():
