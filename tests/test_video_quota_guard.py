@@ -51,6 +51,63 @@ class _FakeSupabaseClient:
         raise AssertionError(f"Unexpected table access: {name}")
 
 
+class _MutableSelectQuery:
+    def __init__(self, rows):
+        self._rows = rows
+        self._filters = {}
+
+    def eq(self, column, value):
+        self._filters[column] = value
+        return self
+
+    def execute(self):
+        matched = [
+            row for row in self._rows
+            if all(row.get(column) == value for column, value in self._filters.items())
+        ]
+        return SimpleNamespace(data=matched)
+
+
+class _MutableUpdateQuery:
+    def __init__(self, rows, payload):
+        self._rows = rows
+        self._payload = payload
+        self._filters = {}
+
+    def eq(self, column, value):
+        self._filters[column] = value
+        return self
+
+    def execute(self):
+        matched = []
+        for row in self._rows:
+            if all(row.get(column) == value for column, value in self._filters.items()):
+                row.update(self._payload)
+                matched.append(row)
+        return SimpleNamespace(data=matched)
+
+
+class _MutablePostsTable:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def select(self, *args, **kwargs):
+        return _MutableSelectQuery(self._rows)
+
+    def update(self, payload):
+        return _MutableUpdateQuery(self._rows, payload)
+
+
+class _MutableSupabaseClient:
+    def __init__(self, posts):
+        self._posts = posts
+
+    def table(self, name):
+        if name == "posts":
+            return _MutablePostsTable(self._posts)
+        raise AssertionError(f"Unexpected table access: {name}")
+
+
 def test_generate_video_blocks_before_submit_when_quota_reservation_fails(monkeypatch):
     post = {
         "id": "post-1",
@@ -141,3 +198,96 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
     assert exc_info.value.code == ErrorCode.RATE_LIMIT
     assert submit_mock.call_count == 0
     assert released == [reservations[0]]
+
+
+def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
+    post = {
+        "id": "post-1",
+        "batch_id": "batch-1",
+        "video_prompt_json": {"veo_prompt": "Prompt"},
+        "seed_data": {},
+        "video_metadata": {},
+    }
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient([post]))
+    captured = {}
+
+    monkeypatch.setattr(
+        "app.features.videos.handlers._resolve_global_veo_anchor_image",
+        lambda correlation_id: (_ for _ in ()).throw(AssertionError("anchor image path must stay disabled")),
+    )
+
+    def _fake_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "operation_id": "operations/test-single",
+            "status": "submitted",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": "operations/test-single"},
+        }
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
+
+    request = VideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    asyncio.run(generate_video("post-1", request))
+
+    assert captured["first_frame_image"] is None
+    assert captured["provider"] == "veo_3_1"
+
+
+def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypatch):
+    posts = [
+        {
+            "id": "post-1",
+            "batch_id": "batch-1",
+            "video_prompt_json": {"veo_prompt": "Prompt 1"},
+            "seed_data": {"script": "Erster Satz."},
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+        {
+            "id": "post-2",
+            "batch_id": "batch-1",
+            "video_prompt_json": {"veo_prompt": "Prompt 2"},
+            "seed_data": {"script": "Zweiter Satz."},
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+    captured_calls = []
+
+    monkeypatch.setattr(
+        "app.features.videos.handlers._resolve_global_veo_anchor_image",
+        lambda correlation_id: (_ for _ in ()).throw(AssertionError("anchor image path must stay disabled")),
+    )
+
+    def _fake_submit(**kwargs):
+        captured_calls.append(kwargs)
+        return {
+            "operation_id": f"operations/test-{len(captured_calls)}",
+            "status": "submitted",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": f"operations/test-{len(captured_calls)}"},
+        }
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: {"id": batch_id, "target_length_tier": None})
+    monkeypatch.setattr("app.features.videos.handlers.ensure_immediate_submit_slot", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.release_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
+
+    request = BatchVideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    asyncio.run(generate_all_videos("batch-1", request))
+
+    assert len(captured_calls) == 2
+    for captured in captured_calls:
+        assert captured["first_frame_image"] is None
+        assert captured["provider"] == "veo_3_1"

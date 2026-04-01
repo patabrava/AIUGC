@@ -1,3 +1,4 @@
+import base64
 from types import SimpleNamespace
 
 import app.adapters.veo_client as veo_module
@@ -79,6 +80,43 @@ def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
     assert "durationSeconds" not in payload["parameters"]
     assert payload["instances"][0]["prompt"] == "continue the scene"
     assert payload["instances"][0]["video"]["uri"].endswith(":download?alt=media")
+    assert submission["operation_id"] == "operations/test-operation"
+
+    veo_module.VeoClient._instance = None
+
+
+def test_veo_submission_includes_first_frame_inline_image(monkeypatch):
+    monkeypatch.setattr(
+        veo_module,
+        "get_settings",
+        lambda: SimpleNamespace(google_ai_api_key="test-key"),
+    )
+    fake_http_client = FakeHttpClient()
+    veo_module.VeoClient._instance = None
+    client = veo_module.VeoClient()
+    client._http_client = fake_http_client
+
+    anchor_bytes = b"sarah-anchor-image"
+    submission = client.submit_video_generation(
+        prompt="portrait product demo",
+        negative_prompt="subtitles, watermark",
+        correlation_id="test-correlation",
+        aspect_ratio="9:16",
+        resolution="720p",
+        duration_seconds=8,
+        first_frame_image={
+            "mime_type": "image/jpeg",
+            "data_base64": base64.b64encode(anchor_bytes).decode("ascii"),
+        },
+    )
+
+    payload = fake_http_client.post_calls[0]["json"]
+    inline_data = payload["instances"][0]["image"]["inlineData"]
+    assert inline_data["mimeType"] == "image/jpeg"
+    assert base64.b64decode(inline_data["data"]) == anchor_bytes
+    assert payload["parameters"]["aspectRatio"] == "9:16"
+    assert payload["parameters"]["resolution"] == "720p"
+    assert payload["parameters"]["durationSeconds"] == 8
     assert submission["operation_id"] == "operations/test-operation"
 
     veo_module.VeoClient._instance = None

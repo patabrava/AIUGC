@@ -5,6 +5,7 @@ Per Constitution § VI: Adapterize specialists
 Per Constitution § III: Deterministic Execution
 """
 
+from copy import deepcopy
 from typing import Optional, Dict, Any
 
 import httpx
@@ -51,6 +52,7 @@ class VeoClient:
         aspect_ratio: str,
         resolution: str,
         duration_seconds: int,
+        first_frame_image: Optional[Dict[str, str]] = None,
         reference_images: Optional[list] = None,
         seed: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -68,6 +70,7 @@ class VeoClient:
             aspect_ratio: Aspect ratio for video generation
             resolution: Resolution for video generation
             duration_seconds: Requested Veo clip duration in seconds
+            first_frame_image: Optional first-frame anchor image as base64 inlineData
             reference_images: Optional list of reference images
             seed: Optional uint32 seed for reproducibility
 
@@ -78,12 +81,19 @@ class VeoClient:
             Exception: If submission fails
         """
         try:
-            payload: Dict[str, Any] = {
-                "instances": [
-                    {
-                        "prompt": prompt
+            instance: Dict[str, Any] = {
+                "prompt": prompt,
+            }
+            if first_frame_image:
+                instance["image"] = {
+                    "inlineData": {
+                        "mimeType": first_frame_image["mime_type"],
+                        "data": first_frame_image["data_base64"],
                     }
-                ],
+                }
+
+            payload: Dict[str, Any] = {
+                "instances": [instance],
                 "parameters": {
                     "aspectRatio": aspect_ratio,
                     "resolution": resolution,
@@ -103,6 +113,8 @@ class VeoClient:
                     correlation_id=correlation_id
                 )
 
+            logged_payload = self._payload_for_logging(payload)
+
             logger.info(
                 "veo_submission_request",
                 correlation_id=correlation_id,
@@ -110,7 +122,8 @@ class VeoClient:
                 resolution=resolution,
                 duration_seconds=duration_seconds,
                 negative_prompt_length=len(negative_prompt) if negative_prompt else 0,
-                request_payload=payload,
+                has_first_frame_image=bool(first_frame_image),
+                request_payload=logged_payload,
                 prompt_length=len(prompt),
                 prompt_preview=prompt[:400],
                 negative_prompt_preview=negative_prompt[:200] if negative_prompt else None,
@@ -135,7 +148,7 @@ class VeoClient:
                     correlation_id=correlation_id,
                     status_code=exc.response.status_code,
                     response_text=exc.response.text,
-                    request_payload=payload,
+                    request_payload=logged_payload,
                     aspect_ratio=aspect_ratio,
                     resolution=resolution,
                     duration_seconds=duration_seconds,
@@ -149,7 +162,7 @@ class VeoClient:
                     "veo_submission_parse_error",
                     correlation_id=correlation_id,
                     response_text=response.text,
-                    request_payload=payload,
+                    request_payload=logged_payload,
                     aspect_ratio=aspect_ratio,
                     resolution=resolution,
                     duration_seconds=duration_seconds,
@@ -165,6 +178,7 @@ class VeoClient:
                 correlation_id=correlation_id,
                 operation_id=operation_name,
                 prompt_length=len(prompt),
+                has_first_frame_image=bool(first_frame_image),
                 has_reference_images=bool(reference_images),
                 duration_seconds=duration_seconds,
                 seed=seed,
@@ -181,7 +195,7 @@ class VeoClient:
                 "veo_submission_failed",
                 correlation_id=correlation_id,
                 error=str(e),
-                request_payload=payload if 'payload' in locals() else None,
+                request_payload=logged_payload if 'logged_payload' in locals() else None,
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
                 duration_seconds=duration_seconds,
@@ -528,6 +542,22 @@ class VeoClient:
         if include_json:
             headers["Content-Type"] = "application/json"
         return headers
+
+    def _payload_for_logging(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Redact bulky inline image data so request logging stays readable."""
+        safe_payload = deepcopy(payload)
+        for instance in safe_payload.get("instances", []) or []:
+            if not isinstance(instance, dict):
+                continue
+            image_payload = instance.get("image") or {}
+            if not isinstance(image_payload, dict):
+                continue
+            inline_data = image_payload.get("inlineData") or {}
+            if not isinstance(inline_data, dict):
+                continue
+            if "data" in inline_data:
+                inline_data["data"] = f"<redacted_base64:{len(str(inline_data['data']))}_chars>"
+        return safe_payload
 
 
 def get_veo_client() -> VeoClient:

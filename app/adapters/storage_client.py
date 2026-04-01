@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 import boto3
 import httpx
+from botocore.exceptions import ClientError
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -186,6 +187,69 @@ class StorageClient:
                 error=str(exc),
             )
             raise
+
+    def ensure_image(
+        self,
+        *,
+        image_bytes: bytes,
+        object_key: str,
+        correlation_id: Optional[str] = None,
+        content_type: str = "image/png",
+    ) -> Dict[str, Any]:
+        """Ensure an image exists at a fixed Cloudflare R2 object key."""
+        normalized_key = _strip_slashes(object_key)
+
+        try:
+            self.client.head_object(Bucket=self.bucket_name, Key=normalized_key)
+            logger.info(
+                "storage_image_already_present",
+                correlation_id=correlation_id,
+                storage_provider="cloudflare_r2",
+                object_key=normalized_key,
+            )
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code") or "")
+            if error_code not in {"404", "NoSuchKey", "NotFound"}:
+                logger.exception(
+                    "storage_image_head_failed",
+                    correlation_id=correlation_id,
+                    storage_provider="cloudflare_r2",
+                    object_key=normalized_key,
+                    error=str(exc),
+                )
+                raise
+
+            logger.info(
+                "storage_fixed_image_upload_starting",
+                correlation_id=correlation_id,
+                storage_provider="cloudflare_r2",
+                object_key=normalized_key,
+                size_bytes=len(image_bytes),
+            )
+            self.client.put_object(
+                Bucket=self.bucket_name,
+                Key=normalized_key,
+                Body=image_bytes,
+                ContentType=content_type,
+                CacheControl="public, max-age=31536000, immutable",
+            )
+            logger.info(
+                "storage_fixed_image_uploaded",
+                correlation_id=correlation_id,
+                storage_provider="cloudflare_r2",
+                object_key=normalized_key,
+                size_bytes=len(image_bytes),
+            )
+
+        return {
+            "storage_provider": "cloudflare_r2",
+            "storage_key": normalized_key,
+            "url": self._build_public_url(normalized_key),
+            "thumbnail_url": None,
+            "file_path": normalized_key,
+            "size": len(image_bytes),
+            "file_type": content_type,
+        }
 
     def upload_video_from_url(
         self,

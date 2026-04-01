@@ -1,3 +1,6 @@
+import base64
+from pathlib import Path
+
 import pytest
 
 from app.core.errors import ValidationError
@@ -213,4 +216,54 @@ def test_submit_video_request_passes_explicit_veo_duration_seconds(monkeypatch):
     )
 
     assert captured["duration_seconds"] == 4
+    assert result["operation_id"] == "operations/test"
+
+
+def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
+    class FakeStorageClient:
+        def ensure_image(self, **kwargs):
+            return {
+                "storage_key": kwargs["object_key"],
+                "url": f"https://example.r2.dev/{kwargs['object_key']}",
+            }
+
+    monkeypatch.setattr(video_handlers, "get_storage_client", lambda: FakeStorageClient())
+
+    anchor_bundle = video_handlers._resolve_global_veo_anchor_image("corr-anchor")
+    expected_bytes = Path(video_handlers._GLOBAL_VEO_ANCHOR_PATH).read_bytes()
+
+    assert Path(video_handlers._GLOBAL_VEO_ANCHOR_PATH).name == "sarah.jpg"
+    assert base64.b64decode(anchor_bundle["first_frame_image"]["data_base64"]) == expected_bytes
+    assert anchor_bundle["metadata"]["anchor_image_enabled"] is True
+    assert anchor_bundle["metadata"]["anchor_image_source_path"] == "static/images/sarah.jpg"
+    assert anchor_bundle["metadata"]["anchor_image_storage_key"] == "flow-forge/images/anchors/sarah.jpg"
+
+
+def test_submit_video_request_passes_anchor_image_to_veo_client(monkeypatch):
+    captured = {}
+    first_frame_image = {"mime_type": "image/jpeg", "data_base64": "YWJj"}
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured.update(kwargs)
+            return {"operation_id": "operations/test", "status": "submitted"}
+
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr",
+        first_frame_image=first_frame_image,
+        provider_duration_seconds=8,
+    )
+
+    assert captured["first_frame_image"] == first_frame_image
     assert result["operation_id"] == "operations/test"

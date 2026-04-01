@@ -5,17 +5,21 @@ Per Constitution § V: Locality & Vertical Slices
 Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
 """
 
+import base64
+import mimetypes
 from fastapi import APIRouter, HTTPException, Request, status
 from typing import Dict, Any, Optional
 import json
 import os
 import random
 from datetime import datetime
+from pathlib import Path
 
 from pydantic import ValidationError as PydanticValidationError
 import httpx
 
 from app.adapters.supabase_client import get_supabase
+from app.adapters.storage_client import get_storage_client
 from app.adapters.veo_client import get_veo_client
 from app.adapters.sora_client import get_sora_client
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
@@ -51,6 +55,69 @@ from app.features.videos.schemas import (
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+
+_GLOBAL_VEO_ANCHOR_RELATIVE_PATH = "static/images/sarah.jpg"
+_GLOBAL_VEO_ANCHOR_PATH = Path(__file__).resolve().parents[3] / _GLOBAL_VEO_ANCHOR_RELATIVE_PATH
+_GLOBAL_VEO_ANCHOR_OBJECT_KEY = "flow-forge/images/anchors/sarah.jpg"
+# Keep the live preview path text-only until the API explicitly supports image.inlineData.
+_GLOBAL_VEO_ANCHOR_ENABLED = False
+
+
+def _resolve_global_veo_anchor_image(correlation_id: str) -> Dict[str, Any]:
+    """Load the global Sarah portrait and mirror it to a fixed Cloudflare R2 key."""
+    if not _GLOBAL_VEO_ANCHOR_PATH.exists():
+        raise ValidationError(
+            "Global Veo anchor image is missing.",
+            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
+        )
+
+    try:
+        image_bytes = _GLOBAL_VEO_ANCHOR_PATH.read_bytes()
+    except OSError as exc:
+        raise ValidationError(
+            "Global Veo anchor image could not be read.",
+            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH, "error": str(exc)},
+        ) from exc
+
+    if not image_bytes:
+        raise ValidationError(
+            "Global Veo anchor image is empty.",
+            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
+        )
+
+    mime_type = mimetypes.guess_type(_GLOBAL_VEO_ANCHOR_PATH.name)[0] or "image/jpeg"
+    metadata = {
+        "anchor_image_enabled": True,
+        "anchor_image_source_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
+        "anchor_image_mime_type": mime_type,
+        "anchor_image_size_bytes": len(image_bytes),
+    }
+
+    try:
+        mirrored = get_storage_client().ensure_image(
+            image_bytes=image_bytes,
+            object_key=_GLOBAL_VEO_ANCHOR_OBJECT_KEY,
+            correlation_id=correlation_id,
+            content_type=mime_type,
+        )
+        metadata["anchor_image_storage_key"] = mirrored["storage_key"]
+        metadata["anchor_image_url"] = mirrored["url"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "veo_anchor_image_mirror_failed",
+            correlation_id=correlation_id,
+            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
+            error=str(exc),
+        )
+
+    return {
+        "first_frame_image": {
+            "mime_type": mime_type,
+            "data_base64": base64.b64encode(image_bytes).decode("ascii"),
+        },
+        "metadata": metadata,
+    }
 
 
 def _resolve_extended_provider_aspect_ratio(route: Optional[str], requested_aspect_ratio: str) -> str:
@@ -321,6 +388,11 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             )
             quota_reserved = True
 
+        anchor_image_bundle = (
+            _resolve_global_veo_anchor_image(correlation_id)
+            if _GLOBAL_VEO_ANCHOR_ENABLED and request.provider == VEO_PROVIDER
+            else None
+        )
         veo_seed = random.randint(0, 2**32 - 1) if request.provider == "veo_3_1" else None
         submission_result = _submit_video_request(
             provider=request.provider,
@@ -334,6 +406,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             size=request.size,
             correlation_id=correlation_id,
             provider_duration_seconds=request.seconds if request.provider == "veo_3_1" else None,
+            first_frame_image=anchor_image_bundle["first_frame_image"] if anchor_image_bundle else None,
             seed=veo_seed,
         )
 
@@ -376,6 +449,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             submission_metadata["provider_model"] = provider_model
         if submission_result.get("provider_metadata"):
             submission_metadata["provider_metadata"] = submission_result["provider_metadata"]
+        if anchor_image_bundle:
+            submission_metadata.update(anchor_image_bundle["metadata"])
 
         # Normalize provider status to DB-compatible values
         provider_status = submission_result.get("status", "submitted")
@@ -696,6 +771,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     )
                 raise
 
+        anchor_image_bundle = _resolve_global_veo_anchor_image(correlation_id) if _GLOBAL_VEO_ANCHOR_ENABLED and veo_submissions else None
         for index, item in enumerate(prepared_submissions):
             post = item["post"]
             post_id = item["post_id"]
@@ -725,6 +801,11 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         if is_extended and profile is not None
                         else submission_plan["provider_target_seconds"]
                         if submission_plan["provider"] == VEO_PROVIDER
+                        else None
+                    ),
+                    first_frame_image=(
+                        anchor_image_bundle["first_frame_image"]
+                        if submission_plan["provider"] == VEO_PROVIDER and anchor_image_bundle
                         else None
                     ),
                     seed=batch_veo_seed,
@@ -763,6 +844,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 if quota_reservation_key:
                     submission_metadata["quota_reservation_key"] = quota_reservation_key
                     submission_metadata["quota_reserved_units"] = item["quota_requested_units"]
+                if submission_plan["provider"] == VEO_PROVIDER and anchor_image_bundle:
+                    submission_metadata.update(anchor_image_bundle["metadata"])
 
                 route = profile.route if profile else None
                 provider_status = submission_result.get("status", "submitted")
@@ -1021,6 +1104,7 @@ def _submit_video_request(
     size: Optional[str],
     correlation_id: str,
     provider_duration_seconds: Optional[int] = None,
+    first_frame_image: Optional[Dict[str, str]] = None,
     seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Submit a video generation request to the selected provider."""
@@ -1040,6 +1124,7 @@ def _submit_video_request(
                 aspect_ratio=provider_aspect,
                 resolution=resolution,
                 duration_seconds=veo_duration_seconds,
+                first_frame_image=first_frame_image,
                 seed=seed,
             )
         except httpx.HTTPStatusError as exc:

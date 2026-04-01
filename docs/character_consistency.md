@@ -15,6 +15,13 @@
 - **No drift-targeted negatives** — `VEO_NEGATIVE_PROMPT` targets visual artifacts (watermarks, blur) but nothing about character mutations
 - **Model status** — Runtime and diagnostics currently target `veo-3.1-generate-preview`; `001` is documented by Vertex AI, but our current Gemini API surface still uses preview.
 
+### Validated Findings From the Implementation Attempt
+
+- **Text-only VEO preview path works; image anchoring does not on the current Gemini Developer API surface** — when we passed `image.inlineData` to `veo-3.1-generate-preview`, Google returned `400 INVALID_ARGUMENT` with ``inlineData` isn't supported by this model``.
+- **The anchor asset itself is suitable** — [`static/images/sarah.jpg`](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/static/images/sarah.jpg) is a usable canonical portrait for a first-frame anchor: square, head-and-shoulders, neutral background, clean lighting, and stable identity features.
+- **Vertex AI would likely be the compatible path for image-conditioned VEO** — the docs we checked point to image conditioning being supported on the Vertex side, but that is a separate provider migration, not a small patch.
+- **Practical implication** — do not rely on first-frame `inlineData` with the current preview model; keep the anchor flow gated until we either move provider surfaces or confirm a Gemini Developer API image-conditioned model variant.
+
 ### Current Character Description (live in code)
 
 ```
@@ -101,7 +108,7 @@ Provide a starting image; VEO animates from it. Character appearance in frame 1 
 
 Also supports `lastFrame` for interpolation (16:9 only currently).
 
-**This is our best near-term path for character consistency.**
+**This is our best near-term path for character consistency in theory, but it is not usable on the current `veo-3.1-generate-preview` Gemini Developer API surface because `inlineData` is rejected.**
 
 ### 3. Seed Parameter
 
@@ -225,12 +232,13 @@ Our codebase already uses `submit_video_extension()` for 16/32-second videos. Th
 
 - [x] **Expand character description in `OPTIMIZED_PROMPT_TEMPLATE`** — Implemented in `app/features/posts/prompt_builder.py`
 - [ ] Add character-drift negatives to `VEO_NEGATIVE_PROMPT`
-- [ ] Migrate model ID from `veo-3.1-generate-preview` to `veo-3.1-generate-001` when the adapter moves to the Vertex AI publisher endpoint
+- [ ] Keep the current Gemini Developer API preview path text-only unless/until a supported image-conditioned model is confirmed
+- [ ] Migrate to the Vertex AI publisher endpoint only if first-frame anchoring becomes a hard requirement worth the longer provider migration
 
 ### Short-term (code changes)
 
 - [x] **Add `seed` parameter to VEO calls** — Implemented 2026-04-01 (commit `5466a5e`). See details below.
-- [ ] Implement image-to-video (first frame) pipeline:
+- [ ] Implement image-to-video (first frame) pipeline only after provider support is confirmed:
   1. Generate canonical character portrait via Imagen 3 during batch setup
   2. Store portrait in Supabase storage
   3. Pass as `image.inlineData` in every VEO request for that batch
@@ -241,6 +249,14 @@ Our codebase already uses `submit_video_extension()` for 16/32-second videos. Th
 - [ ] Wire up existing `reference_images` stub in `veo_client.py`
 - [ ] Generate 2-3 canonical character portraits (front, 3/4, profile) per batch
 - [ ] Pass as `referenceType: "asset"` with every generation request
+
+### Decision Rule For Future Work
+
+Use this order of preference:
+
+1. Keep the current Gemini Developer API preview model and text-only prompts if the goal is to ship quickly.
+2. Add the canonical portrait as a first-frame anchor only if the chosen provider surface explicitly supports `image.inlineData`.
+3. Move to Vertex AI only if image-conditioned consistency becomes a product requirement worth the extra auth, endpoint, and payload migration.
 
 ---
 
