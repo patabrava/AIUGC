@@ -36,11 +36,31 @@ PROMPT1_WORD_BOUNDS = {
     32: (54, 74),
 }
 
+# Pre-persistence gate can be stricter than prompt guidance. We keep it isolated
+# here so we can wire it in without changing the legacy envelope until prompts
+# and downstream expectations are updated.
+PRE_PERSISTENCE_PROMPT1_WORD_BOUNDS = {
+    8: (14, 18),
+    16: (26, 36),
+    32: (54, 74),
+}
+
 PROMPT1_SENTENCE_BOUNDS = {
     8: (1, 1),
     16: (3, 4),
     32: (5, 6),
 }
+
+CURRENT_TOPIC_CONTEXT_YEAR = 2026
+
+_DASH_SEPARATOR_TABLE = str.maketrans(
+    {
+        "\u2014": " ",  # em dash
+        "\u2013": " ",  # en dash
+        "\u2015": " ",  # horizontal bar
+        "\u2212": " ",  # minus sign
+    }
+)
 
 GERMAN_SIGNAL_WORDS = {
     "und", "oder", "mit", "ohne", "für", "deutschland", "deutsche", "deutschen",
@@ -367,6 +387,112 @@ def sanitize_metadata_text(text: Any, *, max_sentences: int = 2, max_chars: Opti
     if clipped and clipped[-1] not in ".!?":
         clipped = f"{clipped}."
     return normalize_spoken_whitespace(clipped)
+
+
+def normalize_dash_separators(text: Any) -> str:
+    """Remove long dash separators while preserving normal hyphenated words."""
+    cleaned = str(text or "").translate(_DASH_SEPARATOR_TABLE)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def normalize_temporal_reference(text: Any, *, current_year: int = CURRENT_TOPIC_CONTEXT_YEAR) -> str:
+    """Normalize time phrasing relative to the current year context.
+
+    Example: In 2026, rewrite 'Ab 2025' to 'Seit 2025' (already in effect).
+    """
+    cleaned = normalize_dash_separators(text)
+
+    def _replace_ab_year(match) -> str:
+        year = int(match.group("year"))
+        return f"Seit {year}" if year < int(current_year) else f"Ab {year}"
+
+    cleaned = re.sub(
+        r"\bAb\s+(?P<year>20\d{2})\b",
+        _replace_ab_year,
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned
+
+
+def _script_word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
+
+
+def _get_pre_persistence_prompt1_word_bounds(tier: int | None) -> tuple[int, int]:
+    return PRE_PERSISTENCE_PROMPT1_WORD_BOUNDS.get(int(tier or 8), get_prompt1_word_bounds(tier))
+
+
+def validate_pre_persistence_topic_payload(
+    payload: Dict[str, Any],
+    *,
+    target_length_tier: int,
+    current_year: int = CURRENT_TOPIC_CONTEXT_YEAR,
+) -> Dict[str, Any]:
+    """Deterministic pre-persistence gate shared across all topic-writing paths.
+
+    This is not the audit agent. It exists to prevent obvious garbage from
+    entering the DB by normalizing dash separators, normalizing stale temporal
+    phrasing, and enforcing a tier-aware word envelope (with one repair attempt
+    for underpowered 8s scripts).
+    """
+    normalized: Dict[str, Any] = dict(payload or {})
+
+    # Normalize metadata-like fields first.
+    metadata_fields = ("topic", "title", "caption", "source_summary", "disclaimer", "rotation", "cta")
+    for field in metadata_fields:
+        if field not in normalized:
+            continue
+        raw = normalize_temporal_reference(normalized.get(field), current_year=current_year)
+        max_chars = 500 if field in {"caption", "source_summary"} else None
+        normalized[field] = sanitize_metadata_text(raw, max_chars=max_chars)
+
+    # Normalize script with the same dash/time rules.
+    script = sanitize_spoken_fragment(
+        normalize_temporal_reference(normalized.get("script"), current_year=current_year),
+        ensure_terminal=True,
+    )
+    min_words, max_words = _get_pre_persistence_prompt1_word_bounds(target_length_tier)
+    word_count = _script_word_count(script)
+
+    # One repair attempt for short 8s scripts by appending a safe clause.
+    if int(target_length_tier or 8) == 8 and word_count < min_words:
+        addon_source = normalized.get("source_summary") or normalized.get("caption") or ""
+        addon = sanitize_spoken_fragment(addon_source, ensure_terminal=False)
+        addon = addon.rstrip(".!?").strip()
+        if addon:
+            repaired = f"{script.rstrip('.!?')}, {addon}."
+            repaired = sanitize_spoken_fragment(repaired, ensure_terminal=True)
+            repaired_words = _script_word_count(repaired)
+            if repaired_words < min_words:
+                # Deterministic filler to avoid clipped 8s fragments without inventing new facts.
+                lowered = repaired.lower()
+                if "ganz konkret" not in lowered:
+                    repaired = sanitize_spoken_fragment(repaired.rstrip(".!?") + " ganz konkret.", ensure_terminal=True)
+                    repaired_words = _script_word_count(repaired)
+                    lowered = repaired.lower()
+                if repaired_words < min_words and "im alltag" not in lowered:
+                    repaired = sanitize_spoken_fragment(repaired.rstrip(".!?") + " im Alltag.", ensure_terminal=True)
+                    repaired_words = _script_word_count(repaired)
+            if repaired_words >= word_count:
+                script = repaired
+                word_count = repaired_words
+
+    if word_count < min_words or word_count > max_words:
+        raise ValidationError(
+            f"Script failed tier envelope for {int(target_length_tier or 0)}s.",
+            details={
+                "code": "TOPIC_QUALITY_GATE_FAILED",
+                "target_length_tier": int(target_length_tier or 0),
+                "word_count": word_count,
+                "min_words": min_words,
+                "max_words": max_words,
+            },
+        )
+
+    normalized["script"] = script
+    return normalized
 
 
 def sanitize_fact_fragments(values: List[Any]) -> List[str]:
