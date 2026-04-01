@@ -28,7 +28,7 @@ BEWERTUNGSDIMENSIONEN (jeweils 0-25 Punkte):
 - 19-25: Sofortiger Scroll-Stopp, starke Emotion
 
 3. prompt_compliance (0-25):
-- Haelt der Text die Wortanzahl des Tiers ein? (8s: 12-15, 16s: 26-36, 32s: 54-74)
+- Haelt der Text die Wortanzahl des Tiers ein? (8s: 14-18, 16s: 26-36, 32s: 54-74)
 - Bleibt er beim Thema?
 - Folgt er der Tonalitaet: locker-direkt, du-Form, empowernd?
 - Zeigt er Barrieren (Systemversagen), nicht Ueberwindung (Inspiration Porn)?

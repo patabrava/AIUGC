@@ -7,16 +7,16 @@ families:
   emotional_core: Unrecht, Versagen, Widerspruch
   examples:
   - "Die groesste Luege ueber ... ist, dass ..."
-  - "Fast alle denken, ... — stimmt aber nicht."
+  - "Fast alle denken, ... stimmt aber nicht."
   - "Alle reden ueber ..., aber keiner ueber ..."
   - "Auf dem Papier hast du das Recht. In der Realitaet? Fehlanzeige."
 
 - name: Provokation und Faktenkonflikt
   priority: high
-  emotional_core: Empoerung, Widerspruch — immer mit Faktenbeleg
+  emotional_core: Empoerung, Widerspruch, immer mit Faktenbeleg
   examples:
   - "Das sagt dir dein Verkehrsbetrieb nicht, aber ..."
-  - "Hoert auf zu behaupten, dass ... — die Zahlen sagen was anderes."
+  - "Hoert auf zu behaupten, dass ... die Zahlen sagen was anderes."
   - "Sorry, aber ... ist einfach falsch."
   - "Niemand redet darueber, aber ..."
 
@@ -31,10 +31,10 @@ families:
 
 - name: Zahlen und Spezifitaet
   priority: high
-  emotional_core: Ueberraschung, Faktenschock — konkrete Zahl im ersten Atemzug
+  emotional_core: Ueberraschung, Faktenschock, konkrete Zahl im ersten Atemzug
   examples:
   - "Nur 2 Prozent aller Wohnungen in Deutschland sind rollstuhlgerecht."
-  - "3 Sekunden — so lange wartest du, bis ..."
+  - "3 Sekunden. So lange wartest du, bis ..."
   - "Nur jede fuenfte Haltestelle ist tatsaechlich barrierefrei."
   - "Eine einzige Zahl zeigt, warum ..."
 
@@ -58,7 +58,7 @@ families:
 
 - name: Fehler und Warnung
   priority: high
-  emotional_core: Verlustangst — staerker als Gewinnversprechen
+  emotional_core: Verlustangst, staerker als Gewinnversprechen
   examples:
   - "Dieser Fehler kostet dich als Rollstuhlfahrer:in Zeit und Nerven."
   - "Hoer auf mit ..., wenn du ... willst."
@@ -71,8 +71,8 @@ families:
   emotional_core: Sarkasmus, Ironie, Systemversagen
   examples:
   - "2022 sollte alles barrierefrei sein. Spoiler: ist es nicht."
-  - "Was das Gesetz sagt — und was du an der Haltestelle erlebst."
-  - "Deutschland 2025. Und du kommst trotzdem nicht in den Bus."
+  - "Was das Gesetz sagt und was du an der Haltestelle erlebst."
+  - "Deutschland 2026. Und du kommst trotzdem nicht in den Bus."
 
 - name: Aha- und Handlungs-Hooks
   priority: medium
@@ -101,19 +101,19 @@ families:
 
 - name: Kurveneffekt (Alle betrifft's)
   priority: medium
-  emotional_core: Reichweite ueber die Nische hinaus — Barrierefreiheit nuetzt allen
+  emotional_core: Reichweite ueber die Nische hinaus, Barrierefreiheit nuetzt allen
   examples:
-  - "Das betrifft nicht nur Rollstuhlfahrer:innen — auch Eltern mit Kinderwagen."
+  - "Das betrifft nicht nur Rollstuhlfahrer:innen, auch Eltern mit Kinderwagen."
   - "Barrierefreie Haltestellen helfen dir auch, wenn du verletzt bist."
   - "Warum gutes Design fuer alle funktioniert, nicht nur fuer wenige."
 
 # --- LOW PRIORITY: use sparingly ---
 - name: Fragen (nur mit Punch und konkreter Zahl)
   priority: low
-  emotional_core: Neugier — nur mit schockierendem Fakt oder konkreter Zahl
+  emotional_core: Neugier, nur mit schockierendem Fakt oder konkreter Zahl
   examples:
   - "Warum ist ... in Deutschland immer noch so schwer?"
-  - "Wie kann es sein, dass ... im Jahr 2025 noch fehlt?"
+  - "Wie kann es sein, dass ... im Jahr 2026 noch fehlt?"
   - "Wusstest du, dass nur 2 Prozent aller Wohnungen rollstuhlgerecht sind?"
 
 - name: POV-Hooks
@@ -125,7 +125,7 @@ families:
 
 banned_patterns:
 - "Du wirst nicht glauben ..."
-- "Ab 2025 gibt's..."
+- "Ab naechstem Jahr gibt es..."
 - "Es gibt..."
 - "Heute erklaere ich..."
 - "In diesem Video..."
@@ -136,14 +136,14 @@ banned_patterns:
 
 negative_examples:
 - bad: "Hast du gewusst, dass die Barrierefreiheit im OEPNV trotz gesetzlicher Frist 2022 oft noch fehlt?"
-  good: "Du stehst an der Haltestelle — und der Bus faehrt einfach vorbei, weil die Rampe fehlt."
+  good: "Du stehst an der Haltestelle und der Bus faehrt einfach vorbei, weil die Rampe fehlt."
   why: "'Hast du gewusst' ohne Zahl ist Lehrer-Energie. Stattdessen die Zuhoererin IN die Szene setzen."
 - bad: "Weisst du, welche Rechte du als Rollstuhlnutzer hast?"
-  good: "Dein Recht auf Mitfahrt? Existiert auf dem Papier — nicht an der Haltestelle."
+  good: "Dein Recht auf Mitfahrt? Existiert auf dem Papier, nicht an der Haltestelle."
   why: "Abstrakte Frage vs. Kontrast zwischen Anspruch und Realitaet."
 - bad: "Kennst du die Probleme mit barrierefreiem Wohnen?"
   good: "Nur 2 Prozent aller Wohnungen in Deutschland sind rollstuhlgerecht."
   why: "Abstrakte Frage vs. konkreter Faktenschock mit Zahl."
 - bad: "Es gibt viele Barrieren im Alltag fuer Rollstuhlfahrer."
-  good: "Deutschland 2025 — und du kommst trotzdem nicht in den Bus."
+  good: "Deutschland 2026 und du kommst trotzdem nicht in den Bus."
   why: "'Es gibt' ist passiv und langweilig. Stattdessen Realitaetscheck mit Jahreszahl."

@@ -8,6 +8,8 @@ Zielgruppe: Rollstuhlnutzer:innen in Deutschland.
 
 {hook_bank_section}
 
+{current_date_guardrail}
+
 AUFGABE:
 - Bleibe strikt beim uebergebenen Lane-Winkel.
 - Erfinde keine neuen Fakten, keine neuen Quellen und kein neues Thema.
@@ -17,10 +19,10 @@ AUFGABE:
 
 TONALITAET:
 - Locker-direkt, in du-Form, empowernd und idiomatisch auf Deutsch.
-- Der Ton ist wie eine Freundin, die dir etwas Krasses erzaehlt — nicht wie eine Lehrerin.
+- Der Ton ist wie eine Freundin, die dir etwas Krasses erzaehlt, nicht wie eine Lehrerin.
 - Zeige Barrieren, nicht Ueberwindung. Das Problem ist die Umgebung, nicht die Person.
 - Keine Mitleids-Hooks, keine Inspirations-Narrative ("trotz Behinderung geschafft").
-- Barrierefreiheit nuetzt allen — Eltern mit Kinderwagen, Aeltere, Verletzte. Nutze diesen Kurveneffekt, wenn es passt.
+- Barrierefreiheit nuetzt allen, Eltern mit Kinderwagen, Aeltere, Verletzte. Nutze diesen Kurveneffekt, wenn es passt.
 - Jede Behauptung muss durch den Dossier-Kontext gedeckt sein. Keine unbelegten Aussagen.
 
 HOOK-REGELN (wichtigster Teil des Scripts):
@@ -48,7 +50,9 @@ SCRIPT-REGELN:
 - Der erste Satz ist der Hook. Die folgenden Saetze liefern konkrete Einordnung, Konsequenz oder den Nutzen.
 - `script` muss mit `.`, `!` oder `?` enden.
 - `script` muss vollstaendig auf Deutsch sein.
-- Kein Clickbait, keine Panikmache, keine Passiv-Starts wie `Ab 2025 gibt es`.
+- Keine langen Dash-Zeichen wie U+2014/U+2013/U+2015/U+2212.
+- Heute ist 2026. Wenn etwas seit 2025 gilt, schreibe `Seit 2025`, nicht `Ab 2025`.
+- Kein Clickbait, keine Panikmache, keine Passiv-Starts wie `Ab naechstem Jahr gibt es`.
 - Keine Zwischenueberschriften, keine Forschungsetiketten wie `Zentrale Erkenntnisse`, keine Zitate wie `[cite: 1]`.
 
 ANTWORTFORMAT:

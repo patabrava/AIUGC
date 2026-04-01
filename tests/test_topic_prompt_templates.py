@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.core.video_profiles import get_duration_profile
-from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2
+from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2, build_topic_research_prompt
 from app.features.topics import agents as topic_agents
 
 
@@ -200,3 +200,34 @@ Warum ist Barrierefreiheit in Deutschland immer noch so verdammt schwer?
     assert len(result.problem_agitate_solution) >= 1
     assert len(result.testimonial) >= 1
     assert len(result.transformation) >= 1
+
+
+def test_prompt1_8s_contains_new_word_range_and_guardrails():
+    prompt = build_prompt1(post_type="value", desired_topics=1)
+    assert "14-18 Woerter" in prompt
+    assert "Heute ist April 2026" in prompt
+    assert "U+2014" in prompt
+
+
+def test_prompt1_research_mentions_current_year_context():
+    prompt = build_topic_research_prompt(
+        seed_topic="BFSG",
+        post_type="value",
+        target_length_tier=8,
+    )
+    assert "Heute ist April 2026" in prompt
+    assert "Seit 2025" in prompt
+
+
+def test_hook_bank_examples_no_longer_contain_long_dashes_or_ab_2025():
+    hook_bank = (PROMPT_DATA_DIR / "hook_bank.yaml").read_text(encoding="utf-8")
+    assert "\u2014" not in hook_bank
+    assert "\u2013" not in hook_bank
+    assert "\u2015" not in hook_bank
+    assert "\u2212" not in hook_bank
+    assert "Ab 2025" not in hook_bank
+
+
+def test_audit_prompt_reflects_new_8s_word_range():
+    audit_prompt = (PROMPT_DATA_DIR / "audit_prompt.txt").read_text(encoding="utf-8")
+    assert "8s: 14-18" in audit_prompt

@@ -21,6 +21,25 @@ TOPIC_BANK_PATH = PROMPT_DATA_DIR / "topic_bank.yaml"
 HOOK_BANK_PATH = PROMPT_DATA_DIR / "hook_bank.yaml"
 
 
+def _build_current_date_guardrail() -> str:
+    # ASCII-only to avoid reintroducing long dash characters into prompt fixtures.
+    return _join_sections(
+        "ZEIT- UND FORMAT-GUARDRAILS:",
+        "- Heute ist April 2026.",
+        "- Wenn etwas 2025 in Kraft getreten ist, formuliere als bereits gueltig (z.B. `Seit 2025 ...`), nicht als Ankuendigung (`Ab 2025 ...`).",
+        "- Verwende keine langen Dash-Zeichen: kein U+2014 (em dash), U+2013 (en dash), U+2015 (horizontal bar), U+2212 (minus).",
+    )
+
+
+def _build_current_date_context_for_research() -> str:
+    return _join_sections(
+        "ZEITKONTEXT:",
+        "- Heute ist April 2026.",
+        "- Ordne Fristen und Regelungen relativ zu 2026 ein.",
+        "- Wenn eine Aenderung bereits 2025 in Kraft getreten ist, beschreibe sie als bereits geltend (z.B. `Seit 2025 ...`).",
+    )
+
+
 
 def _join_sections(*sections: str) -> str:
     return "\n\n".join(section.strip() for section in sections if section).strip()
@@ -422,11 +441,13 @@ def _render_prompt1_template(
     desired_topics: int,
     research_context_section: str,
     hook_bank_section: str,
+    current_date_guardrail: str,
 ) -> str:
     rendered = template.format(
         desired_topics=desired_topics,
         research_context_section=research_context_section,
         hook_bank_section=hook_bank_section,
+        current_date_guardrail=current_date_guardrail,
     )
     if hook_bank_section and "{hook_bank_section}" not in template:
         rendered = rendered.rstrip() + "\n\n" + hook_bank_section
@@ -511,6 +532,7 @@ def build_prompt1(
         desired_topics=desired_topics,
         research_context_section=research_context_section,
         hook_bank_section=hook_bank_section,
+        current_date_guardrail=_build_current_date_guardrail(),
     )
 
 
@@ -550,6 +572,7 @@ def build_prompt1_variant(
         desired_topics=desired_topics,
         research_context_section=research_context_section,
         hook_bank_section=hook_bank_section,
+        current_date_guardrail=_build_current_date_guardrail(),
     )
 
 
@@ -594,6 +617,7 @@ def build_topic_research_prompt(
             post_type=post_type,
             target_length_tier=target_length_tier,
         ),
+        current_date_context=_build_current_date_context_for_research(),
     ).strip()
 
 

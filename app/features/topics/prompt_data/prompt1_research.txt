@@ -4,6 +4,8 @@ Dein Ziel ist Rohforschung, nicht Strukturierung.
 
 {research_context}
 
+{current_date_context}
+
 Arbeite ausschließlich mit aktuellen, verlässlichen Webquellen.
 Untersuche das Seed-Topic tief genug, damit später eine andere Stufe daraus ein strukturiertes Dossier bauen kann.
 Halte alle Inhalte vollständig auf Deutsch.
