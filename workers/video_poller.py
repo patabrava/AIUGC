@@ -785,6 +785,7 @@ def _retry_rai_filtered_video(post: Dict[str, Any], correlation_id: str, rai_rea
             aspect_ratio=audit["aspect_ratio"],
             resolution=audit["resolution"],
             duration_seconds=duration_seconds,
+            seed=audit.get("seed"),
         )
         consume_quota(
             reservation_key=retry_reservation_key,
@@ -1277,6 +1278,7 @@ def _submit_extension_hop(
             correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
             aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
             resolution=metadata.get("requested_resolution", "720p"),
+            seed=metadata.get("veo_seed"),
         )
     except httpx.HTTPStatusError as error:
         if _is_retryable_veo_extension_input_not_ready(error):

@@ -50,7 +50,8 @@ class VeoClient:
         aspect_ratio: str,
         resolution: str,
         duration_seconds: int,
-        reference_images: Optional[list] = None
+        reference_images: Optional[list] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Submit video generation request to VEO 3.1.
@@ -67,7 +68,8 @@ class VeoClient:
             resolution: Resolution for video generation
             duration_seconds: Requested Veo clip duration in seconds
             reference_images: Optional list of reference images
-            
+            seed: Optional uint32 seed for reproducibility
+
         Returns:
             Dict with operation_id, status, done flag
             
@@ -90,6 +92,9 @@ class VeoClient:
 
             if negative_prompt:
                 payload["parameters"]["negativePrompt"] = negative_prompt
+
+            if seed is not None:
+                payload["parameters"]["seed"] = seed
 
             if reference_images:
                 logger.warning(
@@ -161,6 +166,7 @@ class VeoClient:
                 prompt_length=len(prompt),
                 has_reference_images=bool(reference_images),
                 duration_seconds=duration_seconds,
+                seed=seed,
             )
 
             return {
@@ -429,6 +435,7 @@ class VeoClient:
         correlation_id: str,
         aspect_ratio: str = "9:16",
         resolution: str = "720p",
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Extend a previously generated VEO video using the REST payload that
@@ -458,6 +465,9 @@ class VeoClient:
                 "resolution": resolution,
             },
         }
+
+        if seed is not None:
+            payload["parameters"]["seed"] = seed
 
         logger.info(
             "veo_extension_request",

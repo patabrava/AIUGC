@@ -24,6 +24,7 @@ def record_prompt_audit(
     requested_seconds: int,
     correlation_id: str,
     batch_id: Optional[str] = None,
+    seed: Optional[int] = None,
 ) -> None:
     """Record the prompt sent to a video provider for audit/debugging.
 
@@ -42,6 +43,8 @@ def record_prompt_audit(
         "requested_seconds": requested_seconds,
         "correlation_id": correlation_id,
     }
+    if seed is not None:
+        row["seed"] = seed
     try:
         supabase = get_supabase().client
         supabase.table("video_prompt_audit").insert(row).execute()

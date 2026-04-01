@@ -108,6 +108,11 @@ A `seed` (uint32, range 0–4,294,967,295) in `parameters`. Same seed + same pro
 }
 ```
 
+**Documentation status (verified 2026-04-01):**
+- **Vertex AI API reference** (`cloud.google.com/vertex-ai`) explicitly lists `seed` as a supported `uint32` parameter for VEO 3.1.
+- **Gemini API docs** (`ai.google.dev`) — the API surface we use — does not list it in the VEO 3.1 config table, but states: "the `seed` parameter is also available for Veo 3 models. It doesn't guarantee determinism, but slightly improves it."
+- Impact is modest. Not a substitute for reference images or first-frame anchoring.
+
 ---
 
 ## Prompt-Only Techniques (No Code Changes)

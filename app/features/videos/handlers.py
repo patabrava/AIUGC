@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from typing import Dict, Any, Optional
 import json
 import os
+import random
 from datetime import datetime
 
 from pydantic import ValidationError as PydanticValidationError
@@ -320,6 +321,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             )
             quota_reserved = True
 
+        veo_seed = random.randint(0, 2**32 - 1) if request.provider == "veo_3_1" else None
         submission_result = _submit_video_request(
             provider=request.provider,
             prompt_text=prompt_request["prompt_text"] or "",
@@ -332,6 +334,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             size=request.size,
             correlation_id=correlation_id,
             provider_duration_seconds=request.seconds if request.provider == "veo_3_1" else None,
+            seed=veo_seed,
         )
 
         operation_id = submission_result["operation_id"]
@@ -353,6 +356,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             resolution=request.resolution,
             requested_seconds=request.seconds,
             correlation_id=correlation_id,
+            seed=veo_seed,
         )
 
         existing_metadata = post.get("video_metadata") or {}
@@ -363,6 +367,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             "requested_seconds": request.seconds,
             "requested_size": requested_size,
         }
+        if veo_seed is not None:
+            submission_metadata["veo_seed"] = veo_seed
         if quota_reservation_key:
             submission_metadata["quota_reservation_key"] = quota_reservation_key
             submission_metadata["quota_reserved_units"] = requested_units
@@ -578,6 +584,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         submitted_post_ids = []
         prepared_submissions = []
         last_provider_model: Optional[str] = None
+        batch_veo_seed = random.randint(0, 2**32 - 1) if request.provider == "veo_3_1" else None
 
         for post in posts:
             post_id = post["id"]
@@ -720,6 +727,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         if submission_plan["provider"] == VEO_PROVIDER
                         else None
                     ),
+                    seed=batch_veo_seed,
                 )
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
@@ -740,6 +748,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     requested_seconds=submission_plan["seconds"],
                     correlation_id=f"{correlation_id}_{post_id}",
                     batch_id=batch_id,
+                    seed=batch_veo_seed,
                 )
 
                 existing_metadata = post.get("video_metadata") or {}
@@ -749,6 +758,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     submission_result=submission_result,
                     segment_metadata=segment_metadata,
                 )
+                if batch_veo_seed is not None:
+                    submission_metadata["veo_seed"] = batch_veo_seed
                 if quota_reservation_key:
                     submission_metadata["quota_reservation_key"] = quota_reservation_key
                     submission_metadata["quota_reserved_units"] = item["quota_requested_units"]
@@ -1010,6 +1021,7 @@ def _submit_video_request(
     size: Optional[str],
     correlation_id: str,
     provider_duration_seconds: Optional[int] = None,
+    seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Submit a video generation request to the selected provider."""
 
@@ -1028,6 +1040,7 @@ def _submit_video_request(
                 aspect_ratio=provider_aspect,
                 resolution=resolution,
                 duration_seconds=veo_duration_seconds,
+                seed=seed,
             )
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
