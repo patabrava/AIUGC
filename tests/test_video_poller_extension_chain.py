@@ -223,6 +223,60 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
     assert audit_kwargs["operation_id"] == "op-ext-1"
 
 
+def test_submit_extension_hop_consumes_quota_when_reservation_key_exists():
+    """A successful extension hop must record one consumed quota unit."""
+    from workers.video_poller import _submit_extension_hop
+
+    previous_video_data = {"video_uri": "gs://bucket/base.mp4", "mime_type": "video/mp4"}
+    post = {
+        "id": "post-123-quota",
+        "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+        "video_metadata": {
+            "quota_reservation_key": "res-chain",
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 2,
+            "veo_extension_hops_completed": 0,
+            "veo_segments": ["Erster Satz.", "Zweiter Satz.", "Dritter Satz."],
+            "veo_segments_total": 3,
+            "veo_current_segment_index": 0,
+            "operation_ids": ["op-base"],
+            "chain_status": "submitted",
+            "generated_seconds": 4,
+            "veo_base_seconds": 4,
+            "veo_extension_seconds": 7,
+            "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "requested_resolution": "720p",
+            "requested_size": "720x1280",
+        },
+    }
+
+    mock_veo = MagicMock()
+    mock_veo.submit_video_extension.return_value = {
+        "operation_id": "op-ext-2",
+        "status": "submitted",
+    }
+    mock_prompt_audit = MagicMock()
+    mock_consume_quota = MagicMock()
+    mock_ensure_slot = MagicMock()
+
+    mock_supabase = MagicMock()
+    mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch("workers.video_poller.record_prompt_audit", mock_prompt_audit), \
+         patch("workers.video_poller.consume_quota", mock_consume_quota), \
+         patch("workers.video_poller.ensure_immediate_submit_slot", mock_ensure_slot):
+        _submit_extension_hop(post, correlation_id="test-corr-quota", previous_video_data=previous_video_data)
+
+    mock_consume_quota.assert_called_once_with(
+        reservation_key="res-chain",
+        operation_id="op-ext-2",
+        units=1,
+    )
+
+
 def test_submit_extension_hop_raises_when_fewer_segments_than_hops():
     """Under-segmented chains must fail instead of repeating the last line."""
     from workers.video_poller import _submit_extension_hop
