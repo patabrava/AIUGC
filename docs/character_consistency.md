@@ -9,17 +9,23 @@
 
 ### What We Do Today (`app/features/posts/prompt_builder.py`)
 
-- **Text-only prompts** — Character described in ~40 words inside `OPTIMIZED_PROMPT_TEMPLATE`
+- **Expanded character bible** — `OPTIMIZED_PROMPT_TEMPLATE` and `VideoPrompt.character` now use the same 100+ word character definition
 - **No image conditioning** — `veo_client.py` has a `reference_images` parameter (line 53) that logs a warning and is discarded (lines 94-98)
-- **No seed parameter** — Each generation uses random noise independently
+- **Seed parameter active** — Runtime threads a `seed` through VEO submissions and extensions so identical prompts can reuse the same generator seed
 - **No drift-targeted negatives** — `VEO_NEGATIVE_PROMPT` targets visual artifacts (watermarks, blur) but nothing about character mutations
-- **Deprecated model** — Currently on `veo-3.1-generate-preview`, scheduled for removal April 2, 2026. Must migrate to `veo-3.1-generate-001`
+- **Model status** — Runtime and diagnostics currently target `veo-3.1-generate-preview`; `001` is documented by Vertex AI, but our current Gemini API surface still uses preview.
 
-### Current Character Description (too short)
+### Current Character Description (live in code)
 
 ```
-38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights,
-hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural expression.
+38-year-old German woman with long, light brown hair with natural blonde highlights, straight with
+a slight natural wave, parted slightly off-center to the left, falling softly around the shoulders
+and framing the face; hazel, almond-shaped eyes with subtle crow's feet at the outer corners;
+naturally full, soft-arched eyebrows in a light brown shade; a straight nose with a gently rounded
+tip; medium-full lips with a natural muted-pink tone; a friendly oval face with a soft jawline and
+gently rounded chin; soft forehead lines that are faint at rest; gentle laugh lines framing the
+mouth; warm light-medium skin tone with neutral undertones and smooth natural skin texture; slim
+build with relaxed upright posture.
 ```
 
 Best practice is **100-150 words** with forensic-level detail covering: face shape, skin tone, eye shape/color, eyebrow shape, nose, lip shape/color, hair (cut, texture, color, parting), clothing (specific items, colors, fabrics), accessories (or explicit "no jewelry, no glasses").
@@ -217,9 +223,9 @@ Our codebase already uses `submit_video_extension()` for 16/32-second videos. Th
 
 ### Immediate (prompt-only)
 
-- [ ] Expand character description in `OPTIMIZED_PROMPT_TEMPLATE` to 100-150 words
+- [x] **Expand character description in `OPTIMIZED_PROMPT_TEMPLATE`** — Implemented in `app/features/posts/prompt_builder.py`
 - [ ] Add character-drift negatives to `VEO_NEGATIVE_PROMPT`
-- [ ] Migrate model ID from `veo-3.1-generate-preview` to `veo-3.1-generate-001`
+- [ ] Migrate model ID from `veo-3.1-generate-preview` to `veo-3.1-generate-001` when the adapter moves to the Vertex AI publisher endpoint
 
 ### Short-term (code changes)
 

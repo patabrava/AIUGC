@@ -20,7 +20,7 @@ class AudioSection(BaseModel):
 class VideoPrompt(BaseModel):
     """Complete video generation prompt structure per Phase 3 requirements."""
     character: str = Field(
-        default="Character: 38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights, hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural expression.",
+        default="Character: 38-year-old German woman with long, light brown hair with natural blonde highlights, straight with a slight natural wave, parted slightly off-center to the left, falling softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle crow's feet at the outer corners; naturally full, soft-arched eyebrows in a light brown shade; a straight nose with a gently rounded tip; medium-full lips with a natural muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm light-medium skin tone with neutral undertones and smooth natural skin texture; slim build with relaxed upright posture.",
         description="Character definition"
     )
     action: str = Field(
@@ -96,6 +96,14 @@ class VideoPrompt(BaseModel):
         default=None,
         description="Veo negativePrompt string for exclusions",
     )
+    ending_directive: Optional[str] = Field(
+        default=None,
+        description="Explicit ending instruction for the prompt",
+    )
+    audio_block: Optional[str] = Field(
+        default=None,
+        description="Audio section text for the prompt",
+    )
 
     @field_validator('audio', mode='before')
     @classmethod
@@ -115,3 +123,17 @@ class BuildPromptResponse(BaseModel):
     """Response after building video prompt."""
     ok: bool = Field(default=True)
     data: Dict[str, Any] = Field(..., description="Prompt data and metadata")
+
+
+class UpdatePromptRequest(BaseModel):
+    """Request to update editable sections of a generated prompt."""
+    character: str = Field(..., min_length=1, description="Character section text")
+    style: str = Field(..., min_length=1, description="Style section text")
+    action: str = Field(..., min_length=1, description="Action section text")
+    scene: str = Field(..., min_length=1, description="Scene section text")
+    cinematography: str = Field(..., min_length=1, description="Cinematography section text")
+    dialogue: str = Field(..., min_length=1, description="Dialogue section text")
+    ending: str = Field(..., min_length=1, description="Ending directive text")
+    audio_block: str = Field(..., min_length=1, description="Audio block text")
+    universal_negatives: str = Field(..., min_length=1, description="Universal negatives text")
+    veo_negative_prompt: str = Field(..., min_length=1, description="VEO negative prompt text")

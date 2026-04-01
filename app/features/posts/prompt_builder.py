@@ -74,6 +74,24 @@ VEO_NEGATIVE_PROMPT = (
 
 OPTIMIZED_PROMPT_TEMPLATE = (
     "Character:\n"
+    "{character}\n\n"
+    "Style:\n"
+    "{style}\n\n"
+    "Action:\n"
+    "{action_direction}\n\n"
+    "Scene:\n"
+    "{scene}\n\n"
+    "Cinematography:\n"
+    "{cinematography}\n\n"
+    "Dialogue:\n"
+    "\"{dialogue}\"\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
+    "Audio:\n"
+    "{audio_block}{negatives_section}"
+)
+
+DEFAULT_CHARACTER = (
     "38-year-old German woman with long, light brown hair with natural blonde highlights, "
     "straight with a slight natural wave, parted slightly off-center to the left, falling "
     "softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle "
@@ -82,26 +100,25 @@ OPTIMIZED_PROMPT_TEMPLATE = (
     "muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft "
     "forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm "
     "light-medium skin tone with neutral undertones and smooth natural skin texture; slim "
-    "build with relaxed upright posture.\n\n"
-    "Style:\n"
+    "build with relaxed upright posture."
+)
+
+DEFAULT_STYLE = (
     "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
-    "soft flattering indoor light, and natural skin texture.\n\n"
-    "Action:\n"
-    "{action_direction}\n\n"
-    "Scene:\n"
+    "soft flattering indoor light, and natural skin texture."
+)
+
+DEFAULT_SCENE = (
     "A modern, tidy bedroom with blush-pink walls and minimal decor. Bright soft vanity light "
     "and natural daylight from camera-right create an even, flattering indoor look. The "
-    "wheelchair is partially visible in the frame.\n\n"
-    "Cinematography:\n"
+    "wheelchair is partially visible in the frame."
+)
+
+DEFAULT_CINEMATOGRAPHY = (
     "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
     "distance. The camera is handheld but stable, with only minimal natural movement. The "
     "framing remains consistent throughout the shot without noticeable camera drift or "
-    "reframing.\n\n"
-    "Dialogue:\n"
-    "\"{dialogue}\"\n\n"
-    "Ending:\n"
-    "{ending}\n\n"
-    "{audio}{negatives_section}"
+    "reframing."
 )
 
 logger = get_logger(__name__)
@@ -178,34 +195,45 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
             break
 
     script_line = f"{normalized_dialogue} ({STANDARD_FINAL_ENDING_DIRECTIVE})"
+    action_value = (
+        "Seated in a wheelchair in the bedroom, she speaks directly to camera in one continuous "
+        "take. She speaks at a natural conversational pace, uses small natural hand gestures and "
+        f"subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly at the end of the line. She says: {script_line}"
+    )
 
     optimized_prompt = build_optimized_prompt(
         normalized_dialogue,
         negative_constraints=SORA_NEGATIVE_CONSTRAINTS,
         prompt_mode="standard_final",
+        action=action_value,
+        audio_block=STANDARD_FINAL_AUDIO_BLOCK,
+        ending=STANDARD_FINAL_ENDING_DIRECTIVE,
     )
     veo_prompt = build_optimized_prompt(
         normalized_dialogue,
         negative_constraints=None,
         prompt_mode="standard_final",
+        action=action_value,
+        audio_block=STANDARD_FINAL_AUDIO_BLOCK,
+        ending=STANDARD_FINAL_ENDING_DIRECTIVE,
     )
 
     # Keep a single audio block in the final prompt to avoid contradictory synthesis cues.
-    audio_section = AudioSection(dialogue=STANDARD_FINAL_AUDIO_BLOCK, capture="")
+    audio_section = AudioSection(dialogue=normalized_dialogue, capture=STANDARD_FINAL_AUDIO_BLOCK)
 
     # Assemble complete prompt using template defaults
     base_prompt = VideoPrompt(
+        character=DEFAULT_CHARACTER,
         audio=audio_section,
         universal_negatives=SORA_NEGATIVE_CONSTRAINTS,
+        ending_directive=STANDARD_FINAL_ENDING_DIRECTIVE,
+        audio_block=STANDARD_FINAL_AUDIO_BLOCK,
         post="",
         sound_effects="",
         optimized_prompt=optimized_prompt,
         veo_prompt=veo_prompt,
         veo_negative_prompt=VEO_NEGATIVE_PROMPT,
     )
-    action_template = base_prompt.model_fields["action"].default  # type: ignore[attr-defined]
-    action_value = action_template.replace("ENTER SCRIPT FROM POST HERE", script_line)
-
     video_prompt = base_prompt.model_copy(update={"action": action_value})
 
     # Convert to dict for storage and API submission
@@ -253,14 +281,25 @@ def build_optimized_prompt(
     negative_constraints: Optional[str] = SORA_NEGATIVE_CONSTRAINTS,
     *,
     prompt_mode: str = "standard_final",
+    character: Optional[str] = None,
+    action: Optional[str] = None,
+    style: Optional[str] = None,
+    scene: Optional[str] = None,
+    cinematography: Optional[str] = None,
+    ending: Optional[str] = None,
+    audio_block: Optional[str] = None,
 ) -> str:
     cleaned_dialogue = dialogue.strip()
     contract = _get_prompt_contract(prompt_mode)
     return OPTIMIZED_PROMPT_TEMPLATE.format(
-        action_direction=contract["action_direction"],
+        character=(character or DEFAULT_CHARACTER).strip(),
+        style=(style or DEFAULT_STYLE).strip(),
+        action_direction=(action or contract["action_direction"]).strip(),
+        scene=(scene or DEFAULT_SCENE).strip(),
+        cinematography=(cinematography or DEFAULT_CINEMATOGRAPHY).strip(),
         dialogue=cleaned_dialogue,
-        ending=contract["ending_directive"],
-        audio=contract["audio_block"],
+        ending=(ending or contract["ending_directive"]).strip(),
+        audio_block=(audio_block or contract["audio_block"]).strip(),
         negatives_section=f"\n\n{negative_constraints}" if negative_constraints else "",
     )
 
@@ -285,12 +324,8 @@ def build_veo_prompt_segment(dialogue: str, *, include_quotes: bool = False, inc
     cleaned_dialogue = dialogue.strip()
     prompt_dialogue = f"\"{cleaned_dialogue}\"" if include_quotes else cleaned_dialogue
     prompt_mode = "extended_final" if include_ending else "extended_base_or_continuation"
-    contract = _get_prompt_contract(prompt_mode)
-    template = OPTIMIZED_PROMPT_TEMPLATE
-    return template.format(
-        action_direction=contract["action_direction"],
-        dialogue=prompt_dialogue,
-        ending=contract["ending_directive"],
-        audio=contract["audio_block"],
-        negatives_section=f"\n\n{VEO_NEGATIVE_PROMPT}" if not include_quotes else f"\n\n{SORA_NEGATIVE_CONSTRAINTS}",
+    return build_optimized_prompt(
+        prompt_dialogue,
+        negative_constraints=VEO_NEGATIVE_PROMPT if not include_quotes else SORA_NEGATIVE_CONSTRAINTS,
+        prompt_mode=prompt_mode,
     )

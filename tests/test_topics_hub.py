@@ -552,6 +552,64 @@ def test_get_random_topic_returns_least_coverage(monkeypatch):
     assert result["script_count"] == 0
 
 
+def test_pick_topic_bank_topics_prefers_unseen_and_least_used(monkeypatch):
+    from app.features.topics import prompts as topic_prompts
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(
+        topic_prompts,
+        "get_topic_seed_catalog",
+        lambda: ["Alpha topic", "Beta topic", "Gamma topic", "Delta topic"],
+    )
+    monkeypatch.setattr(
+        topic_queries,
+        "get_all_topics_from_registry",
+        lambda: [
+            {
+                "id": "topic-alpha",
+                "title": "Alpha topic",
+                "canonical_topic": "Alpha topic",
+                "family_fingerprint": "alpha topic",
+                "post_type": "value",
+                "use_count": 5,
+                "last_used_at": "2026-03-31T10:00:00+00:00",
+                "last_harvested_at": "2026-03-31T09:00:00+00:00",
+            },
+            {
+                "id": "topic-beta",
+                "title": "Beta topic",
+                "canonical_topic": "Beta topic",
+                "family_fingerprint": "beta topic",
+                "post_type": "value",
+                "use_count": 1,
+                "last_used_at": "2026-03-20T10:00:00+00:00",
+                "last_harvested_at": "2026-03-20T09:00:00+00:00",
+            },
+            {
+                "id": "topic-gamma",
+                "title": "Gamma topic",
+                "canonical_topic": "Gamma topic",
+                "family_fingerprint": "gamma topic",
+                "post_type": "value",
+                "use_count": 1,
+                "last_used_at": "2026-03-29T10:00:00+00:00",
+                "last_harvested_at": "2026-03-29T09:00:00+00:00",
+            },
+        ],
+    )
+
+    ranked = topic_prompts.pick_topic_bank_topics(4, seed=7, post_type="value")
+    assert ranked == ["Delta topic", "Beta topic", "Gamma topic", "Alpha topic"]
+
+    ranked_without_delta = topic_prompts.pick_topic_bank_topics(
+        3,
+        seed=7,
+        post_type="value",
+        exclude_topics=["Delta topic"],
+    )
+    assert ranked_without_delta == ["Beta topic", "Gamma topic", "Alpha topic"]
+
+
 def test_get_random_topic_returns_none_when_no_topics(monkeypatch):
     from app.features.topics import hub as topic_hub
 

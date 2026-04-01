@@ -167,6 +167,38 @@ def test_get_latest_cron_run_empty(mock_get_sb):
     assert result is None
 
 
+def test_store_topic_bank_entry_increments_use_count(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    captured = {}
+
+    def fake_add_topic_to_registry(**kwargs):
+        captured.update(kwargs)
+        return {
+            "id": "topic-1",
+            "title": kwargs["title"],
+            "use_count": kwargs.get("use_count", 0),
+        }
+
+    def fake_create_topic_research_dossier(**kwargs):
+        return {"id": "dossier-1"}
+
+    monkeypatch.setattr(topic_queries, "add_topic_to_registry", fake_add_topic_to_registry)
+    monkeypatch.setattr(topic_queries, "create_topic_research_dossier", fake_create_topic_research_dossier)
+
+    result = topic_queries.store_topic_bank_entry(
+        title="Neues Thema",
+        topic_script="Script text.",
+        post_type="value",
+        target_length_tier=8,
+        research_payload={"seed_topic": "Neues Thema", "topic": "Neues Thema"},
+        origin_kind="provider",
+    )
+
+    assert result["id"] == "topic-1"
+    assert captured["increment_use_count"] is True
+
+
 @patch("app.features.topics.queries.get_supabase")
 def test_get_cron_run_stats(mock_get_sb):
     mock_sb = _mock_supabase()

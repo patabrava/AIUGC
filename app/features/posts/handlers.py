@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
-from app.features.posts.prompt_builder import build_video_prompt_from_seed, validate_video_prompt
+from app.features.posts.prompt_builder import build_video_prompt_from_seed, validate_video_prompt, build_optimized_prompt
+from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.states import BatchState
 
@@ -31,6 +32,15 @@ class UpdateScriptReviewRequest(BaseModel):
     action: str = Field(..., description="Review action: approved, removed, or reset")
 
 
+def _parse_json_document(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value or {}
+
+
 def _load_post_seed_data(post_id: str, supabase_client):
     """Fetch post plus normalized seed data for localized S2 review updates."""
     response = supabase_client.table("posts").select("id, batch_id, seed_data, video_prompt_json").eq("id", post_id).execute()
@@ -43,12 +53,7 @@ def _load_post_seed_data(post_id: str, supabase_client):
         )
 
     post = response.data[0]
-    seed_data = post.get("seed_data") or {}
-    if isinstance(seed_data, str):
-        try:
-            seed_data = json.loads(seed_data)
-        except json.JSONDecodeError:
-            seed_data = {}
+    seed_data = _parse_json_document(post.get("seed_data"))
 
     return post, seed_data
 
@@ -283,6 +288,141 @@ async def build_post_prompt(post_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to build video prompt"
+        )
+
+
+@router.patch("/{post_id}/prompt", response_model=SuccessResponse)
+async def update_post_prompt(post_id: str, request: Request):
+    """Update editable prompt sections and rebuild the stored prompt text."""
+    correlation_id = f"update_prompt_{post_id}"
+
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            payload = UpdatePromptRequest.model_validate(await request.json())
+        else:
+            form = await request.form()
+            payload = UpdatePromptRequest.model_validate({
+                "character": str(form.get("character", "")).strip(),
+                "style": str(form.get("style", "")).strip(),
+                "action": str(form.get("action", "")).strip(),
+                "scene": str(form.get("scene", "")).strip(),
+                "cinematography": str(form.get("cinematography", "")).strip(),
+                "dialogue": str(form.get("dialogue", "")).strip(),
+                "ending": str(form.get("ending", "")).strip(),
+                "audio_block": str(form.get("audio_block", "")).strip(),
+                "universal_negatives": str(form.get("universal_negatives", "")).strip(),
+                "veo_negative_prompt": str(form.get("veo_negative_prompt", "")).strip(),
+            })
+
+        supabase = get_supabase().client
+        response = supabase.table("posts").select("id, batch_id, video_prompt_json").eq("id", post_id).execute()
+        if not response.data:
+            raise FlowForgeException(
+                code=ErrorCode.NOT_FOUND,
+                message=f"Post {post_id} not found",
+                details={"post_id": post_id},
+            )
+
+        post = response.data[0]
+        existing_prompt = _parse_json_document(post.get("video_prompt_json"))
+        if not existing_prompt:
+            raise FlowForgeException(
+                code=ErrorCode.VALIDATION_ERROR,
+                message="Post missing video_prompt_json. Build the prompt before editing it.",
+                details={"post_id": post_id},
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        updated_prompt = {
+            **existing_prompt,
+            "character": payload.character.strip(),
+            "style": payload.style.strip(),
+            "action": payload.action.strip(),
+            "scene": payload.scene.strip(),
+            "cinematography": payload.cinematography.strip(),
+            "audio": {
+                "dialogue": payload.dialogue.strip(),
+                "capture": payload.audio_block.strip(),
+            },
+            "ending_directive": payload.ending.strip(),
+            "audio_block": payload.audio_block.strip(),
+            "universal_negatives": payload.universal_negatives.strip(),
+            "veo_negative_prompt": payload.veo_negative_prompt.strip(),
+        }
+
+        updated_prompt["optimized_prompt"] = build_optimized_prompt(
+            payload.dialogue,
+            negative_constraints=payload.universal_negatives,
+            prompt_mode="standard_final",
+            character=payload.character,
+            action=payload.action,
+            style=payload.style,
+            scene=payload.scene,
+            cinematography=payload.cinematography,
+            ending=payload.ending,
+            audio_block=payload.audio_block,
+        )
+        updated_prompt["veo_prompt"] = build_optimized_prompt(
+            payload.dialogue,
+            negative_constraints=None,
+            prompt_mode="standard_final",
+            character=payload.character,
+            action=payload.action,
+            style=payload.style,
+            scene=payload.scene,
+            cinematography=payload.cinematography,
+            ending=payload.ending,
+            audio_block=payload.audio_block,
+        )
+        validate_video_prompt(updated_prompt)
+
+        supabase.table("posts").update({
+            "video_prompt_json": updated_prompt,
+        }).eq("id", post_id).execute()
+
+        logger.info(
+            "video_prompt_updated",
+            post_id=post_id,
+            batch_id=post.get("batch_id"),
+            correlation_id=correlation_id,
+            dialogue_length=len(payload.dialogue.strip()),
+            action_length=len(payload.action.strip()),
+        )
+
+        return SuccessResponse(
+            data={
+                "id": post_id,
+                "video_prompt": updated_prompt,
+                "state_ready": "S5_PROMPTS_BUILT",
+            }
+        )
+
+    except ValidationError as e:
+        logger.error(
+            "update_prompt_validation_failed",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            error=e.message,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.message,
+        )
+    except FlowForgeException:
+        raise
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "update_prompt_failed",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update video prompt",
         )
 
 

@@ -184,12 +184,17 @@
                 {% set prompt_audio = prompt.audio if prompt and prompt.audio else {} %}
                 {% set prompt_sections = [
                     ('Character', prompt.character),
+                    ('Style', prompt.style),
                     ('Action', prompt.action),
                     ('Scene', prompt.scene),
                     ('Cinematography', prompt.cinematography),
-                    ('Universal Negatives', prompt.universal_negatives)
+                    ('Dialogue', prompt_audio.get('dialogue') if prompt_audio else None),
+                    ('Ending Directive', prompt.ending_directive),
+                    ('Audio Block', prompt.audio_block),
+                    ('Universal Negatives', prompt.universal_negatives),
+                    ('VEO Negative Prompt', prompt.veo_negative_prompt)
                 ] %}
-                <div x-data="promptModalComponent('{{ post.id }}')" class="relative">
+                <div x-data="promptModalComponent('{{ post.id }}')" data-prompt-json='{{ prompt|tojson|e }}' class="relative">
                     <div class="text-sm text-gray-700 space-y-2">
                         <p class="font-semibold text-gray-900">Prompt Snapshot</p>
                         {% for title, value in prompt_sections %}
@@ -198,13 +203,6 @@
                             <p class="mt-1 text-xs text-gray-700" style="display:-webkit-box;-webkit-line-clamp:3;line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">{{ value or '—' }}</p>
                         </div>
                         {% endfor %}
-                        <div>
-                            <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Batch Name</p>
-                            <p class="mt-1 text-xs text-gray-700 italic" style="display:-webkit-box;-webkit-line-clamp:4;line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;">{{ prompt_audio.get('dialogue') if prompt_audio and prompt_audio.get('dialogue') else '—' }}</p>
-                            {% if prompt_audio and prompt_audio.get('capture') and prompt_audio.get('capture') != prompt_audio.get('dialogue') %}
-                            <p class="mt-1 text-xs text-gray-500" style="display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ prompt_audio.get('capture') }}</p>
-                            {% endif %}
-                        </div>
                     </div>
                     <div class="flex flex-col gap-2 mt-4">
                         <button

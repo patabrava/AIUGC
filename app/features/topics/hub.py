@@ -18,7 +18,7 @@ from app.core.video_profiles import get_duration_profile
 from app.core.errors import FlowForgeException, ThirdPartyError, ValidationError
 from app.features.topics.bank_warmup import run_single_seed_topic_warmup
 from app.features.topics.deduplication import calculate_topic_similarity
-from app.features.topics.prompts import get_topic_bank
+from app.features.topics.prompts import get_topic_bank, pick_topic_bank_topics
 from app.features.topics.queries import (
     create_topic_research_run,
     get_all_topics_from_registry,
@@ -72,7 +72,7 @@ def _registry_or_topic_bank() -> List[Dict[str, Any]]:
 
 
 def get_random_topic() -> Optional[Dict[str, Any]]:
-    """Return the topic with the fewest scripts (least coverage)."""
+    """Return the topic with the lowest usage and coverage pressure."""
     topics = get_all_topics_from_registry()
     if not topics:
         return None
@@ -82,9 +82,22 @@ def get_random_topic() -> Optional[Dict[str, Any]]:
             scripts = []
         else:
             scripts = get_topic_scripts_for_registry(topic["id"])
-        scored.append((len(scripts), topic))
-    scored.sort(key=lambda pair: pair[0])
-    count, topic = scored[0]
+        usage_count = int(topic.get("use_count") or 0)
+        last_used_at = _parse_utc_timestamp(
+            topic.get("last_used_at") or topic.get("last_harvested_at") or topic.get("updated_at") or topic.get("created_at")
+        )
+        scored.append(
+            (
+                usage_count,
+                last_used_at.timestamp() if last_used_at else 0.0,
+                len(scripts),
+                str(topic.get("created_at") or ""),
+                str(topic.get("title") or ""),
+                topic,
+            )
+        )
+    scored.sort(key=lambda pair: pair[:5])
+    usage_count, _, count, _, _, topic = scored[0]
     return {**topic, "script_count": count}
 
 
@@ -744,12 +757,18 @@ def _select_warmup_seed_topics(
     post_type: str,
     seed_topic_count: int = _WARMUP_SEED_TOPIC_COUNT,
     seed: Optional[int] = None,
+    exclude_topics: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    payload = get_topic_bank()
-    catalog = [str(topic).strip() for topic in list(payload.get("topics") or []) if str(topic).strip()]
-    chosen = _choose_unique_seed_topics(catalog, count=seed_topic_count, seed=seed)
+    chosen = pick_topic_bank_topics(
+        seed_topic_count,
+        seed=seed,
+        post_type=post_type,
+        exclude_topics=exclude_topics,
+    )
     seed_generation_used = False
     if len(chosen) < seed_topic_count:
+        payload = get_topic_bank()
+        catalog = [str(topic).strip() for topic in list(payload.get("topics") or []) if str(topic).strip()]
         fallback_topics = _generate_fallback_seed_topics(seed_topic_count - len(chosen), post_type=post_type)
         seed_generation_used = bool(fallback_topics)
         for topic in fallback_topics:
@@ -1062,6 +1081,7 @@ def harvest_topics_to_bank_sync(
                 post_type=post_type,
                 seed_topic_count=seed_topic_count,
                 seed=hash((trigger_source, post_type, target_length_tier, count)),
+                exclude_topics=seed_topics_used,
             )
             seed_topics = list(warmup.get("seed_topics") or [])
             run_summary["seed_generation_used"] = run_summary["seed_generation_used"] or bool(warmup.get("seed_generation_used"))

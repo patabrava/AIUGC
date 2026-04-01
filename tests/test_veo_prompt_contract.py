@@ -1,7 +1,10 @@
 import importlib
 import os
 
-from app.features.posts.prompt_builder import build_video_prompt_from_seed, split_dialogue_sentences
+import pytest
+
+from app.features.posts.prompt_builder import build_video_prompt_from_seed, split_dialogue_sentences, build_optimized_prompt
+from app.features.posts.schemas import AudioSection, UpdatePromptRequest, VideoPrompt
 
 
 def test_veo_prompt_requires_exact_german_dialogue():
@@ -17,6 +20,75 @@ def test_veo_prompt_requires_exact_german_dialogue():
     assert script in veo_prompt
     assert "After the final spoken word, speech stops completely." in veo_prompt
     assert "mouth comes to rest" in veo_prompt
+    assert prompt["audio"]["dialogue"] == script
+    assert prompt["audio_block"] == prompt["audio"]["capture"]
+    assert prompt["ending_directive"].startswith("After the final spoken word")
+
+
+def test_build_optimized_prompt_supports_custom_sections():
+    result = build_optimized_prompt(
+        "Test dialogue.",
+        negative_constraints=None,
+        character="A 25-year-old man with dark hair.",
+        action="Custom action block.",
+        style="Cinematic drone footage.",
+        scene="An open rooftop at sunset.",
+        cinematography="Wide-angle lens, slow dolly.",
+        ending="He turns away and walks off.",
+        audio_block="Studio recording with boom mic.",
+    )
+
+    assert "A 25-year-old man with dark hair." in result
+    assert "Cinematic drone footage." in result
+    assert "Custom action block." in result
+    assert "An open rooftop at sunset." in result
+    assert "Wide-angle lens, slow dolly." in result
+    assert "He turns away and walks off." in result
+    assert "Studio recording with boom mic." in result
+    assert "Test dialogue." in result
+    assert "38-year-old German woman" not in result
+
+
+def test_video_prompt_and_update_request_roundtrip_editable_fields():
+    prompt = VideoPrompt(
+        audio=AudioSection(dialogue="Hallo Welt", capture="Audio block"),
+        ending_directive="She rests.",
+        audio_block="Audio block",
+    )
+    restored = VideoPrompt.model_validate(prompt.model_dump())
+    assert restored.audio.dialogue == "Hallo Welt"
+    assert restored.ending_directive == "She rests."
+    assert restored.audio_block == "Audio block"
+
+    request = UpdatePromptRequest(
+        character="Custom character",
+        style="Custom style",
+        action="Custom action",
+        scene="Custom scene",
+        cinematography="Custom cinematography",
+        dialogue="Custom dialogue",
+        ending="Custom ending",
+        audio_block="Custom audio",
+        universal_negatives="Custom negatives",
+        veo_negative_prompt="Custom veo negatives",
+    )
+    assert request.dialogue == "Custom dialogue"
+
+
+def test_update_prompt_request_rejects_empty_fields():
+    with pytest.raises(Exception):
+        UpdatePromptRequest(
+            character="",
+            style="Custom style",
+            action="Custom action",
+            scene="Custom scene",
+            cinematography="Custom cinematography",
+            dialogue="Custom dialogue",
+            ending="Custom ending",
+            audio_block="Custom audio",
+            universal_negatives="Custom negatives",
+            veo_negative_prompt="Custom veo negatives",
+        )
 
 
 def test_veo_extension_prompt_preserves_approved_german_script():

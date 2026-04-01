@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 
 
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+_VEO_MODEL_ID = "veo-3.1-generate-preview"
 
 
 class VeoClient:
@@ -116,7 +117,7 @@ class VeoClient:
             )
 
             response = self._http_client.post(
-                f"{_GEMINI_API_BASE}/models/veo-3.1-generate-preview:predictLongRunning",
+                f"{_GEMINI_API_BASE}/models/{_VEO_MODEL_ID}:predictLongRunning",
                 headers=self._build_headers(include_json=True),
                 json=payload
             )
@@ -482,7 +483,7 @@ class VeoClient:
 
         try:
             response = self._http_client.post(
-                f"{_GEMINI_API_BASE}/models/veo-3.1-generate-preview:predictLongRunning",
+                f"{_GEMINI_API_BASE}/models/{_VEO_MODEL_ID}:predictLongRunning",
                 headers=self._build_headers(include_json=True),
                 json=payload,
             )

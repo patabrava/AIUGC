@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import re
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -194,24 +195,118 @@ def get_hook_bank() -> Dict[str, Any]:
     return _load_hook_bank_payload()
 
 
-def pick_topic_bank_topics(count: int, *, seed: Optional[int] = None) -> List[str]:
+def _normalize_bank_topic_signature(value: Any) -> str:
+    cleaned = re.sub(r"[^\w\s]", " ", str(value or "").lower())
+    tokens = [token for token in cleaned.split() if token]
+    return " ".join(tokens)
+
+
+def _parse_bank_timestamp(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _timestamp_or_zero(value: Any) -> float:
+    parsed = _parse_bank_timestamp(value)
+    return parsed.timestamp() if parsed is not None else 0.0
+
+
+def _summarize_topic_usage(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    summary: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        canonical_topic = str(row.get("canonical_topic") or row.get("title") or row.get("script") or "").strip()
+        fingerprint = str(row.get("family_fingerprint") or _normalize_bank_topic_signature(canonical_topic)).strip()
+        if not fingerprint:
+            continue
+        entry = summary.setdefault(
+            fingerprint,
+            {
+                "use_count": 0,
+                "last_used_at": None,
+                "last_harvested_at": None,
+                "created_at": None,
+            },
+        )
+        entry["use_count"] += int(row.get("use_count") or 0)
+        for field in ("last_used_at", "last_harvested_at", "created_at", "updated_at"):
+            parsed = _parse_bank_timestamp(row.get(field))
+            if parsed is None:
+                continue
+            current = entry.get(field)
+            if current is None or parsed > current:
+                entry[field] = parsed
+    return summary
+
+
+def pick_topic_bank_topics(
+    count: int,
+    *,
+    seed: Optional[int] = None,
+    post_type: Optional[str] = None,
+    exclude_topics: Optional[List[str]] = None,
+) -> List[str]:
     candidates = get_topic_seed_catalog()
     if not candidates:
         raise ValueError("No topic bank entries available")
     if count <= 0:
         return []
+
+    exclude_normalized = {
+        _normalize_bank_topic_signature(topic)
+        for topic in list(exclude_topics or [])
+        if _normalize_bank_topic_signature(topic)
+    }
+
+    try:
+        from app.features.topics.queries import get_all_topics_from_registry
+
+        registry_rows = get_all_topics_from_registry()
+        if post_type:
+            registry_rows = [row for row in registry_rows if str(row.get("post_type") or "").strip() == str(post_type).strip()]
+    except Exception:
+        registry_rows = []
+
+    usage_by_fingerprint = _summarize_topic_usage(registry_rows)
+    scored_topics: Dict[tuple, List[str]] = {}
+    for topic in candidates:
+        normalized = _normalize_bank_topic_signature(topic)
+        if not normalized or normalized in exclude_normalized:
+            continue
+        usage = usage_by_fingerprint.get(normalized)
+        score = (
+            0 if usage is None else 1,
+            int(usage.get("use_count") or 0) if usage else 0,
+            _timestamp_or_zero(usage.get("last_used_at")) if usage else 0.0,
+            _timestamp_or_zero(usage.get("last_harvested_at") or usage.get("created_at")) if usage else 0.0,
+        )
+        scored_topics.setdefault(score, []).append(topic)
+
+    if not scored_topics:
+        return []
+
     rng = random.Random(seed if seed is not None else count)
-    shuffled = candidates[:]
-    rng.shuffle(shuffled)
     chosen: List[str] = []
-    while len(chosen) < count:
-        remaining = count - len(chosen)
-        if remaining >= len(shuffled):
-            chosen.extend(shuffled)
-            rng.shuffle(shuffled)
-        else:
-            chosen.extend(shuffled[:remaining])
-    return chosen
+    for score in sorted(scored_topics):
+        bucket = scored_topics[score][:]
+        rng.shuffle(bucket)
+        for topic in bucket:
+            if topic in chosen:
+                continue
+            chosen.append(topic)
+            if len(chosen) >= count:
+                return chosen[:count]
+    return chosen[:count]
 
 
 

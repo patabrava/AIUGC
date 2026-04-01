@@ -24,6 +24,8 @@ PROMPT_FIELD_ORDER: List[str] = [
     "focus_and_lens_effects",
     "atmosphere",
     "authenticity_modifiers",
+    "ending_directive",
+    "audio_block",
     "universal_negatives",
     "post",
     "sound_effects",
@@ -50,7 +52,7 @@ def _compose_prompt_sections(video_prompt: Dict[str, Any]) -> List[str]:
 
         if dialogue:
             sections.append(str(dialogue).strip())
-        if capture and capture != dialogue:
+        if capture and capture != dialogue and capture != video_prompt.get("audio_block"):
             sections.append(str(capture).strip())
 
     return [section for section in sections if section]

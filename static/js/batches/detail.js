@@ -7,19 +7,94 @@
         });
     };
 
-    window.promptModalComponent = function (postId) {
+    window.promptModalComponent = function (postId, initialPrompt = {}) {
+        const toText = (value) => (typeof value === 'string' ? value : '');
+        const buildDraft = (prompt) => {
+            const audio = prompt?.audio || {};
+            return {
+                character: toText(prompt?.character),
+                style: toText(prompt?.style),
+                action: toText(prompt?.action),
+                scene: toText(prompt?.scene),
+                cinematography: toText(prompt?.cinematography),
+                dialogue: toText(audio?.dialogue),
+                ending: toText(prompt?.ending_directive),
+                audio_block: toText(prompt?.audio_block),
+                universal_negatives: toText(prompt?.universal_negatives),
+                veo_negative_prompt: toText(prompt?.veo_negative_prompt),
+            };
+        };
+
         return {
             expanded: false,
+            editing: false,
+            saving: false,
+            error: null,
             postId,
+            prompt: initialPrompt || {},
+            draft: buildDraft(initialPrompt || {}),
             open() {
                 this.expanded = true;
                 window.batchDetailExpanded = true;
                 document.body.style.overflow = 'hidden';
+                this.error = null;
+            },
+            init() {
+                const rawPrompt = this.$el?.dataset?.promptJson;
+                if (rawPrompt) {
+                    try {
+                        this.prompt = JSON.parse(rawPrompt);
+                        this.draft = buildDraft(this.prompt);
+                    } catch (_error) {
+                        this.error = 'Failed to load prompt data';
+                    }
+                }
             },
             close() {
+                this.cancelEditing();
                 this.expanded = false;
                 window.batchDetailExpanded = false;
                 document.body.style.overflow = '';
+            },
+            startEditing() {
+                this.draft = buildDraft(this.prompt);
+                this.error = null;
+                this.editing = true;
+            },
+            cancelEditing() {
+                this.editing = false;
+                this.saving = false;
+                this.error = null;
+                this.draft = buildDraft(this.prompt);
+            },
+            async save() {
+                if (this.saving) {
+                    return;
+                }
+                this.saving = true;
+                this.error = null;
+                try {
+                    const response = await fetch(`/posts/${this.postId}/prompt`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Correlation-ID': `prompt_edit_${this.postId}`,
+                        },
+                        body: JSON.stringify(this.draft),
+                    });
+                    if (!response.ok) {
+                        throw new Error(await window.extractApiError(response));
+                    }
+                    this.editing = false;
+                    this.expanded = false;
+                    window.batchDetailExpanded = false;
+                    document.body.style.overflow = '';
+                    window.location.reload();
+                } catch (error) {
+                    this.error = error instanceof Error ? error.message : 'Failed to update prompt';
+                } finally {
+                    this.saving = false;
+                }
             },
         };
     };

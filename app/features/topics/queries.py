@@ -736,7 +736,7 @@ def store_topic_bank_entry(
         post_type=post_type,
         canonical_topic=canonical_topic,
         status="quarantined" if origin_kind == "synthetic_fallback" else "provisional",
-        increment_use_count=False,
+        increment_use_count=True,
     )
     dossier = create_topic_research_dossier(
         topic_research_run_id=topic_research_run_id,
