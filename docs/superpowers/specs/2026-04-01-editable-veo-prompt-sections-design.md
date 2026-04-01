@@ -34,11 +34,13 @@ After auto-generating a video prompt (S4 → S5), users have no way to modify th
 | Cinematography | `cinematography` | `{cinematography}` (new) |
 | Dialogue | `audio.dialogue` | `{dialogue}` |
 | Ending | `ending_directive` (new field, see below) | `{ending}` |
-| Audio | `audio.capture` | `{audio}` |
+| Audio | `audio_block` (new field, see below) | `{audio}` |
 | Negatives | `universal_negatives` | `{negatives_section}` |
 | VEO Negative Prompt | `veo_negative_prompt` | Sent as separate VEO API param |
 
 **Ending field note:** Currently the ending directive is determined by `_get_prompt_contract()` based on `prompt_mode` and is not stored as a separate field in `VideoPrompt`. During initial prompt generation, the ending value (`STANDARD_FINAL_ENDING_DIRECTIVE`) will be stored as a new `ending_directive` field in `video_prompt_json` so it can be displayed and edited. A new optional `ending_directive` field is added to the `VideoPrompt` schema with the standard default.
+
+**Audio field note:** Currently the audio description that flows into the VEO prompt comes from `_get_prompt_contract()["audio_block"]` (i.e. `STANDARD_FINAL_AUDIO_BLOCK`), NOT from the `AudioSection` schema fields. The existing `audio.dialogue` field confusingly stores this audio block text, and `audio.capture` is always empty. The template `{audio}` placeholder is filled from the contract, not the schema. To make this editable, a new optional `audio_block` field is added to `VideoPrompt` with `STANDARD_FINAL_AUDIO_BLOCK` as default. During initial generation, this field is populated from the contract. The edit endpoint reads the user's value from this field and passes it to the template rebuild. The existing `AudioSection` fields (`audio.dialogue`, `audio.capture`) are left untouched to avoid breaking other code that may reference them.
 
 Sections NOT shown in the edit UI (don't flow into the VEO prompt): `lighting`, `color_and_grade`, `resolution_and_aspect_ratio`, `camera_positioning_and_motion`, `composition`, `focus_and_lens_effects`, `atmosphere`, `authenticity_modifiers`.
 
@@ -56,7 +58,7 @@ Sections NOT shown in the edit UI (don't flow into the VEO prompt): `lighting`, 
   "cinematography": "...",
   "dialogue": "...",
   "ending": "...",
-  "audio_capture": "...",
+  "audio_block": "...",
   "universal_negatives": "...",
   "veo_negative_prompt": "..."
 }
@@ -95,7 +97,7 @@ OPTIMIZED_PROMPT_TEMPLATE = (
 )
 ```
 
-`build_optimized_prompt()` gains keyword arguments for `character`, `style`, `scene`, `cinematography` with current hardcoded values as defaults. Existing callers pass no extra args and get identical output.
+`build_optimized_prompt()` gains keyword arguments for `character`, `style`, `scene`, `cinematography`, `ending`, and `audio_block` with current hardcoded values as defaults. Existing callers pass no extra args and get identical output. When called from the edit endpoint, all values come from the user's edits.
 
 ### Frontend
 
@@ -124,7 +126,7 @@ Alpine.js `editing` state variable controls the mode:
 
 | File | Change |
 |---|---|
-| `app/features/posts/prompt_builder.py` | Parameterize `OPTIMIZED_PROMPT_TEMPLATE`, update `build_optimized_prompt()` signature |
+| `app/features/posts/prompt_builder.py` | Parameterize `OPTIMIZED_PROMPT_TEMPLATE`, update `build_optimized_prompt()` signature, populate `ending_directive` and `audio_block` in `build_video_prompt_from_seed()` |
 | `app/features/posts/handlers.py` | New `PATCH /posts/{post_id}/prompt` endpoint |
-| `app/features/posts/schemas.py` | New `UpdatePromptRequest` model |
+| `app/features/posts/schemas.py` | New `UpdatePromptRequest` model, add `ending_directive` and `audio_block` optional fields to `VideoPrompt` |
 | `templates/batches/detail/_post_modals.html` | Edit/view toggle, textareas, Save/Cancel buttons |
