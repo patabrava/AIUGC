@@ -133,6 +133,8 @@ def update_blog_status(
     published_at: Optional[str] = None,
     scheduled_at: Optional[str] = None,
     clear_scheduled_at: bool = False,
+    clear_webflow_item_id: bool = False,
+    clear_published_at: bool = False,
 ) -> Dict[str, Any]:
     """Update blog_status and optionally blog_content/webflow fields."""
     supabase = get_supabase()
@@ -141,8 +143,12 @@ def update_blog_status(
         update_payload["blog_content"] = blog_content
     if webflow_item_id is not None:
         update_payload["blog_webflow_item_id"] = webflow_item_id
+    elif clear_webflow_item_id:
+        update_payload["blog_webflow_item_id"] = None
     if published_at is not None:
         update_payload["blog_published_at"] = published_at
+    elif clear_published_at:
+        update_payload["blog_published_at"] = None
     if scheduled_at is not None:
         update_payload["blog_scheduled_at"] = scheduled_at
     elif clear_scheduled_at:

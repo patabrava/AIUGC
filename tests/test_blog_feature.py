@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import base64
 import httpx
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError as PydanticValidationError
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -18,6 +21,8 @@ os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
 os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 
 from app.main import app
+from app.adapters.llm_client import LLMClient
+from app.features.blog import blog_runtime
 from app.features.blog import queries as blog_queries
 from app.features.blog.schemas import BlogContent, BlogSource, build_blog_content_from_llm, normalize_blog_content
 from app.features.blog.webflow_client import WebflowClient
@@ -108,6 +113,64 @@ def test_blog_content_model_accepts_webflow_contract():
     assert len(content.sources) == 1
 
 
+def test_gemini_image_generation_maps_nanobanana_alias():
+    client = LLMClient()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64.b64encode(b"png-bytes").decode("ascii"),
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
+        result = client.generate_gemini_image(prompt="Quadratisches Coverbild", model="nanobanana-2")
+
+    assert result["model"] == "gemini-3.1-flash-image-preview"
+    assert result["image_bytes"] == b"png-bytes"
+    call = mock_post.call_args
+    assert call.args[0] == "/models/gemini-3.1-flash-image-preview:generateContent"
+    assert call.kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
+    assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
+
+
+def test_blog_content_from_llm_requires_real_intro_and_closing():
+    with pytest.raises(PydanticValidationError):
+        build_blog_content_from_llm(
+            {
+                "name": "Unvollstaendiger Blog",
+                "slug": "unvollstaendiger-blog",
+                "merksatz": "Merksatz",
+                "tipp": "Tipp",
+                "summary_bullets": ["Eins", "Zwei", "Drei"],
+                "intro_heading": "Einleitung",
+                "introduction_paragraphs": [],
+                "sections": [
+                    {"heading": "A", "paragraphs": ["Text"], "bullets": []},
+                    {"heading": "B", "paragraphs": ["Text"], "bullets": []},
+                    {"heading": "C", "paragraphs": ["Text"], "bullets": []},
+                ],
+                "conclusion_heading": "Schluss",
+                "conclusion_paragraphs": [],
+                "preview_text": "Kurztext",
+                "meta_title": "Meta Titel",
+                "meta_description": "Meta Beschreibung",
+            },
+            dossier_id="dossier-123",
+        )
+
+
 def test_normalize_blog_content_upgrades_legacy_payload():
     normalized = normalize_blog_content(
         {
@@ -192,6 +255,33 @@ def test_webflow_client_create_and_publish_payloads_are_correct():
     assert mock_request.call_args_list[1].kwargs["json"] == {"itemIds": ["wf-item-123"]}
 
 
+def test_gemini_image_generation_decodes_inline_image_bytes():
+    client = LLMClient()
+    png_bytes = b"\x89PNG\r\n\x1a\nimage-bytes"
+    encoded = base64.b64encode(png_bytes).decode("ascii")
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = '{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"%s"}}]}}]}' % encoded
+    mock_response.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {"inlineData": {"mimeType": "image/png", "data": encoded}},
+                    ]
+                }
+            }
+        ]
+    }
+
+    with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
+        result = client.generate_gemini_image("Create a blog cover image")
+
+    assert result["image_bytes"] == png_bytes
+    assert result["mime_type"] == "image/png"
+    assert mock_post.call_args.kwargs["params"]["key"]
+
+
 def test_blog_toggle_endpoint_is_registered():
     client = TestClient(app)
     response = client.put("/blog/posts/nonexistent/blog-toggle", allow_redirects=False)
@@ -201,6 +291,12 @@ def test_blog_toggle_endpoint_is_registered():
 def test_blog_generate_endpoint_is_registered():
     client = TestClient(app)
     response = client.post("/blog/posts/00000000-0000-0000-0000-000000000000/blog/generate", allow_redirects=False)
+    assert response.status_code != 404
+
+
+def test_blog_image_generate_endpoint_is_registered():
+    client = TestClient(app)
+    response = client.post("/blog/posts/00000000-0000-0000-0000-000000000000/blog/image/generate", allow_redirects=False)
     assert response.status_code != 404
 
 
@@ -225,6 +321,7 @@ def test_blog_prompt_requests_plain_text_output():
     assert "reiner Text" in prompt
     assert "kein JSON" in prompt
     assert "AUSGABEFORMAT (reiner Text" in prompt
+    assert "Bildprompt:" in prompt
 
 
 def test_update_blog_status_falls_back_for_legacy_status_constraint(monkeypatch):
@@ -263,3 +360,154 @@ def test_update_blog_status_falls_back_for_legacy_status_constraint(monkeypatch)
     assert table.update_calls[1]["blog_status"] == "draft"
     assert "blog_scheduled_at" not in table.update_calls[1]
     assert updated["blog_status"] == "draft"
+
+
+def test_publish_blog_post_requires_accepted_image_when_prompt_exists(monkeypatch):
+    class _FakePost(dict):
+        pass
+
+    fake_post = _FakePost(
+        id="post-1",
+        blog_enabled=True,
+        blog_status="draft",
+        blog_webflow_item_id="wf-1",
+        blog_content={
+            "name": "Title",
+            "slug": "title",
+            "merksatz": "Merksatz",
+            "tipp": "Tipp",
+            "summary_html": "<h2>Summary</h2><ul><li>A</li></ul>",
+            "body_html": "<h2>Body</h2><p>Text</p>",
+            "preview_text": "Preview",
+            "reading_time": "1 Minute",
+            "meta_title": "Meta",
+            "meta_description": "Meta desc",
+            "image_prompt": "Prompt exists",
+            "preview_image_url": None,
+        },
+    )
+
+    monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _post_id: fake_post)
+
+    with pytest.raises(ValueError, match="Generate and accept a preview image"):
+        blog_runtime.publish_blog_post("post-1")
+
+
+def test_generate_blog_draft_retries_until_contract_is_complete(monkeypatch):
+    fake_post = {
+        "id": "post-1",
+        "blog_enabled": True,
+        "blog_status": "pending",
+        "blog_scheduled_at": None,
+        "seed_data": {"script_review_status": "approved"},
+        "topic_title": "Barrierefreie Arzttermine",
+    }
+    fake_dossier = {
+        "id": "dossier-1",
+        "normalized_payload": {
+            "topic": "Barrierefreie Arzttermine",
+            "cluster_summary": "So funktionieren bessere Terminwege.",
+            "source_summary": "Ein klarer Leitfaden fuer Terminwege.",
+            "facts": [
+                "Viele Betroffene verlieren Zeit durch unklare Rueckrufprozesse.",
+                "Klare digitale und telefonische Wege reduzieren Reibung.",
+                "Transparente Schritte bauen Unsicherheit ab.",
+            ],
+            "angle_options": [
+                "Wo Terminwege heute scheitern",
+                "Wie gute Prozesse aussehen",
+                "Welche Schritte sofort helfen",
+            ],
+            "sources": [{"title": "Quelle", "url": "https://example.com"}],
+            "risk_notes": [],
+            "disclaimer": "",
+        },
+    }
+
+    invalid_text = """Name: Barrierefreie Arzttermine ohne Warteschleife
+Slug: barrierefreie-arzttermine-ohne-warteschleife
+Merksatz: Gute Terminwege beginnen bei klaren Kontaktpunkten.
+Tipp: Frage sofort nach dem naechsten konkreten Schritt.
+Zusammenfassung:
+- Unklare Rueckrufe kosten Zeit
+- Gute Prozesse schaffen Sicherheit
+- Klare Schritte helfen sofort
+Einleitung:
+### Warum Terminwege oft scheitern
+Abschnitt 1:
+### Wo heute Reibung entsteht
+Viele Wege bleiben unklar.
+Abschnitt 2:
+### Was gute Prozesse besser machen
+Klare Ablaeufe helfen.
+Abschnitt 3:
+### Was Betroffene sofort tun koennen
+Dokumentation hilft.
+Schluss:
+### Was jetzt wichtig ist
+Vorschautext: Gute Terminwege reduzieren Stress und Wartezeit.
+Meta-Titel: Gute Terminwege beim Arzt
+Meta-Beschreibung: So werden Arzttermine fuer Betroffene klarer und verlaesslicher.
+"""
+    valid_text = """Name: Barrierefreie Arzttermine ohne Warteschleife
+Slug: barrierefreie-arzttermine-ohne-warteschleife
+Merksatz: Gute Terminwege beginnen bei klaren Kontaktpunkten.
+Tipp: Frage sofort nach dem naechsten konkreten Schritt.
+Bildprompt: Quadratisches Coverbild zu barrierefreien Arztterminen, freundlich, realistisch, ohne Text.
+Zusammenfassung:
+- Unklare Rueckrufe kosten Zeit
+- Gute Prozesse schaffen Sicherheit
+- Klare Schritte helfen sofort
+Einleitung:
+### Warum Terminwege oft scheitern
+Wer einen Arzttermin organisieren muss, braucht schnelle Klarheit statt neuer Schleifen.
+Gerade bei Rueckrufen oder Formularen wird aus einem kleinen Schritt schnell ein grosser Aufwand.
+Abschnitt 1:
+### Wo heute Reibung entsteht
+Viele Praxen haben keine klar erkennbare Reihenfolge fuer Rueckruf, Terminwahl und Rueckmeldung.
+Dadurch wissen Betroffene oft nicht, ob sie warten, erneut anrufen oder Unterlagen nachreichen sollen.
+Abschnitt 2:
+### Wie gute Prozesse Sicherheit geben
+Ein guter Terminweg nennt den naechsten Schritt, den richtigen Kanal und den erwartbaren Zeitraum.
+So entsteht Verlaesslichkeit, weil niemand raten muss, was als Naechstes passiert.
+Abschnitt 3:
+### Welche Schritte sofort helfen
+Notiere Kontaktzeit, Anliegen und zugesagte Rueckmeldung direkt nach jedem Gespraech.
+Damit kannst du nachfassen, ohne wieder bei null zu beginnen.
+Schluss:
+### Was am Ende wirklich entlastet
+Barrierefreie Terminwege sind nicht kompliziert, wenn Kontaktpunkte, Wartezeiten und Rueckmeldungen klar benannt werden.
+Genau diese Klarheit nimmt Unsicherheit aus dem Prozess und macht den Alltag planbarer.
+Vorschautext: Gute Terminwege reduzieren Stress und Wartezeit. Diese Struktur schafft mehr Verlaesslichkeit im Alltag.
+Meta-Titel: Gute Terminwege beim Arzt
+Meta-Beschreibung: So werden Arzttermine fuer Betroffene klarer und verlaesslicher.
+"""
+
+    class _FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_gemini_text(self, **_kwargs):
+            self.calls += 1
+            return invalid_text if self.calls == 1 else valid_text
+
+    update_calls = []
+
+    def _fake_update_blog_status(post_id, **kwargs):
+        update_calls.append((post_id, kwargs))
+        return {"id": post_id, **kwargs}
+
+    monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _post_id: fake_post)
+    monkeypatch.setattr(blog_runtime, "_lookup_dossier", lambda _post: fake_dossier)
+    monkeypatch.setattr(blog_runtime, "get_llm_client", lambda: _FakeLLM())
+    monkeypatch.setattr(blog_runtime, "update_blog_status", _fake_update_blog_status)
+
+    content = blog_runtime.generate_blog_draft("post-1")
+
+    assert content["name"] == "Barrierefreie Arzttermine ohne Warteschleife"
+    assert content["intro_heading"] == "Warum Terminwege oft scheitern"
+    assert content["conclusion_heading"] == "Was am Ende wirklich entlastet"
+    assert len(content["introduction_paragraphs"]) == 2
+    assert len(update_calls) == 2
+    assert update_calls[0][1]["status"] == "generating"
+    assert update_calls[1][1]["status"] == "draft"

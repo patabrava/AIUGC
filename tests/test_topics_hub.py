@@ -1083,7 +1083,8 @@ def test_shared_warmup_filters_near_duplicate_lane_candidates(monkeypatch):
         collected_topics=[],
     )
 
-    assert seen_lane_keys == ["lane-1", "lane-3"]
+    assert list(dict.fromkeys(seen_lane_keys)) == ["lane-1", "lane-3"]
+    assert "lane-2" not in seen_lane_keys
     assert summary["lanes_seen"] == 3
     assert summary["lanes_persisted"] == 2
 

@@ -39,23 +39,31 @@
                 <div class="flex items-center gap-3 flex-shrink-0">
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full"
                           :class="{
-                              'bg-green-500/15 text-green-400': post.blog_status === 'draft' || post.blog_status === 'published',
-                              'bg-blue-500/15 text-blue-400': post.blog_status === 'scheduled',
-                              'bg-amber-500/15 text-amber-400': post.blog_status === 'pending',
-                              'bg-purple-500/15 text-purple-400': post.blog_status === 'generating' || post.blog_status === 'publishing',
-                              'bg-red-500/15 text-red-400': post.blog_status === 'failed',
+                              'bg-green-500/15 text-green-400': effectiveStatus(post) === 'draft' || effectiveStatus(post) === 'published',
+                              'bg-blue-500/15 text-blue-400': effectiveStatus(post) === 'scheduled',
+                              'bg-amber-500/15 text-amber-400': effectiveStatus(post) === 'pending',
+                              'bg-purple-500/15 text-purple-400': effectiveStatus(post) === 'generating' || effectiveStatus(post) === 'publishing',
+                              'bg-red-500/15 text-red-400': effectiveStatus(post) === 'failed',
                           }"
-                          x-text="statusLabel(post.blog_status)"></span>
-                    <template x-if="post.blog_status === 'pending' || post.blog_status === 'failed'">
+                          x-text="statusLabel(post)"></span>
+                    <template x-if="effectiveStatus(post) === 'pending' || effectiveStatus(post) === 'failed'">
                         <button class="bg-purple-600 text-white text-xs font-medium px-3 py-1 rounded transition hover:bg-purple-700"
                                 type="button"
+                                :disabled="isBusy(post)"
+                                :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
                                 @click.stop="generateDraft(post.id)">
-                            Generate
+                            <span x-text="isBusyFor(post, 'draft') ? 'Generating…' : 'Generate'"></span>
                         </button>
                     </template>
                     <span class="text-gray-500 text-sm" x-text="expanded === post.id ? '&#9660;' : '&#9654;'"></span>
                 </div>
             </div>
+
+            <template x-if="post.clientNote || post.blog_content?.error">
+                <div class="px-6 pb-3 text-xs"
+                     :class="effectiveStatus(post) === 'failed' ? 'text-red-300' : 'text-blue-300'"
+                     x-text="post.clientNote || post.blog_content?.error"></div>
+            </template>
 
             <template x-if="expanded === post.id && post.blog_content && post.blog_content.body_html">
                 <div class="px-6 pb-5 space-y-6">
@@ -149,20 +157,38 @@
                     </div>
 
                     <div class="grid gap-4 md:grid-cols-2">
-                        <div>
-                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Vorschaubild</label>
-                            <input type="url"
-                                   placeholder="https://..."
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
-                                   :value="post.blog_content.preview_image_url || ''"
-                                   @blur="saveField(post.id, 'preview_image_url', $event.target.value)">
-                            <template x-if="post.blog_content.preview_image_url">
-                                <img :src="post.blog_content.preview_image_url"
-                                     alt="Preview image"
-                                     class="mt-3 h-24 w-auto rounded-lg border border-white/10 object-cover">
-                            </template>
-                        </div>
                         <div class="space-y-4">
+                            <div>
+                                <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Bildprompt</label>
+                                <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none resize-y"
+                                          rows="4"
+                                          placeholder="Beschreibe das Bild, das generiert werden soll"
+                                          x-model="post.blog_content.image_prompt"
+                                          @blur="saveField(post.id, 'image_prompt', $event.target.value)"></textarea>
+                                <div class="mt-2 flex gap-2 flex-wrap">
+                                    <button class="text-xs font-medium px-3 py-1.5 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition"
+                                            type="button"
+                                            :disabled="isBusy(post)"
+                                            :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
+                                            @click="generateImage(post)">
+                                        <span x-text="isBusyFor(post, 'image') ? 'Generating…' : 'Generate Image'"></span>
+                                    </button>
+                                    <button class="text-xs font-medium px-3 py-1.5 rounded-lg border border-white/10 text-gray-200 hover:bg-white/5 transition"
+                                            type="button"
+                                            :disabled="isBusy(post)"
+                                            :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
+                                            @click="regenerateImage(post)">
+                                        <span x-text="isBusyFor(post, 'image') ? 'Generating…' : 'Regenerate'"></span>
+                                    </button>
+                                    <button class="text-xs font-medium px-3 py-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/10 transition"
+                                            type="button"
+                                            :disabled="isBusy(post)"
+                                            :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
+                                            @click="removeImage(post)">
+                                        <span x-text="isBusyFor(post, 'image') ? 'Working…' : 'Remove'"></span>
+                                    </button>
+                                </div>
+                            </div>
                             <div>
                                 <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Meta-Titel</label>
                                 <input type="text"
@@ -177,6 +203,34 @@
                                           @blur="saveField(post.id, 'meta_description', $event.target.value)"
                                           x-text="post.blog_content.meta_description"></textarea>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-4 py-4">
+                            <div class="flex items-center justify-between gap-2 mb-2">
+                                <label class="block text-xs text-gray-400 uppercase tracking-wide">Bildvorschau</label>
+                                <span class="text-xs text-gray-500" x-text="post.blog_content.image_model || 'Gemini'"></span>
+                            </div>
+                            <template x-if="post.blog_content.preview_image_url">
+                                <img :src="post.blog_content.preview_image_url"
+                                     alt="Generated blog preview"
+                                     class="w-full max-h-80 rounded-lg border border-white/10 object-cover">
+                            </template>
+                            <template x-if="!post.blog_content.preview_image_url">
+                                <div class="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-gray-500">
+                                    No preview image yet
+                                </div>
+                            </template>
+                            <p class="mt-3 text-xs text-gray-400" x-text="post.blog_content.image_generated_at ? ('Generated at ' + post.blog_content.image_generated_at) : ''"></p>
+                        </div>
+                        <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-4 py-4">
+                            <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Accepted image URL</label>
+                            <input type="url"
+                                   class="w-full bg-[#0c0c18] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   :value="post.blog_content.preview_image_url || ''"
+                                   @blur="saveField(post.id, 'preview_image_url', $event.target.value)">
+                            <p class="mt-2 text-xs text-gray-500">This URL is what gets sent to Webflow as `vorschaubild`.</p>
                         </div>
                     </div>
 
@@ -195,11 +249,15 @@
                         <div class="flex gap-2">
                             <button class="text-purple-400 border border-purple-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-purple-500/10 transition"
                                     type="button"
+                                    :disabled="isBusy(post)"
+                                    :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
                                     @click="generateDraft(post.id)">
-                                Regenerate Draft
+                                <span x-text="isBusyFor(post, 'draft') ? 'Regenerating…' : 'Regenerate Draft'"></span>
                             </button>
                             <button class="text-blue-300 border border-blue-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-500/10 transition"
                                     type="button"
+                                    :disabled="isBusy(post)"
+                                    :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
                                     @click="scheduleDraft(post)">
                                 <span x-text="post.blog_status === 'scheduled' ? 'Reschedule' : 'Schedule'"></span>
                             </button>
@@ -208,15 +266,19 @@
                             <template x-if="post.blog_webflow_item_id">
                                 <button class="bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition"
                                         type="button"
+                                        :disabled="isBusy(post)"
+                                        :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
                                         @click="publishNow(post.id)">
-                                    Update on Webflow
+                                    <span x-text="isBusyFor(post, 'publish') ? 'Publishing…' : 'Update on Webflow'"></span>
                                 </button>
                             </template>
                             <template x-if="!post.blog_webflow_item_id">
                                 <button class="bg-emerald-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-600 transition"
                                         type="button"
+                                        :disabled="isBusy(post)"
+                                        :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
                                         @click="publishNow(post.id)">
-                                    Publish Now
+                                    <span x-text="isBusyFor(post, 'publish') ? 'Publishing…' : 'Publish Now'"></span>
                                 </button>
                             </template>
                         </div>
@@ -238,17 +300,66 @@ function blogPanelComponent() {
         posts: [],
         expanded: null,
         isGenerating: false,
-        initPosts(rawPosts) {
-            this.posts = (rawPosts || []).map((post) => ({
+        decoratePost(post) {
+            return {
                 ...post,
                 blogScheduledAtLocal: this.toLocalInput(post.blog_scheduled_at || post.blog_content?.publication_date),
-            }));
+                busyAction: null,
+                clientStatus: null,
+                clientNote: '',
+            };
         },
-        statusLabel(status) {
+        initPosts(rawPosts) {
+            this.posts = (rawPosts || []).map((post) => this.decoratePost(post));
+        },
+        findPost(postId) {
+            return this.posts.find((post) => post.id === postId);
+        },
+        effectiveStatus(post) {
+            return post?.clientStatus || post?.blog_status || 'pending';
+        },
+        statusLabel(post) {
+            const status = this.effectiveStatus(post);
+            if (post?.busyAction === 'image') return 'Generating Image';
             if (status === 'draft') return 'Draft Ready';
             if (status === 'published') return 'Published';
             if (status === 'scheduled') return 'Scheduled';
+            if (status === 'generating') return 'Generating';
+            if (status === 'publishing') return 'Publishing';
+            if (status === 'failed') return 'Failed';
             return (status || '').charAt(0).toUpperCase() + (status || '').slice(1);
+        },
+        isBusy(post) {
+            return Boolean(post?.busyAction);
+        },
+        isBusyFor(post, action) {
+            return post?.busyAction === action;
+        },
+        setBusy(post, action, note) {
+            if (!post) return;
+            post.busyAction = action;
+            post.clientStatus = action === 'publish' ? 'publishing' : 'generating';
+            post.clientNote = note || '';
+            if (post.blog_content) {
+                post.blog_content.error = null;
+            }
+        },
+        clearBusy(post) {
+            if (!post) return;
+            post.busyAction = null;
+            post.clientStatus = null;
+        },
+        flashNote(post, note) {
+            if (!post) return;
+            post.clientNote = note;
+            window.setTimeout(() => {
+                if (post.clientNote === note) {
+                    post.clientNote = '';
+                }
+            }, 4000);
+        },
+        async readPayload(response) {
+            return await response.json().catch(() => null);
         },
         toggleExpand(postId) {
             this.expanded = this.expanded === postId ? null : postId;
@@ -274,45 +385,76 @@ function blogPanelComponent() {
             });
         },
         async generateDraft(postId) {
-            if (!postId || this.isGenerating) return;
+            const post = this.findPost(postId);
+            if (!postId || !post || this.isGenerating || this.isBusy(post)) return;
             this.isGenerating = true;
+            this.expanded = postId;
+            this.setBusy(post, 'draft', 'Generating blog draft...');
             try {
                 const response = await fetch('/blog/posts/' + postId + '/blog/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                 });
-                if (!response.ok) {
-                    throw new Error(await response.text() || `Generate failed (${response.status})`);
+                const payload = await this.readPayload(response);
+                const errorMessage = payload?.data?.error || payload?.detail || payload?.message;
+                if (!response.ok || payload?.ok === false || errorMessage) {
+                    throw new Error(errorMessage || `Generate failed (${response.status})`);
                 }
-                window.location.reload();
+                post.blog_content = payload.data;
+                post.blog_status = post.blog_scheduled_at ? 'scheduled' : 'draft';
+                this.flashNote(post, 'Draft generated.');
             } catch (error) {
                 console.error('Failed to generate blog draft', error);
-                alert(error instanceof Error ? error.message : 'Failed to generate blog draft');
+                post.blog_status = 'failed';
+                post.clientStatus = 'failed';
+                post.clientNote = error instanceof Error ? error.message : 'Failed to generate blog draft';
+                post.blog_content = { ...(post.blog_content || {}), error: post.clientNote };
+                alert(post.clientNote);
             } finally {
+                if (post.blog_status !== 'failed') {
+                    this.clearBusy(post);
+                } else {
+                    post.busyAction = null;
+                }
                 this.isGenerating = false;
             }
         },
         async publishNow(postId) {
-            if (!postId || this.isGenerating) return;
+            const post = this.findPost(postId);
+            if (!postId || !post || this.isGenerating || this.isBusy(post)) return;
             this.isGenerating = true;
+            this.setBusy(post, 'publish', 'Publishing to Webflow...');
             try {
                 const response = await fetch('/blog/posts/' + postId + '/blog/publish', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                 });
-                if (!response.ok) {
-                    throw new Error(await response.text() || `Publish failed (${response.status})`);
+                const payload = await this.readPayload(response);
+                const errorMessage = payload?.detail || payload?.message;
+                if (!response.ok || payload?.ok === false) {
+                    throw new Error(errorMessage || `Publish failed (${response.status})`);
                 }
-                window.location.reload();
+                post.blog_status = payload.data.blog_status || 'published';
+                post.blog_webflow_item_id = payload.data.webflow_item_id || post.blog_webflow_item_id;
+                post.blog_published_at = payload.data.blog_published_at || post.blog_published_at;
+                this.flashNote(post, 'Published to Webflow.');
             } catch (error) {
                 console.error('Failed to publish blog post', error);
-                alert(error instanceof Error ? error.message : 'Failed to publish blog post');
+                post.blog_status = 'failed';
+                post.clientStatus = 'failed';
+                post.clientNote = error instanceof Error ? error.message : 'Failed to publish blog post';
+                alert(post.clientNote);
             } finally {
+                if (post.blog_status !== 'failed') {
+                    this.clearBusy(post);
+                } else {
+                    post.busyAction = null;
+                }
                 this.isGenerating = false;
             }
         },
         async scheduleDraft(post) {
-            if (!post?.id || this.isGenerating) return;
+            if (!post?.id || this.isGenerating || this.isBusy(post)) return;
             if (!post.blogScheduledAtLocal) {
                 alert('Choose a schedule date first.');
                 return;
@@ -331,10 +473,17 @@ function blogPanelComponent() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ scheduled_at: scheduledDate.toISOString() }),
                 });
-                if (!response.ok) {
-                    throw new Error(await response.text() || `Schedule failed (${response.status})`);
+                const payload = await this.readPayload(response);
+                const errorMessage = payload?.detail || payload?.message;
+                if (!response.ok || payload?.ok === false) {
+                    throw new Error(errorMessage || `Schedule failed (${response.status})`);
                 }
-                window.location.reload();
+                post.blog_status = payload.data.blog_status || 'scheduled';
+                post.blog_scheduled_at = payload.data.blog_scheduled_at;
+                if (post.blog_content) {
+                    post.blog_content.publication_date = payload.data.blog_scheduled_at;
+                }
+                this.flashNote(post, 'Schedule saved.');
             } catch (error) {
                 console.error('Failed to schedule blog post', error);
                 alert(error instanceof Error ? error.message : 'Failed to schedule blog post');
@@ -379,6 +528,74 @@ function blogPanelComponent() {
                     }
                 }
             });
+        },
+        async generateImage(post) {
+            if (!post?.id || this.isGenerating || this.isBusy(post)) return;
+            this.isGenerating = true;
+            this.setBusy(post, 'image', 'Generating preview image...');
+            try {
+                const response = await fetch('/blog/posts/' + post.id + '/blog/image/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_prompt: post.blog_content?.image_prompt || '' }),
+                });
+                const payload = await this.readPayload(response);
+                const errorMessage = payload?.detail || payload?.message;
+                if (!response.ok || payload?.ok === false) {
+                    throw new Error(errorMessage || `Image generation failed (${response.status})`);
+                }
+                post.blog_content = {
+                    ...(post.blog_content || {}),
+                    image_prompt: payload.data.image_prompt,
+                    preview_image_url: payload.data.preview_image_url,
+                    image_model: payload.data.image_model,
+                    image_generated_at: new Date().toISOString(),
+                };
+                this.flashNote(post, 'Preview image generated.');
+            } catch (error) {
+                console.error('Failed to generate blog image', error);
+                post.clientStatus = 'failed';
+                post.clientNote = error instanceof Error ? error.message : 'Failed to generate blog image';
+                alert(post.clientNote);
+            } finally {
+                if (post.clientStatus !== 'failed') {
+                    this.clearBusy(post);
+                } else {
+                    post.busyAction = null;
+                }
+                this.isGenerating = false;
+            }
+        },
+        async regenerateImage(post) {
+            return this.generateImage(post);
+        },
+        async removeImage(post) {
+            if (!post?.id || this.isGenerating || this.isBusy(post)) return;
+            this.isGenerating = true;
+            this.setBusy(post, 'image', 'Removing preview image...');
+            try {
+                const response = await fetch('/blog/posts/' + post.id + '/blog/content', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ preview_image_url: null, image_prompt: post.blog_content?.image_prompt || null }),
+                });
+                const payload = await this.readPayload(response);
+                const errorMessage = payload?.detail || payload?.message;
+                if (!response.ok || payload?.ok === false) {
+                    throw new Error(errorMessage || `Image removal failed (${response.status})`);
+                }
+                post.blog_content = {
+                    ...(post.blog_content || {}),
+                    preview_image_url: null,
+                };
+                this.flashNote(post, 'Preview image removed.');
+            } catch (error) {
+                console.error('Failed to remove blog image', error);
+                alert(error instanceof Error ? error.message : 'Failed to remove blog image');
+            } finally {
+                this.clearBusy(post);
+                this.isGenerating = false;
+            }
         },
     };
 }

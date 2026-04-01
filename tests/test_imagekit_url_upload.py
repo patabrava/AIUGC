@@ -42,6 +42,7 @@ def _make_fake_settings():
         cloudflare_r2_region="auto",
         cloudflare_r2_endpoint_url=None,
         cloudflare_r2_video_prefix="flow-forge/videos",
+        cloudflare_r2_image_prefix="flow-forge/images",
     )
 
 
@@ -86,3 +87,22 @@ def test_ingest_video_from_public_url(monkeypatch):
     assert client._http_client.calls == ["https://provider.example.com/video.mp4"]
     assert fake_s3.calls[0]["Body"] == b"remote-video-bytes"
     assert result["storage_key"].startswith("flow-forge/videos/")
+
+
+def test_upload_image_to_cloudflare_r2(monkeypatch):
+    """Verify the storage adapter uploads image bytes to Cloudflare R2."""
+    fake_s3 = FakeS3Client()
+    client = _build_client(monkeypatch, fake_s3)
+    result = client.upload_image(
+        image_bytes=b"image-bytes",
+        file_name="cover.png",
+        correlation_id="test_image_upload_001",
+    )
+
+    assert fake_s3.calls, "Cloudflare R2 client did not receive put_object call"
+    uploaded = fake_s3.calls[0]
+    assert uploaded["Bucket"] == "ugc-videos"
+    assert uploaded["ContentType"] == "image/png"
+    assert result["storage_provider"] == "cloudflare_r2"
+    assert result["storage_key"].startswith("flow-forge/images/")
+    assert result["url"].startswith("https://cdn.example.com/flow-forge/images/")

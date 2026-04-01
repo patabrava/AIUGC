@@ -11,7 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from pydantic import ValidationError as PydanticValidationError
+
 from app.adapters.llm_client import get_llm_client
+from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -76,6 +79,122 @@ def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
     return prompt
 
 
+def _build_blog_image_prompt(blog_content: Dict[str, Any], dossier_payload: Dict[str, Any]) -> str:
+    topic = _compact_line(blog_content.get("name") or dossier_payload.get("topic") or "Blogartikel")
+    cluster_summary = _limit_text(
+        dossier_payload.get("cluster_summary") or dossier_payload.get("source_summary") or "",
+        120,
+    )
+    summary = _limit_text(blog_content.get("preview_text") or blog_content.get("merksatz") or "", 90)
+    return _limit_text(
+        (
+            f"Quadratisches Coverbild fuer einen deutschen Blogartikel ueber {topic}. "
+            f"Kontext: {cluster_summary}. "
+            f"Teaser: {summary}. "
+            "Freundliche realistische Editorial-Illustration, hell, professionell, ohne Text, Logo oder Wasserzeichen."
+        ),
+        300,
+    )
+
+
+def _compact_line(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _limit_text(value: Any, limit: int) -> str:
+    text = _compact_line(value)
+    if len(text) <= limit:
+        return text
+    clipped = text[: max(0, limit - 1)].rstrip(" ,.;:-")
+    return f"{clipped}…"
+
+
+def _collect_blog_contract_issues(parsed: Dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+
+    if not _compact_line(parsed.get("name")):
+        issues.append("Name fehlt.")
+    if not _compact_line(parsed.get("slug")):
+        issues.append("Slug fehlt.")
+    if not _compact_line(parsed.get("merksatz")):
+        issues.append("Merksatz fehlt.")
+    if not _compact_line(parsed.get("tipp")):
+        issues.append("Tipp fehlt.")
+
+    summary_bullets = [_compact_line(item) for item in (parsed.get("summary_bullets") or []) if _compact_line(item)]
+    if len(summary_bullets) < 3 or len(summary_bullets) > 6:
+        issues.append("Zusammenfassung braucht 3 bis 6 Stichpunkte.")
+
+    if not _compact_line(parsed.get("intro_heading")):
+        issues.append("Einleitung braucht eine Zwischenueberschrift.")
+    intro_paragraphs = [
+        _compact_line(item)
+        for item in (parsed.get("introduction_paragraphs") or [])
+        if _compact_line(item)
+    ]
+    if not intro_paragraphs:
+        issues.append("Einleitung braucht mindestens einen echten Absatz.")
+
+    sections = parsed.get("sections") or []
+    if len(sections) < 3 or len(sections) > 6:
+        issues.append("Es braucht 3 bis 6 Hauptabschnitte.")
+    for index, section in enumerate(sections, start=1):
+        if not _compact_line((section or {}).get("heading")):
+            issues.append(f"Abschnitt {index} braucht eine Zwischenueberschrift.")
+        section_paragraphs = [
+            _compact_line(item)
+            for item in ((section or {}).get("paragraphs") or [])
+            if _compact_line(item)
+        ]
+        if not section_paragraphs:
+            issues.append(f"Abschnitt {index} braucht mindestens einen Absatz.")
+
+    if not _compact_line(parsed.get("conclusion_heading")):
+        issues.append("Schluss braucht eine Zwischenueberschrift.")
+    conclusion_paragraphs = [
+        _compact_line(item)
+        for item in (parsed.get("conclusion_paragraphs") or [])
+        if _compact_line(item)
+    ]
+    if not conclusion_paragraphs:
+        issues.append("Schluss braucht mindestens einen echten Absatz.")
+
+    if not _compact_line(parsed.get("preview_text")):
+        issues.append("Vorschautext fehlt.")
+    elif len(_compact_line(parsed.get("preview_text"))) > 220:
+        issues.append("Vorschautext ist laenger als 220 Zeichen.")
+
+    if not _compact_line(parsed.get("meta_title")):
+        issues.append("Meta-Titel fehlt.")
+    if not _compact_line(parsed.get("meta_description")):
+        issues.append("Meta-Beschreibung fehlt.")
+
+    return issues
+
+
+def _build_blog_retry_prompt(base_prompt: str, issues: list[str], attempt: int) -> str:
+    issue_lines = "\n".join(f"- {issue}" for issue in issues)
+    return (
+        f"{base_prompt}\n\n"
+        f"KORREKTURRUNDE {attempt}:\n"
+        "Deine vorherige Antwort war ungueltig.\n"
+        "Schreibe den kompletten Blogbeitrag neu, nicht nur die fehlenden Teile.\n"
+        "Behebe diese Punkte zwingend:\n"
+        f"{issue_lines}\n"
+        "Achte besonders darauf, dass Einleitung und Schluss echte inhaltliche Absaetze enthalten "
+        "und dass alle Feldlabels exakt einmal in der vorgegebenen Reihenfolge vorkommen."
+    )
+
+
+def _format_blog_validation_issues(exc: PydanticValidationError) -> list[str]:
+    issues: list[str] = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error.get("loc", ()) if part != "__root__")
+        message = str(error.get("msg") or "ungueltig")
+        issues.append(f"{location}: {message}" if location else message)
+    return issues
+
+
 def _parse_labeled_blog_text(raw_text: str, dossier_payload: Dict[str, Any]) -> Dict[str, Any]:
     lines = [line.rstrip() for line in str(raw_text or "").splitlines()]
     sections: list[Dict[str, Any]] = []
@@ -86,28 +205,12 @@ def _parse_labeled_blog_text(raw_text: str, dossier_payload: Dict[str, Any]) -> 
     intro_paragraphs: list[str] = []
     conclusion_paragraphs: list[str] = []
     summary_bullets: list[str] = []
-    name = slug = merksatz = tipp = preview_text = meta_title = meta_description = ""
+    name = slug = merksatz = tipp = preview_text = meta_title = meta_description = image_prompt = ""
 
     def add_paragraph(target: list[str], text: str) -> None:
         cleaned = text.strip()
         if cleaned:
             target.append(cleaned)
-
-    def split_sentences(text: str) -> list[str]:
-        parts = []
-        for chunk in text.replace("\r", "\n").split("\n"):
-            cleaned_chunk = chunk.strip()
-            if not cleaned_chunk:
-                continue
-            pieces = [piece.strip() for piece in cleaned_chunk.split(". ") if piece.strip()]
-            if len(pieces) == 1:
-                parts.append(cleaned_chunk)
-            else:
-                for piece in pieces:
-                    if piece and piece[-1] not in ".!?":
-                        piece += "."
-                    parts.append(piece)
-        return [part for part in parts if part]
 
     for raw_line in lines:
         line = raw_line.strip()
@@ -139,6 +242,10 @@ def _parse_labeled_blog_text(raw_text: str, dossier_payload: Dict[str, Any]) -> 
             continue
         if line.startswith("Meta-Beschreibung:"):
             meta_description = line.removeprefix("Meta-Beschreibung:").strip()
+            current_block = None
+            continue
+        if line.startswith("Bildprompt:"):
+            image_prompt = line.removeprefix("Bildprompt:").strip()
             current_block = None
             continue
         if line == "Zusammenfassung:":
@@ -179,87 +286,21 @@ def _parse_labeled_blog_text(raw_text: str, dossier_payload: Dict[str, Any]) -> 
         elif current_section is not None:
             add_paragraph(current_section["paragraphs"], line)
 
-    facts = list(dossier_payload.get("facts") or [])
-    angles = list(dossier_payload.get("angle_options") or [])
-    if len(sections) < 3:
-        for index in range(3 - len(sections)):
-            focus = angles[index] if index < len(angles) else (facts[index] if index < len(facts) else dossier_payload.get("topic", "Thema"))
-            sections.append(
-                {
-                    "heading": f"Einordnung {index + 1}",
-                    "paragraphs": [f"Dieser Abschnitt ordnet den Punkt '{focus}' ein und zeigt die praktische Konsequenz."],
-                    "bullets": [],
-                }
-            )
-
-    if len(summary_bullets) < 3:
-        for fact in facts[: 3 - len(summary_bullets)]:
-            summary_bullets.append(str(fact).strip())
-
-    if not merksatz:
-        merksatz = str(facts[0]).strip() if facts else str(dossier_payload.get("topic", "")).strip()
-    if not tipp:
-        tipp = str(facts[1]).strip() if len(facts) > 1 else merksatz
-    if not preview_text:
-        preview_text = str(dossier_payload.get("source_summary") or dossier_payload.get("cluster_summary") or merksatz)[:220]
-    if not meta_title:
-        meta_title = name or str(dossier_payload.get("topic", "")).strip()
-    if not meta_description:
-        meta_description = preview_text or str(dossier_payload.get("disclaimer", "")).strip()[:160]
-
-    if not sections:
-        body_sentences = split_sentences(str(dossier_payload.get("source_summary") or raw_text or ""))
-        if not body_sentences:
-            body_sentences = [str(dossier_payload.get("cluster_summary") or dossier_payload.get("topic") or "").strip()]
-        body_sentences = [sentence for sentence in body_sentences if sentence]
-        intro_heading = intro_heading or "Worum es geht"
-        conclusion_heading = conclusion_heading or "Was daraus folgt"
-        if body_sentences:
-            intro_paragraphs = intro_paragraphs or body_sentences[:2]
-        if len(body_sentences) > 2:
-            remaining = body_sentences[2:]
-            chunk_size = max(1, len(remaining) // 3)
-            fallback_headings = [
-                "Die rechtliche Einordnung",
-                "Die praktische Realität",
-                "Was Betroffene beachten sollten",
-            ]
-            for idx, heading in enumerate(fallback_headings):
-                start = idx * chunk_size
-                end = len(remaining) if idx == len(fallback_headings) - 1 else (idx + 1) * chunk_size
-                section_sentences = remaining[start:end] or remaining[-1:]
-                sections.append(
-                    {
-                        "heading": heading,
-                        "paragraphs": section_sentences[:2],
-                        "bullets": [],
-                    }
-                )
-        if not conclusion_paragraphs:
-            conclusion_paragraphs = [
-                "Die zentrale Frage ist nicht nur, was auf dem Papier steht, sondern was im Alltag verlässlich funktioniert.",
-                "Genau dort entsteht der Unterschied zwischen Anspruch und Praxis.",
-            ]
-        if not summary_bullets and body_sentences:
-            summary_bullets = body_sentences[:4]
-        preview_text = _truncate(body_sentences[0] if body_sentences else preview_text, 180)
-        if not meta_description:
-            meta_description = _truncate(preview_text, 160)
-
     return {
-        "name": name or dossier_payload.get("topic", ""),
+        "name": name or "",
         "slug": slug or "",
         "merksatz": merksatz or "",
         "tipp": tipp or "",
         "summary_bullets": summary_bullets,
-        "intro_heading": intro_heading or "Einleitung",
+        "intro_heading": intro_heading or "",
         "introduction_paragraphs": intro_paragraphs,
         "sections": sections,
-        "conclusion_heading": conclusion_heading or "Schluss",
+        "conclusion_heading": conclusion_heading or "",
         "conclusion_paragraphs": conclusion_paragraphs,
         "preview_text": preview_text or "",
-        "meta_title": meta_title or name or "",
+        "meta_title": meta_title or "",
         "meta_description": meta_description or "",
+        "image_prompt": image_prompt or "",
     }
 
 
@@ -273,6 +314,7 @@ def _build_error_content(post: Dict[str, Any], error: str) -> Dict[str, Any]:
         "meta_description": "",
         "meta_title": "",
         "summary_html": "",
+        "image_prompt": "",
         "summary_bullets": [],
         "sources": [],
         "word_count": 0,
@@ -330,27 +372,62 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
         dossier_payload = dossier.get("normalized_payload") or {}
         dossier_id = dossier.get("id", "")
 
-        prompt = _build_blog_prompt(dossier_payload)
-
         llm = get_llm_client()
-        raw_text = llm.generate_gemini_text(
-            prompt=prompt,
-            temperature=0.7,
-            max_tokens=8192,
-        )
-        parsed = _parse_labeled_blog_text(raw_text, dossier_payload)
-
         dossier_sources = dossier_payload.get("sources") or []
-        blog_content = build_blog_content_from_llm(
-            parsed,
-            dossier_id=dossier_id,
-            sources=[
-                {"title": s.get("title", ""), "url": str(s.get("url", ""))}
-                for s in dossier_sources
-                if s.get("title") and s.get("url")
-            ],
-            scheduled_at=_isoformat_optional(post.get("blog_scheduled_at")),
-        )
+        prompt = _build_blog_prompt(dossier_payload)
+        sources = [
+            {"title": s.get("title", ""), "url": str(s.get("url", ""))}
+            for s in dossier_sources
+            if s.get("title") and s.get("url")
+        ]
+
+        blog_content: Optional[Dict[str, Any]] = None
+        current_prompt = prompt
+        for attempt in range(1, 4):
+            raw_text = llm.generate_gemini_text(
+                prompt=current_prompt,
+                temperature=0.7 if attempt == 1 else 0.35,
+                max_tokens=8192,
+            )
+            parsed = _parse_labeled_blog_text(raw_text, dossier_payload)
+            parsed["image_prompt"] = parsed.get("image_prompt") or _build_blog_image_prompt(parsed, dossier_payload)
+
+            contract_issues = _collect_blog_contract_issues(parsed)
+            if contract_issues:
+                logger.warning(
+                    "blog_generation_contract_retry",
+                    post_id=post_id,
+                    attempt=attempt,
+                    issues=contract_issues,
+                )
+                if attempt < 3:
+                    current_prompt = _build_blog_retry_prompt(prompt, contract_issues, attempt + 1)
+                    continue
+                raise ValueError("; ".join(contract_issues))
+
+            try:
+                blog_content = build_blog_content_from_llm(
+                    parsed,
+                    dossier_id=dossier_id,
+                    sources=sources,
+                    scheduled_at=_isoformat_optional(post.get("blog_scheduled_at")),
+                )
+                break
+            except PydanticValidationError as exc:
+                validation_issues = _format_blog_validation_issues(exc)
+                logger.warning(
+                    "blog_generation_validation_retry",
+                    post_id=post_id,
+                    attempt=attempt,
+                    issues=validation_issues,
+                )
+                if attempt < 3:
+                    current_prompt = _build_blog_retry_prompt(prompt, validation_issues, attempt + 1)
+                    continue
+                raise ValueError("; ".join(validation_issues)) from exc
+
+        if blog_content is None:
+            raise ValueError("Blog draft could not be generated with the required structure.")
 
         next_status = "scheduled" if post.get("blog_scheduled_at") else "draft"
         update_blog_status(post_id, status=next_status, blog_content=blog_content)
@@ -363,6 +440,58 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
         return error_content
 
 
+def generate_blog_image(post_id: str, *, image_prompt: Optional[str] = None) -> Dict[str, Any]:
+    """Generate a blog preview image, upload it to R2, and persist the preview URL."""
+    post = _load_post_for_blog(post_id)
+    blog_content = post.get("blog_content") or {}
+
+    if not post.get("blog_enabled"):
+        raise ValueError(f"Blog not enabled for post {post_id}")
+    if not blog_has_draft_content(blog_content):
+        raise ValueError(f"No blog content to generate an image for post {post_id}")
+
+    dossier = _lookup_dossier(post)
+    if not dossier:
+        raise ValueError(f"No research dossier found for post {post_id}")
+
+    dossier_payload = dossier.get("normalized_payload") or {}
+    effective_prompt = (image_prompt or blog_content.get("image_prompt") or "").strip()
+    if not effective_prompt:
+        effective_prompt = _build_blog_image_prompt(blog_content, dossier_payload)
+
+    llm = get_llm_client()
+    image_result = llm.generate_gemini_image(
+        prompt=effective_prompt,
+        model=None,
+        temperature=0.8,
+        max_tokens=2048,
+    )
+    storage = get_storage_client()
+    uploaded = storage.upload_image(
+        image_bytes=image_result["image_bytes"],
+        file_name=f"{blog_content.get('slug') or post_id}.png",
+        correlation_id=post_id,
+        content_type=image_result.get("mime_type") or "image/png",
+    )
+    updated_content = merge_blog_content_updates(
+        blog_content,
+        updates={
+            "image_prompt": effective_prompt,
+            "preview_image_url": uploaded["url"],
+            "image_model": image_result.get("model"),
+            "image_generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        },
+    )
+    update_blog_status(post_id, status=post.get("blog_status") or "draft", blog_content=updated_content)
+    return {
+        "post_id": post_id,
+        "image_prompt": effective_prompt,
+        "preview_image_url": uploaded["url"],
+        "storage_key": uploaded.get("storage_key"),
+        "image_model": image_result.get("model"),
+    }
+
+
 def publish_blog_post(post_id: str, *, publication_date: Optional[str] = None) -> Dict[str, Any]:
     """Publish a generated blog post to Webflow immediately."""
     settings = get_settings()
@@ -373,6 +502,8 @@ def publish_blog_post(post_id: str, *, publication_date: Optional[str] = None) -
         raise ValueError(f"Blog not enabled for post {post_id}")
     if not blog_has_draft_content(blog_content):
         raise ValueError(f"No blog content to publish for post {post_id}")
+    if blog_content.get("image_prompt") and not blog_content.get("preview_image_url"):
+        raise ValueError(f"Generate and accept a preview image before publishing post {post_id}")
 
     client = WebflowClient(
         api_token=settings.webflow_api_token,
@@ -413,6 +544,42 @@ def publish_blog_post(post_id: str, *, publication_date: Optional[str] = None) -
         "blog_status": "published",
         "webflow_item_id": item_id,
         "blog_published_at": published_at,
+    }
+
+
+def delete_blog_post(post_id: str, *, delete_webflow_item: bool = True) -> Dict[str, Any]:
+    """Delete a published blog post from Webflow and clear local publish state."""
+    settings = get_settings()
+    post = _load_post_for_blog(post_id)
+    blog_content = post.get("blog_content") or {}
+    webflow_item_id = post.get("blog_webflow_item_id")
+
+    if delete_webflow_item and webflow_item_id:
+        client = WebflowClient(
+            api_token=settings.webflow_api_token,
+            collection_id=settings.webflow_collection_id,
+            site_id=settings.webflow_site_id,
+        )
+        client.delete_item(str(webflow_item_id))
+
+    updated_content = merge_blog_content_updates(
+        blog_content,
+        updates={"publication_date": None},
+    )
+    update_blog_status(
+        post_id,
+        status="disabled",
+        blog_content=updated_content,
+        clear_webflow_item_id=True,
+        clear_published_at=True,
+        clear_scheduled_at=True,
+    )
+
+    return {
+        "post_id": post_id,
+        "blog_status": "disabled",
+        "webflow_item_id": webflow_item_id,
+        "deleted_webflow_item": bool(delete_webflow_item and webflow_item_id),
     }
 
 

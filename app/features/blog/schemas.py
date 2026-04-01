@@ -67,6 +67,7 @@ class BlogLLMOutput(BaseModel):
     preview_text: str = Field(..., min_length=1, max_length=320)
     meta_title: str = Field(..., min_length=1, max_length=160)
     meta_description: str = Field(..., min_length=1, max_length=320)
+    image_prompt: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator(
         "name",
@@ -78,6 +79,7 @@ class BlogLLMOutput(BaseModel):
         "preview_text",
         "meta_title",
         "meta_description",
+        "image_prompt",
     )
     @classmethod
     def _strip_strings(cls, value: str) -> str:
@@ -111,6 +113,9 @@ class BlogContent(BaseModel):
     publication_date: Optional[str] = Field(default=None)
     preview_text: str = Field(..., min_length=1, max_length=320)
     reading_time: str = Field(..., min_length=1, max_length=64)
+    image_prompt: Optional[str] = Field(default=None, max_length=500)
+    image_model: Optional[str] = Field(default=None, max_length=100)
+    image_generated_at: Optional[str] = Field(default=None)
     preview_image_url: Optional[str] = Field(default=None, max_length=500)
     author_name: Optional[str] = Field(default=None, max_length=160)
     meta_title: str = Field(..., min_length=1, max_length=160)
@@ -139,7 +144,8 @@ class BlogContentUpdateRequest(BaseModel):
     merksatz: Optional[str] = Field(None, min_length=1, max_length=280)
     tipp: Optional[str] = Field(None, min_length=1, max_length=280)
     preview_text: Optional[str] = Field(None, min_length=1, max_length=320)
-    preview_image_url: Optional[str] = Field(None, min_length=1, max_length=500)
+    image_prompt: Optional[str] = Field(None, min_length=1, max_length=500)
+    preview_image_url: Optional[str] = Field(None, max_length=500)
     author_name: Optional[str] = Field(None, min_length=1, max_length=160)
     meta_title: Optional[str] = Field(None, min_length=1, max_length=160)
     meta_description: Optional[str] = Field(None, min_length=1, max_length=320)
@@ -152,6 +158,7 @@ class BlogContentUpdateRequest(BaseModel):
         "merksatz",
         "tipp",
         "preview_text",
+        "image_prompt",
         "preview_image_url",
         "author_name",
         "meta_title",
@@ -212,6 +219,10 @@ def _truncate(value: str, limit: int) -> str:
         return value
     clipped = value[: max(0, limit - 1)].rstrip(" ,.;:-")
     return f"{clipped}…"
+
+
+def _compact_limited_text(value: Any, limit: int) -> str:
+    return _truncate(_compact_text(value), limit)
 
 
 def _split_plain_paragraphs(value: str) -> List[str]:
@@ -332,7 +343,9 @@ def build_blog_content_from_llm(
     sources: Optional[List[Dict[str, str]]] = None,
     scheduled_at: Optional[str] = None,
 ) -> Dict[str, Any]:
-    parsed = BlogLLMOutput.model_validate(data)
+    prepared = dict(data or {})
+    prepared["image_prompt"] = _compact_limited_text(prepared.get("image_prompt"), 500) or None
+    parsed = BlogLLMOutput.model_validate(prepared)
     sections = [section.model_dump() for section in parsed.sections]
     body_html = render_body_html(
         intro_heading=parsed.intro_heading,
@@ -373,6 +386,7 @@ def build_blog_content_from_llm(
             "reading_time": format_reading_time(word_count),
             "meta_title": parsed.meta_title,
             "meta_description": parsed.meta_description,
+            "image_prompt": _compact_limited_text(parsed.image_prompt, 500) if parsed.image_prompt else None,
             "sources": sources or [],
             "word_count": word_count,
             "generated_at": generated_at,
@@ -485,6 +499,9 @@ def normalize_blog_content(
         "publication_date": publication_date,
         "preview_text": preview_text,
         "reading_time": _compact_text(content.get("reading_time")) or format_reading_time(word_count),
+        "image_prompt": _compact_limited_text(content.get("image_prompt"), 500) or None,
+        "image_model": _compact_text(content.get("image_model")) or None,
+        "image_generated_at": _compact_text(content.get("image_generated_at")) or None,
         "preview_image_url": _compact_text(content.get("preview_image_url")) or None,
         "author_name": _compact_text(content.get("author_name")) or None,
         "meta_title": _compact_text(content.get("meta_title")) or name,
@@ -518,6 +535,7 @@ def merge_blog_content_updates(current_content: Any, *, updates: Dict[str, Any])
             "merksatz",
             "tipp",
             "preview_text",
+            "image_prompt",
             "preview_image_url",
             "author_name",
             "meta_title",

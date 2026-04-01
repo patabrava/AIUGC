@@ -102,14 +102,14 @@ def test_audit_single_script_malformed_llm_response():
 from unittest.mock import patch, MagicMock
 
 
-def test_get_unaudited_scripts_returns_null_quality_rows():
-    """Query must filter for quality_score IS NULL."""
+def test_get_unaudited_scripts_returns_pending_audit_rows():
+    """Query must filter for audit_status='pending'."""
     mock_response = MagicMock()
     mock_response.data = [
         {"id": "row-1", "script": "Test script.", "target_length_tier": 8, "title": "Test"},
     ]
     mock_table = MagicMock()
-    mock_table.select.return_value.is_.return_value.limit.return_value.execute.return_value = mock_response
+    mock_table.select.return_value.eq.return_value.limit.return_value.execute.return_value = mock_response
 
     mock_client = MagicMock()
     mock_client.client.table.return_value = mock_table
@@ -122,23 +122,33 @@ def test_get_unaudited_scripts_returns_null_quality_rows():
 
 
 def test_update_script_quality_writes_score_and_notes():
-    """Update must write quality_score and quality_notes."""
-    mock_response = MagicMock()
-    mock_response.data = [{"id": "row-1", "quality_score": 85}]
+    """Update must write quality_score, quality_notes, and audit_status."""
+    select_response = MagicMock()
+    select_response.data = [{"id": "row-1", "topic_registry_id": "topic-1", "audit_attempts": 0}]
+    update_response = MagicMock()
+    update_response.data = [{"id": "row-1", "quality_score": 85, "audit_status": "pass"}]
     mock_table = MagicMock()
-    mock_table.update.return_value.eq.return_value.execute.return_value = mock_response
+    mock_table.select.return_value.eq.return_value.limit.return_value.execute.return_value = select_response
+    mock_table.update.return_value.eq.return_value.execute.return_value = update_response
 
     mock_client = MagicMock()
     mock_client.client.table.return_value = mock_table
 
     with patch("app.features.topics.queries.supabase", mock_client):
         from app.features.topics.queries import update_script_quality
-        update_script_quality(script_id="row-1", quality_score=85, quality_notes='{"status": "pass"}')
+        with patch("app.features.topics.queries._sync_topic_family_status", lambda **kwargs: None):
+            update_script_quality(
+                script_id="row-1",
+                quality_score=85,
+                quality_notes='{"status": "pass"}',
+                audit_status="pass",
+            )
 
     mock_table.update.assert_called_once()
     call_args = mock_table.update.call_args[0][0]
     assert call_args["quality_score"] == 85
     assert "pass" in call_args["quality_notes"]
+    assert call_args["audit_status"] == "pass"
 
 
 def test_audit_worker_run_audit_cycle(monkeypatch):
@@ -153,7 +163,7 @@ def test_audit_worker_run_audit_cycle(monkeypatch):
     def mock_get_unaudited(*, limit=50):
         return mock_rows
 
-    def mock_update(*, script_id, quality_score, quality_notes):
+    def mock_update(*, script_id, quality_score, quality_notes, audit_status=None):
         updated.append({"id": script_id, "score": quality_score})
 
     monkeypatch.setattr("workers.audit_worker.get_unaudited_scripts", mock_get_unaudited)

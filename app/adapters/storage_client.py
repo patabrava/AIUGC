@@ -41,6 +41,7 @@ class StorageClient:
         self.bucket_name = settings.cloudflare_r2_bucket_name
         self.public_base_url = settings.cloudflare_r2_public_base_url.rstrip("/")
         self.object_prefix = _strip_slashes(settings.cloudflare_r2_video_prefix)
+        self.image_prefix = _strip_slashes(getattr(settings, "cloudflare_r2_image_prefix", "flow-forge/images"))
 
         endpoint_url = settings.cloudflare_r2_endpoint_url or (
             f"https://{settings.cloudflare_r2_account_id}.r2.cloudflarestorage.com"
@@ -125,6 +126,67 @@ class StorageClient:
             )
             raise
 
+    def upload_image(
+        self,
+        *,
+        image_bytes: bytes,
+        file_name: str,
+        correlation_id: Optional[str] = None,
+        content_type: str = "image/png",
+    ) -> Dict[str, Any]:
+        """Upload raw image bytes to Cloudflare R2."""
+        object_key = self._build_object_key(file_name, prefix=self.image_prefix)
+
+        try:
+            logger.info(
+                "storage_image_upload_starting",
+                correlation_id=correlation_id,
+                storage_provider="cloudflare_r2",
+                file_name=file_name,
+                object_key=object_key,
+                size_bytes=len(image_bytes),
+            )
+
+            self.client.put_object(
+                Bucket=self.bucket_name,
+                Key=object_key,
+                Body=image_bytes,
+                ContentType=content_type,
+                CacheControl="public, max-age=31536000, immutable",
+            )
+
+            result = {
+                "storage_provider": "cloudflare_r2",
+                "storage_key": object_key,
+                "url": self._build_public_url(object_key),
+                "thumbnail_url": None,
+                "file_path": object_key,
+                "size": len(image_bytes),
+                "file_type": content_type,
+            }
+
+            logger.info(
+                "storage_image_uploaded",
+                correlation_id=correlation_id,
+                storage_provider="cloudflare_r2",
+                object_key=object_key,
+                url=result["url"],
+                size_bytes=len(image_bytes),
+            )
+            return result
+
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "storage_image_upload_failed",
+                correlation_id=correlation_id,
+                storage_provider="cloudflare_r2",
+                file_name=file_name,
+                object_key=object_key,
+                size_bytes=len(image_bytes),
+                error=str(exc),
+            )
+            raise
+
     def upload_video_from_url(
         self,
         *,
@@ -178,11 +240,12 @@ class StorageClient:
         )
         return response.content
 
-    def _build_object_key(self, file_name: str) -> str:
+    def _build_object_key(self, file_name: str, *, prefix: Optional[str] = None) -> str:
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", file_name).strip("-") or "video.mp4"
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        prefix = f"{self.object_prefix}/" if self.object_prefix else ""
-        return f"{prefix}{timestamp}_{safe_name}"
+        object_prefix = _strip_slashes(prefix or self.object_prefix)
+        key_prefix = f"{object_prefix}/" if object_prefix else ""
+        return f"{key_prefix}{timestamp}_{safe_name}"
 
     def _build_public_url(self, object_key: str) -> str:
         return f"{self.public_base_url}/{object_key}"

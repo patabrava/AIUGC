@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o-mini", description="Default OpenAI model identifier")
     gemini_api_key: str = Field("", description="Gemini API key for topic generation")
     gemini_topic_model: str = Field("gemini-2.5-flash", description="Gemini model for topic generation and repair")
+    gemini_image_model: str = Field(
+        "gemini-3.1-flash-image-preview",
+        description="Gemini image generation model for blog previews (Nano Banana 2 preview)",
+    )
     gemini_deep_research_agent: str = Field(
         "deep-research-pro-preview-12-2025",
         description="Gemini Interactions API agent for Deep Research topic discovery",
@@ -79,6 +83,10 @@ class Settings(BaseSettings):
     cloudflare_r2_video_prefix: str = Field(
         default="flow-forge/videos",
         description="Object key prefix for generated videos in Cloudflare R2",
+    )
+    cloudflare_r2_image_prefix: str = Field(
+        default="flow-forge/images",
+        description="Object key prefix for generated images in Cloudflare R2",
     )
     use_url_based_upload: bool = Field(
         default=False,

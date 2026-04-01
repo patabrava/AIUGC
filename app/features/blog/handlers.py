@@ -90,6 +90,32 @@ async def generate_blog_draft(post_id: str):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
+@router.post("/posts/{post_id}/blog/image/generate", response_model=SuccessResponse)
+async def generate_blog_image(post_id: str, request: Request):
+    """Generate a preview image for a blog post and store it in R2."""
+    try:
+        from app.features.blog.blog_runtime import generate_blog_image as run_generate_image
+
+        image_prompt = None
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            data = await request.json()
+            image_prompt = (data or {}).get("image_prompt")
+        else:
+            form = await request.form()
+            image_prompt = form.get("image_prompt")
+
+        result = run_generate_image(post_id, image_prompt=image_prompt)
+        return SuccessResponse(data=result)
+    except FlowForgeException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    except Exception as exc:
+        logger.error("blog_image_generate_error", post_id=post_id, error=str(exc))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
 @router.post("/batches/{batch_id}/blog/generate-all", response_model=SuccessResponse)
 async def generate_all_blog_drafts(batch_id: str):
     """Generate blog drafts for all blog-enabled posts in a batch."""
@@ -211,6 +237,23 @@ async def publish_blog_to_webflow(post_id: str):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     except Exception as exc:
         logger.error("blog_publish_error", post_id=post_id, error=str(exc))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.delete("/posts/{post_id}/blog/delete", response_model=SuccessResponse)
+async def delete_blog_from_webflow(post_id: str):
+    """Delete a blog post from Webflow and clear local blog publish state."""
+    try:
+        from app.features.blog.blog_runtime import delete_blog_post
+
+        result = delete_blog_post(post_id)
+        return SuccessResponse(data=result)
+    except FlowForgeException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    except Exception as exc:
+        logger.error("blog_delete_error", post_id=post_id, error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 

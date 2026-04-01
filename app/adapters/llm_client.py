@@ -16,6 +16,13 @@ from app.core.errors import ThirdPartyError, ValidationError
 
 logger = get_logger(__name__)
 
+GEMINI_IMAGE_MODEL_ALIASES = {
+    "nanobanana-2": "gemini-3.1-flash-image-preview",
+    "nano-banana-2": "gemini-3.1-flash-image-preview",
+    "nano banana 2": "gemini-3.1-flash-image-preview",
+    "nanobanana2": "gemini-3.1-flash-image-preview",
+}
+
 
 class LLMClient:
     """Unified LLM client for OpenAI and Gemini."""
@@ -26,6 +33,7 @@ class LLMClient:
         self.default_openai_model = settings.openai_model
         self.gemini_api_key = settings.gemini_api_key
         self.default_gemini_model = settings.gemini_topic_model
+        self.default_gemini_image_model = settings.gemini_image_model
         self.gemini_deep_research_agent = settings.gemini_deep_research_agent
         self.gemini_topic_timeout_seconds = settings.gemini_topic_timeout_seconds
         self.gemini_topic_poll_seconds = settings.gemini_topic_poll_seconds
@@ -76,6 +84,12 @@ class LLMClient:
             else:
                 params[key] = str(value)
         return params
+
+    def _resolve_gemini_image_model(self, model: Optional[str]) -> str:
+        raw_model = (model or self.default_gemini_image_model or "").strip()
+        if not raw_model:
+            return "gemini-3.1-flash-image-preview"
+        return GEMINI_IMAGE_MODEL_ALIASES.get(raw_model.lower(), raw_model)
     
     def generate_openai(
         self,
@@ -623,6 +637,85 @@ class LLMClient:
             logger.error("gemini_generate_json_failed", model=target_model, error=str(exc))
             raise ThirdPartyError(
                 message="Gemini structured generation failed",
+                details={"error": str(exc), "model": target_model},
+            ) from exc
+
+    def generate_gemini_image(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Generate a single image using Gemini and return image bytes plus mime type."""
+        target_model = self._resolve_gemini_image_model(model)
+        full_prompt = self._merge_prompts(system_prompt, prompt)
+        payload: Dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": full_prompt}],
+                }
+            ],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {
+                    "aspectRatio": "1:1",
+                    "imageSize": "1K",
+                },
+            },
+        }
+        if max_tokens is not None:
+            payload["generationConfig"]["maxOutputTokens"] = max_tokens
+        if temperature is not None:
+            payload["generationConfig"]["temperature"] = temperature
+
+        logger.debug(
+            "gemini_generate_image_request",
+            model=target_model,
+            prompt_length=len(full_prompt),
+            prompt_preview=full_prompt[:400],
+        )
+
+        try:
+            response = self.gemini_http_client.post(
+                f"/models/{target_model}:generateContent",
+                params=self._gemini_params(),
+                json=payload,
+            )
+            if response.status_code >= 400:
+                logger.error(
+                    "gemini_generate_image_http_error",
+                    status_code=response.status_code,
+                    response_text=response.text,
+                    model=target_model,
+                )
+                raise ThirdPartyError(
+                    message="Gemini image generation failed",
+                    details={"status_code": response.status_code, "body": response.text, "model": target_model},
+                )
+
+            data = response.json()
+            image_payload = self._extract_gemini_image_bytes(data)
+            logger.info(
+                "gemini_generate_image_success",
+                model=target_model,
+                size_bytes=len(image_payload["bytes"]),
+                mime_type=image_payload["mime_type"],
+            )
+            return {
+                "image_bytes": image_payload["bytes"],
+                "mime_type": image_payload["mime_type"],
+                "model": target_model,
+                "raw_response": data,
+            }
+        except ThirdPartyError:
+            raise
+        except Exception as exc:
+            logger.error("gemini_generate_image_failed", model=target_model, error=str(exc))
+            raise ThirdPartyError(
+                message="Gemini image generation failed",
                 details={"error": str(exc), "model": target_model},
             ) from exc
 
@@ -1372,6 +1465,28 @@ class LLMClient:
         if collected:
             return "".join(collected).strip()
         raise ThirdPartyError(message="Gemini response missing text output", details={"response": data})
+
+    def _extract_gemini_image_bytes(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        candidates = data.get("candidates") or []
+        for candidate in candidates:
+            content = candidate.get("content") or {}
+            for part in content.get("parts", []) or []:
+                inline_data = part.get("inlineData") or part.get("inline_data") or {}
+                if not isinstance(inline_data, dict):
+                    continue
+                b64 = inline_data.get("data")
+                mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or "image/png"
+                if b64:
+                    import base64
+
+                    try:
+                        return {"bytes": base64.b64decode(b64), "mime_type": mime_type}
+                    except Exception as exc:  # noqa: BLE001
+                        raise ValidationError(
+                            message="Gemini image output could not be decoded",
+                            details={"error": str(exc)},
+                        ) from exc
+        raise ThirdPartyError(message="Gemini image response missing inline image data", details={"response": data})
 
     def _extract_gemini_interaction_text(self, data: Dict[str, Any]) -> str:
         outputs = data.get("outputs") or data.get("output") or []

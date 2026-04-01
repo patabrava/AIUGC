@@ -116,6 +116,12 @@ class WebflowClient:
         self._request("POST", f"/collections/{self.collection_id}/items/publish", json={"itemIds": [item_id]})
         return True
 
+    def delete_item(self, item_id: str) -> bool:
+        """Delete an existing CMS item from the collection."""
+        logger.info("webflow_delete_item", collection_id=self.collection_id, item_id=item_id)
+        self._request("DELETE", f"/collections/{self.collection_id}/items/{item_id}")
+        return True
+
     def publish_site(self) -> bool:
         """Trigger a site publish. Kept for compatibility with earlier rollout paths."""
         logger.info("webflow_publish_site", site_id=self.site_id)
