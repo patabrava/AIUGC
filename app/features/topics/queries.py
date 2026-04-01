@@ -26,6 +26,12 @@ from app.features.topics.topic_validation import (
 logger = get_logger(__name__)
 
 
+def _get_supabase_adapter() -> SupabaseAdapter:
+    if supabase is None:
+        return get_supabase()
+    return supabase
+
+
 def _extract_cta(script: str) -> str:
     text = str(script or "").strip()
     if not text:
@@ -55,6 +61,16 @@ def _normalize_registry_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized["cta"] = cta or _extract_cta(normalized["script"])
     normalized["title"] = str(normalized.get("title") or "").strip()
     normalized["post_type"] = normalized.get("post_type")
+    normalized["canonical_topic"] = str(
+        normalized.get("canonical_topic") or normalized.get("title") or normalized.get("script") or ""
+    ).strip()
+    normalized["family_fingerprint"] = str(
+        normalized.get("family_fingerprint") or _normalize_topic_signature(normalized["canonical_topic"])
+    ).strip()
+    normalized["status"] = str(normalized.get("status") or "active").strip() or "active"
+    normalized["merge_reason"] = str(normalized.get("merge_reason") or "").strip()
+    normalized["merged_into_id"] = normalized.get("merged_into_id")
+    normalized["family_id"] = normalized.get("id")
     normalized["first_seen_at"] = normalized.get("first_seen_at") or normalized.get("created_at") or normalized.get("last_harvested_at")
     normalized["last_used_at"] = normalized.get("last_used_at") or normalized.get("updated_at") or normalized.get("last_harvested_at")
     return normalized
@@ -64,6 +80,23 @@ def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(row or {})
     normalized["source_urls"] = list(normalized.get("source_urls") or [])
     normalized["use_count"] = int(normalized.get("use_count") or 0)
+    normalized["script_fingerprint"] = str(
+        normalized.get("script_fingerprint") or _normalize_script_text(normalized.get("script"))
+    ).strip()
+    audit_status = str(normalized.get("audit_status") or "").strip().lower()
+    if audit_status not in {"pending", "pass", "needs_repair", "reject"}:
+        quality_score = normalized.get("quality_score")
+        if quality_score is None:
+            audit_status = "pending"
+        elif int(quality_score or 0) >= 70:
+            audit_status = "pass"
+        elif int(quality_score or 0) >= 40:
+            audit_status = "needs_repair"
+        else:
+            audit_status = "reject"
+    normalized["audit_status"] = audit_status
+    normalized["audit_attempts"] = int(normalized.get("audit_attempts") or 0)
+    normalized["origin_kind"] = str(normalized.get("origin_kind") or "provider").strip() or "provider"
     return normalized
 
 
@@ -75,6 +108,14 @@ def _normalize_topic_signature(value: Any) -> str:
     cleaned = re.sub(r"[^\w\s]", " ", str(value or "").lower())
     tokens = [token for token in cleaned.split() if token]
     return " ".join(tokens)
+
+
+def _build_family_fingerprint(canonical_topic: Any) -> str:
+    return _normalize_topic_signature(canonical_topic)
+
+
+def _build_script_fingerprint(script: Any) -> str:
+    return _normalize_script_text(script)
 
 
 def _count_script_words(text: Any) -> int:
@@ -106,6 +147,16 @@ def _find_script_overlap(
     return None, None
 
 
+def _should_rehabilitate_family_status(existing_status: Any, resolved_status: Any) -> bool:
+    current = str(existing_status or "").strip().lower()
+    target = str(resolved_status or "").strip().lower()
+    if current == "quarantined" and target in {"provisional", "active"}:
+        return True
+    if current in {"", "provisional"} and target == "active":
+        return True
+    return False
+
+
 def _fetch_topic_script_rows(
     *,
     target_length_tier: Optional[int] = None,
@@ -113,7 +164,7 @@ def _fetch_topic_script_rows(
     topic_research_dossier_id: Optional[str] = None,
     post_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     last_error: Optional[Exception] = None
     for relation in ("v_topic_scripts_resolved", "topic_scripts"):
         try:
@@ -148,7 +199,7 @@ def _normalize_dossier_row(row: Dict[str, Any]) -> Dict[str, Any]:
 def get_all_topics_from_registry() -> List[Dict[str, Any]]:
     """Get all topics from the registry for deduplication and hub browsing."""
     try:
-        supabase = get_supabase()
+        supabase = _get_supabase_adapter()
         response = supabase.client.table("topic_registry").select("*").execute()
         return [_normalize_registry_row(row) for row in (response.data or [])]
     except Exception as exc:
@@ -157,7 +208,7 @@ def get_all_topics_from_registry() -> List[Dict[str, Any]]:
 
 
 def get_topic_registry_by_id(topic_registry_id: str) -> Dict[str, Any]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     response = supabase.client.table("topic_registry").select("*").eq("id", topic_registry_id).limit(1).execute()
     if not response.data:
         raise NotFoundError(message="Topic not found", details={"topic_registry_id": topic_registry_id})
@@ -165,7 +216,7 @@ def get_topic_registry_by_id(topic_registry_id: str) -> Dict[str, Any]:
 
 
 def _insert_registry_row(payload: Dict[str, Any]) -> Dict[str, Any]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     response = supabase.client.table("topic_registry").insert(payload).execute()
     if not response.data:
         raise RuntimeError("Failed to insert topic registry row")
@@ -179,20 +230,63 @@ def add_topic_to_registry(
     *,
     script: Optional[str] = None,
     post_type: Optional[str] = None,
+    canonical_topic: Optional[str] = None,
+    status: str = "active",
+    merge_reason: str = "",
+    increment_use_count: bool = True,
     last_harvested_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Add or update a slim topic registry entry."""
+    """Add or update a family-first topic registry entry."""
     topic_script = str(script or rotation or cta or "").strip()
     if not topic_script:
         raise ValueError("A topic script or rotation is required")
+    canonical_value = str(canonical_topic or title or topic_script).strip()
+    family_fingerprint = _build_family_fingerprint(canonical_value)
+    resolved_status = str(status or "active").strip() or "active"
+    now_iso = (last_harvested_at or datetime.now(timezone.utc)).isoformat()
+    supabase = _get_supabase_adapter()
+
+    query = supabase.client.table("topic_registry").select("*")
+    if post_type is not None:
+        query = query.eq("post_type", post_type)
+    existing_response = query.eq("family_fingerprint", family_fingerprint).limit(1).execute()
+    if existing_response.data:
+        existing_row = _normalize_registry_row(existing_response.data[0])
+        update_payload: Dict[str, Any] = {
+            "title": title,
+            "script": topic_script,
+            "canonical_topic": canonical_value,
+            "family_fingerprint": family_fingerprint,
+            "post_type": post_type,
+            "merge_reason": merge_reason,
+            "last_harvested_at": now_iso,
+        }
+        if increment_use_count:
+            update_payload["use_count"] = int(existing_row.get("use_count") or 0) + 1
+            update_payload["last_used_at"] = datetime.now(timezone.utc).isoformat()
+        if _should_rehabilitate_family_status(existing_row.get("status"), resolved_status):
+            update_payload["status"] = resolved_status
+        elif not existing_row.get("status"):
+            update_payload["status"] = resolved_status
+        response = supabase.client.table("topic_registry").update(
+            {key: value for key, value in update_payload.items() if value is not None}
+        ).eq("id", existing_row["id"]).execute()
+        if response.data:
+            return _normalize_registry_row(response.data[0])
 
     topic_payload: Dict[str, Any] = {
         "title": title,
         "script": topic_script,
-        "use_count": 1,
+        "canonical_topic": canonical_value,
+        "family_fingerprint": family_fingerprint,
+        "status": resolved_status,
+        "merge_reason": merge_reason,
+        "use_count": 1 if increment_use_count else 0,
         "post_type": post_type,
-        "last_harvested_at": (last_harvested_at or datetime.now(timezone.utc)).isoformat(),
+        "last_harvested_at": now_iso,
     }
+    if increment_use_count:
+        topic_payload["last_used_at"] = datetime.now(timezone.utc).isoformat()
 
     # Remove keys with None so the payload works across both the legacy and the current schema.
     topic_payload = {key: value for key, value in topic_payload.items() if value is not None}
@@ -205,22 +299,34 @@ def add_topic_to_registry(
         error_str = str(exc).lower()
         logger.warning("topic_registry_insert_failed", title=title[:50], error=str(exc))
         if "unique" in error_str or "duplicate" in error_str or "constraint" in error_str:
-            supabase = get_supabase()
-            existing = supabase.client.table("topic_registry").select("*").eq("title", title).limit(1).execute()
+            query = supabase.client.table("topic_registry").select("*")
+            if post_type is not None:
+                query = query.eq("post_type", post_type)
+            existing = query.eq("family_fingerprint", family_fingerprint).limit(1).execute()
             if existing.data:
                 existing_row = _normalize_registry_row(existing.data[0])
-                current_count = int(existing_row.get("use_count") or 0)
+                update_payload = {
+                    "title": title,
+                    "script": topic_script,
+                    "canonical_topic": canonical_value,
+                    "family_fingerprint": family_fingerprint,
+                    "post_type": post_type,
+                    "last_harvested_at": now_iso,
+                }
+                if increment_use_count:
+                    current_count = int(existing_row.get("use_count") or 0)
+                    update_payload["use_count"] = current_count + 1
+                    update_payload["last_used_at"] = datetime.now(timezone.utc).isoformat()
+                if _should_rehabilitate_family_status(existing_row.get("status"), resolved_status):
+                    update_payload["status"] = resolved_status
                 updated = supabase.client.table("topic_registry").update(
-                    {
-                        "use_count": current_count + 1,
-                        "last_used_at": datetime.now(timezone.utc).isoformat(),
-                    }
+                    {key: value for key, value in update_payload.items() if value is not None}
                 ).eq("id", existing_row["id"]).execute()
                 if updated.data:
                     logger.info(
                         "topic_use_count_incremented",
                         topic_id=existing_row["id"],
-                        new_count=current_count + 1,
+                        new_count=int((updated.data[0] or {}).get("use_count") or existing_row.get("use_count") or 0),
                     )
                     return _normalize_registry_row(updated.data[0])
             logger.error(
@@ -238,7 +344,7 @@ def touch_topic_registry(
     last_harvested_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Update the registry row's harvest timestamp without changing its content."""
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     payload: Dict[str, Any] = {
         "last_harvested_at": (last_harvested_at or datetime.now(timezone.utc)).isoformat(),
     }
@@ -253,11 +359,15 @@ def _registry_row_to_topic_suggestion(row: Dict[str, Any]) -> Dict[str, Any]:
     script = normalized["script"]
     return {
         "id": normalized["id"],
+        "family_id": normalized["id"],
         "topic_registry_id": normalized["id"],
         "title": normalized["title"],
         "rotation": normalized["rotation"],
         "cta": normalized["cta"],
         "script": script,
+        "canonical_topic": normalized["canonical_topic"],
+        "family_fingerprint": normalized["family_fingerprint"],
+        "family_status": normalized["status"],
         "spoken_duration": normalized.get("spoken_duration")
         or max(1, int(round(max(len(script.split()), 1) / 2.6))),
         "post_type": normalized.get("post_type"),
@@ -275,12 +385,21 @@ def _hydrate_script_suggestion(
     hydrated = dict(script_row)
     registry = _normalize_registry_row(registry_row or {})
     hydrated["id"] = hydrated.get("id") or registry.get("id")
+    hydrated["script_id"] = hydrated.get("id")
+    hydrated["family_id"] = registry.get("id")
     hydrated["topic_registry_id"] = hydrated.get("topic_registry_id") or registry.get("id")
     hydrated["title"] = str(hydrated.get("title") or registry.get("title") or "").strip()
     hydrated["rotation"] = registry.get("rotation") or hydrated.get("script") or ""
     hydrated["cta"] = registry.get("cta") or _extract_cta(str(hydrated.get("script") or ""))
     hydrated["source_urls"] = hydrated.get("source_urls") or []
     hydrated["seed_payload"] = hydrated.get("seed_payload") or {}
+    hydrated["canonical_topic"] = str(
+        hydrated.get("canonical_topic") or registry.get("canonical_topic") or hydrated.get("title") or ""
+    ).strip()
+    hydrated["family_fingerprint"] = str(
+        hydrated.get("family_fingerprint") or registry.get("family_fingerprint") or _build_family_fingerprint(hydrated["canonical_topic"])
+    ).strip()
+    hydrated["family_status"] = str(hydrated.get("family_status") or registry.get("status") or "active").strip() or "active"
     hydrated["spoken_duration"] = hydrated.get("estimated_duration_s") or max(
         1, int(round(max(len(str(hydrated.get("script") or "").split()), 1) / 2.6))
     )
@@ -303,7 +422,7 @@ def create_post_for_batch(
     target_length_tier: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Create a post record for a batch with topic and seed data."""
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     resolved_seed_data = dict(seed_data or {})
     if target_length_tier is not None and "target_length_tier" not in resolved_seed_data:
         resolved_seed_data["target_length_tier"] = target_length_tier
@@ -350,7 +469,7 @@ def create_topic_research_dossier(
     prompt_name: str = "prompt1_research",
     prompt_version: str = "1",
 ) -> Dict[str, Any]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     payload = {
         "topic_research_run_id": topic_research_run_id,
         "topic_registry_id": topic_registry_id,
@@ -413,55 +532,46 @@ def list_topic_suggestions(
             target_length_tier=target_length_tier,
             post_type=post_type,
         )
-        if rows:
-            suggestions: List[Dict[str, Any]] = []
-            seen_topic_ids: set[str] = set()
-            seen_topic_signatures: set[str] = set()
-            for row in rows:
-                topic_registry_id = str(row.get("topic_registry_id") or "")
-                if not topic_registry_id or topic_registry_id in seen_topic_ids:
-                    continue
-                hydrated = _hydrate_script_suggestion(row, registry_by_id.get(topic_registry_id))
-                signature = _normalize_topic_signature(hydrated.get("title") or hydrated.get("script") or "")
-                if signature and signature in seen_topic_signatures:
-                    continue
-                seen_topic_ids.add(topic_registry_id)
-                if signature:
-                    seen_topic_signatures.add(signature)
-                suggestions.append(hydrated)
-            suggestions.sort(
-                key=lambda row: (
-                    int(row.get("use_count") or 0),
-                    str(row.get("last_used_at") or row.get("created_at") or ""),
-                    str(row.get("created_at") or ""),
-                    _normalize_topic_signature(row.get("title") or ""),
-                ),
-            )
-            if suggestions:
-                return suggestions[:limit]
+        suggestions: List[Dict[str, Any]] = []
+        seen_families: set[str] = set()
+        for row in rows:
+            topic_registry_id = str(row.get("topic_registry_id") or "")
+            registry_row = registry_by_id.get(topic_registry_id)
+            if not topic_registry_id or not registry_row:
+                continue
+            normalized_registry = _normalize_registry_row(registry_row)
+            if normalized_registry.get("status") != "active":
+                continue
+            normalized_script = _normalize_script_row(row)
+            if normalized_script.get("audit_status") != "pass":
+                continue
+            if normalized_script.get("origin_kind") == "synthetic_fallback":
+                continue
+            family_fingerprint = str(normalized_registry.get("family_fingerprint") or topic_registry_id)
+            if family_fingerprint in seen_families:
+                continue
+            seen_families.add(family_fingerprint)
+            suggestions.append(_hydrate_script_suggestion(normalized_script, normalized_registry))
+        suggestions.sort(
+            key=lambda row: (
+                int(row.get("use_count") or 0),
+                str(row.get("last_used_at") or row.get("created_at") or ""),
+                str(row.get("created_at") or ""),
+                str(row.get("family_fingerprint") or ""),
+            ),
+        )
+        return suggestions[:limit]
     except Exception as exc:
         logger.warning("topic_scripts_query_failed", error=str(exc))
+    return []
 
-    suggestions = []
-    seen_topic_signatures: set[str] = set()
-    for row in registry_rows:
-        if post_type and row.get("post_type") and row.get("post_type") != post_type:
-            continue
-        candidate = _registry_row_to_topic_suggestion(row)
-        signature = _normalize_topic_signature(candidate.get("title") or candidate.get("script") or "")
-        if signature and signature in seen_topic_signatures:
-            continue
-        if signature:
-            seen_topic_signatures.add(signature)
-        suggestions.append(candidate)
-    suggestions.sort(
-        key=lambda row: (
-            int(row.get("use_count") or 0),
-            str(row.get("last_used_at") or row.get("last_harvested_at") or row.get("created_at") or ""),
-            _normalize_topic_signature(row.get("title") or ""),
-        ),
-    )
-    return suggestions[:limit]
+
+def count_selectable_topic_families(
+    *,
+    post_type: str,
+    target_length_tier: int,
+) -> int:
+    return len(list_topic_suggestions(target_length_tier=target_length_tier, limit=500, post_type=post_type))
 
 
 def list_topic_research_runs(
@@ -469,7 +579,7 @@ def list_topic_research_runs(
     status: Optional[str] = None,
     topic_registry_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     query = supabase.client.table("topic_research_runs").select("*").order("created_at", desc=True).limit(limit)
     if status:
         query = query.eq("status", status)
@@ -498,7 +608,7 @@ def create_topic_research_run(
     normalized_payload: Optional[Dict[str, Any]] = None,
     dossier_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     payload = {
         "trigger_source": trigger_source,
         "status": "running",
@@ -529,7 +639,7 @@ def update_topic_research_run(
     error_message: Optional[str] = None,
     dossier_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     update_payload: Dict[str, Any] = {}
     if status is not None:
         update_payload["status"] = status
@@ -548,7 +658,7 @@ def update_topic_research_run(
 
 
 def get_topic_research_run(run_id: str) -> Dict[str, Any]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     response = supabase.client.table("topic_research_runs").select("*").eq("id", run_id).limit(1).execute()
     if not response.data:
         raise NotFoundError(message="Research run not found", details={"run_id": run_id})
@@ -561,7 +671,7 @@ def get_topic_research_dossiers(
     topic_research_run_id: Optional[str] = None,
     limit: int = 20,
 ) -> List[Dict[str, Any]]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     query = supabase.client.table("topic_research_dossiers").select("*").order("created_at", desc=True).limit(limit)
     if topic_registry_id:
         query = query.eq("topic_registry_id", topic_registry_id)
@@ -573,7 +683,7 @@ def get_topic_research_dossiers(
 
 def get_researched_topic_texts(*, limit: int = 500) -> List[str]:
     """Return unique historical research seed/topic texts for future dedupe."""
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     try:
         response = (
             supabase.client.table("topic_research_dossiers")
@@ -613,11 +723,20 @@ def store_topic_bank_entry(
     topic_research_dossier_id: Optional[str] = None,
     raw_prompt: Optional[str] = None,
     raw_response: Optional[str] = None,
+    origin_kind: str = "provider",
 ) -> Dict[str, Any]:
+    canonical_topic = str(
+        (research_payload or {}).get("seed_topic")
+        or (research_payload or {}).get("topic")
+        or title
+    ).strip()
     row = add_topic_to_registry(
         title=title,
         script=topic_script,
         post_type=post_type,
+        canonical_topic=canonical_topic,
+        status="quarantined" if origin_kind == "synthetic_fallback" else "provisional",
+        increment_use_count=False,
     )
     dossier = create_topic_research_dossier(
         topic_research_run_id=topic_research_run_id,
@@ -646,8 +765,117 @@ def upsert_topic_script_variants(
     target_length_tier: int,
     topic_research_dossier_id: Optional[str] = None,
     variants: List[Dict[str, Any]],
+    origin_kind: str = "provider",
 ) -> List[Dict[str, Any]]:
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
+
+    def _build_variant_slot_key(row: Dict[str, Any], *, fallback_tier: int, fallback_post_type: str) -> tuple[int, str, str, str]:
+        tier_value = int(row.get("target_length_tier") or fallback_tier or 0)
+        post_type_value = str(row.get("post_type") or fallback_post_type or post_type or "").strip()
+        framework_value = str(row.get("framework") or "PAL").strip() or "PAL"
+        hook_style_value = str(row.get("hook_style") or "default").strip() or "default"
+        return (tier_value, post_type_value, framework_value, hook_style_value)
+
+    def _update_existing_variant(
+        existing_row: Dict[str, Any],
+        payload: Dict[str, Any],
+        *,
+        preserve_audit: bool,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_existing = _normalize_script_row(existing_row)
+        update_payload = dict(payload)
+        update_payload["topic_research_dossier_id"] = topic_research_dossier_id or existing_row.get("topic_research_dossier_id")
+        update_payload["use_count"] = int(existing_row.get("use_count") or update_payload.get("use_count") or 0)
+        update_payload["last_used_at"] = existing_row.get("last_used_at") or update_payload.get("last_used_at")
+        if preserve_audit:
+            update_payload["audit_status"] = normalized_existing.get("audit_status") or update_payload.get("audit_status") or "pending"
+            update_payload["audit_attempts"] = int(existing_row.get("audit_attempts") or update_payload.get("audit_attempts") or 0)
+            update_payload["quality_score"] = existing_row.get("quality_score")
+            update_payload["quality_notes"] = existing_row.get("quality_notes") or update_payload.get("quality_notes")
+            update_payload["audited_at"] = existing_row.get("audited_at") or update_payload.get("audited_at")
+        else:
+            update_payload["audit_status"] = str(payload.get("audit_status") or "pending").strip() or "pending"
+            update_payload["audit_attempts"] = int(payload.get("audit_attempts") or 0)
+            update_payload["quality_score"] = payload.get("quality_score")
+            update_payload["quality_notes"] = payload.get("quality_notes")
+            update_payload["audited_at"] = payload.get("audited_at")
+        response = supabase.client.table("topic_scripts").update(update_payload).eq("id", existing_row["id"]).execute()
+        if not response.data:
+            return None
+        existing_row.update(response.data[0])
+        return _normalize_script_row(response.data[0])
+
+    def _should_replace_variant_slot(existing_row: Dict[str, Any], payload: Dict[str, Any]) -> bool:
+        normalized_existing = _normalize_script_row(existing_row)
+        existing_origin = str(normalized_existing.get("origin_kind") or "provider").strip() or "provider"
+        incoming_origin = str(payload.get("origin_kind") or origin_kind or "provider").strip() or "provider"
+        if incoming_origin != "provider":
+            return False
+        if existing_origin == "synthetic_fallback":
+            return True
+        return normalized_existing.get("audit_status") in {"pending", "needs_repair", "reject"}
+
+    def _replace_variant_slot(existing_row: Dict[str, Any], payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not _should_replace_variant_slot(existing_row, payload):
+            return None
+        return _update_existing_variant(existing_row, payload, preserve_audit=False)
+
+    def _refresh_variant_cache(
+        *,
+        previous_row: Optional[Dict[str, Any]],
+        current_row: Dict[str, Any],
+        variant_slot_key: tuple[int, str, str, str],
+        exact_key: Optional[tuple[int, str, str]] = None,
+    ) -> None:
+        current_id = str(current_row.get("id") or "")
+        current_tier = int(current_row.get("target_length_tier") or target_length_tier or 0)
+        current_signature = _normalize_script_text(current_row.get("script"))
+        previous_signature = _normalize_script_text(previous_row.get("script")) if previous_row else ""
+        previous_exact_key = None
+        if previous_row is not None:
+            previous_exact_key = (
+                int(previous_row.get("target_length_tier") or current_tier or 0),
+                str(previous_row.get("bucket") or "").strip(),
+                str(previous_row.get("lane_key") or "").strip(),
+            )
+            if previous_signature and previous_signature != current_signature:
+                existing_signatures_by_tier.get(current_tier, set()).discard(previous_signature)
+                if existing_rows_by_tier_signature.get((current_tier, previous_signature), {}).get("id") == current_id:
+                    existing_rows_by_tier_signature.pop((current_tier, previous_signature), None)
+                current_global_signatures = global_signatures_by_tier.get(current_tier)
+                if current_global_signatures and current_global_signatures.get(previous_signature) == topic_registry_id:
+                    current_global_signatures.pop(previous_signature, None)
+                if topic_research_dossier_id:
+                    previous_lane_key = str(previous_row.get("lane_key") or "").strip()
+                    if previous_lane_key:
+                        existing_lane_signatures_by_tier.get((current_tier, previous_lane_key), set()).discard(previous_signature)
+                if previous_exact_key and existing_exact_rows.get(previous_exact_key, {}).get("id") == current_id:
+                    existing_exact_rows.pop(previous_exact_key, None)
+        existing_rows_by_variant_slot[variant_slot_key] = current_row
+        if exact_key:
+            existing_exact_rows[exact_key] = current_row
+        if current_signature:
+            existing_signatures_by_tier.setdefault(current_tier, set()).add(current_signature)
+            existing_rows_by_tier_signature[(current_tier, current_signature)] = current_row
+            global_signatures_by_tier.setdefault(current_tier, {})[current_signature] = topic_registry_id
+            if topic_research_dossier_id:
+                lane_key_value = str(current_row.get("lane_key") or "").strip()
+                if lane_key_value:
+                    existing_lane_signatures_by_tier.setdefault((current_tier, lane_key_value), set()).add(current_signature)
+        for row_collection in (existing_rows_by_tier.get(current_tier, []), global_rows_by_tier.get(current_tier, [])):
+            for index, cached_row in enumerate(row_collection):
+                if str(cached_row.get("id") or "") == current_id:
+                    row_collection[index] = current_row
+                    break
+
+    def _rehabilitate_exact_duplicate(existing_row: Dict[str, Any], payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        normalized_existing = _normalize_script_row(existing_row)
+        existing_origin = str(normalized_existing.get("origin_kind") or "provider").strip() or "provider"
+        incoming_origin = str(payload.get("origin_kind") or origin_kind or "provider").strip() or "provider"
+        if existing_origin != "synthetic_fallback" or incoming_origin != "provider":
+            return None
+        return _update_existing_variant(existing_row, payload, preserve_audit=True)
+
     existing_rows = (
         supabase.client.table("topic_scripts")
         .select("*")
@@ -685,8 +913,10 @@ def upsert_topic_script_variants(
         combined_rows.append(row)
 
     existing_signatures_by_tier: Dict[int, set[str]] = {}
+    existing_rows_by_tier_signature: Dict[tuple[int, str], Dict[str, Any]] = {}
     existing_lane_signatures_by_tier: Dict[tuple[int, str], set[str]] = {}
     existing_exact_rows: Dict[tuple[int, str, str], Dict[str, Any]] = {}
+    existing_rows_by_variant_slot: Dict[tuple[int, str, str, str], Dict[str, Any]] = {}
     existing_rows_by_tier: Dict[int, List[Dict[str, Any]]] = {}
     for row in combined_rows:
         script = str(row.get("script") or "").strip()
@@ -698,11 +928,15 @@ def upsert_topic_script_variants(
         lane_key = str(row.get("lane_key") or "").strip()
         if signature:
             existing_signatures_by_tier.setdefault(tier, set()).add(signature)
+            existing_rows_by_tier_signature.setdefault((tier, signature), row)
             if topic_research_dossier_id and lane_key and str(row.get("topic_research_dossier_id") or "") == str(topic_research_dossier_id):
                 existing_lane_signatures_by_tier.setdefault((tier, lane_key), set()).add(signature)
         existing_rows_by_tier.setdefault(tier, []).append(row)
         if bucket and lane_key:
             existing_exact_rows[(tier, bucket, lane_key)] = row
+        variant_slot_key = _build_variant_slot_key(row, fallback_tier=tier, fallback_post_type=str(row.get("post_type") or post_type or ""))
+        if variant_slot_key[0] and variant_slot_key[1]:
+            existing_rows_by_variant_slot[variant_slot_key] = row
     global_signatures_by_tier: Dict[int, Dict[str, str]] = {}
     global_rows_by_tier: Dict[int, List[Dict[str, Any]]] = {}
     for row in global_rows:
@@ -733,6 +967,7 @@ def upsert_topic_script_variants(
             )
             continue
         script_signature = _normalize_script_text(script)
+        script_fingerprint = _build_script_fingerprint(script)
         lane_key = str(variant.get("lane_key") or "").strip()
         tier = int(variant.get("target_length_tier") or target_length_tier or 0)
         bucket = str(variant.get("bucket") or "").strip()
@@ -796,7 +1031,53 @@ def upsert_topic_script_variants(
                     script_preview=script[:240],
                 )
                 continue
+        payload = {
+            "topic_registry_id": topic_registry_id,
+            "topic_research_dossier_id": topic_research_dossier_id,
+            "post_type": post_type_value or post_type,
+            "title": title,
+            "script": script,
+            "target_length_tier": tier,
+            "bucket": bucket,
+            "hook_style": variant.get("hook_style") or "default",
+            "framework": variant.get("framework") or "PAL",
+            "tone": sanitize_metadata_text(variant.get("tone"), max_sentences=1),
+            "estimated_duration_s": variant.get("estimated_duration_s"),
+            "lane_key": variant.get("lane_key"),
+            "lane_family": variant.get("lane_family"),
+            "cluster_id": variant.get("cluster_id"),
+            "anchor_topic": variant.get("anchor_topic"),
+            "disclaimer": sanitize_metadata_text(variant.get("disclaimer"), max_sentences=1),
+            "source_summary": sanitize_metadata_text(variant.get("source_summary")),
+            "primary_source_url": variant.get("primary_source_url"),
+            "primary_source_title": variant.get("primary_source_title"),
+            "source_urls": variant.get("source_urls") or [],
+            "seed_payload": variant.get("seed_payload") or {},
+            "script_fingerprint": script_fingerprint,
+            "audit_status": str(variant.get("audit_status") or "pending").strip() or "pending",
+            "audit_attempts": int(variant.get("audit_attempts") or 0),
+            "origin_kind": str(variant.get("origin_kind") or origin_kind or "provider").strip() or "provider",
+            "quality_score": variant.get("quality_score"),
+            "quality_notes": variant.get("quality_notes") or sanitize_metadata_text(variant.get("quality_notes"), max_sentences=2),
+            "use_count": int(variant.get("use_count") or 0),
+            "last_used_at": variant.get("last_used_at"),
+        }
+        variant_slot_key = _build_variant_slot_key(payload, fallback_tier=tier, fallback_post_type=post_type_value or post_type)
+        exact_key = (tier, bucket, lane_key)
         if script_signature and script_signature in existing_signatures_by_tier.get(tier, set()):
+            rehabilitated = _rehabilitate_exact_duplicate(
+                existing_rows_by_tier_signature.get((tier, script_signature), {}),
+                payload,
+            )
+            if rehabilitated is not None:
+                stored_variants.append(rehabilitated)
+                _refresh_variant_cache(
+                    previous_row=existing_rows_by_tier_signature.get((tier, script_signature), {}),
+                    current_row=rehabilitated,
+                    variant_slot_key=variant_slot_key,
+                    exact_key=exact_key,
+                )
+                continue
             logger.info(
                 "topic_script_duplicate_skipped",
                 topic_registry_id=topic_registry_id,
@@ -817,6 +1098,66 @@ def upsert_topic_script_variants(
                 bucket=bucket,
                 lane_key=lane_key,
                 duplicate_reason="duplicate_exact",
+            )
+            duplicate_scripts_skipped += 1
+            continue
+        variant_slot_row = existing_rows_by_variant_slot.get(variant_slot_key)
+        if variant_slot_row is not None:
+            existing_signature = _normalize_script_text(variant_slot_row.get("script"))
+            if existing_signature and existing_signature == script_signature:
+                rehabilitated = _rehabilitate_exact_duplicate(variant_slot_row, payload)
+                if rehabilitated is not None:
+                    stored_variants.append(rehabilitated)
+                    _refresh_variant_cache(
+                        previous_row=variant_slot_row,
+                        current_row=rehabilitated,
+                        variant_slot_key=variant_slot_key,
+                        exact_key=exact_key,
+                    )
+                    continue
+                logger.info(
+                    "topic_script_variant_slot_skipped",
+                    topic_registry_id=topic_registry_id,
+                    topic_research_dossier_id=topic_research_dossier_id,
+                    target_length_tier=tier,
+                    post_type=post_type_value,
+                    framework=payload["framework"],
+                    hook_style=payload["hook_style"],
+                    duplicate_reason="duplicate_exact",
+                )
+                duplicate_scripts_skipped += 1
+                continue
+            previous_row_snapshot = dict(variant_slot_row)
+            replaced = _replace_variant_slot(variant_slot_row, payload)
+            if replaced is not None:
+                stored_variants.append(replaced)
+                _refresh_variant_cache(
+                    previous_row=previous_row_snapshot,
+                    current_row=replaced,
+                    variant_slot_key=variant_slot_key,
+                    exact_key=exact_key,
+                )
+                logger.info(
+                    "topic_script_variant_slot_replaced",
+                    topic_registry_id=topic_registry_id,
+                    topic_research_dossier_id=topic_research_dossier_id,
+                    target_length_tier=tier,
+                    post_type=post_type_value,
+                    framework=payload["framework"],
+                    hook_style=payload["hook_style"],
+                    previous_origin_kind=previous_row_snapshot.get("origin_kind"),
+                    next_origin_kind=replaced.get("origin_kind"),
+                )
+                continue
+            logger.info(
+                "topic_script_variant_slot_skipped",
+                topic_registry_id=topic_registry_id,
+                topic_research_dossier_id=topic_research_dossier_id,
+                target_length_tier=tier,
+                post_type=post_type_value,
+                framework=payload["framework"],
+                hook_style=payload["hook_style"],
+                duplicate_reason="variant_slot_taken",
             )
             duplicate_scripts_skipped += 1
             continue
@@ -864,7 +1205,7 @@ def upsert_topic_script_variants(
                 )
                 duplicate_scripts_skipped += 1
                 continue
-        exact_row = existing_exact_rows.get((tier, bucket, lane_key))
+        exact_row = existing_exact_rows.get(exact_key)
         if exact_row is not None:
             existing_signature = _normalize_script_text(exact_row.get("script"))
             if existing_signature and existing_signature == script_signature:
@@ -890,46 +1231,72 @@ def upsert_topic_script_variants(
             )
             duplicate_scripts_skipped += 1
             continue
-        payload = {
-            "topic_registry_id": topic_registry_id,
-            "topic_research_dossier_id": topic_research_dossier_id,
-            "post_type": post_type_value or post_type,
-            "title": title,
-            "script": script,
-            "target_length_tier": tier,
-            "bucket": bucket,
-            "hook_style": variant.get("hook_style") or "default",
-            "framework": variant.get("framework") or "PAL",
-            "tone": sanitize_metadata_text(variant.get("tone"), max_sentences=1),
-            "estimated_duration_s": variant.get("estimated_duration_s"),
-            "lane_key": variant.get("lane_key"),
-            "lane_family": variant.get("lane_family"),
-            "cluster_id": variant.get("cluster_id"),
-            "anchor_topic": variant.get("anchor_topic"),
-            "disclaimer": sanitize_metadata_text(variant.get("disclaimer"), max_sentences=1),
-            "source_summary": sanitize_metadata_text(variant.get("source_summary")),
-            "primary_source_url": variant.get("primary_source_url"),
-            "primary_source_title": variant.get("primary_source_title"),
-            "source_urls": variant.get("source_urls") or [],
-            "seed_payload": variant.get("seed_payload") or {},
-            "quality_score": variant.get("quality_score"),
-            "quality_notes": variant.get("quality_notes") or sanitize_metadata_text(variant.get("quality_notes"), max_sentences=2),
-            "use_count": int(variant.get("use_count") or 0),
-            "last_used_at": variant.get("last_used_at"),
-        }
-        response = supabase.client.table("topic_scripts").insert(payload).execute()
+        try:
+            response = supabase.client.table("topic_scripts").insert(payload).execute()
+        except Exception as exc:
+            error_text = str(exc)
+            if "topic_scripts_variant_unique_idx" not in error_text:
+                raise
+            race_conflict_rows = (
+                supabase.client.table("topic_scripts")
+                .select("*")
+                .eq("topic_registry_id", topic_registry_id)
+                .eq("target_length_tier", tier)
+                .eq("post_type", post_type_value)
+                .eq("framework", payload["framework"])
+                .eq("hook_style", payload["hook_style"])
+                .execute()
+                .data
+                or []
+            )
+            race_conflict_row = race_conflict_rows[0] if race_conflict_rows else None
+            if race_conflict_row is not None:
+                race_signature = _normalize_script_text(race_conflict_row.get("script"))
+                if race_signature and race_signature == script_signature:
+                    rehabilitated = _rehabilitate_exact_duplicate(race_conflict_row, payload)
+                    if rehabilitated is not None:
+                        stored_variants.append(rehabilitated)
+                        _refresh_variant_cache(
+                            previous_row=race_conflict_row,
+                            current_row=rehabilitated,
+                            variant_slot_key=variant_slot_key,
+                            exact_key=exact_key,
+                        )
+                        continue
+                previous_row_snapshot = dict(race_conflict_row)
+                replaced = _replace_variant_slot(race_conflict_row, payload)
+                if replaced is not None:
+                    stored_variants.append(replaced)
+                    _refresh_variant_cache(
+                        previous_row=previous_row_snapshot,
+                        current_row=replaced,
+                        variant_slot_key=variant_slot_key,
+                        exact_key=exact_key,
+                    )
+                    continue
+            logger.warning(
+                "topic_script_variant_conflict_skipped",
+                topic_registry_id=topic_registry_id,
+                topic_research_dossier_id=topic_research_dossier_id,
+                target_length_tier=tier,
+                post_type=post_type_value,
+                framework=payload["framework"],
+                hook_style=payload["hook_style"],
+                error=error_text,
+            )
+            duplicate_scripts_skipped += 1
+            continue
         if response.data:
             normalized = _normalize_script_row(response.data[0])
             stored_variants.append(normalized)
-            existing_exact_rows[(tier, bucket, lane_key)] = normalized
-            normalized_signature = _normalize_script_text(script)
             existing_rows_by_tier.setdefault(tier, []).append(normalized)
             global_rows_by_tier.setdefault(tier, []).append(normalized)
-            if normalized_signature:
-                existing_signatures_by_tier.setdefault(tier, set()).add(normalized_signature)
-                global_signatures_by_tier.setdefault(tier, {}).setdefault(normalized_signature, topic_registry_id)
-                if topic_research_dossier_id and lane_key:
-                    existing_lane_signatures_by_tier.setdefault((tier, lane_key), set()).add(normalized_signature)
+            _refresh_variant_cache(
+                previous_row=None,
+                current_row=normalized,
+                variant_slot_key=variant_slot_key,
+                exact_key=exact_key,
+            )
     return stored_variants
 
 
@@ -940,7 +1307,7 @@ def get_existing_variant_pairs(
     post_type: str,
 ) -> List[Dict[str, Any]]:
     """Return existing (framework, hook_style) pairs for a topic/tier/post_type."""
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     response = (
         supabase.client.table("topic_scripts")
         .select("framework, hook_style")
@@ -954,7 +1321,7 @@ def get_existing_variant_pairs(
 
 def get_posts_by_batch(batch_id: str) -> List[Dict[str, Any]]:
     """Get all posts for a batch."""
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     
     response = supabase.client.table("posts").select("*").eq("batch_id", batch_id).execute()
     
@@ -963,7 +1330,7 @@ def get_posts_by_batch(batch_id: str) -> List[Dict[str, Any]]:
 
 def count_posts_by_batch_and_type(batch_id: str, post_type: str) -> int:
     """Count posts for a batch by type."""
-    supabase = get_supabase()
+    supabase = _get_supabase_adapter()
     
     response = supabase.client.table("posts").select("id", count="exact").eq("batch_id", batch_id).eq("post_type", post_type).execute()
     
@@ -978,7 +1345,7 @@ def create_cron_run(
     seed_source: str,
 ) -> Dict[str, Any]:
     """Create a new cron run record with status='running'."""
-    sb = get_supabase()
+    sb = _get_supabase_adapter()
     result = sb.client.table("topic_research_cron_runs").insert({
         "topics_requested": topics_requested,
         "seed_source": seed_source,
@@ -1009,7 +1376,7 @@ def update_cron_run(
         payload["error_message"] = error_message
     if details is not None:
         payload["details"] = details
-    sb = get_supabase()
+    sb = _get_supabase_adapter()
     result = sb.client.table("topic_research_cron_runs").update(
         payload
     ).eq("id", run_id).execute()
@@ -1018,7 +1385,7 @@ def update_cron_run(
 
 def get_latest_cron_run(*, status: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Get the most recent cron run, optionally filtered by status."""
-    sb = get_supabase()
+    sb = _get_supabase_adapter()
     query = sb.client.table("topic_research_cron_runs").select("*").order(
         "started_at", desc=True
     ).limit(1)
@@ -1030,7 +1397,7 @@ def get_latest_cron_run(*, status: Optional[str] = None) -> Optional[Dict[str, A
 
 def get_cron_run_stats() -> Dict[str, Any]:
     """Get aggregate stats across all cron runs."""
-    sb = get_supabase()
+    sb = _get_supabase_adapter()
     result = sb.client.table("topic_research_cron_runs").select(
         "status,topics_completed"
     ).execute()
@@ -1041,19 +1408,77 @@ def get_cron_run_stats() -> Dict[str, Any]:
 
 
 def get_unaudited_scripts(*, limit: int = 50) -> List[Dict[str, Any]]:
-    """Fetch topic_scripts rows where quality_score is NULL (unaudited)."""
+    """Fetch topic_scripts rows where audit_status='pending'."""
+    sb = _get_supabase_adapter()
     response = (
-        supabase.client.table("topic_scripts")
-        .select("id, title, script, target_length_tier, post_type, bucket, lane_key, source_summary, cluster_id")
-        .is_("quality_score", "null")
+        sb.client.table("topic_scripts")
+        .select("id, topic_registry_id, title, script, target_length_tier, post_type, bucket, lane_key, source_summary, cluster_id, origin_kind")
+        .eq("audit_status", "pending")
         .limit(limit)
         .execute()
     )
     return list(response.data or [])
 
 
-def update_script_quality(*, script_id: str, quality_score: int, quality_notes: str) -> None:
-    """Write audit results to a topic_scripts row."""
+def _sync_topic_family_status(*, topic_registry_id: str) -> None:
+    supabase = _get_supabase_adapter()
+    registry_row = get_topic_registry_by_id(topic_registry_id)
+    if registry_row.get("status") == "quarantined":
+        return
+    scripts = get_topic_scripts_for_registry(topic_registry_id)
+    next_status = "active" if any(script.get("audit_status") == "pass" for script in scripts) else "provisional"
+    supabase.client.table("topic_registry").update({"status": next_status}).eq("id", topic_registry_id).execute()
+
+
+def update_script_quality(
+    *,
+    script_id: str,
+    quality_score: int,
+    quality_notes: str,
+    audit_status: Optional[str] = None,
+) -> None:
+    """Write audit results to a topic_scripts row and promote the owning family when eligible."""
+    supabase = _get_supabase_adapter()
+    existing = supabase.client.table("topic_scripts").select("id, topic_registry_id, audit_attempts").eq("id", script_id).limit(1).execute()
+    if not existing.data:
+        return
+    row = existing.data[0]
+    resolved_status = str(audit_status or "").strip().lower()
+    if resolved_status not in {"pass", "needs_repair", "reject"}:
+        if int(quality_score or 0) >= 70:
+            resolved_status = "pass"
+        elif int(quality_score or 0) >= 40:
+            resolved_status = "needs_repair"
+        else:
+            resolved_status = "reject"
     supabase.client.table("topic_scripts").update(
-        {"quality_score": quality_score, "quality_notes": quality_notes}
+        {
+            "quality_score": quality_score,
+            "quality_notes": quality_notes,
+            "audit_status": resolved_status,
+            "audit_attempts": int(row.get("audit_attempts") or 0) + 1,
+            "audited_at": datetime.now(timezone.utc).isoformat(),
+        }
     ).eq("id", script_id).execute()
+    topic_registry_id = str(row.get("topic_registry_id") or "").strip()
+    if topic_registry_id:
+        _sync_topic_family_status(topic_registry_id=topic_registry_id)
+
+
+def mark_topic_script_used(*, script_id: Optional[str]) -> None:
+    if not script_id:
+        return
+    try:
+        supabase = _get_supabase_adapter()
+        existing = supabase.client.table("topic_scripts").select("id, use_count").eq("id", script_id).limit(1).execute()
+        if not existing.data:
+            return
+        row = existing.data[0]
+        supabase.client.table("topic_scripts").update(
+            {
+                "use_count": int(row.get("use_count") or 0) + 1,
+                "last_used_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).eq("id", script_id).execute()
+    except Exception as exc:
+        logger.warning("topic_script_usage_touch_failed", script_id=script_id, error=str(exc))

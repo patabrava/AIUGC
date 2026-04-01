@@ -164,6 +164,8 @@ def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: Dia
     }
     payload: Dict[str, Any] = {
         "script": selected_script,
+        "canonical_topic": str(topic_data.get("title") or "").strip(),
+        "research_title": str(topic_data.get("title") or "").strip(),
         "framework": topic_data.get("framework", "PAL"),
         "tone": "direkt, freundlich, empowernd, du-Form",
         "estimated_duration_s": topic_data["spoken_duration"],

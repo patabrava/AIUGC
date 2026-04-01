@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.logging import get_logger
 from app.core.errors import ThirdPartyError
+from app.core.config import get_settings
 from app.features.topics.agents import (
     build_seed_payload,
     convert_research_item_to_topic,
@@ -19,11 +20,12 @@ from app.features.topics.seed_builders import build_research_seed_data
 from app.features.topics.research_runtime import PROMPT1_RESEARCH_SYSTEM_PROMPT
 from app.features.topics.queries import get_topic_scripts_for_dossier, touch_topic_registry
 from app.adapters.llm_client import get_llm_client
-from app.features.topics.topic_validation import select_distinct_lane_candidates
+from app.features.topics.topic_validation import sanitize_metadata_text, select_distinct_lane_candidates
 logger = get_logger(__name__)
 
 _CANONICAL_TIERS = (8, 16, 32)
 _BACKOFF_DELAYS = (1, 2, 4)
+_DEEP_RESEARCH_TIMEOUT_SECONDS = get_settings().gemini_topic_timeout_seconds
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:
@@ -150,7 +152,7 @@ def _generate_research_dossier_raw(
     return llm.generate_gemini_deep_research(
         prompt=prompt,
         system_prompt=PROMPT1_RESEARCH_SYSTEM_PROMPT,
-        timeout_seconds=20,
+        timeout_seconds=_DEEP_RESEARCH_TIMEOUT_SECONDS,
         metadata={
             "feature": "topics.hub_research",
             "seed_topic": seed_topic,
@@ -314,7 +316,11 @@ def run_single_seed_topic_warmup(
                 None,
                 source_title=str(source_info.get("title") or lane_title or base_prompt1_item.topic).strip() or None,
                 source_url=str(source_info.get("url") or "").strip() or None,
-                source_summary=str(lane_dossier.get("source_summary") or base_prompt1_item.caption or base_prompt1_item.source_summary or "").strip() or None,
+                source_summary=sanitize_metadata_text(
+                    lane_dossier.get("source_summary") or base_prompt1_item.caption or base_prompt1_item.source_summary or "",
+                    max_chars=500,
+                )
+                or None,
                 canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
                 research_title=lane_title,
             )
@@ -339,7 +345,11 @@ def run_single_seed_topic_warmup(
                             None,
                             source_title=str(source_info.get("title") or lane_title or tier_prompt_item.topic).strip() or None,
                             source_url=str(source_info.get("url") or "").strip() or None,
-                            source_summary=str(lane_dossier.get("source_summary") or tier_prompt_item.caption or tier_prompt_item.source_summary or "").strip() or None,
+                            source_summary=sanitize_metadata_text(
+                                lane_dossier.get("source_summary") or tier_prompt_item.caption or tier_prompt_item.source_summary or "",
+                                max_chars=500,
+                            )
+                            or None,
                             canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or lane_title).strip(),
                             research_title=lane_title,
                         ),
@@ -355,6 +365,7 @@ def run_single_seed_topic_warmup(
                 post_type=post_type,
                 seed_payload=base_seed_payload,
                 variants=variants,
+                origin_kind=research_source,
             )
             stored_row = dict(persisted_result.get("stored_row") or {})
             stored_variants = list(persisted_result.get("stored_variants") or [])

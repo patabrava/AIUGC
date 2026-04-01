@@ -352,12 +352,21 @@ def _detect_incomplete_clause_issue(value: str) -> Dict[str, Any] | None:
     return None
 
 
-def sanitize_metadata_text(text: Any, *, max_sentences: int = 2) -> str:
+def sanitize_metadata_text(text: Any, *, max_sentences: int = 2, max_chars: Optional[int] = None) -> str:
     cleaned = sanitize_spoken_fragment(text, ensure_terminal=True)
     if not cleaned:
         return ""
     sentences = re.split(r"(?<=[.!?])\s+", cleaned)
-    return normalize_spoken_whitespace(" ".join(sentences[:max_sentences]))
+    normalized = normalize_spoken_whitespace(" ".join(sentences[:max_sentences]))
+    if max_chars is None or len(normalized) <= max_chars:
+        return normalized
+    clipped = normalized[:max_chars].rstrip()
+    if " " in clipped and len(normalized) > max_chars:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip()
+    clipped = clipped.rstrip(" ,;:-")
+    if clipped and clipped[-1] not in ".!?":
+        clipped = f"{clipped}."
+    return normalize_spoken_whitespace(clipped)
 
 
 def sanitize_fact_fragments(values: List[Any]) -> List[str]:
@@ -475,6 +484,65 @@ def _script_window_signature(text: str, *, size: int, from_end: bool = False) ->
     return " ".join(window)
 
 
+_LANE_SIMILARITY_STOPWORDS = {
+    "aber",
+    "alltag",
+    "auch",
+    "auf",
+    "aus",
+    "bei",
+    "bleiben",
+    "damit",
+    "dass",
+    "dein",
+    "deine",
+    "deinem",
+    "deinen",
+    "deiner",
+    "dem",
+    "den",
+    "der",
+    "des",
+    "die",
+    "dir",
+    "durch",
+    "eine",
+    "einen",
+    "einem",
+    "einer",
+    "eines",
+    "fuer",
+    "für",
+    "ganz",
+    "hier",
+    "jede",
+    "jeden",
+    "jeder",
+    "jedes",
+    "kein",
+    "keine",
+    "mehr",
+    "nach",
+    "noch",
+    "oder",
+    "ohne",
+    "schon",
+    "sehr",
+    "sind",
+    "ueber",
+    "über",
+    "und",
+    "viel",
+    "vom",
+    "von",
+    "vor",
+    "warum",
+    "wenn",
+    "wie",
+    "wieder",
+}
+
+
 def classify_script_overlap(candidate: str, existing: str) -> Optional[str]:
     candidate_norm = normalize_similarity_text(candidate)
     existing_norm = normalize_similarity_text(existing)
@@ -494,13 +562,50 @@ def classify_script_overlap(candidate: str, existing: str) -> Optional[str]:
     return None
 
 
-def _lane_similarity_signature(candidate: Dict[str, Any]) -> str:
+def _lane_candidate_value(candidate: Any, field: str) -> Any:
+    if isinstance(candidate, dict):
+        return candidate.get(field)
+    return getattr(candidate, field, None)
+
+
+def _lane_similarity_tokens(candidate: Any) -> Set[str]:
     fragments: List[str] = []
     for value in (
-        candidate.get("title"),
-        candidate.get("angle"),
-        candidate.get("source_summary"),
-        " ".join(str(item).strip() for item in list(candidate.get("facts") or [])[:2] if str(item).strip()),
+        _lane_candidate_value(candidate, "title"),
+        _lane_candidate_value(candidate, "angle"),
+        _lane_candidate_value(candidate, "source_summary"),
+        " ".join(
+            str(item).strip()
+            for item in list(_lane_candidate_value(candidate, "facts") or [])[:2]
+            if str(item).strip()
+        ),
+        " ".join(
+            str(item).strip()
+            for item in list(_lane_candidate_value(candidate, "risk_notes") or [])[:1]
+            if str(item).strip()
+        ),
+    ):
+        cleaned = normalize_similarity_text(value)
+        if cleaned:
+            fragments.append(cleaned)
+    return {
+        token
+        for token in re.findall(r"[a-z0-9äöüß-]+", " ".join(fragments))
+        if len(token) > 3 and token not in _LANE_SIMILARITY_STOPWORDS
+    }
+
+
+def _lane_similarity_signature(candidate: Any) -> str:
+    fragments: List[str] = []
+    for value in (
+        _lane_candidate_value(candidate, "title"),
+        _lane_candidate_value(candidate, "angle"),
+        _lane_candidate_value(candidate, "source_summary"),
+        " ".join(
+            str(item).strip()
+            for item in list(_lane_candidate_value(candidate, "facts") or [])[:2]
+            if str(item).strip()
+        ),
     ):
         cleaned = normalize_similarity_text(value)
         if cleaned:
@@ -509,24 +614,36 @@ def _lane_similarity_signature(candidate: Dict[str, Any]) -> str:
 
 
 def select_distinct_lane_candidates(
-    candidates: List[Dict[str, Any]],
+    candidates: List[Any],
     *,
     max_candidates: Optional[int] = None,
     threshold: float = 0.58,
-) -> List[Dict[str, Any]]:
-    selected: List[Dict[str, Any]] = []
+) -> List[Any]:
+    selected: List[Any] = []
     signatures: List[str] = []
+    token_sets: List[Set[str]] = []
 
     for candidate in list(candidates or []):
         signature = _lane_similarity_signature(candidate)
+        token_set = _lane_similarity_tokens(candidate)
         if signature:
             is_duplicate = any(
-                signature == existing or compute_bigram_jaccard(signature, existing) >= threshold
-                for existing in signatures
+                (
+                    signature == existing
+                    or compute_bigram_jaccard(signature, existing) >= threshold
+                    or (
+                        token_set
+                        and existing_tokens
+                        and len(token_set & existing_tokens) >= 6
+                        and (len(token_set & existing_tokens) / len(token_set | existing_tokens)) >= 0.42
+                    )
+                )
+                for existing, existing_tokens in zip(signatures, token_sets)
             )
             if is_duplicate:
                 continue
             signatures.append(signature)
+            token_sets.append(token_set)
         selected.append(candidate)
         if max_candidates is not None and len(selected) >= max_candidates:
             break

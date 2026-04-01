@@ -7,7 +7,7 @@ Per Constitution § V: Locality & Vertical Slices
 import asyncio
 import re
 from datetime import datetime, timedelta, timezone
-from threading import RLock
+from threading import RLock, Thread
 from collections import Counter
 from types import SimpleNamespace
 from uuid import uuid4
@@ -35,9 +35,11 @@ from app.features.topics.topic_validation import classify_script_overlap
 from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
+    count_selectable_topic_families,
     create_post_for_batch,
     get_posts_by_batch,
     list_topic_suggestions,
+    mark_topic_script_used,
     get_topic_registry_by_id,
     get_topic_scripts_for_registry,
     store_topic_bank_entry,
@@ -71,6 +73,8 @@ _SEEDING_PROGRESS_LOCK = RLock()
 _DISCOVERY_TASKS: Dict[str, asyncio.Task] = {}
 _PROGRESS_TTL_SECONDS = 45
 _WARMUP_SEED_TOPIC_COUNT = 3
+_COVERAGE_TASKS: Dict[str, Thread] = {}
+_COVERAGE_WAITERS: Dict[str, Dict[str, int]] = {}
 
 
 def _attach_publish_captions(
@@ -151,6 +155,132 @@ def _unique_topic_suggestions(
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _coverage_gap_key(post_type: str, target_length_tier: Optional[int]) -> str:
+    return f"{post_type}:{int(target_length_tier or 8)}"
+
+
+def _create_post_from_suggestion(
+    *,
+    batch_id: str,
+    post_type: str,
+    suggestion: Dict[str, Any],
+    target_length_tier: Optional[int],
+) -> Dict[str, Any]:
+    topic_title = str(suggestion.get("title") or "").strip()
+    topic_rotation = str(suggestion.get("rotation") or suggestion.get("script") or topic_title).strip()
+    topic_cta = str(suggestion.get("cta") or topic_rotation).strip()
+    seed_payload = dict(suggestion.get("seed_payload") or {"facts": [topic_rotation]})
+    canonical_topic = str(
+        seed_payload.get("canonical_topic")
+        or suggestion.get("canonical_topic")
+        or topic_title
+    ).strip()
+    if canonical_topic:
+        seed_payload["canonical_topic"] = canonical_topic
+    family_id = suggestion.get("family_id") or suggestion.get("topic_registry_id")
+    family_fingerprint = suggestion.get("family_fingerprint") or _topic_family_signature(suggestion)
+    if family_id:
+        seed_payload["family_id"] = family_id
+    if family_fingerprint:
+        seed_payload["family_fingerprint"] = family_fingerprint
+    seed_payload = _attach_publish_captions(
+        topic_title=topic_title,
+        post_type=post_type,
+        seed_payload=seed_payload,
+        script_fallback=topic_rotation,
+        canonical_topic=canonical_topic or topic_title,
+    )
+    add_topic_to_registry(
+        title=topic_title,
+        script=topic_rotation,
+        post_type=post_type,
+        canonical_topic=canonical_topic or topic_title,
+    )
+    mark_topic_script_used(script_id=suggestion.get("script_id"))
+    return create_post_for_batch(
+        batch_id=batch_id,
+        post_type=post_type,
+        topic_title=topic_title,
+        topic_rotation=topic_rotation,
+        topic_cta=topic_cta,
+        spoken_duration=float(suggestion.get("spoken_duration") or 5),
+        seed_data=seed_payload,
+        target_length_tier=target_length_tier,
+    )
+
+
+def _run_coverage_warmup_task(coverage_key: str, post_type: str, target_length_tier: int) -> None:
+    try:
+        requested_count = max(_WARMUP_SEED_TOPIC_COUNT, max(_COVERAGE_WAITERS.get(coverage_key, {}).values(), default=0))
+        harvest_topics_to_bank_sync(
+            post_type_counts={post_type: requested_count},
+            target_length_tier=target_length_tier,
+            trigger_source="batch_coverage_warmup",
+        )
+        from workers.audit_worker import run_audit_cycle
+
+        run_audit_cycle()
+    except Exception as exc:
+        logger.exception(
+            "batch_coverage_warmup_failed",
+            coverage_key=coverage_key,
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+            error=str(exc),
+        )
+    finally:
+        coverage_count = count_selectable_topic_families(
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+        )
+        with _SEEDING_PROGRESS_LOCK:
+            waiters = dict(_COVERAGE_WAITERS.pop(coverage_key, {}))
+            _COVERAGE_TASKS.pop(coverage_key, None)
+
+        for batch_id, required_count in waiters.items():
+            if coverage_count >= required_count:
+                clear_seeding_progress(batch_id)
+                continue
+            update_seeding_progress(
+                batch_id,
+                stage="coverage_pending",
+                stage_label="Waiting for audited family coverage",
+                detail_message=(
+                    f"Background warm-up finished with {coverage_count} audited {post_type} families at {target_length_tier}s. "
+                    "More audited coverage is still needed before this batch can seed."
+                ),
+                current_post_type=post_type,
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
+
+
+def _schedule_coverage_warmup(
+    *,
+    batch_id: str,
+    post_type: str,
+    target_length_tier: Optional[int],
+    required_count: int,
+) -> None:
+    coverage_key = _coverage_gap_key(post_type, target_length_tier)
+    resolved_tier = int(target_length_tier or 8)
+    with _SEEDING_PROGRESS_LOCK:
+        waiters = _COVERAGE_WAITERS.setdefault(coverage_key, {})
+        waiters[batch_id] = max(required_count, int(waiters.get(batch_id) or 0))
+        task = _COVERAGE_TASKS.get(coverage_key)
+        if task and task.is_alive():
+            return
+        thread = Thread(
+            target=_run_coverage_warmup_task,
+            args=(coverage_key, post_type, resolved_tier),
+            daemon=True,
+        )
+        _COVERAGE_TASKS[coverage_key] = thread
+        thread.start()
 
 
 def _next_event_id_locked(batch_id: str) -> str:
@@ -518,6 +648,24 @@ def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]
     return recovered
 
 
+def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
+    """Return True when every research-backed post type can seed from audited families."""
+    post_type_counts = batch.get("post_type_counts") or {}
+    target_length_tier = int(batch.get("target_length_tier") or 8)
+
+    for post_type, count in post_type_counts.items():
+        requested_count = int(count or 0)
+        if post_type == "lifestyle" or requested_count <= 0:
+            continue
+        available_count = count_selectable_topic_families(
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+        )
+        if available_count < requested_count:
+            return False
+    return True
+
+
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     """Synchronous topic discovery workflow executed off the request event loop."""
     batch = get_batch_by_id(batch_id)
@@ -531,10 +679,12 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     post_type_counts = batch["post_type_counts"]
     existing_topics = get_all_topics_from_registry()
     target_length_tier = batch.get("target_length_tier")
+    resolved_target_tier = int(target_length_tier or 8)
 
     expected_posts = sum(post_type_counts.values())
     all_generated_topics: List[Dict[str, Any]] = []
     created_posts = []
+    preselected_suggestions: Dict[str, List[Dict[str, Any]]] = {}
 
     update_seeding_progress(
         batch_id,
@@ -550,6 +700,63 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
         is_retrying=False,
         retry_message=None,
     )
+
+    for post_type, count in post_type_counts.items():
+        if count == 0 or post_type == "lifestyle":
+            continue
+        stored_suggestions = list_topic_suggestions(
+            target_length_tier=resolved_target_tier,
+            limit=max(count * 3, count),
+            post_type=post_type,
+        )
+        unique_stored_suggestions = _unique_topic_suggestions(
+            stored_suggestions,
+            count,
+            existing_topics=all_generated_topics,
+        )
+        preselected_suggestions[post_type] = unique_stored_suggestions
+        if len(unique_stored_suggestions) >= count:
+            continue
+
+        available_count = len(unique_stored_suggestions)
+        update_seeding_progress(
+            batch_id,
+            state=batch["state"],
+            stage="coverage_pending",
+            stage_label="Waiting for audited family coverage",
+            detail_message=(
+                f"Only {available_count} audited {post_type} families are ready at {resolved_target_tier}s. "
+                "Background topic-bank warm-up and audit promotion were queued."
+            ),
+            posts_created=0,
+            expected_posts=expected_posts,
+            current_post_type=post_type,
+            attempt=None,
+            max_attempts=None,
+            is_retrying=False,
+            retry_message=None,
+        )
+        _schedule_coverage_warmup(
+            batch_id=batch_id,
+            post_type=post_type,
+            target_length_tier=resolved_target_tier,
+            required_count=count,
+        )
+        logger.info(
+            "topic_discovery_coverage_pending",
+            batch_id=batch_id,
+            post_type=post_type,
+            target_length_tier=resolved_target_tier,
+            required_count=count,
+            available_count=available_count,
+        )
+        return {
+            "batch_id": batch_id,
+            "posts_created": 0,
+            "state": batch["state"],
+            "topics": [],
+            "coverage_pending": True,
+        }
 
     for post_type, count in post_type_counts.items():
         if count == 0:
@@ -582,74 +789,6 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             post_type=post_type,
             count=count
         )
-
-        stored_suggestions = list_topic_suggestions(
-            target_length_tier=batch.get("target_length_tier"),
-            limit=max(count * 3, count),
-            post_type=post_type,
-        )
-        unique_stored_suggestions = _unique_topic_suggestions(
-            stored_suggestions,
-            count,
-            existing_topics=existing_topics + all_generated_topics,
-        )
-
-        if len(unique_stored_suggestions) >= count and post_type != "lifestyle":
-            update_seeding_progress(
-                batch_id,
-                state=batch["state"],
-                stage="writing_posts",
-                stage_label="Reusing stored topic-bank suggestions",
-                detail_message=(
-                    f"Found {len(stored_suggestions)} stored suggestions for {post_type} and writing the requested posts directly from the bank."
-                ),
-                posts_created=len(created_posts),
-                expected_posts=expected_posts,
-                current_post_type=post_type,
-                attempt=None,
-                max_attempts=None,
-                is_retrying=False,
-                retry_message=None,
-            )
-            for suggestion in unique_stored_suggestions[:count]:
-                topic_title = suggestion["title"]
-                topic_rotation = suggestion.get("rotation") or suggestion.get("script") or topic_title
-                topic_cta = suggestion.get("cta") or topic_rotation
-                seed_payload = (
-                    suggestion.get("seed_payload")
-                    or {"facts": [topic_rotation]}
-                )
-                seed_payload = _attach_publish_captions(
-                    topic_title=topic_title,
-                    post_type=post_type,
-                    seed_payload=seed_payload,
-                    script_fallback=topic_rotation,
-                    canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
-                )
-                add_topic_to_registry(
-                    title=topic_title,
-                    rotation=topic_rotation,
-                    cta=topic_cta,
-                )
-                post = create_post_for_batch(
-                    batch_id=batch_id,
-                    post_type=post_type,
-                    topic_title=topic_title,
-                    topic_rotation=topic_rotation,
-                    topic_cta=topic_cta,
-                    spoken_duration=float(suggestion.get("spoken_duration") or 5),
-                    seed_data=seed_payload,
-                    target_length_tier=batch.get("target_length_tier"),
-                )
-                created_posts.append(post)
-                dedup_topic_record = {
-                    "title": topic_title,
-                    "rotation": topic_rotation,
-                    "cta": topic_cta,
-                    "spoken_duration": float(suggestion.get("spoken_duration") or 5),
-                }
-                all_generated_topics.append(dedup_topic_record)
-            continue
 
         # PIPELINE DISPATCH: lifestyle uses PROMPT_2 direct; value/product use Deep Research via PROMPT_1.
         if post_type == "lifestyle":
@@ -697,7 +836,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
 
                 lifestyle_topics = generate_lifestyle_topics(
                     count=request_count,
-                    target_length_tier=target_length_tier,
+                    target_length_tier=resolved_target_tier,
                 )
 
                 unique_candidates = deduplicate_topics(
@@ -795,6 +934,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     topic_data=topic_data,
                     dialog_scripts=dialog_scripts
                 )
+                seed_payload["canonical_topic"] = str(seed_payload.get("canonical_topic") or topic_data["title"]).strip()
                 seed_payload = _attach_publish_captions(
                     topic_title=topic_data["title"],
                     post_type=post_type,
@@ -807,14 +947,19 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     title=topic_data["title"],
                     topic_script=topic_data["rotation"],
                     post_type=post_type,
-                    target_length_tier=target_length_tier,
+                    target_length_tier=resolved_target_tier,
                     research_payload={},
+                    origin_kind="provider",
+                )
+                seed_payload["family_id"] = stored_row["id"]
+                seed_payload["family_fingerprint"] = stored_row.get("family_fingerprint") or _topic_family_signature(
+                    {"title": topic_data["title"], "seed_payload": seed_payload}
                 )
 
                 variants = _build_script_variants(
                     topic_title=topic_data["title"],
                     post_type=post_type,
-                    target_length_tier=target_length_tier,
+                    target_length_tier=resolved_target_tier,
                     research_dossier={},
                     prompt1_item=SimpleNamespace(
                         script=topic_data["rotation"],
@@ -827,9 +972,10 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     topic_registry_id=stored_row["id"],
                     title=stored_row["title"],
                     post_type=post_type,
-                    target_length_tier=target_length_tier,
+                    target_length_tier=resolved_target_tier,
                     topic_research_dossier_id=None,
                     variants=variants,
+                    origin_kind="provider",
                 )
 
                 post = create_post_for_batch(
@@ -840,7 +986,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     topic_cta=topic_data["cta"],
                     spoken_duration=float(topic_data["spoken_duration"]),
                     seed_data=seed_payload,
-                    target_length_tier=target_length_tier,
+                    target_length_tier=resolved_target_tier,
                 )
 
                 created_posts.append(post)
@@ -865,18 +1011,17 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     "rotation": topic_data["rotation"],
                     "cta": topic_data["cta"],
                     "spoken_duration": float(topic_data["spoken_duration"]),
+                    "seed_payload": {"canonical_topic": seed_payload["canonical_topic"]},
                 }
                 all_generated_topics.append(dedup_topic_record)
         else:
-            required_topics = count
-            target_tier = batch.get("target_length_tier") or 8
             update_seeding_progress(
                 batch_id,
                 state=batch["state"],
-                stage="researching",
-                stage_label="Checking stored bank coverage",
+                stage="writing_posts",
+                stage_label="Reusing audited family coverage",
                 detail_message=(
-                    f"Looking for {required_topics} stored {post_type} suggestions at {target_tier}s before any warm-up."
+                    f"Using audited {post_type} family coverage from the topic bank without running live research."
                 ),
                 posts_created=len(created_posts),
                 expected_posts=expected_posts,
@@ -886,58 +1031,23 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 is_retrying=False,
                 retry_message=None,
             )
-            stored_suggestions = list_topic_suggestions(
-                target_length_tier=target_tier,
-                limit=max(required_topics * 3, required_topics),
-                post_type=post_type,
-            )
-            unique_stored_suggestions = _unique_topic_suggestions(
-                stored_suggestions,
-                required_topics,
-                existing_topics=existing_topics + all_generated_topics,
-            )
-
-            if len(unique_stored_suggestions) < required_topics:
-                update_seeding_progress(
-                    batch_id,
-                    state=batch["state"],
-                    stage="researching",
-                    stage_label="Warming up the topic bank",
-                    detail_message=(
-                        f"Stored bank coverage is short, so a canonical 3-topic warm-up is running for {post_type}."
-                    ),
-                    posts_created=len(created_posts),
-                    expected_posts=expected_posts,
-                    current_post_type=post_type,
-                    attempt=None,
-                    max_attempts=None,
-                    is_retrying=False,
-                    retry_message=None,
-                )
-                harvest_topics_to_bank_sync(
-                    post_type_counts={post_type: _WARMUP_SEED_TOPIC_COUNT},
-                    target_length_tier=target_tier,
-                    trigger_source="batch_discovery_warmup",
-                )
-                stored_suggestions = list_topic_suggestions(
-                    target_length_tier=target_tier,
-                    limit=max(required_topics * 3, required_topics),
+            required_topics = count
+            unique_stored_suggestions = preselected_suggestions.get(post_type, [])
+            for suggestion in unique_stored_suggestions[:required_topics]:
+                post = _create_post_from_suggestion(
+                    batch_id=batch_id,
                     post_type=post_type,
+                    suggestion=suggestion,
+                    target_length_tier=resolved_target_tier,
                 )
-                unique_stored_suggestions = _unique_topic_suggestions(
-                    stored_suggestions,
-                    required_topics,
-                    existing_topics=existing_topics + all_generated_topics,
-                )
-
-            if len(unique_stored_suggestions) >= required_topics:
+                created_posts.append(post)
                 update_seeding_progress(
                     batch_id,
                     state=batch["state"],
                     stage="writing_posts",
-                    stage_label="Reusing stored topic-bank suggestions",
+                    stage_label="Reusing audited family coverage",
                     detail_message=(
-                        f"Found {len(stored_suggestions)} stored suggestions for {post_type} and writing the requested posts directly from the bank."
+                        f"{len(created_posts)} of {expected_posts} posts are now ready for script review."
                     ),
                     posts_created=len(created_posts),
                     expected_posts=expected_posts,
@@ -947,161 +1057,15 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     is_retrying=False,
                     retry_message=None,
                 )
-                for suggestion in unique_stored_suggestions[:required_topics]:
-                    topic_title = suggestion["title"]
-                    topic_rotation = suggestion.get("rotation") or suggestion.get("script") or topic_title
-                    topic_cta = suggestion.get("cta") or topic_rotation
-                    seed_payload = (
-                        suggestion.get("seed_payload")
-                        or {"facts": [topic_rotation]}
-                    )
-                    seed_payload = _attach_publish_captions(
-                        topic_title=topic_title,
-                        post_type=post_type,
-                        seed_payload=seed_payload,
-                        script_fallback=topic_rotation,
-                        canonical_topic=str(seed_payload.get("canonical_topic") or topic_title),
-                    )
-                    add_topic_to_registry(
-                        title=topic_title,
-                        rotation=topic_rotation,
-                        cta=topic_cta,
-                    )
-                    post = create_post_for_batch(
-                        batch_id=batch_id,
-                        post_type=post_type,
-                        topic_title=topic_title,
-                        topic_rotation=topic_rotation,
-                        topic_cta=topic_cta,
-                        spoken_duration=float(suggestion.get("spoken_duration") or 5),
-                        seed_data=seed_payload,
-                        target_length_tier=batch.get("target_length_tier"),
-                    )
-                    created_posts.append(post)
-                    dedup_topic_record = {
-                        "title": topic_title,
-                        "rotation": topic_rotation,
-                        "cta": topic_cta,
-                        "spoken_duration": float(suggestion.get("spoken_duration") or 5),
-                    }
-                    all_generated_topics.append(dedup_topic_record)
-
-    if not created_posts:
-        logger.warning(
-            "topic_discovery_no_posts_after_dedup",
-            batch_id=batch_id,
-            requested_counts=post_type_counts
-        )
-
-        lifestyle_topics = generate_lifestyle_topics(
-            count=1,
-            target_length_tier=target_length_tier,
-        )
-
-        if lifestyle_topics:
-            update_seeding_progress(
-                batch_id,
-                state=batch["state"],
-                stage="writing_posts",
-                stage_label="Recovering with a fallback topic",
-                detail_message="No unique researched posts survived filtering, so a fallback post is being created.",
-                posts_created=len(created_posts),
-                expected_posts=expected_posts,
-                current_post_type="lifestyle",
-                attempt=None,
-                max_attempts=None,
-                is_retrying=False,
-                retry_message=None,
-            )
-            fallback_topic = lifestyle_topics[0]
-            dialog_scripts = fallback_topic["dialog_scripts"]
-
-            seed_payload = build_lifestyle_seed_payload(
-                topic_data=fallback_topic,
-                dialog_scripts=dialog_scripts
-            )
-            seed_payload = _attach_publish_captions(
-                topic_title=fallback_topic["title"],
-                post_type="lifestyle",
-                seed_payload=seed_payload,
-                script_fallback=fallback_topic["rotation"],
-                canonical_topic=str(seed_payload.get("canonical_topic") or fallback_topic["title"]),
-            )
-
-            fallback_tier = target_length_tier or 8
-            stored_row = store_topic_bank_entry(
-                title=fallback_topic["title"],
-                topic_script=fallback_topic["rotation"],
-                post_type="lifestyle",
-                target_length_tier=fallback_tier,
-                research_payload={},
-            )
-            variants = _build_script_variants(
-                topic_title=fallback_topic["title"],
-                post_type="lifestyle",
-                target_length_tier=fallback_tier,
-                research_dossier={},
-                prompt1_item=SimpleNamespace(
-                    script=fallback_topic["rotation"],
-                    caption=seed_payload.get("caption", ""),
-                ),
-                dialog_scripts=dialog_scripts,
-                seed_payload=seed_payload,
-            )
-            upsert_topic_script_variants(
-                topic_registry_id=stored_row["id"],
-                title=stored_row["title"],
-                post_type="lifestyle",
-                target_length_tier=fallback_tier,
-                topic_research_dossier_id=None,
-                variants=variants,
-            )
-
-            fallback_post = create_post_for_batch(
-                batch_id=batch_id,
-                post_type="lifestyle",
-                topic_title=fallback_topic["title"],
-                topic_rotation=fallback_topic["rotation"],
-                topic_cta=fallback_topic["cta"],
-                spoken_duration=float(fallback_topic["spoken_duration"]),
-                seed_data=seed_payload,
-                target_length_tier=fallback_tier,
-            )
-
-            created_posts.append(fallback_post)
-            update_seeding_progress(
-                batch_id,
-                state=batch["state"],
-                stage="writing_posts",
-                stage_label="Recovered with a fallback topic",
-                detail_message=f"{len(created_posts)} of {expected_posts} posts are now ready for script review.",
-                posts_created=len(created_posts),
-                expected_posts=expected_posts,
-                current_post_type="lifestyle",
-                attempt=None,
-                max_attempts=None,
-                is_retrying=False,
-                retry_message=None,
-            )
-            dedup_topic_record = {
-                "title": fallback_topic["title"],
-                "rotation": fallback_topic["rotation"],
-                "cta": fallback_topic["cta"],
-                "spoken_duration": float(fallback_topic["spoken_duration"]),
-            }
-            all_generated_topics.append(dedup_topic_record)
-
-            logger.info(
-                "topic_discovery_fallback_created",
-                batch_id=batch_id,
-                topic_title=fallback_topic["title"],
-                post_type="lifestyle"
-            )
-        else:
-            logger.error(
-                "topic_discovery_fallback_failed",
-                batch_id=batch_id
-            )
+                dedup_topic_record = {
+                    "title": suggestion["title"],
+                    "rotation": suggestion.get("rotation") or suggestion.get("script") or suggestion["title"],
+                    "cta": suggestion.get("cta") or suggestion.get("rotation") or suggestion.get("script") or suggestion["title"],
+                    "spoken_duration": float(suggestion.get("spoken_duration") or 5),
+                    "seed_payload": {"canonical_topic": suggestion.get("canonical_topic") or suggestion["title"]},
+                }
+                all_generated_topics.append(dedup_topic_record)
+                existing_topics.append(dedup_topic_record)
 
     created_counts = Counter(post.get("post_type") for post in created_posts)
     missing_post_types = {

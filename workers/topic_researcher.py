@@ -17,6 +17,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
 from app.features.topics.bank_warmup import run_single_seed_topic_warmup
 from app.features.topics.queries import (
+    count_selectable_topic_families,
     create_cron_run,
     update_cron_run,
     get_latest_cron_run,
@@ -36,6 +37,7 @@ TARGET_TIERS = [8, 16, 32]
 POST_TYPE = "value"
 NICHE = os.environ.get("CRON_RESEARCH_NICHE", "Schwerbehinderung, Treppenlifte, Barrierefreiheit")
 CRON_STALE_AFTER_SECONDS = 15 * 60
+MIN_ACTIVE_FAMILY_COVERAGE = int(os.environ.get("TOPIC_MIN_ACTIVE_FAMILY_COVERAGE", "5"))
 
 def _get_last_run_timestamp() -> float:
     """Get timestamp of last completed cron run from DB. Returns 0.0 if none."""
@@ -237,6 +239,17 @@ def run_discovery_cycle():
     topic_ids: List[str] = []
     details: List[Dict[str, Any]] = []
     seeds: List[str] = []
+    active_coverage_before = count_selectable_topic_families(post_type=POST_TYPE, target_length_tier=8)
+
+    if active_coverage_before >= MIN_ACTIVE_FAMILY_COVERAGE:
+        logger.info(
+            "topic_research_coverage_satisfied",
+            post_type=POST_TYPE,
+            target_length_tier=8,
+            active_coverage=active_coverage_before,
+            minimum_required=MIN_ACTIVE_FAMILY_COVERAGE,
+        )
+        return
 
     try:
         seeds, source = select_seeds(max_topics=MAX_TOPICS_PER_RUN, niche=NICHE)
@@ -304,12 +317,16 @@ def run_discovery_cycle():
             except Exception:
                 logger.exception("topic_research_audit_trigger_failed")
 
+        active_coverage_after = count_selectable_topic_families(post_type=POST_TYPE, target_length_tier=8)
+
         logger.info(
             "topic_research_cron_complete",
             run_id=run_id,
             topics_completed=topics_completed,
             topics_failed=topics_failed,
             topic_ids=topic_ids,
+            active_coverage_before=active_coverage_before,
+            active_coverage_after=active_coverage_after,
         )
     except Exception as exc:
         logger.exception("topic_research_cron_failed", error=str(exc), run_id=run_id)

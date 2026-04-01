@@ -35,6 +35,7 @@ from app.features.topics.response_parsers import (
 from app.features.topics.schemas import DialogScripts, ResearchAgentBatch, ResearchAgentItem, ResearchDossier, SeedData, TopicData
 from app.features.topics.topic_validation import (
     _clean_fact_pool,
+    detect_metadata_bleed,
     detect_spoken_copy_issues,
     estimate_script_duration_seconds,
     get_prompt1_sentence_bounds,
@@ -322,9 +323,9 @@ def generate_topic_script_candidate(
     dossier_payload = dossier.model_dump(mode="json") if hasattr(dossier, "model_dump") else (dossier or {})
     lane_payload = lane_candidate.model_dump(mode="json") if hasattr(lane_candidate, "model_dump") else dict(lane_candidate or {})
     lane_title = normalize_spoken_whitespace(str(lane_payload.get("title") or "").strip())
-    lane_caption = sanitize_metadata_text(lane_payload.get("source_summary") or lane_payload.get("caption") or "")
-    dossier_source_summary = sanitize_metadata_text((dossier_payload or {}).get("source_summary") or "")
-    cluster_summary = sanitize_metadata_text((dossier_payload or {}).get("cluster_summary") or "")
+    lane_caption = sanitize_metadata_text(lane_payload.get("source_summary") or lane_payload.get("caption") or "", max_chars=500)
+    dossier_source_summary = sanitize_metadata_text((dossier_payload or {}).get("source_summary") or "", max_chars=500)
+    cluster_summary = sanitize_metadata_text((dossier_payload or {}).get("cluster_summary") or "", max_chars=500)
     lane_sources = list((dossier_payload or {}).get("sources") or [])
     source_title = None
     source_url = None
@@ -492,9 +493,9 @@ def generate_topic_script_candidate(
                 message="PROMPT_1 script was empty after spoken-text sanitization",
                 details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
             )
-        cleaned_summary = sanitize_metadata_text(metadata_summary or lane_caption or dossier_source_summary)
+        cleaned_summary = sanitize_metadata_text(metadata_summary or lane_caption or dossier_source_summary, max_chars=500)
         item = ResearchAgentItem(
-            topic=lane_title or sanitize_metadata_text(dossier_payload.get("topic") or "", max_sentences=1) or "Thema",
+            topic=lane_title or sanitize_metadata_text(dossier_payload.get("topic") or "", max_sentences=1, max_chars=400) or "Thema",
             script=cleaned_script,
             caption=cleaned_summary,
             framework=framework_value,
@@ -511,6 +512,7 @@ def generate_topic_script_candidate(
                 or dossier_payload.get("disclaimer")
                 or "Keine Rechts- oder medizinische Beratung.",
                 max_sentences=1,
+                max_chars=200,
             )
             or "Keine Rechts- oder medizinische Beratung.",
         )
@@ -616,67 +618,26 @@ def generate_topic_script_candidate(
                 message="PROMPT_1 lane output was empty",
                 details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
             )
-        return _build_clean_item(
+        item = _build_clean_item(
             script_text=script_text,
             metadata_summary=lane_caption or dossier_source_summary or cluster_summary or script_text,
         )
-
-    def _audit_gate(item: ResearchAgentItem) -> ResearchAgentItem:
-        """Inline quality gate: audit the script before returning it for persistence."""
-        from app.features.topics.audit import audit_single_script
-
-        row = {
-            "id": f"inline-{lane_title[:20]}",
-            "script": item.script,
-            "target_length_tier": target_length_tier,
-            "title": item.topic,
-        }
-        try:
-            result = audit_single_script(row, llm=llm)
-        except Exception as exc:
-            logger.warning(
-                "topic_script_inline_audit_error",
-                lane_title=lane_payload.get("title"),
-                error=str(exc),
-            )
-            return item  # let it through if audit itself fails
-
-        item.quality_score = result.total_score
-        item.quality_notes = result.quality_notes
-
-        if result.status == "pass":
-            logger.info(
-                "topic_script_inline_audit_pass",
-                lane_title=lane_payload.get("title"),
-                score=result.total_score,
-            )
-            return item
-
-        if result.status == "needs_repair":
-            logger.warning(
-                "topic_script_inline_audit_needs_repair",
-                lane_title=lane_payload.get("title"),
-                score=result.total_score,
-                notes=result.quality_notes[:200],
-            )
-            # Still return — the score travels with the item for downstream decisions
-            return item
-
-        # reject
-        logger.warning(
-            "topic_script_inline_audit_reject",
-            lane_title=lane_payload.get("title"),
-            score=result.total_score,
-            notes=result.quality_notes[:200],
+        bleed_issue = detect_metadata_bleed(
+            item.script,
+            source_summary=lane_caption or dossier_source_summary,
+            cluster_summary=cluster_summary,
         )
-        raise ValidationError(
-            message="PROMPT_1 script rejected by inline audit",
-            details={
-                "lane_title": lane_payload.get("title"),
-                "score": result.total_score,
-                "status": result.status,
-            },
-        )
+        if bleed_issue:
+            raise ValidationError(
+                message="PROMPT_1 raw draft repeated research metadata instead of spoken copy",
+                details={
+                    "lane_title": lane_payload.get("title"),
+                    "target_length_tier": target_length_tier,
+                    "bleed_field": bleed_issue.get("field"),
+                    "bleed_window": bleed_issue.get("window"),
+                },
+            )
+        return item
 
     fallback_reason = ""
     for attempt in range(2):
@@ -687,7 +648,7 @@ def generate_topic_script_candidate(
                 max_tokens=3200,
             )
             item = _build_item_from_text(text_response)
-            return _audit_gate(item)
+            return item
         except ValidationError as exc:
             logger.warning(
                 "topic_script_candidate_text_invalid",

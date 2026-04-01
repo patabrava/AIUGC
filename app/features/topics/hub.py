@@ -783,15 +783,16 @@ def _build_canonical_script_variant(
         "target_length_tier": tier,
         "hook_style": str(lane_candidate.get("lane_family") or "canonical").strip() or "canonical",
         "framework": str(prompt1_item.framework or "PAL").strip() or "PAL",
-        "tone": sanitize_metadata_text(prompt1_item.tone or "direkt, freundlich, empowernd, du-Form", max_sentences=1),
+        "tone": sanitize_metadata_text(prompt1_item.tone or "direkt, freundlich, empowernd, du-Form", max_sentences=1, max_chars=120),
         "estimated_duration_s": int(getattr(prompt1_item, "estimated_duration_s", 0) or 0) or tier,
         "lane_key": str(lane_candidate.get("lane_key") or "").strip(),
         "lane_family": str(lane_candidate.get("lane_family") or "").strip(),
         "cluster_id": str(research_dossier.get("cluster_id") or "").strip(),
         "anchor_topic": str(research_dossier.get("anchor_topic") or lane_candidate.get("title") or "").strip(),
-        "disclaimer": sanitize_metadata_text(prompt1_item.disclaimer or research_dossier.get("disclaimer") or "", max_sentences=1),
+        "disclaimer": sanitize_metadata_text(prompt1_item.disclaimer or research_dossier.get("disclaimer") or "", max_sentences=1, max_chars=200),
         "source_summary": sanitize_metadata_text(
-            research_dossier.get("source_summary") or lane_candidate.get("source_summary") or ""
+            research_dossier.get("source_summary") or lane_candidate.get("source_summary") or "",
+            max_chars=500,
         ),
         "primary_source_url": source_urls[0]["url"] if source_urls else None,
         "primary_source_title": source_urls[0]["title"] if source_urls else None,
@@ -814,7 +815,10 @@ def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[s
         "cluster_summary": research_dossier.get("cluster_summary"),
         "framework_candidates": list(lane.get("framework_candidates") or research_dossier.get("framework_candidates") or []),
         "sources": list(research_dossier.get("sources") or []),
-        "source_summary": sanitize_metadata_text(lane.get("source_summary") or research_dossier.get("source_summary") or ""),
+        "source_summary": sanitize_metadata_text(
+            lane.get("source_summary") or research_dossier.get("source_summary") or "",
+            max_chars=500,
+        ),
         "facts": list(lane.get("facts") or research_dossier.get("facts") or []),
         "angle_options": [str(lane.get("angle") or "").strip()] + [
             str(item).strip()
@@ -822,7 +826,11 @@ def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[s
             if str(item).strip() and str(item).strip() != str(lane.get("angle") or "").strip()
         ],
         "risk_notes": list(lane.get("risk_notes") or research_dossier.get("risk_notes") or []),
-        "disclaimer": sanitize_metadata_text(lane.get("disclaimer") or research_dossier.get("disclaimer") or "", max_sentences=1),
+        "disclaimer": sanitize_metadata_text(
+            lane.get("disclaimer") or research_dossier.get("disclaimer") or "",
+            max_sentences=1,
+            max_chars=200,
+        ),
         "lane_candidates": [lane],
         "lane_candidate": lane,
     }
@@ -838,6 +846,7 @@ def _persist_topic_bank_row(
     post_type: str,
     seed_payload: Dict[str, Any],
     variants: Optional[List[Dict[str, Any]]] = None,
+    origin_kind: str = "provider",
 ) -> Dict[str, Any]:
     script_variants = variants if variants is not None else _build_script_variants(
         topic_title=title,
@@ -854,6 +863,7 @@ def _persist_topic_bank_row(
         post_type=post_type,
         target_length_tier=target_length_tier,
         research_payload=research_dossier,
+        origin_kind=origin_kind,
     )
     topic_research_dossier_id = str(stored_row.get("topic_research_dossier_id") or stored_row.get("research_dossier_id") or "").strip() or None
     stored_variants = upsert_topic_script_variants(
@@ -863,6 +873,7 @@ def _persist_topic_bank_row(
         target_length_tier=target_length_tier,
         topic_research_dossier_id=topic_research_dossier_id,
         variants=script_variants,
+        origin_kind=origin_kind,
     )
     if not isinstance(stored_variants, list):
         stored_variants = []

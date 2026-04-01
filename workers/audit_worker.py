@@ -1,8 +1,4 @@
-"""Audit Worker — scores persisted scripts on nativeness, hooks, compliance, virality.
-
-Runs as a scheduled background worker (like expansion_worker.py).
-Fetches unaudited topic_scripts rows and evaluates them using Gemini.
-"""
+"""Audit Worker — promotes persisted pending scripts into selectable coverage."""
 
 from __future__ import annotations
 
@@ -20,7 +16,7 @@ from app.features.topics.queries import get_unaudited_scripts, update_script_qua
 configure_logging()
 logger = get_logger(__name__)
 
-AUDIT_INTERVAL_SECONDS = 12 * 60 * 60  # 12 hours
+AUDIT_INTERVAL_SECONDS = int(os.getenv("TOPIC_AUDIT_INTERVAL_SECONDS", "60"))
 MAX_SCRIPTS_PER_RUN = 50
 
 
@@ -40,6 +36,7 @@ def run_audit_cycle() -> None:
             script_id=result.script_id,
             quality_score=result.total_score,
             quality_notes=result.quality_notes,
+            audit_status=result.status,
         )
 
     pass_count = sum(1 for r in results if r.status == "pass")

@@ -11,7 +11,7 @@ from app.adapters import llm_client as llm_client_module
 from app.core.config import Settings
 from app.features.topics import agents as topic_agents
 from app.features.topics import handlers as topic_handlers
-from app.features.topics.topic_validation import detect_spoken_copy_issues
+from app.features.topics.topic_validation import detect_metadata_bleed, detect_spoken_copy_issues
 
 
 class FakeResponse:
@@ -171,6 +171,7 @@ def test_generate_gemini_deep_research_polls_until_done(monkeypatch):
         openai_model="gpt-4o-mini",
         gemini_api_key="gemini-key",
         gemini_topic_model="gemini-2.5-flash",
+        gemini_image_model="gemini-2.0-flash-preview-image-generation",
         gemini_deep_research_agent="deep-research-pro-preview",
         gemini_topic_timeout_seconds=30,
         gemini_topic_poll_seconds=0,
@@ -209,6 +210,7 @@ def test_generate_gemini_deep_research_streams_thought_summaries(monkeypatch):
         openai_model="gpt-4o-mini",
         gemini_api_key="gemini-key",
         gemini_topic_model="gemini-2.5-flash",
+        gemini_image_model="gemini-2.0-flash-preview-image-generation",
         gemini_deep_research_agent="deep-research-pro-preview",
         gemini_topic_timeout_seconds=30,
         gemini_topic_poll_seconds=0,
@@ -274,6 +276,7 @@ def test_generate_gemini_deep_research_resumes_after_idle_timeout(monkeypatch):
         openai_model="gpt-4o-mini",
         gemini_api_key="gemini-key",
         gemini_topic_model="gemini-2.5-flash",
+        gemini_image_model="gemini-2.0-flash-preview-image-generation",
         gemini_deep_research_agent="deep-research-pro-preview",
         gemini_topic_timeout_seconds=30,
         gemini_topic_poll_seconds=0,
@@ -338,6 +341,7 @@ def test_generate_gemini_deep_research_retries_transient_poll_503(monkeypatch):
         openai_model="gpt-4o-mini",
         gemini_api_key="gemini-key",
         gemini_topic_model="gemini-2.5-flash",
+        gemini_image_model="gemini-2.0-flash-preview-image-generation",
         gemini_deep_research_agent="deep-research-pro-preview",
         gemini_topic_timeout_seconds=30,
         gemini_topic_poll_seconds=0,
@@ -370,6 +374,7 @@ def test_to_gemini_response_schema_inlines_local_refs(monkeypatch):
         openai_model="gpt-4o-mini",
         gemini_api_key="gemini-key",
         gemini_topic_model="gemini-2.5-flash",
+        gemini_image_model="gemini-2.0-flash-preview-image-generation",
         gemini_deep_research_agent="deep-research-pro-preview",
         gemini_topic_timeout_seconds=30,
         gemini_topic_poll_seconds=0,
@@ -695,6 +700,64 @@ def test_generate_topic_script_candidate_synthesizes_fallback_on_provider_failur
     assert 26 <= len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", item.script)) <= 36
 
 
+def test_generate_topic_script_candidate_rebuilds_when_raw_draft_bleeds_metadata(monkeypatch):
+    class FakeMetadataBleedLLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return "Die Quelle zeigt, wie Rechte, Anträge und feste Abläufe kommunale Mitsprache belastbarer machen."
+
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="teilhabe-bleed-01",
+        topic="Behindertenbeirat mit Wirkung",
+        anchor_topic="Kommunale Teilhabe",
+        seed_topic="Kommunale Teilhabe",
+        cluster_summary="Das Dossier erklärt Rechte, Mitsprache und feste Routinen für wirksame Behindertenbeiräte.",
+        framework_candidates=["PAL"],
+        sources=[{"title": "Kommunale Teilhabe", "url": "https://example.com/teilhabe"}],
+        source_summary="Klare Rechte, feste Abläufe und nachvollziehbare Anträge entscheiden darüber, ob kommunale Teilhabe im Alltag tatsächlich Wirkung entfaltet.",
+        facts=[
+            "Antragsrechte erhöhen den Einfluss in kommunalen Gremien.",
+            "Feste Zuständigkeiten verhindern, dass Anliegen im Alltag liegen bleiben.",
+            "Klare Routinen machen Mitsprache belastbarer und sichtbarer.",
+        ],
+        angle_options=["Rechte sichern"],
+        risk_notes=["Ohne klare Rechte bleibt Mitsprache oft symbolisch."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            {
+                "lane_key": "beirat-bleed",
+                "lane_family": "value",
+                "title": "Behindertenbeirat mit Wirkung",
+                "angle": "Rechte und Routinen.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": "Die Quelle zeigt, wie Rechte, Anträge und feste Abläufe kommunale Mitsprache belastbarer machen.",
+                "facts": ["Klare Rechte stärken Mitsprache."],
+                "risk_notes": ["Ohne Zuständigkeiten versanden Anträge."],
+                "disclaimer": "Keine individuelle Rechts- oder Medizinberatung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [8],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeMetadataBleedLLM())
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=8,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    assert detect_metadata_bleed(
+        item.script,
+        source_summary=dossier.lane_candidates[0].source_summary,
+        cluster_summary=dossier.cluster_summary,
+    ) is None
+    assert item.script.endswith(".")
+    assert 12 <= len(item.script.split()) <= 15
+
+
 def test_generate_topic_script_candidate_strips_research_labels_from_long_script(monkeypatch):
     class FakeContaminatedPrompt1LLM:
         def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
@@ -947,6 +1010,60 @@ def test_generate_topic_script_candidate_rebuilds_when_model_returns_definition_
     assert "ist-zustands" not in lowered
     assert "überlassung einer sache" not in lowered
     assert 26 <= len(item.script.split()) <= 36
+
+
+def test_generate_topic_script_candidate_clips_long_metadata_summary(monkeypatch):
+    class FakeLongSummaryLLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return "Wenn du Hilfe im Nahverkehr früh anmeldest, vermeidest du Stress, Wartezeit und chaotische Umstiege."
+
+    long_summary = ("Barrierefreiheit im Nahverkehr braucht klare Anmeldung, Hilfe und verlässliche Abläufe. " * 20)[:1100].strip()
+    lane_summary = long_summary[:480].strip()
+    dossier = topic_agents.ResearchDossier(
+        cluster_id="nahverkehr-8s-01",
+        topic="Nahverkehrshilfe besser abstimmen",
+        anchor_topic="Nahverkehrshilfe",
+        seed_topic="Nahverkehrshilfe",
+        cluster_summary=long_summary,
+        framework_candidates=["PAL"],
+        sources=[{"title": "Nahverkehr", "url": "https://example.com/nahverkehr"}],
+        source_summary=long_summary,
+        facts=[
+            "Frühe Anmeldung verhindert Stress am Bahnsteig.",
+            "Klare Zuständigkeiten helfen dir beim barrierefreien Einstieg.",
+        ],
+        angle_options=["Anmeldung und Ablauf"],
+        risk_notes=["Ohne Vorlauf fehlt dir oft verlässliche Unterstützung."],
+        disclaimer="Keine Rechts- oder medizinische Beratung.",
+        lane_candidates=[
+            {
+                "lane_key": "nahverkehr-8",
+                "lane_family": "value",
+                "title": "Nahverkehrshilfe besser abstimmen",
+                "angle": "Anmeldung und Ablauf klar erklären.",
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": lane_summary,
+                "facts": ["Mit früher Meldung planst du Einstieg und Umstieg ruhiger."],
+                "risk_notes": ["Zu späte Meldung führt oft zu improvisierten Lösungen."],
+                "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [8],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeLongSummaryLLM())
+
+    item = topic_agents.generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=8,
+        dossier=dossier,
+        lane_candidate=dossier.lane_candidates[0].model_dump(mode="json"),
+    )
+
+    assert len(item.caption) <= 500
+    assert len(item.source_summary) <= 500
 
 
 def test_parse_topic_research_response_accepts_json_followed_by_markdown():

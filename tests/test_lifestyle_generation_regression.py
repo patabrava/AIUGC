@@ -125,7 +125,7 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
             for index, title in enumerate(LIFESTYLE_TEMPLATES, start=1)
         ]
 
-    def fake_add_topic_to_registry(title: str, rotation: str, cta: str):
+    def fake_add_topic_to_registry(title: str, rotation: str = "", cta: str = "", **kwargs):
         registry_rows.append((title, rotation, cta))
         return {"id": f"registry-new-{len(registry_rows)}"}
 
@@ -304,7 +304,7 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
     def fake_build_lifestyle_seed_payload(topic_data, dialog_scripts):
         return {"script": dialog_scripts.problem_agitate_solution[0]}
 
-    def fake_add_topic_to_registry(title: str, rotation: str, cta: str):
+    def fake_add_topic_to_registry(title: str, rotation: str = "", cta: str = "", **kwargs):
         return {"id": f"registry-{title}"}
 
     def fake_create_post_for_batch(
@@ -332,6 +332,9 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
 
     value_suggestion = {
         "id": "suggestion-value-1",
+        "script_id": "script-value-1",
+        "family_id": "topic-family-1",
+        "family_fingerprint": "value topic title",
         "title": "Value topic title",
         "rotation": "Value rotation",
         "cta": "Value cta",
@@ -370,6 +373,127 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
     assert batch["state"] == "S1_SETUP", batch
     assert len(created_posts) == 1, created_posts
     assert created_posts[0]["post_type"] == "value", created_posts
+
+
+def test_discover_topics_returns_coverage_pending_for_value_shortage(monkeypatch):
+    batch = {
+        "id": "batch-coverage-pending",
+        "brand": "Coverage Pending Fixture",
+        "state": "S1_SETUP",
+        "post_type_counts": {"value": 1, "lifestyle": 0, "product": 0},
+        "target_length_tier": 8,
+    }
+    queued = []
+
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", lambda batch_id: dict(batch))
+    monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", lambda **kwargs: [])
+    monkeypatch.setattr(
+        topic_handlers,
+        "_schedule_coverage_warmup",
+        lambda **kwargs: queued.append(kwargs),
+    )
+    monkeypatch.setattr(
+        topic_handlers,
+        "create_post_for_batch",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("posts must not be created while coverage is pending")),
+    )
+    topic_handlers.clear_seeding_progress(batch["id"])
+
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
+
+    progress = topic_handlers.get_seeding_progress(batch["id"])
+    assert result["coverage_pending"] is True
+    assert result["posts_created"] == 0
+    assert progress is not None
+    assert progress["stage"] == "coverage_pending"
+    assert queued == [
+        {
+            "batch_id": batch["id"],
+            "post_type": "value",
+            "target_length_tier": 8,
+            "required_count": 1,
+        }
+    ]
+
+
+def test_discover_topics_reuses_bank_suggestions_without_self_deduping(monkeypatch):
+    batch = {
+        "id": "batch-bank-reuse",
+        "brand": "Bank Reuse Fixture",
+        "state": "S1_SETUP",
+        "post_type_counts": {"value": 1, "lifestyle": 0, "product": 0},
+        "target_length_tier": 16,
+    }
+    created_posts = []
+
+    def fake_create_post_for_batch(**kwargs):
+        post = {
+            "id": f"post-{len(created_posts) + 1}",
+            "batch_id": kwargs["batch_id"],
+            "post_type": kwargs["post_type"],
+            "topic_title": kwargs["topic_title"],
+            "seed_data": kwargs["seed_data"],
+        }
+        created_posts.append(post)
+        return post
+
+    def fake_update_batch_state(batch_id: str, target_state):
+        batch["state"] = target_state.value if hasattr(target_state, "value") else target_state
+        return dict(batch)
+
+    suggestion = {
+        "id": "topic-bank-1",
+        "script_id": "script-bank-1",
+        "family_id": "family-1",
+        "family_fingerprint": "begleitperson nahverkehr merkzeichen b",
+        "canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B",
+        "title": "Begleitperson im Nahverkehr erklärt",
+        "rotation": "Mit Merkzeichen B planst du Begleitung und Freifahrt deutlich entspannter im Alltag.",
+        "cta": "Prüf deine Nachweise rechtzeitig.",
+        "spoken_duration": 16.0,
+        "seed_payload": {
+            "canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B",
+            "script": "Mit Merkzeichen B planst du Begleitung und Freifahrt deutlich entspannter im Alltag.",
+            "facts": ["Begleitperson und Freifahrt müssen sauber nachgewiesen werden."],
+        },
+    }
+
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", lambda batch_id: dict(batch))
+    monkeypatch.setattr(
+        topic_handlers,
+        "get_all_topics_from_registry",
+        lambda: [
+            {
+                "id": suggestion["id"],
+                "title": suggestion["title"],
+                "script": suggestion["rotation"],
+                "seed_payload": {"canonical_topic": suggestion["canonical_topic"]},
+            }
+        ],
+    )
+    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", lambda **kwargs: [suggestion])
+    monkeypatch.setattr(
+        topic_handlers,
+        "_schedule_coverage_warmup",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("coverage warmup should not run when bank coverage exists")),
+    )
+    monkeypatch.setattr(
+        topic_handlers,
+        "add_topic_to_registry",
+        lambda **kwargs: {"id": suggestion["id"], "canonical_topic": suggestion["canonical_topic"]},
+    )
+    monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id: None)
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
+    monkeypatch.setattr(topic_handlers, "update_batch_state", fake_update_batch_state)
+    topic_handlers.clear_seeding_progress(batch["id"])
+
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert result["posts_created"] == 1
+    assert batch["state"] == "S2_SEEDED"
+    assert len(created_posts) == 1
+    assert created_posts[0]["seed_data"]["family_id"] == "family-1"
 
 
 def test_prompt2_structured_payload_rejects_chopped_script():
