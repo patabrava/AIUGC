@@ -12,7 +12,7 @@ Current social publishing support:
 
 Current topic system support:
 - Family-first topic bank with canonical `topic_registry` rows
-- Async audit worker that promotes `pending` scripts into `pass` coverage
+- Unified topic worker that handles both research discovery and async audit promotion
 - Batch seeding reuses audited families only and returns `coverage_pending` when the bank is short
 
 ## Quick Start
@@ -68,7 +68,16 @@ python3 workers/video_poller.py
 ```
 Keep this terminal open. You should see logs like `polling_videos` and `batch_transitioned_to_qa` when operations complete. Press `Ctrl+C` to stop the worker.
 
-8. **View runtime logs:**
+8. **Run the topic worker in a third terminal:**
+```bash
+# In a NEW terminal tab/window
+cd /Users/camiloecheverri/Documents/AI/AIUGC
+source .venv/bin/activate
+python3 workers/topic_worker.py
+```
+Keep this terminal open. The topic worker drains pending audits and runs discovery on its own cadence.
+
+9. **View runtime logs:**
 * __In-terminal__: watch the shell running `uvicorn` for structured log lines (startup, requests, adapter calls).
 * __Saved to file (optional)__:
   ```bash
@@ -77,7 +86,7 @@ Keep this terminal open. You should see logs like `polling_videos` and `batch_tr
   tail -f uvicorn.log
   ```
 
-9. **Stop services cleanly:**
+10. **Stop services cleanly:**
 ```bash
 # In each terminal that is running a service
 Ctrl+C
@@ -128,7 +137,7 @@ flow-forge/
 ├── static/                  # CSS/JS assets
 ├── migrations/              # Supabase SQL migrations
 ├── tests/                   # E2E testscripts
-└── workers/                 # Video polling worker
+└── workers/                 # Video polling, topic, caption, and expansion workers
 ```
 
 ## Development
@@ -199,16 +208,25 @@ Production requirement:
 - `APP_URL` is required in production because the app uses it to build the trusted host allowlist.
 - The app will refuse to start in production if `APP_URL` is missing.
 
+Topic deployment:
+- `web`
+- `worker` for video polling
+- `caption-worker`
+- `topic-worker` for research discovery plus audit promotion
+- `expansion-worker` if script-bank expansion remains enabled
+
 ```bash
 docker compose build
 docker compose up -d
 ```
 
-This repository runs as two long-lived services:
+This repository runs as multiple long-lived services:
 - `web`: FastAPI app on port `8000`
 - `worker`: `workers/video_poller.py`
+- `topic-worker`: research discovery plus audit promotion
+- `caption-worker`: caption post-processing
 
-Both services use the same image and the same `.env` file. The worker is mandatory because video completion is asynchronous and polling-driven.
+All services use the same image and the same `.env` file. The video worker is mandatory because video completion is asynchronous and polling-driven; the topic worker is mandatory if you want fresh topic discovery and audit promotion to continue in production.
 
 ## Testing Strategy
 

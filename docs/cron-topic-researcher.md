@@ -1,54 +1,44 @@
-# Cron Job: Daily Topic Discovery
+# Cron Job: Unified Topic Discovery and Audit
 
 Date: 2026-03-24
 Status: Active
 
 ## What It Does
 
-Automatically discovers new topics via Gemini deep research, once per day. Reads the configured niche from `CRON_RESEARCH_NICHE`, selects candidate topics through a two-phase process (YAML seed bank + LLM-generated seeds), then runs each through a 3-stage research pipeline before storing the results in the topic registry.
+Automatically discovers new topics via Gemini deep research and drains pending audits on a bounded schedule. Reads the configured niche from `CRON_RESEARCH_NICHE`, selects candidate topics through a two-phase process (YAML seed bank + LLM-generated seeds), then runs each through the research pipeline before storing the results in the topic registry and promoting audited coverage.
 
 ## Where It Runs
 
-Inside the dedicated **topic-researcher** Docker container (`workers/topic_researcher.py`) on Hostinger. Runs as a separate service alongside the web and worker containers.
+Inside the dedicated **topic-worker** Docker container (`workers/topic_worker.py`) on Hostinger. Runs as a separate service alongside the web, video, caption, and optional expansion containers.
 
 ## How It Works
 
 ```
-topic_researcher main loop (every 60 seconds):
-  1. Has 24 hours passed since last run?
+topic_worker main loop:
+  1. Has the audit interval elapsed?
        |
-       NO  -> sleep and re-check (no-op)
+       YES -> run audit drain
+       |
+       NO  -> skip audit for now
+  2. Has the research interval elapsed?
        |
        YES -> run_topic_research()
-               |
-               +-- Phase 1: YAML seed selection
-               |     Load candidate topics from seed bank YAML
-               |     Filter out topics already in topic_registry
-               |
-               +-- Phase 2: LLM-generated seeds
-               |     If Phase 1 yields fewer than MAX_TOPICS_PER_RUN,
-               |     ask Gemini for fresh topic ideas in the niche
-               |     Filter out duplicates against DB + Phase 1
-               |
-               +-- 3-stage pipeline (per topic):
-               |     Stage 1: Deep research via Gemini (dossier generation)
-               |     Stage 2: Extract framework candidates + metadata
-               |     Stage 3: Store in topic_registry + generate initial scripts
-               |
-               +-- Log summary
+       |
+       NO  -> sleep and re-check
 ```
 
 ## Timing
 
 | Parameter | Value | Config Location |
 |-----------|-------|-----------------|
-| Check interval | 60 seconds | `POLL_INTERVAL_SECONDS` in topic_researcher.py |
-| Research interval | 24 hours | `RESEARCH_INTERVAL_SECONDS` in topic_researcher.py |
+| Audit interval | 60 seconds | `TOPIC_AUDIT_INTERVAL_SECONDS` |
+| Research interval | 24 hours | `TOPIC_RESEARCH_INTERVAL_SECONDS` |
+| Poll interval | 60 seconds | `TOPIC_WORKER_POLL_INTERVAL_SECONDS` |
 | Max topics per run | 5 | `MAX_TOPICS_PER_RUN` in topic_researcher.py |
 
 ## First Run Behavior
 
-On container startup, the worker calls `get_latest_cron_run()` to check the database for the last successful run timestamp. If no previous run exists (fresh deployment), research runs immediately on the first loop iteration. This DB-based recovery means restarts do not cause duplicate runs or missed windows.
+On container startup, the worker checks `get_latest_cron_run()` to recover the last successful research timestamp and reconciles stale running wrappers before entering the loop. If no previous run exists (fresh deployment), research runs immediately on the first loop iteration. This DB-based recovery means restarts do not cause duplicate runs or missed windows.
 
 ## Topic Selection Phases
 
@@ -74,7 +64,10 @@ On container startup, the worker calls `get_latest_cron_run()` to check the data
 
 | Event | Meaning |
 |-------|---------|
-| `topic_research_starting` | Daily run begins |
+| `topic_worker_started` | Unified topic worker booted |
+| `topic_worker_running_audit_cycle` | Pending scripts are being audited |
+| `topic_worker_running_discovery_cycle` | Research discovery is starting |
+| `topic_research_starting` | Daily research run begins |
 | `topic_research_phase1_seeds` | YAML seed selection complete |
 | `topic_research_phase2_seeds` | LLM seed generation complete |
 | `topic_research_processing` | Processing one topic through the pipeline |
@@ -87,15 +80,16 @@ On container startup, the worker calls `get_latest_cron_run()` to check the data
 
 | File | Role |
 |------|------|
-| `workers/topic_researcher.py` | Worker loop + research orchestration |
+| `workers/topic_worker.py` | Unified worker loop + research/audit orchestration |
+| `workers/topic_researcher.py` | Research pipeline and cron run orchestration |
 | `app/features/topics/topic_discovery.py` | 3-stage pipeline, seed selection, LLM seed generation |
 | `app/features/topics/prompt_data/topic_seeds.yaml` | Phase 1 YAML seed bank |
-| `docker-compose.yml` | Service definition (`topic-researcher`) |
-| `docker-compose.yaml` | Service definition (`topic-researcher`, env_file variant) |
+| `docker-compose.yml` | Service definition (`topic-worker`) |
+| `docker-compose.yaml` | Service definition (`topic-worker`, env_file variant) |
 
 ## Health Endpoint
 
-`GET /topics/cron-status` — returns the last run timestamp, next scheduled run, and status of the topic researcher cron job.
+`GET /topics/cron-status` — returns the last run timestamp, next scheduled run, and status of the topic worker cron job.
 
 ## Deployment Note
 

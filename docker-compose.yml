@@ -14,6 +14,9 @@ x-flow-forge-env: &flow-forge-env
   GEMINI_DEEP_RESEARCH_AGENT: ${GEMINI_DEEP_RESEARCH_AGENT:-deep-research-pro-preview-12-2025}
   GEMINI_TOPIC_TIMEOUT_SECONDS: ${GEMINI_TOPIC_TIMEOUT_SECONDS:-600}
   GEMINI_TOPIC_POLL_SECONDS: ${GEMINI_TOPIC_POLL_SECONDS:-5}
+  TOPIC_AUDIT_INTERVAL_SECONDS: ${TOPIC_AUDIT_INTERVAL_SECONDS:-60}
+  TOPIC_RESEARCH_INTERVAL_SECONDS: ${TOPIC_RESEARCH_INTERVAL_SECONDS:-86400}
+  TOPIC_WORKER_POLL_INTERVAL_SECONDS: ${TOPIC_WORKER_POLL_INTERVAL_SECONDS:-60}
   GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY}
   GOOGLE_AI_PROJECT_ID: ${GOOGLE_AI_PROJECT_ID}
   DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
@@ -92,9 +95,9 @@ services:
       web:
         condition: service_healthy
 
-  topic-researcher:
+  topic-worker:
     build: *flow-forge-build
-    command: ["python", "workers/topic_researcher.py"]
+    command: ["python", "workers/topic_worker.py"]
     environment: *flow-forge-env
     restart: unless-stopped
     depends_on:

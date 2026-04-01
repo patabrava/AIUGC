@@ -1,7 +1,8 @@
-"""
-Topic Research Worker
-Discovers and deep-researches new topics daily.
-Runs as a separate Docker service alongside the video poller.
+"""Topic Research Worker.
+
+Discovers and deep-researches new topics on a scheduled cadence.
+This module remains the research engine; the unified topic worker owns
+deployment orchestration and audit timing.
 """
 
 import time
@@ -30,9 +31,9 @@ configure_logging()
 logger = get_logger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────
-RESEARCH_INTERVAL_SECONDS = 24 * 60 * 60  # 24 hours
+RESEARCH_INTERVAL_SECONDS = int(os.getenv("TOPIC_RESEARCH_INTERVAL_SECONDS", str(24 * 60 * 60)))
 MAX_TOPICS_PER_RUN = 5
-POLL_INTERVAL_SECONDS = 60
+POLL_INTERVAL_SECONDS = int(os.getenv("TOPIC_WORKER_POLL_INTERVAL_SECONDS", "60"))
 TARGET_TIERS = [8, 16, 32]
 POST_TYPE = "value"
 NICHE = os.environ.get("CRON_RESEARCH_NICHE", "Schwerbehinderung, Treppenlifte, Barrierefreiheit")
@@ -231,7 +232,7 @@ def _research_single_topic(
         return None
 
 
-def run_discovery_cycle():
+def run_discovery_cycle(*, audit_after_discovery: bool = True):
     """Execute one full discovery cycle: select seeds, research them, track in DB."""
     run_id: Optional[str] = None
     topics_completed = 0
@@ -309,7 +310,7 @@ def run_discovery_cycle():
             error_message=error_msg,
         )
 
-        if topics_completed > 0:
+        if audit_after_discovery and topics_completed > 0:
             try:
                 from workers.audit_worker import run_audit_cycle
                 logger.info("topic_research_triggering_audit")
