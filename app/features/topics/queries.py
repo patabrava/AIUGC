@@ -100,6 +100,10 @@ def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _script_is_selectable(script_row: Dict[str, Any]) -> bool:
+    return int((script_row or {}).get("use_count") or 0) <= 0
+
+
 def _normalize_script_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
 
@@ -544,6 +548,8 @@ def list_topic_suggestions(
                 continue
             normalized_script = _normalize_script_row(row)
             if normalized_script.get("audit_status") != "pass":
+                continue
+            if not _script_is_selectable(normalized_script):
                 continue
             if normalized_script.get("origin_kind") == "synthetic_fallback":
                 continue
@@ -1482,3 +1488,25 @@ def mark_topic_script_used(*, script_id: Optional[str]) -> None:
         ).eq("id", script_id).execute()
     except Exception as exc:
         logger.warning("topic_script_usage_touch_failed", script_id=script_id, error=str(exc))
+
+
+def delete_topic_script(*, script_id: Optional[str]) -> Optional[str]:
+    if not script_id:
+        return None
+    try:
+        supabase = _get_supabase_adapter()
+        existing = supabase.client.table("topic_scripts").select("id, topic_registry_id, use_count").eq("id", script_id).limit(1).execute()
+        if not existing.data:
+            return None
+        row = existing.data[0]
+        if int(row.get("use_count") or 0) > 0:
+            logger.info("topic_script_delete_blocked_used", script_id=script_id, use_count=int(row.get("use_count") or 0))
+            return None
+        topic_registry_id = str(row.get("topic_registry_id") or "").strip()
+        supabase.client.table("topic_scripts").delete().eq("id", script_id).execute()
+        if topic_registry_id:
+            _sync_topic_family_status(topic_registry_id=topic_registry_id)
+        return topic_registry_id or None
+    except Exception as exc:
+        logger.warning("topic_script_delete_failed", script_id=script_id, error=str(exc))
+        return None

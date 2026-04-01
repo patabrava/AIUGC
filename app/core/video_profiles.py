@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from app.core.config import get_settings
+
 
 SHORT_VIDEO_ROUTE = "short"
 VEO_EXTENDED_VIDEO_ROUTE = "veo_extended"
@@ -46,7 +48,7 @@ class DurationProfile:
     prompt2_sentence_guidance: str
 
 
-_PROFILES = {
+_BASE_PROFILES = {
     8: DurationProfile(
         target_length_tier=8,
         route=SHORT_VIDEO_ROUTE,
@@ -103,6 +105,56 @@ _PROFILES = {
     ),
 }
 
+_EFFICIENT_LONG_ROUTE_PROFILES = {
+    16: DurationProfile(
+        target_length_tier=16,
+        route=VEO_EXTENDED_VIDEO_ROUTE,
+        requested_seconds=16,
+        provider_target_seconds=15,
+        veo_base_seconds=8,
+        veo_extension_seconds=7,
+        veo_extension_hops=1,
+        prompt1_min_words=26,
+        prompt1_max_words=36,
+        prompt1_min_seconds=12,
+        prompt1_max_seconds=14,
+        prompt1_max_chars_no_spaces=220,
+        prompt1_sentence_guidance="DREI oder VIER vollstaendige Saetze",
+        prompt2_min_words=24,
+        prompt2_max_words=34,
+        prompt2_sentence_guidance="3-4 Saetze",
+    ),
+    32: DurationProfile(
+        target_length_tier=32,
+        route=VEO_EXTENDED_VIDEO_ROUTE,
+        requested_seconds=32,
+        provider_target_seconds=29,
+        veo_base_seconds=8,
+        veo_extension_seconds=7,
+        veo_extension_hops=3,
+        prompt1_min_words=54,
+        prompt1_max_words=74,
+        prompt1_min_seconds=24,
+        prompt1_max_seconds=28,
+        prompt1_max_chars_no_spaces=430,
+        prompt1_sentence_guidance="FUENF oder SECHS vollstaendige Saetze",
+        prompt2_min_words=40,
+        prompt2_max_words=66,
+        prompt2_sentence_guidance="5-6 Saetze",
+    ),
+}
+
+
+def _profiles() -> dict[int, DurationProfile]:
+    settings = get_settings()
+    if settings.veo_enable_efficient_long_route:
+        return {
+            8: _BASE_PROFILES[8],
+            16: _EFFICIENT_LONG_ROUTE_PROFILES[16],
+            32: _EFFICIENT_LONG_ROUTE_PROFILES[32],
+        }
+    return _BASE_PROFILES
+
 
 def normalize_target_length_tier(value: Optional[int]) -> int:
     if value is None:
@@ -117,7 +169,7 @@ def normalize_target_length_tier(value: Optional[int]) -> int:
 
 def get_duration_profile(value: Optional[int]) -> DurationProfile:
     tier = normalize_target_length_tier(value)
-    return _PROFILES[tier]
+    return _profiles()[tier]
 
 
 def derive_pipeline_route(value: Optional[int]) -> str:
@@ -134,6 +186,9 @@ def build_seed_duration_metadata(profile: DurationProfile) -> dict:
         "video_pipeline_route": profile.route,
         "requested_seconds": profile.requested_seconds,
         "provider_target_seconds": profile.provider_target_seconds,
+        "veo_base_seconds": profile.veo_base_seconds,
+        "veo_extension_seconds": profile.veo_extension_seconds,
+        "veo_extension_hops": profile.veo_extension_hops,
     }
 
 
@@ -149,6 +204,18 @@ def get_submission_video_status(route: Optional[str], provider_status: Optional[
 
 def get_profile_request_cost_units(profile: DurationProfile) -> int:
     return 1 + max(int(profile.veo_extension_hops or 0), 0)
+
+
+def get_profile_route_config(profile: DurationProfile) -> dict:
+    return {
+        "target_length_tier": profile.target_length_tier,
+        "route": profile.route,
+        "requested_seconds": profile.requested_seconds,
+        "provider_target_seconds": profile.provider_target_seconds,
+        "veo_base_seconds": profile.veo_base_seconds,
+        "veo_extension_seconds": profile.veo_extension_seconds,
+        "veo_extension_hops": profile.veo_extension_hops,
+    }
 
 
 def get_processing_video_status(route: Optional[str]) -> str:

@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.core.config import get_settings
 from app.core.errors import ErrorCode, FlowForgeException
+from app.core.video_profiles import get_duration_profile
 from app.features.videos.handlers import (
     BatchVideoGenerationRequest,
     VideoGenerationRequest,
@@ -198,6 +200,21 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
     assert exc_info.value.code == ErrorCode.RATE_LIMIT
     assert submit_mock.call_count == 0
     assert released == [reservations[0]]
+
+
+def test_duration_profile_cost_switches_when_experiment_flag_enabled(monkeypatch):
+    from app.features.videos.quota_guard import chain_cost_units
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_enable_efficient_long_route", True)
+
+    profile_16 = get_duration_profile(16)
+    profile_32 = get_duration_profile(32)
+
+    assert profile_16.veo_base_seconds == 8
+    assert profile_32.veo_base_seconds == 8
+    assert chain_cost_units(profile_16, provider="veo_3_1") == 2
+    assert chain_cost_units(profile_32, provider="veo_3_1") == 4
 
 
 def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):

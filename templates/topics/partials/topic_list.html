@@ -67,6 +67,9 @@
                         <div class="mt-1 text-xs text-slate-500">{{ topic.post_type or 'unknown' }}</div>
                     </div>
                     <div class="flex flex-col items-end gap-1">
+                        {% if topic.used_script_count|default(0) > 0 and topic.script_count|default(0) == topic.used_script_count|default(0) %}
+                        <span class="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-700">All used</span>
+                        {% endif %}
                         {% if topic.is_new %}
                         <span class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-900">New</span>
                         {% endif %}

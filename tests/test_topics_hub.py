@@ -104,6 +104,64 @@ def test_topics_hub_uses_fixed_height_desktop_panels(monkeypatch):
     assert 'id="launch-panel" class="bg-slate-50/50 p-5 sm:p-6 overflow-y-auto lg:h-full min-h-0"' in response.text
 
 
+def test_topics_hub_script_cards_show_delete_button(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(topic_queries, "get_topic_registry_by_id", lambda topic_id: {"id": topic_id, "title": "Test Topic", "post_type": "value"})
+    monkeypatch.setattr(
+        topic_queries,
+        "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [
+            {"id": "script-1", "script": "Script one", "target_length_tier": 8, "created_at": "2026-04-01T00:00:00Z", "use_count": 0, "source_urls": []},
+            {"id": "script-2", "script": "Script two", "target_length_tier": 8, "created_at": "2026-04-01T00:00:00Z", "use_count": 1, "source_urls": []},
+        ],
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics/topic-1/scripts-drawer", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert 'action="/topics/scripts/script-1/delete"' in response.text
+    assert 'action="/topics/scripts/script-2/delete"' not in response.text
+    assert "Fresh" in response.text
+    assert "Used" in response.text
+
+
+def test_topics_hub_delete_script_endpoint_refreshes_drawer(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    deleted = {}
+
+    monkeypatch.setattr(topic_handlers, "delete_topic_script", lambda script_id: deleted.setdefault("script_id", script_id) or "topic-1")
+    monkeypatch.setattr(topic_queries, "get_topic_registry_by_id", lambda topic_id: {"id": topic_id, "title": "Test Topic", "post_type": "value"})
+    monkeypatch.setattr(
+        topic_queries,
+        "get_topic_scripts_for_registry",
+        lambda topic_id, target_length_tier=None: [],
+    )
+
+    client = _build_test_client()
+    response = client.post("/topics/scripts/script-1/delete", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert deleted["script_id"] == "script-1"
+    assert "No scripts generated yet" in response.text
+
+
+def test_topics_hub_delete_script_endpoint_blocks_used_scripts(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(topic_handlers, "delete_topic_script", lambda script_id: None)
+    monkeypatch.setattr(topic_queries, "get_topic_registry_by_id", lambda topic_id: {"id": topic_id, "title": "Test Topic", "post_type": "value"})
+    monkeypatch.setattr(topic_queries, "get_topic_scripts_for_registry", lambda topic_id, target_length_tier=None: [])
+
+    client = _build_test_client()
+    response = client.post("/topics/scripts/script-used/delete", headers={"accept": "text/html"})
+
+    assert response.status_code == 409
+    assert "Used scripts cannot be deleted" in response.text
+
+
 def test_topics_launch_endpoint_returns_json(monkeypatch):
     async def fake_launch_topic_research_run(**kwargs):
         return {

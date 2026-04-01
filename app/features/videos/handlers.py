@@ -22,12 +22,14 @@ from app.adapters.supabase_client import get_supabase
 from app.adapters.storage_client import get_storage_client
 from app.adapters.veo_client import get_veo_client
 from app.adapters.sora_client import get_sora_client
+from app.core.config import get_settings
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
 from app.core.video_profiles import (
     VEO_EXTENDED_VIDEO_ROUTE,
     VEO_PROVIDER,
     get_duration_profile,
+    get_profile_route_config,
     get_submission_video_status,
     uses_duration_routing,
 )
@@ -136,6 +138,7 @@ def _resolve_video_submission_plan(
 ) -> Dict[str, Any]:
     if uses_duration_routing(batch):
         profile = get_duration_profile(batch.get("target_length_tier"))
+        profile_config = get_profile_route_config(profile)
         resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
         provider_aspect_ratio = _resolve_extended_provider_aspect_ratio(profile.route, aspect_ratio)
         requested_size = size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution)
@@ -153,6 +156,7 @@ def _resolve_video_submission_plan(
             "postprocess_crop_aspect_ratio": aspect_ratio if provider_aspect_ratio != aspect_ratio else None,
             "postprocess_strategy": "center_crop_scale" if provider_aspect_ratio != aspect_ratio else None,
             "profile": profile,
+            "profile_config": profile_config,
             "duration_routed": True,
         }
 
@@ -172,6 +176,7 @@ def _resolve_video_submission_plan(
         "postprocess_crop_aspect_ratio": None,
         "postprocess_strategy": None,
         "profile": None,
+        "profile_config": None,
         "duration_routed": False,
     }
 
@@ -844,6 +849,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 if quota_reservation_key:
                     submission_metadata["quota_reservation_key"] = quota_reservation_key
                     submission_metadata["quota_reserved_units"] = item["quota_requested_units"]
+                if submission_plan.get("profile_config"):
+                    submission_metadata["veo_efficient_long_route_enabled"] = get_settings().veo_enable_efficient_long_route
                 if submission_plan["provider"] == VEO_PROVIDER and anchor_image_bundle:
                     submission_metadata.update(anchor_image_bundle["metadata"])
 

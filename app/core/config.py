@@ -115,6 +115,10 @@ class Settings(BaseSettings):
         ge=0,
         description="Optional safety buffer subtracted from the configured Veo daily limit",
     )
+    veo_enable_efficient_long_route: bool = Field(
+        default=True,
+        description="Use the 8s-base long-route profile by default for 16s and 32s Veo tiers",
+    )
     veo_quota_freeze_on_unexpected_429: bool = Field(
         default=True,
         description="Freeze further Veo submits until next Pacific reset after an unexpected provider 429",

@@ -1255,6 +1255,19 @@ def _submit_extension_hop(
         )
 
     is_final_hop = (hops_completed + 1) >= metadata.get("veo_extension_hops_target", 0)
+    logger.info(
+        "extension_hop_route_profile",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        route=metadata.get("video_pipeline_route"),
+        target_length_tier=metadata.get("target_length_tier"),
+        base_seconds=metadata.get("veo_base_seconds"),
+        extension_seconds=metadata.get("veo_extension_seconds"),
+        hop_target=metadata.get("veo_extension_hops_target"),
+        hop_completed=hops_completed,
+        final_hop=is_final_hop,
+        experiment_enabled=metadata.get("veo_efficient_long_route_enabled"),
+    )
     prompt_payload = _build_veo_extension_prompt(post, segment_index=next_segment_idx)
     prompt = prompt_payload["prompt_text"]
     segment_text = prompt_payload["segment_text"]

@@ -4,9 +4,13 @@ from pathlib import Path
 import pytest
 
 from app.core.errors import ValidationError
+from app.core.config import get_settings
 from app.core.video_profiles import (
     VEO_EXTENDED_VIDEO_ROUTE,
+    build_seed_duration_metadata,
+    get_duration_profile,
     get_pollable_video_statuses,
+    get_profile_request_cost_units,
     get_submission_video_status,
 )
 from app.features.videos import handlers as video_handlers
@@ -47,7 +51,7 @@ def test_resolve_video_submission_plan_routes_duration_tier_to_veo_extended():
 
     assert plan["provider"] == "veo_3_1"
     assert plan["seconds"] == 16
-    assert plan["provider_target_seconds"] == 18
+    assert plan["provider_target_seconds"] == 15
     assert plan["resolution"] == "720p"
     assert plan["requested_aspect_ratio"] == "9:16"
     assert plan["provider_aspect_ratio"] == "9:16"
@@ -80,7 +84,7 @@ def test_build_submission_metadata_initializes_extension_chain():
 
     assert metadata["target_length_tier"] == 32
     assert metadata["video_pipeline_route"] == "veo_extended"
-    assert metadata["provider_target_seconds"] == 32
+    assert metadata["provider_target_seconds"] == 29
     assert metadata["generated_seconds"] == 0
     assert metadata["operation_ids"] == ["operations/abc"]
     assert metadata["requested_aspect_ratio"] == "9:16"
@@ -165,7 +169,7 @@ def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():
 
     assert plan["duration_routed"] is True
     assert plan["provider"] == "veo_3_1"
-    assert plan["profile"].veo_extension_hops == 4
+    assert plan["profile"].veo_extension_hops == 3
     assert plan["resolution"] == "720p"
 
     metadata = video_handlers._build_submission_metadata(
@@ -217,6 +221,39 @@ def test_submit_video_request_passes_explicit_veo_duration_seconds(monkeypatch):
 
     assert captured["duration_seconds"] == 4
     assert result["operation_id"] == "operations/test"
+
+
+def test_efficient_long_route_profiles_are_default_and_can_opt_out(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_enable_efficient_long_route", True)
+
+    profile_16 = get_duration_profile(16)
+    profile_32 = get_duration_profile(32)
+    metadata_32 = build_seed_duration_metadata(profile_32)
+
+    assert settings.veo_enable_efficient_long_route is True
+    assert profile_16.provider_target_seconds == 15
+    assert profile_16.veo_base_seconds == 8
+    assert profile_16.veo_extension_hops == 1
+    assert profile_32.provider_target_seconds == 29
+    assert profile_32.veo_base_seconds == 8
+    assert profile_32.veo_extension_hops == 3
+    assert metadata_32["veo_base_seconds"] == 8
+    assert metadata_32["veo_extension_hops"] == 3
+    assert get_profile_request_cost_units(profile_16) == 2
+    assert get_profile_request_cost_units(profile_32) == 4
+
+    monkeypatch.setattr(settings, "veo_enable_efficient_long_route", False)
+
+    legacy_16 = get_duration_profile(16)
+    legacy_32 = get_duration_profile(32)
+
+    assert legacy_16.provider_target_seconds == 18
+    assert legacy_16.veo_base_seconds == 4
+    assert legacy_16.veo_extension_hops == 2
+    assert legacy_32.provider_target_seconds == 32
+    assert legacy_32.veo_base_seconds == 4
+    assert legacy_32.veo_extension_hops == 4
 
 
 def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):

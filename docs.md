@@ -62,7 +62,7 @@ flowchart TD
 - It reads only audited family coverage.
 - If coverage is short, the batch returns `coverage_pending`.
 - The batch scheduler/handler queues warmup and audit promotion in the background.
-- Selection only reuses `audit_status='pass'` coverage.
+- Selection only reuses `audit_status='pass'` coverage and only if `use_count == 0`; once a script has been used for a post it is one-and-done, and any future reuse must come from a fresh variant in the same family.
 
 ### 7. Script writing
 - Script generation happens during research.
@@ -76,6 +76,7 @@ flowchart TD
 - Persistence stores provisional families and pending scripts.
 - Audit promotes scripts after persistence.
 - Retrieval consumes only `pass` coverage.
+- Used scripts are never selected again for another post; family reuse is allowed only through fresh unused variants.
 - No batch path should depend on a live audit loop.
 
 ## Where To Look In Code

@@ -36,6 +36,7 @@ from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
     count_selectable_topic_families,
+    delete_topic_script,
     create_post_for_batch,
     get_posts_by_batch,
     list_topic_suggestions,
@@ -1230,27 +1231,29 @@ async def scripts_drawer_endpoint(request: Request, topic_id: str):
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
     scripts = _get_scripts(topic_id)
+    response = _render_scripts_drawer(request=request, topic=topic, scripts=scripts)
+    response.headers["HX-Trigger"] = "open-scripts-drawer"
+    return response
 
-    # Group scripts by tier, sort by created_at descending within each
-    tier_groups = {}
+
+def _render_scripts_drawer(*, request: Request, topic: Dict[str, Any], scripts: List[Dict[str, Any]]):
+    tier_groups: Dict[int, List[Dict[str, Any]]] = {}
     for script in scripts:
-        tier = script.get("target_length_tier", 0)
+        tier = int(script.get("target_length_tier", 0) or 0)
         tier_groups.setdefault(tier, []).append(script)
     for tier_scripts in tier_groups.values():
         tier_scripts.sort(key=lambda s: s.get("created_at", ""), reverse=True)
 
-    # Build ordered list of non-empty tier groups
-    grouped = []
+    grouped: List[Dict[str, Any]] = []
     for tier in [8, 16, 32]:
         if tier in tier_groups:
             grouped.append({"tier": tier, "scripts": tier_groups.pop(tier)})
-    # Include any scripts with unexpected tiers
     for tier, tier_scripts in sorted(tier_groups.items()):
         if tier_scripts:
             grouped.append({"tier": tier, "scripts": tier_scripts})
 
     templates = Jinja2Templates(directory="templates")
-    response = templates.TemplateResponse(
+    return templates.TemplateResponse(
         "topics/partials/scripts_drawer.html",
         {
             "request": request,
@@ -1259,6 +1262,21 @@ async def scripts_drawer_endpoint(request: Request, topic_id: str):
             "total_scripts": len(scripts),
         },
     )
+
+
+@router.post("/scripts/{script_id}/delete")
+async def delete_topic_script_endpoint(request: Request, script_id: str):
+    """Delete a topic script and refresh the drawer UI."""
+    topic_id = delete_topic_script(script_id=script_id)
+    if not topic_id:
+        raise HTTPException(status_code=409, detail="Used scripts cannot be deleted")
+    from app.features.topics.queries import get_topic_registry_by_id as _get_topic, get_topic_scripts_for_registry as _get_scripts
+
+    topic = _get_topic(topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    scripts = _get_scripts(topic_id)
+    response = _render_scripts_drawer(request=request, topic=topic, scripts=scripts)
     response.headers["HX-Trigger"] = "open-scripts-drawer"
     return response
 
