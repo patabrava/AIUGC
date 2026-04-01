@@ -223,7 +223,7 @@ Our codebase already uses `submit_video_extension()` for 16/32-second videos. Th
 
 ### Short-term (code changes)
 
-- [ ] Add `seed` parameter to `submit_video_generation()` — use consistent seed per batch
+- [x] **Add `seed` parameter to VEO calls** — Implemented 2026-04-01 (commit `5466a5e`). See details below.
 - [ ] Implement image-to-video (first frame) pipeline:
   1. Generate canonical character portrait via Imagen 3 during batch setup
   2. Store portrait in Supabase storage
@@ -235,6 +235,30 @@ Our codebase already uses `submit_video_extension()` for 16/32-second videos. Th
 - [ ] Wire up existing `reference_images` stub in `veo_client.py`
 - [ ] Generate 2-3 canonical character portraits (front, 3/4, profile) per batch
 - [ ] Pass as `referenceType: "asset"` with every generation request
+
+---
+
+## Completed Changes
+
+### Seed Parameter Integration (2026-04-01, commit `5466a5e`)
+
+Threaded a `uint32` seed through all VEO video generation and extension calls to reduce cross-clip variance.
+
+**What was changed:**
+
+| File | Change |
+|---|---|
+| `app/adapters/veo_client.py` | Added optional `seed: int` param to `submit_video_generation()` and `submit_video_extension()`. When provided, included as `parameters.seed` in the API payload. |
+| `app/features/videos/handlers.py` | Single-video handler generates a random seed per request. Batch handler generates one seed shared across all posts in the batch. Seed stored in `video_metadata["veo_seed"]` for reuse by extensions. Seed passed to `record_prompt_audit()`. |
+| `app/features/videos/prompt_audit.py` | Added optional `seed` field to audit record. Stored in `video_prompt_audit` table so RAI retries reuse the original seed. |
+| `workers/video_poller.py` | RAI retries read `audit["seed"]` and pass it back. Extension hops read `metadata["veo_seed"]` and pass it through. |
+| `supabase/migrations/024_add_seed_to_video_prompt_audit.sql` | Adds `seed bigint` column to `video_prompt_audit` table. |
+
+**Seed lifecycle:**
+1. Generated once at submission time (`random.randint(0, 2**32 - 1)`)
+2. Sent to VEO API in `parameters.seed`
+3. Stored in `video_metadata["veo_seed"]` (for extensions) and `video_prompt_audit.seed` (for RAI retries)
+4. Reused by all extension hops and retry attempts for the same post
 
 ---
 
