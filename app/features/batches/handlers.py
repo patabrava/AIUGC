@@ -37,6 +37,7 @@ from app.features.topics.handlers import discover_topics_for_batch
 from app.features.topics.handlers import (
     get_seeding_events,
     get_seeding_progress,
+    has_required_family_coverage,
     is_batch_discovery_active,
     schedule_batch_discovery,
     start_seeding_interaction,
@@ -639,16 +640,33 @@ async def get_batch_status(batch_id: str):
         if (
             batch["state"] == BatchState.S1_SETUP.value
             and posts_summary["posts_count"] == 0
-            and (progress is None or progress.get("stage") in {"failed", "completed"})
             and not is_batch_discovery_active(batch_id)
         ):
-            start_seeding_interaction(
-                batch_id=batch["id"],
-                brand=batch["brand"],
-                expected_posts=sum((batch.get("post_type_counts") or {}).values()),
-            )
-            schedule_batch_discovery(batch_id, reason="status_recovery")
-            progress = get_seeding_progress(batch_id)
+            if progress is None or progress.get("stage") in {"failed", "completed"}:
+                start_seeding_interaction(
+                    batch_id=batch["id"],
+                    brand=batch["brand"],
+                    expected_posts=sum((batch.get("post_type_counts") or {}).values()),
+                )
+                schedule_batch_discovery(batch_id, reason="status_recovery")
+                progress = get_seeding_progress(batch_id)
+            elif progress.get("stage") == "coverage_pending" and has_required_family_coverage(batch):
+                progress = update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="booting",
+                    stage_label="Audited family coverage ready",
+                    detail_message="Audited family coverage is now sufficient. Resuming topic generation.",
+                    posts_created=posts_summary["posts_count"],
+                    expected_posts=sum((batch.get("post_type_counts") or {}).values()),
+                    current_post_type=None,
+                    attempt=None,
+                    max_attempts=None,
+                    is_retrying=False,
+                    retry_message=None,
+                )
+                schedule_batch_discovery(batch_id, reason="coverage_recovery")
+                progress = get_seeding_progress(batch_id) or progress
 
         payload = {
             "id": batch["id"],
