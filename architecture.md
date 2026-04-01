@@ -56,20 +56,23 @@ State definitions live in [app/core/states.py](/Users/camiloecheverri/Documents/
 
 ## 4. Topic + Script Generation
 
-Two-phase generation:
+Current family-first flow:
 
-1. research dossier generation (`PROMPT_1` family)
-2. script generation (`PROMPT_2` family, tier-native `8/16/32`)
+1. Seed selection pulls from the YAML topic bank using usage-aware ranking.
+2. Topic research runs on a seed topic and writes a provisional family plus `pending` scripts.
+3. `workers/audit_worker.py` audits pending scripts asynchronously.
+4. Passing scripts promote their owning family to `active`.
+5. Batch seeding reuses only `pass`-audited family coverage and returns `coverage_pending` when the bank is short.
 
 Current design uses:
 
-- topic parent bank: `public.topic_registry`
-- script variant rows: `public.topic_scripts` (canonical script store)
+- topic parent bank: `public.topic_registry` as the canonical family registry
+- script variant rows: `public.topic_scripts`
 
 Important behavior:
 
-- exact-tier reuse is preferred
-- missing tier is generated from stored dossier before new deep research
+- exact-tier reuse is preferred from audited families
+- missing coverage does not trigger inline audit during batch setup
 - hook-bank context is injected separately from topic seed context
 
 Core modules:
@@ -131,7 +134,8 @@ Notes:
 
 - `posts.seed_data` is the per-post script/review payload
 - `posts.video_metadata` stores provider/storage diagnostics
-- `topic_scripts` is the primary script-quality and traceability surface
+- `topic_scripts` stores script variants plus audit state (`pending`, `pass`, `needs_repair`, `reject`)
+- `topic_registry` stores family identity and lifecycle state (`provisional`, `active`, `quarantined`, `merged`)
 
 ## 8. UI Surface
 

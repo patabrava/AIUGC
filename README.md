@@ -10,6 +10,11 @@ Current social publishing support:
 - TikTok sandbox OAuth plus manual draft upload in `S7_PUBLISH_PLAN`
 - TikTok direct posting via `video.publish` is not implemented yet
 
+Current topic system support:
+- Family-first topic bank with canonical `topic_registry` rows
+- Async audit worker that promotes `pending` scripts into `pass` coverage
+- Batch seeding reuses audited families only and returns `coverage_pending` when the bank is short
+
 ## Quick Start
 
 ### Prerequisites
@@ -213,11 +218,16 @@ Each feature phase has a whole-app testscript that:
 - Re-verifies all prior phases (regression guard)
 - Provides explicit pass/fail criteria
 
+Current topic-flow reference:
+- [`docs.md`](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/docs.md)
+- [`agents/topic_system_flow.md`](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/agents/topic_system_flow.md)
+
 ## Documentation
 
 - **CANON.md** - Complete system specification
 - **IMPLEMENTATION_GUIDE.md** - Phase-by-phase implementation guide
 - **constitution.md** - Development rules and best practices
+- **docs.md** - Current topic research / audit / seeding flow
 - **docs/PHASE3_SETUP.md** - Phase 3 setup and usage guide
 - **PROGRESS.md** - Current implementation status
 
