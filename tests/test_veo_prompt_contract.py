@@ -55,6 +55,8 @@ def test_video_prompt_and_update_request_roundtrip_editable_fields():
         ending_directive="She rests.",
         audio_block="Audio block",
     )
+    assert "The camera is stable" in prompt.cinematography
+    assert "handheld but stable" not in prompt.cinematography
     restored = VideoPrompt.model_validate(prompt.model_dump())
     assert restored.audio.dialogue == "Hallo Welt"
     assert restored.ending_directive == "She rests."

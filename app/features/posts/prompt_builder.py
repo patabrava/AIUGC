@@ -69,7 +69,9 @@ VEO_NEGATIVE_PROMPT = (
     "subtitles, captions, watermark, text overlays, words on screen, logos, branding, poor lighting, "
     "blurry footage, low resolution, unwanted objects, character inconsistency, lip-sync drift, "
     "cartoon styling, unrealistic proportions, distorted hands, artificial lighting, oversaturation, "
-    "excessive camera shake, background voices, music bed, audio hiss, static, clipping, abrupt cuts, angle changes"
+    "excessive camera shake, background voices, music bed, audio hiss, static, clipping, abrupt cuts, angle changes, "
+    "mirror appearing or disappearing, layout changes, background drift, new furniture, extra plants, wall color change, "
+    "bedding color change, different room, lighting shift"
 )
 
 OPTIMIZED_PROMPT_TEMPLATE = (
@@ -109,14 +111,15 @@ DEFAULT_STYLE = (
 )
 
 DEFAULT_SCENE = (
-    "A modern, tidy bedroom with blush-pink walls and minimal decor. Bright soft vanity light "
-    "and natural daylight from camera-right create an even, flattering indoor look. The "
-    "wheelchair is partially visible in the frame."
+    "A tidy modern bedroom with soft blush-pink walls, a white bed with warm beige bedding, and "
+    "one warm bedside lamp on a small nightstand at camera-left. Bright soft vanity light and "
+    "natural daylight from camera-right create an even, flattering indoor look. The wheelchair is "
+    "partially visible in the frame. The room is uncluttered and visually stable across shots."
 )
 
 DEFAULT_CINEMATOGRAPHY = (
     "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
-    "distance. The camera is handheld but stable, with only minimal natural movement. The "
+    "distance. The camera is stable, with only minimal natural movement. The "
     "framing remains consistent throughout the shot without noticeable camera drift or "
     "reframing."
 )

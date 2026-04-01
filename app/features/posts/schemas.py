@@ -36,7 +36,7 @@ class VideoPrompt(BaseModel):
         description="Scene setup"
     )
     cinematography: str = Field(
-        default="Cinematography: Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie distance. The camera is handheld but stable, with only minimal natural movement. The framing remains consistent throughout the shot without noticeable camera drift or reframing.",
+        default="Cinematography: Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie distance. The camera is stable, with only minimal natural movement. The framing remains consistent throughout the shot without noticeable camera drift or reframing.",
         description="Cinematography notes"
     )
     lighting: str = Field(
@@ -52,7 +52,7 @@ class VideoPrompt(BaseModel):
         description="Resolution and aspect ratio"
     )
     camera_positioning_and_motion: str = Field(
-        default="Camera positioning & movement: Front-facing smartphone camera at natural selfie distance, handheld but stable. Minor natural movement typical of a person holding a phone, without noticeable drift or framing changes.",
+        default="Camera positioning & movement: Front-facing smartphone camera at natural selfie distance, stable. Minor natural movement typical of a person holding a phone, without noticeable drift or framing changes.",
         description="Camera positioning"
     )
     composition: str = Field(
