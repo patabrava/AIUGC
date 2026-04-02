@@ -7,6 +7,7 @@ Per Canon Phase 3: S4_SCRIPTED → S5_PROMPTS_BUILT
 import re
 from typing import Dict, Any, Optional
 
+from app.features.posts.prompt_defaults import DEFAULT_SCENE_BODY
 from app.features.posts.schemas import VideoPrompt, AudioSection
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
@@ -108,13 +109,6 @@ DEFAULT_CHARACTER = (
 DEFAULT_STYLE = (
     "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
     "soft flattering indoor light, and natural skin texture."
-)
-
-DEFAULT_SCENE = (
-    "A tidy modern bedroom with soft blush-pink walls, a white bed with warm beige bedding, and "
-    "one warm bedside lamp on a small nightstand at camera-left. Bright soft vanity light and "
-    "natural daylight from camera-right create an even, flattering indoor look. The wheelchair is "
-    "partially visible in the frame. The room is uncluttered and visually stable across shots."
 )
 
 DEFAULT_CINEMATOGRAPHY = (
@@ -298,7 +292,7 @@ def build_optimized_prompt(
         character=(character or DEFAULT_CHARACTER).strip(),
         style=(style or DEFAULT_STYLE).strip(),
         action_direction=(action or contract["action_direction"]).strip(),
-        scene=(scene or DEFAULT_SCENE).strip(),
+        scene=(scene or DEFAULT_SCENE_BODY).strip(),
         cinematography=(cinematography or DEFAULT_CINEMATOGRAPHY).strip(),
         dialogue=cleaned_dialogue,
         ending=(ending or contract["ending_directive"]).strip(),

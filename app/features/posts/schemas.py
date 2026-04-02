@@ -7,6 +7,8 @@ Per Constitution § II: Validated Boundaries
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
+from app.features.posts.prompt_defaults import DEFAULT_SCENE
+
 
 class AudioSection(BaseModel):
     """Audio section for video prompt."""
@@ -32,7 +34,7 @@ class VideoPrompt(BaseModel):
         description="Visual style"
     )
     scene: str = Field(
-        default="Scene: The woman is sitting on a wheelchair in a brightly lit modern bedroom with pink walls. Clean, minimal décor. Natural daylight streams through an unseen window camera-right, supplemented by soft ambient lighting creating even, flattering illumination across the space. The wheelchair is partially visible in the frame.",
+        default=DEFAULT_SCENE,
         description="Scene setup"
     )
     cinematography: str = Field(

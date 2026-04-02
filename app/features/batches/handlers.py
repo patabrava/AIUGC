@@ -23,6 +23,8 @@ from app.features.batches.schemas import (
     ArchiveBatchRequest,
     PostDetail,
 )
+from app.features.posts.prompt_defaults import DEFAULT_SCENE, LEGACY_SCENE
+from app.features.posts.prompt_builder import build_video_prompt_from_seed
 from app.features.batches.queries import (
     create_batch,
     get_batch_by_id,
@@ -78,6 +80,17 @@ def _wants_html(request: Request) -> bool:
 def _is_hx_history_restore_request(request: Request) -> bool:
     """Detect HTMX back/forward restoration requests that must receive a full document."""
     return request.headers.get("HX-History-Restore-Request", "").lower() == "true"
+
+
+def _refresh_prompt_scene_for_display(video_prompt: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Refresh legacy generated scene text for UI display without mutating stored rows."""
+    if not video_prompt:
+        return video_prompt
+    if video_prompt.get("scene") != LEGACY_SCENE:
+        return video_prompt
+    refreshed = dict(video_prompt)
+    refreshed["scene"] = DEFAULT_SCENE
+    return refreshed
 
 
 @router.post("", response_model=SuccessResponse, status_code=status.HTTP_201_CREATED)
@@ -505,6 +518,17 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                         post_id=p.get("id")
                     )
                     video_prompt = None
+            video_prompt = _refresh_prompt_scene_for_display(video_prompt)
+
+            if not video_prompt and normalized_seed:
+                try:
+                    video_prompt = build_video_prompt_from_seed(normalized_seed)
+                except Exception as exc:
+                    logger.warning(
+                        "video_prompt_preview_rebuild_failed",
+                        post_id=p.get("id"),
+                        error=str(exc),
+                    )
 
             video_metadata = p.get("video_metadata")
             if isinstance(video_metadata, str):

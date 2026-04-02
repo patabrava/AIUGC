@@ -4,6 +4,7 @@ import os
 import pytest
 
 from app.features.posts.prompt_builder import build_video_prompt_from_seed, split_dialogue_sentences, build_optimized_prompt
+from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE
 from app.features.posts.schemas import AudioSection, UpdatePromptRequest, VideoPrompt
 
 
@@ -47,6 +48,27 @@ def test_build_optimized_prompt_supports_custom_sections():
     assert "Studio recording with boom mic." in result
     assert "Test dialogue." in result
     assert "38-year-old German woman" not in result
+
+
+def test_scene_default_is_shared_between_schema_and_prompt_builder():
+    assert DEFAULT_SCENE.startswith("Scene: ")
+    assert DEFAULT_SCENE_BODY in DEFAULT_SCENE
+    assert VideoPrompt.model_fields["scene"].default == DEFAULT_SCENE
+
+    prompt = build_video_prompt_from_seed({"script": "Beispielsatz."})
+    assert prompt["scene"] == DEFAULT_SCENE
+
+
+def test_legacy_scene_is_refreshed_for_display_only():
+    from app.features.batches.handlers import _refresh_prompt_scene_for_display
+
+    refreshed = _refresh_prompt_scene_for_display({"scene": LEGACY_SCENE, "style": "kept"})
+    assert refreshed is not None
+    assert refreshed["scene"] == DEFAULT_SCENE
+    assert refreshed["style"] == "kept"
+
+    custom_scene = {"scene": "Scene: A custom attic studio."}
+    assert _refresh_prompt_scene_for_display(custom_scene) is custom_scene
 
 
 def test_video_prompt_and_update_request_roundtrip_editable_fields():

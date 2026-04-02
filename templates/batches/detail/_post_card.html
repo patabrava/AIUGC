@@ -196,7 +196,7 @@
                 ] %}
                 <div x-data="promptModalComponent('{{ post.id }}')" data-prompt-json='{{ prompt|tojson|e }}' class="relative">
                     <div class="text-sm text-gray-700 space-y-2">
-                        <p class="font-semibold text-gray-900">Prompt Snapshot</p>
+                        <p class="font-semibold text-gray-900">Current Prompt</p>
                         {% for title, value in prompt_sections %}
                         <div>
                             <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">{{ title }}</p>
