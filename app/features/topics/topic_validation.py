@@ -31,7 +31,7 @@ PROMPT2_DIALOG_WORD_BOUNDS = {
 }
 
 PROMPT1_WORD_BOUNDS = {
-    8: (12, 15),
+    8: (14, 18),
     16: (26, 36),
     32: (54, 74),
 }
@@ -461,23 +461,48 @@ def validate_pre_persistence_topic_payload(
         addon_source = normalized.get("source_summary") or normalized.get("caption") or ""
         addon = sanitize_spoken_fragment(addon_source, ensure_terminal=False)
         addon = addon.rstrip(".!?").strip()
+        repair_suffixes: List[str] = []
         if addon:
-            repaired = f"{script.rstrip('.!?')}, {addon}."
-            repaired = sanitize_spoken_fragment(repaired, ensure_terminal=True)
-            repaired_words = _script_word_count(repaired)
-            if repaired_words < min_words:
-                # Deterministic filler to avoid clipped 8s fragments without inventing new facts.
-                lowered = repaired.lower()
-                if "ganz konkret" not in lowered:
-                    repaired = sanitize_spoken_fragment(repaired.rstrip(".!?") + " ganz konkret.", ensure_terminal=True)
-                    repaired_words = _script_word_count(repaired)
-                    lowered = repaired.lower()
-                if repaired_words < min_words and "im alltag" not in lowered:
-                    repaired = sanitize_spoken_fragment(repaired.rstrip(".!?") + " im Alltag.", ensure_terminal=True)
-                    repaired_words = _script_word_count(repaired)
-            if repaired_words >= word_count:
-                script = repaired
-                word_count = repaired_words
+            addon_words = addon.split()
+            addon_variants: List[str] = []
+            for limit in (6, 5, 4, 3):
+                clause = " ".join(addon_words[:limit]).strip()
+                if clause and clause not in addon_variants:
+                    addon_variants.append(clause)
+            if addon not in addon_variants:
+                addon_variants.insert(0, addon)
+            for clause in addon_variants:
+                if clause not in repair_suffixes:
+                    repair_suffixes.append(clause)
+                for generic in (
+                    "ganz konkret",
+                    "im Alltag",
+                    "für dich",
+                    "ganz konkret im Alltag",
+                    "ganz konkret im Alltag für dich",
+                ):
+                    combined = f"{clause} {generic}".strip()
+                    if combined not in repair_suffixes:
+                        repair_suffixes.append(combined)
+        repair_suffixes.extend(
+            [
+                "ganz konkret",
+                "im Alltag",
+                "für dich",
+                "ganz konkret im Alltag",
+                "ganz konkret im Alltag für dich",
+            ]
+        )
+        for clause in repair_suffixes:
+            for separator in (", ", " "):
+                repaired = sanitize_spoken_fragment(f"{script.rstrip('.!?')}{separator}{clause}.", ensure_terminal=True)
+                repaired_words = _script_word_count(repaired)
+                if min_words <= repaired_words <= max_words and repaired_words >= word_count:
+                    script = repaired
+                    word_count = repaired_words
+                    break
+            if min_words <= word_count <= max_words:
+                break
 
     if word_count < min_words or word_count > max_words:
         raise ValidationError(

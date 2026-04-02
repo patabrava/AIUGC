@@ -162,6 +162,47 @@ def test_topics_hub_delete_script_endpoint_blocks_used_scripts(monkeypatch):
     assert "Used scripts cannot be deleted" in response.text
 
 
+def test_persist_topic_bank_row_applies_shared_quality_gate(monkeypatch):
+    captured = {}
+
+    def fake_store_topic_bank_entry(**kwargs):
+        captured.update(kwargs)
+        return {
+            "id": "topic-1",
+            "title": kwargs["title"],
+            "topic_research_dossier_id": "dossier-1",
+        }
+
+    monkeypatch.setattr(topic_hub, "_build_script_variants", lambda **kwargs: [])
+    monkeypatch.setattr(topic_hub, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    monkeypatch.setattr(topic_hub, "upsert_topic_script_variants", lambda **kwargs: [])
+
+    topic_hub._persist_topic_bank_row(
+        title="MSZ — Hilfe",
+        target_length_tier=8,
+        research_dossier={
+            "topic": "MSZ — Hilfe",
+            "source_summary": "Ab 2025 gilt die Hilfe am Bahnhof.",
+            "disclaimer": "Keine Rechts- oder Medizinberatung.",
+        },
+        prompt1_item=SimpleNamespace(
+            script="Ab 2025 gibt es endlich Hilfe — und du sparst im Alltag Stress.",
+            caption="MSZ — Hilfe am Bahnhof.",
+            source_summary="Ab 2025 gilt die Hilfe am Bahnhof.",
+            disclaimer="Keine Rechts- oder Medizinberatung.",
+        ),
+        dialog_scripts=None,
+        post_type="value",
+        seed_payload={},
+        variants=[],
+    )
+
+    assert "—" not in captured["title"]
+    assert "—" not in captured["topic_script"]
+    assert "Ab 2025" not in captured["topic_script"]
+    assert "Seit 2025" in captured["topic_script"]
+
+
 def test_topics_launch_endpoint_returns_json(monkeypatch):
     async def fake_launch_topic_research_run(**kwargs):
         return {

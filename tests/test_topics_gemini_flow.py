@@ -1303,3 +1303,41 @@ Barrierefreiheit scheitert im Alltag oft an kleinen Details wie Schwellen, Türb
     ]
     assert scripts.testimonial == [scripts.problem_agitate_solution[0]]
     assert scripts.transformation == [scripts.problem_agitate_solution[0]]
+
+
+def test_generate_topic_script_candidate_applies_shared_quality_gate():
+    from app.features.topics.research_runtime import generate_topic_script_candidate
+
+    class FakeLLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            return "Ab 2025 gibt es endlich Hilfe — und du sparst im Alltag spürbar Stress."
+
+    item = generate_topic_script_candidate(
+        post_type="value",
+        target_length_tier=8,
+        dossier={
+            "topic": "MSZ — Hilfe",
+            "seed_topic": "MSZ — Hilfe",
+            "source_summary": "Ab 2025 gilt die Hilfe am Bahnhof.",
+            "facts": ["Ab 2025 gilt die Hilfe am Bahnhof."],
+            "risk_notes": [],
+            "framework_candidates": ["PAL"],
+            "sources": [],
+        },
+        lane_candidate={
+            "title": "MSZ — Hilfe",
+            "source_summary": "Ab 2025 gilt die Hilfe am Bahnhof.",
+            "facts": ["Ab 2025 gilt die Hilfe am Bahnhof."],
+            "risk_notes": [],
+            "framework_candidates": ["PAL"],
+        },
+        llm_factory=lambda: FakeLLM(),
+    )
+
+    assert "—" not in item.topic
+    assert "—" not in item.script
+    assert "—" not in item.caption
+    assert "—" not in item.source_summary
+    assert "Ab 2025" not in item.script
+    assert "Seit 2025" in item.script
+    assert 14 <= len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", item.script)) <= 18

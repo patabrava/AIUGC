@@ -33,7 +33,7 @@ from app.features.topics.queries import (
     upsert_topic_script_variants,
 )
 from app.features.topics.seed_builders import build_research_seed_data
-from app.features.topics.topic_validation import sanitize_metadata_text, sanitize_spoken_fragment
+from app.features.topics.topic_validation import sanitize_metadata_text, sanitize_spoken_fragment, validate_pre_persistence_topic_payload
 
 logger = get_logger(__name__)
 
@@ -134,6 +134,23 @@ def _fetch_all_script_counts() -> Dict[str, int]:
         return {}
     counts: Dict[str, int] = {}
     for script in all_scripts:
+        rid = str(script.get("topic_registry_id") or "")
+        counts[rid] = counts.get(rid, 0) + 1
+    return counts
+
+
+def _fetch_used_script_counts() -> Dict[str, int]:
+    """Fetch usage counts for all scripts in a single query."""
+    from app.features.topics.queries import _fetch_topic_script_rows
+    try:
+        all_scripts = _fetch_topic_script_rows()
+    except Exception as exc:
+        logger.warning("topic_script_usage_counts_unavailable", error=str(exc))
+        return {}
+    counts: Dict[str, int] = {}
+    for script in all_scripts:
+        if int(script.get("use_count") or 0) <= 0:
+            continue
         rid = str(script.get("topic_registry_id") or "")
         counts[rid] = counts.get(rid, 0) + 1
     return counts
@@ -576,10 +593,12 @@ def build_topic_hub_payload(request) -> Dict[str, Any]:
     fresh_cutoff = datetime.now(timezone.utc) - _TOPIC_NEW_WINDOW
     generated_topics.sort(key=lambda row: _generated_topic_sort_key(row, fresh_cutoff))
     script_counts = _fetch_all_script_counts()
+    used_script_counts = _fetch_used_script_counts()
     generated_topics = [
         {
             **topic,
             "script_count": _count_topic_scripts(str(topic["id"]), script_counts),
+            "used_script_count": int(used_script_counts.get(str(topic["id"]), 0) or 0),
             "is_new": bool((_parse_utc_timestamp(topic.get("last_harvested_at") or topic.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= fresh_cutoff),
         }
         for topic in generated_topics
@@ -876,9 +895,21 @@ def _persist_topic_bank_row(
         dialog_scripts=dialog_scripts,
         seed_payload=seed_payload,
     )
+    normalized_payload = validate_pre_persistence_topic_payload(
+        {
+            "topic": title,
+            "title": title,
+            "script": prompt1_item.script,
+            "caption": getattr(prompt1_item, "caption", "") or getattr(prompt1_item, "source_summary", ""),
+            "source_summary": getattr(prompt1_item, "source_summary", "") or getattr(prompt1_item, "caption", ""),
+            "disclaimer": getattr(prompt1_item, "disclaimer", "") or research_dossier.get("disclaimer") or "Keine Rechts- oder medizinische Beratung.",
+        },
+        target_length_tier=target_length_tier,
+    )
+    normalized_title = sanitize_metadata_text(normalized_payload.get("title") or title, max_sentences=1, max_chars=400).rstrip(".!?")
     stored_row = store_topic_bank_entry(
-        title=title,
-        topic_script=sanitize_spoken_fragment(prompt1_item.script, ensure_terminal=True),
+        title=normalized_title or title,
+        topic_script=normalized_payload["script"],
         post_type=post_type,
         target_length_tier=target_length_tier,
         research_payload=research_dossier,

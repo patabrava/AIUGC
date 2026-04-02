@@ -45,6 +45,7 @@ from app.features.topics.topic_validation import (
     sanitize_metadata_text,
     sanitize_spoken_fragment,
     select_distinct_lane_candidates,
+    validate_pre_persistence_topic_payload,
     validate_spoken_copy_cleanliness,
 )
 
@@ -487,17 +488,36 @@ def generate_topic_script_candidate(
         return sanitize_spoken_fragment(compiled, ensure_terminal=True) if compiled else ""
 
     def _build_clean_item(*, script_text: str, metadata_summary: str) -> ResearchAgentItem:
-        cleaned_script = sanitize_spoken_fragment(script_text, ensure_terminal=True)
+        normalized_payload = validate_pre_persistence_topic_payload(
+            {
+                "topic": lane_title or sanitize_metadata_text(dossier_payload.get("topic") or "", max_sentences=1, max_chars=400) or "Thema",
+                "title": lane_title or sanitize_metadata_text(dossier_payload.get("topic") or "", max_sentences=1, max_chars=400) or "Thema",
+                "script": script_text,
+                "caption": metadata_summary or lane_caption or dossier_source_summary or script_text,
+                "source_summary": metadata_summary or lane_caption or dossier_source_summary or script_text,
+                "disclaimer": lane_payload.get("disclaimer")
+                or dossier_payload.get("disclaimer")
+                or "Keine Rechts- oder medizinische Beratung.",
+            },
+            target_length_tier=target_length_tier,
+        )
+        cleaned_script = normalized_payload["script"]
         if not cleaned_script:
             raise ValidationError(
                 message="PROMPT_1 script was empty after spoken-text sanitization",
                 details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
             )
-        cleaned_summary = sanitize_metadata_text(metadata_summary or lane_caption or dossier_source_summary, max_chars=500)
+        cleaned_summary = sanitize_metadata_text(
+            normalized_payload.get("source_summary") or metadata_summary or lane_caption or dossier_source_summary,
+            max_chars=500,
+        )
+        cleaned_topic = sanitize_metadata_text(normalized_payload.get("title") or lane_title or "", max_sentences=1, max_chars=400).rstrip(".!?")
+        cleaned_caption = sanitize_metadata_text(normalized_payload.get("caption") or cleaned_summary, max_chars=500)
+        cleaned_disclaimer = sanitize_metadata_text(normalized_payload.get("disclaimer") or "", max_sentences=1, max_chars=200)
         item = ResearchAgentItem(
-            topic=lane_title or sanitize_metadata_text(dossier_payload.get("topic") or "", max_sentences=1, max_chars=400) or "Thema",
+            topic=cleaned_topic or lane_title or sanitize_metadata_text(dossier_payload.get("topic") or "", max_sentences=1, max_chars=400).rstrip(".!?") or "Thema",
             script=cleaned_script,
-            caption=cleaned_summary,
+            caption=cleaned_caption,
             framework=framework_value,
             sources=(
                 [{"title": source_title or lane_title or str(dossier_payload.get("topic") or "Quelle"), "url": source_url}]
@@ -507,14 +527,7 @@ def generate_topic_script_candidate(
             source_summary=cleaned_summary,
             estimated_duration_s=max(1, min(profile.target_length_tier, estimate_script_duration_seconds(cleaned_script))),
             tone="direkt, freundlich, empowernd, du-Form",
-            disclaimer=sanitize_metadata_text(
-                lane_payload.get("disclaimer")
-                or dossier_payload.get("disclaimer")
-                or "Keine Rechts- oder medizinische Beratung.",
-                max_sentences=1,
-                max_chars=200,
-            )
-            or "Keine Rechts- oder medizinische Beratung.",
+            disclaimer=cleaned_disclaimer or "Keine Rechts- oder medizinische Beratung.",
         )
         if not item.sources and source_title and source_url:
             item.sources = [{"title": source_title, "url": source_url}]
