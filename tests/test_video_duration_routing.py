@@ -321,7 +321,7 @@ def test_prompt3_32s_template_uses_four_speech_blocks_language():
 
     prompt_text = prompt_path.read_text(encoding="utf-8")
 
-    assert "40-66 Woerter und vier natuerliche Sprechbloecke" in prompt_text
+    assert "32-66 Woerter und vier bis fuenf natuerliche Sprechbloecke" in prompt_text
     assert "5-6 Saetze" not in prompt_text
     assert "5-6-Satz-Scripttext" not in prompt_text
 

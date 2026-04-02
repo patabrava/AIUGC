@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.core.video_profiles import get_duration_profile
-from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2, build_prompt3, build_topic_research_prompt
+from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2, build_prompt3, build_topic_research_dossier_prompt, build_topic_research_prompt
 from app.features.topics.schemas import ProductKnowledgeEntry
 from app.features.topics import agents as topic_agents
 
@@ -85,7 +85,7 @@ def test_build_prompt2_uses_32s_text_template():
     )
 
     assert "32-Sekunden-UGC-Videos" in prompt
-    assert "40-66 Wörter" in prompt
+    assert "8-66 Wörter" in prompt
     assert "4 Sprechbloecke" in prompt
     assert "core:" not in prompt
 
@@ -125,8 +125,8 @@ def test_build_prompt3_uses_32s_text_template():
     prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(32))
 
     assert "32-Sekunden-UGC-Videos" in prompt
-    assert "40-66 Woerter" in prompt
-    assert "vier natuerlichen Sprechbloecken" in prompt
+    assert "32-66 Woerter" in prompt
+    assert "vier bis fuenf natuerlichen Sprechbloecken" in prompt
     assert "Antworte nicht in JSON" in prompt
     assert "LL12" in prompt
 
@@ -207,6 +207,17 @@ def test_prompt1_32s_contains_hook_mechanics():
     assert "HOOK-REGELN" in prompt
     assert "Scroll-Stopp" in prompt
     assert "TONALITAET" in prompt
+
+
+def test_build_topic_research_dossier_prompt_renders_current_date_context():
+    prompt = build_topic_research_dossier_prompt(
+        seed_topic="Barrierefreie Bahnreisen",
+        post_type="value",
+        target_length_tier=8,
+    )
+
+    assert "Heute ist April 2026." in prompt
+    assert "Ordne Fristen und Regelungen relativ zu 2026 ein." in prompt
 
 
 def test_prompt2_hook_prefixes_include_new_families():

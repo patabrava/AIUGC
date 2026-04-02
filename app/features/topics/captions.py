@@ -146,6 +146,83 @@ def _build_caption_prompt(
     )
 
 
+def _clean_caption_fact(fact: str) -> str:
+    cleaned = _normalize_line_breaks(fact)
+    if not cleaned:
+        return ""
+    if re.search(r"\b(?:community|forschung|dossier|source_context|recherche)\b", cleaned, flags=re.IGNORECASE):
+        return ""
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().rstrip(" .")
+    if len(cleaned) > 120:
+        cleaned = cleaned[:117].rstrip(" ,;:") + "..."
+    return cleaned
+
+
+def _fallback_caption_hashtags(topic_title: str, post_type: str, key: str) -> List[str]:
+    title = f"{topic_title} {post_type}".lower()
+    if "öpnv" in title or "opnv" in title:
+        base = ["#BarriereFreiheit", "#ÖPNV", "#Selbstbestimmt"]
+    elif post_type == "product":
+        base = ["#BarriereFreiheit", "#Mobilitaet", "#Alltagshilfe"]
+    elif "rollstuhl" in title:
+        base = ["#RollstuhlAlltag", "#BarriereFreiheit", "#Selbstbestimmt"]
+    else:
+        base = ["#BarriereFreiheit", "#Alltagshilfe", "#Selbstbestimmt"]
+
+    variant_tags = {
+        "curiosity": "#WasVieleNichtWissen",
+        "personal": "#DuKennstDas",
+        "provocative": "#Klartext",
+    }
+    tags = list(dict.fromkeys([variant_tags.get(key, ""), *base]))
+    return [tag for tag in tags if tag][:5]
+
+
+def _build_fallback_caption_variants(
+    *,
+    topic_title: str,
+    post_type: str,
+    script: str,
+    research_facts: List[str],
+    selected_key: str,
+) -> Dict[str, Any]:
+    fact = ""
+    for candidate in research_facts:
+        fact = _clean_caption_fact(candidate)
+        if fact:
+            break
+
+    fact_sentence = fact or "Kleine Huerden kosten im Alltag oft mehr Kraft, als man zuerst denkt"
+    lead_map = {
+        "curiosity": "Viele merken erst spaet, wie schnell kleine Huerden Energie fressen.",
+        "personal": "Wenn du unterwegs bist, zaehlt am Ende jede gesparte Kraft.",
+        "provocative": "Barrierefreiheit darf nicht erst wichtig werden, wenn es schon unbequem ist.",
+    }
+    cta_map = {
+        "curiosity": "Speicher dir das fuer spaeter.",
+        "personal": "Schick das an jemanden, der das kennt.",
+        "provocative": "Kommentier, wenn du das auch so siehst.",
+    }
+    variants: List[Dict[str, Any]] = []
+    for key in VARIANT_KEYS:
+        body = (
+            f"{lead_map[key]} {fact_sentence}. "
+            f"{cta_map[key]}\n\n"
+            f"{' '.join(_fallback_caption_hashtags(topic_title, post_type, key))}"
+        )
+        validated = validate_caption_variant(key, body, script, max_overlap=0.85)
+        variants.append(validated)
+
+    final_key = selected_key if selected_key in VARIANT_KEYS else VARIANT_KEYS[0]
+    selected_variant = next((item for item in variants if item["key"] == final_key), variants[0])
+    return {
+        "variants": variants,
+        "selected_key": selected_variant["key"],
+        "selected_body": selected_variant["body"],
+        "selection_reason": "local_fallback",
+    }
+
+
 def _parse_text_variants(raw: str) -> Dict[str, Any]:
     current_key: Optional[str] = None
     buffer: List[str] = []
@@ -294,7 +371,7 @@ def generate_caption_bundle(
     canonical_topic = str(canonical_topic or topic_title or "").strip()
     selected_key = select_caption_variant_key(topic_title=canonical_topic, post_type=post_type, script=script)
     script_hook = extract_script_hook(script)
-    facts = list(research_facts or [])
+    facts = sanitize_fact_fragments(list(research_facts or []))
     llm_factory = llm_factory or get_llm_client
     llm = llm_factory()
     prompt = _build_caption_prompt(
@@ -304,7 +381,7 @@ def generate_caption_bundle(
         script_hook=script_hook,
         research_facts=facts,
     )
-    last_error: Optional[ValidationError] = None
+    last_error: Optional[Any] = None
     for attempt in range(3):
         try:
             raw_text = llm.generate_gemini_text(
@@ -340,19 +417,37 @@ def generate_caption_bundle(
                 "selection_reason": "hash_variant",
                 "last_error": None,
             }
-        except ValidationError as exc:
+        except Exception as exc:
             last_error = exc
+            if isinstance(exc, ValidationError):
+                error_message = exc.message
+                error_details = str(exc.details)[:200]
+            else:
+                error_message = "Caption generation provider failure"
+                error_details = str(exc)[:200]
             logger.warning(
                 "caption_generation_retry",
                 topic_title=canonical_topic[:60],
                 attempt=attempt + 1,
-                error=exc.message,
-                details=str(exc.details)[:200],
+                error=error_message,
+                details=error_details,
             )
-            prompt = f"{prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, ensure_ascii=False)[:800]}"
-    raise ValidationError(
-        message="Caption generation failed after 3 attempts",
-        details={"topic_title": canonical_topic, "last_error": last_error.message if last_error else None},
+            if isinstance(exc, ValidationError):
+                prompt = f"{prompt}\n\nFEEDBACK: {exc.message}. Details: {json.dumps(exc.details, ensure_ascii=False)[:800]}"
+            continue
+    logger.warning(
+        "caption_generation_falling_back",
+        topic_title=canonical_topic[:60],
+        post_type=post_type,
+        selected_key=selected_key,
+        last_error=getattr(last_error, "message", str(last_error)) if last_error else None,
+    )
+    return _build_fallback_caption_variants(
+        topic_title=canonical_topic,
+        post_type=post_type,
+        script=script,
+        research_facts=facts,
+        selected_key=selected_key,
     )
 
 

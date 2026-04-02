@@ -86,7 +86,7 @@ def test_remove_script_review_marks_post_removed_and_returns_success(monkeypatch
 
     monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://localhost")
     response = client.put("/posts/post-1/script-review", data={"action": "removed"})
 
     assert response.status_code == 200, response.text
@@ -96,3 +96,46 @@ def test_remove_script_review_marks_post_removed_and_returns_success(monkeypatch
     assert storage["posts"][0]["seed_data"]["video_excluded"] is True
     assert storage["posts"][0]["video_prompt_json"] is None
     assert storage["posts"][0]["video_status"] == "pending"
+
+
+def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "seed_data": {
+                    "script": "Original script sentence.",
+                    "script_review_status": "approved",
+                },
+                "video_prompt_json": None,
+            }
+        ]
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.patch(
+        "/posts/post-1/prompt",
+        json={
+            "character": "Edited character",
+            "style": "Edited style",
+            "action": "Edited action",
+            "scene": "Edited scene",
+            "cinematography": "Edited cinematography",
+            "dialogue": "Edited dialogue.",
+            "ending": "Edited ending.",
+            "audio_block": "Edited audio block.",
+            "universal_negatives": "Edited universal negatives.",
+            "veo_negative_prompt": "Edited veo negatives.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    stored_prompt = storage["posts"][0]["video_prompt_json"]
+    assert stored_prompt is not None
+    assert stored_prompt["character"] == "Edited character"
+    assert stored_prompt["audio"]["dialogue"] == "Edited dialogue."
+    assert stored_prompt["optimized_prompt"]
+    assert stored_prompt["veo_prompt"]

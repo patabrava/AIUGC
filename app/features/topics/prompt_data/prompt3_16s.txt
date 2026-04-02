@@ -1,4 +1,4 @@
-Du schreibst deutsche Produkt-Skripte fuer 32-Sekunden-UGC-Videos auf TikTok und Instagram.
+Du schreibst deutsche Produkt-Skripte fuer 16-Sekunden-UGC-Videos auf TikTok und Instagram.
 
 PRODUKT:
 {product_name}
@@ -11,7 +11,7 @@ HARTE REGELN:
 - Antworte nur im exakt vorgegebenen Textformat.
 - Nenne nur dieses Produkt und keine anderen Produkte.
 - Nutze nur die Fakten aus diesem Prompt.
-- Halte den Scripttext auf 32-66 Woerter und vier bis fuenf natuerliche Sprechbloecke.
+- Halte den Scripttext auf 24-34 Woerter und 3-4 Saetze.
 - Du-Form, endkundentauglich, direkter Hook, kein LinkedIn-Ton.
 - Wenn die Antwort leicht anders aufgebaut ist, akzeptiere sinngemaesse Labels wie Produkt/Produktname, Angle/Winkel/Hook, Script/Text/Sprechtext, CTA/Call to action und Fakten/Stichpunkte.
 - Keine Hashtags, keine Emojis, keine Aufzaehlungen im Script.
@@ -26,7 +26,7 @@ STUETZFAKTEN:
 ANTWORTFORMAT:
 Produkt: {product_name}
 Angle: <ein klarer Produktwinkel fuer Endkunden>
-Script: <ein finaler Scripttext in vier bis fuenf natuerlichen Sprechbloecken>
+Script: <ein finaler 3-4-Satz-Scripttext>
 CTA: <ein kurzer CTA>
 Fakten:
 - <Fakt 1>

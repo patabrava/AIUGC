@@ -83,6 +83,30 @@ def test_generate_lifestyle_topics_retries_when_request_level_script_shape_repea
     assert call_index["value"] == 3
 
 
+def test_generate_lifestyle_topics_skips_validation_errors_and_continues(monkeypatch):
+    call_state = {"value": 0}
+
+    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
+        call_state["value"] += 1
+        if call_state["value"] == 1:
+            raise ValidationError(
+                message="PROMPT_2 generation failed after text normalization",
+                details={"topic": topic},
+            )
+        script = "Dieser Alltagstipp spart dir auf Dauer Kraft und macht deinen Weg spuerbar leichter."
+        return _dialog_scripts(
+            script,
+            description=f"Ausführliche Lifestyle-Beschreibung für {topic} mit genug Kontext.",
+        )
+
+    monkeypatch.setattr(topic_agents, "generate_dialog_scripts", fake_generate_dialog_scripts)
+
+    generated = topic_agents.generate_lifestyle_topics(count=2, seed=19)
+
+    assert len(generated) == 2, generated
+    assert call_state["value"] >= 3, call_state
+
+
 def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_template_titles(monkeypatch):
     created_posts = []
     registry_rows = []
@@ -197,6 +221,109 @@ def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_tem
     assert len(stored_bank_entries) == 4, stored_bank_entries
 
 
+def test_discover_topics_synthesizes_lifestyle_fallbacks_when_generation_is_sparse(monkeypatch):
+    created_posts = []
+    stored_bank_entries = []
+
+    batch = {
+        "id": "batch-lifestyle-fallback",
+        "brand": "Lifestyle Fallback Fixture",
+        "state": "S1_SETUP",
+        "post_type_counts": {"value": 0, "lifestyle": 4, "product": 0},
+    }
+
+    generated = [
+        {
+            "title": "Spontane Freizeit braucht oft mehr Planung als man denkt",
+            "template_title": "Spontane Freizeit braucht oft mehr Planung als man denkt",
+            "rotation": "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht.",
+            "cta": "Speicher dir das für später.",
+            "spoken_duration": 8,
+            "dialog_scripts": _dialog_scripts(
+                "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. Speicher dir das für später."
+            ),
+            "framework": "PAL",
+        }
+    ]
+
+    def fake_generate_lifestyle_topics(count: int = 1, seed=None, target_length_tier=None):
+        return generated[:1]
+
+    def fake_get_batch_by_id(batch_id: str):
+        assert batch_id == batch["id"]
+        return dict(batch)
+
+    def fake_get_all_topics_from_registry():
+        return []
+
+    def fake_add_topic_to_registry(title: str, rotation: str = "", cta: str = "", **kwargs):
+        stored_bank_entries.append((title, rotation, cta))
+        return {"id": f"registry-new-{len(stored_bank_entries)}"}
+
+    def fake_create_post_for_batch(
+        batch_id: str,
+        post_type: str,
+        topic_title: str,
+        topic_rotation: str,
+        topic_cta: str,
+        spoken_duration: float,
+        seed_data,
+        **kwargs,
+    ):
+        post = {
+            "id": f"post-{len(created_posts) + 1}",
+            "batch_id": batch_id,
+            "post_type": post_type,
+            "topic_title": topic_title,
+            "topic_rotation": topic_rotation,
+            "topic_cta": topic_cta,
+            "spoken_duration": spoken_duration,
+            "seed_data": seed_data,
+        }
+        created_posts.append(post)
+        return post
+
+    def fake_update_batch_state(batch_id: str, target_state):
+        batch["state"] = target_state.value if hasattr(target_state, "value") else target_state
+        return dict(batch)
+
+    def fake_list_topic_suggestions(**kwargs):
+        return []
+
+    def fake_store_topic_bank_entry(**kwargs):
+        entry = {"id": f"bank-{len(stored_bank_entries) + 1}", "title": kwargs.get("title", "")}
+        stored_bank_entries.append((entry["id"], kwargs.get("title", ""), kwargs.get("topic_script", "")))
+        return entry
+
+    def fake_upsert_topic_script_variants(**kwargs):
+        return None
+
+    def fake_attach_publish_captions(**kwargs):
+        seed_payload = dict(kwargs["seed_payload"])
+        seed_payload["caption"] = seed_payload.get("caption") or f"Caption for {kwargs['topic_title']}"
+        return seed_payload
+
+    monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
+    monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", fake_get_all_topics_from_registry)
+    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", fake_add_topic_to_registry)
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
+    monkeypatch.setattr(topic_handlers, "update_batch_state", fake_update_batch_state)
+    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", fake_list_topic_suggestions)
+    monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", fake_attach_publish_captions)
+    topic_handlers.clear_seeding_progress(batch["id"])
+
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert result["posts_created"] == 4, result
+    assert batch["state"] == "S2_SEEDED", batch
+    assert len(created_posts) == 4, created_posts
+    assert {post["post_type"] for post in created_posts} == {"lifestyle"}, created_posts
+    assert len(stored_bank_entries) == 4, stored_bank_entries
+
+
 def test_unique_topic_suggestions_collapses_same_family_topics():
     suggestions = [
         {"title": "Merkzeichen B: Freifahrt", "seed_payload": {"canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B"}},
@@ -236,7 +363,7 @@ def test_unique_topic_suggestions_filters_semantic_near_duplicates():
     assert unique[1]["title"] == "Barrierefreiheit im Alltag"
 
 
-def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(monkeypatch):
+def test_discover_topics_falls_back_for_missing_lifestyle_posts(monkeypatch):
     created_posts = []
 
     batch = {
@@ -327,8 +454,9 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
         created_posts.append(post)
         return post
 
-    def fail_update_batch_state(batch_id: str, target_state):
-        raise AssertionError("Batch state should not advance when a requested post type is missing")
+    def fake_update_batch_state(batch_id: str, target_state):
+        batch["state"] = target_state.value if hasattr(target_state, "value") else target_state
+        return dict(batch)
 
     value_suggestion = {
         "id": "suggestion-value-1",
@@ -361,18 +489,125 @@ def test_discover_topics_does_not_finalize_when_requested_post_type_is_missing(m
     monkeypatch.setattr(topic_handlers, "build_lifestyle_seed_payload", fake_build_lifestyle_seed_payload)
     monkeypatch.setattr(topic_handlers, "add_topic_to_registry", fake_add_topic_to_registry)
     monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
-    monkeypatch.setattr(topic_handlers, "update_batch_state", fail_update_batch_state)
+    monkeypatch.setattr(topic_handlers, "update_batch_state", fake_update_batch_state)
     monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
     monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
     topic_handlers.clear_seeding_progress(batch["id"])
 
-    with pytest.raises(ValidationError) as exc_info:
-        topic_handlers._discover_topics_for_batch_sync(batch["id"])
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
 
-    assert exc_info.value.message == "Topic discovery did not create all requested post types."
-    assert batch["state"] == "S1_SETUP", batch
-    assert len(created_posts) == 1, created_posts
-    assert created_posts[0]["post_type"] == "value", created_posts
+    assert result["posts_created"] == 2, result
+    assert batch["state"] == "S2_SEEDED", batch
+    assert len(created_posts) == 2, created_posts
+    assert {post["post_type"] for post in created_posts} == {"value", "lifestyle"}, created_posts
+
+
+def test_mixed_batch_lifestyle_dedupe_stays_lane_scoped(monkeypatch):
+    batch = {
+        "id": "batch-mixed-lane-scope",
+        "brand": "Lane Scope Fixture",
+        "state": "S1_SETUP",
+        "post_type_counts": {"value": 2, "lifestyle": 1, "product": 0},
+        "target_length_tier": 8,
+    }
+    created_posts = []
+    dedupe_calls = []
+
+    value_suggestions = [
+        {
+            "id": "value-suggestion-1",
+            "script_id": "value-script-1",
+            "family_id": "value-family-1",
+            "family_fingerprint": "value-fp-1",
+            "title": "Wohnumfeld sicher planen",
+            "rotation": "Wenn der Alltag zuhause enger wird, braucht Planung mehr Klarheit.",
+            "cta": "Hol dir einen Plan, der passt.",
+            "spoken_duration": 5.0,
+            "seed_payload": {"script": "Wenn der Alltag zuhause enger wird, braucht Planung mehr Klarheit.", "facts": ["Value fact"]},
+        },
+        {
+            "id": "value-suggestion-2",
+            "script_id": "value-script-2",
+            "family_id": "value-family-2",
+            "family_fingerprint": "value-fp-2",
+            "title": "Pflege im Alltag entlasten",
+            "rotation": "Wenn Pflege den Tag frisst, braucht es spürbare Entlastung.",
+            "cta": "Mach den Alltag leichter.",
+            "spoken_duration": 5.0,
+            "seed_payload": {"script": "Wenn Pflege den Tag frisst, braucht es spürbare Entlastung.", "facts": ["Value fact 2"]},
+        },
+    ]
+
+    lifestyle_topics = [
+        {
+            "title": "Barrierefreiheit im Alltag erleben",
+            "rotation": "Im Alltag geht es nicht um Technikfakten, sondern um Wege, die funktionieren.",
+            "cta": "Zeig, wie sich Alltag wirklich anfühlt.",
+            "spoken_duration": 5.0,
+            "dialog_scripts": _dialog_scripts("Im Alltag geht es nicht um Technikfakten, sondern um Wege, die funktionieren."),
+            "framework": "PAL",
+        }
+    ]
+
+    def fake_get_batch_by_id(batch_id: str):
+        assert batch_id == batch["id"]
+        return dict(batch)
+
+    def fake_generate_lifestyle_topics(count: int = 1, target_length_tier=None):
+        return list(lifestyle_topics[:count])
+
+    def fake_generate_product_topics(count: int = 1, target_length_tier=None):
+        return []
+
+    def fake_list_topic_suggestions(**kwargs):
+        if kwargs.get("post_type") == "value":
+            return list(value_suggestions)
+        return []
+
+    def fake_deduplicate_topics(new_topics, existing_topics, threshold=0.35):
+        dedupe_calls.append([dict(topic) for topic in existing_topics])
+        return list(new_topics)
+
+    def fake_build_lifestyle_seed_payload(topic_data, dialog_scripts):
+        return {"script": dialog_scripts.problem_agitate_solution[0], "canonical_topic": topic_data["title"]}
+
+    def fake_add_topic_to_registry(**kwargs):
+        return {"id": f"registry-{kwargs['title']}"}
+
+    def fake_store_topic_bank_entry(**kwargs):
+        return {"id": f"bank-{kwargs['title']}", "title": kwargs["title"], "family_fingerprint": f"fp-{kwargs['title']}"}
+
+    def fake_upsert_topic_script_variants(**kwargs):
+        return None
+
+    def fake_create_post_for_batch(**kwargs):
+        post = {"id": f"post-{len(created_posts) + 1}", **kwargs}
+        created_posts.append(post)
+        return post
+
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
+    monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(topic_handlers, "list_topic_suggestions", fake_list_topic_suggestions)
+    monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)
+    monkeypatch.setattr(topic_handlers, "generate_product_topics", fake_generate_product_topics)
+    monkeypatch.setattr(topic_handlers, "deduplicate_topics", fake_deduplicate_topics)
+    monkeypatch.setattr(topic_handlers, "build_lifestyle_seed_payload", fake_build_lifestyle_seed_payload)
+    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", fake_add_topic_to_registry)
+    monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption=f"Caption for {kwargs['topic_title']}"))
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
+    monkeypatch.setattr(topic_handlers, "update_batch_state", lambda batch_id, target_state: {"id": batch_id, "state": getattr(target_state, "value", target_state)})
+
+    topic_handlers.clear_seeding_progress(batch["id"])
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert result["posts_created"] == 3
+    assert [post["post_type"] for post in created_posts] == ["value", "value", "lifestyle"]
+    assert dedupe_calls, "lifestyle lane should have invoked deduplication"
+    lifestyle_existing_topics = dedupe_calls[0]
+    assert all(topic.get("post_type") != "value" for topic in lifestyle_existing_topics)
+    assert all(topic.get("title") not in {"Wohnumfeld sicher planen", "Pflege im Alltag entlasten"} for topic in lifestyle_existing_topics)
 
 
 def test_discover_topics_returns_coverage_pending_for_value_shortage(monkeypatch):

@@ -36,8 +36,25 @@ def test_validate_pre_persistence_topic_payload_extends_short_8s_script():
         target_length_tier=8,
         current_year=2026,
     )
-    assert len(payload["script"].split()) >= 14
+    assert 16 <= len(payload["script"].split()) <= 18
     assert payload["script"].endswith(".")
+
+
+def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifestyle_posts():
+    payload = validate_pre_persistence_topic_payload(
+        {
+            "topic": "Rollstuhl-Alltag",
+            "title": "Rollstuhl-Alltag",
+            "script": "Schon wieder ein unnötiger Umweg, aber heute planst du ihn bewusst anders und sparst dir Kraft im Alltag.",
+            "caption": "Alltag mit Rollstuhl braucht kluge Planung.",
+            "source_summary": "Alltag mit Rollstuhl braucht kluge Planung.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+        },
+        target_length_tier=32,
+        post_type="lifestyle",
+        current_year=2026,
+    )
+    assert 8 <= len(payload["script"].split()) <= 66
 
 
 def test_validate_pre_persistence_topic_payload_strips_dash_from_all_text_fields():

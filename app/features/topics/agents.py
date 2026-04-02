@@ -14,6 +14,7 @@ from app.core.errors import ThirdPartyError, ValidationError
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.content_utils import build_social_description, extract_soft_cta, strip_cta_from_script
 from app.features.topics.lifestyle_runtime import generate_lifestyle_topics as _generate_lifestyle_topics
+from app.features.topics.prompt3_runtime import generate_product_topics as _generate_product_topics
 from app.features.topics.research_runtime import (
     extract_seed_strict_extractor as _extract_seed_strict_extractor,
     generate_dialog_scripts as _generate_dialog_scripts,
@@ -27,6 +28,7 @@ from app.features.topics.response_parsers import (
     _validate_dialog_scripts_payload,
     parse_prompt1_response as _parse_prompt1_response,
     parse_prompt2_response,
+    parse_prompt3_response as _parse_prompt3_response,
     parse_topic_research_response,
 )
 from app.features.topics.schemas import (
@@ -46,6 +48,7 @@ from app.features.topics.schemas import (
 )
 from app.features.topics.seed_builders import (
     build_lifestyle_seed_payload,
+    build_product_seed_payload,
     build_seed_payload,
     convert_research_item_to_topic,
 )
@@ -176,6 +179,19 @@ def generate_lifestyle_topics(count: int = 1, seed: Optional[int] = None, target
         target_length_tier=target_length_tier,
         generate_dialog_scripts_fn=generate_dialog_scripts,
     )
+
+
+def generate_product_topics(count: int = 1, seed: Optional[int] = None, target_length_tier: Optional[int] = None) -> List[Dict[str, object]]:
+    return _generate_product_topics(
+        count=count,
+        seed=seed,
+        target_length_tier=target_length_tier,
+        llm_factory=get_llm_client,
+    )
+
+
+def parse_prompt3_response(raw: str):
+    return _parse_prompt3_response(raw)
 
 
 def extract_seed_strict_extractor(topic: TopicData) -> SeedData:

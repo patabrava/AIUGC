@@ -27,7 +27,19 @@ CHARS_PER_SECOND_ESTIMATE = 17.0
 PROMPT2_DIALOG_WORD_BOUNDS = {
     8: (16, 20),
     16: (24, 34),
-    32: (40, 66),
+    32: (8, 66),
+}
+
+PROMPT3_PRODUCT_WORD_BOUNDS = {
+    8: (16, 20),
+    16: (24, 34),
+    32: (32, 66),
+}
+
+PROMPT3_PRODUCT_SENTENCE_BOUNDS = {
+    8: (1, 1),
+    16: (3, 4),
+    32: (4, 5),
 }
 
 PROMPT1_WORD_BOUNDS = {
@@ -40,7 +52,7 @@ PROMPT1_WORD_BOUNDS = {
 # here so we can wire it in without changing the legacy envelope until prompts
 # and downstream expectations are updated.
 PRE_PERSISTENCE_PROMPT1_WORD_BOUNDS = {
-    8: (14, 18),
+    8: (16, 18),
     16: (26, 36),
     32: (54, 74),
 }
@@ -230,6 +242,25 @@ def get_prompt1_sentence_bounds(tier: int | None) -> tuple[int, int]:
     return PROMPT1_SENTENCE_BOUNDS.get(int(tier or 8), (1, 1))
 
 
+def get_prompt2_word_bounds(tier: int | None) -> tuple[int, int]:
+    return PROMPT2_DIALOG_WORD_BOUNDS.get(int(tier or 8), (16, 20))
+
+
+def get_prompt3_word_bounds(tier: int | None) -> tuple[int, int]:
+    return PROMPT3_PRODUCT_WORD_BOUNDS.get(int(tier or 8), (16, 20))
+
+
+def get_prompt3_sentence_bounds(tier: int | None) -> tuple[int, int]:
+    return PROMPT3_PRODUCT_SENTENCE_BOUNDS.get(int(tier or 8), (1, 1))
+
+
+def count_spoken_sentences(text: Any) -> int:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return 0
+    return len([segment for segment in re.split(r"(?<=[.!?])\s+", cleaned) if segment.strip()])
+
+
 def normalize_spoken_whitespace(text: Any) -> str:
     return _MULTISPACE_PATTERN.sub(" ", str(text or "")).strip()
 
@@ -293,6 +324,52 @@ def sanitize_spoken_fragment(text: Any, *, ensure_terminal: bool = True) -> str:
         sentences.append(fragment)
 
     return normalize_spoken_whitespace(" ".join(sentences))
+
+
+def trim_spoken_script_to_word_bounds(text: Any, min_words: int, max_words: int) -> str:
+    cleaned = sanitize_spoken_fragment(text, ensure_terminal=True)
+    if not cleaned:
+        return ""
+
+    words = cleaned.split()
+    if len(words) <= max_words:
+        return cleaned
+
+    sentence_candidates = re.split(r"(?<=[.!?])\s+", _protect_abbreviations(cleaned))
+    kept_sentences: List[str] = []
+    total_words = 0
+    for candidate in sentence_candidates:
+        sentence = normalize_spoken_whitespace(_restore_abbreviations(candidate).strip(" -*•"))
+        if not sentence:
+            continue
+        sentence_words = sentence.split()
+        if not sentence_words:
+            continue
+        if total_words + len(sentence_words) > max_words:
+            break
+        kept_sentences.append(sentence)
+        total_words += len(sentence_words)
+        if total_words >= max_words:
+            break
+
+    trimmed = normalize_spoken_whitespace(" ".join(kept_sentences))
+    if not trimmed:
+        trimmed = " ".join(words[:max_words]).strip()
+
+    trimmed = sanitize_spoken_fragment(trimmed, ensure_terminal=True)
+    trimmed_words = trimmed.split()
+    if len(trimmed_words) > max_words:
+        trimmed = " ".join(trimmed_words[:max_words]).strip()
+        if trimmed and trimmed[-1] not in ".!?":
+            trimmed = trimmed.rstrip(",;:") + "."
+
+    if len(trimmed.split()) < min_words:
+        fallback = " ".join(words[:max_words]).strip()
+        if fallback and fallback[-1] not in ".!?":
+            fallback = fallback.rstrip(",;:") + "."
+        return fallback or trimmed
+
+    return trimmed
 
 
 def _has_unbalanced_parenthetical(text: str) -> bool:
@@ -428,6 +505,7 @@ def validate_pre_persistence_topic_payload(
     payload: Dict[str, Any],
     *,
     target_length_tier: int,
+    post_type: Optional[str] = None,
     current_year: int = CURRENT_TOPIC_CONTEXT_YEAR,
 ) -> Dict[str, Any]:
     """Deterministic pre-persistence gate shared across all topic-writing paths.
@@ -458,7 +536,13 @@ def validate_pre_persistence_topic_payload(
         normalize_temporal_reference(normalized.get("script"), current_year=current_year),
         ensure_terminal=True,
     )
-    min_words, max_words = _get_pre_persistence_prompt1_word_bounds(target_length_tier)
+    normalized_post_type = str(post_type or "").strip().lower()
+    if normalized_post_type == "product":
+        min_words, max_words = get_prompt3_word_bounds(target_length_tier)
+    elif normalized_post_type == "lifestyle":
+        min_words, max_words = get_prompt2_word_bounds(target_length_tier)
+    else:
+        min_words, max_words = _get_pre_persistence_prompt1_word_bounds(target_length_tier)
     word_count = _script_word_count(script)
 
     # One repair attempt for short 8s scripts by appending a safe clause.

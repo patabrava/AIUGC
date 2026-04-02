@@ -1,0 +1,3 @@
+-- Compatibility migration to align local Supabase history with the linked project.
+-- The live database already records version 20260401163729; this file restores
+-- local CLI parity so later migrations in this repo can be pushed cleanly.

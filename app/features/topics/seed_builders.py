@@ -179,3 +179,34 @@ def build_lifestyle_seed_payload(topic_data: Dict[str, Any], dialog_scripts: Dia
     }
     logger.info("lifestyle_seed_payload_built", title=topic_data["title"], has_sources=False)
     return payload
+
+
+def build_product_seed_payload(topic_data: Dict[str, Any]) -> Dict[str, Any]:
+    script = str(topic_data.get("script") or topic_data.get("rotation") or "").strip()
+    facts = [str(item).strip() for item in list(topic_data.get("facts") or []) if str(item).strip()]
+    support_facts = [str(item).strip() for item in list(topic_data.get("support_facts") or []) if str(item).strip()]
+    source_summary = str(topic_data.get("source_summary") or "").strip()
+    strict_seed = {
+        "facts": facts[:5] or [str(topic_data.get("title") or "").strip()],
+        "source_context": source_summary or None,
+    }
+    payload: Dict[str, Any] = {
+        "script": script,
+        "canonical_topic": str(topic_data.get("product_name") or topic_data.get("title") or "").strip(),
+        "research_title": str(topic_data.get("title") or "").strip(),
+        "product_name": str(topic_data.get("product_name") or "").strip(),
+        "product_angle": str(topic_data.get("angle") or "").strip(),
+        "framework": str(topic_data.get("framework") or "PAL"),
+        "tone": "direkt, freundlich, empowernd, du-Form",
+        "estimated_duration_s": int(topic_data.get("spoken_duration") or 0),
+        "cta": str(topic_data.get("cta") or "").strip(),
+        "dialog_script": script,
+        "script_category": "problem",
+        "strict_fact": strict_seed["facts"][0],
+        "strict_seed": strict_seed,
+        "description": build_social_description(script, source_summary),
+        "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+        "support_facts": support_facts,
+    }
+    logger.info("product_seed_payload_built", title=topic_data.get("title"), product_name=payload["product_name"])
+    return payload

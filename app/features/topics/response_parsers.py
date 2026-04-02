@@ -14,7 +14,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
-from app.features.topics.schemas import DialogScripts, ResearchAgentBatch, ResearchDossier
+from app.features.topics.schemas import DialogScripts, ProductPromptCandidate, ResearchAgentBatch, ResearchDossier
 from app.features.topics.topic_validation import (
     MAX_SCRIPT_CHARS_NO_SPACES,
     MIN_SCRIPT_SECONDS,
@@ -43,6 +43,44 @@ FOCUS_STOPWORDS = {
     "während", "waehrend", "perspektive", "winkel", "thema", "titel", "lane", "punkt", "frage",
     "fragen", "alltag",
 }
+
+_PROMPT3_LABEL_ALIASES = {
+    "produkt": {"produkt", "produktname", "product", "product name", "name"},
+    "angle": {"angle", "winkel", "produktwinkel", "aufhänger", "aufhaenger"},
+    "script": {"script", "skript", "text", "copy", "sprechtext", "voiceover", "voice over", "dialog", "hook", "hook line", "hooktext"},
+    "cta": {"cta", "call to action", "call-to-action", "handlungsaufforderung", "schluss", "schlusssatz"},
+    "facts": {"fakten", "facts", "fakt", "faktenliste", "stichpunkte", "stutzfakten", "stützfakten", "support facts"},
+}
+
+
+def _normalize_prompt3_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9äöüß ]+", " ", str(value or "").lower()).strip()
+
+
+def _prompt3_alias_match(label: str) -> Optional[str]:
+    normalized = _normalize_prompt3_label(label)
+    if not normalized:
+        return None
+    for canonical, aliases in _PROMPT3_LABEL_ALIASES.items():
+        for alias in aliases:
+            if normalized == alias:
+                return canonical
+            if normalized.startswith(alias + " "):
+                return canonical
+    return None
+
+
+def _prompt3_alias_match_with_alias(label: str) -> tuple[Optional[str], str]:
+    normalized = _normalize_prompt3_label(label)
+    if not normalized:
+        return None, ""
+    for canonical, aliases in _PROMPT3_LABEL_ALIASES.items():
+        for alias in aliases:
+            if normalized == alias:
+                return canonical, alias
+            if normalized.startswith(alias + " "):
+                return canonical, alias
+    return None, ""
 
 
 def _sanitize_json_text(text: str) -> str:
@@ -314,6 +352,112 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
             message="PROMPT_2 response invalid",
             details=json.loads(exc.json()),
         ) from exc
+
+
+def parse_prompt3_response(
+    raw: str,
+    *,
+    fallback_product_name: Optional[str] = None,
+    fallback_facts: Optional[List[str]] = None,
+) -> ProductPromptCandidate:
+    fields: Dict[str, str] = {}
+    facts: List[str] = []
+    body_lines: List[str] = []
+    in_facts = False
+    current_section: Optional[str] = None
+    section_lines: Dict[str, List[str]] = {
+        "produkt": [],
+        "angle": [],
+        "script": [],
+        "cta": [],
+    }
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        candidate_key, candidate_alias = _prompt3_alias_match_with_alias(stripped.split(":", 1)[0])
+        if candidate_key == "facts" or stripped.lower().startswith(("fakten:", "facts:")):
+            in_facts = True
+            current_section = "facts"
+            continue
+        if in_facts and stripped.startswith("-"):
+            fact = stripped[1:].strip()
+            if fact:
+                facts.append(fact)
+            continue
+        if ":" in stripped:
+            key, value = stripped.split(":", 1)
+            normalized_key = _prompt3_alias_match(key)
+            if normalized_key in {"produkt", "angle", "script", "cta"}:
+                value = value.strip()
+                if value:
+                    fields[normalized_key] = value
+                current_section = normalized_key
+                in_facts = False
+                continue
+        if candidate_key in {"produkt", "angle", "script", "cta"}:
+            remainder = stripped[len(candidate_alias):].lstrip(" :-")
+            if remainder:
+                fields[candidate_key] = remainder.strip()
+                current_section = candidate_key
+                in_facts = False
+                continue
+            current_section = candidate_key
+            in_facts = False
+            continue
+        if current_section in section_lines:
+            section_lines[current_section].append(stripped)
+            continue
+        if in_facts:
+            facts.append(stripped)
+        else:
+            body_lines.append(stripped)
+
+    if fallback_product_name and "produkt" not in fields:
+        fields["produkt"] = fallback_product_name
+    if fallback_facts and not facts:
+        facts = [fact for fact in fallback_facts if str(fact or "").strip()][:5]
+
+    for section_name, lines in section_lines.items():
+        if lines and not fields.get(section_name):
+            fields[section_name] = " ".join(lines).strip()
+
+    if "script" not in fields and body_lines:
+        fields["script"] = " ".join(body_lines).strip()
+    if "angle" not in fields and fields.get("script"):
+        first_sentence = re.split(r"(?<=[.!?])\s+", fields["script"], maxsplit=1)[0].strip()
+        fields["angle"] = first_sentence[:120] or fields["script"][:120]
+    if "cta" not in fields and fields.get("script"):
+        cta_source = re.split(r"(?<=[.!?])\s+", fields["script"].strip())[-1].strip()
+        fields["cta"] = cta_source[:120] or f"Frag nach {fields.get('produkt', fallback_product_name or '')}".strip()
+
+    if not {"produkt", "angle", "script", "cta"}.issubset(fields):
+        raise ValidationError(
+            message="PROMPT_3 output missing required fields",
+            details={"fields": sorted(fields.keys())},
+        )
+
+    try:
+        candidate = ProductPromptCandidate(
+            product_name=fields["produkt"],
+            angle=fields["angle"],
+            script=fields["script"],
+            cta=fields["cta"],
+            facts=[fact for fact in facts if fact][:5],
+            estimated_duration_s=estimate_script_duration_seconds(fields["script"]),
+        )
+    except PydanticValidationError as exc:
+        raise ValidationError(
+            message="PROMPT_3 output invalid",
+            details=json.loads(exc.json()),
+        ) from exc
+    if not candidate.facts:
+        raise ValidationError(
+            message="PROMPT_3 output missing facts",
+            details={"product_name": candidate.product_name},
+        )
+    return candidate
 
 
 def _normalize_list_payload(value: Any) -> List[str]:

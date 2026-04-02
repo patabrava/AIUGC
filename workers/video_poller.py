@@ -1156,6 +1156,7 @@ def _build_veo_extension_prompt(
     from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
 
     seed_data = post.get("seed_data") or {}
+    metadata = post.get("video_metadata") or {}
     if isinstance(seed_data, str):
         import json as _json
         try:
@@ -1163,13 +1164,30 @@ def _build_veo_extension_prompt(
         except _json.JSONDecodeError:
             seed_data = {}
 
-    script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
-    segments = split_dialogue_sentences(script) if script else []
-    if not segments and script:
-        segments = [script]
+    video_prompt = post.get("video_prompt_json") or {}
+    if isinstance(video_prompt, str):
+        try:
+            video_prompt = _json.loads(video_prompt)
+        except _json.JSONDecodeError:
+            video_prompt = {}
+    if not isinstance(video_prompt, dict):
+        video_prompt = {}
+    prompt_audio = video_prompt.get("audio") or {}
+    if not isinstance(prompt_audio, dict):
+        prompt_audio = {}
+
+    script = str(
+        prompt_audio.get("dialogue")
+        or seed_data.get("script")
+        or seed_data.get("dialog_script")
+        or ""
+    ).strip()
+    metadata_segments = metadata.get("veo_segments") or []
+    segments = [str(segment).strip() for segment in metadata_segments if str(segment).strip()]
     if not segments:
-        metadata_segments = (post.get("video_metadata") or {}).get("veo_segments") or []
-        segments = [str(segment).strip() for segment in metadata_segments if str(segment).strip()]
+        segments = split_dialogue_sentences(script) if script else []
+        if not segments and script:
+            segments = [script]
 
     idx = segment_index if segment_index is not None else 0
     if idx < len(segments):
@@ -1180,19 +1198,30 @@ def _build_veo_extension_prompt(
             details={
                 "segment_index": idx,
                 "segments_available": len(segments),
-                "veo_extension_hops_target": (post.get("video_metadata") or {}).get("veo_extension_hops_target", 0),
+                "veo_extension_hops_target": metadata.get("veo_extension_hops_target", 0),
             },
         )
 
-    metadata = post.get("video_metadata") or {}
     hops_target = metadata.get("veo_extension_hops_target", 0)
     hops_completed = metadata.get("veo_extension_hops_completed", 0)
     is_final = (hops_completed + 1) >= hops_target if hops_target > 0 else True
+
+    prompt_overrides = {
+        "character": video_prompt.get("character"),
+        "action": video_prompt.get("action"),
+        "style": video_prompt.get("style"),
+        "scene": video_prompt.get("scene"),
+        "cinematography": video_prompt.get("cinematography"),
+        "audio_block": video_prompt.get("audio_block") or prompt_audio.get("capture"),
+        "ending": video_prompt.get("ending_directive") if is_final else None,
+        "negative_constraints": video_prompt.get("veo_negative_prompt"),
+    }
 
     prompt_text = build_veo_prompt_segment(
         segment_text,
         include_quotes=False,
         include_ending=is_final,
+        **prompt_overrides,
     )
 
     return {"prompt_text": prompt_text, "segment_text": segment_text}

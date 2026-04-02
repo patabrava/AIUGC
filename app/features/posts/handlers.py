@@ -316,7 +316,7 @@ async def update_post_prompt(post_id: str, request: Request):
             })
 
         supabase = get_supabase().client
-        response = supabase.table("posts").select("id, batch_id, video_prompt_json").eq("id", post_id).execute()
+        response = supabase.table("posts").select("id, batch_id, video_prompt_json, seed_data").eq("id", post_id).execute()
         if not response.data:
             raise FlowForgeException(
                 code=ErrorCode.NOT_FOUND,
@@ -327,12 +327,15 @@ async def update_post_prompt(post_id: str, request: Request):
         post = response.data[0]
         existing_prompt = _parse_json_document(post.get("video_prompt_json"))
         if not existing_prompt:
-            raise FlowForgeException(
-                code=ErrorCode.VALIDATION_ERROR,
-                message="Post missing video_prompt_json. Build the prompt before editing it.",
-                details={"post_id": post_id},
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            )
+            seed_data = _parse_json_document(post.get("seed_data"))
+            if not seed_data:
+                raise FlowForgeException(
+                    code=ErrorCode.VALIDATION_ERROR,
+                    message="Post missing video_prompt_json and seed_data. Build the prompt before editing it.",
+                    details={"post_id": post_id},
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            existing_prompt = build_video_prompt_from_seed(seed_data)
 
         updated_prompt = {
             **existing_prompt,

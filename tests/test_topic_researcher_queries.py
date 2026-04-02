@@ -199,6 +199,53 @@ def test_store_topic_bank_entry_increments_use_count(monkeypatch):
     assert captured["increment_use_count"] is True
 
 
+def test_store_topic_bank_entry_uses_product_validation_bounds(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    validation_calls = []
+
+    def fake_validate(payload, *, target_length_tier, post_type=None, **kwargs):
+        validation_calls.append(
+            {
+                "target_length_tier": target_length_tier,
+                "post_type": post_type,
+                "script": payload["script"],
+            }
+        )
+        return dict(payload)
+
+    def fake_add_topic_to_registry(**kwargs):
+        return {
+            "id": "topic-1",
+            "title": kwargs["title"],
+            "use_count": kwargs.get("use_count", 0),
+        }
+
+    def fake_create_topic_research_dossier(**kwargs):
+        return {"id": "dossier-1"}
+
+    monkeypatch.setattr(topic_queries, "validate_pre_persistence_topic_payload", fake_validate)
+    monkeypatch.setattr(topic_queries, "add_topic_to_registry", fake_add_topic_to_registry)
+    monkeypatch.setattr(topic_queries, "create_topic_research_dossier", fake_create_topic_research_dossier)
+
+    topic_queries.store_topic_bank_entry(
+        title="VARIO PLUS: Eine Schiene fuer heute und spaeter",
+        topic_script="Hast du eine Treppe, die heute passt und morgen noch sicher ist?",
+        post_type="product",
+        target_length_tier=32,
+        research_payload={"seed_topic": "VARIO PLUS", "topic": "VARIO PLUS"},
+        origin_kind="provider",
+    )
+
+    assert validation_calls == [
+        {
+            "target_length_tier": 32,
+            "post_type": "product",
+            "script": "Hast du eine Treppe, die heute passt und morgen noch sicher ist?",
+        }
+    ]
+
+
 @patch("app.features.topics.queries.get_supabase")
 def test_upsert_topic_script_variants_applies_shared_quality_gate(mock_get_sb):
     class _FakeResponse:
@@ -269,6 +316,148 @@ def test_upsert_topic_script_variants_applies_shared_quality_gate(mock_get_sb):
     assert "—" not in fake_table.rows[0]["source_summary"]
     assert "Seit 2025" in fake_table.rows[0]["source_summary"]
     assert "—" not in fake_table.rows[0]["disclaimer"]
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_uses_product_word_bounds(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = []
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def table(self, *_args, **_kwargs):
+            return self
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                return _FakeResponse([])
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = type("SB", (), {"client": fake_table})()
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="VARIO PLUS",
+        post_type="product",
+        target_length_tier=8,
+        topic_research_dossier_id=None,
+        variants=[{
+            "script": "VARIO PLUS gibt dir heute Sicherheit und spaeter Flexibilitaet, weil dieselbe Schiene mit deinem Alltag mitwachsen kann.",
+            "caption": "VARIO PLUS im Alltag",
+            "source_summary": "Kurzer Produktkontext fuer die Speicherung.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+            "framework": "PAL",
+            "hook_style": "question",
+            "bucket": "canonical",
+            "lane_key": "product-canonical",
+            "lane_family": "product",
+            "origin_kind": "provider",
+            "estimated_duration_s": 8,
+        }],
+        origin_kind="provider",
+    )
+
+    assert len(stored) == 1
+    assert stored[0]["post_type"] == "product"
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_accepts_product_32s_midrange_script(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = []
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def table(self, *_args, **_kwargs):
+            return self
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                return _FakeResponse([])
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = type("SB", (), {"client": fake_table})()
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="VARIO PLUS",
+        post_type="product",
+        target_length_tier=32,
+        topic_research_dossier_id=None,
+        variants=[{
+            "script": "VARIO PLUS passt sich deinem Alltag an, weil er gerade, kurvig, steil oder eng funktioniert. Du nutzt ihn innen und außen, als Plattform oder mit Sitz. Dabei bleibst du flexibel und sicher unterwegs. Mit 300 Kilo Tragkraft und nachrüstbarem Sitzwechsel wächst die Lösung mit. Made in Germany sorgt zusätzlich für Vertrauen im Alltag.",
+            "caption": "VARIO PLUS fuer Zuhause",
+            "source_summary": "Kurzer Produktkontext fuer die Speicherung.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+            "framework": "PAL",
+            "hook_style": "question",
+            "bucket": "canonical",
+            "lane_key": "product-canonical",
+            "lane_family": "product",
+            "origin_kind": "provider",
+            "estimated_duration_s": 32,
+        }],
+        origin_kind="provider",
+    )
+
+    assert len(stored) == 1
+    assert stored[0]["post_type"] == "product"
 
 
 @patch("app.features.topics.queries.get_supabase")

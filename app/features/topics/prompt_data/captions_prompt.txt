@@ -51,6 +51,7 @@ Emotionale Winkel:
 Regeln:
 - Jeder Hook muss einen ANDEREN emotionalen Winkel haben als die anderen zwei.
 - Body muss einen KONKRETEN Fakt aus den Recherche-Fakten enthalten — keine generischen Saetze.
+- Wenn die Recherche-Fakten knapp oder generisch sind, nutze trotzdem das Thema und das Skript als saubere Grundlage und bleib strikt im Markerformat.
 - Gesamtlaenge pro Caption (inkl. Hook, Body, CTA, Hashtags): 150-300 Zeichen.
 - Alles auf Deutsch, natuerlich gesprochen, keine Uebersetzungsartefakte.
 - Max 1 Emoji pro Caption.

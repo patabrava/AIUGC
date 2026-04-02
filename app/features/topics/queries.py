@@ -19,6 +19,8 @@ from app.features.topics.topic_validation import (
     detect_spoken_copy_issues,
     get_prompt1_sentence_bounds,
     get_prompt1_word_bounds,
+    get_prompt3_sentence_bounds,
+    get_prompt3_word_bounds,
     sanitize_metadata_text,
     sanitize_spoken_fragment,
     validate_pre_persistence_topic_payload,
@@ -747,6 +749,7 @@ def store_topic_bank_entry(
             "disclaimer": str((research_payload or {}).get("disclaimer") or ""),
         },
         target_length_tier=target_length_tier,
+        post_type=post_type,
     )
     row = add_topic_to_registry(
         title=str(normalized_payload.get("title") or title).strip() or title,
@@ -1019,11 +1022,15 @@ def upsert_topic_script_variants(
                 bleed_field=bleed_issue.get("field"),
                 bleed_window=bleed_issue.get("window"),
                 script_preview=script[:240],
-            )
+        )
             continue
         if bucket == "canonical" and post_type_value in {"value", "product"}:
-            min_words, max_words = get_prompt1_word_bounds(tier)
-            min_sentences, max_sentences = get_prompt1_sentence_bounds(tier)
+            if post_type_value == "product":
+                min_words, max_words = get_prompt3_word_bounds(tier)
+                min_sentences, max_sentences = get_prompt3_sentence_bounds(tier)
+            else:
+                min_words, max_words = get_prompt1_word_bounds(tier)
+                min_sentences, max_sentences = get_prompt1_sentence_bounds(tier)
             word_count = _count_script_words(script)
             sentence_count = _count_script_sentences(script)
             if (
@@ -1080,6 +1087,7 @@ def upsert_topic_script_variants(
         payload = validate_pre_persistence_topic_payload(
             payload,
             target_length_tier=tier,
+            post_type=post_type_value or post_type,
         )
         payload_title = str(payload.get("title") or title).strip() or title
         script = str(payload.get("script") or script).strip() or script

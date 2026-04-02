@@ -304,11 +304,29 @@ def _pack_veo_segments_for_profile(
 
 def _build_veo_extended_base_prompt(
     seed_data: Dict[str, Any],
+    video_prompt: Optional[Dict[str, Any]] = None,
     *,
     planned_extension_hops: Optional[int] = None,
     target_length_tier: Optional[int] = None,
 ) -> tuple[str, Dict[str, Any]]:
-    script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
+    if isinstance(video_prompt, str):
+        try:
+            video_prompt = json.loads(video_prompt)
+        except json.JSONDecodeError:
+            video_prompt = {}
+    if not isinstance(video_prompt, dict):
+        video_prompt = {}
+
+    prompt_audio = video_prompt.get("audio") or {}
+    if not isinstance(prompt_audio, dict):
+        prompt_audio = {}
+
+    script = str(
+        prompt_audio.get("dialogue")
+        or seed_data.get("script")
+        or seed_data.get("dialog_script")
+        or ""
+    ).strip()
     segments = split_dialogue_sentences(script) if script else []
     if not segments and script:
         segments = [script]
@@ -345,7 +363,21 @@ def _build_veo_extended_base_prompt(
                 "veo_chain_shortened_to_available_segments": False,
             }
         )
-    return build_veo_prompt_segment(base_segment, include_quotes=False, include_ending=False), segment_metadata
+    prompt_overrides = {
+        "character": video_prompt.get("character"),
+        "action": video_prompt.get("action"),
+        "style": video_prompt.get("style"),
+        "scene": video_prompt.get("scene"),
+        "cinematography": video_prompt.get("cinematography"),
+        "audio_block": video_prompt.get("audio_block") or prompt_audio.get("capture"),
+        "negative_constraints": video_prompt.get("veo_negative_prompt"),
+    }
+    return build_veo_prompt_segment(
+        base_segment,
+        include_quotes=False,
+        include_ending=False,
+        **prompt_overrides,
+    ), segment_metadata
 
 
 @router.post("/{post_id}/generate", response_model=SuccessResponse)
@@ -755,6 +787,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             if is_extended:
                 prompt_text, segment_metadata = _build_veo_extended_base_prompt(
                     seed_data,
+                    video_prompt,
                     planned_extension_hops=profile.veo_extension_hops,
                     target_length_tier=profile.target_length_tier,
                 )

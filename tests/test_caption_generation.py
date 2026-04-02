@@ -267,34 +267,39 @@ def test_generate_caption_bundle_with_new_structure():
     assert bundle["selection_reason"] == "hash_variant"
 
 
-def test_generate_caption_bundle_raises_on_persistent_failure():
+def test_generate_caption_bundle_falls_back_on_persistent_failure():
     class BadLLM:
         def generate_gemini_text(self, **kwargs):
             return "no markers here"
 
-    with pytest.raises(ValidationError, match="failed after 3 attempts"):
-        captions.generate_caption_bundle(
-            topic_title="Barrierefreiheit im ÖPNV",
-            post_type="value",
-            script="Ein Skript zum Testen.",
-            research_facts=[],
-            llm_factory=lambda: BadLLM(),
-        )
+    bundle = captions.generate_caption_bundle(
+        topic_title="Barrierefreiheit im ÖPNV",
+        post_type="value",
+        script="Ein Skript zum Testen.",
+        research_facts=[],
+        llm_factory=lambda: BadLLM(),
+    )
+    assert len(bundle["variants"]) == 3
+    assert bundle["selected_key"] in VARIANT_KEYS
+    assert bundle["selected_body"]
+    assert bundle["selection_reason"] == "local_fallback"
 
 
-def test_generate_caption_bundle_raises_on_llm_error():
+def test_generate_caption_bundle_falls_back_on_llm_error():
     class ErrorLLM:
         def generate_gemini_text(self, **kwargs):
             raise RuntimeError("boom")
 
-    with pytest.raises(RuntimeError, match="boom"):
-        captions.generate_caption_bundle(
-            topic_title="Topic",
-            post_type="value",
-            script="Skript.",
-            research_facts=[],
-            llm_factory=lambda: ErrorLLM(),
-        )
+    bundle = captions.generate_caption_bundle(
+        topic_title="Topic",
+        post_type="value",
+        script="Skript.",
+        research_facts=[],
+        llm_factory=lambda: ErrorLLM(),
+    )
+    assert len(bundle["variants"]) == 3
+    assert bundle["selected_key"] in VARIANT_KEYS
+    assert bundle["selection_reason"] == "local_fallback"
 
 
 # --- attach_caption_bundle ---

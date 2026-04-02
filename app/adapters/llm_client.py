@@ -500,6 +500,7 @@ class LLMClient:
         model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        thinking_budget: Optional[int] = None,
     ) -> str:
         """Generate plain text using Gemini generateContent."""
         target_model = model or self.default_gemini_model
@@ -518,6 +519,9 @@ class LLMClient:
                 payload["generationConfig"]["maxOutputTokens"] = max_tokens
             if temperature is not None:
                 payload["generationConfig"]["temperature"] = temperature
+        if thinking_budget is not None:
+            payload.setdefault("generationConfig", {})
+            payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking_budget}
 
         logger.debug(
             "gemini_generate_text_request",

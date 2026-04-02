@@ -20,6 +20,7 @@ from jinja2 import Environment, FileSystemLoader
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import get_settings
 from app.features.batches import handlers as batch_handlers
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.topics import handlers as topic_handlers
@@ -584,3 +585,17 @@ def test_batches_routes_return_full_documents_for_history_restore(monkeypatch):
     assert detail_response.status_code == 200
     assert "<html" in list_response.text.lower()
     assert "<html" in detail_response.text.lower()
+
+
+def test_batches_list_modal_includes_product_count_input(monkeypatch):
+    client = TestClient(app)
+    settings = get_settings()
+    settings.bypass_auth_in_development = True
+
+    monkeypatch.setattr(batch_handlers, "list_batches", lambda archived=None, limit=50, offset=0: ([], 0))
+
+    response = client.get("/batches", headers={"Accept": "text/html"})
+
+    assert response.status_code == 200
+    assert 'name="post_type_counts.product"' in response.text
+    assert "value + lifestyle + product" in response.text

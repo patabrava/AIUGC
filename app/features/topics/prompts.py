@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 from app.core.video_profiles import DurationProfile, get_duration_profile
-from app.features.topics.schemas import ResearchDossier
+from app.features.topics.schemas import ProductKnowledgeEntry, ResearchDossier
 from app.features.topics.topic_validation import sanitize_spoken_fragment, sanitize_metadata_text
 
 PROMPT_DATA_DIR = Path(__file__).resolve().parent / "prompt_data"
@@ -366,6 +366,7 @@ def _format_research_dossier_prompt(
             post_type=post_type,
             target_length_tier=target_length_tier,
         ),
+        current_date_context=_build_current_date_context_for_research(),
     ).strip()
 
 
@@ -696,3 +697,27 @@ def build_prompt2(
         "hook_bank_section": _format_hook_bank_section(),
     }
     return template.format(**format_kwargs).strip()
+
+
+def _format_prompt3_fact_lines(values: List[str]) -> str:
+    cleaned = [sanitize_metadata_text(value, max_sentences=2) for value in values if str(value or "").strip()]
+    if not cleaned:
+        return "- Keine Zusatzfakten vorhanden."
+    return "\n".join(f"- {item}" for item in cleaned[:8])
+
+
+def build_prompt3(
+    *,
+    product: ProductKnowledgeEntry | Dict[str, Any],
+    profile: Optional[DurationProfile] = None,
+) -> str:
+    profile = profile or get_duration_profile(8)
+    payload = product.model_dump(mode="json") if isinstance(product, ProductKnowledgeEntry) else dict(product)
+    template = _load_text_prompt("prompt3", profile.target_length_tier)
+    return template.format(
+        product_name=str(payload.get("product_name") or "").strip(),
+        source_label=str(payload.get("source_label") or "").strip(),
+        product_summary=_clip_text(payload.get("summary") or "", 320),
+        product_facts=_format_prompt3_fact_lines(list(payload.get("facts") or [])),
+        support_facts=_format_prompt3_fact_lines(list(payload.get("support_facts") or [])),
+    ).strip()

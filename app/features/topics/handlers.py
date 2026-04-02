@@ -25,12 +25,14 @@ from app.features.topics.schemas import (
 )
 from app.features.topics.agents import (
     generate_lifestyle_topics,
+    generate_product_topics,
     build_lifestyle_seed_payload,
 )
 from app.features.topics.captions import attach_caption_bundle
 from app.features.topics.deduplication import deduplicate_topics
 from app.features.topics.variant_expansion import expand_topic_variants
 from app.features.topics.seed_builders import build_research_seed_data
+from app.features.topics.seed_builders import build_product_seed_payload
 from app.features.topics.topic_validation import classify_script_overlap
 from app.features.topics.queries import (
     get_all_topics_from_registry,
@@ -93,6 +95,70 @@ def _attach_publish_captions(
         script_fallback=script_fallback,
         canonical_topic=canonical_topic or None,
     )
+
+
+_LIFESTYLE_FALLBACK_CANDIDATES: List[Dict[str, str]] = [
+    {
+        "title": "Spontane Freizeit braucht oft mehr Planung als man denkt",
+        "rotation": "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht.",
+        "cta": "Speicher dir das für später.",
+    },
+    {
+        "title": "Kleine Wege werden ohne Barrierefreiheit schnell gross",
+        "rotation": "Kleine Wege werden ohne Barrierefreiheit schnell zu echter Zusatzarbeit im Alltag.",
+        "cta": "Schick das an jemanden, der das kennt.",
+    },
+    {
+        "title": "Selbstbestimmt unterwegs sein heißt Hürden mitdenken",
+        "rotation": "Selbstbestimmt unterwegs zu sein klappt leichter, wenn Hürden gar nicht erst entstehen.",
+        "cta": "Kommentier, wenn du das auch so siehst.",
+    },
+    {
+        "title": "Barrierefreiheit spart im Alltag spürbar Kraft",
+        "rotation": "Barrierefreiheit spart im Alltag spürbar Kraft, weil kleine Umwege gar nicht erst entstehen.",
+        "cta": "Teile das mit jemandem, der das kennt.",
+    },
+]
+
+
+def _build_lifestyle_fallback_candidates(
+    *,
+    count: int,
+    existing_titles: set,
+    existing_scripts: List[str],
+    target_length_tier: Optional[int],
+) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for fallback in _LIFESTYLE_FALLBACK_CANDIDATES:
+        if len(candidates) >= count:
+            break
+        title = fallback["title"].strip()
+        if title.lower() in existing_titles:
+            continue
+        rotation = fallback["rotation"].strip()
+        if any(classify_script_overlap(rotation, script) for script in existing_scripts):
+            continue
+        cta = fallback["cta"].strip()
+        script = f"{rotation} {cta}".strip()
+        candidates.append(
+            {
+                "title": title,
+                "template_title": title,
+                "rotation": rotation,
+                "cta": cta,
+                "spoken_duration": max(1, (len(script.split()) + 2) // 3),
+                "dialog_scripts": SimpleNamespace(
+                    problem_agitate_solution=[script],
+                    testimonial=[script],
+                    transformation=[script],
+                    description=f"Lifestyle-Beitrag zu: {title}",
+                ),
+                "framework": "PAL",
+            }
+        )
+        existing_titles.add(title.lower())
+        existing_scripts.append(rotation)
+    return candidates
 
 
 def _topic_family_signature(topic: Dict[str, Any]) -> str:
@@ -656,7 +722,7 @@ def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
 
     for post_type, count in post_type_counts.items():
         requested_count = int(count or 0)
-        if post_type == "lifestyle" or requested_count <= 0:
+        if post_type in {"lifestyle", "product"} or requested_count <= 0:
             continue
         available_count = count_selectable_topic_families(
             post_type=post_type,
@@ -703,7 +769,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     )
 
     for post_type, count in post_type_counts.items():
-        if count == 0 or post_type == "lifestyle":
+        if count == 0 or post_type in {"lifestyle", "product"}:
             continue
         stored_suggestions = list_topic_suggestions(
             target_length_tier=resolved_target_tier,
@@ -791,14 +857,22 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             count=count
         )
 
-        # PIPELINE DISPATCH: lifestyle uses PROMPT_2 direct; value/product use Deep Research via PROMPT_1.
+        # PIPELINE DISPATCH: lifestyle uses PROMPT_2 direct; product uses PROMPT_3 direct; value uses Deep Research via PROMPT_1.
         if post_type == "lifestyle":
             # Lifestyle pipeline: PROMPT_2 direct (no web research), but still dedupe
             required_topics = count
             collected_candidates: List[Dict[str, Any]] = []
             attempts = 0
             max_attempts = 5
-            dedupe_reference = existing_topics + all_generated_topics
+            def _same_lane(topic: Dict[str, Any]) -> bool:
+                topic_type = str(topic.get("post_type") or "").strip()
+                return topic_type in {"", post_type}
+
+            dedupe_reference = [
+                topic
+                for topic in existing_topics + all_generated_topics
+                if isinstance(topic, dict) and _same_lane(topic)
+            ]
             existing_titles = {
                 str(topic.get("title") or "").strip().lower()
                 for topic in dedupe_reference
@@ -913,6 +987,40 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     ),
                 )
 
+            if len(collected_candidates) < required_topics:
+                fallback_candidates = _build_lifestyle_fallback_candidates(
+                    count=required_topics - len(collected_candidates),
+                    existing_titles=existing_titles,
+                    existing_scripts=existing_scripts,
+                    target_length_tier=resolved_target_tier,
+                )
+                if fallback_candidates:
+                    logger.warning(
+                        "lifestyle_topic_fallback_synthesized",
+                        batch_id=batch_id,
+                        missing=required_topics - len(collected_candidates),
+                        synthesized=len(fallback_candidates),
+                    )
+                    for candidate in fallback_candidates:
+                        if len(collected_candidates) >= required_topics:
+                            break
+                        collected_candidates.append(candidate)
+                        candidate_title = str(candidate.get("title") or "").strip().lower()
+                        candidate_script = str(candidate.get("rotation") or "").strip()
+                        if candidate_title:
+                            existing_titles.add(candidate_title)
+                        if candidate_script:
+                            existing_scripts.append(candidate_script)
+                        dedupe_reference.append(
+                            {
+                                "title": candidate["title"],
+                                "rotation": candidate["rotation"],
+                                "cta": candidate["cta"],
+                                "script": candidate_script,
+                                "spoken_duration": float(candidate["spoken_duration"]),
+                            }
+                        )
+
             for topic_data in collected_candidates[:required_topics]:
                 update_seeding_progress(
                     batch_id,
@@ -1012,9 +1120,120 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     "rotation": topic_data["rotation"],
                     "cta": topic_data["cta"],
                     "spoken_duration": float(topic_data["spoken_duration"]),
+                    "post_type": post_type,
                     "seed_payload": {"canonical_topic": seed_payload["canonical_topic"]},
                 }
                 all_generated_topics.append(dedup_topic_record)
+        elif post_type == "product":
+            update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="writing_posts",
+                stage_label="Generating product scripts",
+                detail_message=(
+                    f"Generating {count} product posts from the static product knowledge base."
+                ),
+                posts_created=len(created_posts),
+                expected_posts=expected_posts,
+                current_post_type=post_type,
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
+
+            product_topics = generate_product_topics(
+                count=count,
+                target_length_tier=resolved_target_tier,
+            )
+
+            for topic_data in product_topics[:count]:
+                update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="writing_posts",
+                    stage_label="Writing product posts from generated concepts",
+                    detail_message=(
+                        f"Turning {post_type} concepts into post records and seed payloads."
+                    ),
+                    posts_created=len(created_posts),
+                    expected_posts=expected_posts,
+                    current_post_type=post_type,
+                    attempt=None,
+                    max_attempts=None,
+                    is_retrying=False,
+                    retry_message=None,
+                )
+                seed_payload = build_product_seed_payload(topic_data)
+                seed_payload = _attach_publish_captions(
+                    topic_title=topic_data["title"],
+                    post_type=post_type,
+                    seed_payload=seed_payload,
+                    script_fallback=topic_data["rotation"],
+                    canonical_topic=str(seed_payload.get("canonical_topic") or topic_data["product_name"]),
+                )
+
+                stored_row = store_topic_bank_entry(
+                    title=topic_data["title"],
+                    topic_script=topic_data["rotation"],
+                    post_type=post_type,
+                    target_length_tier=resolved_target_tier,
+                    research_payload={},
+                    origin_kind="provider",
+                )
+                seed_payload["family_id"] = stored_row["id"]
+                seed_payload["family_fingerprint"] = stored_row.get("family_fingerprint") or _topic_family_signature(
+                    {"title": topic_data["title"], "seed_payload": seed_payload}
+                )
+
+                variants = _build_script_variants(
+                    topic_title=topic_data["title"],
+                    post_type=post_type,
+                    target_length_tier=resolved_target_tier,
+                    research_dossier={},
+                    prompt1_item=SimpleNamespace(
+                        script=topic_data["rotation"],
+                        caption=seed_payload.get("caption", ""),
+                    ),
+                    dialog_scripts=SimpleNamespace(
+                        problem_agitate_solution=[topic_data["script"]],
+                        testimonial=[topic_data["script"]],
+                        transformation=[topic_data["script"]],
+                        description=seed_payload.get("description", ""),
+                    ),
+                    seed_payload=seed_payload,
+                )
+                upsert_topic_script_variants(
+                    topic_registry_id=stored_row["id"],
+                    title=stored_row["title"],
+                    post_type=post_type,
+                    target_length_tier=resolved_target_tier,
+                    topic_research_dossier_id=None,
+                    variants=variants,
+                    origin_kind="provider",
+                )
+
+                post = create_post_for_batch(
+                    batch_id=batch_id,
+                    post_type=post_type,
+                    topic_title=topic_data["title"],
+                    topic_rotation=topic_data["rotation"],
+                    topic_cta=topic_data["cta"],
+                    spoken_duration=float(topic_data["spoken_duration"]),
+                    seed_data=seed_payload,
+                    target_length_tier=resolved_target_tier,
+                )
+                created_posts.append(post)
+                all_generated_topics.append(
+                    {
+                        "title": topic_data["title"],
+                        "rotation": topic_data["rotation"],
+                        "cta": topic_data["cta"],
+                        "spoken_duration": float(topic_data["spoken_duration"]),
+                        "post_type": post_type,
+                        "seed_payload": {"canonical_topic": seed_payload["canonical_topic"]},
+                    }
+                )
         else:
             update_seeding_progress(
                 batch_id,
@@ -1063,6 +1282,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     "rotation": suggestion.get("rotation") or suggestion.get("script") or suggestion["title"],
                     "cta": suggestion.get("cta") or suggestion.get("rotation") or suggestion.get("script") or suggestion["title"],
                     "spoken_duration": float(suggestion.get("spoken_duration") or 5),
+                    "post_type": post_type,
                     "seed_payload": {"canonical_topic": suggestion.get("canonical_topic") or suggestion["title"]},
                 }
                 all_generated_topics.append(dedup_topic_record)

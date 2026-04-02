@@ -119,6 +119,41 @@ class ResearchAgentItem(BaseModel):
         return len(self.script.split())
 
 
+class ProductKnowledgeEntry(BaseModel):
+    """Normalized active product facts derived from the static knowledge base."""
+    product_name: str = Field(..., min_length=2, max_length=120)
+    source_label: str = Field(..., min_length=2, max_length=200)
+    aliases: List[str] = Field(default_factory=list, min_length=1, max_length=10)
+    summary: str = Field(..., min_length=10, max_length=500)
+    facts: List[str] = Field(default_factory=list, min_length=1, max_length=12)
+    support_facts: List[str] = Field(default_factory=list, max_length=12)
+    is_active: bool = True
+
+    @validator("aliases", "facts", "support_facts")
+    def validate_non_empty_lists(cls, v):
+        if isinstance(v, list) and not v:
+            raise ValueError("At least one entry is required")
+        return v
+
+
+class ProductPromptCandidate(BaseModel):
+    """Plain-text Prompt 3 output after local parsing and validation."""
+    product_name: str = Field(..., min_length=2, max_length=120)
+    angle: str = Field(..., min_length=5, max_length=240)
+    script: str = Field(..., min_length=10, max_length=900)
+    cta: str = Field(..., min_length=2, max_length=240)
+    facts: List[str] = Field(default_factory=list, min_length=1, max_length=5)
+    framework: Literal["PAL", "Testimonial", "Transformation"] = "PAL"
+    estimated_duration_s: int = Field(default=0, ge=0, le=32)
+
+    @validator("product_name", "angle", "script", "cta")
+    def _validate_product_prompt_text(cls, value: str) -> str:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
+
+
 class ResearchAgentBatch(BaseModel):
     """Wrapper for PROMPT_1 batch output."""
     items: List[ResearchAgentItem] = Field(..., min_length=1, max_length=10)
@@ -253,4 +288,3 @@ class DeduplicationResult(BaseModel):
     similarity_score: float
     matched_topic_id: Optional[str] = None
     reason: Optional[str] = None
-

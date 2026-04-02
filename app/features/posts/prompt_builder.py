@@ -317,12 +317,36 @@ def split_dialogue_sentences(dialogue: str) -> list[str]:
     return sentences
 
 
-def build_veo_prompt_segment(dialogue: str, *, include_quotes: bool = False, include_ending: bool = False) -> str:
+def build_veo_prompt_segment(
+    dialogue: str,
+    *,
+    include_quotes: bool = False,
+    include_ending: bool = False,
+    character: Optional[str] = None,
+    action: Optional[str] = None,
+    style: Optional[str] = None,
+    scene: Optional[str] = None,
+    cinematography: Optional[str] = None,
+    ending: Optional[str] = None,
+    audio_block: Optional[str] = None,
+    negative_constraints: Optional[str] = None,
+) -> str:
     cleaned_dialogue = dialogue.strip()
     prompt_dialogue = f"\"{cleaned_dialogue}\"" if include_quotes else cleaned_dialogue
     prompt_mode = "extended_final" if include_ending else "extended_base_or_continuation"
     return build_optimized_prompt(
         prompt_dialogue,
-        negative_constraints=VEO_NEGATIVE_PROMPT if not include_quotes else SORA_NEGATIVE_CONSTRAINTS,
+        negative_constraints=(
+            negative_constraints
+            if negative_constraints is not None
+            else VEO_NEGATIVE_PROMPT if not include_quotes else SORA_NEGATIVE_CONSTRAINTS
+        ),
         prompt_mode=prompt_mode,
+        character=character,
+        action=action,
+        style=style,
+        scene=scene,
+        cinematography=cinematography,
+        ending=ending,
+        audio_block=audio_block,
     )

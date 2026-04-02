@@ -10,6 +10,7 @@ import re
 import secrets
 from typing import Callable, Dict, List, Optional
 
+from app.core.errors import ValidationError
 from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.content_utils import extract_soft_cta, strip_cta_from_script
@@ -90,12 +91,24 @@ def generate_lifestyle_topics(
         topic_data: Optional[Dict[str, object]] = None
         for attempt in range(3):
             topic_template = shuffled_templates[(index + attempt) % len(shuffled_templates)]
-            dialog_scripts = generate_dialog_scripts_fn(
-                topic=topic_template,
-                scripts_required=1,
-                previously_used_hooks=retry_hooks if retry_hooks else None,
-                profile=resolved_profile,
-            )
+            try:
+                dialog_scripts = generate_dialog_scripts_fn(
+                    topic=topic_template,
+                    scripts_required=1,
+                    previously_used_hooks=retry_hooks if retry_hooks else None,
+                    profile=resolved_profile,
+                )
+            except ValidationError as exc:
+                logger.warning(
+                    "lifestyle_topic_generation_retry",
+                    template_title=topic_template,
+                    attempt=attempt + 1,
+                    error=getattr(exc, "message", str(exc)),
+                    details=getattr(exc, "details", {}),
+                )
+                retry_hooks.append(topic_template[:24])
+                topic_data = None
+                continue
             main_script = dialog_scripts.problem_agitate_solution[0]
             overlap_reason = _request_level_overlap_reason(main_script, accepted_scripts)
             if overlap_reason:
