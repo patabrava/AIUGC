@@ -445,8 +445,13 @@ def validate_pre_persistence_topic_payload(
         if field not in normalized:
             continue
         raw = normalize_temporal_reference(normalized.get(field), current_year=current_year)
-        max_chars = 500 if field in {"caption", "source_summary"} else None
-        normalized[field] = sanitize_metadata_text(raw, max_chars=max_chars)
+        if field in {"caption", "source_summary", "disclaimer"}:
+            max_chars = 500 if field in {"caption", "source_summary"} else None
+            normalized[field] = sanitize_metadata_text(raw, max_chars=max_chars)
+        else:
+            cleaned = normalize_dash_separators(raw)
+            cleaned = normalize_spoken_whitespace(cleaned).strip(" ,;:-")
+            normalized[field] = cleaned
 
     # Normalize script with the same dash/time rules.
     script = sanitize_spoken_fragment(

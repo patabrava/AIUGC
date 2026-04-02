@@ -188,7 +188,7 @@ def test_store_topic_bank_entry_increments_use_count(monkeypatch):
 
     result = topic_queries.store_topic_bank_entry(
         title="Neues Thema",
-        topic_script="Script text.",
+        topic_script="Pruef deinen Pflegegrad jetzt sofort und nutze die Hilfe im Alltag.",
         post_type="value",
         target_length_tier=8,
         research_payload={"seed_topic": "Neues Thema", "topic": "Neues Thema"},
@@ -197,6 +197,78 @@ def test_store_topic_bank_entry_increments_use_count(monkeypatch):
 
     assert result["id"] == "topic-1"
     assert captured["increment_use_count"] is True
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_applies_shared_quality_gate(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = []
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def table(self, *_args, **_kwargs):
+            return self
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                return _FakeResponse([])
+            if self._mode == "insert":
+                row = dict(self._payload)
+                row["id"] = f"row-{len(self.rows) + 1}"
+                self.rows.append(row)
+                return _FakeResponse([row])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = type("SB", (), {"client": fake_table})()
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-1",
+        title="MSZ — Rechte",
+        post_type="value",
+        target_length_tier=8,
+        topic_research_dossier_id=None,
+        variants=[{
+            "script": "Ab 2025 — dein Pflegegrad bleibt wichtig, weil Hilfe im Alltag oft schneller gebraucht wird.",
+            "caption": "Cap — Ab 2025 gelten neue Hinweise fuer dich im Alltag.",
+            "source_summary": "Zusammenfassung — Ab 2025 gelten neue Hinweise fuer dich im Alltag.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung — bitte die Lage 2026 pruefen.",
+            "framework": "PAL",
+            "hook_style": "question",
+            "bucket": "canonical",
+            "origin_kind": "provider",
+        }],
+    )
+
+    assert len(stored) == 1
+    assert "—" not in fake_table.rows[0]["title"]
+    assert "—" not in fake_table.rows[0]["script"]
+    assert "Seit 2025" in fake_table.rows[0]["script"]
+    assert "—" not in fake_table.rows[0]["source_summary"]
+    assert "Seit 2025" in fake_table.rows[0]["source_summary"]
+    assert "—" not in fake_table.rows[0]["disclaimer"]
 
 
 @patch("app.features.topics.queries.get_supabase")
@@ -279,19 +351,19 @@ def test_upsert_topic_script_variants_skips_identical_scripts_within_registry_ti
         variants=[
             {
                 "bucket": "canonical",
-                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause.",
+                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause wirklich sofort.",
                 "hook_style": "canonical",
                 "lane_key": "lane-1",
             },
             {
                 "bucket": "testimonial",
-                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause.",
+                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause wirklich sofort.",
                 "hook_style": "testimonial",
                 "lane_key": "lane-1",
             },
             {
                 "bucket": "transformation",
-                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause.",
+                "script": "Pflegegrad prüfen spart dir Rückfragen, Zeit und unnötigen Stress bei der Begutachtung zuhause wirklich sofort.",
                 "hook_style": "transformation",
                 "lane_key": "lane-1",
             },
@@ -631,7 +703,7 @@ def test_upsert_topic_script_variants_replaces_fallback_owned_variant_slot(mock_
         variants=[
             {
                 "bucket": "canonical",
-                "script": "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg.",
+                    "script": "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg oft komplett.",
                 "hook_style": "canonical",
                 "framework": "PAL",
                 "lane_key": "lane-provider",
@@ -642,7 +714,7 @@ def test_upsert_topic_script_variants_replaces_fallback_owned_variant_slot(mock_
 
     assert len(stored) == 1
     assert len(fake_table.rows) == 1
-    assert fake_table.rows[0]["script"] == "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg."
+    assert fake_table.rows[0]["script"] == "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg oft komplett."
     assert fake_table.rows[0]["origin_kind"] == "provider"
     assert fake_table.rows[0]["topic_research_dossier_id"] == "dossier-provider"
     assert fake_table.rows[0]["lane_key"] == "lane-provider"
@@ -814,6 +886,26 @@ def test_list_topic_suggestions_only_returns_active_pass_audited_families(monkey
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
 
     assert [row["topic_registry_id"] for row in result] == ["topic-active"]
+
+
+def test_list_topic_suggestions_excludes_used_scripts(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {"id": "topic-used", "title": "Verbraucht", "script": "A", "post_type": "value", "status": "active", "family_fingerprint": "verbraucht"},
+        {"id": "topic-unused", "title": "Frei", "script": "B", "post_type": "value", "status": "active", "family_fingerprint": "frei"},
+    ]
+    script_rows = [
+        {"id": "script-used", "topic_registry_id": "topic-used", "title": "Verbraucht", "script": "A", "audit_status": "pass", "use_count": 2, "last_used_at": "2026-03-31T10:00:00+00:00"},
+        {"id": "script-unused", "topic_registry_id": "topic-unused", "title": "Frei", "script": "B", "audit_status": "pass", "use_count": 0},
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+
+    result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
+
+    assert [row["topic_registry_id"] for row in result] == ["topic-unused"]
 
 
 @patch("app.features.topics.queries.get_supabase")

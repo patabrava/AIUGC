@@ -27,7 +27,10 @@ from app.features.topics.queries import (
 )
 from app.features.topics.response_parsers import parse_prompt1_response, parse_prompt2_response, _coerce_prompt2_payload, _validate_dialog_scripts_payload
 from app.features.topics.schemas import DialogScripts, ResearchAgentItem
-from app.features.topics.topic_validation import estimate_script_duration_seconds
+from app.features.topics.topic_validation import (
+    estimate_script_duration_seconds,
+    validate_pre_persistence_topic_payload,
+)
 
 logger = get_logger(__name__)
 
@@ -269,6 +272,7 @@ def expand_topic_variants(
             break
 
         framework, hook_style = variant
+        normalized_title = title
 
         if dry_run:
             details.append({"framework": framework, "hook_style": hook_style, "dry_run": True})
@@ -329,6 +333,19 @@ def expand_topic_variants(
                     lane_fact_texts,
                 )
                 script_text = str(prompt1_item.script or "").strip()
+                normalized_variant = validate_pre_persistence_topic_payload(
+                    {
+                        "topic": str(getattr(prompt1_item, "topic", title) or title).strip(),
+                        "title": str(title or "").strip(),
+                        "script": script_text,
+                        "caption": str(getattr(prompt1_item, "caption", "") or "").strip(),
+                        "source_summary": str(getattr(prompt1_item, "source_summary", "") or "").strip(),
+                        "disclaimer": str(getattr(prompt1_item, "disclaimer", "") or "").strip(),
+                    },
+                    target_length_tier=target_length_tier,
+                )
+                script_text = str(normalized_variant.get("script") or script_text).strip()
+                normalized_title = str(normalized_variant.get("title") or title or "").strip() or title
                 variant_data: Dict[str, Any] = {
                     "script": script_text,
                     "framework": framework,
@@ -340,6 +357,11 @@ def expand_topic_variants(
                     "cluster_id": getattr(prompt1_item, "cluster_id", None),
                     "anchor_topic": getattr(prompt1_item, "anchor_topic", None),
                     "seed_payload": {},
+                    "topic": str(normalized_variant.get("topic") or getattr(prompt1_item, "topic", title) or title or "").strip(),
+                    "title": normalized_title,
+                    "caption": str(normalized_variant.get("caption") or getattr(prompt1_item, "caption", "") or "").strip(),
+                    "source_summary": str(normalized_variant.get("source_summary") or getattr(prompt1_item, "source_summary", "") or "").strip(),
+                    "disclaimer": str(normalized_variant.get("disclaimer") or getattr(prompt1_item, "disclaimer", "") or "").strip(),
                 }
             else:
                 dialog_scripts = generate_dialog_scripts_variant(
@@ -351,12 +373,27 @@ def expand_topic_variants(
                 script_text = str(
                     (dialog_scripts.problem_agitate_solution or [""])[0]
                 ).strip()
+                normalized_variant = validate_pre_persistence_topic_payload(
+                    {
+                        "topic": str(title or "").strip(),
+                        "title": str(title or "").strip(),
+                        "script": script_text,
+                        "caption": "",
+                        "source_summary": "",
+                        "disclaimer": "",
+                    },
+                    target_length_tier=target_length_tier,
+                )
+                script_text = str(normalized_variant.get("script") or script_text).strip()
+                normalized_title = str(normalized_variant.get("title") or title or "").strip() or title
                 variant_data = {
                     "script": script_text,
                     "framework": framework,
                     "hook_style": hook_style,
                     "bucket": framework.lower(),
                     "seed_payload": {},
+                    "topic": str(normalized_variant.get("topic") or title or "").strip(),
+                    "title": normalized_title,
                 }
 
             if not script_text:
@@ -366,7 +403,7 @@ def expand_topic_variants(
             dossier_id = dossiers[0].get("id") if (post_type == "value" and dossiers) else None
             upsert_topic_script_variants(
                 topic_registry_id=topic_registry_id,
-                title=title,
+                title=normalized_title,
                 post_type=post_type,
                 target_length_tier=target_length_tier,
                 topic_research_dossier_id=dossier_id,

@@ -21,6 +21,7 @@ from app.features.topics.topic_validation import (
     get_prompt1_word_bounds,
     sanitize_metadata_text,
     sanitize_spoken_fragment,
+    validate_pre_persistence_topic_payload,
 )
 
 logger = get_logger(__name__)
@@ -736,11 +737,22 @@ def store_topic_bank_entry(
         or (research_payload or {}).get("topic")
         or title
     ).strip()
+    normalized_payload = validate_pre_persistence_topic_payload(
+        {
+            "topic": canonical_topic,
+            "title": title,
+            "script": topic_script,
+            "caption": str((research_payload or {}).get("caption") or ""),
+            "source_summary": str((research_payload or {}).get("source_summary") or ""),
+            "disclaimer": str((research_payload or {}).get("disclaimer") or ""),
+        },
+        target_length_tier=target_length_tier,
+    )
     row = add_topic_to_registry(
-        title=title,
-        script=topic_script,
+        title=str(normalized_payload.get("title") or title).strip() or title,
+        script=str(normalized_payload.get("script") or topic_script).strip() or topic_script,
         post_type=post_type,
-        canonical_topic=canonical_topic,
+        canonical_topic=str(normalized_payload.get("topic") or canonical_topic).strip() or canonical_topic,
         status="quarantined" if origin_kind == "synthetic_fallback" else "provisional",
         increment_use_count=True,
     )
@@ -972,8 +984,6 @@ def upsert_topic_script_variants(
                 reason="empty_after_sanitization",
             )
             continue
-        script_signature = _normalize_script_text(script)
-        script_fingerprint = _build_script_fingerprint(script)
         lane_key = str(variant.get("lane_key") or "").strip()
         tier = int(variant.get("target_length_tier") or target_length_tier or 0)
         bucket = str(variant.get("bucket") or "").strip()
@@ -1059,7 +1069,6 @@ def upsert_topic_script_variants(
             "primary_source_title": variant.get("primary_source_title"),
             "source_urls": variant.get("source_urls") or [],
             "seed_payload": variant.get("seed_payload") or {},
-            "script_fingerprint": script_fingerprint,
             "audit_status": str(variant.get("audit_status") or "pending").strip() or "pending",
             "audit_attempts": int(variant.get("audit_attempts") or 0),
             "origin_kind": str(variant.get("origin_kind") or origin_kind or "provider").strip() or "provider",
@@ -1068,6 +1077,17 @@ def upsert_topic_script_variants(
             "use_count": int(variant.get("use_count") or 0),
             "last_used_at": variant.get("last_used_at"),
         }
+        payload = validate_pre_persistence_topic_payload(
+            payload,
+            target_length_tier=tier,
+        )
+        payload_title = str(payload.get("title") or title).strip() or title
+        script = str(payload.get("script") or script).strip() or script
+        payload["title"] = payload_title
+        payload["script"] = script
+        script_signature = _normalize_script_text(script)
+        script_fingerprint = _build_script_fingerprint(script)
+        payload["script_fingerprint"] = script_fingerprint
         variant_slot_key = _build_variant_slot_key(payload, fallback_tier=tier, fallback_post_type=post_type_value or post_type)
         exact_key = (tier, bucket, lane_key)
         if script_signature and script_signature in existing_signatures_by_tier.get(tier, set()):

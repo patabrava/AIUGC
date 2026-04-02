@@ -27,38 +27,17 @@ def test_expand_topic_variants_generates_and_stores(monkeypatch):
     )
 
     mock_llm = MagicMock()
-    mock_llm.generate_gemini_json.return_value = [{"topic": "Test", "script": "Test script das ist ein guter deutscher Skript fuer dich heute jetzt.", "caption": "Cap"}]
     mock_llm.generate_gemini_text.return_value = (
-        "Problem-Agitieren-Lösung Ads\n\n"
-        "Kennst du das Gefühl, wenn der Alltag im Rollstuhl dich mal wieder völlig unerwartet überrascht und du spontan umplanen musst?\n\n"
-        "Beschreibung\n\n"
-        "Ein ausführliches Test-Skript für Lifestyle-Inhalte mit genug Zeichen und Kontext für die Social-Media-Caption und noch mehr Wörter dazu."
+        "Ab 2025 — dein Pflegegrad bleibt wichtig, weil Hilfe im Alltag oft schneller gebraucht wird wirklich."
     )
     monkeypatch.setattr(
         "app.features.topics.variant_expansion.get_llm_client",
         lambda: mock_llm,
     )
 
-    mock_item = SimpleNamespace(
-        topic="Test",
-        script="Test script das ist ein guter deutscher Skript fuer dich heute jetzt.",
-        caption="Cap",
-        framework="PAL",
-        source_summary="",
-        estimated_duration_s=5,
-        sources=[],
-        tone="direkt",
-        disclaimer="Keine Rechts- oder medizinische Beratung.",
-    )
-    mock_batch = SimpleNamespace(items=[mock_item])
-    monkeypatch.setattr(
-        "app.features.topics.variant_expansion.parse_prompt1_response",
-        lambda raw, profile=None, **kwargs: mock_batch,
-    )
-
     result = expand_topic_variants(
         topic_registry_id="topic-1",
-        title="Test Topic",
+        title="Test Topic — Ab 2025",
         post_type="value",
         target_length_tier=8,
         count=1,
@@ -66,6 +45,14 @@ def test_expand_topic_variants_generates_and_stores(monkeypatch):
     assert result["generated"] == 1
     assert len(stored) == 1
     assert stored[0]["topic_research_dossier_id"] == "dossier-1"
+    assert "—" not in stored[0]["title"]
+    assert "—" not in stored[0]["variants"][0]["script"]
+    assert "Seit 2025" in stored[0]["variants"][0]["script"]
+    assert "—" not in stored[0]["variants"][0]["caption"]
+    assert "Seit 2025" in stored[0]["variants"][0]["caption"]
+    assert "—" not in stored[0]["variants"][0]["source_summary"]
+    assert "Seit 2025" in stored[0]["variants"][0]["source_summary"]
+    assert "—" not in stored[0]["variants"][0]["disclaimer"]
 
 
 def test_expand_topic_variants_expands_16s_script_to_tier_bounds(monkeypatch):
