@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from app.core.video_profiles import get_duration_profile
-from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2, build_topic_research_prompt
+from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2, build_prompt3, build_topic_research_prompt
+from app.features.topics.schemas import ProductKnowledgeEntry
 from app.features.topics import agents as topic_agents
 
 
@@ -18,6 +19,9 @@ def test_prompt_text_files_exist_for_all_duration_tiers():
         "prompt2_8s.txt",
         "prompt2_16s.txt",
         "prompt2_32s.txt",
+        "prompt3_8s.txt",
+        "prompt3_16s.txt",
+        "prompt3_32s.txt",
     }
     existing = {path.name for path in PROMPT_DATA_DIR.glob("prompt*.txt")}
     assert expected.issubset(existing)
@@ -97,6 +101,34 @@ def test_build_prompt2_uses_16s_text_template():
     assert "24-34 Wörter" in prompt
     assert "3-4 Sätze" in prompt
     assert "core:" not in prompt
+
+
+def _sample_product() -> ProductKnowledgeEntry:
+    return ProductKnowledgeEntry(
+        product_name="VARIO PLUS",
+        source_label="PLATTFORMTREPPENLIFT T80",
+        aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+        summary="Plattform oder Sitzlift auf derselben Schiene.",
+        facts=[
+            "Plattform oder Sitzlift auf derselben Schiene",
+            "Tragfaehigkeit bis 300 kg",
+            "Innen- und Aussenbereich",
+        ],
+        support_facts=[
+            "100% Made in Germany",
+            "5 Jahre Gewaehrleistung auf den gesamten Lift",
+        ],
+    )
+
+
+def test_build_prompt3_uses_32s_text_template():
+    prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(32))
+
+    assert "32-Sekunden-UGC-Videos" in prompt
+    assert "40-66 Woerter" in prompt
+    assert "5-6 Saetze" in prompt
+    assert "Antworte nicht in JSON" in prompt
+    assert "LL12" in prompt
 
 
 def test_parse_prompt1_response_normalizes_trailing_fragment(monkeypatch):
@@ -204,9 +236,11 @@ Warum ist Barrierefreiheit in Deutschland immer noch so verdammt schwer?
 
 def test_prompt1_8s_contains_new_word_range_and_guardrails():
     prompt = build_prompt1(post_type="value", desired_topics=1)
-    assert "14-18 Woerter" in prompt
+    assert "16-18 Woerter" in prompt
     assert "Heute ist April 2026" in prompt
     assert "U+2014" in prompt
+    assert "HARTE NORMEN" in prompt
+    assert "SELF-CHECK VOR DEM ABSCHICKEN" in prompt
 
 
 def test_prompt1_research_mentions_current_year_context():

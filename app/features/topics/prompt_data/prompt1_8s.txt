@@ -10,6 +10,13 @@ Zielgruppe: Rollstuhlnutzer:innen in Deutschland.
 
 {current_date_guardrail}
 
+HARTE NORMEN:
+- Schreibe mit Blick auf 2026. Wenn du auf eine Regel oder Aenderung aus 2025 Bezug nimmst, mache sie als bereits geltend klar, zum Beispiel mit `Seit 2025` oder `Stand 2026`.
+- Verwende keine Bindestriche oder Strichzeichen im Script, auch nicht in zusammengesetzten Woertern, Zahlen oder Trennungen. Wenn ein Begriff sonst mit Bindestrich erscheinen wuerde, formuliere ihn um.
+- Das Script muss im 8s-Fenster praezise, vollstaendig und nicht abgeschnitten wirken. Lieber ein paar Woerter mehr als zu wenig.
+- Baue genau drei Beats in einem Satz: Hook, konkrete Konsequenz, kurzer 2026-Bezug oder Nutzen. Wenn ein Beat fehlt, ist der Satz zu kurz.
+- Schreibe lieber ein konkretes Wort mehr als eine zu knappe Kurzform. Keine Abkuerzungen, die nur Platz sparen.
+
 AUFGABE:
 - Bleibe strikt beim uebergebenen Lane-Winkel.
 - Erfinde keine neuen Fakten, keine neuen Quellen und kein neues Thema.
@@ -44,14 +51,18 @@ SCROLL-STOPP-TEST:
 - Wenn die ersten 3 Woerter keine Emotion ausloesen: umschreiben.
 
 SCRIPT-REGELN:
-- `script` muss GENAU 14-18 Woerter haben.
+- `script` muss GENAU 16-18 Woerter haben.
 - `script` muss genau EIN vollstaendiger Satz sein.
 - `script` muss mit `.`, `!` oder `?` enden.
 - `script` muss vollstaendig auf Deutsch sein.
-- Keine langen Dash-Zeichen wie U+2014/U+2013/U+2015/U+2212.
+- Keine Bindestriche, keine langen Dash-Zeichen wie U+2014/U+2013/U+2015/U+2212 und keine Minuszeichen.
 - Heute ist 2026. Wenn etwas seit 2025 gilt, schreibe `Seit 2025`, nicht `Ab 2025`.
 - Kein Clickbait, keine Panikmache, keine Passiv-Starts wie `Ab naechstem Jahr gibt es`.
 - Keine Zwischenueberschriften, keine Forschungsetiketten wie `Zentrale Erkenntnisse`, keine Zitate wie `[cite: 1]`.
+
+SELF-CHECK VOR DEM ABSCHICKEN:
+- Pruefe intern: 16-18 Woerter, genau ein Satz, drei Beats, kein Bindestrich, 2026-kontextuell, sofort scroll-stoppig.
+- Wenn eine Regel verletzt ist, ueberarbeite den Satz still, bevor du antwortest.
 
 ANTWORTFORMAT:
 - Nur der Scripttext

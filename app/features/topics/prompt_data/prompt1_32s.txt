@@ -10,6 +10,13 @@ Zielgruppe: Rollstuhlnutzer:innen in Deutschland.
 
 {current_date_guardrail}
 
+HARTE NORMEN:
+- Schreibe mit Blick auf 2026. Wenn du auf eine Regel oder Aenderung aus 2025 Bezug nimmst, mache sie als bereits geltend klar, zum Beispiel mit `Seit 2025` oder `Stand 2026`.
+- Verwende keine Bindestriche oder Strichzeichen im Script, auch nicht in zusammengesetzten Woertern, Zahlen oder Trennungen. Wenn ein Begriff sonst mit Bindestrich erscheinen wuerde, formuliere ihn um.
+- Der Text darf mehr Kontext tragen als 8s oder 16s, aber er muss trotzdem klar, direkt und gesprochen klingen.
+- Bei zeitkritischen Themen soll mindestens ein Satz den aktuellen Stand 2026 explizit einordnen.
+- Die ersten Saetze muessen die Gegenwartsrelevanz sofort klar machen. Keine abstrakte Einleitung ohne aktuellen Bezug.
+
 AUFGABE:
 - Bleibe strikt beim uebergebenen Lane-Winkel.
 - Erfinde keine neuen Fakten, keine neuen Quellen und kein neues Thema.
@@ -50,10 +57,14 @@ SCRIPT-REGELN:
 - Der erste Satz ist der Hook. Die folgenden Saetze liefern konkrete Einordnung, Konsequenz und Nutzen.
 - `script` muss mit `.`, `!` oder `?` enden.
 - `script` muss vollstaendig auf Deutsch sein.
-- Keine langen Dash-Zeichen wie U+2014/U+2013/U+2015/U+2212.
+- Keine Bindestriche, keine langen Dash-Zeichen wie U+2014/U+2013/U+2015/U+2212 und keine Minuszeichen.
 - Heute ist 2026. Wenn etwas seit 2025 gilt, schreibe `Seit 2025`, nicht `Ab 2025`.
 - Kein Clickbait, keine Panikmache, keine Passiv-Starts wie `Ab naechstem Jahr gibt es`.
 - Keine Zwischenueberschriften, keine Forschungsetiketten wie `Zentrale Erkenntnisse`, keine Zitate wie `[cite: 1]`.
+
+SELF-CHECK VOR DEM ABSCHICKEN:
+- Pruefe intern: 54-74 Woerter, 5-6 volle Saetze, kein Bindestrich, 2026-kontextuell, keine auslaufende Zeitbehauptung ohne Einordnung.
+- Wenn eine Regel verletzt ist, ueberarbeite den Text still, bevor du antwortest.
 
 ANTWORTFORMAT:
 - Nur der Scripttext
