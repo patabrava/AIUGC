@@ -272,6 +272,36 @@ def _validate_veo_extension_segment_budget(
     )
 
 
+def _pack_veo_segments_for_profile(
+    segments: list[str],
+    *,
+    planned_extension_hops: Optional[int],
+    target_length_tier: Optional[int],
+) -> list[str]:
+    if not segments or planned_extension_hops is None or target_length_tier is None:
+        return segments
+
+    profile = get_duration_profile(target_length_tier)
+    required_segments = _required_veo_segments_for_profile_hops(planned_extension_hops)
+    if (
+        profile.route != VEO_EXTENDED_VIDEO_ROUTE
+        or profile.veo_base_seconds < 8
+        or len(segments) <= required_segments
+    ):
+        return segments
+
+    packed_segments = list(segments)
+    merge_index = 0
+    while len(packed_segments) > required_segments and merge_index < len(packed_segments) - 1:
+        packed_segments[merge_index] = (
+            f"{packed_segments[merge_index]} {packed_segments[merge_index + 1]}"
+        ).strip()
+        del packed_segments[merge_index + 1]
+        if merge_index < required_segments - 2:
+            merge_index += 1
+    return packed_segments
+
+
 def _build_veo_extended_base_prompt(
     seed_data: Dict[str, Any],
     *,
@@ -282,6 +312,11 @@ def _build_veo_extended_base_prompt(
     segments = split_dialogue_sentences(script) if script else []
     if not segments and script:
         segments = [script]
+    segments = _pack_veo_segments_for_profile(
+        segments,
+        planned_extension_hops=planned_extension_hops,
+        target_length_tier=target_length_tier,
+    )
 
     effective_hops: Optional[int] = None
     if planned_extension_hops is not None:

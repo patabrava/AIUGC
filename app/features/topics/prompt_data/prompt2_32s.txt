@@ -37,7 +37,7 @@ Struktur des Skripts:
   3. Eine offene Frage ist erlaubt, wenn sie natürlich wirkt, aber nicht Pflicht in jedem Skript.
   4. Vermeide billigen Klickköder wie "Du wirst nicht glauben ...", reine Schockformeln und unfaire Panikmache.
 
-LÄNGE: 40-66 Wörter, 5-6 Sätze, keine Regieanweisungen.
+LÄNGE: 40-66 Wörter, 4 Sprechbloecke, keine Regieanweisungen.
 Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
 Jeder Skript-Satz muss als vollständige, zusammenhängende Zeile stehen und mit ".", "!" oder "?" enden.
 Hänge keinen abgeschnittenen Rest, keine halbe zweite Aussage und keine ausgelagerte Schlussphrase an.

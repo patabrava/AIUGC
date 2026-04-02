@@ -50,7 +50,7 @@ def test_build_prompt1_uses_32s_text_template():
         },
     )
 
-    assert "FUENF oder SECHS vollstaendige Saetze" in prompt
+    assert "VIER natuerliche Sprechbloecke" in prompt
     assert "54-74 Woerter" in prompt
     assert "Lane-Titel:" in prompt
     assert "Nur der Scripttext" in prompt
@@ -73,7 +73,7 @@ def test_build_prompt1_batch_keeps_rotation_context():
 
     assert "ZUFALLS-THEMEN FÜR DIESEN DURCHLAUF:" in prompt
     assert "26-36 Woerter" in prompt
-    assert "DREI oder VIER vollstaendige Saetze" in prompt
+    assert "ZWEI natuerliche Sprechbloecke" in prompt
     assert "Barrierefreie Bahnreisen" in prompt
 
 
@@ -86,7 +86,7 @@ def test_build_prompt2_uses_32s_text_template():
 
     assert "32-Sekunden-UGC-Videos" in prompt
     assert "40-66 Wörter" in prompt
-    assert "5-6 Sätze" in prompt
+    assert "4 Sprechbloecke" in prompt
     assert "core:" not in prompt
 
 
@@ -99,7 +99,7 @@ def test_build_prompt2_uses_16s_text_template():
 
     assert "16-Sekunden-UGC-Videos" in prompt
     assert "24-34 Wörter" in prompt
-    assert "3-4 Sätze" in prompt
+    assert "2 Sprechbloecke" in prompt
     assert "core:" not in prompt
 
 
@@ -126,7 +126,7 @@ def test_build_prompt3_uses_32s_text_template():
 
     assert "32-Sekunden-UGC-Videos" in prompt
     assert "40-66 Woerter" in prompt
-    assert "5-6 Saetze" in prompt
+    assert "vier natuerlichen Sprechbloecken" in prompt
     assert "Antworte nicht in JSON" in prompt
     assert "LL12" in prompt
 
@@ -192,7 +192,7 @@ def test_prompt1_16s_contains_hook_mechanics():
         post_type="value", desired_topics=1, profile=get_duration_profile(16),
     )
     assert "klaren Hook" not in prompt, "Old vague hook instruction still present in 16s"
-    assert "DREI oder VIER vollstaendige Saetze" in prompt
+    assert "ZWEI natuerliche Sprechbloecke" in prompt
     assert "HOOK-REGELN" in prompt
     assert "Scroll-Stopp" in prompt
     assert "TONALITAET" in prompt

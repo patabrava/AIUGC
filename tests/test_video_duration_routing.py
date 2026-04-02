@@ -144,6 +144,55 @@ def test_build_veo_extended_base_prompt_preserves_full_32s_chain_budget():
     assert seg_meta["veo_chain_shortened_to_available_segments"] is False
 
 
+def test_build_veo_extended_base_prompt_packs_short_opening_for_efficient_32s():
+    seed_data = {
+        "script": (
+            "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie. "
+            "Physio fokussiert auf koerperliche Funktionen und Beweglichkeit, "
+            "waehrend Ergo handlungsorientiert deine Selbststaendigkeit im Alltag staerkt. "
+            "Durch Alltagstraining lernst du, Routinetaetigkeiten wieder selbst zu bewaeltigen. "
+            "Die Kosten uebernehmen primaer die Krankenkassen, du leistest allerdings die gesetzliche Zuzahlung. "
+            "Seit 2024 bietet die Blankoverordnung Therapeuten mehr Flexibilitaet fuer deine Behandlung."
+        ),
+        "estimated_duration_s": 29,
+    }
+
+    prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        planned_extension_hops=3,
+        target_length_tier=32,
+    )
+
+    assert "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie." in prompt
+    assert "Physio fokussiert auf koerperliche Funktionen und Beweglichkeit" in prompt
+    assert len(seg_meta["veo_segments"]) == 4
+    assert seg_meta["veo_segments_total"] == 4
+    assert seg_meta["veo_segments"][-1] == (
+        "Seit 2024 bietet die Blankoverordnung Therapeuten mehr Flexibilitaet fuer deine Behandlung."
+    )
+
+
+def test_build_veo_extended_base_prompt_packs_to_two_segments_for_efficient_16s():
+    seed_data = {
+        "script": (
+            "Erster kurzer Satz. Zweiter kurzer Satz. "
+            "Dritter Satz mit etwas mehr Inhalt."
+        ),
+        "estimated_duration_s": 15,
+    }
+
+    prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        planned_extension_hops=1,
+        target_length_tier=16,
+    )
+
+    assert "Erster kurzer Satz. Zweiter kurzer Satz." in prompt
+    assert len(seg_meta["veo_segments"]) == 2
+    assert seg_meta["veo_segments_total"] == 2
+    assert seg_meta["veo_segments"][-1] == "Dritter Satz mit etwas mehr Inhalt."
+
+
 def test_batch_video_generation_request_accepts_duration_tier_seconds():
     req = BatchVideoGenerationRequest(
         provider="veo_3_1",
@@ -235,9 +284,13 @@ def test_efficient_long_route_profiles_are_default_and_can_opt_out(monkeypatch):
     assert profile_16.provider_target_seconds == 15
     assert profile_16.veo_base_seconds == 8
     assert profile_16.veo_extension_hops == 1
+    assert profile_16.prompt1_sentence_guidance == "ZWEI natuerliche Sprechbloecke"
+    assert profile_16.prompt2_sentence_guidance == "2 Sprechbloecke"
     assert profile_32.provider_target_seconds == 29
     assert profile_32.veo_base_seconds == 8
     assert profile_32.veo_extension_hops == 3
+    assert profile_32.prompt1_sentence_guidance == "VIER natuerliche Sprechbloecke"
+    assert profile_32.prompt2_sentence_guidance == "4 Sprechbloecke"
     assert metadata_32["veo_base_seconds"] == 8
     assert metadata_32["veo_extension_hops"] == 3
     assert get_profile_request_cost_units(profile_16) == 2
@@ -254,6 +307,23 @@ def test_efficient_long_route_profiles_are_default_and_can_opt_out(monkeypatch):
     assert legacy_32.provider_target_seconds == 32
     assert legacy_32.veo_base_seconds == 4
     assert legacy_32.veo_extension_hops == 4
+
+
+def test_prompt3_32s_template_uses_four_speech_blocks_language():
+    prompt_path = (
+        Path(__file__).resolve().parent.parent
+        / "app"
+        / "features"
+        / "topics"
+        / "prompt_data"
+        / "prompt3_32s.txt"
+    )
+
+    prompt_text = prompt_path.read_text(encoding="utf-8")
+
+    assert "40-66 Woerter und vier natuerliche Sprechbloecke" in prompt_text
+    assert "5-6 Saetze" not in prompt_text
+    assert "5-6-Satz-Scripttext" not in prompt_text
 
 
 def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):

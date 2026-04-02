@@ -119,10 +119,10 @@ _EFFICIENT_LONG_ROUTE_PROFILES = {
         prompt1_min_seconds=12,
         prompt1_max_seconds=14,
         prompt1_max_chars_no_spaces=220,
-        prompt1_sentence_guidance="DREI oder VIER vollstaendige Saetze",
+        prompt1_sentence_guidance="ZWEI natuerliche Sprechbloecke",
         prompt2_min_words=24,
         prompt2_max_words=34,
-        prompt2_sentence_guidance="3-4 Saetze",
+        prompt2_sentence_guidance="2 Sprechbloecke",
     ),
     32: DurationProfile(
         target_length_tier=32,
@@ -137,10 +137,10 @@ _EFFICIENT_LONG_ROUTE_PROFILES = {
         prompt1_min_seconds=24,
         prompt1_max_seconds=28,
         prompt1_max_chars_no_spaces=430,
-        prompt1_sentence_guidance="FUENF oder SECHS vollstaendige Saetze",
+        prompt1_sentence_guidance="VIER natuerliche Sprechbloecke",
         prompt2_min_words=40,
         prompt2_max_words=66,
-        prompt2_sentence_guidance="5-6 Saetze",
+        prompt2_sentence_guidance="4 Sprechbloecke",
     ),
 }
 

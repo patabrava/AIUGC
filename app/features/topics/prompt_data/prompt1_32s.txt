@@ -53,7 +53,7 @@ Scroll-Stopp ist Pflicht:
 SCRIPT-REGELN:
 - `script` muss GENAU 54-74 Woerter haben.
 - Wenn `script` unter 54 oder ueber 74 Woerter liegt, ist die Antwort ungueltig.
-- `script` muss genau FUENF oder SECHS vollstaendige Saetze haben.
+- `script` muss in genau VIER natuerliche Sprechbloecke passen.
 - Der erste Satz ist der Hook. Die folgenden Saetze liefern konkrete Einordnung, Konsequenz und Nutzen.
 - `script` muss mit `.`, `!` oder `?` enden.
 - `script` muss vollstaendig auf Deutsch sein.
@@ -63,7 +63,7 @@ SCRIPT-REGELN:
 - Keine Zwischenueberschriften, keine Forschungsetiketten wie `Zentrale Erkenntnisse`, keine Zitate wie `[cite: 1]`.
 
 SELF-CHECK VOR DEM ABSCHICKEN:
-- Pruefe intern: 54-74 Woerter, 5-6 volle Saetze, kein Bindestrich, 2026-kontextuell, keine auslaufende Zeitbehauptung ohne Einordnung.
+- Pruefe intern: 54-74 Woerter, 4 Sprechbloecke, kein Bindestrich, 2026-kontextuell, keine auslaufende Zeitbehauptung ohne Einordnung.
 - Wenn eine Regel verletzt ist, ueberarbeite den Text still, bevor du antwortest.
 
 ANTWORTFORMAT:
