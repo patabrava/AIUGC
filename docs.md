@@ -126,3 +126,10 @@ Takeaway:
 - the worker path is actively writing new families
 - the shared gate is stripping and normalizing text before persistence
 - the audit worker still controls final promotion, so weak drafts can be quarantined without becoming selectable
+
+## Audit JSON Handling
+
+- The audit worker now asks Gemini for structured JSON first.
+- If the structured call fails, it retries once with a text-repair prompt.
+- A `parse_error` should now be treated as a last-resort failure, not the normal path.
+- The `topic_scripts` audit history still records rejects, but malformed JSON should now be much rarer after the structured-first change.

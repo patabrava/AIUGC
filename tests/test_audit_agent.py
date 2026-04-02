@@ -58,23 +58,27 @@ def _mock_llm_response(total_score: int, status: str) -> str:
 def test_audit_single_script_pass():
     """Script scoring >= 70 gets status pass."""
     llm = MagicMock()
-    llm.generate_gemini_text.return_value = _mock_llm_response(85, "pass")
+    llm.generate_gemini_json.return_value = json.loads(_mock_llm_response(85, "pass"))
     row = {"id": "abc-123", "script": "Dein Recht auf Mitfahrt existiert nur auf dem Papier.", "target_length_tier": 8, "title": "Test"}
     result = audit_single_script(row, llm=llm)
     assert isinstance(result, AuditResult)
     assert result.total_score == 85
     assert result.status == "pass"
     assert result.script_id == "abc-123"
+    llm.generate_gemini_json.assert_called_once()
+    llm.generate_gemini_text.assert_not_called()
 
 
 def test_audit_single_script_reject():
     """Script scoring < 40 gets status reject."""
     llm = MagicMock()
-    llm.generate_gemini_text.return_value = _mock_llm_response(25, "reject")
+    llm.generate_gemini_json.return_value = json.loads(_mock_llm_response(25, "reject"))
     row = {"id": "abc-456", "script": "Es gibt Barrierefreiheit.", "target_length_tier": 8, "title": "Test"}
     result = audit_single_script(row, llm=llm)
     assert result.total_score == 25
     assert result.status == "reject"
+    llm.generate_gemini_json.assert_called_once()
+    llm.generate_gemini_text.assert_not_called()
 
 
 def test_audit_single_script_deterministic_reject():
@@ -85,12 +89,14 @@ def test_audit_single_script_deterministic_reject():
     assert result.total_score == 0
     assert result.status == "reject"
     assert "label_fragment" in result.quality_notes
+    llm.generate_gemini_json.assert_not_called()
     llm.generate_gemini_text.assert_not_called()
 
 
 def test_audit_single_script_malformed_llm_response():
     """Malformed LLM JSON falls back to reject."""
     llm = MagicMock()
+    llm.generate_gemini_json.side_effect = ValueError("structured output invalid")
     llm.generate_gemini_text.return_value = "This is not JSON at all"
     row = {"id": "abc-bad", "script": "Dein Recht auf Mitfahrt.", "target_length_tier": 8, "title": "Test"}
     result = audit_single_script(row, llm=llm)
@@ -170,7 +176,7 @@ def test_audit_worker_run_audit_cycle(monkeypatch):
     monkeypatch.setattr("workers.audit_worker.update_script_quality", mock_update)
 
     mock_llm = MagicMock()
-    mock_llm.generate_gemini_text.return_value = _mock_llm_response(80, "pass")
+    mock_llm.generate_gemini_json.return_value = json.loads(_mock_llm_response(80, "pass"))
     monkeypatch.setattr("workers.audit_worker.get_llm_client", lambda: mock_llm)
 
     from workers.audit_worker import run_audit_cycle
