@@ -450,6 +450,7 @@ class VeoClient:
         correlation_id: str,
         aspect_ratio: str = "9:16",
         resolution: str = "720p",
+        duration_seconds: int = 8,
         seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -478,6 +479,7 @@ class VeoClient:
             "parameters": {
                 "aspectRatio": aspect_ratio,
                 "resolution": resolution,
+                "durationSeconds": duration_seconds,
             },
         }
 
@@ -489,6 +491,7 @@ class VeoClient:
             correlation_id=correlation_id,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
+            duration_seconds=duration_seconds,
             video_uri=video_uri,
             prompt_length=len(prompt),
             prompt_preview=prompt[:400],

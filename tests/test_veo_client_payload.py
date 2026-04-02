@@ -77,7 +77,7 @@ def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
     payload = fake_http_client.post_calls[0]["json"]
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
-    assert "durationSeconds" not in payload["parameters"]
+    assert payload["parameters"]["durationSeconds"] == 8
     assert payload["instances"][0]["prompt"] == "continue the scene"
     assert payload["instances"][0]["video"]["uri"].endswith(":download?alt=media")
     assert submission["operation_id"] == "operations/test-operation"

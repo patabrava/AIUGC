@@ -1291,6 +1291,7 @@ def _submit_extension_hop(
             correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
             aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
             resolution=metadata.get("requested_resolution", "720p"),
+            duration_seconds=8,
             seed=metadata.get("veo_seed"),
         )
     except httpx.HTTPStatusError as error:
