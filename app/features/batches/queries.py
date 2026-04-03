@@ -4,14 +4,39 @@ Database operations for batches.
 Per Constitution § V: Locality & Vertical Slices
 """
 
+import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import httpx
 from app.adapters.supabase_client import get_supabase
 from app.core.states import BatchState, validate_state_transition
-from app.core.errors import NotFoundError, StateTransitionError
+from app.core.errors import NotFoundError, StateTransitionError, ThirdPartyError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_QUERY_RETRY_DELAYS = (0.15, 0.35, 0.75)
+
+
+def _execute_with_retry(operation_name: str, callback):
+    last_error: Optional[Exception] = None
+    for attempt, delay in enumerate((0.0, *_QUERY_RETRY_DELAYS), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            return callback()
+        except httpx.RequestError as exc:
+            last_error = exc
+            logger.warning(
+                "batch_query_retryable_request_error",
+                operation=operation_name,
+                attempt=attempt,
+                error=str(exc),
+            )
+    raise ThirdPartyError(
+        message=f"Failed to load batch data for {operation_name}",
+        details={"operation": operation_name, "error": str(last_error) if last_error else "unknown"},
+    )
 
 
 def create_batch(brand: str, post_type_counts: Dict[str, int], target_length_tier: int = 8) -> Dict[str, Any]:
@@ -49,8 +74,11 @@ def create_batch(brand: str, post_type_counts: Dict[str, int], target_length_tie
 def get_batch_by_id(batch_id: str) -> Dict[str, Any]:
     """Get batch by ID."""
     supabase = get_supabase()
-    
-    response = supabase.client.table("batches").select("*").eq("id", batch_id).execute()
+
+    response = _execute_with_retry(
+        "get_batch_by_id",
+        lambda: supabase.client.table("batches").select("*").eq("id", batch_id).execute(),
+    )
     
     if not response.data:
         raise NotFoundError(
@@ -68,7 +96,7 @@ def list_batches(
 ) -> tuple[List[Dict[str, Any]], int]:
     """List batches with optional filtering."""
     supabase = get_supabase()
-    
+
     query = supabase.client.table("batches").select("*", count="exact")
     
     if archived is not None:
@@ -76,7 +104,7 @@ def list_batches(
     
     query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
     
-    response = query.execute()
+    response = _execute_with_retry("list_batches", query.execute)
     
     return response.data, response.count or 0
 
@@ -158,9 +186,12 @@ def duplicate_batch(batch_id: str, new_brand: Optional[str] = None) -> Dict[str,
 def get_batch_posts_summary(batch_id: str) -> Dict[str, Any]:
     """Get summary of posts for a batch."""
     supabase = get_supabase()
-    
+
     # Get all posts for batch
-    response = supabase.client.table("posts").select("*").eq("batch_id", batch_id).execute()
+    response = _execute_with_retry(
+        "get_batch_posts_summary",
+        lambda: supabase.client.table("posts").select("*").eq("batch_id", batch_id).execute(),
+    )
     
     posts = response.data
     posts_count = len(posts)

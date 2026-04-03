@@ -28,6 +28,10 @@
 </div>
 {% else %}
 <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+    {% if research_triggered %}
+    No topics are available right now. A new research run is being started for {{ post_type or 'value' }} at {{ target_length_tier or 32 }}s.
+    {% else %}
     No topics available in the registry.
+    {% endif %}
 </div>
 {% endif %}

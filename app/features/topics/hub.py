@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import asyncio
 import json
 import random
@@ -746,6 +747,13 @@ def _choose_unique_seed_topics(seed_topics: List[str], *, count: int, seed: Opti
     return unique_topics[:count]
 
 
+def _build_stable_warmup_seed(*parts: Any) -> int:
+    """Build a stable integer seed for warm-up selection across process restarts."""
+    raw = "|".join(str(part or "") for part in parts)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return int(digest[:16], 16)
+
+
 def _generate_fallback_seed_topics(missing_count: int, *, post_type: str) -> List[str]:
     if missing_count <= 0:
         return []
@@ -1111,7 +1119,7 @@ def harvest_topics_to_bank_sync(
             warmup = _select_warmup_seed_topics(
                 post_type=post_type,
                 seed_topic_count=seed_topic_count,
-                seed=hash((trigger_source, post_type, target_length_tier, count)),
+                seed=_build_stable_warmup_seed(trigger_source, post_type, target_length_tier, count),
                 exclude_topics=seed_topics_used,
             )
             seed_topics = list(warmup.get("seed_topics") or [])

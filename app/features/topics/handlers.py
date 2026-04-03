@@ -5,6 +5,7 @@ Per Constitution § V: Locality & Vertical Slices
 """
 
 import asyncio
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from threading import RLock, Thread
@@ -42,6 +43,7 @@ from app.features.topics.queries import (
     create_post_for_batch,
     get_posts_by_batch,
     list_topic_suggestions,
+    list_topic_research_runs,
     mark_topic_script_used,
     get_topic_registry_by_id,
     get_topic_scripts_for_registry,
@@ -76,8 +78,11 @@ _SEEDING_PROGRESS_LOCK = RLock()
 _DISCOVERY_TASKS: Dict[str, asyncio.Task] = {}
 _PROGRESS_TTL_SECONDS = 45
 _WARMUP_SEED_TOPIC_COUNT = 3
+_COVERAGE_WARMUP_MAX_ROUNDS = 3
 _COVERAGE_TASKS: Dict[str, Thread] = {}
 _COVERAGE_WAITERS: Dict[str, Dict[str, int]] = {}
+_TOPIC_BANK_RESEARCH_TASKS: Dict[str, Thread] = {}
+_TOPIC_BANK_RESEARCH_LOCK = RLock()
 
 
 def _attach_publish_captions(
@@ -279,16 +284,41 @@ def _create_post_from_suggestion(
 
 
 def _run_coverage_warmup_task(coverage_key: str, post_type: str, target_length_tier: int) -> None:
+    attempts = 0
+    coverage_count = 0
     try:
         requested_count = max(_WARMUP_SEED_TOPIC_COUNT, max(_COVERAGE_WAITERS.get(coverage_key, {}).values(), default=0))
-        harvest_topics_to_bank_sync(
-            post_type_counts={post_type: requested_count},
+        coverage_count = count_selectable_topic_families(
+            post_type=post_type,
             target_length_tier=target_length_tier,
-            trigger_source="batch_coverage_warmup",
         )
-        from workers.audit_worker import run_audit_cycle
+        while attempts < _COVERAGE_WARMUP_MAX_ROUNDS and coverage_count < requested_count:
+            attempt = attempts + 1
+            attempt_count = requested_count + attempts
+            try:
+                harvest_topics_to_bank_sync(
+                    post_type_counts={post_type: attempt_count},
+                    target_length_tier=target_length_tier,
+                    trigger_source=f"batch_coverage_warmup_round_{attempt}",
+                )
+                from workers.audit_worker import run_audit_cycle
 
-        run_audit_cycle()
+                run_audit_cycle()
+            except Exception as exc:
+                logger.warning(
+                    "batch_coverage_warmup_round_failed",
+                    coverage_key=coverage_key,
+                    post_type=post_type,
+                    target_length_tier=target_length_tier,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+            finally:
+                attempts += 1
+                coverage_count = count_selectable_topic_families(
+                    post_type=post_type,
+                    target_length_tier=target_length_tier,
+                )
     except Exception as exc:
         logger.exception(
             "batch_coverage_warmup_failed",
@@ -315,7 +345,7 @@ def _run_coverage_warmup_task(coverage_key: str, post_type: str, target_length_t
                 stage="coverage_pending",
                 stage_label="Waiting for audited family coverage",
                 detail_message=(
-                    f"Background warm-up finished with {coverage_count} audited {post_type} families at {target_length_tier}s. "
+                    f"Background warm-up finished with {coverage_count} audited {post_type} families at {target_length_tier}s after {attempts} round(s). "
                     "More audited coverage is still needed before this batch can seed."
                 ),
                 current_post_type=post_type,
@@ -348,6 +378,56 @@ def _schedule_coverage_warmup(
         )
         _COVERAGE_TASKS[coverage_key] = thread
         thread.start()
+
+
+def _topic_bank_research_key(*, post_type: str, target_length_tier: int) -> str:
+    return f"{post_type}:{target_length_tier}"
+
+
+def _run_topic_bank_research_task(post_type: str, target_length_tier: int) -> None:
+    try:
+        harvest_topics_to_bank_sync(
+            post_type_counts={post_type: _WARMUP_SEED_TOPIC_COUNT},
+            target_length_tier=target_length_tier,
+            trigger_source="topic_hub_empty_state",
+        )
+    except Exception as exc:
+        logger.exception(
+            "topic_bank_empty_state_research_failed",
+            post_type=post_type,
+            target_length_tier=target_length_tier,
+            error=str(exc),
+        )
+    finally:
+        with _TOPIC_BANK_RESEARCH_LOCK:
+            _TOPIC_BANK_RESEARCH_TASKS.pop(_topic_bank_research_key(post_type=post_type, target_length_tier=target_length_tier), None)
+
+
+def _schedule_topic_bank_research_if_empty(*, post_type: str, target_length_tier: int) -> bool:
+    if count_selectable_topic_families(post_type=post_type, target_length_tier=target_length_tier) > 0:
+        return False
+
+    running_runs = list_topic_research_runs(limit=25, status="running")
+    for run in running_runs:
+        if int(run.get("target_length_tier") or 0) != target_length_tier:
+            continue
+        requested_counts = run.get("requested_counts") or {}
+        if int(requested_counts.get(post_type) or 0) > 0:
+            return False
+
+    research_key = _topic_bank_research_key(post_type=post_type, target_length_tier=target_length_tier)
+    with _TOPIC_BANK_RESEARCH_LOCK:
+        task = _TOPIC_BANK_RESEARCH_TASKS.get(research_key)
+        if task and task.is_alive():
+            return False
+        thread = Thread(
+            target=_run_topic_bank_research_task,
+            args=(post_type, target_length_tier),
+            daemon=True,
+        )
+        _TOPIC_BANK_RESEARCH_TASKS[research_key] = thread
+        thread.start()
+    return True
 
 
 def _next_event_id_locked(batch_id: str) -> str:
@@ -1409,10 +1489,37 @@ async def random_topic_endpoint(request: Request):
     from app.features.topics import hub as _hub
     topic = _hub.get_random_topic()
     if topic is None:
-        return templates.TemplateResponse(
-            "topics/partials/confirmation_card.html",
-            {"request": request, "topic": None},
+        raw_post_type = str(request.query_params.get("post_type") or "value").strip() or "value"
+        post_type = raw_post_type if raw_post_type in {"value", "lifestyle", "product"} else "value"
+        raw_tier = request.query_params.get("target_length_tier")
+        try:
+            target_length_tier = int(raw_tier) if raw_tier is not None else 32
+        except (TypeError, ValueError):
+            target_length_tier = 32
+        research_triggered = _schedule_topic_bank_research_if_empty(
+            post_type=post_type,
+            target_length_tier=target_length_tier,
         )
+        response = templates.TemplateResponse(
+            "topics/partials/confirmation_card.html",
+            {
+                "request": request,
+                "topic": None,
+                "research_triggered": research_triggered,
+                "post_type": post_type,
+                "target_length_tier": target_length_tier,
+            },
+        )
+        if research_triggered:
+            response.headers["HX-Trigger"] = json.dumps(
+                {
+                    "topic-research-requested": {
+                        "post_type": post_type,
+                        "target_length_tier": target_length_tier,
+                    }
+                }
+            )
+        return response
     return templates.TemplateResponse(
         "topics/partials/confirmation_card.html",
         {"request": request, "topic": topic},

@@ -826,13 +826,117 @@ def test_random_topic_endpoint(monkeypatch):
 
 
 def test_random_topic_endpoint_empty(monkeypatch):
+    import asyncio
     from app.features.topics import hub as topic_hub
 
     monkeypatch.setattr(topic_hub, "get_random_topic", lambda: None)
-    client = _build_test_client()
-    response = client.get("/topics/random", headers={"HX-Request": "true"})
+    scheduled = {}
+    captured = {}
+
+    monkeypatch.setattr(
+        topic_handlers,
+        "_schedule_topic_bank_research_if_empty",
+        lambda **kwargs: (scheduled.setdefault("kwargs", kwargs), True)[1],
+    )
+
+    class FakeResponse:
+        def __init__(self, template_name, context):
+            captured["template_name"] = template_name
+            captured["context"] = context
+            self.headers = {}
+            self.status_code = 200
+            self.text = "No topics are available right now. A new research run is being started for value at 32s."
+
+    monkeypatch.setattr(topic_handlers.templates, "TemplateResponse", lambda template_name, context: FakeResponse(template_name, context))
+
+    class FakeRequest:
+        query_params = {}
+        headers = {"HX-Request": "true"}
+
+    response = asyncio.run(topic_handlers.random_topic_endpoint(FakeRequest()))
     assert response.status_code == 200
     assert "No topics" in response.text
+    assert scheduled["kwargs"] == {"post_type": "value", "target_length_tier": 32}
+    assert "new research run is being started" in response.text
+    assert captured["template_name"] == "topics/partials/confirmation_card.html"
+    assert captured["context"]["research_triggered"] is True
+
+
+def test_schedule_topic_bank_research_if_empty_launches_background_warmup(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(topic_handlers, "count_selectable_topic_families", lambda **kwargs: 0)
+    monkeypatch.setattr(topic_handlers, "list_topic_research_runs", lambda limit=25, status=None: [])
+
+    def fake_harvest_topics_to_bank_sync(**kwargs):
+        captured["kwargs"] = kwargs
+
+    class FakeThread:
+        def __init__(self, target, args=(), daemon=False):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def is_alive(self):
+            return False
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(topic_handlers, "harvest_topics_to_bank_sync", fake_harvest_topics_to_bank_sync)
+    monkeypatch.setattr(topic_handlers, "Thread", FakeThread)
+    topic_handlers._TOPIC_BANK_RESEARCH_TASKS.clear()
+
+    triggered = topic_handlers._schedule_topic_bank_research_if_empty(post_type="value", target_length_tier=32)
+
+    assert triggered is True
+    assert captured["kwargs"] == {
+        "post_type_counts": {"value": 3},
+        "target_length_tier": 32,
+        "trigger_source": "topic_hub_empty_state",
+    }
+
+
+def test_coverage_warmup_retries_until_audited_coverage_is_ready(monkeypatch):
+    from app.features.topics import handlers as topic_handlers
+    import workers.audit_worker as audit_worker
+
+    coverage_key = "value:32"
+    topic_handlers._COVERAGE_WAITERS[coverage_key] = {"batch-1": 3}
+    topic_handlers._COVERAGE_TASKS[coverage_key] = None  # type: ignore[assignment]
+
+    harvest_calls = []
+    audit_calls = []
+    cleared = []
+    progress_updates = []
+    state = {"harvests": 0}
+
+    def fake_count_selectable_topic_families(*, post_type, target_length_tier):
+        return 3 if state["harvests"] >= 2 else 1
+
+    def fake_harvest_topics_to_bank_sync(**kwargs):
+        harvest_calls.append(kwargs)
+        state["harvests"] += 1
+
+    monkeypatch.setattr(topic_handlers, "count_selectable_topic_families", fake_count_selectable_topic_families)
+    monkeypatch.setattr(topic_handlers, "harvest_topics_to_bank_sync", fake_harvest_topics_to_bank_sync)
+    monkeypatch.setattr(audit_worker, "run_audit_cycle", lambda: audit_calls.append("audit"))
+    monkeypatch.setattr(topic_handlers, "clear_seeding_progress", lambda batch_id: cleared.append(batch_id))
+    monkeypatch.setattr(topic_handlers, "update_seeding_progress", lambda *args, **kwargs: progress_updates.append(kwargs))
+
+    try:
+        topic_handlers._run_coverage_warmup_task(coverage_key, "value", 32)
+    finally:
+        topic_handlers._COVERAGE_WAITERS.pop(coverage_key, None)
+        topic_handlers._COVERAGE_TASKS.pop(coverage_key, None)
+
+    assert len(harvest_calls) == 2
+    assert len(audit_calls) == 2
+    assert harvest_calls[0]["trigger_source"] != harvest_calls[1]["trigger_source"]
+    assert harvest_calls[0]["post_type_counts"] == {"value": 3}
+    assert harvest_calls[1]["post_type_counts"] == {"value": 4}
+    assert cleared == ["batch-1"]
+    assert progress_updates == []
 
 
 def test_match_topic_endpoint_found(monkeypatch):
