@@ -6,36 +6,36 @@ families:
   priority: high
   emotional_core: Unrecht, Versagen, Widerspruch
   examples:
-  - "Die groesste Luege ueber ... ist, dass ..."
+  - "Die größte Lüge über ... ist, dass ..."
   - "Fast alle denken, ... stimmt aber nicht."
-  - "Alle reden ueber ..., aber keiner ueber ..."
-  - "Auf dem Papier hast du das Recht. In der Realitaet? Fehlanzeige."
+  - "Alle reden über ..., aber keiner über ..."
+  - "Auf dem Papier hast du das Recht. In der Realität? Fehlanzeige."
 
 - name: Provokation und Faktenkonflikt
   priority: high
-  emotional_core: Empoerung, Widerspruch, immer mit Faktenbeleg
+  emotional_core: Empörung, Widerspruch, immer mit Faktenbeleg
   examples:
   - "Das sagt dir dein Verkehrsbetrieb nicht, aber ..."
-  - "Hoert auf zu behaupten, dass ... die Zahlen sagen was anderes."
+  - "Hört auf zu behaupten, dass ... die Zahlen sagen was anderes."
   - "Sorry, aber ... ist einfach falsch."
-  - "Niemand redet darueber, aber ..."
+  - "Niemand redet darüber, aber ..."
 
-- name: Identitaet und Zugehoerigkeit
+- name: Identität und Zugehörigkeit
   priority: high
-  emotional_core: Wiedererkennung, persoenliche Betroffenheit
+  emotional_core: Wiedererkennung, persönliche Betroffenheit
   examples:
   - "Als Rollstuhlnutzer:in kennst du das ..."
   - "Das betrifft dich direkt, wenn du ..."
-  - "Du kennst dieses Gefuehl, wenn ..."
-  - "Jeder, der ... nutzt, weiss genau ..."
+  - "Du kennst dieses Gefühl, wenn ..."
+  - "Jeder, der ... nutzt, weiß genau ..."
 
-- name: Zahlen und Spezifitaet
+- name: Zahlen und Spezifität
   priority: high
-  emotional_core: Ueberraschung, Faktenschock, konkrete Zahl im ersten Atemzug
+  emotional_core: Überraschung, Faktenschock, konkrete Zahl im ersten Atemzug
   examples:
   - "Nur 2 Prozent aller Wohnungen in Deutschland sind rollstuhlgerecht."
   - "3 Sekunden. So lange wartest du, bis ..."
-  - "Nur jede fuenfte Haltestelle ist tatsaechlich barrierefrei."
+  - "Nur jede fünfte Haltestelle ist tatsächlich barrierefrei."
   - "Eine einzige Zahl zeigt, warum ..."
 
 - name: Konsequenz- und Friktions-Hooks
@@ -44,12 +44,12 @@ families:
   examples:
   - "Wenn du ... ignorierst, passiert genau das."
   - "Der unangenehme Grund, warum ..."
-  - "Dieser kleine Fehler macht deinen Alltag unnoetig schwer."
+  - "Dieser kleine Fehler macht deinen Alltag unnötig schwer."
   - "Was passiert, wenn du ... einfach nicht bekommst?"
 
 - name: Neugier und Alltagsfragen
   priority: high
-  emotional_core: Echte Neugier ueber Alltag mit Rollstuhl
+  emotional_core: Echte Neugier über Alltag mit Rollstuhl
   examples:
   - "Wie kommt man als Rollstuhlfahrer:in eigentlich ins Flugzeug?"
   - "Was passiert, wenn die Rampe am Bus fehlt?"
@@ -58,15 +58,15 @@ families:
 
 - name: Fehler und Warnung
   priority: high
-  emotional_core: Verlustangst, staerker als Gewinnversprechen
+  emotional_core: Verlustangst, stärker als Gewinnversprechen
   examples:
   - "Dieser Fehler kostet dich als Rollstuhlfahrer:in Zeit und Nerven."
-  - "Hoer auf mit ..., wenn du ... willst."
+  - "Hör auf mit ..., wenn du ... willst."
   - "Mach diesen Fehler nicht, wenn du ..."
   - "3 Dinge, die du bei ... falsch machst."
 
 # --- MEDIUM PRIORITY: solid performers ---
-- name: Absurditaet und Realitaetscheck
+- name: Absurdität und Realitätscheck
   priority: medium
   emotional_core: Sarkasmus, Ironie, Systemversagen
   examples:
@@ -79,33 +79,33 @@ families:
   emotional_core: Neugier, Aktivierung, Aha-Moment
   examples:
   - "Bevor du ... machst, solltest du das wissen."
-  - "Alles veraendert sich, wenn du ..."
+  - "Alles verändert sich, wenn du ..."
   - "Was dir bei ... niemand klar sagt: ..."
-  - "3 Tipps, die ich gerne frueher gewusst haette."
+  - "3 Tipps, die ich gerne früher gewusst hätte."
 
 - name: Empathische Hooks (Situation, nicht Mitleid)
   priority: medium
-  emotional_core: Mitgefuehl mit der Situation, NICHT mit der Behinderung
+  emotional_core: Mitgefühl mit der Situation, NICHT mit der Behinderung
   examples:
   - "Stell dir vor, du willst einfach nur in den Bus einsteigen."
-  - "Kennst du das Gefuehl, wenn alles an einer fehlenden Rampe scheitert?"
+  - "Kennst du das Gefühl, wenn alles an einer fehlenden Rampe scheitert?"
   - "Ich zeig dir, was wirklich hilft bei ..."
 
 - name: Direkte Aussagen
   priority: medium
   emotional_core: Handlung, Empowerment, Tipp
   examples:
-  - "Check mal, was sich bei ... geaendert hat."
+  - "Check mal, was sich bei ... geändert hat."
   - "Das musst du wissen, bevor du ..."
   - "Hier ist, was du tun kannst."
 
 - name: Kurveneffekt (Alle betrifft's)
   priority: medium
-  emotional_core: Reichweite ueber die Nische hinaus, Barrierefreiheit nuetzt allen
+  emotional_core: Reichweite über die Nische hinaus, Barrierefreiheit nützt allen
   examples:
   - "Das betrifft nicht nur Rollstuhlfahrer:innen, auch Eltern mit Kinderwagen."
   - "Barrierefreie Haltestellen helfen dir auch, wenn du verletzt bist."
-  - "Warum gutes Design fuer alle funktioniert, nicht nur fuer wenige."
+  - "Warum gutes Design für alle funktioniert, nicht nur für wenige."
 
 # --- LOW PRIORITY: use sparingly ---
 - name: Fragen (nur mit Punch und konkreter Zahl)
@@ -125,25 +125,25 @@ families:
 
 banned_patterns:
 - "Du wirst nicht glauben ..."
-- "Ab naechstem Jahr gibt es..."
+- "Ab nächstem Jahr gibt es..."
 - "Es gibt..."
-- "Heute erklaere ich..."
+- "Heute erkläre ich..."
 - "In diesem Video..."
-- "Ich moechte euch zeigen..."
-- "Lass uns mal ueber ... reden"
+- "Ich möchte euch zeigen..."
+- "Lass uns mal über ... reden"
 - "Hallo zusammen, heute..."
 - "Willkommen zu meinem..."
 
 negative_examples:
-- bad: "Hast du gewusst, dass die Barrierefreiheit im OEPNV trotz gesetzlicher Frist 2022 oft noch fehlt?"
-  good: "Du stehst an der Haltestelle und der Bus faehrt einfach vorbei, weil die Rampe fehlt."
-  why: "'Hast du gewusst' ohne Zahl ist Lehrer-Energie. Stattdessen die Zuhoererin IN die Szene setzen."
-- bad: "Weisst du, welche Rechte du als Rollstuhlnutzer hast?"
+- bad: "Hast du gewusst, dass die Barrierefreiheit im ÖPNV trotz gesetzlicher Frist 2022 oft noch fehlt?"
+  good: "Du stehst an der Haltestelle und der Bus fährt einfach vorbei, weil die Rampe fehlt."
+  why: "'Hast du gewusst' ohne Zahl ist Lehrer-Energie. Stattdessen die Zuhörerin IN die Szene setzen."
+  - bad: "Weißt du, welche Rechte du als Rollstuhlnutzer hast?"
   good: "Dein Recht auf Mitfahrt? Existiert auf dem Papier, nicht an der Haltestelle."
-  why: "Abstrakte Frage vs. Kontrast zwischen Anspruch und Realitaet."
+  why: "Abstrakte Frage vs. Kontrast zwischen Anspruch und Realität."
 - bad: "Kennst du die Probleme mit barrierefreiem Wohnen?"
   good: "Nur 2 Prozent aller Wohnungen in Deutschland sind rollstuhlgerecht."
   why: "Abstrakte Frage vs. konkreter Faktenschock mit Zahl."
-- bad: "Es gibt viele Barrieren im Alltag fuer Rollstuhlfahrer."
+- bad: "Es gibt viele Barrieren im Alltag für Rollstuhlfahrer."
   good: "Deutschland 2026 und du kommst trotzdem nicht in den Bus."
-  why: "'Es gibt' ist passiv und langweilig. Stattdessen Realitaetscheck mit Jahreszahl."
+  why: "'Es gibt' ist passiv und langweilig. Stattdessen Realitätscheck mit Jahreszahl."

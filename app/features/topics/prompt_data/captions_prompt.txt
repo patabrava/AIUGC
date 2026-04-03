@@ -5,7 +5,7 @@ Jede Caption folgt der gleichen Struktur: Hook, Body, CTA, Hashtags.
 SKRIPT-HOOK (das sagt das Video am Anfang — NICHT wiederholen):
 {script_hook}
 
-RECHERCHE-FAKTEN (waehle die ueberraschendsten fuer den Body):
+RECHERCHE-FAKTEN (wähle die überraschendsten für den Body):
 {research_facts}
 
 THEMA: {topic_title}
@@ -22,37 +22,37 @@ Speicher dir das, bevor es untergeht.
 #BarriereFreiheit #ÖPNV #Inklusion
 
 [personal]
-Wenn du ÖPNV faehrst, betrifft dich das ab 2026. Viele Haltestellen sind bis heute nicht barrierefrei, obwohl das Gesetz es laengst verlangt.
+Wenn du ÖPNV fährst, betrifft dich das ab 2026. Viele Haltestellen sind bis heute nicht barrierefrei, obwohl das Gesetz es längst verlangt.
 
 Schick das jemandem, der das wissen muss.
 
 #Barrierefrei #Alltag #Selbstbestimmt
 
 [provocative]
-Keine Rampe, kein Aufzug, keine Ansage — und trotzdem nennen sie es barrierefrei. Ab 2026 gibt es fuer Kommunen keine Ausreden mehr.
+Keine Rampe, kein Aufzug, keine Ansage — und trotzdem nennen sie es barrierefrei. Ab 2026 gibt es für Kommunen keine Ausreden mehr.
 
 Kommentier, wenn deine Haltestelle betroffen ist.
 
 #BarriereFreiheit #ÖPNV #Teilhabe
 
-JETZT BIST DU DRAN. Erstelle 3 Varianten fuer dieses Thema.
+JETZT BIST DU DRAN. Erstelle 3 Varianten für dieses Thema.
 
 Struktur JEDER Caption:
-- HOOK: Max 100 Zeichen. Hauptkeyword in den ersten 30 Zeichen. Anderer emotionaler Winkel als der Skript-Hook. Nie den Skript-Hook woertlich kopieren.
-- BODY: 1-2 Saetze, max 150 Zeichen. Nutze einen KONKRETEN Fakt aus den Recherche-Fakten.
+- HOOK: Max 100 Zeichen. Hauptkeyword in den ersten 30 Zeichen. Anderer emotionaler Winkel als der Skript-Hook. Nie den Skript-Hook wörtlich kopieren.
+- BODY: 1-2 Sätze, max 150 Zeichen. Nutze einen KONKRETEN Fakt aus den Recherche-Fakten.
 - CTA: Direkte Handlungsaufforderung (Speichern, Teilen oder Kommentieren). Immer eine eigene Zeile.
 - HASHTAGS: 3-5 thematische Hashtags in CamelCase. Eigene Zeile.
 
 Emotionale Winkel:
-- [curiosity]: Neugier oder Social-Proof (Was verschwiegen wird, was wenige wissen, ueberraschende Zahlen)
-- [personal]: Persoenliche Betroffenheit (Du-Ansprache, Alltagsbezug, direkte Konsequenz)
+- [curiosity]: Neugier oder Social-Proof (Was verschwiegen wird, was wenige wissen, überraschende Zahlen)
+- [personal]: Persönliche Betroffenheit (Du-Ansprache, Alltagsbezug, direkte Konsequenz)
 - [provocative]: Herausforderung oder Widerspruch (Kritik, Gegensatz, Forderung)
 
 Regeln:
 - Jeder Hook muss einen ANDEREN emotionalen Winkel haben als die anderen zwei.
-- Body muss einen KONKRETEN Fakt aus den Recherche-Fakten enthalten — keine generischen Saetze.
+- Body muss einen KONKRETEN Fakt aus den Recherche-Fakten enthalten — keine generischen Sätze.
 - Wenn die Recherche-Fakten knapp oder generisch sind, nutze trotzdem das Thema und das Skript als saubere Grundlage und bleib strikt im Markerformat.
-- Gesamtlaenge pro Caption (inkl. Hook, Body, CTA, Hashtags): 150-300 Zeichen.
-- Alles auf Deutsch, natuerlich gesprochen, keine Uebersetzungsartefakte.
+- Gesamtlänge pro Caption (inkl. Hook, Body, CTA, Hashtags): 150-300 Zeichen.
+- Alles auf Deutsch, natürlich gesprochen, keine Übersetzungsartefakte.
 - Max 1 Emoji pro Caption.
 - Schreibe alle 3 Varianten mit den Markern [curiosity], [personal] und [provocative].

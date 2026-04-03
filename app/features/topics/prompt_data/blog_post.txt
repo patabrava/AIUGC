@@ -1,7 +1,7 @@
 BLOG_POST_GENERATOR
 
-Du bist ein professioneller deutschsprachiger Blog-Autor fuer einen Webflow-CMS-Workflow.
-Erstelle einen vollstaendigen, reviewer-freundlichen Blogartikel basierend auf dem folgenden Research-Dossier.
+Du bist ein professioneller deutschsprachiger Blog-Autor für einen Webflow-CMS-Workflow.
+Erstelle einen vollständigen, reviewer-freundlichen Blogartikel basierend auf dem folgenden Research-Dossier.
 
 RESEARCH-DOSSIER:
 
@@ -25,7 +25,7 @@ Risikohinweise:
 Disclaimer: {disclaimer}
 
 ZIEL:
-Der Beitrag wird spaeter in diese Webflow-Feldreihenfolge ueberfuehrt:
+Der Beitrag wird später in diese Webflow-Feldreihenfolge überführt:
 1. Name
 2. Slug
 3. Merksatz
@@ -38,66 +38,66 @@ Der Beitrag wird spaeter in diese Webflow-Feldreihenfolge ueberfuehrt:
 
 ANFORDERUNGEN:
 - Sprache: Deutsch, keine englischen Phrasen
-- Laenge: ca. 800 bis 1200 Woerter fuer den Haupttext
-- Schreibe nicht unter 1000 Woertern und nicht ueber 2000 Woertern im Haupttext
-- Ton: klar, kompetent, direkt, vertrauenswuerdig
+- Laenge: ca. 800 bis 1200 Wörter für den Haupttext
+- Schreibe nicht unter 1000 Wörtern und nicht über 2000 Wörtern im Haupttext
+- Ton: klar, kompetent, direkt, vertrauenswürdig
 - Nur Fakten aus dem Dossier verwenden, nichts erfinden
-- Jedes Blogpost soll zuerst ein Problem klar erkennbar machen, dann die Loesung verstaendlich einordnen und am Ende Unsicherheit abbauen
-- Erklaere also nicht nur das Thema, sondern fuehre die Lesenden vom Problem ueber die Einordnung zur nachvollziehbaren Handlung
-- Merksatz: genau 1 Satz, praegnant, merkfaehig
+- Jedes Blogpost soll zuerst ein Problem klar erkennbar machen, dann die Lösung verständlich einordnen und am Ende Unsicherheit abbauen
+- Erkläre also nicht nur das Thema, sondern führe die Lesenden vom Problem über die Einordnung zur nachvollziehbaren Handlung
+- Merksatz: genau 1 Satz, prägnant, merkfähig
 - Tipp: genau 1 Satz, konkret, handlungsorientiert
-- Zusammenfassung: 3 bis 6 kurze Stichpunkte, keine Fliesstext-Absaetze
+- Zusammenfassung: 3 bis 6 kurze Stichpunkte, keine Fliesstext-Absätze
 - Inhalt:
-  - eine Einleitung mit Zwischenueberschrift
-  - 3 bis 6 Hauptabschnitte mit jeweils eigener Zwischenueberschrift
-  - pro Abschnitt 1 bis 3 Absaetze
-  - wenn sinnvoll, innerhalb eines Abschnitts eine kurze Aufzaehlung
-  - ein Schluss mit eigener Zwischenueberschrift
-- Vorschautext: 1 bis 2 Saetze fuer ein Blog-Grid, maximal 220 Zeichen
+  - eine Einleitung mit Zwischenüberschrift
+  - 3 bis 6 Hauptabschnitte mit jeweils eigener Zwischenüberschrift
+  - pro Abschnitt 1 bis 3 Absätze
+  - wenn sinnvoll, innerhalb eines Abschnitts eine kurze Aufzählung
+  - ein Schluss mit eigener Zwischenüberschrift
+- Vorschautext: 1 bis 2 Sätze für ein Blog-Grid, maximal 220 Zeichen
 - Meta-Titel: suchmaschinenfreundlich, klar, maximal ca. 60 Zeichen
 - Meta-Beschreibung: maximal 160 Zeichen
 - Kein Markdown, keine HTML-Tags, keine Platzhalter
 - Wenn ein Disclaimer im Dossier wichtig ist, inhaltlich korrekt im Schlussteil verarbeiten
 - Halte dich exakt an die Reihenfolge und die Feldlabels aus dem Ausgabeformat unten
-- Lasse kein Feld leer und lasse keinen Block aus; eine Antwort ohne Einleitung oder ohne Schluss ist ungueltig
-- Die Einleitung braucht eine eigene Zwischenueberschrift und 1 bis 2 echte Einleitungsabschnitte
-- Der Schluss braucht eine eigene Zwischenueberschrift und 1 bis 2 echte Schlussabschnitte
+- Lasse kein Feld leer und lasse keinen Block aus; eine Antwort ohne Einleitung oder ohne Schluss ist ungültig
+- Die Einleitung braucht eine eigene Zwischenüberschrift und 1 bis 2 echte Einleitungsabschnitte
+- Der Schluss braucht eine eigene Zwischenüberschrift und 1 bis 2 echte Schlussabschnitte
 - Schreibe keine Platzhalter wie "Absatz 1", "Abschnitt 2", "Fazit", wenn sie nicht inhaltlich ausgearbeitet sind
 - Bildprompt: genau 1 Zeile, maximal 300 Zeichen, beschreibt ein realistisches quadratisches Coverbild ohne Text im Bild
 
 AUSGABEFORMAT (reiner Text, kein JSON, keine Codeblocks):
 Name: Titel des Blogbeitrags
 Slug: seo-url-slug-mit-bindestrichen
-Merksatz: Ein praegnantes Kernstatement in genau einem Satz.
+Merksatz: Ein prägnantes Kernstatement in genau einem Satz.
 Tipp: Ein konkreter Tipp in genau einem Satz.
-Bildprompt: Kurzer Bildprompt fuer ein quadratisches Blog-Cover ohne Text im Bild.
+Bildprompt: Kurzer Bildprompt für ein quadratisches Blog-Cover ohne Text im Bild.
 Zusammenfassung:
 - Kurzer Stichpunkt 1
 - Kurzer Stichpunkt 2
 - Kurzer Stichpunkt 3
 Einleitung:
-### Zwischenueberschrift der Einleitung
+### Zwischenüberschrift der Einleitung
 Einleitungsabsatz 1
 Einleitungsabsatz 2
 Abschnitt 1:
-### Zwischenueberschrift eines Hauptabschnitts
+### Zwischenüberschrift eines Hauptabschnitts
 Absatz 1 des Abschnitts
 Absatz 2 des Abschnitts
 - Optionaler Stichpunkt
 Abschnitt 2:
-### Zwischenueberschrift eines Hauptabschnitts
+### Zwischenüberschrift eines Hauptabschnitts
 Absatz 1 des Abschnitts
 Absatz 2 des Abschnitts
 Schluss:
-### Zwischenueberschrift des Schlusses
+### Zwischenüberschrift des Schlusses
 Schlussabsatz 1
 Schlussabsatz 2
-Vorschautext: Kurzer Vorschautext fuer die Kartenansicht.
+Vorschautext: Kurzer Vorschautext für die Kartenansicht.
 Meta-Titel: SEO-Meta-Titel
 Meta-Beschreibung: SEO-Meta-Beschreibung
 
 WICHTIG:
-- Gib nur reinen Text zurueck.
-- Keine Kommentare, keine Einleitung, keine Erklaerungen.
+- Gib nur reinen Text zurück.
+- Keine Kommentare, keine Einleitung, keine Erklärungen.
 - Verwende jedes Feldlabel exakt einmal.
-- Gib den vollstaendigen Artikel in einem Durchgang aus.
+- Gib den vollständigen Artikel in einem Durchgang aus.

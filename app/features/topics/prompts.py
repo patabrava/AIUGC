@@ -26,7 +26,7 @@ def _build_current_date_guardrail() -> str:
     return _join_sections(
         "ZEIT- UND FORMAT-GUARDRAILS:",
         "- Heute ist April 2026.",
-        "- Wenn etwas 2025 in Kraft getreten ist, formuliere als bereits gueltig (z.B. `Seit 2025 ...`), nicht als Ankuendigung (`Ab 2025 ...`).",
+        "- Wenn etwas 2025 in Kraft getreten ist, formuliere als bereits gültig (z.B. `Seit 2025 ...`), nicht als Ankündigung (`Ab 2025 ...`).",
         "- Verwende keine langen Dash-Zeichen: kein U+2014 (em dash), U+2013 (en dash), U+2015 (horizontal bar), U+2212 (minus).",
     )
 
@@ -36,7 +36,7 @@ def _build_current_date_context_for_research() -> str:
         "ZEITKONTEXT:",
         "- Heute ist April 2026.",
         "- Ordne Fristen und Regelungen relativ zu 2026 ein.",
-        "- Wenn eine Aenderung bereits 2025 in Kraft getreten ist, beschreibe sie als bereits geltend (z.B. `Seit 2025 ...`).",
+        "- Wenn eine Änderung bereits 2025 in Kraft getreten ist, beschreibe sie als bereits geltend (z.B. `Seit 2025 ...`).",
     )
 
 
