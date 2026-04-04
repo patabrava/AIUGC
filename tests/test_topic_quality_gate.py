@@ -36,8 +36,50 @@ def test_validate_pre_persistence_topic_payload_extends_short_8s_script():
         target_length_tier=8,
         current_year=2026,
     )
-    assert 16 <= len(payload["script"].split()) <= 18
+    assert 14 <= len(payload["script"].split()) <= 18
     assert payload["script"].endswith(".")
+
+
+def test_validate_pre_persistence_topic_payload_matches_published_bounds_for_all_tiers():
+    eight = validate_pre_persistence_topic_payload(
+        {
+            "topic": "Bahnhof ohne Huerden",
+            "title": "Bahnhof ohne Huerden",
+            "script": "Du stolperst nicht am Gleis, sondern am kaputten Aufzug im Alltag.",
+            "caption": "Barrieren im Bahnhof kosten Kraft.",
+            "source_summary": "Barrieren im Bahnhof kosten Kraft und Zeit.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+        },
+        target_length_tier=8,
+        current_year=2026,
+    )
+    sixteen = validate_pre_persistence_topic_payload(
+        {
+            "topic": "Bahnhof ohne Huerden",
+            "title": "Bahnhof ohne Huerden",
+            "script": "Du willst einfach einsteigen, aber der Aufzug fällt aus und der Umweg kostet dir heute Kraft, Zeit und Nerven im Alltag, obwohl du nur ankommen willst.",
+            "caption": "Barrieren im Bahnhof kosten Kraft.",
+            "source_summary": "Barrieren im Bahnhof kosten Kraft und Zeit.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+        },
+        target_length_tier=16,
+        current_year=2026,
+    )
+    thirty_two = validate_pre_persistence_topic_payload(
+        {
+            "topic": "Bahnhof ohne Huerden",
+            "title": "Bahnhof ohne Huerden",
+            "script": "Du willst einfach einsteigen, aber der Aufzug fällt aus und der Umweg kostet Kraft, Zeit und Nerven, deshalb zählt barrierefreie Planung 2026 im Alltag für dich und alle anderen, die nicht noch mehr Wege verlieren wollen, wenn Bahnsteige, Eingänge und Wege nicht zusammenpassen und jede kleine Hürde den ganzen Tag kippt und Kraft kostet.",
+            "caption": "Barrieren im Bahnhof kosten Kraft.",
+            "source_summary": "Barrieren im Bahnhof kosten Kraft und Zeit.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+        },
+        target_length_tier=32,
+        current_year=2026,
+    )
+    assert 14 <= len(eight["script"].split()) <= 18
+    assert 26 <= len(sixteen["script"].split()) <= 36
+    assert 54 <= len(thirty_two["script"].split()) <= 74
 
 
 def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifestyle_posts():

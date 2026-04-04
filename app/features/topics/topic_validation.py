@@ -52,7 +52,7 @@ PROMPT1_WORD_BOUNDS = {
 # here so we can wire it in without changing the legacy envelope until prompts
 # and downstream expectations are updated.
 PRE_PERSISTENCE_PROMPT1_WORD_BOUNDS = {
-    8: (16, 18),
+    8: (14, 18),
     16: (26, 36),
     32: (54, 74),
 }
