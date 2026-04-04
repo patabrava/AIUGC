@@ -1196,6 +1196,7 @@ def test_shared_warmup_falls_back_to_synthesized_dossier(monkeypatch):
         lambda raw, **kwargs: parse_calls.append(raw) or fallback_dossier,
     )
     monkeypatch.setattr(bank_warmup.time, "sleep", lambda *_args, **_kwargs: None)
+    # Avoid external Gemini calls in the normal lane path; the rescue lane is local.
     monkeypatch.setattr(
         bank_warmup,
         "generate_topic_script_candidate",
@@ -1205,13 +1206,14 @@ def test_shared_warmup_falls_back_to_synthesized_dossier(monkeypatch):
             caption="Kurz gesagt: Planung entscheidet.",
             framework="PAL",
             sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
-            source_summary="Planung entscheidet im Alltag über Nutzbarkeit.",
+            source_summary="Planung entscheidet im Alltag ueber Nutzbarkeit.",
             estimated_duration_s=8,
             tone="direkt, freundlich, empowernd, du-Form",
             disclaimer="Keine Rechts- oder medizinische Beratung.",
         ),
     )
     monkeypatch.setattr(bank_warmup, "deduplicate_topics", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bank_warmup, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}])
     monkeypatch.setattr(
         topic_hub,
         "_persist_topic_bank_row",
@@ -1363,7 +1365,7 @@ def test_shared_warmup_forces_one_lane_when_all_candidates_dedupe(monkeypatch):
         cluster_summary="Klare Terminwege helfen im Alltag.",
         framework_candidates=["PAL"],
         sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
-        source_summary="Klare Terminwege helfen im Alltag.",
+        source_summary="Klare Terminwege helfen im Alltag und geben dir verlässliche Planung im Alltag.",
         facts=["Klare Wege helfen dir vor dem Termin."],
         angle_options=["Terminwege"],
         risk_notes=["Ohne klare Wege wird alles zäh."],
@@ -1389,6 +1391,8 @@ def test_shared_warmup_forces_one_lane_when_all_candidates_dedupe(monkeypatch):
     monkeypatch.setattr(bank_warmup, "_generate_research_dossier_raw", lambda **kwargs: "raw")
     monkeypatch.setattr(bank_warmup, "parse_topic_research_response", lambda raw, **kwargs: dossier)
     monkeypatch.setattr(bank_warmup, "touch_topic_registry", lambda *args, **kwargs: {})
+    monkeypatch.setattr(bank_warmup.time, "sleep", lambda *_args, **_kwargs: None)
+    # Avoid external Gemini calls in the normal lane path; the rescue lane is local.
     monkeypatch.setattr(
         bank_warmup,
         "generate_topic_script_candidate",
@@ -1405,6 +1409,8 @@ def test_shared_warmup_forces_one_lane_when_all_candidates_dedupe(monkeypatch):
         ),
     )
     monkeypatch.setattr(bank_warmup, "deduplicate_topics", lambda *args, **kwargs: [])
+    # Prevent Supabase calls when the warmup summarizes persisted variants by tier.
+    monkeypatch.setattr(bank_warmup, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}])
 
     persisted = []
 
@@ -1430,6 +1436,120 @@ def test_shared_warmup_forces_one_lane_when_all_candidates_dedupe(monkeypatch):
 
     assert persisted == ["Barrierefreie Terminwege"]
     assert summary["lanes_persisted"] == 1
+    assert summary["stored_topic_ids"] == ["topic-1"]
+
+
+def test_shared_warmup_persists_seed_scoped_fallback_when_initial_lane_fanout_is_empty(monkeypatch):
+    from app.features.topics import bank_warmup
+    from app.features.topics import hub as topic_hub
+
+    dossier = ResearchDossier(
+        cluster_id="cluster-4",
+        topic="Barrierefreie Terminwege",
+        anchor_topic="Barrierefreie Terminwege",
+        seed_topic="Barrierefreie Terminwege",
+        cluster_summary="Klare Terminwege helfen im Alltag.",
+        framework_candidates=["PAL"],
+        sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
+        source_summary="Klare Terminwege helfen im Alltag und geben dir verlässliche Planung im Alltag.",
+        facts=["Klare Wege helfen dir vor dem Termin."],
+        angle_options=["Terminwege"],
+        risk_notes=["Ohne klare Wege wird alles zäh."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            ResearchLaneCandidate(
+                lane_key="lane-1",
+                lane_family="sub_angle",
+                title="Barrierefreie Terminwege",
+                angle="Wie digitale und telefonische Wege den Arzttermin absichern",
+                priority=1,
+                framework_candidates=["PAL"],
+                source_summary="Digitale und telefonische Wege sichern den Arzttermin im Alltag besser ab.",
+                facts=["Klare Wege helfen dir schon vor dem Termin."],
+                risk_notes=["Ohne Plan bleiben Termine unnötig fragil."],
+                disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+                lane_overlap_warnings=[],
+                suggested_length_tiers=[8, 16, 32],
+            ),
+        ],
+    )
+
+    monkeypatch.setattr(bank_warmup, "_generate_research_dossier_raw", lambda **kwargs: "raw")
+    monkeypatch.setattr(bank_warmup, "parse_topic_research_response", lambda raw, **kwargs: dossier)
+    monkeypatch.setattr(bank_warmup, "touch_topic_registry", lambda *args, **kwargs: {})
+    monkeypatch.setattr(bank_warmup, "select_distinct_lane_candidates", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bank_warmup.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bank_warmup, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}])
+    persisted = []
+
+    def fake_persist_topic_bank_row(**kwargs):
+        persisted.append(kwargs["title"])
+        return {
+            "stored_row": {
+                "id": f"topic-{len(persisted)}",
+                "title": kwargs["title"],
+                "topic_research_dossier_id": f"dossier-{len(persisted)}",
+            },
+            "stored_variants": [{"id": "v1"}, {"id": "v2"}, {"id": "v3"}],
+        }
+
+    monkeypatch.setattr(topic_hub, "_persist_topic_bank_row", fake_persist_topic_bank_row)
+
+    summary = bank_warmup.run_single_seed_topic_warmup(
+        seed_topic="Barrierefreie Terminwege",
+        post_type="value",
+        existing_topics=[],
+        collected_topics=[],
+    )
+
+    assert persisted == ["Barrierefreie Terminwege"]
+    assert summary["lanes_persisted"] == 1
+    assert summary["stored_topic_ids"] == ["topic-1"]
+
+
+def test_shared_warmup_contaminated_topic_list_payload_persists_seed_scoped_fallback_lane(monkeypatch):
+    from app.features.topics import bank_warmup
+    from app.features.topics import hub as topic_hub
+
+    contaminated_raw = """
+    [
+      {"topic": "Irgendwas", "script": "X", "source_summary": "Y"},
+      {"topic": "Noch eins", "script": "X", "source_summary": "Y"}
+    ]
+    """.strip()
+
+    # Exercise the real contamination detector in parse_topic_research_response.
+    monkeypatch.setattr(bank_warmup, "_generate_research_dossier_raw", lambda **_kwargs: contaminated_raw)
+    monkeypatch.setattr(bank_warmup, "touch_topic_registry", lambda *args, **kwargs: {})
+    monkeypatch.setattr(bank_warmup, "select_distinct_lane_candidates", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bank_warmup.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bank_warmup, "get_topic_scripts_for_dossier", lambda *_args, **_kwargs: [{"id": "script-1"}])
+
+    persisted = []
+
+    def fake_persist_topic_bank_row(**kwargs):
+        persisted.append(kwargs["title"])
+        return {
+            "stored_row": {
+                "id": f"topic-{len(persisted)}",
+                "title": kwargs["title"],
+                "topic_research_dossier_id": f"dossier-{len(persisted)}",
+            },
+            "stored_variants": [{"id": "v1"}, {"id": "v2"}, {"id": "v3"}],
+        }
+
+    monkeypatch.setattr(topic_hub, "_persist_topic_bank_row", fake_persist_topic_bank_row)
+
+    summary = bank_warmup.run_single_seed_topic_warmup(
+        seed_topic="Barrierefreie Terminwege",
+        post_type="value",
+        existing_topics=[],
+        collected_topics=[],
+    )
+
+    assert persisted == ["Barrierefreie Terminwege"]
+    assert summary["lanes_persisted"] == 1
+    assert summary["dossiers_completed"] == 1
     assert summary["stored_topic_ids"] == ["topic-1"]
 
 
