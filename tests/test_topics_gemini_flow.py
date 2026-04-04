@@ -1319,6 +1319,32 @@ def test_discover_topics_for_batch_runs_off_event_loop(monkeypatch):
     assert result["state"] == "S2_SEEDED"
 
 
+def test_cron_topic_discovery_continues_after_one_batch_failure(monkeypatch):
+    from app.features.topics import handlers as topic_handlers
+    from app.core.states import BatchState
+    from app.features.batches import queries as batch_queries
+
+    batches = [
+        {"id": "batch-1", "state": BatchState.S1_SETUP.value},
+        {"id": "batch-2", "state": BatchState.S1_SETUP.value},
+        {"id": "batch-3", "state": BatchState.S2_SEEDED.value},
+    ]
+
+    async def fake_discover_topics_endpoint(request):
+        if request.batch_id == "batch-1":
+            return topic_handlers.SuccessResponse(data={"batch_id": "batch-1", "posts_created": 1, "state": "S2_SEEDED", "topics": []})
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(topic_handlers, "get_settings", lambda: SimpleNamespace(cron_secret="cron-secret"))
+    monkeypatch.setattr(batch_queries, "list_batches", lambda archived=False, limit=100, offset=0: (batches, None))
+    monkeypatch.setattr(topic_handlers, "discover_topics_endpoint", fake_discover_topics_endpoint)
+
+    response = asyncio.run(topic_handlers.cron_topic_discovery(authorization="Bearer cron-secret"))
+
+    assert response.data["seeded_batches"] == ["batch-1"]
+    assert response.data["failed_batches"][0]["batch_id"] == "batch-2"
+
+
 def test_validate_german_content_allows_peer_support_loan_phrase():
     item = topic_agents.ResearchAgentItem(
         topic="Austausch im Alltag",

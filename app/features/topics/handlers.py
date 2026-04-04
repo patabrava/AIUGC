@@ -1815,21 +1815,40 @@ async def cron_topic_discovery(
 
         batches, _ = list_batches(archived=False, limit=100, offset=0)
         seeded = []
+        failed_batches = []
         for batch in batches:
             if batch["state"] != BatchState.S1_SETUP.value:
                 continue
             request_payload = DiscoverTopicsRequest(batch_id=batch["id"], count=10)
-            seeded.append(batch["id"])
-            await discover_topics_endpoint(request_payload)
+            try:
+                await discover_topics_endpoint(request_payload)
+                seeded.append(batch["id"])
+            except Exception as exc:
+                failed_batches.append({
+                    "batch_id": batch["id"],
+                    "error": str(exc),
+                })
+                logger.exception(
+                    "cron_topic_discovery_batch_failed",
+                    batch_id=batch["id"],
+                    error=str(exc),
+                )
 
         logger.info(
             "cron_topic_discovery_triggered",
-            seeded_batches=seeded
+            seeded_batches=seeded,
+            failed_batches=failed_batches,
         )
+        if not seeded and failed_batches:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Cron job failed",
+            )
         return SuccessResponse(
             data={
                 "message": "Cron job executed successfully",
                 "seeded_batches": seeded,
+                "failed_batches": failed_batches,
             }
         )
     
