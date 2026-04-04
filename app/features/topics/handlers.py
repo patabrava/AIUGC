@@ -1379,15 +1379,23 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     }
 
     if missing_post_types:
-        raise ValidationError(
-            message="Topic discovery did not create all requested post types.",
-            details={
-                "batch_id": batch_id,
-                "requested_counts": post_type_counts,
-                "created_counts": dict(created_counts),
-                "missing_post_types": missing_post_types,
-            },
+        logger.warning(
+            "topic_discovery_partial_completion",
+            batch_id=batch_id,
+            requested_counts=post_type_counts,
+            created_counts=dict(created_counts),
+            missing_post_types=missing_post_types,
         )
+        if not created_posts:
+            raise ValidationError(
+                message="Topic discovery did not create any posts.",
+                details={
+                    "batch_id": batch_id,
+                    "requested_counts": post_type_counts,
+                    "created_counts": dict(created_counts),
+                    "missing_post_types": missing_post_types,
+                },
+            )
 
     update_seeding_progress(
         batch_id,

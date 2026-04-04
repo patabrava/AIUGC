@@ -1345,6 +1345,29 @@ def test_cron_topic_discovery_continues_after_one_batch_failure(monkeypatch):
     assert response.data["failed_batches"][0]["batch_id"] == "batch-2"
 
 
+def test_discover_topics_endpoint_finalizes_partial_completion(monkeypatch):
+    from app.core.states import BatchState
+
+    async def fake_discover_topics_for_batch(batch_id):
+        return {
+            "batch_id": batch_id,
+            "posts_created": 1,
+            "state": BatchState.S2_SEEDED.value,
+            "topics": [{"title": "Teilweise fertig", "rotation": "Hook", "cta": "CTA"}],
+        }
+
+    monkeypatch.setattr(topic_handlers, "discover_topics_for_batch", fake_discover_topics_for_batch)
+
+    response = asyncio.run(
+        topic_handlers.discover_topics_endpoint(
+            topic_handlers.DiscoverTopicsRequest(batch_id="batch-1", count=10)
+        )
+    )
+
+    assert response.data["posts_created"] == 1
+    assert response.data["state"] == BatchState.S2_SEEDED.value
+
+
 def test_validate_german_content_allows_peer_support_loan_phrase():
     item = topic_agents.ResearchAgentItem(
         topic="Austausch im Alltag",
