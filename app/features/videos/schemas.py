@@ -95,6 +95,59 @@ class VideoStatusResponse(BaseModel):
     metadata: Optional[dict] = Field(None, description="Additional metadata")
 
 
+class VertexVideoGenerationRequest(BaseModel):
+    """Request to generate a Vertex AI video explicitly (text or image mode)."""
+    mode: Literal["text", "image"] = Field(
+        ..., description="Vertex video mode (text or image)"
+    )
+    prompt: str = Field(..., description="Prompt text for video generation")
+    aspect_ratio: Literal["9:16", "16:9"] = Field(
+        default="9:16",
+        description="Target video aspect ratio",
+    )
+    duration_seconds: int = Field(
+        default=8,
+        ge=1,
+        description="Target duration in seconds for the generated clip.",
+    )
+    image_base64: Optional[str] = Field(
+        default=None,
+        description="Base64-encoded image payload for image mode",
+    )
+    image_mime_type: Optional[str] = Field(
+        default=None,
+        description="Mime type for the image payload",
+    )
+    output_gcs_uri: Optional[str] = Field(
+        default=None,
+        description="Optional GCS URI prefix for Vertex output",
+    )
+    use_fast_model: bool = Field(
+        default=False,
+        description="Use the Vertex fast model variant when available",
+    )
+    model: Optional[str] = Field(
+        default=None,
+        description="Override Vertex model identifier",
+    )
+
+
+class VertexVideoGenerationResponse(BaseModel):
+    """Response from Vertex AI video generation submission."""
+    provider: str = Field(default="vertex_ai", description="Video generation provider")
+    operation_id: str = Field(..., description="Provider operation ID for polling")
+    status: str = Field(..., description="Current provider status")
+    done: bool = Field(default=False, description="Provider completion flag")
+    provider_model: Optional[str] = Field(
+        default=None,
+        description="Underlying model identifier returned by the provider",
+    )
+    video_uri: Optional[str] = Field(
+        default=None,
+        description="GCS URI returned when the operation completes",
+    )
+
+
 class BatchVideoGenerationRequest(BaseModel):
     """Request to generate videos for all posts in a batch."""
     provider: Literal["veo_3_1", "sora_2", "sora_2_pro"] = Field(
