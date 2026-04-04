@@ -1266,6 +1266,40 @@ def test_parse_topic_research_response_clips_overlong_disclaimers():
     assert len(dossier.lane_candidates[0].disclaimer) <= 200
 
 
+def test_normalize_topic_research_dossier_rejects_topic_list_contamination():
+    contaminated_raw = json.dumps(
+        [
+            {
+                "topic": "Pflegegrad 2025 prüfen",
+                "script": "Nicht relevant für den Seed.",
+                "source_summary": "Unrelated topic list entry.",
+                "facts": ["foo"],
+                "risk_notes": ["bar"],
+            },
+            {
+                "topic": "Hilfsmittel richtig beantragen",
+                "script": "Another unrelated item.",
+                "source_summary": "Still unrelated.",
+                "facts": ["baz"],
+                "risk_notes": ["qux"],
+            },
+        ],
+        ensure_ascii=False,
+    )
+
+    dossier = topic_agents.normalize_topic_research_dossier(
+        seed_topic="Dein Rollstuhl ist versichert?",
+        post_type="value",
+        target_length_tier=8,
+        raw_response=contaminated_raw,
+    )
+
+    assert dossier.seed_topic == "Dein Rollstuhl ist versichert?"
+    assert "Pflegegrad 2025 prüfen" not in dossier.source_summary
+    assert dossier.topic == "Dein Rollstuhl ist versichert?"
+    assert len(dossier.lane_candidates) >= 1
+
+
 def test_discover_topics_for_batch_runs_off_event_loop(monkeypatch):
     calls = []
 

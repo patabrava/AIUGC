@@ -139,6 +139,28 @@ def _parse_json_or_yaml(text: str) -> Any:
     return parsed_yaml
 
 
+def _looks_like_topic_list_payload(parsed: Any) -> bool:
+    if not isinstance(parsed, list) or not parsed:
+        return False
+    dict_items = [item for item in parsed if isinstance(item, dict)]
+    if not dict_items:
+        return False
+    topicish_keys = {
+        "topic",
+        "script",
+        "source_summary",
+        "angle_options",
+        "lane_candidates",
+        "facts",
+        "risk_notes",
+    }
+    matching_items = 0
+    for item in dict_items:
+        if topicish_keys.intersection(item.keys()):
+            matching_items += 1
+    return matching_items >= max(2, len(dict_items) // 2)
+
+
 def parse_prompt1_response(
     raw: str,
     profile: Optional[Any] = None,
@@ -833,6 +855,54 @@ def _synthesize_research_dossier_from_text(
     return _normalize_research_dossier_payload(payload)
 
 
+def _synthesize_research_dossier_from_seed(
+    *,
+    seed_topic: str,
+    post_type: str,
+    target_length_tier: int,
+) -> Dict[str, Any]:
+    topic = _clip_text(seed_topic or "Thema", 240)
+    source_summary = (
+        f"{topic} bleibt der zentrale Seed für diesen Lauf. "
+        "Die Rohantwort war unbrauchbar, daher wird ein sicherer Seed-Fallback verwendet."
+    )
+    cluster_summary = (
+        f"Safely synthesized research dossier for {topic}. "
+        "This fallback keeps persistence stable even when provider output is contaminated."
+    )
+    payload: Dict[str, Any] = {
+        "cluster_id": f"{_slugify_research_label(topic)}-{secrets.token_hex(4)}",
+        "topic": topic,
+        "anchor_topic": topic,
+        "seed_topic": seed_topic or topic,
+        "cluster_summary": cluster_summary,
+        "framework_candidates": ["PAL"],
+        "sources": [{"title": topic, "url": f"https://example.com/{_slugify_research_label(topic)}"}],
+        "source_summary": source_summary,
+        "facts": [topic],
+        "angle_options": [topic],
+        "risk_notes": [topic],
+        "disclaimer": "Keine individuelle Rechts-, Therapie- oder Medizinberatung.",
+        "lane_candidates": [
+            {
+                "lane_key": f"{_slugify_research_label(topic)}-seed-1",
+                "lane_family": "topic_cluster",
+                "title": topic,
+                "angle": topic,
+                "priority": 1,
+                "framework_candidates": ["PAL"],
+                "source_summary": topic,
+                "facts": [topic],
+                "risk_notes": [topic],
+                "disclaimer": "Keine individuelle Rechts-, Therapie- oder Medizinberatung.",
+                "lane_overlap_warnings": [],
+                "suggested_length_tiers": [8, 16, 32],
+            }
+        ],
+    }
+    return _normalize_research_dossier_payload(payload)
+
+
 def parse_topic_research_response(
     raw: str,
     *,
@@ -851,11 +921,15 @@ def parse_topic_research_response(
 
     try:
         parsed = _parse_json_or_yaml(cleaned)
+        if _looks_like_topic_list_payload(parsed):
+            raise ValidationError(
+                message="Contaminated research payload",
+                details={"reason": "topic_list_payload_detected", "seed_topic": seed_topic, "post_type": post_type},
+            )
         payload = parsed if isinstance(parsed, dict) else {}
         payload = _normalize_research_dossier_payload(payload)
     except ValidationError:
-        payload = _synthesize_research_dossier_from_text(
-            cleaned,
+        payload = _synthesize_research_dossier_from_seed(
             seed_topic=seed_topic,
             post_type=post_type,
             target_length_tier=target_length_tier,
