@@ -1,5 +1,7 @@
 """Tests for the PROMPT_1 prompt builders."""
 
+from pathlib import Path
+
 import pytest
 from app.features.topics.prompts import build_prompt1, build_prompt1_variant, get_hook_bank
 from app.features.topics import prompts as _prompts_mod
@@ -44,7 +46,7 @@ def test_build_prompt1_includes_yaml_hook_bank_for_canonical_path():
     assert "HOOK-BANK" in prompt
     assert "Fragen" in prompt  # matches "Fragen (nur mit Punch und konkreter Zahl)"
     assert "Du wirst nicht glauben" in prompt  # still in banned list
-    assert "Heute erklaere ich" in prompt  # new banned pattern
+    assert "Heute erkläre ich" in prompt  # still in banned list
 
 
 def test_hook_bank_has_high_engagement_families():
@@ -52,10 +54,10 @@ def test_hook_bank_has_high_engagement_families():
     bank = get_hook_bank()
     family_names = [f["name"] for f in bank["families"]]
     required = [
-        "Identitaet und Zugehoerigkeit",
+        "Identität und Zugehörigkeit",
         "Provokation und Faktenkonflikt",
-        "Zahlen und Spezifitaet",
-        "Absurditaet und Realitaetscheck",
+        "Zahlen und Spezifität",
+        "Absurdität und Realitätscheck",
         "Neugier und Alltagsfragen",
         "Fehler und Warnung",
     ]
@@ -67,9 +69,9 @@ def test_hook_bank_bans_weak_starters():
     """Weak starters must be in the banned list."""
     bank = get_hook_bank()
     banned = bank["banned_patterns"]
-    assert any("Heute erklaere ich" in b for b in banned)
+    assert any("Heute erkläre ich" in b for b in banned)
     assert any("In diesem Video" in b for b in banned)
-    assert any("Ich moechte euch zeigen" in b for b in banned)
+    assert any("Ich möchte euch zeigen" in b for b in banned)
 
 
 def test_hook_bank_families_have_priority():
@@ -108,3 +110,13 @@ def test_format_hook_bank_includes_negative_examples():
     prompt = build_prompt1(post_type="value", desired_topics=1)
     assert "SCHLECHT:" in prompt
     assert "GUT:" in prompt
+
+
+def test_hook_bank_yaml_is_valid():
+    """The source hook bank fixture must remain parseable YAML."""
+    hook_bank_path = Path("app/features/topics/prompt_data/hook_bank.yaml")
+    payload = hook_bank_path.read_text(encoding="utf-8")
+    assert "negative_examples:" in payload
+    bank = get_hook_bank()
+    assert bank["families"]
+    assert bank["negative_examples"]

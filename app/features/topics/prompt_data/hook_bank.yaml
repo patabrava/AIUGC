@@ -138,7 +138,7 @@ negative_examples:
 - bad: "Hast du gewusst, dass die Barrierefreiheit im ÖPNV trotz gesetzlicher Frist 2022 oft noch fehlt?"
   good: "Du stehst an der Haltestelle und der Bus fährt einfach vorbei, weil die Rampe fehlt."
   why: "'Hast du gewusst' ohne Zahl ist Lehrer-Energie. Stattdessen die Zuhörerin IN die Szene setzen."
-  - bad: "Weißt du, welche Rechte du als Rollstuhlnutzer hast?"
+- bad: "Weißt du, welche Rechte du als Rollstuhlnutzer hast?"
   good: "Dein Recht auf Mitfahrt? Existiert auf dem Papier, nicht an der Haltestelle."
   why: "Abstrakte Frage vs. Kontrast zwischen Anspruch und Realität."
 - bad: "Kennst du die Probleme mit barrierefreiem Wohnen?"

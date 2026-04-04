@@ -50,11 +50,11 @@ def test_build_prompt1_uses_32s_text_template():
         },
     )
 
-    assert "VIER natuerliche Sprechbloecke" in prompt
-    assert "54-74 Woerter" in prompt
+    assert "FUENF oder SECHS vollständige Sätze" in prompt
+    assert "54-74 Wörter" in prompt
     assert "Lane-Titel:" in prompt
     assert "Nur der Scripttext" in prompt
-    assert "Keine Zwischenueberschriften" in prompt
+    assert "Keine Zwischenüberschriften" in prompt
     assert "keine Zitate wie `[cite: 1]`" in prompt
     assert "HOOK-BANK" in prompt
     assert "Fragen" in prompt
@@ -72,7 +72,7 @@ def test_build_prompt1_batch_keeps_rotation_context():
     )
 
     assert "ZUFALLS-THEMEN FÜR DIESEN DURCHLAUF:" in prompt
-    assert "26-36 Woerter" in prompt
+    assert "26-36 Wörter" in prompt
     assert "ZWEI natuerliche Sprechbloecke" in prompt
     assert "Barrierefreie Bahnreisen" in prompt
 
@@ -85,8 +85,8 @@ def test_build_prompt2_uses_32s_text_template():
     )
 
     assert "32-Sekunden-UGC-Videos" in prompt
-    assert "8-66 Wörter" in prompt
-    assert "4 Sprechbloecke" in prompt
+    assert "40-66 Wörter" in prompt
+    assert "5-6 Sätze" in prompt
     assert "core:" not in prompt
 
 
@@ -99,7 +99,7 @@ def test_build_prompt2_uses_16s_text_template():
 
     assert "16-Sekunden-UGC-Videos" in prompt
     assert "24-34 Wörter" in prompt
-    assert "2 Sprechbloecke" in prompt
+    assert "2 Sprechblöcke" in prompt
     assert "core:" not in prompt
 
 
@@ -125,8 +125,8 @@ def test_build_prompt3_uses_32s_text_template():
     prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(32))
 
     assert "32-Sekunden-UGC-Videos" in prompt
-    assert "32-66 Woerter" in prompt
-    assert "vier bis fuenf natuerlichen Sprechbloecken" in prompt
+    assert "40-66 Wörter" in prompt
+    assert "fünf bis sechs natürlichen Sätzen" in prompt
     assert "Antworte nicht in JSON" in prompt
     assert "LL12" in prompt
 
@@ -192,7 +192,7 @@ def test_prompt1_16s_contains_hook_mechanics():
         post_type="value", desired_topics=1, profile=get_duration_profile(16),
     )
     assert "klaren Hook" not in prompt, "Old vague hook instruction still present in 16s"
-    assert "ZWEI natuerliche Sprechbloecke" in prompt
+    assert "2 Sprechblöcke" in prompt
     assert "HOOK-REGELN" in prompt
     assert "Scroll-Stopp" in prompt
     assert "TONALITAET" in prompt
@@ -247,7 +247,7 @@ Warum ist Barrierefreiheit in Deutschland immer noch so verdammt schwer?
 
 def test_prompt1_8s_contains_new_word_range_and_guardrails():
     prompt = build_prompt1(post_type="value", desired_topics=1)
-    assert "16-18 Woerter" in prompt
+    assert "16-18 Wörter" in prompt
     assert "Heute ist April 2026" in prompt
     assert "U+2014" in prompt
     assert "HARTE NORMEN" in prompt

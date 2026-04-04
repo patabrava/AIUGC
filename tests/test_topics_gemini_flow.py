@@ -368,6 +368,36 @@ def test_generate_gemini_deep_research_retries_transient_poll_503(monkeypatch):
     assert len(get_calls) == 2
 
 
+def test_generate_gemini_deep_research_429_submission_surfaces_structured_error(monkeypatch):
+    fake_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_model="gpt-4o-mini",
+        gemini_api_key="gemini-key",
+        gemini_topic_model="gemini-2.5-flash",
+        gemini_image_model="gemini-2.0-flash-preview-image-generation",
+        gemini_deep_research_agent="deep-research-pro-preview",
+        gemini_topic_timeout_seconds=30,
+        gemini_topic_poll_seconds=0,
+    )
+    fake_openai = FakeHttpClient([])
+    fake_gemini = FakeHttpClient(
+        [
+            FakeResponse(429, {"error": {"status": "RESOURCE_EXHAUSTED"}}),
+        ]
+    )
+    clients = [fake_openai, fake_gemini]
+
+    monkeypatch.setattr(llm_client_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(llm_client_module.httpx, "Client", lambda *args, **kwargs: clients.pop(0))
+    client = llm_client_module.LLMClient()
+
+    with pytest.raises(llm_client_module.ThirdPartyError) as exc_info:
+        client.generate_gemini_deep_research("Find current wheelchair topics")
+
+    assert exc_info.value.details["status_code"] == 429
+    assert exc_info.value.details["agent"] == "deep-research-pro-preview"
+
+
 def test_to_gemini_response_schema_inlines_local_refs(monkeypatch):
     fake_settings = SimpleNamespace(
         openai_api_key="",

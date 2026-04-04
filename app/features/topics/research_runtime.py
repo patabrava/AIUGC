@@ -525,7 +525,10 @@ def generate_topic_script_candidate(
                 else []
             ),
             source_summary=cleaned_summary,
-            estimated_duration_s=max(1, min(profile.target_length_tier, estimate_script_duration_seconds(cleaned_script))),
+            estimated_duration_s=max(
+                profile.prompt1_min_seconds,
+                min(profile.prompt1_max_seconds, estimate_script_duration_seconds(cleaned_script)),
+            ),
             tone="direkt, freundlich, empowernd, du-Form",
             disclaimer=cleaned_disclaimer or "Keine Rechts- oder medizinische Beratung.",
         )
@@ -559,20 +562,78 @@ def generate_topic_script_candidate(
                 },
             )
         item.script = script
-        item.estimated_duration_s = max(1, min(profile.target_length_tier, estimate_script_duration_seconds(script)))
+        item.estimated_duration_s = max(
+            profile.prompt1_min_seconds,
+            min(profile.prompt1_max_seconds, estimate_script_duration_seconds(script)),
+        )
         return item
 
     def _synthesize_prompt1_fallback_item() -> ResearchAgentItem:
-        script = _compile_prompt1_script()
+        base_title = sanitize_metadata_text(
+            lane_title or lane_payload.get("title") or dossier_payload.get("topic") or "Thema",
+            max_sentences=1,
+            max_chars=120,
+        ).rstrip(".!?")
+        fallback_clauses = [
+            f"{base_title} bringt im Alltag klare Orientierung und macht Anträge planbarer für dich.",
+            f"{base_title} schafft im Alltag klare Orientierung und macht Entscheidungen planbarer für dich.",
+            f"{base_title} hilft im Alltag mit klarer Orientierung und planbaren Anträgen für dich.",
+        ]
+        script = ""
+        for candidate in fallback_clauses:
+            cleaned_candidate = sanitize_spoken_fragment(candidate, ensure_terminal=True)
+            if min_words <= _word_count(cleaned_candidate) <= max_words:
+                script = cleaned_candidate
+                break
+        if not script:
+            preferred_text = " ".join(
+                part
+                for part in (
+                    lane_title,
+                    cluster_summary,
+                    dossier_source_summary,
+                )
+                if part
+            ).strip()
+            script = _compile_prompt1_script(preferred_text=preferred_text) or _compile_prompt1_script()
         if not script:
             raise ValidationError(
                 message="PROMPT_1 script could not be reconstructed from clean facts",
                 details={"lane_title": lane_payload.get("title"), "target_length_tier": target_length_tier},
             )
-        return _build_clean_item(
-            script_text=script,
-            metadata_summary=lane_caption or dossier_source_summary or cluster_summary,
+        cleaned_summary = sanitize_metadata_text(
+            lane_caption or dossier_source_summary or cluster_summary or script,
+            max_chars=500,
         )
+        cleaned_topic = sanitize_metadata_text(base_title, max_sentences=1, max_chars=400).rstrip(".!?") or base_title
+        disclaimer_value = sanitize_metadata_text(
+            lane_payload.get("disclaimer")
+            or dossier_payload.get("disclaimer")
+            or "Keine Rechts- oder medizinische Beratung.",
+            max_sentences=1,
+            max_chars=200,
+        )
+        item = ResearchAgentItem(
+            topic=cleaned_topic,
+            script=script,
+            caption=cleaned_summary or script,
+            framework=framework_value,
+            sources=(
+                [{"title": source_title or lane_title or str(dossier_payload.get("topic") or "Quelle"), "url": source_url}]
+                if source_url
+                else []
+            ),
+            source_summary=cleaned_summary,
+            estimated_duration_s=max(
+                profile.prompt1_min_seconds,
+                min(profile.prompt1_max_seconds, estimate_script_duration_seconds(script)),
+            ),
+            tone="direkt, freundlich, empowernd, du-Form",
+            disclaimer=disclaimer_value or "Keine Rechts- oder medizinische Beratung.",
+        )
+        if not item.sources and source_title and source_url:
+            item.sources = [{"title": source_title, "url": source_url}]
+        return item
 
     def _extract_script_text(raw_response: str) -> str:
         cleaned = (raw_response or "").strip()
@@ -715,7 +776,7 @@ def generate_dialog_scripts(
     )
     if previously_used_hooks:
         hooks_list = ", ".join([f'"{hook}"' for hook in previously_used_hooks])
-        prompt += f"\n\nWICHTIG: Die folgenden Hooks wurden bereits verwendet: {hooks_list}\nNutze einen anderen Hook-Start fuer dieses Skript."
+        prompt += f"\n\nWICHTIG: Die folgenden Hooks wurden bereits verwendet: {hooks_list}\nNutze einen anderen Hook-Start für dieses Skript."
 
     for attempt in range(3):
         try:

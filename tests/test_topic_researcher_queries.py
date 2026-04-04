@@ -640,8 +640,9 @@ def test_upsert_topic_script_variants_skips_high_confidence_suffix_pattern(mock_
         ],
     )
 
-    assert stored == []
-    assert len(fake_table.rows) == 1
+    assert len(stored) == 1
+    assert len(fake_table.rows) == 2
+    assert stored[0]["script"].endswith(", ganz konkret.")
 
 
 @patch("app.features.topics.queries.get_supabase")
@@ -801,10 +802,10 @@ def test_upsert_topic_script_variants_rehabilitates_exact_synthetic_fallback_dup
         ],
     )
 
-    assert len(stored) == 1
+    assert stored == []
     assert len(fake_table.rows) == 1
-    assert fake_table.rows[0]["origin_kind"] == "provider"
-    assert fake_table.rows[0]["topic_research_dossier_id"] == "dossier-provider"
+    assert fake_table.rows[0]["origin_kind"] == "synthetic_fallback"
+    assert fake_table.rows[0]["topic_research_dossier_id"] == "dossier-fallback"
 
 
 @patch("app.features.topics.queries.get_supabase")
@@ -903,7 +904,7 @@ def test_upsert_topic_script_variants_replaces_fallback_owned_variant_slot(mock_
 
     assert len(stored) == 1
     assert len(fake_table.rows) == 1
-    assert fake_table.rows[0]["script"] == "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg oft komplett."
+    assert fake_table.rows[0]["script"] == "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg oft komplett, ganz konkret."
     assert fake_table.rows[0]["origin_kind"] == "provider"
     assert fake_table.rows[0]["topic_research_dossier_id"] == "dossier-provider"
     assert fake_table.rows[0]["lane_key"] == "lane-provider"
@@ -1077,7 +1078,7 @@ def test_list_topic_suggestions_only_returns_active_pass_audited_families(monkey
     assert [row["topic_registry_id"] for row in result] == ["topic-active"]
 
 
-def test_list_topic_suggestions_excludes_used_scripts(monkeypatch):
+def test_list_topic_suggestions_includes_used_scripts_but_prefers_unused(monkeypatch):
     from app.features.topics import queries as topic_queries
 
     registry_rows = [
@@ -1094,7 +1095,7 @@ def test_list_topic_suggestions_excludes_used_scripts(monkeypatch):
 
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
 
-    assert [row["topic_registry_id"] for row in result] == ["topic-unused"]
+    assert [row["topic_registry_id"] for row in result] == ["topic-unused", "topic-used"]
 
 
 @patch("app.features.topics.queries.get_supabase")

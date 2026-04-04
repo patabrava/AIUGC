@@ -104,7 +104,7 @@ def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _script_is_selectable(script_row: Dict[str, Any]) -> bool:
-    return int((script_row or {}).get("use_count") or 0) <= 0
+    return True
 
 
 def _normalize_script_text(value: Any) -> str:
@@ -551,8 +551,6 @@ def list_topic_suggestions(
                 continue
             normalized_script = _normalize_script_row(row)
             if normalized_script.get("audit_status") != "pass":
-                continue
-            if not _script_is_selectable(normalized_script):
                 continue
             if normalized_script.get("origin_kind") == "synthetic_fallback":
                 continue

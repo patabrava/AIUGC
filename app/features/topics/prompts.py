@@ -185,8 +185,11 @@ def _load_topic_bank_payload() -> Dict[str, Any]:
 @lru_cache(maxsize=None)
 def _load_hook_bank_payload() -> Dict[str, Any]:
     if HOOK_BANK_PATH.exists():
-        with HOOK_BANK_PATH.open("r", encoding="utf-8") as fp:
-            return yaml.safe_load(fp) or {}
+        try:
+            with HOOK_BANK_PATH.open("r", encoding="utf-8") as fp:
+                return yaml.safe_load(fp) or {}
+        except Exception as exc:
+            return extract_hook_bank_from_prompt1_source(_load_seed_canon_text())
     return extract_hook_bank_from_prompt1_source(_load_seed_canon_text())
 
 
@@ -393,7 +396,7 @@ def _format_hook_bank_section() -> str:
     banned = [str(item).strip() for item in list(payload.get("banned_patterns") or []) if str(item).strip()]
     negative_examples = list(payload.get("negative_examples") or [])
     if not families and not banned:
-        return ""
+        return "HOOK-BANK (verbindlich):\n- Keine zusätzlichen Hook-Bank-Regeln verfügbar."
 
     priority_order = {"high": 0, "medium": 1, "low": 2}
     sorted_families = sorted(

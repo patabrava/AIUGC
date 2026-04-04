@@ -760,9 +760,9 @@ def _generate_fallback_seed_topics(missing_count: int, *, post_type: str) -> Lis
     llm = get_llm_client()
     prompt = (
         "Erzeuge genau "
-        f"{missing_count} neue, kurze, einzigartige deutsche Seed-Topics fuer einen {post_type}-Warm-up-Lauf. "
+        f"{missing_count} neue, kurze, einzigartige deutsche Seed-Topics für einen {post_type}-Warm-up-Lauf. "
         "Antworte nur als JSON-Array von Strings. "
-        "Keine Duplikate zu typischen UGC-Themen, keine Deep-Research-Fakten, keine Erklaerungen."
+        "Keine Duplikate zu typischen UGC-Themen, keine Deep-Research-Fakten, keine Erklärungen."
     )
     response = llm.generate_gemini_json(
         prompt=prompt,
