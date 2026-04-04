@@ -801,7 +801,7 @@ class LLMClient:
                     "gemini_deep_research_submit_http_error",
                     status_code=submit_response.status_code,
                     response_text=submit_response.text,
-                    agent=target_agent,
+                    agent=agent,
                 )
                 raise ThirdPartyError(
                     message="Gemini Deep Research submission failed",
@@ -996,7 +996,10 @@ class LLMClient:
             raise
         except Exception as exc:
             logger.error("gemini_deep_research_polling_failed", agent=agent, error=str(exc))
-            raise
+            raise ThirdPartyError(
+                message="Gemini Deep Research polling failed",
+                details={"error": str(exc), "agent": agent},
+            ) from exc
 
     def _generate_gemini_deep_research_streamed(
         self,
