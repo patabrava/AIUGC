@@ -191,8 +191,7 @@
                     ('Dialogue', prompt_audio.get('dialogue') if prompt_audio else None),
                     ('Ending Directive', prompt.ending_directive),
                     ('Audio Block', prompt.audio_block),
-                    ('Universal Negatives', prompt.universal_negatives),
-                    ('VEO Negative Prompt', prompt.veo_negative_prompt)
+                    ('Negatives', prompt.veo_negative_prompt or prompt.universal_negatives)
                 ] %}
                 <div x-data="promptModalComponent('{{ post.id }}')" data-prompt-json='{{ prompt|tojson|e }}' class="relative">
                     <div class="text-sm text-gray-700 space-y-2">

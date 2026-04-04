@@ -151,7 +151,7 @@ def _profiles() -> dict[int, DurationProfile]:
         return {
             8: _BASE_PROFILES[8],
             16: _EFFICIENT_LONG_ROUTE_PROFILES[16],
-            32: _EFFICIENT_LONG_ROUTE_PROFILES[32],
+            32: _BASE_PROFILES[32],
         }
     return _BASE_PROFILES
 

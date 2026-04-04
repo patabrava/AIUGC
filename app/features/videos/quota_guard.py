@@ -34,6 +34,19 @@ def _settings_limits() -> Dict[str, int]:
     }
 
 
+def _quota_controls_bypassed() -> bool:
+    settings = get_settings()
+    return bool(
+        settings.veo_disable_local_quota_guard
+        or settings.veo_disable_all_quota_controls
+    )
+
+
+def quota_controls_bypassed() -> bool:
+    """Expose whether Veo quota ledger calls should be skipped entirely."""
+    return _quota_controls_bypassed()
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -120,6 +133,14 @@ def raise_quota_block(reason: str, snapshot: Dict[str, Any], *, requested_units:
 
 def ensure_immediate_submit_slot(*, requested_units: int = 1, provider: str = VEO_PROVIDER) -> Dict[str, Any]:
     snapshot = get_quota_snapshot(provider=provider)
+    if _quota_controls_bypassed():
+        logger.warning(
+            "quota_guard_bypass_enabled",
+            provider=provider,
+            requested_units=requested_units,
+            snapshot=snapshot,
+        )
+        return snapshot
     if snapshot.get("frozen"):
         raise_quota_block("provider_frozen", snapshot, requested_units=requested_units)
     if snapshot.get("minute_remaining_units", 0) < requested_units:
@@ -137,6 +158,23 @@ def reserve_quota(
     require_immediate_slot: bool,
     reservation_kind: str = "video_chain",
 ) -> Dict[str, Any]:
+    if _quota_controls_bypassed():
+        logger.warning(
+            "quota_reservation_bypassed",
+            provider=provider,
+            post_id=post_id,
+            batch_id=batch_id,
+            reservation_key=reservation_key,
+            requested_units=requested_units,
+            require_immediate_slot=require_immediate_slot,
+        )
+        return {
+            "allowed": True,
+            "bypassed": True,
+            "provider": provider,
+            "reservation_key": reservation_key,
+            "requested_units": requested_units,
+        }
     payload = {
         "p_provider": provider,
         "p_reservation_key": reservation_key,
@@ -163,6 +201,20 @@ def reserve_quota(
 
 
 def consume_quota(*, reservation_key: str, operation_id: Optional[str], units: int = 1) -> Dict[str, Any]:
+    if _quota_controls_bypassed():
+        logger.warning(
+            "quota_consumption_bypassed",
+            reservation_key=reservation_key,
+            operation_id=operation_id,
+            units=units,
+        )
+        return {
+            "allowed": True,
+            "bypassed": True,
+            "reservation_key": reservation_key,
+            "operation_id": operation_id,
+            "remaining_units": None,
+        }
     result = _rpc(
         "consume_video_provider_quota",
         {
@@ -199,6 +251,20 @@ def release_quota(
     final_status: str,
     error_code: Optional[str] = None,
 ) -> Dict[str, Any]:
+    if _quota_controls_bypassed():
+        logger.warning(
+            "quota_release_bypassed",
+            reservation_key=reservation_key,
+            reason=reason,
+            final_status=final_status,
+            error_code=error_code,
+        )
+        return {
+            "allowed": True,
+            "bypassed": True,
+            "reservation_key": reservation_key,
+            "final_status": final_status,
+        }
     result = _rpc(
         "release_video_provider_quota",
         {
@@ -219,6 +285,18 @@ def release_quota(
 
 
 def freeze_provider_quota(*, provider: str, reason: str) -> Dict[str, Any]:
+    if _quota_controls_bypassed():
+        logger.warning(
+            "quota_guard_freeze_bypassed",
+            provider=provider,
+            reason=reason,
+        )
+        return {
+            "allowed": True,
+            "bypassed": True,
+            "provider": provider,
+            "reason": reason,
+        }
     freeze_until = _next_pacific_reset()
     result = _rpc(
         "freeze_video_provider_quota",

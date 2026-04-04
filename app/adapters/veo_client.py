@@ -451,6 +451,7 @@ class VeoClient:
         aspect_ratio: str = "9:16",
         resolution: str = "720p",
         duration_seconds: int = 8,
+        negative_prompt: Optional[str] = None,
         seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -483,6 +484,9 @@ class VeoClient:
             },
         }
 
+        if negative_prompt:
+            payload["parameters"]["negativePrompt"] = negative_prompt
+
         if seed is not None:
             payload["parameters"]["seed"] = seed
 
@@ -492,9 +496,11 @@ class VeoClient:
             aspect_ratio=aspect_ratio,
             resolution=resolution,
             duration_seconds=duration_seconds,
+            negative_prompt_length=len(negative_prompt) if negative_prompt else 0,
             video_uri=video_uri,
             prompt_length=len(prompt),
             prompt_preview=prompt[:400],
+            negative_prompt_preview=negative_prompt[:200] if negative_prompt else None,
             request_payload=payload,
         )
 

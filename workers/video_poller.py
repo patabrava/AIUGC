@@ -23,8 +23,8 @@ from app.adapters.supabase_client import get_supabase
 from app.adapters.sora_client import get_sora_client
 from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
-from app.core.config import get_settings
-from app.core.errors import ValidationError
+from app.core.config import get_settings, google_ai_context_fingerprint
+from app.core.errors import FlowForgeException, ValidationError
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.videos.prompt_audit import record_prompt_audit
 from app.features.videos.quota_guard import (
@@ -59,6 +59,11 @@ except Exception as import_error:  # noqa: BLE001
 # Configure logging
 configure_logging()
 logger = get_logger(__name__)
+
+logger.info(
+    "video_poller_startup_context",
+    **google_ai_context_fingerprint(),
+)
 
 if not _veo_available:
     logger.warning(
@@ -95,6 +100,45 @@ def _utc_now() -> datetime:
 def _utc_now_iso(now: Optional[datetime] = None) -> str:
     current = now or _utc_now()
     return current.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _quota_controls_bypassed() -> bool:
+    settings = get_settings()
+    return bool(
+        settings.veo_disable_local_quota_guard
+        or settings.veo_disable_all_quota_controls
+    )
+
+
+def _consume_quota_after_acceptance(
+    *,
+    reservation_key: Optional[str],
+    operation_id: str,
+    units: int,
+    correlation_id: str,
+    post_id: str,
+) -> Optional[str]:
+    if not reservation_key:
+        return None
+    try:
+        consume_quota(
+            reservation_key=reservation_key,
+            operation_id=operation_id,
+            units=units,
+        )
+        return None
+    except FlowForgeException as exc:
+        logger.error(
+            "quota_consume_failed_after_provider_acceptance",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            reservation_key=reservation_key,
+            operation_id=operation_id,
+            code=str(exc.code),
+            message=exc.message,
+            details=exc.details,
+        )
+        return exc.message
 
 
 def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
@@ -650,10 +694,19 @@ def process_video_operation(post: Dict[str, Any]):
         metadata = post.get("video_metadata") or {}
         if provider == "veo_3_1":
             if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
-                maybe_freeze_after_provider_429(
-                    provider="veo_3_1",
-                    reason=str(e),
-                )
+                if _quota_controls_bypassed():
+                    logger.warning(
+                        "provider_429_freeze_suppressed_for_test",
+                        post_id=post_id,
+                        correlation_id=correlation_id,
+                        provider=provider,
+                        error=str(e),
+                    )
+                else:
+                    maybe_freeze_after_provider_429(
+                        provider="veo_3_1",
+                        reason=str(e),
+                    )
                 _release_post_quota_reservation(
                     post,
                     reason=str(e),
@@ -761,22 +814,32 @@ def _retry_rai_filtered_video(post: Dict[str, Any], correlation_id: str, rai_rea
     )
     if duration_seconds not in {4, 6, 8}:
         duration_seconds = 8
-    ensure_immediate_submit_slot(provider="veo_3_1")
+    if not _quota_controls_bypassed():
+        ensure_immediate_submit_slot(provider="veo_3_1")
+    else:
+        logger.warning(
+            "rai_retry_quota_controls_bypassed",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            retry_number=retry_num,
+        )
     retry_reservation_key = build_reservation_key(
         provider="veo_3_1",
         post_id=post_id,
         correlation_id=f"{correlation_id}_rai_retry_{retry_num}",
         kind="retry_submit",
     )
-    reserve_quota(
-        provider="veo_3_1",
-        post_id=post_id,
-        batch_id=post.get("batch_id"),
-        reservation_key=retry_reservation_key,
-        requested_units=1,
-        require_immediate_slot=False,
-        reservation_kind="retry_submit",
-    )
+    if not _quota_controls_bypassed():
+        reserve_quota(
+            provider="veo_3_1",
+            post_id=post_id,
+            batch_id=post.get("batch_id"),
+            reservation_key=retry_reservation_key,
+            requested_units=1,
+            require_immediate_slot=False,
+            reservation_kind="retry_submit",
+        )
+    quota_consume_error = None
     try:
         result = veo_client.submit_video_generation(
             prompt=audit["prompt_text"],
@@ -787,20 +850,33 @@ def _retry_rai_filtered_video(post: Dict[str, Any], correlation_id: str, rai_rea
             duration_seconds=duration_seconds,
             seed=audit.get("seed"),
         )
-        consume_quota(
-            reservation_key=retry_reservation_key,
-            operation_id=result["operation_id"],
-            units=1,
-        )
+        if not _quota_controls_bypassed():
+            quota_consume_error = _consume_quota_after_acceptance(
+                reservation_key=retry_reservation_key,
+                operation_id=result["operation_id"],
+                units=1,
+                correlation_id=correlation_id,
+                post_id=post_id,
+            )
     except Exception as exc:
-        release_quota(
-            reservation_key=retry_reservation_key,
-            reason=str(exc),
-            final_status="released",
-            error_code=exc.__class__.__name__,
-        )
+        if not _quota_controls_bypassed() and not quota_consume_error:
+            release_quota(
+                reservation_key=retry_reservation_key,
+                reason=str(exc),
+                final_status="released",
+                error_code=exc.__class__.__name__,
+            )
         if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-            maybe_freeze_after_provider_429(provider="veo_3_1", reason=str(exc))
+            if _quota_controls_bypassed():
+                logger.warning(
+                    "rai_retry_freeze_suppressed_for_test",
+                    post_id=post_id,
+                    correlation_id=correlation_id,
+                    retry_number=retry_num,
+                    error=str(exc),
+                )
+            else:
+                maybe_freeze_after_provider_429(provider="veo_3_1", reason=str(exc))
         raise
 
     new_operation_id = result["operation_id"]
@@ -813,6 +889,8 @@ def _retry_rai_filtered_video(post: Dict[str, Any], correlation_id: str, rai_rea
         "rai_last_retry_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "operation_ids": operation_ids,
     })
+    if quota_consume_error:
+        metadata["quota_consume_error"] = quota_consume_error
     # Clear failure fields so the post re-enters the polling loop
     metadata.pop("error", None)
     metadata.pop("error_type", None)
@@ -1153,7 +1231,11 @@ def _build_veo_extension_prompt(
     segment_index: Optional[int] = None,
 ) -> Dict[str, str]:
     """Build a VEO extension prompt for the given post and segment index."""
-    from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
+    from app.features.posts.prompt_builder import (
+        VEO_NEGATIVE_PROMPT,
+        build_lean_veo_continuation_prompt,
+        split_dialogue_sentences,
+    )
 
     seed_data = post.get("seed_data") or {}
     metadata = post.get("video_metadata") or {}
@@ -1205,26 +1287,16 @@ def _build_veo_extension_prompt(
     hops_target = metadata.get("veo_extension_hops_target", 0)
     hops_completed = metadata.get("veo_extension_hops_completed", 0)
     is_final = (hops_completed + 1) >= hops_target if hops_target > 0 else True
-
-    prompt_overrides = {
-        "character": video_prompt.get("character"),
-        "action": video_prompt.get("action"),
-        "style": video_prompt.get("style"),
-        "scene": video_prompt.get("scene"),
-        "cinematography": video_prompt.get("cinematography"),
-        "audio_block": video_prompt.get("audio_block") or prompt_audio.get("capture"),
-        "ending": video_prompt.get("ending_directive") if is_final else None,
-        "negative_constraints": video_prompt.get("veo_negative_prompt"),
-    }
-
-    prompt_text = build_veo_prompt_segment(
+    prompt_text = build_lean_veo_continuation_prompt(
         segment_text,
-        include_quotes=False,
-        include_ending=is_final,
-        **prompt_overrides,
+        include_final_ending=is_final,
     )
 
-    return {"prompt_text": prompt_text, "segment_text": segment_text}
+    return {
+        "prompt_text": prompt_text,
+        "segment_text": segment_text,
+        "negative_prompt": str(video_prompt.get("veo_negative_prompt") or VEO_NEGATIVE_PROMPT).strip(),
+    }
 
 
 def _needs_extension_hop(metadata: Optional[Dict[str, Any]]) -> bool:
@@ -1299,6 +1371,7 @@ def _submit_extension_hop(
     )
     prompt_payload = _build_veo_extension_prompt(post, segment_index=next_segment_idx)
     prompt = prompt_payload["prompt_text"]
+    negative_prompt = prompt_payload.get("negative_prompt")
     segment_text = prompt_payload["segment_text"]
 
     veo_client = get_veo_client()
@@ -1311,7 +1384,16 @@ def _submit_extension_hop(
             f"missing video_uri"
         )
 
-    ensure_immediate_submit_slot(provider="veo_3_1")
+    if _quota_controls_bypassed():
+        logger.warning(
+            "extension_hop_quota_controls_bypassed",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            hop_number=hops_completed + 1,
+            hop_target=metadata.get("veo_extension_hops_target"),
+        )
+    else:
+        ensure_immediate_submit_slot(provider="veo_3_1")
 
     try:
         result = veo_client.submit_video_extension(
@@ -1321,6 +1403,7 @@ def _submit_extension_hop(
             aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
             resolution=metadata.get("requested_resolution", "720p"),
             duration_seconds=8,
+            negative_prompt=negative_prompt,
             seed=metadata.get("veo_seed"),
         )
     except httpx.HTTPStatusError as error:
@@ -1335,12 +1418,13 @@ def _submit_extension_hop(
         raise
 
     new_operation_id = result["operation_id"]
-    if reservation_key:
-        consume_quota(
-            reservation_key=reservation_key,
-            operation_id=new_operation_id,
-            units=1,
-        )
+    quota_consume_error = _consume_quota_after_acceptance(
+        reservation_key=reservation_key,
+        operation_id=new_operation_id,
+        units=1,
+        correlation_id=correlation_id,
+        post_id=post_id,
+    )
     operation_ids = list(metadata.get("operation_ids") or [])
     operation_ids.append(new_operation_id)
 
@@ -1350,11 +1434,11 @@ def _submit_extension_hop(
         operation_id=new_operation_id,
         provider="veo_3_1",
         prompt_text=prompt,
-        negative_prompt=None,
+        negative_prompt=negative_prompt,
         prompt_path="veo_extension_hop",
         aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
         resolution=metadata.get("requested_resolution", "720p"),
-        requested_seconds=metadata.get("veo_extension_seconds", 7),
+        requested_seconds=8,
         correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
     )
 
@@ -1368,6 +1452,8 @@ def _submit_extension_hop(
         "chain_status": "extending",
         "generated_seconds": generated_seconds,
     })
+    if quota_consume_error:
+        metadata["quota_consume_error"] = quota_consume_error
     metadata.pop("veo_extension_retry_after", None)
     metadata.pop("veo_extension_last_retryable_error", None)
     metadata.pop("provider_status_code", None)
@@ -1455,6 +1541,15 @@ def _reconcile_batches_ready_for_qa() -> None:
 
 
 if __name__ == "__main__":
+    settings = get_settings()
+    if not settings.google_ai_keys_aligned():
+        logger.warning(
+            "google_ai_key_alignment_mismatch",
+            gemini_api_key_present=bool(settings.gemini_api_key),
+            google_ai_api_key_present=bool(settings.google_ai_api_key),
+            message="GEMINI_API_KEY and GOOGLE_AI_API_KEY differ; continuing with the active Google AI key fingerprint",
+        )
+
     logger.info(
         "video_poller_started",
         poll_interval_seconds=POLL_INTERVAL_SECONDS,

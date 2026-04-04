@@ -7,7 +7,7 @@ Per Canon Phase 3: S4_SCRIPTED → S5_PROMPTS_BUILT
 import re
 from typing import Dict, Any, Optional
 
-from app.features.posts.prompt_defaults import DEFAULT_SCENE_BODY
+from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE_BODY
 from app.features.posts.schemas import VideoPrompt, AudioSection
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
@@ -22,6 +22,7 @@ __all__ = [
     "build_optimized_prompt",
     "split_dialogue_sentences",
     "build_veo_prompt_segment",
+    "build_lean_veo_continuation_prompt",
 ]
 
 
@@ -54,8 +55,7 @@ EXTENDED_FINAL_ENDING_DIRECTIVE = (
 )
 
 EXTENDED_CONTINUATION_ENDING_DIRECTIVE = (
-    "Do not end the speech yet. Continue directly into the next segment with no concluding pause "
-    "or scene-ending hold."
+    "Continue directly into the next segment with no concluding pause or scene-ending hold."
 )
 
 SORA_NEGATIVE_CONSTRAINTS = (
@@ -94,7 +94,69 @@ OPTIMIZED_PROMPT_TEMPLATE = (
     "{audio_block}{negatives_section}"
 )
 
+LEAN_CONTINUATION_PROMPT_TEMPLATE = (
+    "Character:\n"
+    "{character}\n\n"
+    "Style:\n"
+    "{style}\n\n"
+    "Continuity:\n"
+    "{continuity}\n\n"
+    "Language:\n"
+    "{language}\n\n"
+    "Dialogue:\n"
+    "\"{dialogue}\"\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
+    "Audio:\n"
+    "{audio_block}"
+)
+
+LEAN_EXTENSION_CHARACTER = (
+    "Same person as the previous segment: 38-year-old German woman with shoulder-length "
+    "light brown hair with subtle blonde highlights, hazel eyes, warm light-medium skin "
+    "tone, friendly oval face, natural expression."
+)
+
+LEAN_EXTENSION_STYLE = (
+    "Maintain the same realistic smartphone selfie video look from the previous segment."
+)
+
+LEAN_EXTENSION_CONTINUITY = (
+    "Maintain the same bedroom, lighting, framing, camera position, and wardrobe from the previous segment."
+)
+
+LEAN_EXTENSION_LANGUAGE = (
+    "Speak only in German. Maintain the same voice, accent, and speaking pace from the previous segment."
+)
+
+LEAN_CONTINUATION_AUDIO_BLOCK = (
+    "Natural single-speaker smartphone room audio. No music. No background voices."
+)
+
+LEAN_FINAL_AUDIO_BLOCK = (
+    "Natural single-speaker smartphone room audio. No music. No background voices. "
+    "Let the room tone settle briefly after the final word."
+)
+
 DEFAULT_CHARACTER = (
+    "38-year-old German woman with shoulder-length light brown hair with subtle blonde "
+    "highlights, hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural "
+    "expression."
+)
+
+DEFAULT_STYLE = (
+    "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
+    "soft flattering indoor light, and natural skin texture."
+)
+
+DEFAULT_CINEMATOGRAPHY = (
+    "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
+    "distance. The camera is stable, with only minimal natural movement. The "
+    "framing remains consistent throughout the shot without noticeable camera drift or "
+    "reframing."
+)
+
+LEGACY_32_CHARACTER = (
     "38-year-old German woman with long, light brown hair with natural blonde highlights, "
     "straight with a slight natural wave, parted slightly off-center to the left, falling "
     "softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle "
@@ -106,14 +168,14 @@ DEFAULT_CHARACTER = (
     "build with relaxed upright posture."
 )
 
-DEFAULT_STYLE = (
+LEGACY_32_STYLE = (
     "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
     "soft flattering indoor light, and natural skin texture."
 )
 
-DEFAULT_CINEMATOGRAPHY = (
+LEGACY_32_CINEMATOGRAPHY = (
     "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
-    "distance. The camera is stable, with only minimal natural movement. The "
+    "distance. The camera is handheld but stable, with only minimal natural movement. The "
     "framing remains consistent throughout the shot without noticeable camera drift or "
     "reframing."
 )
@@ -153,7 +215,7 @@ def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
     }
 
 
-def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
+def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals: bool = False) -> Dict[str, Any]:
     """
     Assemble video generation prompt by inserting dialogue from Phase 2 seed data.
     
@@ -205,6 +267,7 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
         action=action_value,
         audio_block=STANDARD_FINAL_AUDIO_BLOCK,
         ending=STANDARD_FINAL_ENDING_DIRECTIVE,
+        legacy_32_visuals=legacy_32_visuals,
     )
     veo_prompt = build_optimized_prompt(
         normalized_dialogue,
@@ -213,14 +276,23 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any]) -> Dict[str, Any]:
         action=action_value,
         audio_block=STANDARD_FINAL_AUDIO_BLOCK,
         ending=STANDARD_FINAL_ENDING_DIRECTIVE,
+        legacy_32_visuals=legacy_32_visuals,
     )
 
     # Keep a single audio block in the final prompt to avoid contradictory synthesis cues.
     audio_section = AudioSection(dialogue=normalized_dialogue, capture=STANDARD_FINAL_AUDIO_BLOCK)
 
     # Assemble complete prompt using template defaults
+    character_value = LEGACY_32_CHARACTER if legacy_32_visuals else DEFAULT_CHARACTER
+    style_value = LEGACY_32_STYLE if legacy_32_visuals else DEFAULT_STYLE
+    scene_value = LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY
+    cinematography_value = LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY
+
     base_prompt = VideoPrompt(
-        character=DEFAULT_CHARACTER,
+        character=character_value,
+        style=style_value,
+        scene=(f"Scene: {scene_value}" if legacy_32_visuals else DEFAULT_SCENE),
+        cinematography=(f"Cinematography: {cinematography_value}" if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY),
         audio=audio_section,
         universal_negatives=SORA_NEGATIVE_CONSTRAINTS,
         ending_directive=STANDARD_FINAL_ENDING_DIRECTIVE,
@@ -285,30 +357,45 @@ def build_optimized_prompt(
     cinematography: Optional[str] = None,
     ending: Optional[str] = None,
     audio_block: Optional[str] = None,
+    legacy_32_visuals: bool = False,
 ) -> str:
     cleaned_dialogue = dialogue.strip()
     contract = _get_prompt_contract(prompt_mode)
+    character_default = LEGACY_32_CHARACTER if legacy_32_visuals else DEFAULT_CHARACTER
+    style_default = LEGACY_32_STYLE if legacy_32_visuals else DEFAULT_STYLE
+    scene_default = LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY
+    cinematography_default = LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY
     return OPTIMIZED_PROMPT_TEMPLATE.format(
-        character=(character or DEFAULT_CHARACTER).strip(),
-        style=(style or DEFAULT_STYLE).strip(),
+        character=(character or character_default).strip(),
+        style=(style or style_default).strip(),
         action_direction=(action or contract["action_direction"]).strip(),
-        scene=(scene or DEFAULT_SCENE_BODY).strip(),
-        cinematography=(cinematography or DEFAULT_CINEMATOGRAPHY).strip(),
+        scene=(scene or scene_default).strip(),
+        cinematography=(cinematography or cinematography_default).strip(),
         dialogue=cleaned_dialogue,
         ending=(ending or contract["ending_directive"]).strip(),
         audio_block=(audio_block or contract["audio_block"]).strip(),
         negatives_section=f"\n\n{negative_constraints}" if negative_constraints else "",
     )
-
-
 def split_dialogue_sentences(dialogue: str) -> list[str]:
     cleaned = " ".join(dialogue.split()).strip()
     if not cleaned:
         return []
-    sentence_matches = re.findall(r"[^.!?]+[.!?]", cleaned)
+    decimal_tokens: dict[str, str] = {}
+
+    def _protect_decimal(match: re.Match[str]) -> str:
+        token = f"__DECIMAL_{len(decimal_tokens)}__"
+        decimal_tokens[token] = match.group(0)
+        return token
+
+    protected = re.sub(r"\b(\d+)\.(\d+)\b", _protect_decimal, cleaned)
+    sentence_matches = re.findall(r"[^.!?]+[.!?]", protected)
     remainder_start = sum(len(match) for match in sentence_matches)
-    remainder = cleaned[remainder_start:].strip()
+    remainder = protected[remainder_start:].strip()
     sentences = [match.strip() for match in sentence_matches if match.strip()]
+    
+    for token, value in decimal_tokens.items():
+        sentences = [sentence.replace(token, value) for sentence in sentences]
+        remainder = remainder.replace(token, value)
     if remainder:
         if sentences:
             sentences[-1] = f"{sentences[-1].rstrip()} {remainder}".strip()
@@ -330,23 +417,44 @@ def build_veo_prompt_segment(
     ending: Optional[str] = None,
     audio_block: Optional[str] = None,
     negative_constraints: Optional[str] = None,
+    legacy_32_visuals: bool = False,
 ) -> str:
     cleaned_dialogue = dialogue.strip()
     prompt_dialogue = f"\"{cleaned_dialogue}\"" if include_quotes else cleaned_dialogue
     prompt_mode = "extended_final" if include_ending else "extended_base_or_continuation"
     return build_optimized_prompt(
         prompt_dialogue,
-        negative_constraints=(
-            negative_constraints
-            if negative_constraints is not None
-            else VEO_NEGATIVE_PROMPT if not include_quotes else SORA_NEGATIVE_CONSTRAINTS
-        ),
+        negative_constraints=negative_constraints,
         prompt_mode=prompt_mode,
         character=character,
         action=action,
         style=style,
         scene=scene,
         cinematography=cinematography,
+        ending=ending,
+        audio_block=audio_block,
+        legacy_32_visuals=legacy_32_visuals,
+    )
+
+
+def build_lean_veo_continuation_prompt(
+    dialogue: str,
+    *,
+    include_final_ending: bool = False,
+) -> str:
+    cleaned_dialogue = dialogue.strip()
+    ending = (
+        EXTENDED_FINAL_ENDING_DIRECTIVE
+        if include_final_ending
+        else EXTENDED_CONTINUATION_ENDING_DIRECTIVE
+    )
+    audio_block = LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_CONTINUATION_AUDIO_BLOCK
+    return LEAN_CONTINUATION_PROMPT_TEMPLATE.format(
+        character=LEAN_EXTENSION_CHARACTER,
+        style=LEAN_EXTENSION_STYLE,
+        continuity=LEAN_EXTENSION_CONTINUITY,
+        language=LEAN_EXTENSION_LANGUAGE,
+        dialogue=cleaned_dialogue,
         ending=ending,
         audio_block=audio_block,
     )

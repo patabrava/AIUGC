@@ -7,6 +7,7 @@ Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
 
 import base64
 import mimetypes
+import re
 from fastapi import APIRouter, HTTPException, Request, status
 from typing import Dict, Any, Optional
 import json
@@ -36,7 +37,12 @@ from app.core.video_profiles import (
 from app.features.batches.queries import get_batch_by_id
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.posts.prompt_text import build_full_prompt_text
-from app.features.posts.prompt_builder import build_veo_prompt_segment, split_dialogue_sentences
+from app.features.posts.prompt_builder import (
+    build_video_prompt_from_seed,
+    build_veo_prompt_segment,
+    split_dialogue_sentences,
+    validate_video_prompt,
+)
 from app.features.videos.prompt_audit import record_prompt_audit
 from app.features.videos.quota_guard import (
     build_reservation_key,
@@ -44,6 +50,7 @@ from app.features.videos.quota_guard import (
     consume_quota,
     ensure_immediate_submit_slot,
     maybe_freeze_after_provider_429,
+    quota_controls_bypassed,
     release_quota,
     reserve_quota,
 )
@@ -57,6 +64,8 @@ from app.features.videos.schemas import (
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+_WORDS_PER_SECOND = 2.5
 
 
 _GLOBAL_VEO_ANCHOR_RELATIVE_PATH = "static/images/sarah.jpg"
@@ -181,6 +190,101 @@ def _resolve_video_submission_plan(
     }
 
 
+def _normalize_seed_data(value: Any) -> Dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _load_or_build_video_prompt(
+    *,
+    post: Dict[str, Any],
+    supabase_client,
+    correlation_id: str,
+) -> Dict[str, Any]:
+    video_prompt = post.get("video_prompt_json")
+    if isinstance(video_prompt, str):
+        try:
+            video_prompt = json.loads(video_prompt)
+        except json.JSONDecodeError:
+            video_prompt = None
+
+    if isinstance(video_prompt, dict) and video_prompt:
+        return video_prompt
+
+    seed_data = _normalize_seed_data(post.get("seed_data"))
+    if not seed_data:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Post missing video_prompt_json and seed_data. Run build-prompt first.",
+            details={"post_id": post.get("id")},
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+    try:
+        legacy_32_visuals = False
+        candidate_tier = post.get("target_length_tier") or seed_data.get("target_length_tier")
+        if candidate_tier is not None:
+            try:
+                legacy_32_visuals = (
+                    get_duration_profile(candidate_tier).target_length_tier == 32
+                    and get_duration_profile(candidate_tier).veo_base_seconds == 4
+                )
+            except Exception:
+                legacy_32_visuals = bool(candidate_tier == 32)
+        video_metadata = _normalize_seed_data(post.get("video_metadata"))
+        if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
+            try:
+                legacy_32_visuals = get_duration_profile(video_metadata.get("target_length_tier")).veo_base_seconds == 4
+            except Exception:
+                legacy_32_visuals = True
+        built_prompt = build_video_prompt_from_seed(seed_data, legacy_32_visuals=legacy_32_visuals)
+        validate_video_prompt(built_prompt)
+    except ValidationError as exc:
+        raise FlowForgeException(
+            code=exc.code,
+            message=exc.message,
+            details={**exc.details, "post_id": post.get("id")},
+            status_code=exc.status_code,
+        ) from exc
+    except PydanticValidationError as exc:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Generated video prompt failed validation.",
+            details={"post_id": post.get("id"), "error": str(exc)},
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        ) from exc
+
+    supabase_client.table("posts").update({
+        "video_prompt_json": built_prompt,
+    }).eq("id", post["id"]).execute()
+    post["video_prompt_json"] = built_prompt
+    logger.info(
+        "video_prompt_backfilled_for_submission",
+        post_id=post.get("id"),
+        batch_id=post.get("batch_id"),
+        correlation_id=correlation_id,
+    )
+    try:
+        reconcile_batch_video_pipeline_state(
+            batch_id=post.get("batch_id"),
+            correlation_id=correlation_id,
+            supabase_client=supabase_client,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "video_prompt_backfill_reconcile_failed",
+            post_id=post.get("id"),
+            batch_id=post.get("batch_id"),
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+    return built_prompt
+
+
 def _build_submission_metadata(
     *,
     existing_metadata: Dict[str, Any],
@@ -242,8 +346,142 @@ def _build_submission_metadata(
     return metadata
 
 
+def _uses_actual_efficient_long_route(profile: Optional[Any]) -> bool:
+    """Efficient long-route profiles use an 8s base with 1 or 3 extension hops."""
+    return bool(
+        profile is not None
+        and profile.route == VEO_EXTENDED_VIDEO_ROUTE
+        and profile.veo_base_seconds == 8
+        and profile.veo_extension_hops in {1, 3}
+    )
+
+
+def _should_assign_veo_seed(*, provider: str, profile: Optional[Any]) -> bool:
+    """Legacy 32s chains must stay unseeded to mirror the last stable contract."""
+    return provider == VEO_PROVIDER and _uses_actual_efficient_long_route(profile)
+
+
 def _required_veo_segments_for_profile_hops(hops_target: int) -> int:
     return max(int(hops_target or 0), 0) + 1
+
+
+def _estimate_spoken_seconds(text: str) -> float:
+    words = [word for word in str(text).split() if word]
+    if not words:
+        return 0.0
+    return len(words) / _WORDS_PER_SECOND
+
+
+def _split_legacy_32_dialogue_units(segments: list[str], *, target_base_words: float) -> list[str]:
+    units: list[str] = []
+    for index, segment in enumerate(segments):
+        words = [word for word in segment.split() if word]
+        if index == 0 and len(words) >= 8:
+            candidate_matches = list(re.finditer(r"[,;:]", segment))
+            best_split: Optional[tuple[float, int, str, str]] = None
+            for match in candidate_matches:
+                split_index = match.start()
+                head = segment[: split_index + 1].strip()
+                tail = segment[split_index + 1 :].strip()
+                if not head or not tail:
+                    continue
+                head_words = len(head.split())
+                tail_words = len(tail.split())
+                if head_words < 3 or tail_words < 3:
+                    continue
+                score = abs(head_words - target_base_words) + abs(tail_words - target_base_words * 0.75)
+                candidate = (score, -head_words, head, tail)
+                if best_split is None or candidate < best_split:
+                    best_split = candidate
+            if best_split is not None:
+                _, _, head, tail = best_split
+                units.append(head)
+                units.append(tail)
+                continue
+        units.append(segment)
+    return units
+
+
+def _partition_dialogue_units_for_profile(
+    units: list[str],
+    *,
+    profile: Any,
+    required_segments: int,
+) -> list[str]:
+    if required_segments <= 0 or not units:
+        return units
+    if len(units) <= required_segments:
+        return units
+
+    target_budgets = [
+        _segment_time_budget_seconds(profile=profile, segment_index=index)
+        for index in range(required_segments)
+    ]
+    target_words = [budget * _WORDS_PER_SECOND for budget in target_budgets]
+    packed_segments: list[str] = []
+    cursor = 0
+
+    for segment_index in range(required_segments):
+        if segment_index == required_segments - 1:
+            packed_segments.append(" ".join(units[cursor:]).strip())
+            break
+
+        remaining_segments = required_segments - segment_index
+        remaining_units = len(units) - cursor
+        target = target_words[segment_index]
+        min_units_needed_after_current = remaining_segments - 1
+        current_units: list[str] = []
+        current_words = 0.0
+
+        while cursor < len(units):
+            next_unit = units[cursor]
+            next_words = _estimate_spoken_seconds(next_unit) * _WORDS_PER_SECOND
+            units_left_after_next = len(units) - (cursor + 1)
+            if current_units and units_left_after_next < min_units_needed_after_current:
+                break
+
+            current_units.append(next_unit)
+            current_words += next_words
+            cursor += 1
+
+            if current_words >= target and units_left_after_next >= min_units_needed_after_current:
+                break
+
+        if not current_units and cursor < len(units):
+            current_units.append(units[cursor])
+            cursor += 1
+
+        packed_segments.append(" ".join(current_units).strip())
+
+    return [segment for segment in packed_segments if segment]
+
+
+def _segment_time_budget_seconds(*, profile: Any, segment_index: int) -> int:
+    if segment_index <= 0:
+        return int(profile.veo_base_seconds or 8)
+    return int(profile.veo_extension_seconds or 7)
+
+
+def _build_time_windows_for_profile(
+    *,
+    profile: Any,
+    segment_count: int,
+) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    start = 0.0
+    for index in range(max(segment_count, 0)):
+        budget = _segment_time_budget_seconds(profile=profile, segment_index=index)
+        end = start + float(budget)
+        windows.append(
+            {
+                "segment_index": index,
+                "start_seconds": round(start, 1),
+                "end_seconds": round(end, 1),
+                "budget_seconds": budget,
+            }
+        )
+        start = end
+    return windows
 
 
 def _resolve_veo_extension_hops_target(*, segment_count: int, planned_hops: int) -> int:
@@ -283,23 +521,63 @@ def _pack_veo_segments_for_profile(
 
     profile = get_duration_profile(target_length_tier)
     required_segments = _required_veo_segments_for_profile_hops(planned_extension_hops)
-    if (
-        profile.route != VEO_EXTENDED_VIDEO_ROUTE
-        or profile.veo_base_seconds < 8
-        or len(segments) <= required_segments
+    if profile.route != VEO_EXTENDED_VIDEO_ROUTE or len(segments) < required_segments:
+        return segments
+
+    if len(segments) == required_segments and not (
+        profile.target_length_tier == 32 and profile.veo_base_seconds == 4
     ):
         return segments
 
+    target_budgets = [
+        _segment_time_budget_seconds(profile=profile, segment_index=index)
+        for index in range(required_segments)
+    ]
+
+    if profile.target_length_tier == 32 and profile.veo_base_seconds == 4:
+        units = _split_legacy_32_dialogue_units(
+            segments,
+            target_base_words=target_budgets[0] * _WORDS_PER_SECOND,
+        )
+        if len(units) >= 2:
+            units = units[:-2] + [f"{units[-2]} {units[-1]}".strip()]
+        packed_segments = _partition_dialogue_units_for_profile(
+            units,
+            profile=profile,
+            required_segments=required_segments,
+        )
+        if len(packed_segments) == required_segments:
+            return packed_segments
+
+    target_words = [budget * _WORDS_PER_SECOND for budget in target_budgets]
     packed_segments = list(segments)
-    merge_index = 0
-    while len(packed_segments) > required_segments and merge_index < len(packed_segments) - 1:
-        packed_segments[merge_index] = (
-            f"{packed_segments[merge_index]} {packed_segments[merge_index + 1]}"
-        ).strip()
-        del packed_segments[merge_index + 1]
-        if merge_index < required_segments - 2:
-            merge_index += 1
-    return packed_segments
+
+    while len(packed_segments) > required_segments:
+        current_counts = [len(segment.split()) for segment in packed_segments]
+        best_index = 0
+        best_score = float("inf")
+
+        for index in range(len(packed_segments) - 1):
+            merged_count = current_counts[index] + current_counts[index + 1]
+            candidate_counts = (
+                current_counts[:index]
+                + [merged_count]
+                + current_counts[index + 2 :]
+            )
+            score = sum(
+                abs(candidate_counts[position] - target_words[position])
+                for position in range(min(len(candidate_counts), len(target_words)))
+            )
+            score += abs(len(candidate_counts) - len(target_words)) * max(target_words[-1], 1.0)
+            if score < best_score:
+                best_score = score
+                best_index = index
+
+        packed_segments[best_index : best_index + 2] = [
+            f"{packed_segments[best_index]} {packed_segments[best_index + 1]}".strip()
+        ]
+
+    return [segment for segment in packed_segments if segment]
 
 
 def _build_veo_extended_base_prompt(
@@ -348,11 +626,17 @@ def _build_veo_extended_base_prompt(
             planned_hops=planned_extension_hops,
         )
 
+    profile = get_duration_profile(target_length_tier) if target_length_tier is not None else None
     base_segment = segments[0] if segments else ""
     segment_metadata = {
         "veo_segments": segments,
         "veo_segments_total": len(segments),
         "veo_current_segment_index": 0,
+        "veo_segment_time_windows": (
+            _build_time_windows_for_profile(profile=profile, segment_count=len(segments))
+            if profile is not None
+            else []
+        ),
     }
     if planned_extension_hops is not None:
         segment_metadata.update(
@@ -363,20 +647,15 @@ def _build_veo_extended_base_prompt(
                 "veo_chain_shortened_to_available_segments": False,
             }
         )
-    prompt_overrides = {
-        "character": video_prompt.get("character"),
-        "action": video_prompt.get("action"),
-        "style": video_prompt.get("style"),
-        "scene": video_prompt.get("scene"),
-        "cinematography": video_prompt.get("cinematography"),
-        "audio_block": video_prompt.get("audio_block") or prompt_audio.get("capture"),
-        "negative_constraints": video_prompt.get("veo_negative_prompt"),
-    }
+    legacy_32_visuals = False
+    if target_length_tier is not None:
+        profile = get_duration_profile(target_length_tier)
+        legacy_32_visuals = profile.target_length_tier == 32 and profile.veo_base_seconds == 4
     return build_veo_prompt_segment(
         base_segment,
         include_quotes=False,
         include_ending=False,
-        **prompt_overrides,
+        legacy_32_visuals=legacy_32_visuals,
     ), segment_metadata
 
 
@@ -419,13 +698,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             )
         
         post = response.data[0]
-        video_prompt = post.get("video_prompt_json")
-        seed_data = post.get("seed_data") or {}
-        if isinstance(seed_data, str):
-            try:
-                seed_data = json.loads(seed_data)
-            except json.JSONDecodeError:
-                seed_data = {}
+        seed_data = _normalize_seed_data(post.get("seed_data"))
 
         if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
             raise ValidationError(
@@ -433,17 +706,16 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 {"post_id": post_id}
             )
 
-        if not video_prompt:
-            raise FlowForgeException(
-                code=ErrorCode.VALIDATION_ERROR,
-                message="Post missing video_prompt_json. Run build-prompt first.",
-                details={"post_id": post_id}
-            )
+        video_prompt = _load_or_build_video_prompt(
+            post=post,
+            supabase_client=supabase,
+            correlation_id=correlation_id,
+        )
         
         prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
 
         requested_units = 0
-        if request.provider == VEO_PROVIDER:
+        if request.provider == VEO_PROVIDER and not quota_controls_bypassed():
             requested_units = chain_cost_units(None, provider=request.provider)
             quota_reservation_key = build_reservation_key(
                 provider=request.provider,
@@ -486,8 +758,16 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         provider_model = submission_result.get("provider_model")
         requested_size = submission_result.get("requested_size")
 
+        quota_consume_error = _consume_quota_after_acceptance(
+            reservation_key=quota_reservation_key,
+            operation_id=operation_id,
+            units=1,
+            correlation_id=correlation_id,
+            provider=request.provider,
+            post_id=post_id,
+            batch_id=post.get("batch_id"),
+        )
         if quota_reservation_key:
-            consume_quota(reservation_key=quota_reservation_key, operation_id=operation_id, units=1)
             quota_consumed = True
 
         record_prompt_audit(
@@ -517,6 +797,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         if quota_reservation_key:
             submission_metadata["quota_reservation_key"] = quota_reservation_key
             submission_metadata["quota_reserved_units"] = requested_units
+        if quota_consume_error:
+            submission_metadata["quota_consume_error"] = quota_consume_error
         if provider_model:
             submission_metadata["provider_model"] = provider_model
         if submission_result.get("provider_metadata"):
@@ -726,22 +1008,23 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 details={"batch_id": batch_id}
             )
         
+        batch_profile = get_duration_profile(batch.get("target_length_tier")) if uses_duration_routing(batch) else None
+        batch_uses_efficient_long_route = _uses_actual_efficient_long_route(batch_profile)
+
         submitted_count = 0
         skipped_count = 0
         submitted_post_ids = []
         prepared_submissions = []
         last_provider_model: Optional[str] = None
-        batch_veo_seed = random.randint(0, 2**32 - 1) if request.provider == "veo_3_1" else None
+        batch_veo_seed = (
+            random.randint(0, 2**32 - 1)
+            if _should_assign_veo_seed(provider=request.provider, profile=batch_profile)
+            else None
+        )
 
         for post in posts:
             post_id = post["id"]
-            video_prompt = post.get("video_prompt_json")
-            seed_data = post.get("seed_data") or {}
-            if isinstance(seed_data, str):
-                try:
-                    seed_data = json.loads(seed_data)
-                except json.JSONDecodeError:
-                    seed_data = {}
+            seed_data = _normalize_seed_data(post.get("seed_data"))
             
             # Skip posts without prompts or already submitted
             if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
@@ -753,15 +1036,6 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 skipped_count += 1
                 continue
 
-            if not video_prompt:
-                logger.warning(
-                    "post_skipped_no_prompt",
-                    post_id=post_id,
-                    batch_id=batch_id
-                )
-                skipped_count += 1
-                continue
-            
             if post.get("video_status") in ["submitted", "processing", "completed", "extended_submitted", "extended_processing"]:
                 logger.info(
                     "post_skipped_already_submitted",
@@ -784,6 +1058,22 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             profile = submission_plan.get("profile")
             is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
 
+            try:
+                video_prompt = _load_or_build_video_prompt(
+                    post=post,
+                    supabase_client=supabase,
+                    correlation_id=f"{correlation_id}_{post_id}",
+                )
+            except FlowForgeException as exc:
+                logger.warning(
+                    "post_skipped_no_prompt",
+                    post_id=post_id,
+                    batch_id=batch_id,
+                    error=exc.message,
+                )
+                skipped_count += 1
+                continue
+
             if is_extended:
                 prompt_text, segment_metadata = _build_veo_extended_base_prompt(
                     seed_data,
@@ -791,7 +1081,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     planned_extension_hops=profile.veo_extension_hops,
                     target_length_tier=profile.target_length_tier,
                 )
-                negative_prompt = None
+                negative_prompt = _build_veo_negative_prompt(video_prompt)
             else:
                 prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
                 prompt_text = prompt_request["prompt_text"] or ""
@@ -815,7 +1105,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
 
         veo_submissions = [item for item in prepared_submissions if item["submission_plan"]["provider"] == VEO_PROVIDER]
         reserved_keys = []
-        if veo_submissions:
+        if veo_submissions and not quota_controls_bypassed():
             ensure_immediate_submit_slot(requested_units=len(veo_submissions), provider=VEO_PROVIDER)
             try:
                 for item in veo_submissions:
@@ -886,8 +1176,16 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
 
+                quota_consume_error = _consume_quota_after_acceptance(
+                    reservation_key=quota_reservation_key,
+                    operation_id=operation_id,
+                    units=1,
+                    correlation_id=correlation_id,
+                    provider=submission_plan["provider"],
+                    post_id=post_id,
+                    batch_id=batch_id,
+                )
                 if quota_reservation_key:
-                    consume_quota(reservation_key=quota_reservation_key, operation_id=operation_id, units=1)
                     quota_consumed = True
 
                 record_prompt_audit(
@@ -917,8 +1215,10 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 if quota_reservation_key:
                     submission_metadata["quota_reservation_key"] = quota_reservation_key
                     submission_metadata["quota_reserved_units"] = item["quota_requested_units"]
+                if quota_consume_error:
+                    submission_metadata["quota_consume_error"] = quota_consume_error
                 if submission_plan.get("profile_config"):
-                    submission_metadata["veo_efficient_long_route_enabled"] = get_settings().veo_enable_efficient_long_route
+                    submission_metadata["veo_efficient_long_route_enabled"] = batch_uses_efficient_long_route
                 if submission_plan["provider"] == VEO_PROVIDER and anchor_image_bundle:
                     submission_metadata.update(anchor_image_bundle["metadata"])
 
@@ -1135,6 +1435,38 @@ def _write_recovery_record(post_id: str, operation_id: str, provider: str, corre
             operation_id=operation_id,
             error=str(e)
         )
+
+
+def _consume_quota_after_acceptance(
+    *,
+    reservation_key: Optional[str],
+    operation_id: str,
+    units: int,
+    correlation_id: str,
+    provider: str,
+    post_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+) -> Optional[str]:
+    """Best-effort ledger consume after Veo has already accepted a paid request."""
+    if not reservation_key:
+        return None
+    try:
+        consume_quota(reservation_key=reservation_key, operation_id=operation_id, units=units)
+        return None
+    except FlowForgeException as exc:
+        logger.error(
+            "quota_consume_failed_after_provider_acceptance",
+            post_id=post_id,
+            batch_id=batch_id,
+            provider=provider,
+            correlation_id=correlation_id,
+            reservation_key=reservation_key,
+            operation_id=operation_id,
+            code=str(exc.code),
+            message=exc.message,
+            details=exc.details,
+        )
+        return exc.message
 
 
 def _build_provider_prompt_text(video_prompt: Dict[str, Any], provider: str) -> tuple[str, str]:
