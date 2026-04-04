@@ -14,7 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.core.config import get_settings
+from app.core.config import get_settings, google_ai_context_fingerprint
 from app.core.logging import configure_logging, get_logger, set_correlation_id
 from app.core.errors import FlowForgeException, ErrorResponse, error_code_for_status
 from app.adapters.supabase_client import get_supabase
@@ -57,7 +57,20 @@ async def lifespan(app: FastAPI):
     logger.info(
         "application_startup",
         environment=settings.environment,
-        debug=settings.debug
+        debug=settings.debug,
+        **google_ai_context_fingerprint(settings),
+    )
+    if not settings.google_ai_keys_aligned():
+        logger.warning(
+            "google_ai_key_alignment_mismatch",
+            gemini_api_key_present=bool(settings.gemini_api_key),
+            google_ai_api_key_present=bool(settings.google_ai_api_key),
+            message="GEMINI_API_KEY and GOOGLE_AI_API_KEY differ; VEO requests will keep using the active Google AI key fingerprint"
+        )
+    logger.info(
+        "google_ai_key_alignment_verified",
+        gemini_api_key_present=bool(settings.gemini_api_key),
+        google_ai_api_key_present=bool(settings.google_ai_api_key),
     )
     
     # Defer Supabase client creation until the first real database operation.
@@ -87,11 +100,19 @@ async def lifespan(app: FastAPI):
     )
     logger.info("blog_publish_scheduler_started", interval_minutes=1)
 
-    recovered_batches = recover_stalled_batches(limit=1, max_age_hours=6)
+    try:
+        recovered_batches = recover_stalled_batches(limit=1, max_age_hours=6)
+    except Exception as exc:
+        recovered_batches = []
+        logger.warning("startup_batch_recovery_failed", error=str(exc))
     if recovered_batches:
         logger.info("startup_batch_recovery_scheduled", batch_ids=recovered_batches)
 
-    recovered_topic_runs = recover_stalled_topic_research_runs(limit=1, max_age_hours=6)
+    try:
+        recovered_topic_runs = recover_stalled_topic_research_runs(limit=1, max_age_hours=6)
+    except Exception as exc:
+        recovered_topic_runs = []
+        logger.warning("startup_topic_research_recovery_failed", error=str(exc))
     if recovered_topic_runs:
         logger.info("startup_topic_research_recovery_scheduled", run_ids=recovered_topic_runs)
     

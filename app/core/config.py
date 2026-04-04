@@ -4,9 +4,10 @@ Loads and validates environment variables using Pydantic Settings.
 Per Constitution § III: Deterministic Execution
 """
 
+import hashlib
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, Field, field_validator, model_validator
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 
 class Settings(BaseSettings):
@@ -117,11 +118,19 @@ class Settings(BaseSettings):
     )
     veo_enable_efficient_long_route: bool = Field(
         default=True,
-        description="Use the 8s-base long-route profile by default for 16s and 32s Veo tiers",
+        description="Use the 8s-base long-route profile by default for the 16s and 32s Veo tiers; disable to fall back to legacy 4s-base 32s routing",
     )
     veo_quota_freeze_on_unexpected_429: bool = Field(
         default=True,
         description="Freeze further Veo submits until next Pacific reset after an unexpected provider 429",
+    )
+    veo_disable_local_quota_guard: bool = Field(
+        default=False,
+        description="Bypass local Veo quota freezes and ledger checks for development multi-key testing",
+    )
+    veo_disable_all_quota_controls: bool = Field(
+        default=False,
+        description="Bypass all Veo quota guards, freezes, and reservations for controlled testing",
     )
     veo_quota_project_scope: str = Field(
         default="default-gemini-project",
@@ -183,6 +192,11 @@ class Settings(BaseSettings):
             raise ValueError("APP_URL must be set in production for host validation")
         return self
 
+    def google_ai_keys_aligned(self) -> bool:
+        if not self.gemini_api_key or not self.google_ai_api_key:
+            return True
+        return self.gemini_api_key == self.google_ai_api_key
+
     @field_validator("cloudflare_r2_public_base_url")
     @classmethod
     def validate_r2_public_base_url(cls, v):
@@ -222,3 +236,20 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def fingerprint_secret(value: str, *, prefix_length: int = 12) -> str:
+    """Return a stable fingerprint for a secret without exposing the secret."""
+    if not value:
+        return "unset"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:prefix_length]
+
+
+def google_ai_context_fingerprint(settings: Optional[Settings] = None) -> dict[str, Any]:
+    """Summarize the active Google AI context for startup logging."""
+    resolved = settings or get_settings()
+    return {
+        "google_ai_api_key_fingerprint": fingerprint_secret(resolved.google_ai_api_key),
+        "google_ai_api_key_present": bool(resolved.google_ai_api_key),
+        "google_ai_project_id": resolved.google_ai_project_id or "unset",
+    }
