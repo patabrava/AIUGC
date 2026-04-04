@@ -20,7 +20,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 # Paths that do not require authentication
-PUBLIC_PATH_PREFIXES = ("/auth/", "/health", "/static/", "/tiktok")
+PUBLIC_PATH_PREFIXES = ("/auth/", "/health", "/static/", "/tiktok", "/topics/cron")
 PUBLIC_PATHS_EXACT = ("/health",)
 
 
