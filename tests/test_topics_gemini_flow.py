@@ -1368,6 +1368,31 @@ def test_cron_topic_discovery_returns_success_when_all_batches_fail(monkeypatch)
     assert {item["batch_id"] for item in response.data["failed_batches"]} == {"batch-1", "batch-2"}
 
 
+def test_cron_topic_discovery_skips_malformed_batch_rows(monkeypatch):
+    from app.features.topics import handlers as topic_handlers
+    from app.features.batches import queries as batch_queries
+
+    batches = [
+        {"id": "batch-1", "state": "S1_SETUP"},
+        {"id": "batch-2"},
+        {"state": "S1_SETUP"},
+        "not-a-batch-row",
+    ]
+
+    async def fake_discover_topics_endpoint(request):
+        return topic_handlers.SuccessResponse(data={"batch_id": request.batch_id, "posts_created": 1, "state": "S2_SEEDED", "topics": []})
+
+    monkeypatch.setattr(topic_handlers, "get_settings", lambda: SimpleNamespace(cron_secret="cron-secret"))
+    monkeypatch.setattr(batch_queries, "list_batches", lambda archived=False, limit=100, offset=0: (batches, None))
+    monkeypatch.setattr(topic_handlers, "discover_topics_endpoint", fake_discover_topics_endpoint)
+
+    response = asyncio.run(topic_handlers.cron_topic_discovery(authorization="Bearer cron-secret"))
+
+    assert response.data["seeded_batches"] == ["batch-1"]
+    assert len(response.data["failed_batches"]) == 3
+    assert {item["error"] for item in response.data["failed_batches"]} == {"Malformed batch row returned by list_batches"}
+
+
 def test_discover_topics_endpoint_finalizes_partial_completion(monkeypatch):
     from app.core.states import BatchState
 

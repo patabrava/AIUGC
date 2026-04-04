@@ -1825,20 +1825,34 @@ async def cron_topic_discovery(
         seeded = []
         failed_batches = []
         for batch in batches:
-            if batch["state"] != BatchState.S1_SETUP.value:
+            batch_id = batch.get("id") if isinstance(batch, dict) else None
+            batch_state = batch.get("state") if isinstance(batch, dict) else None
+            if not batch_id or not batch_state:
+                failed_batches.append({
+                    "batch_id": batch_id,
+                    "error": "Malformed batch row returned by list_batches",
+                })
+                logger.warning(
+                    "cron_topic_discovery_malformed_batch",
+                    batch_id=batch_id,
+                    batch_state=batch_state,
+                    batch_row=batch,
+                )
                 continue
-            request_payload = DiscoverTopicsRequest(batch_id=batch["id"], count=10)
+            if batch_state != BatchState.S1_SETUP.value:
+                continue
+            request_payload = DiscoverTopicsRequest(batch_id=batch_id, count=10)
             try:
                 await discover_topics_endpoint(request_payload)
-                seeded.append(batch["id"])
+                seeded.append(batch_id)
             except Exception as exc:
                 failed_batches.append({
-                    "batch_id": batch["id"],
+                    "batch_id": batch_id,
                     "error": str(exc),
                 })
                 logger.exception(
                     "cron_topic_discovery_batch_failed",
-                    batch_id=batch["id"],
+                    batch_id=batch_id,
                     error=str(exc),
                 )
 

@@ -44,6 +44,7 @@ END_LLM_FRIENDLY_PLAN_TEST_DEBUG
 2) Specific repo rules
 - Production auth bypass must never trust proxy loopback `request.client.host`; only bypass on localhost-style requested hosts while `ENVIRONMENT=development`, or reverse proxies like Traefik will silently disable login on the live site.
 - Topic cron endpoints under `/topics/cron` must bypass the global auth middleware because the route itself validates `Bearer $CRON_SECRET`; otherwise Hostinger scheduler requests get redirected to `/auth/login` before cron auth can run.
+- Topic cron wrappers must treat malformed batch rows or transient batch-list failures as non-fatal and report them in `failed_batches`; never let one bad row or query exception turn the whole cron into HTTP 500.
 - Hostinger repo-URL Docker deploys must keep `docker-compose.yaml` and `docker-compose.yml` functionally identical and self-contained (no repo-only `.env` dependency), or the platform will pick the wrong compose entry and boot a broken production stack.
 - Hostinger Docker builds must not hide apt/pip inside one opaque `RUN`; split OS-package install and Python dependency install into separate retryable layers or remote build failures become non-diagnostic and stall recovery.
 - Runtime dependency pins must stay solver-clean in a fresh Python 3.11 build: `google-genai>=1.3` conflicts with the current Supabase/httpx stack, so keep the SDK on the 1.1/1.2 line unless the full transport set is upgraded together.
