@@ -2,10 +2,13 @@ from app.core.config import Settings
 
 
 def test_vertex_settings_default_to_disabled():
-    settings = Settings(
-        supabase_url="https://example.supabase.co",
-        supabase_key="x",
-        supabase_service_key="y",
+    settings = Settings.model_validate(
+        {
+            "supabase_url": "https://example.supabase.co",
+            "SUPABASE_KEY": "x",
+            "SUPABASE_SERVICE_KEY": "y",
+            "cloudflare_r2_public_base_url": "https://r2.example.com",
+        }
     )
     assert settings.vertex_ai_project_id == ""
     assert settings.vertex_ai_location == "us-central1"
@@ -13,13 +16,16 @@ def test_vertex_settings_default_to_disabled():
 
 
 def test_vertex_settings_use_explicit_project_and_location():
-    settings = Settings(
-        supabase_url="https://example.supabase.co",
-        supabase_key="x",
-        supabase_service_key="y",
-        vertex_ai_project_id="my-project",
-        vertex_ai_location="europe-west4",
-        vertex_ai_enabled=True,
+    settings = Settings.model_validate(
+        {
+            "supabase_url": "https://example.supabase.co",
+            "SUPABASE_KEY": "x",
+            "SUPABASE_SERVICE_KEY": "y",
+            "cloudflare_r2_public_base_url": "https://r2.example.com",
+            "vertex_ai_project_id": "my-project",
+            "vertex_ai_location": "europe-west4",
+            "vertex_ai_enabled": True,
+        }
     )
     assert settings.vertex_ai_project_id == "my-project"
     assert settings.vertex_ai_location == "europe-west4"
