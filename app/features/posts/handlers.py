@@ -41,6 +41,17 @@ def _parse_json_document(value):
     return value or {}
 
 
+def _should_use_legacy_32_visuals(post: dict) -> bool:
+    target_length_tier = post.get("target_length_tier")
+    if target_length_tier == 32:
+        return True
+    video_metadata = _parse_json_document(post.get("video_metadata"))
+    if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
+        return True
+    seed_data = _parse_json_document(post.get("seed_data"))
+    return seed_data.get("target_length_tier") == 32
+
+
 def _load_post_seed_data(post_id: str, supabase_client):
     """Fetch post plus normalized seed data for localized S2 review updates."""
     response = supabase_client.table("posts").select("id, batch_id, seed_data, video_prompt_json").eq("id", post_id).execute()
@@ -232,7 +243,10 @@ async def build_post_prompt(post_id: str):
             )
 
         # Build video prompt by inserting dialogue into template
-        video_prompt = build_video_prompt_from_seed(seed_data)
+        video_prompt = build_video_prompt_from_seed(
+            seed_data,
+            legacy_32_visuals=_should_use_legacy_32_visuals(post),
+        )
         
         # Validate assembled prompt
         validate_video_prompt(video_prompt)
@@ -335,7 +349,10 @@ async def update_post_prompt(post_id: str, request: Request):
                     details={"post_id": post_id},
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 )
-            existing_prompt = build_video_prompt_from_seed(seed_data)
+            existing_prompt = build_video_prompt_from_seed(
+                seed_data,
+                legacy_32_visuals=_should_use_legacy_32_visuals(post),
+            )
 
         updated_prompt = {
             **existing_prompt,
