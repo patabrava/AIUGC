@@ -1847,11 +1847,6 @@ async def cron_topic_discovery(
             seeded_batches=seeded,
             failed_batches=failed_batches,
         )
-        if not seeded and failed_batches:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Cron job failed",
-            )
         return SuccessResponse(
             data={
                 "message": "Cron job executed successfully",

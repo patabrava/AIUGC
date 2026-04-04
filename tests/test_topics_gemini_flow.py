@@ -1345,6 +1345,29 @@ def test_cron_topic_discovery_continues_after_one_batch_failure(monkeypatch):
     assert response.data["failed_batches"][0]["batch_id"] == "batch-2"
 
 
+def test_cron_topic_discovery_returns_success_when_all_batches_fail(monkeypatch):
+    from app.features.topics import handlers as topic_handlers
+    from app.core.states import BatchState
+    from app.features.batches import queries as batch_queries
+
+    batches = [
+        {"id": "batch-1", "state": BatchState.S1_SETUP.value},
+        {"id": "batch-2", "state": BatchState.S1_SETUP.value},
+    ]
+
+    async def fake_discover_topics_endpoint(request):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(topic_handlers, "get_settings", lambda: SimpleNamespace(cron_secret="cron-secret"))
+    monkeypatch.setattr(batch_queries, "list_batches", lambda archived=False, limit=100, offset=0: (batches, None))
+    monkeypatch.setattr(topic_handlers, "discover_topics_endpoint", fake_discover_topics_endpoint)
+
+    response = asyncio.run(topic_handlers.cron_topic_discovery(authorization="Bearer cron-secret"))
+
+    assert response.data["seeded_batches"] == []
+    assert {item["batch_id"] for item in response.data["failed_batches"]} == {"batch-1", "batch-2"}
+
+
 def test_discover_topics_endpoint_finalizes_partial_completion(monkeypatch):
     from app.core.states import BatchState
 
