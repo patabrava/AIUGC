@@ -891,7 +891,7 @@ def test_schedule_topic_bank_research_if_empty_launches_background_warmup(monkey
 
     assert triggered is True
     assert captured["kwargs"] == {
-        "post_type_counts": {"value": 3},
+        "post_type_counts": {"value": 5},
         "target_length_tier": 32,
         "trigger_source": "topic_hub_empty_state",
     }
@@ -930,11 +930,12 @@ def test_coverage_warmup_retries_until_audited_coverage_is_ready(monkeypatch):
         topic_handlers._COVERAGE_WAITERS.pop(coverage_key, None)
         topic_handlers._COVERAGE_TASKS.pop(coverage_key, None)
 
-    assert len(harvest_calls) == 2
-    assert len(audit_calls) == 2
+    assert len(harvest_calls) == 3
+    assert len(audit_calls) == 3
     assert harvest_calls[0]["trigger_source"] != harvest_calls[1]["trigger_source"]
-    assert harvest_calls[0]["post_type_counts"] == {"value": 3}
-    assert harvest_calls[1]["post_type_counts"] == {"value": 4}
+    assert harvest_calls[0]["post_type_counts"] == {"value": 5}
+    assert harvest_calls[1]["post_type_counts"] == {"value": 6}
+    assert harvest_calls[2]["post_type_counts"] == {"value": 7}
     assert cleared == ["batch-1"]
     assert progress_updates == []
 
@@ -1348,6 +1349,88 @@ def test_shared_warmup_filters_near_duplicate_lane_candidates(monkeypatch):
     assert "lane-2" not in seen_lane_keys
     assert summary["lanes_seen"] == 3
     assert summary["lanes_persisted"] == 2
+
+
+def test_shared_warmup_forces_one_lane_when_all_candidates_dedupe(monkeypatch):
+    from app.features.topics import bank_warmup
+    from app.features.topics import hub as topic_hub
+
+    dossier = ResearchDossier(
+        cluster_id="cluster-3",
+        topic="Barrierefreie Terminwege",
+        anchor_topic="Barrierefreie Terminwege",
+        seed_topic="Barrierefreie Terminwege",
+        cluster_summary="Klare Terminwege helfen im Alltag.",
+        framework_candidates=["PAL"],
+        sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
+        source_summary="Klare Terminwege helfen im Alltag.",
+        facts=["Klare Wege helfen dir vor dem Termin."],
+        angle_options=["Terminwege"],
+        risk_notes=["Ohne klare Wege wird alles zäh."],
+        disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+        lane_candidates=[
+            ResearchLaneCandidate(
+                lane_key="lane-1",
+                lane_family="sub_angle",
+                title="Barrierefreie Terminwege",
+                angle="Wie digitale und telefonische Wege den Arzttermin absichern",
+                priority=1,
+                framework_candidates=["PAL"],
+                source_summary="Digitale und telefonische Wege sichern den Arzttermin im Alltag besser ab.",
+                facts=["Klare Wege helfen dir schon vor dem Termin."],
+                risk_notes=["Ohne Plan bleiben Termine unnötig fragil."],
+                disclaimer="Keine individuelle Rechts- oder Medizinberatung.",
+                lane_overlap_warnings=[],
+                suggested_length_tiers=[8, 16, 32],
+            ),
+        ],
+    )
+
+    monkeypatch.setattr(bank_warmup, "_generate_research_dossier_raw", lambda **kwargs: "raw")
+    monkeypatch.setattr(bank_warmup, "parse_topic_research_response", lambda raw, **kwargs: dossier)
+    monkeypatch.setattr(bank_warmup, "touch_topic_registry", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        bank_warmup,
+        "generate_topic_script_candidate",
+        lambda **kwargs: ResearchAgentItem(
+            topic="Barrierefreie Terminwege",
+            script="Barrierefreie Terminwege helfen dir, Termine ruhiger zu planen.",
+            caption="Kurze Zusammenfassung.",
+            framework="PAL",
+            sources=[ResearchAgentSource(title="Quelle 1", url="https://example.com")],
+            source_summary="Klare Wege helfen dir schon vor dem Termin.",
+            estimated_duration_s=8,
+            tone="direkt, freundlich, empowernd, du-Form",
+            disclaimer="Keine Rechts- oder Medizinberatung.",
+        ),
+    )
+    monkeypatch.setattr(bank_warmup, "deduplicate_topics", lambda *args, **kwargs: [])
+
+    persisted = []
+
+    def fake_persist_topic_bank_row(**kwargs):
+        persisted.append(kwargs["title"])
+        return {
+            "stored_row": {
+                "id": f"topic-{len(persisted)}",
+                "title": kwargs["title"],
+                "topic_research_dossier_id": f"dossier-{len(persisted)}",
+            },
+            "stored_variants": [{"id": "v1"}, {"id": "v2"}, {"id": "v3"}],
+        }
+
+    monkeypatch.setattr(topic_hub, "_persist_topic_bank_row", fake_persist_topic_bank_row)
+
+    summary = bank_warmup.run_single_seed_topic_warmup(
+        seed_topic="Barrierefreie Terminwege",
+        post_type="value",
+        existing_topics=[],
+        collected_topics=[],
+    )
+
+    assert persisted == ["Barrierefreie Terminwege"]
+    assert summary["lanes_persisted"] == 1
+    assert summary["stored_topic_ids"] == ["topic-1"]
 
 
 def test_launch_redirects_and_hub_shows_active_runs(monkeypatch):

@@ -404,6 +404,130 @@ def run_single_seed_topic_warmup(
             continue
 
     summary["stored_topic_ids"] = [topic_id for topic_id in summary["stored_topic_ids"] if topic_id]
+    if summary["lanes_persisted"] == 0 and raw_lane_candidates:
+        fallback_lane_candidate = dict(raw_lane_candidates[0] or {})
+        fallback_lane_candidate["title"] = (
+            sanitize_metadata_text(
+                fallback_lane_candidate.get("title")
+                or research_dossier.get("topic")
+                or seed_topic,
+                max_sentences=1,
+                max_chars=120,
+            ).rstrip(".!?")
+            or sanitize_metadata_text(seed_topic, max_sentences=1, max_chars=120).rstrip(".!?")
+        )
+        logger.warning(
+            "topic_bank_forced_fallback_lane_retry",
+            seed_topic=seed_topic,
+            post_type=post_type,
+            lane_title=fallback_lane_candidate.get("title"),
+            research_source=research_source,
+        )
+        try:
+            fallback_dossier = _build_lane_dossier(research_dossier, fallback_lane_candidate)
+            fallback_prompt1_item = _call_with_retry(
+                "generate_topic_script_candidate",
+                seed_topic=seed_topic,
+                lane_title=str(fallback_lane_candidate.get("title") or seed_topic).strip(),
+                callback=lambda: generate_topic_script_candidate(
+                    post_type=post_type,
+                    target_length_tier=8,
+                    dossier=fallback_dossier,
+                    lane_candidate=fallback_lane_candidate,
+                ),
+            )
+            fallback_topic_data = convert_research_item_to_topic(fallback_prompt1_item)
+            fallback_lane_title = str(
+                fallback_lane_candidate.get("title")
+                or fallback_prompt1_item.topic
+                or fallback_topic_data.title
+                or seed_topic
+            ).strip()
+            fallback_seed_payload = build_seed_payload(
+                fallback_prompt1_item,
+                build_research_seed_data(
+                    prompt1_item=fallback_prompt1_item,
+                    research_dossier=research_dossier,
+                    lane_dossier=fallback_dossier,
+                    topic_title=fallback_lane_title,
+                ),
+                None,
+                source_title=str((fallback_dossier.get("sources") or [{}])[0].get("title") or fallback_lane_title).strip() or None,
+                source_url=str((fallback_dossier.get("sources") or [{}])[0].get("url") or "").strip() or None,
+                source_summary=sanitize_metadata_text(
+                    fallback_dossier.get("source_summary") or fallback_prompt1_item.caption or fallback_prompt1_item.source_summary or "",
+                    max_chars=500,
+                )
+                or None,
+                canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or fallback_lane_title).strip(),
+                research_title=fallback_lane_title,
+            )
+            fallback_variants: List[Dict[str, Any]] = []
+            for tier in _CANONICAL_TIERS:
+                fallback_variants.append(
+                    _build_canonical_script_variant(
+                        prompt1_item=fallback_prompt1_item,
+                        lane_candidate=fallback_lane_candidate,
+                        research_dossier=research_dossier,
+                        tier=tier,
+                        post_type=post_type,
+                        seed_payload=build_seed_payload(
+                            fallback_prompt1_item,
+                            build_research_seed_data(
+                                prompt1_item=fallback_prompt1_item,
+                                research_dossier=research_dossier,
+                                lane_dossier=fallback_dossier,
+                                topic_title=fallback_lane_title,
+                            ),
+                            None,
+                            source_title=str((fallback_dossier.get("sources") or [{}])[0].get("title") or fallback_lane_title).strip() or None,
+                            source_url=str((fallback_dossier.get("sources") or [{}])[0].get("url") or "").strip() or None,
+                            source_summary=sanitize_metadata_text(
+                                fallback_dossier.get("source_summary") or fallback_prompt1_item.caption or fallback_prompt1_item.source_summary or "",
+                                max_chars=500,
+                            )
+                            or None,
+                            canonical_topic=str(research_dossier.get("seed_topic") or research_dossier.get("topic") or fallback_lane_title).strip(),
+                            research_title=fallback_lane_title,
+                        ),
+                    )
+                )
+            persisted_result = _persist_topic_bank_row(
+                title=fallback_lane_title,
+                target_length_tier=8,
+                research_dossier=fallback_dossier,
+                prompt1_item=fallback_prompt1_item,
+                dialog_scripts=None,
+                post_type=post_type,
+                seed_payload=fallback_seed_payload,
+                variants=fallback_variants,
+                origin_kind=research_source,
+            )
+            stored_row = dict(persisted_result.get("stored_row") or {})
+            stored_variants = list(persisted_result.get("stored_variants") or [])
+            topic_research_dossier_id = str(
+                stored_row.get("topic_research_dossier_id") or stored_row.get("research_dossier_id") or ""
+            ).strip() or None
+            if topic_research_dossier_id:
+                persisted_by_tier = {
+                    str(tier): len(get_topic_scripts_for_dossier(topic_research_dossier_id, target_length_tier=tier))
+                    for tier in _CANONICAL_TIERS
+                }
+            else:
+                persisted_by_tier = {str(tier): 0 for tier in _CANONICAL_TIERS}
+            summary["lanes_persisted"] += 1
+            summary["stored_rows"].append(stored_row)
+            summary["stored_topic_ids"].append(str(stored_row.get("id") or "").strip())
+            for tier, count in persisted_by_tier.items():
+                summary["scripts_persisted_by_tier"][tier] += int(count or 0)
+            summary["duplicate_scripts_skipped"] += max(0, len(_CANONICAL_TIERS) - len(stored_variants))
+        except Exception as exc:
+            logger.warning(
+                "topic_bank_forced_fallback_lane_failed",
+                seed_topic=seed_topic,
+                post_type=post_type,
+                error=str(exc),
+            )
     if summary["stored_topic_ids"]:
         try:
             touch_topic_registry(summary["stored_topic_ids"][0])
