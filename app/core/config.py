@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Video Providers
     google_ai_api_key: str = Field("", description="Google AI API key for VEO 3.1")
     google_ai_project_id: Optional[str] = Field(None, description="Google Cloud project ID")
+    vertex_ai_project_id: str = Field("", description="Google Cloud project ID for Vertex AI video generation")
+    vertex_ai_location: str = Field("us-central1", description="Vertex AI region for video generation")
+    vertex_ai_enabled: bool = Field(default=False, description="Enable the explicit Vertex AI provider path")
     deepgram_api_key: str = Field("", description="Deepgram API key for speech-to-text captioning")
     # sora_api_key: str = Field(default="", description="Sora 2 API key")  # Future
     

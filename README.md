@@ -115,6 +115,20 @@ See `.env.example` for all required variables:
   - `TERMS_URL`
   - `TOKEN_ENCRYPTION_KEY`
 
+### Vertex AI Testing (Local)
+For explicit Vertex testing, enable the Vertex endpoint and authenticate with Google ADC.
+
+Required env vars:
+- `VERTEX_AI_PROJECT_ID`
+- `VERTEX_AI_LOCATION` (default: `us-central1`)
+- `VERTEX_AI_ENABLED=true`
+
+Auth:
+- Local: `gcloud auth application-default login`
+- GCP: attach a service account with Vertex permissions
+
+See [docs/vertex-ai-testing.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/.worktrees/vertex-ai-video-plan/docs/vertex-ai-testing.md) for request examples.
+
 ## Architecture
 
 **Stack:** Python/FastAPI + Jinja2 + htmx + Alpine.js + Tailwind + Supabase

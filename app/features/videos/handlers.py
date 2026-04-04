@@ -23,6 +23,7 @@ from app.adapters.supabase_client import get_supabase
 from app.adapters.storage_client import get_storage_client
 from app.adapters.veo_client import get_veo_client
 from app.adapters.sora_client import get_sora_client
+from app.adapters.vertex_ai_client import get_vertex_ai_client
 from app.core.config import get_settings
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
@@ -59,7 +60,9 @@ from app.features.videos.schemas import (
     VideoGenerationResponse,
     VideoStatusResponse,
     BatchVideoGenerationRequest,
-    BatchVideoGenerationResponse
+    BatchVideoGenerationResponse,
+    VertexVideoGenerationRequest,
+    VertexVideoGenerationResponse,
 )
 
 logger = get_logger(__name__)
@@ -1366,6 +1369,79 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate batch videos"
+        )
+
+
+@router.post("/vertex", response_model=SuccessResponse)
+async def generate_vertex_video(request: VertexVideoGenerationRequest):
+    """Submit an explicit Vertex AI video generation request."""
+    correlation_id = f"vertex_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+    try:
+        vertex_client = get_vertex_ai_client()
+        if request.mode == "image":
+            if not request.image_base64 or not request.image_mime_type:
+                raise ValidationError(
+                    "Vertex image mode requires image_base64 and image_mime_type.",
+                    {
+                        "mode": request.mode,
+                        "image_base64_present": bool(request.image_base64),
+                        "image_mime_type_present": bool(request.image_mime_type),
+                    },
+                )
+            try:
+                image_bytes = base64.b64decode(request.image_base64, validate=True)
+            except Exception as exc:  # noqa: BLE001
+                raise ValidationError(
+                    "Vertex image payload is not valid base64.",
+                    {"error": str(exc)},
+                ) from exc
+            if not image_bytes:
+                raise ValidationError(
+                    "Vertex image payload is empty.",
+                    {"mode": request.mode},
+                )
+            submission = vertex_client.submit_image_video(
+                prompt=request.prompt,
+                image_bytes=image_bytes,
+                mime_type=request.image_mime_type,
+                correlation_id=correlation_id,
+                aspect_ratio=request.aspect_ratio,
+                duration_seconds=request.duration_seconds,
+                output_gcs_uri=request.output_gcs_uri,
+                model=request.model,
+                use_fast_model=request.use_fast_model,
+            )
+        else:
+            submission = vertex_client.submit_text_video(
+                prompt=request.prompt,
+                correlation_id=correlation_id,
+                aspect_ratio=request.aspect_ratio,
+                duration_seconds=request.duration_seconds,
+                output_gcs_uri=request.output_gcs_uri,
+                model=request.model,
+                use_fast_model=request.use_fast_model,
+            )
+
+        response = VertexVideoGenerationResponse(
+            provider="vertex_ai",
+            operation_id=submission["operation_id"],
+            status=submission.get("status", "submitted"),
+            done=bool(submission.get("done", False)),
+            provider_model=submission.get("provider_model"),
+            video_uri=submission.get("video_uri"),
+        )
+        return SuccessResponse(data=response.model_dump())
+    except FlowForgeException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "vertex_video_submission_failed",
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to submit Vertex video",
         )
 
 
