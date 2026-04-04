@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
@@ -69,3 +71,63 @@ def test_app_lifespan_does_not_eagerly_create_supabase_client(monkeypatch):
 
     assert asyncio.run(_run()) is True
     assert calls["count"] == 0
+
+
+def test_app_lifespan_logs_google_ai_context_fingerprint(monkeypatch):
+    from app.core.config import fingerprint_secret
+
+    recorded = []
+
+    class FakeLogger:
+        def info(self, event, **data):
+            recorded.append((event, data))
+
+        def warning(self, event, **data):
+            recorded.append((event, data))
+
+        def exception(self, event, **data):
+            recorded.append((event, data))
+
+    monkeypatch.setattr(main_module, "logger", FakeLogger())
+    monkeypatch.setattr(main_module, "recover_stalled_batches", lambda **kwargs: [])
+    monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: [])
+
+    async def _run():
+        async with main_module.lifespan(app):
+            return True
+
+    import asyncio
+
+    assert asyncio.run(_run()) is True
+
+    startup_events = [data for event, data in recorded if event == "application_startup"]
+    assert startup_events, "application_startup log was not emitted"
+    startup = startup_events[0]
+    assert startup["google_ai_api_key_present"] is True
+    assert startup["google_ai_api_key_fingerprint"] == fingerprint_secret("test-google-key")
+    assert startup["google_ai_project_id"] == "unset"
+
+
+def test_google_ai_context_fingerprint_is_stable_and_redacted():
+    from app.core.config import fingerprint_secret, google_ai_context_fingerprint
+
+    class DummySettings:
+        google_ai_api_key = "alpha-key"
+        google_ai_project_id = "project-123"
+
+    first = google_ai_context_fingerprint(DummySettings())
+    second = google_ai_context_fingerprint(DummySettings())
+
+    assert first == second
+    assert first["google_ai_api_key_present"] is True
+    assert first["google_ai_api_key_fingerprint"] == fingerprint_secret("alpha-key")
+    assert first["google_ai_api_key_fingerprint"] != "alpha-key"
+    assert first["google_ai_project_id"] == "project-123"
+
+
+def test_google_ai_key_alignment_detector_flags_mismatch():
+    class DummySettings:
+        gemini_api_key = "gemini-key"
+        google_ai_api_key = "google-key"
+
+    assert Settings.google_ai_keys_aligned(DummySettings()) is False

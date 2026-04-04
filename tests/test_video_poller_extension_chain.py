@@ -151,9 +151,14 @@ def test_needs_extension_hop_returns_false_for_missing_metadata():
     assert _needs_extension_hop(None) is False
 
 
-def test_submit_extension_hop_downloads_video_and_uses_extension_api():
+def test_submit_extension_hop_downloads_video_and_uses_extension_api(monkeypatch):
     """Extension hop must call the REST submit_video_extension path."""
+    from app.core.config import get_settings
     from workers.video_poller import _submit_extension_hop
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_disable_local_quota_guard", False)
+    monkeypatch.setattr(settings, "veo_disable_all_quota_controls", False)
 
     previous_video_data = {"video_uri": "gs://bucket/base.mp4", "mime_type": "video/mp4"}
     post = {
@@ -204,6 +209,8 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
     assert "Zweiter Satz." in call_kwargs["prompt"]
     assert call_kwargs["video_uri"] == "gs://bucket/base.mp4"
     assert call_kwargs["aspect_ratio"] == "9:16"
+    assert call_kwargs["duration_seconds"] == 8
+    assert call_kwargs["negative_prompt"] is not None
 
     update_call = mock_supabase.client.table.return_value.update
     assert update_call.called
@@ -219,8 +226,9 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api():
     mock_prompt_audit.assert_called_once()
     audit_kwargs = mock_prompt_audit.call_args.kwargs
     assert audit_kwargs["prompt_path"] == "veo_extension_hop"
-    assert audit_kwargs["requested_seconds"] == 7
+    assert audit_kwargs["requested_seconds"] == 8
     assert audit_kwargs["operation_id"] == "op-ext-1"
+    assert audit_kwargs["negative_prompt"] is not None
 
 
 def test_submit_extension_hop_reuses_existing_veo_seed():
@@ -322,6 +330,66 @@ def test_submit_extension_hop_consumes_quota_when_reservation_key_exists():
         operation_id="op-ext-2",
         units=1,
     )
+
+
+def test_submit_extension_hop_bypasses_quota_controls_for_control_testing(monkeypatch):
+    """Controlled test runs must bypass extension-hop quota checks entirely."""
+    from app.core.config import get_settings
+    from workers.video_poller import _submit_extension_hop
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_disable_all_quota_controls", True)
+
+    previous_video_data = {"video_uri": "gs://bucket/base.mp4", "mime_type": "video/mp4"}
+    post = {
+        "id": "post-bypass",
+        "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+        "video_metadata": {
+            "quota_reservation_key": "res-chain",
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 2,
+            "veo_extension_hops_completed": 0,
+            "veo_segments": ["Erster Satz.", "Zweiter Satz.", "Dritter Satz."],
+            "veo_segments_total": 3,
+            "veo_current_segment_index": 0,
+            "operation_ids": ["op-base"],
+            "chain_status": "submitted",
+            "generated_seconds": 4,
+            "veo_base_seconds": 4,
+            "veo_extension_seconds": 7,
+            "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "requested_resolution": "720p",
+            "requested_size": "720x1280",
+        },
+    }
+
+    mock_veo = MagicMock()
+    mock_veo.submit_video_extension.return_value = {
+        "operation_id": "op-ext-bypass",
+        "status": "submitted",
+    }
+    mock_prompt_audit = MagicMock()
+    mock_consume_quota = MagicMock()
+    mock_ensure_slot = MagicMock()
+
+    mock_supabase = MagicMock()
+    mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch("workers.video_poller.record_prompt_audit", mock_prompt_audit), \
+         patch("workers.video_poller.consume_quota", mock_consume_quota), \
+         patch("workers.video_poller.ensure_immediate_submit_slot", mock_ensure_slot):
+        _submit_extension_hop(post, correlation_id="test-bypass", previous_video_data=previous_video_data)
+
+    mock_ensure_slot.assert_not_called()
+    mock_consume_quota.assert_called_once_with(
+        reservation_key="res-chain",
+        operation_id="op-ext-bypass",
+        units=1,
+    )
+    mock_prompt_audit.assert_called_once()
 
 
 def test_submit_extension_hop_raises_when_fewer_segments_than_hops():
@@ -682,7 +750,12 @@ def test_full_32s_chain_lifecycle():
 
 
 def test_process_video_operation_releases_quota_and_freezes_after_provider_429(monkeypatch):
+    from app.core.config import get_settings
     from workers.video_poller import process_video_operation
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_disable_local_quota_guard", False)
+    monkeypatch.setattr(settings, "veo_disable_all_quota_controls", False)
 
     response = httpx.Response(
         status_code=429,
@@ -734,6 +807,72 @@ def test_process_video_operation_releases_quota_and_freezes_after_provider_429(m
     process_video_operation(post)
 
     freeze_mock.assert_called_once()
+    release_mock.assert_called_once_with(
+        post,
+        reason=str(error),
+        final_status="failed",
+        error_code="provider_429",
+    )
+    assert captured_update["payload"]["video_status"] == "failed"
+
+
+def test_process_video_operation_suppresses_freeze_when_controls_bypassed(monkeypatch):
+    from app.core.config import get_settings
+    from workers.video_poller import process_video_operation
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_disable_all_quota_controls", True)
+
+    response = httpx.Response(
+        status_code=429,
+        request=httpx.Request("POST", "https://example.com"),
+        text='{"error":{"message":"quota exhausted"}}',
+    )
+    error = httpx.HTTPStatusError("quota exhausted", request=response.request, response=response)
+
+    post = {
+        "id": "post-429-bypass",
+        "video_operation_id": "op-429-bypass",
+        "video_provider": "veo_3_1",
+        "updated_at": "2026-03-31T10:00:00Z",
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 2,
+            "veo_extension_hops_completed": 1,
+            "quota_reservation_key": "res-429-bypass",
+        },
+    }
+
+    captured_update = {}
+
+    class FakeUpdate:
+        def __init__(self, payload):
+            captured_update["payload"] = payload
+
+        def eq(self, *args, **kwargs):
+            return self
+
+        def execute(self):
+            return MagicMock()
+
+    class FakeTable:
+        def update(self, payload):
+            return FakeUpdate(payload)
+
+    fake_supabase = MagicMock()
+    fake_supabase.client.table.return_value = FakeTable()
+
+    monkeypatch.setattr("workers.video_poller._claim_video_poll_lease", lambda post, correlation_id: post)
+    monkeypatch.setattr("workers.video_poller._handle_veo_video", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_supabase)
+    freeze_mock = MagicMock()
+    release_mock = MagicMock()
+    monkeypatch.setattr("workers.video_poller.maybe_freeze_after_provider_429", freeze_mock)
+    monkeypatch.setattr("workers.video_poller._release_post_quota_reservation", release_mock)
+
+    process_video_operation(post)
+
+    freeze_mock.assert_not_called()
     release_mock.assert_called_once_with(
         post,
         reason=str(error),

@@ -47,7 +47,17 @@ def test_build_optimized_prompt_supports_custom_sections():
     assert "He turns away and walks off." in result
     assert "Studio recording with boom mic." in result
     assert "Test dialogue." in result
-    assert "38-year-old German woman" not in result
+    assert (
+        "38-year-old German woman with long, light brown hair with natural blonde highlights, "
+        "straight with a slight natural wave, parted slightly off-center to the left, falling "
+        "softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle "
+        "crow's feet at the outer corners; naturally full, soft-arched eyebrows in a light brown "
+        "shade; a straight nose with a gently rounded tip; medium-full lips with a natural "
+        "muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft "
+        "forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm "
+        "light-medium skin tone with neutral undertones and smooth natural skin texture; slim "
+        "build with relaxed upright posture."
+    ) not in result
 
 
 def test_build_veo_prompt_segment_supports_custom_sections():
@@ -95,6 +105,14 @@ def test_legacy_scene_is_refreshed_for_display_only():
 
     custom_scene = {"scene": "Scene: A custom attic studio."}
     assert _refresh_prompt_scene_for_display(custom_scene) is custom_scene
+
+
+def test_legacy_32_prompt_build_uses_legacy_visual_scene():
+    prompt = build_video_prompt_from_seed({"script": "Beispielsatz."}, legacy_32_visuals=True)
+
+    assert prompt["scene"] == LEGACY_SCENE
+    assert "The woman is sitting on a wheelchair" in prompt["scene"]
+    assert "A tidy modern bedroom" not in prompt["scene"]
 
 
 def test_video_prompt_and_update_request_roundtrip_editable_fields():
@@ -171,14 +189,17 @@ def test_veo_extension_prompt_preserves_approved_german_script():
     prompt_text = prompt["prompt_text"]
     assert "Character:" in prompt_text
     assert "Die Pflegekasse zahlt bis zu viertausend Euro pro Person." in prompt_text
-    assert "Do not end the speech yet." in prompt_text
-    assert "brisk but natural pacing" in prompt_text
-    assert "no settling room tone" in prompt_text
+    assert "Speak only in German." in prompt_text
+    assert "Continue directly into the next segment with no concluding pause or scene-ending hold." in prompt_text
+    assert "Maintain the same bedroom, lighting, framing, camera position, and wardrobe from the previous segment." in prompt_text
+    assert "Natural single-speaker smartphone room audio." in prompt_text
     assert "mouth closes" not in prompt_text
     assert "After the final spoken word" not in prompt_text
+    assert "Cinematography:" not in prompt_text
+    assert "subtitles, captions, watermark" not in prompt_text
 
 
-def test_veo_extension_prompt_uses_saved_prompt_sections_over_seed_defaults():
+def test_veo_extension_prompt_uses_canonical_segment_template_over_saved_visual_sections():
     os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
     os.environ.setdefault("SUPABASE_KEY", "test-key")
     os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
@@ -195,11 +216,11 @@ def test_veo_extension_prompt_uses_saved_prompt_sections_over_seed_defaults():
         {
             "seed_data": {"script": "Old seed sentence one. Old seed sentence two."},
             "video_prompt_json": {
-                "character": "Edited character",
-                "style": "Edited style",
+                "character": "Edited character with novelty accessory",
+                "style": "Style: Edited style",
                 "action": "Edited action",
-                "scene": "Edited scene",
-                "cinematography": "Edited cinematography",
+                "scene": "Scene: Edited scene",
+                "cinematography": "Cinematography: Edited cinematography",
                 "audio": {"dialogue": "Edited dialogue one. Edited dialogue two.", "capture": "Edited audio block"},
                 "ending_directive": "Edited ending",
                 "audio_block": "Edited audio block",
@@ -214,15 +235,57 @@ def test_veo_extension_prompt_uses_saved_prompt_sections_over_seed_defaults():
     )
 
     prompt_text = prompt["prompt_text"]
-    assert "Edited character" in prompt_text
-    assert "Edited style" in prompt_text
-    assert "Edited action" in prompt_text
-    assert "Edited scene" in prompt_text
-    assert "Edited cinematography" in prompt_text
+    assert "Edited character with novelty accessory" not in prompt_text
+    assert "Edited style" not in prompt_text
+    assert "Edited scene" not in prompt_text
+    assert "Edited cinematography" not in prompt_text
+    assert "Style:\nStyle:" not in prompt_text
+    assert "Scene:\nScene:" not in prompt_text
+    assert "Cinematography:\nCinematography:" not in prompt_text
     assert "Edited dialogue one." in prompt_text
     assert "Old seed sentence one." not in prompt_text
-    assert "Edited negative prompt" in prompt_text
-    assert "Do not end the speech yet." in prompt_text
+    assert "Edited action" not in prompt_text
+    assert "Edited audio block" not in prompt_text
+    assert "Edited negative prompt" not in prompt_text
+    assert "subtitles, captions, watermark" not in prompt_text
+    assert prompt["negative_prompt"] == "Edited negative prompt"
+    assert "Continue directly into the next segment with no concluding pause or scene-ending hold." in prompt_text
+
+
+def test_veo_extension_prompt_uses_efficient_32s_visual_contract():
+    os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+    os.environ.setdefault("SUPABASE_KEY", "test-key")
+    os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+    os.environ.setdefault("GOOGLE_AI_API_KEY", "test-google-key")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
+    os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
+    os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
+    os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
+    os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+    video_poller = importlib.import_module("workers.video_poller")
+
+    prompt = video_poller._build_veo_extension_prompt(
+        {
+            "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+            "video_metadata": {
+                "target_length_tier": 32,
+                "veo_base_seconds": 8,
+                "veo_extension_hops_target": 3,
+                "veo_extension_hops_completed": 0,
+                "veo_segments": ["Erster Satz.", "Zweiter Satz.", "Dritter Satz."],
+            },
+        },
+        segment_index=0,
+    )
+
+    prompt_text = prompt["prompt_text"]
+    assert "Same person as the previous segment" in prompt_text
+    assert "shoulder-length light brown hair with subtle blonde highlights" in prompt_text
+    assert DEFAULT_SCENE_BODY not in prompt_text
+    assert LEGACY_SCENE not in prompt_text
+    assert "Maintain the same bedroom, lighting, framing, camera position, and wardrobe from the previous segment." in prompt_text
+    assert "The camera is stable, with only minimal natural movement" not in prompt_text
 
 
 def test_veo_extension_prompt_uses_requested_next_segment():
@@ -293,6 +356,48 @@ def test_veo_extension_prompt_prefers_packed_metadata_segments_over_raw_script()
     assert "Innerhalb Deutschlands wird aber weiterhin eine Anmeldung bis 20 Uhr am Vortag dringend empfohlen." in prompt_text
     assert "Die neue EU-Verordnung hat die alte 48-Stunden-Frist halbiert." not in prompt_text
     assert "Auch Oesterreich hat spezielle Fristen." not in prompt_text
+
+
+def test_veo_extension_prompt_does_not_reuse_full_script_action_or_final_audio():
+    os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+    os.environ.setdefault("SUPABASE_KEY", "test-key")
+    os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+    os.environ.setdefault("GOOGLE_AI_API_KEY", "test-google-key")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
+    os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
+    os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
+    os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
+    os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+    video_poller = importlib.import_module("workers.video_poller")
+
+    prompt = video_poller._build_veo_extension_prompt(
+        {
+            "seed_data": {
+                "script": "Satz eins. Satz zwei. Satz drei."
+            },
+            "video_prompt_json": {
+                "action": "She says: Satz eins. Satz zwei. Satz drei.",
+                "audio_block": "After the final word, the audio gently settles into a quiet room tone.",
+                "audio": {"dialogue": "Satz eins. Satz zwei. Satz drei.", "capture": "After the final word, the audio gently settles into a quiet room tone."},
+                "veo_negative_prompt": "Edited negative prompt",
+            },
+            "video_metadata": {
+                "veo_segments": ["Satz eins.", "Satz zwei.", "Satz drei."],
+                "veo_extension_hops_target": 2,
+                "veo_extension_hops_completed": 0,
+            },
+        },
+        segment_index=1,
+    )
+
+    prompt_text = prompt["prompt_text"]
+    assert "Satz zwei." in prompt_text
+    assert "Satz eins. Satz zwei. Satz drei." not in prompt_text
+    assert "After the final word, the audio gently settles into a quiet room tone." not in prompt_text
+    assert "Natural single-speaker smartphone room audio." in prompt_text
+    assert "subtitles, captions, watermark" not in prompt_text
+    assert prompt["negative_prompt"] == "Edited negative prompt"
 
 
 def test_veo_extension_prompt_final_hop_uses_explicit_stop_and_mouth_rest():

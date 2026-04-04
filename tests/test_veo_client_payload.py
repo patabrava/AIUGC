@@ -72,12 +72,14 @@ def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
         correlation_id="test-extension",
         aspect_ratio="9:16",
         resolution="720p",
+        negative_prompt="subtitles, watermark",
     )
 
     payload = fake_http_client.post_calls[0]["json"]
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
     assert payload["parameters"]["durationSeconds"] == 8
+    assert payload["parameters"]["negativePrompt"] == "subtitles, watermark"
     assert payload["instances"][0]["prompt"] == "continue the scene"
     assert payload["instances"][0]["video"]["uri"].endswith(":download?alt=media")
     assert submission["operation_id"] == "operations/test-operation"

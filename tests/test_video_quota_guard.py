@@ -130,6 +130,7 @@ def test_generate_video_blocks_before_submit_when_quota_reservation_fails(monkey
         )
 
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.quota_controls_bypassed", lambda: False)
     monkeypatch.setattr("app.features.videos.handlers.reserve_quota", _reject_reservation)
     monkeypatch.setattr("app.features.videos.handlers._submit_video_request", submit_mock)
 
@@ -141,6 +142,56 @@ def test_generate_video_blocks_before_submit_when_quota_reservation_fails(monkey
     assert exc_info.value.code == ErrorCode.RATE_LIMIT
     assert exc_info.value.details["blocked_before_submit"] is True
     submit_mock.assert_not_called()
+
+
+def test_local_quota_guard_can_be_bypassed_for_multi_key_testing(monkeypatch):
+    from app.features.videos import quota_guard
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_disable_local_quota_guard", True)
+    monkeypatch.setattr(
+        quota_guard,
+        "get_quota_snapshot",
+        lambda **kwargs: {
+            "frozen": True,
+            "minute_remaining_units": 0,
+            "minute_limit": 0,
+            "daily_remaining_units": 0,
+            "daily_limit": 0,
+        },
+    )
+    rpc_mock = MagicMock(side_effect=AssertionError("quota RPC should not be used when bypass is enabled"))
+    monkeypatch.setattr(quota_guard, "_rpc", rpc_mock)
+
+    snapshot = quota_guard.ensure_immediate_submit_slot(requested_units=7)
+    reservation = quota_guard.reserve_quota(
+        provider="veo_3_1",
+        post_id="post-1",
+        batch_id="batch-1",
+        reservation_key="reservation-1",
+        requested_units=7,
+        require_immediate_slot=True,
+    )
+    consumed = quota_guard.consume_quota(
+        reservation_key="reservation-1",
+        operation_id="operation-1",
+        units=1,
+    )
+    released = quota_guard.release_quota(
+        reservation_key="reservation-1",
+        reason="test",
+        final_status="released",
+        error_code="test",
+    )
+    frozen = quota_guard.freeze_provider_quota(provider="veo_3_1", reason="test")
+    quota_guard.maybe_freeze_after_provider_429(provider="veo_3_1", reason="test")
+
+    assert snapshot["frozen"] is True
+    assert reservation["bypassed"] is True
+    assert consumed["bypassed"] is True
+    assert released["bypassed"] is True
+    assert frozen["bypassed"] is True
+    rpc_mock.assert_not_called()
 
 
 def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_breaks(monkeypatch):
@@ -179,6 +230,7 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
         return {"allowed": True}
 
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.quota_controls_bypassed", lambda: False)
     monkeypatch.setattr(
         "app.features.videos.handlers.get_batch_by_id",
         lambda batch_id: {"id": batch_id, "target_length_tier": 16},
@@ -212,9 +264,9 @@ def test_duration_profile_cost_switches_when_experiment_flag_enabled(monkeypatch
     profile_32 = get_duration_profile(32)
 
     assert profile_16.veo_base_seconds == 8
-    assert profile_32.veo_base_seconds == 8
+    assert profile_32.veo_base_seconds == 4
     assert chain_cost_units(profile_16, provider="veo_3_1") == 2
-    assert chain_cost_units(profile_32, provider="veo_3_1") == 4
+    assert chain_cost_units(profile_32, provider="veo_3_1") == 5
 
 
 def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
@@ -253,6 +305,40 @@ def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
 
     assert captured["first_frame_image"] is None
     assert captured["provider"] == "veo_3_1"
+
+
+def test_generate_video_skips_quota_ledger_calls_when_bypass_enabled(monkeypatch):
+    post = {
+        "id": "post-1",
+        "batch_id": "batch-1",
+        "video_prompt_json": {"veo_prompt": "Prompt"},
+        "seed_data": {},
+        "video_metadata": {},
+    }
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient([post]))
+    reserve_mock = MagicMock()
+    consume_mock = MagicMock()
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.quota_controls_bypassed", lambda: True)
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", reserve_mock)
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", consume_mock)
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "app.features.videos.handlers._submit_video_request",
+        lambda **kwargs: {
+            "operation_id": "operations/test-single",
+            "status": "submitted",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": "operations/test-single"},
+        },
+    )
+
+    request = VideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    asyncio.run(generate_video("post-1", request))
+
+    reserve_mock.assert_not_called()
+    consume_mock.assert_not_called()
 
 
 def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypatch):
@@ -308,3 +394,64 @@ def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypat
     for captured in captured_calls:
         assert captured["first_frame_image"] is None
         assert captured["provider"] == "veo_3_1"
+
+
+def test_generate_all_videos_backfills_missing_prompts_from_seed_data(monkeypatch):
+    posts = [
+        {
+            "id": "post-1",
+            "batch_id": "batch-1",
+            "video_prompt_json": None,
+            "seed_data": {
+                "script": "Erster Satz. Zweiter Satz. Dritter Satz.",
+                "script_review_status": "approved",
+            },
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+        {
+            "id": "post-2",
+            "batch_id": "batch-1",
+            "video_prompt_json": None,
+            "seed_data": {
+                "script_review_status": "removed",
+                "video_excluded": True,
+            },
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+    captured_calls = []
+
+    monkeypatch.setattr(
+        "app.features.videos.handlers._resolve_global_veo_anchor_image",
+        lambda correlation_id: (_ for _ in ()).throw(AssertionError("anchor image path must stay disabled")),
+    )
+
+    def _fake_submit(**kwargs):
+        captured_calls.append(kwargs)
+        return {
+            "operation_id": "operations/test-1",
+            "status": "submitted",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": "operations/test-1"},
+        }
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: {"id": batch_id, "target_length_tier": None})
+    monkeypatch.setattr("app.features.videos.handlers.ensure_immediate_submit_slot", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.release_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
+
+    request = BatchVideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    asyncio.run(generate_all_videos("batch-1", request))
+
+    assert len(captured_calls) == 1
+    assert posts[0]["video_prompt_json"] is not None
+    assert "optimized_prompt" in posts[0]["video_prompt_json"]
+    assert posts[1]["video_prompt_json"] is None
