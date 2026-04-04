@@ -99,7 +99,8 @@ def test_run_discovery_cycle():
     with patch("workers.topic_researcher.select_seeds") as mock_select, \
          patch("workers.topic_researcher.create_cron_run") as mock_create, \
          patch("workers.topic_researcher.update_cron_run") as mock_update, \
-         patch("workers.topic_researcher._research_single_topic") as mock_research:
+         patch("workers.topic_researcher._research_single_topic") as mock_research, \
+         patch("workers.topic_researcher.count_selectable_topic_families", return_value=0):
 
         mock_select.return_value = (["Topic A", "Topic B"], "yaml_bank")
         mock_create.return_value = {"id": "run-1", "status": "running"}
@@ -121,7 +122,8 @@ def test_run_discovery_cycle_no_seeds():
 
     with patch("workers.topic_researcher.select_seeds") as mock_select, \
          patch("workers.topic_researcher.create_cron_run") as mock_create, \
-         patch("workers.topic_researcher.update_cron_run") as mock_update:
+         patch("workers.topic_researcher.update_cron_run") as mock_update, \
+         patch("workers.topic_researcher.count_selectable_topic_families", return_value=0):
 
         mock_select.return_value = ([], "yaml_bank")
         mock_create.return_value = {"id": "run-1", "status": "running"}
@@ -133,6 +135,28 @@ def test_run_discovery_cycle_no_seeds():
     assert mock_update.call_args[1]["topics_completed"] == 0
 
 
+def test_run_discovery_cycle_does_not_skip_on_high_coverage():
+    """High selectable coverage should not suppress the daily research cycle."""
+    from workers.topic_researcher import run_discovery_cycle
+
+    with patch("workers.topic_researcher.select_seeds") as mock_select, \
+         patch("workers.topic_researcher.create_cron_run") as mock_create, \
+         patch("workers.topic_researcher.update_cron_run") as mock_update, \
+         patch("workers.topic_researcher._research_single_topic") as mock_research, \
+         patch("workers.topic_researcher.count_selectable_topic_families", return_value=999):
+
+        mock_select.return_value = (["Topic A"], "yaml_bank")
+        mock_create.return_value = {"id": "run-1", "status": "running"}
+        mock_research.return_value = [{"id": "t-1", "title": "Topic A"}]
+        mock_update.return_value = {"id": "run-1", "status": "completed"}
+
+        run_discovery_cycle()
+
+    mock_create.assert_called_once()
+    assert mock_research.call_count == 1
+    assert mock_update.call_args[1]["status"] == "completed"
+
+
 def test_run_discovery_cycle_marks_run_failed_on_unhandled_error():
     """Escaped exceptions should close the cron wrapper as failed."""
     from workers.topic_researcher import run_discovery_cycle
@@ -140,7 +164,8 @@ def test_run_discovery_cycle_marks_run_failed_on_unhandled_error():
     with patch("workers.topic_researcher.select_seeds") as mock_select, \
          patch("workers.topic_researcher.create_cron_run") as mock_create, \
          patch("workers.topic_researcher.update_cron_run") as mock_update, \
-         patch("workers.topic_researcher._research_single_topic", side_effect=RuntimeError("boom")):
+         patch("workers.topic_researcher._research_single_topic", side_effect=RuntimeError("boom")), \
+         patch("workers.topic_researcher.count_selectable_topic_families", return_value=0):
 
         mock_select.return_value = (["Topic A"], "yaml_bank")
         mock_create.return_value = {"id": "run-1", "status": "running"}

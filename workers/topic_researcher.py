@@ -241,16 +241,13 @@ def run_discovery_cycle(*, audit_after_discovery: bool = True):
     details: List[Dict[str, Any]] = []
     seeds: List[str] = []
     active_coverage_before = count_selectable_topic_families(post_type=POST_TYPE, target_length_tier=8)
-
-    if active_coverage_before >= MIN_ACTIVE_FAMILY_COVERAGE:
-        logger.info(
-            "topic_research_coverage_satisfied",
-            post_type=POST_TYPE,
-            target_length_tier=8,
-            active_coverage=active_coverage_before,
-            minimum_required=MIN_ACTIVE_FAMILY_COVERAGE,
-        )
-        return
+    logger.info(
+        "topic_research_coverage_snapshot",
+        post_type=POST_TYPE,
+        target_length_tier=8,
+        active_coverage=active_coverage_before,
+        minimum_required=MIN_ACTIVE_FAMILY_COVERAGE,
+    )
 
     try:
         seeds, source = select_seeds(max_topics=MAX_TOPICS_PER_RUN, niche=NICHE)
