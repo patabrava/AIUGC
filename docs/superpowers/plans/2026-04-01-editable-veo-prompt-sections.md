@@ -215,7 +215,17 @@ def test_build_optimized_prompt_default_output_unchanged():
     assert "Scene:" in result
     assert "Cinematography:" in result
     assert dialogue in result
-    assert "38-year-old German woman" in result
+    assert (
+        "38-year-old German woman with long, light brown hair with natural blonde highlights, "
+        "straight with a slight natural wave, parted slightly off-center to the left, falling "
+        "softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle "
+        "crow's feet at the outer corners; naturally full, soft-arched eyebrows in a light brown "
+        "shade; a straight nose with a gently rounded tip; medium-full lips with a natural "
+        "muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft "
+        "forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm "
+        "light-medium skin tone with neutral undertones and smooth natural skin texture; slim "
+        "build with relaxed upright posture."
+    ) in result
 
 
 def test_build_optimized_prompt_custom_sections():
@@ -239,7 +249,17 @@ def test_build_optimized_prompt_custom_sections():
     assert "Studio recording with boom mic." in result
     assert "Test dialogue." in result
     # Default values should NOT appear
-    assert "38-year-old German woman" not in result
+    assert (
+        "38-year-old German woman with long, light brown hair with natural blonde highlights, "
+        "straight with a slight natural wave, parted slightly off-center to the left, falling "
+        "softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle "
+        "crow's feet at the outer corners; naturally full, soft-arched eyebrows in a light brown "
+        "shade; a straight nose with a gently rounded tip; medium-full lips with a natural "
+        "muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft "
+        "forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm "
+        "light-medium skin tone with neutral undertones and smooth natural skin texture; slim "
+        "build with relaxed upright posture."
+    ) not in result
     assert "blush-pink walls" not in result
 ```
 
@@ -465,7 +485,17 @@ def test_rebuild_prompt_with_edited_sections():
     assert "A bright kitchen with white tiles." in new_optimized_prompt
     assert original["universal_negatives"] in new_optimized_prompt
     # Defaults still used for non-overridden sections
-    assert "38-year-old German woman" in new_veo_prompt
+    assert (
+        "38-year-old German woman with long, light brown hair with natural blonde highlights, "
+        "straight with a slight natural wave, parted slightly off-center to the left, falling "
+        "softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle "
+        "crow's feet at the outer corners; naturally full, soft-arched eyebrows in a light brown "
+        "shade; a straight nose with a gently rounded tip; medium-full lips with a natural "
+        "muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft "
+        "forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm "
+        "light-medium skin tone with neutral undertones and smooth natural skin texture; slim "
+        "build with relaxed upright posture."
+    ) in new_veo_prompt
 ```
 
 - [ ] **Step 2: Run test to verify it passes**
