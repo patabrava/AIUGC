@@ -142,6 +142,7 @@ def test_get_batch_status_requeues_stalled_s1_batch(monkeypatch):
 
 def test_get_batch_status_resumes_coverage_pending_batch_when_audited_bank_is_ready(monkeypatch):
     scheduled = []
+    batch_handlers._COVERAGE_RECOVERY_LAST_SCHEDULED_AT.clear()
     progress_state = {
         "brand": "Recover",
         "expected_posts": 3,
@@ -201,6 +202,123 @@ def test_get_batch_status_resumes_coverage_pending_batch_when_audited_bank_is_re
     assert response.data["progress"]["stage"] == "booting"
     assert response.data["progress"]["stage_label"] == "Audited family coverage ready"
     assert scheduled == [("batch-coverage", "coverage_recovery")]
+
+
+def test_get_batch_status_requeues_coverage_pending_batch_when_coverage_is_still_short(monkeypatch):
+    scheduled = []
+    batch_handlers._COVERAGE_RECOVERY_LAST_SCHEDULED_AT.clear()
+    progress_state = {
+        "brand": "Recover",
+        "expected_posts": 3,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "coverage_pending",
+        "stage_label": "Waiting for audited family coverage",
+        "detail_message": "Only 1 audited value families are ready at 32s.",
+    }
+
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "brand": "Recover",
+            "state": "S1_SETUP",
+            "updated_at": "2026-03-19T21:00:00+00:00",
+            "post_type_counts": {"value": 3, "lifestyle": 0, "product": 0},
+            "target_length_tier": 32,
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda batch_id: {
+            "posts_count": 0,
+            "posts_by_state": {},
+        },
+    )
+    monkeypatch.setattr(batch_handlers, "is_batch_discovery_active", lambda batch_id: False)
+    monkeypatch.setattr(batch_handlers, "has_required_family_coverage", lambda batch: False)
+
+    def _get_progress(batch_id):
+        return dict(progress_state)
+
+    def _update_progress(batch_id, **progress):
+        progress_state.update(progress)
+        return dict(progress_state)
+
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", _get_progress)
+    monkeypatch.setattr(batch_handlers, "update_seeding_progress", _update_progress)
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda batch_id, reason: scheduled.append((batch_id, reason)) or True,
+    )
+
+    response = asyncio.run(batch_handlers.get_batch_status("batch-coverage-short"))
+
+    assert response.ok is True
+    assert response.data["progress"]["stage"] == "coverage_pending"
+    assert scheduled == [("batch-coverage-short", "coverage_recovery")]
+
+
+def test_get_batch_status_throttles_repeated_coverage_recovery_polling(monkeypatch):
+    scheduled = []
+    batch_handlers._COVERAGE_RECOVERY_LAST_SCHEDULED_AT.clear()
+    progress_state = {
+        "brand": "Recover",
+        "expected_posts": 3,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "coverage_pending",
+        "stage_label": "Waiting for audited family coverage",
+        "detail_message": "Only 1 audited value families are ready at 32s.",
+    }
+
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "brand": "Recover",
+            "state": "S1_SETUP",
+            "updated_at": "2026-03-19T21:00:00+00:00",
+            "post_type_counts": {"value": 3, "lifestyle": 0, "product": 0},
+            "target_length_tier": 32,
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda batch_id: {
+            "posts_count": 0,
+            "posts_by_state": {},
+        },
+    )
+    monkeypatch.setattr(batch_handlers, "is_batch_discovery_active", lambda batch_id: False)
+    monkeypatch.setattr(batch_handlers, "has_required_family_coverage", lambda batch: False)
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", lambda batch_id: dict(progress_state))
+    monkeypatch.setattr(batch_handlers, "update_seeding_progress", lambda batch_id, **progress: progress_state.update(progress) or dict(progress_state))
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda batch_id, reason: scheduled.append((batch_id, reason)) or True,
+    )
+
+    class FakeLoop:
+        def __init__(self):
+            self.now_value = 1000.0
+
+        def time(self):
+            return self.now_value
+
+    fake_loop = FakeLoop()
+    monkeypatch.setattr(batch_handlers.asyncio, "get_running_loop", lambda: fake_loop)
+
+    asyncio.run(batch_handlers.get_batch_status("batch-coverage-short"))
+    asyncio.run(batch_handlers.get_batch_status("batch-coverage-short"))
+
+    assert scheduled == [("batch-coverage-short", "coverage_recovery")]
 
 
 def test_recover_stalled_batches_only_requeues_empty_s1_batches(monkeypatch):

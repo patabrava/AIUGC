@@ -66,6 +66,8 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/batches", tags=["batches"])
 templates = Jinja2Templates(directory="templates")
 DETAIL_JS_VERSION = str(Path("static/js/batches/detail.js").stat().st_mtime_ns)
+_COVERAGE_RECOVERY_COOLDOWN_SECONDS = 300
+_COVERAGE_RECOVERY_LAST_SCHEDULED_AT: Dict[str, float] = {}
 
 
 def _wants_html(request: Request) -> bool:
@@ -522,7 +524,22 @@ async def get_batch_endpoint(request: Request, batch_id: str):
 
             if not video_prompt and normalized_seed:
                 try:
-                    video_prompt = build_video_prompt_from_seed(normalized_seed)
+                    legacy_32_visuals = bool(
+                        p.get("target_length_tier") == 32
+                        or normalized_seed.get("target_length_tier") == 32
+                    )
+                    video_metadata = p.get("video_metadata")
+                    if isinstance(video_metadata, str):
+                        try:
+                            video_metadata = json.loads(video_metadata)
+                        except json.JSONDecodeError:
+                            video_metadata = {}
+                    if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
+                        legacy_32_visuals = True
+                    video_prompt = build_video_prompt_from_seed(
+                        normalized_seed,
+                        legacy_32_visuals=legacy_32_visuals,
+                    )
                 except Exception as exc:
                     logger.warning(
                         "video_prompt_preview_rebuild_failed",
@@ -674,22 +691,44 @@ async def get_batch_status(batch_id: str):
                 )
                 schedule_batch_discovery(batch_id, reason="status_recovery")
                 progress = get_seeding_progress(batch_id)
-            elif progress.get("stage") == "coverage_pending" and has_required_family_coverage(batch):
-                progress = update_seeding_progress(
-                    batch_id,
-                    state=batch["state"],
-                    stage="booting",
-                    stage_label="Audited family coverage ready",
-                    detail_message="Audited family coverage is now sufficient. Resuming topic generation.",
-                    posts_created=posts_summary["posts_count"],
-                    expected_posts=sum((batch.get("post_type_counts") or {}).values()),
-                    current_post_type=None,
-                    attempt=None,
-                    max_attempts=None,
-                    is_retrying=False,
-                    retry_message=None,
-                )
-                schedule_batch_discovery(batch_id, reason="coverage_recovery")
+            elif progress.get("stage") == "coverage_pending":
+                if has_required_family_coverage(batch):
+                    progress = update_seeding_progress(
+                        batch_id,
+                        state=batch["state"],
+                        stage="booting",
+                        stage_label="Audited family coverage ready",
+                        detail_message="Audited family coverage is now sufficient. Resuming topic generation.",
+                        posts_created=posts_summary["posts_count"],
+                        expected_posts=sum((batch.get("post_type_counts") or {}).values()),
+                        current_post_type=None,
+                        attempt=None,
+                        max_attempts=None,
+                        is_retrying=False,
+                        retry_message=None,
+                    )
+                    _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.pop(batch_id, None)
+                    schedule_batch_discovery(batch_id, reason="coverage_recovery")
+                else:
+                    now = asyncio.get_running_loop().time()
+                    last_scheduled = _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.get(batch_id, 0.0)
+                    progress = update_seeding_progress(
+                        batch_id,
+                        state=batch["state"],
+                        stage="coverage_pending",
+                        stage_label="Waiting for audited family coverage",
+                        detail_message="Audited coverage is still short. Rechecking the topic bank in the background.",
+                        posts_created=posts_summary["posts_count"],
+                        expected_posts=sum((batch.get("post_type_counts") or {}).values()),
+                        current_post_type=None,
+                        attempt=None,
+                        max_attempts=None,
+                        is_retrying=True,
+                        retry_message="Coverage is still short; the batch will keep retrying in the background.",
+                    )
+                    if last_scheduled == 0.0 or (now - last_scheduled) >= _COVERAGE_RECOVERY_COOLDOWN_SECONDS:
+                        schedule_batch_discovery(batch_id, reason="coverage_recovery")
+                        _COVERAGE_RECOVERY_LAST_SCHEDULED_AT[batch_id] = now
                 progress = get_seeding_progress(batch_id) or progress
 
         payload = {
