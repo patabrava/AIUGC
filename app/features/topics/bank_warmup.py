@@ -20,6 +20,7 @@ from app.features.topics.seed_builders import build_research_seed_data
 from app.features.topics.research_runtime import PROMPT1_RESEARCH_SYSTEM_PROMPT
 from app.features.topics.queries import get_topic_scripts_for_dossier, touch_topic_registry
 from app.adapters.llm_client import get_llm_client
+from app.features.topics.schemas import ResearchAgentItem
 from app.features.topics.topic_validation import sanitize_metadata_text, select_distinct_lane_candidates
 logger = get_logger(__name__)
 
@@ -135,6 +136,52 @@ def _normalize_fallback_lane_titles(research_dossier):
         return ResearchDossier(**fallback_payload)
     except Exception:
         return research_dossier
+
+
+def _build_seed_scoped_fallback_lane_candidate(*, research_dossier, seed_topic: str) -> Dict[str, Any]:
+    # Seed-scoped by construction: never key the forced fallback off potentially polluted dossier fields.
+    base_topic = str(seed_topic or "").strip() or str(
+        research_dossier.get("seed_topic")
+        or research_dossier.get("topic")
+        or "Thema"
+    ).strip()
+    title = sanitize_metadata_text(
+        base_topic,
+        max_sentences=1,
+        max_chars=120,
+    ).rstrip(".!?") or sanitize_metadata_text(seed_topic, max_sentences=1, max_chars=120).rstrip(".!?")
+    angle = title
+    return {
+        "lane_key": f"{base_topic.lower().replace(' ', '-')[:64]}-seed-fallback",
+        "lane_family": "topic_cluster",
+        "title": title,
+        "angle": angle,
+        "priority": 1,
+        "framework_candidates": list(research_dossier.get("framework_candidates") or ["PAL"]),
+        "source_summary": str(
+            research_dossier.get("source_summary")
+            or research_dossier.get("cluster_summary")
+            or title
+        ).strip()[:500],
+        "facts": list(research_dossier.get("facts") or [title])[:10],
+        "risk_notes": list(research_dossier.get("risk_notes") or [title])[:5],
+        "disclaimer": str(
+            research_dossier.get("disclaimer")
+            or "Keine individuelle Rechts-, Therapie- oder Medizinberatung."
+        ).strip()[:200],
+        "lane_overlap_warnings": [],
+        "suggested_length_tiers": [8, 16, 32],
+    }
+
+
+def _build_seed_scoped_fallback_script(*, seed_topic: str) -> str:
+    """Build a deterministic 8s-safe German script line that should pass tier envelopes after normalization."""
+    import re
+
+    tokens = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(seed_topic or ""))
+    seed_hint = " ".join(tokens[:2]).strip() or "dein Thema"
+    # 17-ish words with a terminal marker; keeps the rescue path fully local (no Gemini).
+    return f"Kennst du 3 Schritte, damit {seed_hint} im Alltag klappt, ohne Stress, und du dich sicherer fuehlst?"
 
 
 def _generate_research_dossier_raw(
@@ -404,17 +451,10 @@ def run_single_seed_topic_warmup(
             continue
 
     summary["stored_topic_ids"] = [topic_id for topic_id in summary["stored_topic_ids"] if topic_id]
-    if summary["lanes_persisted"] == 0 and raw_lane_candidates:
-        fallback_lane_candidate = dict(raw_lane_candidates[0] or {})
-        fallback_lane_candidate["title"] = (
-            sanitize_metadata_text(
-                fallback_lane_candidate.get("title")
-                or research_dossier.get("topic")
-                or seed_topic,
-                max_sentences=1,
-                max_chars=120,
-            ).rstrip(".!?")
-            or sanitize_metadata_text(seed_topic, max_sentences=1, max_chars=120).rstrip(".!?")
+    if summary["lanes_persisted"] == 0:
+        fallback_lane_candidate = _build_seed_scoped_fallback_lane_candidate(
+            research_dossier=research_dossier,
+            seed_topic=seed_topic,
         )
         logger.warning(
             "topic_bank_forced_fallback_lane_retry",
@@ -424,17 +464,32 @@ def run_single_seed_topic_warmup(
             research_source=research_source,
         )
         try:
-            fallback_dossier = _build_lane_dossier(research_dossier, fallback_lane_candidate)
-            fallback_prompt1_item = _call_with_retry(
-                "generate_topic_script_candidate",
-                seed_topic=seed_topic,
-                lane_title=str(fallback_lane_candidate.get("title") or seed_topic).strip(),
-                callback=lambda: generate_topic_script_candidate(
-                    post_type=post_type,
-                    target_length_tier=8,
-                    dossier=fallback_dossier,
-                    lane_candidate=fallback_lane_candidate,
-                ),
+            fallback_dossier = dict(research_dossier)
+            fallback_dossier["lane_candidate"] = fallback_lane_candidate
+            fallback_dossier["lane_candidates"] = [fallback_lane_candidate]
+            fallback_caption = sanitize_metadata_text(
+                str(fallback_dossier.get("source_summary") or fallback_dossier.get("cluster_summary") or seed_topic).strip(),
+                max_chars=500,
+            )
+            fallback_source_summary = sanitize_metadata_text(
+                str(fallback_dossier.get("source_summary") or fallback_dossier.get("cluster_summary") or seed_topic).strip(),
+                max_chars=500,
+            )
+            fallback_prompt1_item = ResearchAgentItem(
+                topic=str(fallback_lane_candidate.get("title") or seed_topic).strip() or seed_topic,
+                script=_build_seed_scoped_fallback_script(seed_topic=seed_topic),
+                caption=fallback_caption,
+                framework="PAL",
+                sources=[
+                    {
+                        "title": str((fallback_dossier.get("sources") or [{}])[0].get("title") or seed_topic).strip(),
+                        "url": str((fallback_dossier.get("sources") or [{}])[0].get("url") or "https://example.com").strip(),
+                    }
+                ],
+                source_summary=fallback_source_summary,
+                estimated_duration_s=8,
+                tone="direkt, freundlich, empowernd, du-Form",
+                disclaimer="Keine individuelle Rechts-, Therapie- oder Medizinberatung.",
             )
             fallback_topic_data = convert_research_item_to_topic(fallback_prompt1_item)
             fallback_lane_title = str(
