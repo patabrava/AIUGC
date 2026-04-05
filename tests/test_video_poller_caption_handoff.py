@@ -61,3 +61,23 @@ class TestPollerCaptionHandoff:
                 assert data["video_status"] == VIDEO_STATUS_CAPTION_PENDING
                 found = True
         assert found, "No update call set video_status"
+
+    @patch("workers.video_poller.httpx.get")
+    @patch("workers.video_poller.google.auth.default")
+    def test_decode_vertex_gcs_uri_downloads_bytes(self, mock_auth_default, mock_http_get):
+        from workers.video_poller import _decode_vertex_video_uri
+
+        mock_credentials = MagicMock()
+        mock_credentials.expired = False
+        mock_credentials.token = "token"
+        mock_auth_default.return_value = (mock_credentials, None)
+
+        mock_response = MagicMock()
+        mock_response.content = b"vertex-video-bytes"
+        mock_response.raise_for_status.return_value = None
+        mock_http_get.return_value = mock_response
+
+        result = _decode_vertex_video_uri("gs://bucket-name/path/to/video.mp4")
+
+        assert result == b"vertex-video-bytes"
+        mock_http_get.assert_called_once()

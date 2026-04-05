@@ -10,10 +10,36 @@
 >
     <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>
     <form action="/videos/batch/{{ batch.id }}/generate-all" method="post" x-on:submit.prevent="submitBatch">
+        <div class="mb-4" x-show="isDurationRouted" x-cloak>
+            <label class="flex flex-col text-sm max-w-xs" for="provider-select">
+                <span class="text-gray-700 font-medium">Provider</span>
+                <select
+                    id="provider-select"
+                    name="provider"
+                    class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    x-model="provider"
+                >
+                    <option value="veo_3_1">Veo 3.1 (Gemini API)</option>
+                    <option value="vertex_ai">Veo 3.1 (Vertex AI)</option>
+                </select>
+            </label>
+        </div>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4" x-show="!isDurationRouted">
             <div class="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 sm:col-span-3">
                 Veo 3.1 is selected automatically. Choose the duration tier and aspect ratio below.
             </div>
+            <label class="flex flex-col text-sm" for="provider-select">
+                <span class="text-gray-700 font-medium">Provider</span>
+                <select
+                    id="provider-select"
+                    name="provider"
+                    class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    x-model="provider"
+                >
+                    <option value="veo_3_1">Veo 3.1 (Gemini API)</option>
+                    <option value="vertex_ai">Veo 3.1 (Vertex AI)</option>
+                </select>
+            </label>
             <label class="flex flex-col text-sm" for="aspect-select">
                 <span class="text-gray-700 font-medium">Aspect Ratio</span>
                 <select

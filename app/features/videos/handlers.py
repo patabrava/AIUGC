@@ -154,8 +154,9 @@ def _resolve_video_submission_plan(
         resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
         provider_aspect_ratio = _resolve_extended_provider_aspect_ratio(profile.route, aspect_ratio)
         requested_size = size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution)
+        provider = requested_provider or VEO_PROVIDER
         return {
-            "provider": VEO_PROVIDER,
+            "provider": provider,
             "seconds": profile.requested_seconds,
             "provider_target_seconds": profile.provider_target_seconds,
             "aspect_ratio": aspect_ratio,
@@ -1166,7 +1167,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         profile.veo_base_seconds
                         if is_extended and profile is not None
                         else submission_plan["provider_target_seconds"]
-                        if submission_plan["provider"] == VEO_PROVIDER
+                        if submission_plan["provider"] in {VEO_PROVIDER, "vertex_ai"}
                         else None
                     ),
                     first_frame_image=(
@@ -1648,6 +1649,49 @@ def _submit_video_request(
             "provider_model": "veo-3.1",
             "requested_size": requested_size,
             "provider_requested_size": provider_requested_size,
+            "estimated_duration_seconds": 180,
+            "provider_metadata": result,
+        }
+
+    if provider == "vertex_ai":
+        vertex_client = get_vertex_ai_client()
+        image_path = Path(__file__).resolve().parents[2] / "static" / "images" / "sarah.jpg"
+        vertex_duration = provider_duration_seconds or seconds
+        try:
+            if image_path.exists():
+                image_bytes = image_path.read_bytes()
+                result = vertex_client.submit_image_video(
+                    prompt=prompt_text,
+                    image_bytes=image_bytes,
+                    mime_type="image/jpeg",
+                    correlation_id=correlation_id,
+                    aspect_ratio=aspect_ratio,
+                    duration_seconds=vertex_duration,
+                )
+            else:
+                result = vertex_client.submit_text_video(
+                    prompt=prompt_text,
+                    correlation_id=correlation_id,
+                    aspect_ratio=aspect_ratio,
+                    duration_seconds=vertex_duration,
+                )
+        except ValidationError as exc:
+            raise FlowForgeException(
+                code=ErrorCode.THIRD_PARTY_FAIL,
+                message=exc.message,
+                details={
+                    "provider": provider,
+                    "response": exc.details,
+                },
+                status_code=503,
+            ) from exc
+        requested_size = _map_size_from_aspect_ratio(aspect_ratio, resolution)
+        return {
+            "operation_id": result["operation_id"],
+            "status": result.get("status", "submitted"),
+            "provider_model": result.get("provider_model", "vertex_ai"),
+            "requested_size": requested_size,
+            "provider_requested_size": requested_size,
             "estimated_duration_seconds": 180,
             "provider_metadata": result,
         }

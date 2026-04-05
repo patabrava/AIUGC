@@ -36,6 +36,10 @@ class _FakeQuery:
         self.filters.append((field, value))
         return self
 
+    def in_(self, field, values):
+        self.filters.append((field, set(values)))
+        return self
+
     def update(self, payload):
         self.update_payload = payload
         return self
@@ -43,13 +47,20 @@ class _FakeQuery:
     def execute(self):
         rows = [row.copy() for row in self.db[self.table_name]]
         for field, value in self.filters:
-            rows = [row for row in rows if row.get(field) == value]
+            if isinstance(value, set):
+                rows = [row for row in rows if row.get(field) in value]
+            else:
+                rows = [row for row in rows if row.get(field) == value]
 
         if self.update_payload is not None:
             for row in self.db[self.table_name]:
-                if all(row.get(field) == value for field, value in self.filters):
+                if all((row.get(field) in value if isinstance(value, set) else row.get(field) == value) for field, value in self.filters):
                     row.update(self.update_payload)
-            rows = [row.copy() for row in self.db[self.table_name] if all(row.get(field) == value for field, value in self.filters)]
+            rows = [
+                row.copy()
+                for row in self.db[self.table_name]
+                if all((row.get(field) in value if isinstance(value, set) else row.get(field) == value) for field, value in self.filters)
+            ]
 
         if self.selected_fields is not None:
             rows = [
@@ -95,6 +106,11 @@ def test_reconcile_batches_ready_for_qa_heals_stuck_completed_batch(monkeypatch)
     }
 
     monkeypatch.setattr(video_poller, "get_supabase", lambda: _FakeSupabase(db))
+    monkeypatch.setattr(
+        video_poller,
+        "reconcile_batch_video_pipeline_state",
+        lambda *, batch_id, correlation_id, supabase_client=None: db["batches"][0].__setitem__("state", "S6_QA"),
+    )
 
     video_poller._reconcile_batches_ready_for_qa()
 

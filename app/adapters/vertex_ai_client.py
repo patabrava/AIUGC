@@ -1,24 +1,23 @@
 """
 Vertex AI Video Generation Adapter
-Explicit Vertex AI path for text-to-video and image-to-video.
+Uses Vertex AI REST API with the correct polling endpoint (:fetchPredictOperation).
+The standard LRO operations endpoint returns 404 for Veo UUID-style operations;
+fetchPredictOperation on the model path is the correct way to poll.
 """
 
 from __future__ import annotations
 
+import base64
+from copy import deepcopy
 from typing import Optional, Dict, Any
-import inspect
 
-from google import genai
+import httpx
+import google.auth
+from google.auth.transport.requests import Request
 
-try:
-    from google.genai.types import Image, GenerateVideosConfig  # type: ignore
-except Exception:  # pragma: no cover - fallback for older SDKs
-    from google.genai import types as genai_types  # type: ignore
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-    Image = getattr(genai_types, "Image", None)
-    GenerateVideosConfig = None  # type: ignore
-
-from app.core.config import get_settings
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
 
@@ -28,8 +27,26 @@ _DEFAULT_VERTEX_MODEL = "veo-3.1-generate-001"
 _DEFAULT_VERTEX_FAST_MODEL = "veo-3.1-fast-generate-001"
 
 
+class VertexSettings(BaseSettings):
+    """Vertex-only settings loaded from the shared app .env file."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    vertex_ai_enabled: bool = Field(default=False, validation_alias=AliasChoices("VERTEX_AI_ENABLED"))
+    vertex_ai_project_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("VERTEX_AI_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"),
+    )
+    vertex_ai_location: str = Field(default="us-central1", validation_alias=AliasChoices("VERTEX_AI_LOCATION"))
+
+
 class VertexAIClient:
-    """Singleton adapter for Vertex AI Veo video generation."""
+    """Singleton adapter for Vertex AI Veo video generation via REST."""
 
     _instance: Optional["VertexAIClient"] = None
 
@@ -42,8 +59,9 @@ class VertexAIClient:
     def __init__(self):
         if self._initialized:
             return
-        self._settings = get_settings()
-        self._client: Optional[genai.Client] = None
+        self._settings = self._load_vertex_settings()
+        self._http_client = httpx.Client(timeout=120.0, follow_redirects=True)
+        self._credentials = None
         self._initialized = True
         logger.info("vertex_ai_client_initialized")
 
@@ -58,34 +76,30 @@ class VertexAIClient:
         model: Optional[str] = None,
         use_fast_model: bool = False,
     ) -> Dict[str, Any]:
-        client = self._get_client()
+        self._ensure_configured()
         model_name = model or (_DEFAULT_VERTEX_FAST_MODEL if use_fast_model else _DEFAULT_VERTEX_MODEL)
-        config = self._build_generate_config(
+
+        payload = self._build_request_payload(
+            prompt=prompt,
             aspect_ratio=aspect_ratio,
-            output_gcs_uri=output_gcs_uri,
             duration_seconds=duration_seconds,
+            output_gcs_uri=output_gcs_uri,
         )
+
         self._log_request(
             correlation_id=correlation_id,
             model=model_name,
             prompt=prompt,
             aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
-            output_gcs_uri=output_gcs_uri,
             has_image=False,
         )
-        try:
-            operation = client.models.generate_videos(  # type: ignore[attr-defined]
-                model=model_name,
-                prompt=prompt,
-                config=config,
-            )
-        except AttributeError as exc:
-            raise ValidationError(
-                "google-genai SDK is missing video generation support.",
-                {"error": str(exc)},
-            ) from exc
-        return self._normalize_operation(operation, model_name)
+
+        return self._submit_to_vertex(
+            model_name=model_name,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
 
     def submit_image_video(
         self,
@@ -100,43 +114,76 @@ class VertexAIClient:
         model: Optional[str] = None,
         use_fast_model: bool = False,
     ) -> Dict[str, Any]:
-        if Image is None:
-            raise ValidationError(
-                "google-genai SDK is missing image support for video generation.",
-                {"error": "Image type unavailable"},
-            )
-        client = self._get_client()
+        self._ensure_configured()
         model_name = model or (_DEFAULT_VERTEX_FAST_MODEL if use_fast_model else _DEFAULT_VERTEX_MODEL)
-        config = self._build_generate_config(
+
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        payload = self._build_request_payload(
+            prompt=prompt,
             aspect_ratio=aspect_ratio,
-            output_gcs_uri=output_gcs_uri,
             duration_seconds=duration_seconds,
+            output_gcs_uri=output_gcs_uri,
+            image_base64=image_b64,
+            image_mime_type=mime_type,
         )
-        image = Image(imageBytes=image_bytes, mimeType=mime_type)  # type: ignore[call-arg]
+
         self._log_request(
             correlation_id=correlation_id,
             model=model_name,
             prompt=prompt,
             aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
-            output_gcs_uri=output_gcs_uri,
             has_image=True,
             image_bytes_len=len(image_bytes),
             image_mime_type=mime_type,
         )
-        try:
-            operation = client.models.generate_videos(  # type: ignore[attr-defined]
-                model=model_name,
-                prompt=prompt,
-                image=image,
-                config=config,
-            )
-        except AttributeError as exc:
-            raise ValidationError(
-                "google-genai SDK is missing video generation support.",
-                {"error": str(exc)},
-            ) from exc
-        return self._normalize_operation(operation, model_name)
+
+        return self._submit_to_vertex(
+            model_name=model_name,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+
+    def submit_video_extension(
+        self,
+        *,
+        prompt: str,
+        video_uri: str,
+        video_mime_type: Optional[str] = None,
+        correlation_id: str,
+        aspect_ratio: str,
+        duration_seconds: int,
+        output_gcs_uri: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        self._ensure_configured()
+        model_name = model or _DEFAULT_VERTEX_MODEL
+
+        payload = self._build_extension_request_payload(
+            prompt=prompt,
+            video_uri=video_uri,
+            video_mime_type=video_mime_type,
+            aspect_ratio=aspect_ratio,
+            duration_seconds=duration_seconds,
+            output_gcs_uri=output_gcs_uri,
+        )
+
+        self._log_request(
+            correlation_id=correlation_id,
+            model=model_name,
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            duration_seconds=duration_seconds,
+            has_image=False,
+            source_video_uri=video_uri,
+        )
+
+        return self._submit_to_vertex(
+            model_name=model_name,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
 
     def check_operation_status(
         self,
@@ -144,22 +191,39 @@ class VertexAIClient:
         operation_id: str,
         correlation_id: str,
     ) -> Dict[str, Any]:
-        client = self._get_client()
-        if not hasattr(client, "operations"):
-            raise ValidationError(
-                "google-genai SDK is missing operation polling support.",
-                {"operation_id": operation_id},
-            )
-        try:
-            operation = client.operations.get(operation_id)  # type: ignore[attr-defined]
-        except Exception as exc:
-            raise ValidationError(
-                "Vertex AI operation polling failed.",
-                {"operation_id": operation_id, "error": str(exc)},
-            ) from exc
+        self._ensure_configured()
+        url = self._build_fetch_operation_url(operation_id)
+        headers = self._build_headers(include_json=True)
 
-        done = bool(getattr(operation, "done", False))
-        video_uri = self._extract_video_uri(operation)
+        response = self._http_client.post(
+            url,
+            headers=headers,
+            json={"operationName": operation_id},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        done = data.get("done", False)
+        video_uri = self._extract_video_uri(data)
+
+        if done:
+            provider_error = data.get("error")
+            if provider_error:
+                logger.error(
+                    "vertex_ai_operation_failed",
+                    correlation_id=correlation_id,
+                    operation_id=operation_id,
+                    provider_error=provider_error,
+                )
+                return {
+                    "operation_id": operation_id,
+                    "done": True,
+                    "status": "failed",
+                    "video_uri": None,
+                    "provider": "vertex_ai",
+                    "error": provider_error,
+                }
+
         return {
             "operation_id": operation_id,
             "done": done,
@@ -168,22 +232,258 @@ class VertexAIClient:
             "provider": "vertex_ai",
         }
 
-    def _get_client(self) -> genai.Client:
-        if self._client is not None:
-            return self._client
-        self._ensure_configured()
-        try:
-            self._client = genai.Client(
-                vertexai=True,
-                project=self._settings.vertex_ai_project_id,
-                location=self._settings.vertex_ai_location,
+    def _submit_to_vertex(
+        self,
+        *,
+        model_name: str,
+        payload: Dict[str, Any],
+        correlation_id: str,
+    ) -> Dict[str, Any]:
+        url = self._build_submit_url(model_name)
+        headers = self._build_headers(include_json=True)
+
+        logged_payload = self._payload_for_logging(payload)
+        logger.info(
+            "vertex_ai_rest_submit",
+            correlation_id=correlation_id,
+            url=url,
+            request_payload=logged_payload,
+        )
+
+        response = self._http_client.post(url, headers=headers, json=payload)
+        logger.info(
+            "vertex_ai_rest_response",
+            correlation_id=correlation_id,
+            status_code=response.status_code,
+            response_text=response.text[:500],
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        operation_name = data.get("name")
+        if not operation_name:
+            raise ValidationError(
+                "Vertex AI response missing operation name.",
+                {"response": str(data)},
             )
+
+        logger.info(
+            "vertex_ai_video_submitted",
+            correlation_id=correlation_id,
+            operation_id=operation_name,
+            model=model_name,
+        )
+
+        return {
+            "operation_id": operation_name,
+            "status": "submitted",
+            "done": False,
+            "provider": "vertex_ai",
+            "provider_model": model_name,
+        }
+
+    def _build_request_payload(
+        self,
+        *,
+        prompt: str,
+        aspect_ratio: str,
+        duration_seconds: int,
+        output_gcs_uri: Optional[str] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        instance: Dict[str, Any] = {"prompt": prompt}
+        if image_base64 and image_mime_type:
+            instance["image"] = {
+                "bytesBase64Encoded": image_base64,
+                "mimeType": image_mime_type,
+            }
+
+        parameters: Dict[str, Any] = {
+            "aspectRatio": aspect_ratio,
+            "durationSeconds": duration_seconds,
+        }
+        if output_gcs_uri:
+            parameters["storageUri"] = output_gcs_uri
+
+        return {
+            "instances": [instance],
+            "parameters": parameters,
+        }
+
+    def _build_extension_request_payload(
+        self,
+        *,
+        prompt: str,
+        video_uri: str,
+        video_mime_type: Optional[str] = None,
+        aspect_ratio: str,
+        duration_seconds: int,
+        output_gcs_uri: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        video_payload: Dict[str, Any] = {"gcsUri": video_uri}
+        if video_mime_type:
+            video_payload["mimeType"] = video_mime_type
+
+        instance: Dict[str, Any] = {
+            "prompt": prompt,
+            "video": video_payload,
+        }
+
+        parameters: Dict[str, Any] = {
+            "aspectRatio": aspect_ratio,
+            "durationSeconds": duration_seconds,
+        }
+        if output_gcs_uri:
+            parameters["storageUri"] = output_gcs_uri
+
+        return {
+            "instances": [instance],
+            "parameters": parameters,
+        }
+
+    def _build_submit_url(self, model_name: str) -> str:
+        project = self._settings.vertex_ai_project_id
+        location = self._settings.vertex_ai_location
+        return (
+            f"https://{location}-aiplatform.googleapis.com/v1"
+            f"/projects/{project}/locations/{location}"
+            f"/publishers/google/models/{model_name}:predictLongRunning"
+        )
+
+    def _build_fetch_operation_url(self, operation_id: str) -> str:
+        """Build the fetchPredictOperation URL for polling.
+        
+        Extracts the model name from the operation ID and uses the v1beta1
+        fetchPredictOperation endpoint, which is the only way to poll
+        Veo UUID-style operations.
+        """
+        location = self._settings.vertex_ai_location
+        project = self._settings.vertex_ai_project_id
+        
+        # Extract model name from operation_id
+        # Format: projects/{project}/locations/{location}/publishers/google/models/{model}/operations/{uuid}
+        if "/models/" in operation_id:
+            model_part = operation_id.split("/models/")[1].split("/operations/")[0]
+        else:
+            model_part = _DEFAULT_VERTEX_MODEL
+        
+        return (
+            f"https://{location}-aiplatform.googleapis.com/v1beta1"
+            f"/projects/{project}/locations/{location}"
+            f"/publishers/google/models/{model_part}:fetchPredictOperation"
+        )
+
+    def _get_credentials(self):
+        if self._credentials is None:
+            try:
+                self._credentials, _ = google.auth.default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+            except google.auth.exceptions.DefaultCredentialsError as exc:
+                raise ValidationError(
+                    "No Google Cloud Application Default Credentials found. "
+                    "Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.",
+                    {"error": str(exc)},
+                ) from exc
+        if self._credentials.expired or not self._credentials.token:
+            self._credentials.refresh(Request())
+        return self._credentials
+
+    def _build_headers(self, include_json: bool = False) -> Dict[str, str]:
+        creds = self._get_credentials()
+        headers = {
+            "Authorization": f"Bearer {creds.token}",
+        }
+        if include_json:
+            headers["Content-Type"] = "application/json"
+        return headers
+
+    def _payload_for_logging(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        safe_payload = deepcopy(payload)
+        for instance in safe_payload.get("instances", []) or []:
+            if not isinstance(instance, dict):
+                continue
+            image_payload = instance.get("image") or {}
+            if not isinstance(image_payload, dict):
+                continue
+            inline_data = image_payload.get("bytesBase64Encoded")
+            if inline_data:
+                instance["image"]["bytesBase64Encoded"] = f"<redacted_base64:{len(str(inline_data))}_chars>"
+        return safe_payload
+
+    def _extract_video_uri(self, data: Dict[str, Any]) -> Optional[str]:
+        """Extract video URI from fetchPredictOperation response."""
+        response_obj = data.get("response", {})
+        if isinstance(response_obj, dict):
+            # Try generatedSamples (v1 format)
+            generated_samples = response_obj.get("generatedSamples", [])
+            if generated_samples and isinstance(generated_samples, list):
+                first_sample = generated_samples[0]
+                if isinstance(first_sample, dict):
+                    video = first_sample.get("video", {})
+                    if isinstance(video, dict):
+                        uri = video.get("uri")
+                        if uri:
+                            return uri
+                        gcs_uri = video.get("gcsUri")
+                        if gcs_uri:
+                            return gcs_uri
+                        b64 = video.get("bytesBase64Encoded")
+                        if b64:
+                            return f"data:video/mp4;base64,{b64}"
+            
+            # Try videos (SDK format)
+            videos = response_obj.get("videos", [])
+            if videos and isinstance(videos, list):
+                first_video = videos[0]
+                if isinstance(first_video, dict):
+                    uri = first_video.get("uri")
+                    if uri:
+                        return uri
+                    gcs_uri = first_video.get("gcsUri")
+                    if gcs_uri:
+                        return gcs_uri
+                    b64 = first_video.get("bytesBase64Encoded")
+                    if b64:
+                        return f"data:video/mp4;base64,{b64}"
+        return None
+
+    def _log_request(
+        self,
+        *,
+        correlation_id: str,
+        model: str,
+        prompt: str,
+        aspect_ratio: str,
+        duration_seconds: int,
+        has_image: bool,
+        image_bytes_len: Optional[int] = None,
+        image_mime_type: Optional[str] = None,
+        source_video_uri: Optional[str] = None,
+    ) -> None:
+        logger.info(
+            "vertex_ai_video_submission",
+            correlation_id=correlation_id,
+            model=model,
+            prompt_length=len(prompt),
+            prompt_preview=prompt[:400],
+            aspect_ratio=aspect_ratio,
+            duration_seconds=duration_seconds,
+            has_image=has_image,
+            image_bytes_len=image_bytes_len,
+            image_mime_type=image_mime_type,
+            source_video_uri=source_video_uri,
+        )
+
+    def _load_vertex_settings(self) -> VertexSettings:
+        try:
+            return VertexSettings()
         except Exception as exc:
             raise ValidationError(
-                "Vertex AI authentication unavailable. Configure ADC or a service account.",
+                "Vertex AI settings could not be loaded from the shared environment file.",
                 {"error": str(exc)},
             ) from exc
-        return self._client
 
     def _ensure_configured(self) -> None:
         if not self._settings.vertex_ai_enabled:
@@ -196,90 +496,6 @@ class VertexAIClient:
                 "Vertex AI project ID is required.",
                 {"vertex_ai_project_id": self._settings.vertex_ai_project_id},
             )
-
-    def _build_generate_config(
-        self,
-        *,
-        aspect_ratio: str,
-        output_gcs_uri: Optional[str],
-        duration_seconds: int,
-    ) -> Any:
-        payload: Dict[str, Any] = {
-            "aspect_ratio": aspect_ratio,
-        }
-        if output_gcs_uri:
-            payload["output_gcs_uri"] = output_gcs_uri
-        if duration_seconds:
-            payload["duration_seconds"] = duration_seconds
-        if GenerateVideosConfig is None:
-            return payload
-        try:
-            allowed = set(inspect.signature(GenerateVideosConfig).parameters)
-            payload = {k: v for k, v in payload.items() if k in allowed}
-        except (TypeError, ValueError):
-            pass
-        return GenerateVideosConfig(**payload)  # type: ignore[arg-type]
-
-    def _normalize_operation(self, operation: Any, model_name: str) -> Dict[str, Any]:
-        operation_id = (
-            getattr(operation, "name", None)
-            or getattr(operation, "id", None)
-            or getattr(operation, "operation", None)
-        )
-        if not operation_id and isinstance(operation, dict):
-            operation_id = operation.get("name") or operation.get("id") or operation.get("operation")
-        if not operation_id:
-            raise ValidationError(
-                "Vertex AI response missing operation identifier.",
-                {"operation": str(operation)},
-            )
-        return {
-            "operation_id": operation_id,
-            "status": "submitted",
-            "done": False,
-            "provider": "vertex_ai",
-            "provider_model": model_name,
-        }
-
-    def _extract_video_uri(self, operation: Any) -> Optional[str]:
-        response = getattr(operation, "response", None) or getattr(operation, "result", None)
-        if response is None:
-            return None
-        generated = getattr(response, "generated_videos", None) or getattr(response, "generatedVideos", None)
-        if not generated:
-            return None
-        first = generated[0]
-        video = getattr(first, "video", None) or getattr(first, "Video", None)
-        if video is None:
-            return None
-        return getattr(video, "uri", None) or getattr(video, "URI", None)
-
-    def _log_request(
-        self,
-        *,
-        correlation_id: str,
-        model: str,
-        prompt: str,
-        aspect_ratio: str,
-        duration_seconds: int,
-        output_gcs_uri: Optional[str],
-        has_image: bool,
-        image_bytes_len: Optional[int] = None,
-        image_mime_type: Optional[str] = None,
-    ) -> None:
-        logger.info(
-            "vertex_ai_video_submission",
-            correlation_id=correlation_id,
-            model=model,
-            prompt_length=len(prompt),
-            prompt_preview=prompt[:400],
-            aspect_ratio=aspect_ratio,
-            duration_seconds=duration_seconds,
-            output_gcs_uri=output_gcs_uri,
-            has_image=has_image,
-            image_bytes_len=image_bytes_len,
-            image_mime_type=image_mime_type,
-        )
 
 
 def get_vertex_ai_client() -> VertexAIClient:

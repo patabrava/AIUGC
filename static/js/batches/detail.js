@@ -188,6 +188,10 @@
                     '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
                     '16:9': { '720p': '1280x720', '1080p': '1920x1080' },
                 },
+                vertex_ai: {
+                    '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
+                    '16:9': { '720p': '1280x720', '1080p': '1920x1080' },
+                },
             },
             isSubmitting: false,
             submitError: null,
@@ -248,14 +252,15 @@
 
                     const submittedCount = payload?.data?.submitted_count ?? 0;
                     const skippedCount = payload?.data?.skipped_count ?? 0;
+                    const providerName = this.provider === 'vertex_ai' ? 'Vertex AI' : 'Veo 3.1';
                     if (submittedCount > 0) {
                         this.submitStatusKind = 'success';
-                        this.submitStatusMessage = `Submitted ${submittedCount} prompt(s) to Veo 3.1.`;
+                        this.submitStatusMessage = `Submitted ${submittedCount} prompt(s) to ${providerName}.`;
                         window.setTimeout(() => window.location.reload(), 250);
                     } else {
                         this.submitStatusKind = 'warning';
                         this.submitStatusMessage = payload?.message
-                            || `No prompts were submitted to Veo 3.1.${skippedCount ? ` ${skippedCount} post(s) were skipped.` : ''} Check the batch details or retry later.`;
+                            || `No prompts were submitted to ${providerName}.${skippedCount ? ` ${skippedCount} post(s) were skipped.` : ''} Check the batch details or retry later.`;
                     }
                 } catch (error) {
                     this.submitError = error instanceof Error ? error.message : 'Submission failed';
@@ -271,10 +276,6 @@
                     this.duration = String(this.targetLengthTier || 8);
                 }
                 this.$watch('provider', () => {
-                    if (this.isDurationRouted) {
-                        this.provider = 'veo_3_1';
-                        return;
-                    }
                     this.resolution = this.aspectRatio === '16:9' ? '1080p' : '720p';
                 });
                 this.$watch('aspectRatio', (value) => {

@@ -68,7 +68,7 @@ def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
 
     submission = client.submit_video_extension(
         prompt="continue the scene",
-        video_uri="https://generativelanguage.googleapis.com/v1beta/files/example:download?alt=media",
+        video_uri="gs://bucket-name/example.mp4",
         correlation_id="test-extension",
         aspect_ratio="9:16",
         resolution="720p",
@@ -81,7 +81,7 @@ def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
     assert payload["parameters"]["durationSeconds"] == 8
     assert payload["parameters"]["negativePrompt"] == "subtitles, watermark"
     assert payload["instances"][0]["prompt"] == "continue the scene"
-    assert payload["instances"][0]["video"]["uri"].endswith(":download?alt=media")
+    assert payload["instances"][0]["video"]["uri"] == "gs://bucket-name/example.mp4"
     assert submission["operation_id"] == "operations/test-operation"
 
     veo_module.VeoClient._instance = None

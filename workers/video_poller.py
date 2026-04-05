@@ -12,9 +12,12 @@ import json
 import socket
 import subprocess
 import tempfile
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Union
 import httpx
+import google.auth
+from google.auth.transport.requests import Request
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -55,6 +58,15 @@ except Exception as import_error:  # noqa: BLE001
     get_veo_client = None  # type: ignore
     _veo_available = False
     _veo_import_error = import_error
+
+try:  # pragma: no cover - allow worker to run without Vertex AI SDK
+    from app.adapters.vertex_ai_client import get_vertex_ai_client  # type: ignore
+    _vertex_ai_available = True
+    _vertex_ai_import_error = None
+except Exception as import_error:  # noqa: BLE001
+    get_vertex_ai_client = None  # type: ignore
+    _vertex_ai_available = False
+    _vertex_ai_import_error = import_error
 
 # Configure logging
 configure_logging()
@@ -673,6 +685,16 @@ def process_video_operation(post: Dict[str, Any]):
             _handle_veo_video(post, operation_id, correlation_id)
         elif provider in {"sora_2", "sora_2_pro"}:
             _handle_sora_video(post, operation_id, correlation_id)
+        elif provider == "vertex_ai":
+            if not _vertex_ai_available or get_vertex_ai_client is None:
+                logger.warning(
+                    "vertex_ai_poll_skipped",
+                    post_id=post_id,
+                    provider=provider,
+                    reason="Vertex AI client unavailable on this runtime"
+                )
+                return
+            _handle_vertex_ai_video(post, operation_id, correlation_id)
         else:
             logger.warning(
                 "unsupported_provider",
@@ -692,6 +714,42 @@ def process_video_operation(post: Dict[str, Any]):
         )
 
         metadata = post.get("video_metadata") or {}
+        if provider == "vertex_ai":
+            retry_metadata = {
+                **metadata,
+                "error": str(e),
+                "error_type": e.__class__.__name__,
+                "provider": provider,
+                "operation_id": operation_id,
+                "last_polled_by": _poller_identity(),
+                "last_polled_at": _utc_now_iso(),
+            }
+            if isinstance(e, httpx.HTTPStatusError):
+                retry_metadata["provider_status_code"] = e.response.status_code
+                retry_metadata["provider_response_body"] = e.response.text[:4000]
+
+            try:
+                supabase = get_supabase().client
+                supabase.table("posts").update({
+                    "video_status": "processing",
+                    "video_metadata": retry_metadata,
+                }).eq("id", post_id).execute()
+                logger.warning(
+                    "vertex_video_polling_deferred",
+                    post_id=post_id,
+                    correlation_id=correlation_id,
+                    operation_id=operation_id,
+                    error_type=e.__class__.__name__,
+                )
+                return
+            except Exception as update_error:
+                logger.exception(
+                    "vertex_video_polling_deferral_failed",
+                    post_id=post_id,
+                    correlation_id=correlation_id,
+                    operation_id=operation_id,
+                    error=str(update_error),
+                )
         if provider == "veo_3_1":
             if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
                 if _quota_controls_bypassed():
@@ -1061,6 +1119,99 @@ def _handle_sora_video(post: Dict[str, Any], operation_id: str, correlation_id: 
         }).eq("id", post_id).execute()
 
 
+def _handle_vertex_ai_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:
+    post_id = post["id"]
+    provider = post.get("video_provider", "vertex_ai")
+    vertex_client = get_vertex_ai_client()
+
+    status_result = vertex_client.check_operation_status(
+        operation_id=operation_id,
+        correlation_id=correlation_id,
+    )
+
+    done = status_result.get("done", False)
+    video_uri = status_result.get("video_uri")
+
+    logger.debug(
+        "vertex_ai_status_polled",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        done=done,
+        has_video_uri=bool(video_uri),
+    )
+
+    if done and video_uri:
+        metadata = post.get("video_metadata") or {}
+        if _needs_extension_hop(metadata):
+            try:
+                _submit_extension_hop(
+                    post,
+                    correlation_id=correlation_id,
+                    previous_video_data=status_result,
+                )
+            except httpx.HTTPStatusError as error:
+                if error.response.status_code == 429:
+                    _defer_vertex_extension_rate_limit(
+                        post_id=post_id,
+                        metadata=metadata,
+                        correlation_id=correlation_id,
+                        error=error,
+                    )
+                    return
+                raise
+            return
+
+        video_source = _decode_vertex_video_uri(video_uri)
+        _store_completed_video(
+            post_id=post_id,
+            provider=provider,
+            video_source=video_source,
+            correlation_id=correlation_id,
+            provider_metadata=status_result,
+            existing_metadata=metadata,
+        )
+    elif done and not video_uri:
+        raise ValueError("Vertex AI operation completed but returned no video URI")
+    else:
+        new_status = "processing"
+        supabase = get_supabase().client
+        supabase.table("posts").update({
+            "video_status": new_status,
+            "video_metadata": {
+                **(post.get("video_metadata") or {}),
+                "provider": provider,
+                "provider_status": status_result.get("status"),
+            }
+        }).eq("id", post_id).execute()
+
+
+def _decode_vertex_video_uri(video_uri: str) -> bytes:
+    """Decode a Vertex AI data URI (data:video/mp4;base64,...) to bytes."""
+    if video_uri.startswith("data:"):
+        header, b64_data = video_uri.split(",", 1)
+        import base64
+        return base64.b64decode(b64_data)
+    if video_uri.startswith("gs://"):
+        bucket_and_object = video_uri[5:]
+        bucket, _, object_name = bucket_and_object.partition("/")
+        if not bucket or not object_name:
+            raise ValueError(f"Invalid Vertex GCS URI: {video_uri}")
+        credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/devstorage.read_only"])
+        if credentials.expired or not credentials.token:
+            credentials.refresh(Request())
+        object_path = quote(object_name, safe="")
+        url = f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{object_path}?alt=media"
+        response = httpx.get(
+            url,
+            headers={"Authorization": f"Bearer {credentials.token}"},
+            follow_redirects=True,
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        return response.content
+    return video_uri
+
+
 def _store_completed_video(
     *,
     post_id: str,
@@ -1378,6 +1529,7 @@ def _submit_extension_hop(
     reservation_key = _quota_reservation_key(metadata)
 
     video_uri = (previous_video_data or {}).get("video_uri")
+    video_mime_type = (previous_video_data or {}).get("mime_type") or "video/mp4"
     if not video_uri:
         raise ValueError(
             f"Cannot extend video for post {post_id}: previous video_data "
@@ -1399,10 +1551,11 @@ def _submit_extension_hop(
         result = veo_client.submit_video_extension(
             prompt=prompt,
             video_uri=video_uri,
+            video_mime_type=video_mime_type,
             correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
             aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
             resolution=metadata.get("requested_resolution", "720p"),
-            duration_seconds=8,
+            duration_seconds=7,
             negative_prompt=negative_prompt,
             seed=metadata.get("veo_seed"),
         )
@@ -1438,7 +1591,7 @@ def _submit_extension_hop(
         prompt_path="veo_extension_hop",
         aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
         resolution=metadata.get("requested_resolution", "720p"),
-        requested_seconds=8,
+        requested_seconds=7,
         correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
     )
 
@@ -1475,6 +1628,48 @@ def _submit_extension_hop(
         operation_id=new_operation_id,
         segment_index=next_segment_idx,
         is_final_hop=is_final_hop,
+    )
+
+
+def _defer_vertex_extension_rate_limit(
+    *,
+    post_id: str,
+    metadata: Dict[str, Any],
+    correlation_id: str,
+    error: httpx.HTTPStatusError,
+) -> None:
+    retry_count = int(metadata.get("veo_extension_rate_limit_retry_count") or 0) + 1
+    delay_seconds = _veo_extension_retry_delay_seconds(retry_count)
+    retry_after = _utc_now() + timedelta(seconds=delay_seconds)
+
+    metadata.update(
+        {
+            "chain_status": "waiting_for_extension_input_processing",
+            "veo_extension_rate_limit_retry_count": retry_count,
+            "veo_extension_retry_after": _utc_now_iso(retry_after),
+            "veo_extension_last_retryable_error": error.response.text[:4000],
+            "provider_status_code": error.response.status_code,
+            "provider_response_body": error.response.text[:4000],
+            "last_polled_by": _poller_identity(),
+            "last_polled_at": _utc_now_iso(),
+        }
+    )
+
+    supabase = get_supabase().client
+    supabase.table("posts").update(
+        {
+            "video_status": get_processing_video_status(VEO_EXTENDED_VIDEO_ROUTE),
+            "video_metadata": metadata,
+        }
+    ).eq("id", post_id).execute()
+
+    logger.warning(
+        "vertex_extension_hop_deferred_rate_limited",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        retry_count=retry_count,
+        retry_after=metadata["veo_extension_retry_after"],
+        provider_status_code=error.response.status_code,
     )
 
 

@@ -85,7 +85,11 @@ class VideoStatusResponse(BaseModel):
         "submitted",
         "processing",
         "completed",
-        "failed"
+        "failed",
+        "caption_pending",
+        "caption_processing",
+        "caption_completed",
+        "caption_failed"
     ] = Field(
         ..., 
         description="Current video generation status"
@@ -150,8 +154,8 @@ class VertexVideoGenerationResponse(BaseModel):
 
 class BatchVideoGenerationRequest(BaseModel):
     """Request to generate videos for all posts in a batch."""
-    provider: Literal["veo_3_1", "sora_2", "sora_2_pro"] = Field(
-        ..., 
+    provider: Literal["veo_3_1", "sora_2", "sora_2_pro", "vertex_ai"] = Field(
+        ...,
         description="Video generation provider for all posts"
     )
     aspect_ratio: Literal["9:16", "16:9"] = Field(

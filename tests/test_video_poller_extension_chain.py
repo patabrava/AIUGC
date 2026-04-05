@@ -209,7 +209,7 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api(monkeypatch
     assert "Zweiter Satz." in call_kwargs["prompt"]
     assert call_kwargs["video_uri"] == "gs://bucket/base.mp4"
     assert call_kwargs["aspect_ratio"] == "9:16"
-    assert call_kwargs["duration_seconds"] == 8
+    assert call_kwargs["duration_seconds"] == 7
     assert call_kwargs["negative_prompt"] is not None
 
     update_call = mock_supabase.client.table.return_value.update
@@ -226,9 +226,54 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api(monkeypatch
     mock_prompt_audit.assert_called_once()
     audit_kwargs = mock_prompt_audit.call_args.kwargs
     assert audit_kwargs["prompt_path"] == "veo_extension_hop"
-    assert audit_kwargs["requested_seconds"] == 8
+    assert audit_kwargs["requested_seconds"] == 7
     assert audit_kwargs["operation_id"] == "op-ext-1"
     assert audit_kwargs["negative_prompt"] is not None
+
+
+def test_submit_extension_hop_uses_vertex_doc_shape(monkeypatch):
+    """Vertex extension should use gcsUri input and 7s hop duration."""
+    from workers.video_poller import _submit_extension_hop
+
+    previous_video_data = {"video_uri": "gs://bucket/base.mp4", "mime_type": "video/mp4"}
+    post = {
+        "id": "post-vertex-doc",
+        "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 1,
+            "veo_extension_hops_completed": 0,
+            "veo_segments": ["Erster Satz.", "Zweiter Satz."],
+            "veo_segments_total": 2,
+            "veo_current_segment_index": 0,
+            "operation_ids": ["op-base"],
+            "chain_status": "submitted",
+            "generated_seconds": 4,
+            "veo_base_seconds": 4,
+            "veo_extension_seconds": 7,
+            "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "requested_resolution": "720p",
+            "requested_size": "720x1280",
+        },
+    }
+
+    mock_veo = MagicMock()
+    mock_veo.submit_video_extension.return_value = {
+        "operation_id": "op-ext-vertex",
+        "status": "submitted",
+    }
+    mock_supabase = MagicMock()
+    mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch("workers.video_poller.ensure_immediate_submit_slot", return_value={"ok": True}):
+        _submit_extension_hop(post, correlation_id="test-vertex-doc", previous_video_data=previous_video_data)
+
+    payload = mock_veo.submit_video_extension.call_args.kwargs
+    assert payload["video_uri"] == "gs://bucket/base.mp4"
+    assert payload["duration_seconds"] == 7
 
 
 def test_submit_extension_hop_reuses_existing_veo_seed():
@@ -625,6 +670,47 @@ def test_handle_veo_video_completes_when_all_hops_done():
     mock_store.assert_called_once()
 
 
+def test_handle_vertex_ai_video_chains_when_hops_remaining():
+    """Vertex AI completion must also advance to the next extension hop."""
+    from workers.video_poller import _handle_vertex_ai_video
+
+    post = {
+        "id": "post-vertex-chain",
+        "video_provider": "vertex_ai",
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 2,
+            "veo_extension_hops_completed": 0,
+            "veo_segments": ["Satz eins.", "Satz zwei.", "Satz drei."],
+            "veo_segments_total": 3,
+            "veo_current_segment_index": 0,
+            "operation_ids": ["op-base"],
+            "chain_status": "submitted",
+            "generated_seconds": 4,
+            "veo_base_seconds": 4,
+            "veo_extension_seconds": 7,
+            "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "requested_resolution": "720p",
+        },
+    }
+
+    mock_vertex = MagicMock()
+    mock_vertex.check_operation_status.return_value = {
+        "done": True,
+        "video_uri": "gs://bucket/video.mp4",
+        "status": "completed",
+    }
+
+    with patch("workers.video_poller.get_vertex_ai_client", return_value=mock_vertex), \
+         patch("workers.video_poller._submit_extension_hop") as mock_submit_extension, \
+         patch("workers.video_poller.get_supabase"):
+        _handle_vertex_ai_video(post, "op-base", "corr-vertex-chain")
+
+    mock_submit_extension.assert_called_once()
+    mock_vertex.check_operation_status.assert_called_once()
+
+
 def test_handle_veo_video_downloads_bytes_when_postprocess_needed():
     """Portrait fallback must bypass URL ingest and download bytes for the final crop step."""
     from workers.video_poller import _handle_veo_video
@@ -880,3 +966,56 @@ def test_process_video_operation_suppresses_freeze_when_controls_bypassed(monkey
         error_code="provider_429",
     )
     assert captured_update["payload"]["video_status"] == "failed"
+
+
+def test_process_video_operation_defers_vertex_polling_errors(monkeypatch):
+    from workers.video_poller import process_video_operation
+
+    post = {
+        "id": "post-vertex-defer",
+        "video_operation_id": "op-vertex-defer",
+        "video_provider": "vertex_ai",
+        "updated_at": "2026-03-31T10:00:00Z",
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 1,
+            "veo_extension_hops_completed": 0,
+            "chain_status": "submitted",
+        },
+    }
+
+    response = httpx.Response(
+        status_code=503,
+        request=httpx.Request("POST", "https://example.com"),
+        text="temporary outage",
+    )
+    error = httpx.HTTPStatusError("temporary outage", request=response.request, response=response)
+
+    captured_update = {}
+
+    class FakeUpdate:
+        def __init__(self, payload):
+            captured_update["payload"] = payload
+
+        def eq(self, *args, **kwargs):
+            return self
+
+        def execute(self):
+            return MagicMock()
+
+    class FakeTable:
+        def update(self, payload):
+            return FakeUpdate(payload)
+
+    fake_supabase = MagicMock()
+    fake_supabase.client.table.return_value = FakeTable()
+
+    monkeypatch.setattr("workers.video_poller._claim_video_poll_lease", lambda post, correlation_id: post)
+    monkeypatch.setattr("workers.video_poller._handle_vertex_ai_video", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_supabase)
+
+    process_video_operation(post)
+
+    assert captured_update["payload"]["video_status"] == "processing"
+    assert captured_update["payload"]["video_metadata"]["provider_status_code"] == 503
+    assert captured_update["payload"]["video_metadata"]["error_type"] == "HTTPStatusError"
