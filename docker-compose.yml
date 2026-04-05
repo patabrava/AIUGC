@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${APP_HOST:-aiugc-prod.srv1498567.hstgr.cloud}`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${APP_HOST:-aiugc-prod.srv1498567.hstgr.cloud}`) || Host(`srv1498567.hstgr.cloud`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=websecure
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.tls.certresolver=letsencrypt
       - traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000
