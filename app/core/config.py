@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     vertex_ai_project_id: str = Field("", description="Google Cloud project ID for Vertex AI video generation")
     vertex_ai_location: str = Field("us-central1", description="Vertex AI region for video generation")
     vertex_ai_enabled: bool = Field(default=False, description="Enable the explicit Vertex AI provider path")
+    vertex_ai_output_gcs_uri: str = Field(
+        "",
+        description="Optional GCS URI prefix for Vertex AI video outputs",
+    )
     deepgram_api_key: str = Field("", description="Deepgram API key for speech-to-text captioning")
     # sora_api_key: str = Field(default="", description="Sora 2 API key")  # Future
     

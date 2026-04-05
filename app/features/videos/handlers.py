@@ -154,7 +154,7 @@ def _resolve_video_submission_plan(
         resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
         provider_aspect_ratio = _resolve_extended_provider_aspect_ratio(profile.route, aspect_ratio)
         requested_size = size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution)
-        provider = requested_provider or VEO_PROVIDER
+        provider = VEO_PROVIDER
         return {
             "provider": provider,
             "seconds": profile.requested_seconds,
@@ -1655,8 +1655,10 @@ def _submit_video_request(
 
     if provider == "vertex_ai":
         vertex_client = get_vertex_ai_client()
+        settings = get_settings()
         image_path = Path(__file__).resolve().parents[2] / "static" / "images" / "sarah.jpg"
         vertex_duration = provider_duration_seconds or seconds
+        output_gcs_uri = settings.vertex_ai_output_gcs_uri or None
         try:
             if image_path.exists():
                 image_bytes = image_path.read_bytes()
@@ -1667,6 +1669,7 @@ def _submit_video_request(
                     correlation_id=correlation_id,
                     aspect_ratio=aspect_ratio,
                     duration_seconds=vertex_duration,
+                    output_gcs_uri=output_gcs_uri,
                 )
             else:
                 result = vertex_client.submit_text_video(
@@ -1674,6 +1677,7 @@ def _submit_video_request(
                     correlation_id=correlation_id,
                     aspect_ratio=aspect_ratio,
                     duration_seconds=vertex_duration,
+                    output_gcs_uri=output_gcs_uri,
                 )
         except ValidationError as exc:
             raise FlowForgeException(
@@ -1694,6 +1698,7 @@ def _submit_video_request(
             "provider_requested_size": requested_size,
             "estimated_duration_seconds": 180,
             "provider_metadata": result,
+            "vertex_output_gcs_uri": output_gcs_uri,
         }
 
     if provider in {"sora_2", "sora_2_pro"}:

@@ -1525,18 +1525,24 @@ def _submit_extension_hop(
     negative_prompt = prompt_payload.get("negative_prompt")
     segment_text = prompt_payload["segment_text"]
 
-    veo_client = get_veo_client()
+    provider = post.get("video_provider", "veo_3_1")
+    settings = get_settings()
     reservation_key = _quota_reservation_key(metadata)
 
     video_uri = (previous_video_data or {}).get("video_uri")
     video_mime_type = (previous_video_data or {}).get("mime_type") or "video/mp4"
+    output_gcs_uri = (
+        metadata.get("vertex_output_gcs_uri")
+        or settings.vertex_ai_output_gcs_uri
+        or None
+    )
     if not video_uri:
         raise ValueError(
             f"Cannot extend video for post {post_id}: previous video_data "
             f"missing video_uri"
         )
 
-    if _quota_controls_bypassed():
+    if provider != "vertex_ai" and _quota_controls_bypassed():
         logger.warning(
             "extension_hop_quota_controls_bypassed",
             post_id=post_id,
@@ -1544,23 +1550,35 @@ def _submit_extension_hop(
             hop_number=hops_completed + 1,
             hop_target=metadata.get("veo_extension_hops_target"),
         )
-    else:
+    elif provider != "vertex_ai":
         ensure_immediate_submit_slot(provider="veo_3_1")
 
     try:
-        result = veo_client.submit_video_extension(
-            prompt=prompt,
-            video_uri=video_uri,
-            video_mime_type=video_mime_type,
-            correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
-            aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
-            resolution=metadata.get("requested_resolution", "720p"),
-            duration_seconds=7,
-            negative_prompt=negative_prompt,
-            seed=metadata.get("veo_seed"),
-        )
+        if provider == "vertex_ai":
+            vertex_client = get_vertex_ai_client()
+            result = vertex_client.submit_video_extension(
+                prompt=prompt,
+                video_uri=video_uri,
+                video_mime_type=video_mime_type,
+                correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
+                aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
+                duration_seconds=7,
+                output_gcs_uri=output_gcs_uri,
+            )
+        else:
+            veo_client = get_veo_client()
+            result = veo_client.submit_video_extension(
+                prompt=prompt,
+                video_uri=video_uri,
+                correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
+                aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
+                resolution=metadata.get("requested_resolution", "720p"),
+                duration_seconds=7,
+                negative_prompt=negative_prompt,
+                seed=metadata.get("veo_seed"),
+            )
     except httpx.HTTPStatusError as error:
-        if _is_retryable_veo_extension_input_not_ready(error):
+        if provider != "vertex_ai" and _is_retryable_veo_extension_input_not_ready(error):
             _defer_extension_hop_retry(
                 post_id=post_id,
                 metadata=metadata,
@@ -1585,7 +1603,7 @@ def _submit_extension_hop(
         post_id=post_id,
         batch_id=post.get("batch_id"),
         operation_id=new_operation_id,
-        provider="veo_3_1",
+        provider=provider,
         prompt_text=prompt,
         negative_prompt=negative_prompt,
         prompt_path="veo_extension_hop",
@@ -1604,6 +1622,7 @@ def _submit_extension_hop(
         "operation_ids": operation_ids,
         "chain_status": "extending",
         "generated_seconds": generated_seconds,
+        "vertex_output_gcs_uri": output_gcs_uri,
     })
     if quota_consume_error:
         metadata["quota_consume_error"] = quota_consume_error

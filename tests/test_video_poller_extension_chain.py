@@ -234,10 +234,12 @@ def test_submit_extension_hop_downloads_video_and_uses_extension_api(monkeypatch
 def test_submit_extension_hop_uses_vertex_doc_shape(monkeypatch):
     """Vertex extension should use gcsUri input and 7s hop duration."""
     from workers.video_poller import _submit_extension_hop
+    from app.core.config import get_settings
 
     previous_video_data = {"video_uri": "gs://bucket/base.mp4", "mime_type": "video/mp4"}
     post = {
         "id": "post-vertex-doc",
+        "video_provider": "vertex_ai",
         "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
         "video_metadata": {
             "video_pipeline_route": "veo_extended",
@@ -258,22 +260,27 @@ def test_submit_extension_hop_uses_vertex_doc_shape(monkeypatch):
         },
     }
 
-    mock_veo = MagicMock()
-    mock_veo.submit_video_extension.return_value = {
+    mock_vertex = MagicMock()
+    mock_vertex.submit_video_extension.return_value = {
         "operation_id": "op-ext-vertex",
         "status": "submitted",
     }
     mock_supabase = MagicMock()
     mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
 
-    with patch("workers.video_poller.get_veo_client", return_value=mock_veo), \
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vertex_ai_output_gcs_uri", "gs://bucket/output/")
+
+    with patch("workers.video_poller.get_vertex_ai_client", return_value=mock_vertex), \
          patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
          patch("workers.video_poller.ensure_immediate_submit_slot", return_value={"ok": True}):
         _submit_extension_hop(post, correlation_id="test-vertex-doc", previous_video_data=previous_video_data)
 
-    payload = mock_veo.submit_video_extension.call_args.kwargs
+    payload = mock_vertex.submit_video_extension.call_args.kwargs
     assert payload["video_uri"] == "gs://bucket/base.mp4"
+    assert payload["video_mime_type"] == "video/mp4"
     assert payload["duration_seconds"] == 7
+    assert payload["output_gcs_uri"] == "gs://bucket/output/"
 
 
 def test_submit_extension_hop_reuses_existing_veo_seed():
