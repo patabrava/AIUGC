@@ -1703,3 +1703,109 @@ def test_scripts_drawer_endpoint_empty_scripts(monkeypatch):
     assert response.status_code == 200
     assert "Empty Topic" in response.text
     assert "No scripts generated yet" in response.text
+
+
+def test_topics_layout_loads_lippe_lift_brand_assets(monkeypatch):
+    monkeypatch.setattr(
+        topic_handlers,
+        "build_topic_hub_payload",
+        lambda request: {
+            "filters": {"search": "", "post_type": None, "target_length_tier": None, "topic_id": None, "run_id": None, "status": None, "only_with_scripts": False},
+            "topics": [],
+            "total_topics": 0,
+            "scripts": [],
+            "selected_topic": None,
+            "selected_scripts": [],
+            "runs": [],
+            "active_runs": [],
+            "completed_runs": [],
+        },
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert '/static/css/brand.css?v=' in response.text
+    assert "fonts.googleapis.com" in response.text
+    assert 'class="app-shell' in response.text
+
+
+def test_topics_layout_uses_branded_shell_navigation(monkeypatch):
+    monkeypatch.setattr(
+        topic_handlers,
+        "build_topic_hub_payload",
+        lambda request: {
+            "filters": {"search": "", "post_type": None, "target_length_tier": None, "topic_id": None, "run_id": None, "status": None, "only_with_scripts": False},
+            "topics": [],
+            "total_topics": 0,
+            "scripts": [],
+            "selected_topic": None,
+            "selected_scripts": [],
+            "runs": [],
+            "active_runs": [],
+            "completed_runs": [],
+        },
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert "brand-nav" in response.text
+    assert "brand-nav__link" in response.text
+    assert "Lippe Lift Operations" in response.text
+    assert "brand-footer" in response.text
+
+
+def test_topics_hub_renders_lippe_lift_surface_classes(monkeypatch):
+    monkeypatch.setattr(
+        topic_handlers,
+        "build_topic_hub_payload",
+        lambda request: {
+            "filters": {"search": "", "post_type": None, "target_length_tier": None, "topic_id": None, "run_id": None, "status": None, "only_with_scripts": False},
+            "topics": [],
+            "total_topics": 0,
+            "scripts": [],
+            "selected_topic": None,
+            "selected_scripts": [],
+            "runs": [],
+            "active_runs": [],
+            "completed_runs": [],
+        },
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert "brand-panel brand-topics-shell" in response.text
+    assert "brand-section-eyebrow" in response.text
+    assert "brand-filter-button" in response.text
+    assert "brand-launch-panel" in response.text
+
+
+def test_topics_hub_brand_copy_and_visual_hooks_stay_present(monkeypatch):
+    monkeypatch.setattr(
+        topic_handlers,
+        "build_topic_hub_payload",
+        lambda request: {
+            "filters": {"search": "", "post_type": None, "target_length_tier": None, "topic_id": None, "run_id": None, "status": None, "only_with_scripts": False},
+            "topics": [],
+            "total_topics": 0,
+            "scripts": [],
+            "selected_topic": None,
+            "selected_scripts": [],
+            "runs": [],
+            "active_runs": [],
+            "completed_runs": [],
+        },
+    )
+
+    client = _build_test_client()
+    response = client.get("/topics", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert "Lippe Lift Operations" in response.text
+    assert "brand-topics-shell" in response.text
+    assert "brand-launch-panel" in response.text

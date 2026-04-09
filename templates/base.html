@@ -12,6 +12,10 @@
     
     <!-- htmx -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/brand.css?v={{ static_version }}">
     
     <!-- Alpine.js -->
     <script defer src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js"></script>
@@ -38,24 +42,28 @@
         [x-cloak] { display: none !important; }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen" hx-history-elt>
+<body class="app-shell" hx-history-elt>
     <!-- Navigation -->
-    <nav class="bg-white shadow-sm border-b border-gray-200" x-data="{ mobileMenuOpen: false }" x-init="$nextTick(() => $store.accountsHub?.bootstrap())">
+    <nav class="brand-nav" x-data="{ mobileMenuOpen: false }" x-init="$nextTick(() => $store.accountsHub?.bootstrap())">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center space-x-3">
-                    <a href="/" class="inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white rounded-md">
+            <div class="flex min-h-[5rem] items-center justify-between gap-6">
+                <div class="flex items-center gap-4">
+                    <a href="/" class="brand-focus inline-flex items-center rounded-xl">
                         <img
                             src="/static/images/logo-Lippe-Lift_01.png"
-                            alt="Lippe Lift UGC System"
-                            class="h-8 sm:h-10 w-auto"
+                            alt="Lippe Lift Operations"
+                            class="h-10 w-auto sm:h-12"
                             loading="lazy"
                         >
                     </a>
+                    <div class="hidden lg:block">
+                        <p class="font-brand-heading text-xs font-semibold uppercase tracking-[0.32em] text-[#006AAB]">Lippe Lift</p>
+                        <p class="text-sm text-[#1C2740]/72">Operations</p>
+                    </div>
                 </div>
                 
                 <!-- Desktop Navigation -->
-                <div class="hidden md:flex items-center space-x-4">
+                <div class="hidden md:flex items-center gap-2">
                     <button
                         type="button"
                         @click="$store.accountsHub?.open()"
@@ -74,15 +82,9 @@
                         </span>
                         <span x-text="$store.accountsHub?.desktopLabel() || 'Accounts'"></span>
                     </button>
-                    <a href="/topics" class="text-gray-700 hover:text-purple-700 px-3 py-2 rounded-md text-sm font-medium transition">
-                        Topics
-                    </a>
-                    <a href="/batches" class="text-gray-700 hover:text-purple-700 px-3 py-2 rounded-md text-sm font-medium transition">
-                        Batches
-                    </a>
-                    <a href="/docs" class="text-gray-700 hover:text-purple-700 px-3 py-2 rounded-md text-sm font-medium transition">
-                        API Docs
-                    </a>
+                    <a href="/topics" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">Topics</a>
+                    <a href="/batches" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">Batches</a>
+                    <a href="/docs" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">API Docs</a>
                     <form method="post" action="/auth/logout" class="inline">
                         <button type="submit" class="text-gray-400 hover:text-red-600 px-3 py-2 rounded-md text-sm font-medium transition" title="Log out">
                             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -164,19 +166,19 @@
     </nav>
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
         {% block content %}{% endblock %}
     </main>
 
     {% include "components/accounts_hub.html" %}
 
     <!-- Footer -->
-    <footer class="bg-white border-t border-gray-200 mt-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <p class="text-center text-sm text-gray-500">
-                FLOW-FORGE UGC System &copy; 2025 | 
-                <a href="/health" class="text-purple-600 hover:text-purple-800">System Health</a>
-            </p>
+    <footer class="brand-footer mt-12">
+        <div class="max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8">
+            <div class="flex flex-col gap-2 text-sm text-[#1C2740]/70 sm:flex-row sm:items-center sm:justify-between">
+                <p>Lippe Lift Operations Hub</p>
+                <a href="/health" class="brand-nav__link brand-focus rounded-md">System Health</a>
+            </div>
         </div>
     </footer>
     {% block scripts %}{% endblock %}
