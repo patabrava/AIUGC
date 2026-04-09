@@ -48,6 +48,8 @@ def _trusted_hosts_from_settings() -> list[str]:
         parsed = urlparse(settings.app_url)
         if parsed.hostname:
             hosts.add(parsed.hostname)
+            if not parsed.hostname.startswith("www."):
+                hosts.add(f"www.{parsed.hostname}")
     return sorted(hosts)
 
 
