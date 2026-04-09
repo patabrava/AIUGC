@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 # Paths that do not require authentication
 PUBLIC_PATH_PREFIXES = ("/auth/", "/health", "/static/", "/tiktok", "/topics/cron")
-PUBLIC_PATHS_EXACT = ("/health",)
+PUBLIC_PATHS_EXACT = ("/health", "/terms", "/privacy")
 
 
 def _is_local_request(request: Request) -> bool:

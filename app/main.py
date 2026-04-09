@@ -315,6 +315,19 @@ async def root():
     return RedirectResponse(url="/batches", status_code=status.HTTP_302_FOUND)
 
 
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/terms")
+async def terms_page(request: Request):
+    """Serve the Terms of Service."""
+    return templates.TemplateResponse("legal/terms.html", {"request": request})
+
+@app.get("/privacy")
+async def privacy_page(request: Request):
+    """Serve the Privacy Policy."""
+    return templates.TemplateResponse("legal/privacy.html", {"request": request})
+
+
 @app.get(f"/{TIKTOK_VERIFICATION_FILENAME}")
 async def tiktok_url_verification():
     """Serve the TikTok URL prefix verification token at the site root."""
