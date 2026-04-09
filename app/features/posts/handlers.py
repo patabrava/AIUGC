@@ -24,7 +24,7 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 
 class UpdateScriptRequest(BaseModel):
     """Request to update post script."""
-    script_text: str = Field(..., min_length=1, max_length=500, description="Script text")
+    script_text: str = Field(..., min_length=1, max_length=900, description="Script text")
 
 
 class UpdateScriptReviewRequest(BaseModel):
@@ -97,9 +97,11 @@ async def update_post_script(post_id: str, request: Request):
         current_seed["script"] = script_text
         current_seed["script_review_status"] = "pending"
         current_seed.pop("video_excluded", None)
-        
+
         supabase.table("posts").update({
-            "seed_data": current_seed
+            "seed_data": current_seed,
+            # Editing the script must invalidate any prompt assembled from the old text.
+            "video_prompt_json": None,
         }).eq("id", post_id).execute()
         
         logger.info(

@@ -139,3 +139,31 @@ def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch)
     assert stored_prompt["audio"]["dialogue"] == "Edited dialogue."
     assert stored_prompt["optimized_prompt"]
     assert stored_prompt["veo_prompt"]
+
+
+def test_update_script_accepts_long_edits_within_generated_script_bounds(monkeypatch):
+    long_script = " ".join(["Das ist eine sehr lange bearbeitbare Skriptzeile."] * 16)
+    assert len(long_script) > 500
+
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "seed_data": {"script_review_status": "pending", "script": "Kurzer Ausgangstext."},
+                "video_prompt_json": {"existing": True},
+                "video_status": "pending",
+            }
+        ]
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.put("/posts/post-1/script", data={"script_text": long_script})
+
+    assert response.status_code == 200, response.text
+    assert storage["posts"][0]["seed_data"]["script"] == long_script
+    assert storage["posts"][0]["seed_data"]["script_review_status"] == "pending"
+    assert "video_excluded" not in storage["posts"][0]["seed_data"]
+    assert storage["posts"][0]["video_prompt_json"] is None
