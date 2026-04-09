@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -44,6 +45,12 @@ def _resolve_startup_research_timestamp() -> float:
     return max(last_run, active_run)
 
 
+def _is_same_utc_day(first_timestamp: float, second_timestamp: float) -> bool:
+    first_day = datetime.fromtimestamp(first_timestamp, tz=timezone.utc).date()
+    second_day = datetime.fromtimestamp(second_timestamp, tz=timezone.utc).date()
+    return first_day == second_day
+
+
 def _maybe_run_audit(now: float, last_audit_run: float) -> float:
     if (now - last_audit_run) < AUDIT_INTERVAL_SECONDS:
         return last_audit_run
@@ -57,7 +64,7 @@ def _maybe_run_audit(now: float, last_audit_run: float) -> float:
 
 
 def _maybe_run_research(now: float, last_research_run: float) -> float:
-    if (now - last_research_run) < RESEARCH_INTERVAL_SECONDS:
+    if last_research_run and _is_same_utc_day(now, last_research_run):
         return last_research_run
 
     logger.info(

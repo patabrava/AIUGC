@@ -1886,10 +1886,15 @@ async def cron_status():
     Health/status endpoint for the automated topic discovery cron.
     Returns the latest run info and aggregate stats.
     """
-    from app.features.topics.queries import get_latest_cron_run, get_cron_run_stats
+    from app.features.topics.queries import (
+        get_latest_cron_run,
+        get_cron_run_stats,
+        get_topic_research_cron_monitoring,
+    )
 
     latest = get_latest_cron_run()
     stats = get_cron_run_stats()
+    monitoring = get_topic_research_cron_monitoring()
 
     last_run = None
     next_expected = None
@@ -1916,6 +1921,7 @@ async def cron_status():
         data={
             "last_run": last_run,
             "next_expected_run": next_expected,
+            "monitoring": monitoring,
             **stats,
         }
     )

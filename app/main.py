@@ -21,6 +21,7 @@ from app.adapters.supabase_client import get_supabase
 from app.features.batches.handlers import router as batches_router
 from app.features.topics.handlers import recover_stalled_batches, router as topics_router
 from app.features.topics.hub import recover_stalled_topic_research_runs
+from app.features.topics.queries import get_topic_research_cron_monitoring
 from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
@@ -115,6 +116,13 @@ async def lifespan(app: FastAPI):
         logger.warning("startup_topic_research_recovery_failed", error=str(exc))
     if recovered_topic_runs:
         logger.info("startup_topic_research_recovery_scheduled", run_ids=recovered_topic_runs)
+
+    try:
+        cron_monitoring = get_topic_research_cron_monitoring()
+    except Exception as exc:
+        logger.warning("startup_topic_cron_monitoring_failed", error=str(exc))
+    else:
+        logger.info("startup_topic_cron_monitoring", **cron_monitoring)
     
     yield
 

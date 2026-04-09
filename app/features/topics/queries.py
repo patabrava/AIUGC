@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any, Dict, List, Optional
 
@@ -1437,6 +1437,98 @@ def get_cron_run_stats() -> Dict[str, Any]:
     total_runs = len(rows)
     total_topics = sum(r.get("topics_completed", 0) for r in rows)
     return {"total_runs": total_runs, "total_topics_researched": total_topics}
+
+
+def list_topic_research_cron_runs(*, limit: int = 50, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return recent topic research cron runs, newest first."""
+    sb = _get_supabase_adapter()
+    query = sb.client.table("topic_research_cron_runs").select("*").order("started_at", desc=True).limit(limit)
+    if status:
+        query = query.eq("status", status)
+    result = query.execute()
+    return list(result.data or [])
+
+
+def _parse_cron_timestamp(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def get_topic_research_cron_monitoring(
+    *,
+    window_days: int = 7,
+    overdue_grace_hours: int = 26,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Summarize cadence health for the topic researcher cron."""
+    now = datetime.now(timezone.utc)
+    recent_runs = list_topic_research_cron_runs(limit=limit)
+    completed_runs: List[Dict[str, Any]] = []
+    for row in recent_runs:
+        if str(row.get("status") or "").strip() != "completed":
+            continue
+        completed_at = _parse_cron_timestamp(row.get("completed_at") or row.get("updated_at") or row.get("started_at"))
+        if completed_at is None:
+            continue
+        completed_runs.append(
+            {
+                "id": row.get("id"),
+                "completed_at": completed_at,
+                "status": row.get("status"),
+            }
+        )
+
+    last_success_at: Optional[datetime] = None
+    if completed_runs:
+        last_success_at = max(item["completed_at"] for item in completed_runs)
+
+    hours_since_last_success: Optional[float] = None
+    overdue_by_hours: Optional[float] = None
+    if last_success_at is not None:
+        hours_since_last_success = (now - last_success_at).total_seconds() / 3600.0
+        overdue_by_hours = max(0.0, hours_since_last_success - 24.0)
+
+    recent_completed_dates: List[str] = []
+    if completed_runs:
+        recent_completed_dates = sorted({item["completed_at"].date().isoformat() for item in completed_runs})
+
+    window_end = now.date() - timedelta(days=1)
+    window_start = window_end - timedelta(days=max(0, window_days - 1))
+    expected_dates = {
+        (window_start + timedelta(days=offset)).isoformat()
+        for offset in range(max(0, window_days))
+        if window_start + timedelta(days=offset) <= window_end
+    }
+    observed_dates = {
+        item["completed_at"].date().isoformat()
+        for item in completed_runs
+        if window_start <= item["completed_at"].date() <= window_end
+    }
+
+    state = "missing"
+    if last_success_at is not None:
+        state = "healthy" if hours_since_last_success is not None and hours_since_last_success <= overdue_grace_hours else "overdue"
+
+    return {
+        "state": state,
+        "expected_interval_hours": 24,
+        "overdue_grace_hours": overdue_grace_hours,
+        "current_utc_date": now.date().isoformat(),
+        "last_success_at": last_success_at.isoformat() if last_success_at else None,
+        "hours_since_last_success": round(hours_since_last_success, 2) if hours_since_last_success is not None else None,
+        "overdue_by_hours": round(overdue_by_hours, 2) if overdue_by_hours is not None else None,
+        "recent_completed_dates": recent_completed_dates,
+        "completed_dates_last_window": sorted(observed_dates),
+        "missing_completed_dates_last_window": sorted(expected_dates - observed_dates),
+        "window_days": window_days,
+    }
 
 
 def get_unaudited_scripts(*, limit: int = 50) -> List[Dict[str, Any]]:
