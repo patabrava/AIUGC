@@ -283,6 +283,59 @@ def test_submit_extension_hop_uses_vertex_doc_shape(monkeypatch):
     assert payload["output_gcs_uri"] == "gs://bucket/output/"
 
 
+def test_submit_extension_hop_stages_vertex_data_uri_to_gcs(monkeypatch):
+    """Vertex extension must stage data URI sources into GCS before submit."""
+    from workers.video_poller import _submit_extension_hop
+    from app.core.config import get_settings
+
+    previous_video_data = {
+        "video_uri": "data:video/mp4;base64,AAAA",
+        "mime_type": "video/mp4",
+    }
+    post = {
+        "id": "post-vertex-stage",
+        "video_provider": "vertex_ai",
+        "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 1,
+            "veo_extension_hops_completed": 0,
+            "veo_segments": ["Erster Satz.", "Zweiter Satz."],
+            "veo_segments_total": 2,
+            "veo_current_segment_index": 0,
+            "operation_ids": ["op-base"],
+            "chain_status": "submitted",
+            "generated_seconds": 4,
+            "veo_base_seconds": 4,
+            "veo_extension_seconds": 7,
+            "requested_aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "requested_resolution": "720p",
+            "requested_size": "720x1280",
+        },
+    }
+
+    mock_vertex = MagicMock()
+    mock_vertex.submit_video_extension.return_value = {
+        "operation_id": "op-ext-stage",
+        "status": "submitted",
+    }
+    mock_supabase = MagicMock()
+    mock_supabase.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vertex_ai_output_gcs_uri", "gs://bucket/output/")
+    monkeypatch.setattr("workers.video_poller._stage_vertex_video_bytes_to_gcs", lambda **kwargs: "gs://bucket/output/vertex-input/post-vertex-stage/1.mp4")
+
+    with patch("workers.video_poller.get_vertex_ai_client", return_value=mock_vertex), \
+         patch("workers.video_poller.get_supabase", return_value=mock_supabase), \
+         patch("workers.video_poller.ensure_immediate_submit_slot", return_value={"ok": True}):
+        _submit_extension_hop(post, correlation_id="test-vertex-stage", previous_video_data=previous_video_data)
+
+    payload = mock_vertex.submit_video_extension.call_args.kwargs
+    assert payload["video_uri"] == "gs://bucket/output/vertex-input/post-vertex-stage/1.mp4"
+
+
 def test_submit_extension_hop_reuses_existing_veo_seed():
     """Extension hops must reuse the base Veo seed when one exists."""
     from workers.video_poller import _submit_extension_hop

@@ -61,6 +61,27 @@ def test_resolve_video_submission_plan_routes_duration_tier_to_veo_extended():
     assert plan["profile"].route == "veo_extended"
 
 
+def test_resolve_video_submission_plan_preserves_vertex_provider_for_duration_routed_batches():
+    batch = {"id": "vertex-batch", "target_length_tier": 32, "video_pipeline_route": "veo_extended"}
+
+    plan = video_handlers._resolve_video_submission_plan(
+        batch=batch,
+        requested_provider="vertex_ai",
+        requested_seconds=32,
+        aspect_ratio="9:16",
+        resolution="720p",
+        size="720x1280",
+    )
+
+    assert plan["provider"] == "vertex_ai"
+    assert plan["seconds"] == 32
+    assert plan["provider_target_seconds"] == 29
+    assert plan["resolution"] == "720p"
+    assert plan["requested_size"] == "720x1280"
+    assert plan["provider_requested_size"] == "720x1280"
+    assert plan["profile"].route == "veo_extended"
+
+
 def test_build_submission_metadata_initializes_extension_chain():
     batch = {"id": "new-batch", "target_length_tier": 32, "video_pipeline_route": "veo_extended"}
     plan = video_handlers._resolve_video_submission_plan(
@@ -84,7 +105,7 @@ def test_build_submission_metadata_initializes_extension_chain():
 
     assert metadata["target_length_tier"] == 32
     assert metadata["video_pipeline_route"] == "veo_extended"
-    assert metadata["provider_target_seconds"] == 32
+    assert metadata["provider_target_seconds"] == 29
     assert metadata["generated_seconds"] == 0
     assert metadata["operation_ids"] == ["operations/abc"]
     assert metadata["requested_aspect_ratio"] == "9:16"
@@ -146,7 +167,7 @@ def test_build_veo_extended_base_prompt_packs_to_four_segments_for_legacy_32s():
     assert seg_meta["veo_chain_shortened_to_available_segments"] is False
 
 
-def test_build_veo_extended_base_prompt_packs_five_sentences_into_four_segments_for_legacy_32s():
+def test_build_veo_extended_base_prompt_packs_five_sentences_into_four_segments_for_efficient_32s():
     seed_data = {
         "script": (
             "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie. "
@@ -165,15 +186,14 @@ def test_build_veo_extended_base_prompt_packs_five_sentences_into_four_segments_
         target_length_tier=32,
     )
 
-    assert "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie." in prompt
-    assert "Physio fokussiert auf koerperliche Funktionen und Beweglichkeit" not in prompt
+    assert "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie. Physio fokussiert auf koerperliche Funktionen und Beweglichkeit" in prompt
     assert len(seg_meta["veo_segments"]) == 4
     assert seg_meta["veo_segments_total"] == 4
     assert seg_meta["veo_segments"] == [
-        "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie.",
-        "Physio fokussiert auf koerperliche Funktionen und Beweglichkeit, waehrend Ergo handlungsorientiert deine Selbststaendigkeit im Alltag staerkt.",
-        "Durch Alltagstraining lernst du, Routinetaetigkeiten wieder selbst zu bewaeltigen.",
-        "Die Kosten uebernehmen primaer die Krankenkassen, du leistest allerdings die gesetzliche Zuzahlung. Seit 2024 bietet die Blankoverordnung Therapeuten mehr Flexibilitaet fuer deine Behandlung.",
+        "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie. Physio fokussiert auf koerperliche Funktionen und Beweglichkeit, waehrend",
+        "Ergo handlungsorientiert deine Selbststaendigkeit im Alltag staerkt. Durch Alltagstraining lernst du, Routinetaetigkeiten wieder",
+        "selbst zu bewaeltigen. Die Kosten uebernehmen primaer die Krankenkassen, du leistest allerdings die",
+        "gesetzliche Zuzahlung. Seit 2024 bietet die Blankoverordnung Therapeuten mehr Flexibilitaet fuer deine Behandlung.",
     ]
 
 
@@ -195,7 +215,10 @@ def test_build_veo_extended_base_prompt_packs_to_two_segments_for_efficient_16s(
     assert "Erster kurzer Satz. Zweiter kurzer Satz." in prompt
     assert len(seg_meta["veo_segments"]) == 2
     assert seg_meta["veo_segments_total"] == 2
-    assert seg_meta["veo_segments"][-1] == "Dritter Satz mit etwas mehr Inhalt."
+    assert seg_meta["veo_segments"] == [
+        "Erster kurzer Satz. Zweiter kurzer Satz. Dritter",
+        "Satz mit etwas mehr Inhalt.",
+    ]
 
 
 def test_build_veo_extended_base_prompt_uses_canonical_segment_visual_contract():
@@ -234,10 +257,10 @@ def test_build_veo_extended_base_prompt_uses_canonical_segment_visual_contract()
     assert "After the final word, the audio gently settles into a quiet room tone." not in prompt
     assert "no settling room tone" in prompt
     assert "subtitles, captions, watermark" not in prompt
-    assert seg_meta["veo_segments"] == ["Erster Satz. Zweiter Satz.", "Dritter Satz."]
+    assert seg_meta["veo_segments"] == ["Erster Satz. Zweiter", "Satz. Dritter Satz."]
 
 
-def test_build_veo_extended_base_prompt_uses_time_budgeted_packing_for_legacy_32s():
+def test_build_veo_extended_base_prompt_uses_time_budgeted_packing_for_efficient_32s():
     seed_data = {
         "script": (
             "Als Rollstuhlnutzer kennst du das: Das gesuchte Produkt steht unerreichbar hoch im Supermarktregal. "
@@ -256,20 +279,20 @@ def test_build_veo_extended_base_prompt_uses_time_budgeted_packing_for_legacy_32
     )
 
     assert seg_meta["veo_segments"] == [
-        "Als Rollstuhlnutzer kennst du das: Das gesuchte Produkt steht unerreichbar hoch im Supermarktregal.",
-        "Spezielle Hubrollstühle mit stufenloser Gasdruckfederung und ergonomische Greifzangen erleichtern den Zugriff enorm.",
-        "Für enge Gänge sind ankoppelbare Rollstuhl Einkaufswagen die beste Wahl.",
-        "Seit 2025 verbessert das Barrierefreiheitsstärkungsgesetz Terminals, aber Übergangsfristen bremsen die Inklusion noch. Mit diesen Hacks meisterst du vertikale Barrieren beim Einkaufen.",
+        "Als Rollstuhlnutzer kennst du das: Das gesuchte Produkt steht unerreichbar hoch im Supermarktregal. Spezielle Hubrollstühle mit",
+        "stufenloser Gasdruckfederung und ergonomische Greifzangen erleichtern den Zugriff enorm. Für enge Gänge sind",
+        "ankoppelbare Rollstuhl Einkaufswagen die beste Wahl. Seit 2025 verbessert das Barrierefreiheitsstärkungsgesetz Terminals, aber",
+        "Übergangsfristen bremsen die Inklusion noch. Mit diesen Hacks meisterst du vertikale Barrieren beim Einkaufen.",
     ]
     assert seg_meta["veo_segment_time_windows"] == [
-        {"segment_index": 0, "start_seconds": 0.0, "end_seconds": 4.0, "budget_seconds": 4},
-        {"segment_index": 1, "start_seconds": 4.0, "end_seconds": 11.0, "budget_seconds": 7},
-        {"segment_index": 2, "start_seconds": 11.0, "end_seconds": 18.0, "budget_seconds": 7},
-        {"segment_index": 3, "start_seconds": 18.0, "end_seconds": 25.0, "budget_seconds": 7},
+        {"segment_index": 0, "start_seconds": 0.0, "end_seconds": 8.0, "budget_seconds": 8},
+        {"segment_index": 1, "start_seconds": 8.0, "end_seconds": 15.0, "budget_seconds": 7},
+        {"segment_index": 2, "start_seconds": 15.0, "end_seconds": 22.0, "budget_seconds": 7},
+        {"segment_index": 3, "start_seconds": 22.0, "end_seconds": 29.0, "budget_seconds": 7},
     ]
 
 
-def test_build_veo_extended_base_prompt_uses_legacy_32s_visual_contract():
+def test_build_veo_extended_base_prompt_uses_efficient_32s_visual_contract():
     seed_data = {
         "script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz. Fuenfter Satz.",
     }
@@ -287,30 +310,22 @@ def test_build_veo_extended_base_prompt_uses_legacy_32s_visual_contract():
     )
 
     assert (
-        "38-year-old German woman with long, light brown hair with natural blonde highlights, "
-        "straight with a slight natural wave, parted slightly off-center to the left, falling "
-        "softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle "
-        "crow's feet at the outer corners; naturally full, soft-arched eyebrows in a light brown "
-        "shade; a straight nose with a gently rounded tip; medium-full lips with a natural "
-        "muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft "
-        "forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm "
-        "light-medium skin tone with neutral undertones and smooth natural skin texture; slim "
-        "build with relaxed upright posture."
+        "38-year-old German woman with shoulder-length light brown hair with subtle blonde "
+        "highlights, hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural "
+        "expression."
     ) in prompt
     assert (
-        "The woman is sitting on a wheelchair in a brightly lit modern bedroom with pink walls. "
-        "Clean, minimal décor. Natural daylight streams through an unseen window camera-right, "
-        "supplemented by soft ambient lighting creating even, flattering illumination across the "
-        "space. The wheelchair is partially visible in the frame."
+        "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
+        "soft flattering indoor light, and natural skin texture."
     ) in prompt
-    assert "The camera is handheld but stable" in prompt
+    assert "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie distance." in prompt
     assert "Edited character with novelty accessory" not in prompt
     assert "Edited scene" not in prompt
     assert seg_meta["veo_segments"] == [
-        "Erster Satz.",
-        "Zweiter Satz.",
+        "Erster Satz. Zweiter Satz.",
         "Dritter Satz.",
-        "Vierter Satz. Fuenfter Satz.",
+        "Vierter Satz.",
+        "Fuenfter Satz.",
     ]
 
 
@@ -339,7 +354,7 @@ def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():
 
     assert plan["duration_routed"] is True
     assert plan["provider"] == "veo_3_1"
-    assert plan["profile"].veo_extension_hops == 4
+    assert plan["profile"].veo_extension_hops == 3
     assert plan["resolution"] == "720p"
 
     metadata = video_handlers._build_submission_metadata(
@@ -407,15 +422,15 @@ def test_efficient_long_route_applies_to_16s_and_32s(monkeypatch):
     assert profile_16.veo_extension_hops == 1
     assert profile_16.prompt1_sentence_guidance == "ZWEI natuerliche Sprechbloecke"
     assert profile_16.prompt2_sentence_guidance == "2 Sprechbloecke"
-    assert profile_32.provider_target_seconds == 32
-    assert profile_32.veo_base_seconds == 4
-    assert profile_32.veo_extension_hops == 4
-    assert profile_32.prompt1_sentence_guidance == "FUENF oder SECHS vollstaendige Saetze"
-    assert profile_32.prompt2_sentence_guidance == "5-6 Saetze"
-    assert metadata_32["veo_base_seconds"] == 4
-    assert metadata_32["veo_extension_hops"] == 4
+    assert profile_32.provider_target_seconds == 29
+    assert profile_32.veo_base_seconds == 8
+    assert profile_32.veo_extension_hops == 3
+    assert profile_32.prompt1_sentence_guidance == "VIER natuerliche Sprechbloecke"
+    assert profile_32.prompt2_sentence_guidance == "4 Sprechbloecke"
+    assert metadata_32["veo_base_seconds"] == 8
+    assert metadata_32["veo_extension_hops"] == 3
     assert get_profile_request_cost_units(profile_16) == 2
-    assert get_profile_request_cost_units(profile_32) == 5
+    assert get_profile_request_cost_units(profile_32) == 4
 
     monkeypatch.setattr(settings, "veo_enable_efficient_long_route", False)
 
@@ -425,12 +440,12 @@ def test_efficient_long_route_applies_to_16s_and_32s(monkeypatch):
     assert legacy_16.provider_target_seconds == 18
     assert legacy_16.veo_base_seconds == 4
     assert legacy_16.veo_extension_hops == 2
-    assert legacy_32.provider_target_seconds == 32
-    assert legacy_32.veo_base_seconds == 4
-    assert legacy_32.veo_extension_hops == 4
+    assert legacy_32.provider_target_seconds == 29
+    assert legacy_32.veo_base_seconds == 8
+    assert legacy_32.veo_extension_hops == 3
 
 
-def test_efficient_long_route_can_be_disabled_for_legacy_32s_fallback(monkeypatch):
+def test_efficient_long_route_stays_enabled_for_32s(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "veo_enable_efficient_long_route", False)
 
@@ -438,7 +453,7 @@ def test_efficient_long_route_can_be_disabled_for_legacy_32s_fallback(monkeypatc
     profile_32 = get_duration_profile(32)
 
     assert video_handlers._uses_actual_efficient_long_route(profile_16) is False
-    assert video_handlers._uses_actual_efficient_long_route(profile_32) is False
+    assert video_handlers._uses_actual_efficient_long_route(profile_32) is True
 
 
 def test_veo_seed_is_only_used_for_actual_efficient_long_route(monkeypatch):
@@ -449,7 +464,7 @@ def test_veo_seed_is_only_used_for_actual_efficient_long_route(monkeypatch):
     profile_32 = get_duration_profile(32)
 
     assert video_handlers._should_assign_veo_seed(provider="veo_3_1", profile=profile_16) is True
-    assert video_handlers._should_assign_veo_seed(provider="veo_3_1", profile=profile_32) is False
+    assert video_handlers._should_assign_veo_seed(provider="veo_3_1", profile=profile_32) is True
     assert video_handlers._should_assign_veo_seed(provider="sora", profile=profile_16) is False
 
 

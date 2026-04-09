@@ -1212,6 +1212,56 @@ def _decode_vertex_video_uri(video_uri: str) -> bytes:
     return video_uri
 
 
+def _stage_vertex_video_bytes_to_gcs(
+    *,
+    video_bytes: bytes,
+    correlation_id: str,
+    post_id: str,
+    object_name: str,
+) -> str:
+    settings = get_settings()
+    output_gcs_uri = (settings.vertex_ai_output_gcs_uri or "").strip()
+    if not output_gcs_uri.startswith("gs://"):
+        raise ValidationError(
+            "VERTEX_AI_OUTPUT_GCS_URI must be set to a gs:// bucket prefix for Vertex extension staging.",
+            details={"vertex_ai_output_gcs_uri": output_gcs_uri},
+        )
+
+    bucket_and_prefix = output_gcs_uri[5:]
+    bucket, _, prefix = bucket_and_prefix.partition("/")
+    if not bucket:
+        raise ValidationError(
+            "VERTEX_AI_OUTPUT_GCS_URI must include a bucket name.",
+            details={"vertex_ai_output_gcs_uri": output_gcs_uri},
+        )
+
+    normalized_object_name = object_name.strip().lstrip("/")
+    if prefix:
+        normalized_object_name = f"{prefix.rstrip('/')}/{normalized_object_name}"
+
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/devstorage.read_write"]
+    )
+    if credentials.expired or not credentials.token:
+        credentials.refresh(Request())
+
+    url = (
+        f"https://storage.googleapis.com/upload/storage/v1/b/{bucket}/o"
+        f"?uploadType=media&name={quote(normalized_object_name, safe='')}"
+    )
+    response = httpx.post(
+        url,
+        content=video_bytes,
+        headers={
+            "Authorization": f"Bearer {credentials.token}",
+            "Content-Type": "video/mp4",
+        },
+        timeout=120.0,
+    )
+    response.raise_for_status()
+    return f"gs://{bucket}/{normalized_object_name}"
+
+
 def _store_completed_video(
     *,
     post_id: str,
@@ -1531,6 +1581,14 @@ def _submit_extension_hop(
 
     video_uri = (previous_video_data or {}).get("video_uri")
     video_mime_type = (previous_video_data or {}).get("mime_type") or "video/mp4"
+    if video_uri and video_uri.startswith("data:"):
+        video_bytes = _decode_vertex_video_uri(video_uri)
+        video_uri = _stage_vertex_video_bytes_to_gcs(
+            video_bytes=video_bytes,
+            correlation_id=correlation_id,
+            post_id=post_id,
+            object_name=f"vertex-input/{post_id}/{hops_completed + 1}.mp4",
+        )
     output_gcs_uri = (
         metadata.get("vertex_output_gcs_uri")
         or settings.vertex_ai_output_gcs_uri

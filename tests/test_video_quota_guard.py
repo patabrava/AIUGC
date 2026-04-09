@@ -264,9 +264,9 @@ def test_duration_profile_cost_switches_when_experiment_flag_enabled(monkeypatch
     profile_32 = get_duration_profile(32)
 
     assert profile_16.veo_base_seconds == 8
-    assert profile_32.veo_base_seconds == 4
+    assert profile_32.veo_base_seconds == 8
     assert chain_cost_units(profile_16, provider="veo_3_1") == 2
-    assert chain_cost_units(profile_32, provider="veo_3_1") == 5
+    assert chain_cost_units(profile_32, provider="veo_3_1") == 4
 
 
 def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):

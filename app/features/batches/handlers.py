@@ -395,7 +395,11 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "should_poll_prompts": batch_state == BatchState.S5_PROMPTS_BUILT.value,
-        "should_poll_videos": active_video_poll_count > 0,
+        "should_poll_videos": batch_state in {
+            BatchState.S4_SCRIPTED.value,
+            BatchState.S5_PROMPTS_BUILT.value,
+            BatchState.S6_QA.value,
+        } and active_video_poll_count > 0,
         "progress_states": [
             {"code": BatchState.S1_SETUP.value, "label": "Setup"},
             {"code": BatchState.S2_SEEDED.value, "label": "Seeded"},
