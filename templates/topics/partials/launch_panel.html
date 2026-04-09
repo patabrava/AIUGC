@@ -1,26 +1,26 @@
 {# Right panel default state — new topic input, random, placeholder #}
 <div id="launch-panel-default">
-    <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Launch Research</div>
-    <h2 class="mt-1 text-xl font-black text-slate-900">Generate Scripts</h2>
-    <p class="mt-2 text-sm text-slate-500">Pick a topic from the list, enter a new one, or let the system choose.</p>
+    <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#1C2740]/60">Launch Research</div>
+    <h2 class="mt-1 text-xl font-black text-[#1C2740]">Generate Scripts</h2>
+    <p class="mt-2 text-sm text-[#1C2740]/60">Pick a topic from the list, enter a new one, or let the system choose.</p>
 
     {# New topic input #}
     <div class="mt-6">
-        <label class="block text-xs font-semibold uppercase tracking-wide text-slate-600">Research a new topic</label>
+        <label class="block text-xs font-semibold uppercase tracking-wide text-[#1C2740]">Research a new topic</label>
         <form class="mt-2 flex gap-2"
               hx-get="/topics/match"
               hx-target="#launch-panel"
               hx-swap="innerHTML">
             <input name="q" type="text" placeholder="Type a topic..."
-                   class="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
-            <button type="submit" class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800">
+                   class="flex-1 rounded-xl border border-[#1C2740]/10 bg-white px-4 py-3 text-sm text-[#1C2740] placeholder:text-[#1C2740]/60 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200">
+            <button type="submit" class="rounded-xl brand-button-primary px-5 py-3 text-sm font-bold transition brand-focus text-white">
                 Go
             </button>
         </form>
     </div>
 
-    <div class="my-5 flex items-center gap-3 text-xs text-slate-400">
-        <div class="h-px flex-1 bg-slate-200"></div>or<div class="h-px flex-1 bg-slate-200"></div>
+    <div class="my-5 flex items-center gap-3 text-xs text-[#1C2740]/60">
+        <div class="h-px flex-1 bg-[#1C2740]/10"></div>or<div class="h-px flex-1 bg-[#1C2740]/10"></div>
     </div>
 
     {# Random button #}
@@ -28,16 +28,16 @@
             hx-get="/topics/random"
             hx-target="#launch-panel"
             hx-swap="innerHTML"
-            class="w-full rounded-xl bg-amber-400 px-4 py-3.5 text-sm font-bold text-slate-950 transition hover:bg-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-200">
+            class="w-full rounded-xl brand-button-accent px-4 py-3.5 text-sm font-bold text-[#1C2740] transition focus:outline-none focus-visible:ring-2 brand-focus text-white">
         🎲 Pick Random Topic (least coverage)
     </button>
 
-    <div class="my-5 flex items-center gap-3 text-xs text-slate-400">
-        <div class="h-px flex-1 bg-slate-200"></div>or<div class="h-px flex-1 bg-slate-200"></div>
+    <div class="my-5 flex items-center gap-3 text-xs text-[#1C2740]/60">
+        <div class="h-px flex-1 bg-[#1C2740]/10"></div>or<div class="h-px flex-1 bg-[#1C2740]/10"></div>
     </div>
 
     {# Placeholder #}
-    <div class="rounded-2xl border-2 border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+    <div class="rounded-2xl border-2 border-dashed border-[#1C2740]/10 px-4 py-8 text-center text-sm text-[#1C2740]/60">
         <div class="text-lg">←</div>
         <div class="mt-1">Click a topic from the list</div>
     </div>

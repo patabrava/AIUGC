@@ -12,14 +12,14 @@
     <div class="relative z-10 w-full max-w-4xl bg-white rounded-xl shadow-2xl border border-gray-200 p-6">
         <div class="flex items-start justify-between gap-4">
             <div>
-                <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">Prompt Details</p>
+                <p class="text-xs font-semibold uppercase tracking-wide text-[#006AAB]">Prompt Details</p>
                 <h5 class="mt-1 text-lg font-semibold text-gray-900">Video prompt for {{ post.topic_title }}</h5>
                 <p class="mt-2 text-sm text-gray-500" x-show="!editing">Same structure, expanded for verification and copy.</p>
                 <p class="mt-2 text-sm text-gray-500" x-show="editing">Edit the structured sections below, then save to rebuild the stored prompt text.</p>
             </div>
             <button
                 type="button"
-                class="inline-flex items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="inline-flex items-center justify-center rounded-full border border-gray-200 text-[var(--lippe-deep-blue)] hover:text-gray-900 hover:border-gray-300 focus:outline-none focus:ring-2"
                 @click="close()"
                 aria-label="Close expanded prompt"
             >
@@ -39,43 +39,43 @@
             <div x-show="editing" class="grid gap-4">
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Character</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-28 whitespace-pre-wrap" x-model="draft.character"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-28 whitespace-pre-wrap" x-model="draft.character"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Style</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-20 whitespace-pre-wrap" x-model="draft.style"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-20 whitespace-pre-wrap" x-model="draft.style"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Action</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-32 whitespace-pre-wrap" x-model="draft.action"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-32 whitespace-pre-wrap" x-model="draft.action"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Scene</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24 whitespace-pre-wrap" x-model="draft.scene"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-24 whitespace-pre-wrap" x-model="draft.scene"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Cinematography</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24 whitespace-pre-wrap" x-model="draft.cinematography"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-24 whitespace-pre-wrap" x-model="draft.cinematography"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Dialogue</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24 whitespace-pre-wrap" x-model="draft.dialogue"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-24 whitespace-pre-wrap" x-model="draft.dialogue"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Ending Directive</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24 whitespace-pre-wrap" x-model="draft.ending"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-24 whitespace-pre-wrap" x-model="draft.ending"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Audio Block</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24 whitespace-pre-wrap" x-model="draft.audio_block"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-24 whitespace-pre-wrap" x-model="draft.audio_block"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">Universal Negatives</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-28 whitespace-pre-wrap" x-model="draft.universal_negatives"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-28 whitespace-pre-wrap" x-model="draft.universal_negatives"></textarea>
                 </div>
                 <div>
                     <label class="text-xs font-semibold uppercase tracking-wide text-gray-600">VEO Negative Prompt</label>
-                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24 whitespace-pre-wrap" x-model="draft.veo_negative_prompt"></textarea>
+                    <textarea class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] min-h-24 whitespace-pre-wrap" x-model="draft.veo_negative_prompt"></textarea>
                 </div>
             </div>
 
@@ -84,7 +84,7 @@
         <div class="mt-4 flex flex-wrap justify-end gap-2">
             <button
                 type="button"
-                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-gray-200 text-[var(--lippe-deep-blue)] hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300"
                 x-show="!editing"
                 @click="startEditing()"
             >
@@ -92,7 +92,7 @@
             </button>
             <button
                 type="button"
-                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-gray-200 text-[var(--lippe-deep-blue)] hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300"
                 x-show="editing"
                 @click="cancelEditing()"
             >
@@ -100,7 +100,7 @@
             </button>
             <button
                 type="button"
-                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md brand-button-primary focus:outline-none focus:ring-2 focus:ring-offset-2 brand-focus text-white"
                 x-show="editing"
                 :disabled="saving"
                 @click="save()"
@@ -109,7 +109,7 @@
             </button>
             <button
                 type="button"
-                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium brand-button-primary rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 brand-focus text-white"
                 x-show="!editing"
                 @click="close()"
             >

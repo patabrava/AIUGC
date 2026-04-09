@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}FLOW-FORGE UGC System{% endblock %}</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236750A4'/%3E%3Cpath d='M14 44V20h8v16h16v8H14zm18 0V20h8v16h10v8H32z' fill='white'/%3E%3C/svg%3E">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23006AAB'/%3E%3Cpath d='M14 44V20h8v16h16v8H14zm18 0V20h8v16h10v8H32z' fill='white'/%3E%3C/svg%3E">
     {% block head_extra %}{% endblock %}
     
     <!-- Tailwind CSS -->
@@ -23,7 +23,7 @@
     <style>
         /* Material Design 3 inspired colors */
         :root {
-            --primary: #6750A4;
+            --primary: #006AAB;
             --primary-container: #EADDFF;
             --on-primary: #FFFFFF;
             --on-primary-container: #21005D;
@@ -56,10 +56,7 @@
                             loading="lazy"
                         >
                     </a>
-                    <div class="hidden lg:block">
-                        <p class="font-brand-heading text-xs font-semibold uppercase tracking-[0.32em] text-[#006AAB]">Lippe Lift</p>
-                        <p class="text-sm text-[#1C2740]/72">Operations</p>
-                    </div>
+
                 </div>
                 
                 <!-- Desktop Navigation -->
@@ -68,7 +65,7 @@
                         type="button"
                         @click="$store.accountsHub?.open()"
                         x-cloak
-                        class="inline-flex items-center gap-3 rounded-full border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        class="inline-flex items-center gap-3 rounded-full border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] transition hover:border-[#006AAB]/40 hover:bg-[#006AAB]/5 hover:text-[#006AAB] focus:outline-none focus:ring-2 focus:ring-offset-2"
                     >
                         <span class="flex items-center gap-1.5">
                             <span class="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-600 ring-1 ring-gray-200">
@@ -86,7 +83,7 @@
                     <a href="/batches" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">Batches</a>
                     <a href="/docs" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">API Docs</a>
                     <form method="post" action="/auth/logout" class="inline">
-                        <button type="submit" class="text-gray-400 hover:text-red-600 px-3 py-2 rounded-md text-sm font-medium transition" title="Log out">
+                        <button type="submit" class="text-gray-400 hover:text-[var(--lippe-orange)] px-3 py-2 rounded-md text-sm font-medium transition" title="Log out">
                             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
                             </svg>
@@ -99,7 +96,7 @@
                     <button
                         @click="mobileMenuOpen = !mobileMenuOpen"
                         type="button"
-                        class="inline-flex items-center justify-center p-2 rounded-md text-gray-700 hover:text-purple-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-purple-500 transition"
+                        class="inline-flex items-center justify-center p-2 rounded-md text-[var(--lippe-deep-blue)] hover:text-[#006AAB] hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset transition"
                         aria-expanded="false"
                         aria-label="Toggle navigation menu"
                     >
@@ -119,21 +116,21 @@
             <div class="px-2 pt-2 pb-3 space-y-1">
                 <a
                     href="/topics"
-                    class="block text-gray-700 hover:text-purple-700 hover:bg-purple-50 px-3 py-2 rounded-md text-base font-medium transition"
+                    class="block text-[var(--lippe-deep-blue)] hover:text-[#006AAB] hover:bg-[#006AAB]/5 px-3 py-2 rounded-md text-base font-medium transition"
                     @click="mobileMenuOpen = false"
                 >
                     Topics
                 </a>
                 <a
                     href="/batches"
-                    class="block text-gray-700 hover:text-purple-700 hover:bg-purple-50 px-3 py-2 rounded-md text-base font-medium transition"
+                    class="block text-[var(--lippe-deep-blue)] hover:text-[#006AAB] hover:bg-[#006AAB]/5 px-3 py-2 rounded-md text-base font-medium transition"
                     @click="mobileMenuOpen = false"
                 >
                     Batches
                 </a>
                 <a
                     href="/docs"
-                    class="block text-gray-700 hover:text-purple-700 hover:bg-purple-50 px-3 py-2 rounded-md text-base font-medium transition"
+                    class="block text-[var(--lippe-deep-blue)] hover:text-[#006AAB] hover:bg-[#006AAB]/5 px-3 py-2 rounded-md text-base font-medium transition"
                     @click="mobileMenuOpen = false"
                 >
                     API Docs
@@ -142,7 +139,7 @@
                     type="button"
                     x-cloak
                     @click="mobileMenuOpen = false; $store.accountsHub?.open()"
-                    class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base font-medium text-gray-700 transition hover:bg-purple-50 hover:text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base font-medium text-[var(--lippe-deep-blue)] transition hover:bg-[#006AAB]/5 hover:text-[#006AAB] focus:outline-none focus:ring-2"
                 >
                     <span class="flex items-center gap-1.5">
                         <span class="inline-flex h-2.5 w-2.5 rounded-full" :class="$store.accountsHub?.providerDot('meta') || 'bg-amber-400'"></span>
@@ -153,7 +150,7 @@
                 <form method="post" action="/auth/logout">
                     <button
                         type="submit"
-                        class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base font-medium text-gray-700 transition hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+                        class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base font-medium text-[var(--lippe-deep-blue)] transition hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
                     >
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>

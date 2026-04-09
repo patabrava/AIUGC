@@ -33,7 +33,7 @@
     ✓ Completed
 </span>
 {% elif video_status == "extended_processing" %}
-<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
     ⏳ Extending
 </span>
 {% elif video_status == "extended_submitted" %}
@@ -41,11 +41,11 @@
     ⏳ Extension Submitted
 </span>
 {% elif video_status == "caption_pending" %}
-<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
     ⏳ Adding Captions
 </span>
 {% elif video_status == "caption_processing" %}
-<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
     ⏳ Burning Captions
 </span>
 {% elif video_status == "caption_failed" %}
@@ -57,7 +57,7 @@
     ⟳ Retrying ({{ rai_retry_count }}/3)
 </span>
 {% elif video_status == "processing" %}
-<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
     ⏳ Processing
 </span>
 {% elif video_status == "submitted" %}

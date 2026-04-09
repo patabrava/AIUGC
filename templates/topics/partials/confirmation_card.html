@@ -2,8 +2,8 @@
 {% if topic %}
 <div class="rounded-2xl border border-amber-200 bg-amber-50 p-5">
     <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-800">Ready to launch</div>
-    <h3 class="mt-2 text-lg font-black text-slate-900">{{ topic.title }}</h3>
-    <p class="mt-1 text-sm text-slate-600">
+    <h3 class="mt-2 text-lg font-black text-[#1C2740]">{{ topic.title }}</h3>
+    <p class="mt-1 text-sm text-[#1C2740]">
         {{ topic.post_type or 'unknown' }} · {{ topic.script_count }} existing script{{ 's' if topic.script_count != 1 else '' }}
     </p>
     <form method="post" action="/topics/runs" class="mt-4 flex gap-3">
@@ -13,7 +13,7 @@
         {% if topic.is_new %}
         <input type="hidden" name="new_topic_title" value="{{ topic.title }}">
         {% endif %}
-        <button type="submit" class="flex-1 rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
+        <button type="submit" class="flex-1 rounded-xl brand-button-primary px-4 py-3 text-sm font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E58434] brand-focus text-white">
             Launch Research
         </button>
         <button type="button"
@@ -21,13 +21,13 @@
                 hx-target="#launch-panel"
                 hx-select="#launch-panel-default"
                 hx-swap="innerHTML"
-                class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+                class="rounded-xl border border-[#1C2740]/10 bg-white px-4 py-3 text-sm font-medium text-[var(--lippe-deep-blue)] opacity-60 transition hover:bg-[#FFF2E2]/50">
             Cancel
         </button>
     </form>
 </div>
 {% else %}
-<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+<div class="rounded-2xl border border-dashed border-[#1C2740]/10 bg-[#FFF2E2]/50 px-4 py-8 text-center text-sm text-[#1C2740]/60">
     {% if research_triggered %}
     No topics are available right now. A new research run is being started for {{ post_type or 'value' }} at {{ target_length_tier or 32 }}s.
     {% else %}

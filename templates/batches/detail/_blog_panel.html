@@ -11,10 +11,10 @@
     <div class="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div class="flex items-center gap-3">
             <h3 class="text-base font-semibold text-gray-100">Blog Posts</h3>
-            <span class="bg-purple-500/20 text-purple-400 text-xs font-semibold px-2 py-0.5 rounded-full"
+            <span class="bg-[#006AAB]/20 text-[#006AAB]/80 text-xs font-semibold px-2 py-0.5 rounded-full"
                   x-text="posts.length + ' of {{ all_posts | length }} posts'"></span>
         </div>
-        <button class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+        <button class="brand-button-primary text-sm font-medium px-4 py-2 rounded-lg transition brand-focus text-white"
                 type="button"
                 @click="generateAllDrafts()">
             Generate All Drafts
@@ -27,27 +27,17 @@
                  @click="toggleExpand(post.id)">
                 <div class="flex items-center gap-3 min-w-0 flex-1">
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase flex-shrink-0"
-                          :class="{
-                              'bg-purple-600 text-white': post.post_type === 'value',
-                              'bg-sky-500 text-white': post.post_type === 'lifestyle',
-                              'bg-amber-500 text-white': post.post_type === 'product'
-                          }"
+                          :class="{ 'bg-[#006AAB] text-white': post.post_type === 'value', 'bg-sky-500 text-white': post.post_type === 'lifestyle', 'bg-amber-500 text-white': post.post_type === 'product' }"
                           x-text="post.post_type"></span>
                     <span class="text-sm text-gray-200 truncate"
                           x-text="post.blog_content?.name || post.topic_title"></span>
                 </div>
                 <div class="flex items-center gap-3 flex-shrink-0">
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full"
-                          :class="{
-                              'bg-green-500/15 text-green-400': effectiveStatus(post) === 'draft' || effectiveStatus(post) === 'published',
-                              'bg-blue-500/15 text-blue-400': effectiveStatus(post) === 'scheduled',
-                              'bg-amber-500/15 text-amber-400': effectiveStatus(post) === 'pending',
-                              'bg-purple-500/15 text-purple-400': effectiveStatus(post) === 'generating' || effectiveStatus(post) === 'publishing',
-                              'bg-red-500/15 text-red-400': effectiveStatus(post) === 'failed',
-                          }"
+                          :class="{ 'bg-green-500/15 text-green-400': effectiveStatus(post) === 'draft' || effectiveStatus(post) === 'published', 'bg-blue-500/15 text-blue-400': effectiveStatus(post) === 'scheduled', 'bg-amber-500/15 text-amber-400': effectiveStatus(post) === 'pending', 'bg-[#006AAB]/15 text-[#006AAB]/80': effectiveStatus(post) === 'generating' || effectiveStatus(post) === 'publishing', 'bg-red-500/15 text-red-400': effectiveStatus(post) === 'failed', }"
                           x-text="statusLabel(post)"></span>
                     <template x-if="effectiveStatus(post) === 'pending' || effectiveStatus(post) === 'failed'">
-                        <button class="bg-purple-600 text-white text-xs font-medium px-3 py-1 rounded transition hover:bg-purple-700"
+                        <button class="brand-button-primary text-xs font-medium px-3 py-1 rounded transition brand-focus text-white"
                                 type="button"
                                 :disabled="isBusy(post)"
                                 :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
@@ -71,14 +61,14 @@
                         <div>
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Name</label>
                             <input type="text"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 font-medium focus:border-purple-500 focus:outline-none"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 font-medium focus:border-[#006AAB] focus:outline-none"
                                    :value="post.blog_content.name"
                                    @blur="saveField(post.id, 'name', $event.target.value)">
                         </div>
                         <div>
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Slug</label>
                             <input type="text"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                    :value="post.blog_content.slug"
                                    @blur="saveField(post.id, 'slug', $event.target.value)">
                         </div>
@@ -88,14 +78,14 @@
                         <div>
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Merksatz</label>
                             <input type="text"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                    :value="post.blog_content.merksatz"
                                    @blur="saveField(post.id, 'merksatz', $event.target.value)">
                         </div>
                         <div>
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Tipp</label>
                             <input type="text"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                    :value="post.blog_content.tipp"
                                    @blur="saveField(post.id, 'tipp', $event.target.value)">
                         </div>
@@ -124,14 +114,14 @@
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Veroeffentlichungsdatum</label>
                             <input type="datetime-local"
                                    x-model="post.blogScheduledAtLocal"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none">
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none">
                             <p class="mt-2 text-xs text-blue-300" x-show="post.blog_scheduled_at">
                                 Scheduled for <span x-text="formatScheduled(post.blog_scheduled_at)"></span>
                             </p>
                         </div>
                         <div>
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Vorschautext</label>
-                            <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none resize-y"
+                            <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none resize-y"
                                       rows="3"
                                       @blur="saveField(post.id, 'preview_text', $event.target.value)"
                                       x-text="post.blog_content.preview_text"></textarea>
@@ -150,7 +140,7 @@
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Autor</label>
                             <input type="text"
                                    placeholder="Exact Webflow option label"
-                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                    :value="post.blog_content.author_name || ''"
                                    @blur="saveField(post.id, 'author_name', $event.target.value)">
                         </div>
@@ -160,13 +150,13 @@
                         <div class="space-y-4">
                             <div>
                                 <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Bildprompt</label>
-                                <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none resize-y"
+                                <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none resize-y"
                                           rows="4"
                                           placeholder="Beschreibe das Bild, das generiert werden soll"
                                           x-model="post.blog_content.image_prompt"
                                           @blur="saveField(post.id, 'image_prompt', $event.target.value)"></textarea>
                                 <div class="mt-2 flex gap-2 flex-wrap">
-                                    <button class="text-xs font-medium px-3 py-1.5 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition"
+                                    <button class="text-xs font-medium px-3 py-1.5 rounded-lg brand-button-primary transition brand-focus text-white"
                                             type="button"
                                             :disabled="isBusy(post)"
                                             :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
@@ -192,13 +182,13 @@
                             <div>
                                 <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Meta-Titel</label>
                                 <input type="text"
-                                       class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                       class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                        :value="post.blog_content.meta_title"
                                        @blur="saveField(post.id, 'meta_title', $event.target.value)">
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Meta-Beschreibung</label>
-                                <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none resize-y"
+                                <textarea class="w-full bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none resize-y"
                                           rows="3"
                                           @blur="saveField(post.id, 'meta_description', $event.target.value)"
                                           x-text="post.blog_content.meta_description"></textarea>
@@ -227,7 +217,7 @@
                         <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-4 py-4">
                             <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Accepted image URL</label>
                             <input type="url"
-                                   class="w-full bg-[#0c0c18] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                                   class="w-full bg-[#0c0c18] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                    :value="post.blog_content.preview_image_url || ''"
                                    @blur="saveField(post.id, 'preview_image_url', $event.target.value)">
                             <p class="mt-2 text-xs text-gray-500">This URL is what gets sent to Webflow as `vorschaubild`.</p>
@@ -239,7 +229,7 @@
                         <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed">
                             <template x-for="src in (post.blog_content.sources || [])" :key="src.url">
                                 <a :href="src.url" target="_blank" rel="noopener noreferrer"
-                                   class="block text-purple-400 hover:text-purple-300 hover:underline cursor-pointer"
+                                   class="block text-[var(--lippe-blue)] hover:text-[#006AAB]/80 hover:underline cursor-pointer"
                                    x-text="'• ' + src.title"></a>
                             </template>
                         </div>
@@ -247,7 +237,7 @@
 
                     <div class="flex items-center justify-between gap-3 flex-wrap">
                         <div class="flex gap-2">
-                            <button class="text-purple-400 border border-purple-500/30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-purple-500/10 transition"
+                            <button class="text-[var(--lippe-blue)] border border-[var(--lippe-blue)] border-opacity-30 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-[var(--lippe-blue)] hover:bg-opacity-10 transition"
                                     type="button"
                                     :disabled="isBusy(post)"
                                     :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
@@ -264,7 +254,7 @@
                         </div>
                         <div class="flex items-center gap-2">
                             <template x-if="post.blog_webflow_item_id">
-                                <button class="bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition"
+                                <button class="brand-button-primary text-xs font-medium px-3 py-1.5 rounded-lg transition brand-focus text-white"
                                         type="button"
                                         :disabled="isBusy(post)"
                                         :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
@@ -273,7 +263,7 @@
                                 </button>
                             </template>
                             <template x-if="!post.blog_webflow_item_id">
-                                <button class="bg-emerald-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-600 transition"
+                                <button class="brand-button-primary text-xs font-medium px-3 py-1.5 rounded-lg hover:brand-button-primary transition brand-focus text-white"
                                         type="button"
                                         :disabled="isBusy(post)"
                                         :class="isBusy(post) ? 'opacity-60 cursor-wait' : ''"
@@ -288,7 +278,7 @@
         </div>
     </template>
 
-    <div class="flex items-center justify-between px-6 py-3 bg-purple-500/5">
+    <div class="flex items-center justify-between px-6 py-3 bg-[#006AAB]/5">
         <span class="text-xs text-gray-500"
               x-text="posts.filter(p => p.blog_status === 'draft').length + ' draft(s) ready · ' + posts.filter(p => p.blog_status === 'scheduled').length + ' scheduled · ' + posts.filter(p => p.blog_status === 'pending').length + ' pending'"></span>
     </div>

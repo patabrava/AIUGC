@@ -17,7 +17,7 @@
         </div>
         <button 
             @click="showCreateModal = true"
-            class="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition sm:w-auto w-full"
+            class="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium brand-button-primary focus:outline-none focus:ring-2 focus:ring-offset-2 transition sm:w-auto w-full brand-focus text-white"
         >
             <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -130,11 +130,11 @@
                     </div>
                 </div>
 
-                <div class="mt-3 rounded-lg bg-slate-950 p-3 text-slate-100 shadow-inner">
+                <div class="mt-3 rounded-lg bg-[#1C2740] p-3 text-white/90 shadow-inner">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Live research feed</p>
-                            <p class="mt-1 text-sm text-slate-200">Short progress notes stream in here while the batch is being prepared.</p>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1C2740]/60">Live research feed</p>
+                            <p class="mt-1 text-sm text-[#1C2740]/40">Short progress notes stream in here while the batch is being prepared.</p>
                         </div>
                         <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide" :class="streamBadgeClasses(info)">
                             <span x-text="info.streamState || 'polling'"></span>
@@ -142,16 +142,16 @@
                     </div>
                     <div class="mt-3 max-h-52 overflow-y-auto rounded-lg bg-black/20 p-2">
                         <template x-if="!info.events || info.events.length === 0">
-                            <p class="px-2 py-3 text-sm text-slate-400">Waiting for the first live research event...</p>
+                            <p class="px-2 py-3 text-sm text-[#1C2740]/60">Waiting for the first live research event...</p>
                         </template>
                         <div class="space-y-2">
                             <template x-for="event in visibleEvents(info)" :key="event.event_id">
                                 <div class="rounded-md border border-white/10 bg-white/5 px-3 py-2">
                                     <div class="flex items-center justify-between gap-3">
                                         <p class="text-xs font-semibold uppercase tracking-wide" :class="eventLabelClasses(event)" x-text="eventLabel(event)"></p>
-                                        <span class="text-[11px] text-slate-400" x-text="formatEventTime(event.created_at)"></span>
+                                        <span class="text-[11px] text-[#1C2740]/60" x-text="formatEventTime(event.created_at)"></span>
                                     </div>
-                                    <p class="mt-1 text-sm leading-5 text-slate-100" x-text="eventSummary(event)"></p>
+                                    <p class="mt-1 text-sm leading-5 text-white/90" x-text="eventSummary(event)"></p>
                                 </div>
                             </template>
                         </div>
@@ -168,7 +168,7 @@
             hx-target="#batches-list-content"
             hx-select="#batches-list-content"
             hx-swap="outerHTML"
-            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
+            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             Active
         </button>
@@ -177,7 +177,7 @@
             hx-target="#batches-list-content"
             hx-select="#batches-list-content"
             hx-swap="outerHTML"
-            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
+            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             Archived
         </button>
@@ -186,7 +186,7 @@
             hx-target="#batches-list-content"
             hx-select="#batches-list-content"
             hx-swap="outerHTML"
-            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
+            class="flex-1 sm:flex-none px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
         >
             All
         </button>
@@ -206,7 +206,7 @@
         </div>
         <div id="list-loading" class="htmx-indicator absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
             <div class="text-center">
-                <svg class="animate-spin h-8 w-8 text-purple-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg class="animate-spin h-8 w-8 text-[#006AAB] mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
@@ -262,7 +262,7 @@
                             type="text" 
                             name="brand" 
                             required
-                            class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-purple-500 focus:border-purple-500"
+                            class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                     </div>
                     
@@ -309,7 +309,7 @@
                         <label class="block text-sm font-medium text-gray-700 mb-2">Video Duration</label>
                         <select
                             name="target_length_tier"
-                            class="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500"
+                            class="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                             <option value="8">8 seconds</option>
                             <option value="16">16 seconds</option>
@@ -323,13 +323,13 @@
                     <button 
                         type="button"
                         @click="showCreateModal = false"
-                        class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-[var(--lippe-deep-blue)] hover:bg-gray-50"
                     >
                         Cancel
                     </button>
                     <button 
                         type="submit"
-                        class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 inline-flex items-center"
+                        class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium brand-button-primary inline-flex items-center brand-focus text-white"
                     >
                         <span>Create Batch</span>
                         <svg id="batch-spinner" class="htmx-indicator ml-2 animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -632,13 +632,13 @@
                     if (step.status === 'complete') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
                     if (step.status === 'active') return 'border-violet-300 bg-violet-100 text-violet-900';
                     if (step.status === 'failed') return 'border-rose-200 bg-rose-50 text-rose-800';
-                    return 'border-slate-200 bg-white/80 text-slate-500';
+                    return 'border-[#1C2740]/10 bg-white/80 text-[#1C2740]/60';
                 },
                 checkpointDotClasses(step) {
                     if (step.status === 'complete') return 'bg-emerald-500';
                     if (step.status === 'active') return 'bg-violet-600 animate-pulse';
                     if (step.status === 'failed') return 'bg-rose-500';
-                    return 'bg-slate-300';
+                    return 'bg-[#1C2740]/20';
                 },
                 progressCardClasses(info) {
                     if (info.stage === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-950';
@@ -677,7 +677,7 @@
                 streamBadgeClasses(info) {
                     if (info.streamState === 'live') return 'border-emerald-300 bg-emerald-100 text-emerald-900';
                     if (info.streamState === 'reconnecting') return 'border-amber-300 bg-amber-100 text-amber-900';
-                    if (info.streamState === 'closed') return 'border-slate-300 bg-slate-100 text-slate-900';
+                    if (info.streamState === 'closed') return 'border-[#1C2740]/10 bg-[#1C2740]/5 text-[#1C2740]';
                     return 'border-violet-300 bg-violet-100 text-violet-900';
                 },
                 visibleEvents(info) {
@@ -697,7 +697,7 @@
                     if (event.event_type === 'interaction.failed') return 'text-rose-300';
                     if (event.event_type === 'content.delta') return 'text-sky-300';
                     if (event.event_type === 'progress.post_created') return 'text-violet-300';
-                    return 'text-slate-300';
+                    return 'text-[#1C2740]/40';
                 },
                 eventSummary(event) {
                     return eventSummaryText(event);

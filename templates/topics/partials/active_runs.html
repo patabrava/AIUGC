@@ -2,7 +2,7 @@
 <div id="active-runs">
     {% if active_runs %}
     <div class="mt-5 space-y-3">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Active Research</div>
+        <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#1C2740]/60">Active Research</div>
         {% for run in active_runs %}
         <div id="run-{{ run.id }}"
              x-data="runProgress('{{ run.id }}', '{{ run.result_summary.topic_title if run.result_summary and run.result_summary.topic_title else 'Researching...' }}')"
@@ -11,16 +11,16 @@
              :class="status === 'completed' ? 'border-emerald-200 bg-emerald-50' : status === 'failed' ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'">
             <div class="flex items-center justify-between gap-3">
                 <div>
-                    <span class="text-sm font-semibold text-slate-900" x-text="topicTitle"></span>
+                    <span class="text-sm font-semibold text-[#1C2740]" x-text="topicTitle"></span>
                     <span class="ml-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                           :class="status === 'completed' ? 'bg-emerald-200 text-emerald-900' : status === 'failed' ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'">
                         <span x-show="status === 'running'" class="inline-block h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse"></span>
                         <span x-text="stageLabel"></span>
                     </span>
                 </div>
-                <span class="text-xs text-slate-500">{{ run.created_at }}</span>
+                <span class="text-xs text-[#1C2740]/60">{{ run.created_at }}</span>
             </div>
-            <p class="mt-2 text-xs text-slate-600 leading-5 truncate" x-show="detailMessage" x-text="detailMessage" x-cloak></p>
+            <p class="mt-2 text-xs text-[#1C2740] leading-5 truncate" x-show="detailMessage" x-text="detailMessage" x-cloak></p>
         </div>
         {% endfor %}
     </div>

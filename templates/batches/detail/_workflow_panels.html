@@ -26,7 +26,7 @@
         <div>
             <div class="flex items-center gap-3 mb-2">
                 <h3 class="text-xl font-bold text-gray-900">Video Production</h3>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
                     {{ batch_view.prompt_ready_count }}/{{ batch_view.active_posts_count }} Ready
                 </span>
             </div>
@@ -48,7 +48,7 @@
         <div class="flex-1">
             <div class="flex items-center gap-3 mb-2">
                 <h3 class="text-xl font-bold text-gray-900">Prompts Ready</h3>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
                     {{ batch_view.prompt_ready_count }}/{{ batch_view.active_posts_count }} Prepared
                 </span>
             </div>
@@ -78,7 +78,7 @@
             hx-confirm="All posts approved. Advance to Publish Planning?"
             hx-swap="none"
             hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-            class="px-6 py-3 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition shadow-sm"
+            class="px-6 py-3 brand-button-primary font-semibold rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition shadow-sm brand-focus text-white"
         >
             Advance to Publish
         </button>

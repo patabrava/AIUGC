@@ -7,11 +7,11 @@
 })'>
 
     {# ── Batch Schedule Panel ── #}
-    <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
+    <div class="bg-[#006AAB]/5 border border-[#006AAB]/30 rounded-lg p-4 sm:p-6 mb-6">
         <div class="flex items-center justify-between mb-4">
             <div>
-                <h3 class="text-lg font-semibold text-indigo-900">Batch Schedule</h3>
-                <p class="text-sm text-indigo-700 mt-1">Set your week and posting times. Posts are auto-assigned Mon&rarr;Fri.</p>
+                <h3 class="text-lg font-semibold text-[#006AAB]">Batch Schedule</h3>
+                <p class="text-sm text-[#006AAB] mt-1">Set your week and posting times. Posts are auto-assigned Mon&rarr;Fri.</p>
             </div>
             <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold"
                 :class="allSlotsSet ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
@@ -21,14 +21,14 @@
         {# Week start + network toggles #}
         <div class="flex flex-wrap items-center gap-4 mb-4">
             <div>
-                <label class="block text-xs font-medium text-indigo-700 mb-1">Week starting</label>
+                <label class="block text-xs font-medium text-[#006AAB] mb-1">Week starting</label>
                 <input type="date" x-model="weekStart"
-                    class="px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                    class="px-3 py-2 text-sm border border-[#006AAB]/30 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent">
             </div>
             <div>
-                <label class="block text-xs font-medium text-indigo-700 mb-1">Timezone</label>
+                <label class="block text-xs font-medium text-[#006AAB] mb-1">Timezone</label>
                 <select x-model="timezone"
-                    class="px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                    class="px-3 py-2 text-sm border border-[#006AAB]/30 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent">
                     <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
                     <option value="Europe/London">Europe/London (GMT/BST)</option>
                     <option value="America/New_York">America/New York (EST/EDT)</option>
@@ -37,13 +37,11 @@
                 </select>
             </div>
             <div class="flex items-center gap-2 ml-auto">
-                <label class="text-xs font-medium text-indigo-700">Networks</label>
+                <label class="text-xs font-medium text-[#006AAB]">Networks</label>
                 <template x-for="net in [{id:'instagram',label:'IG',color:'purple'},{id:'facebook',label:'FB',color:'blue'},{id:'tiktok',label:'TT',color:'gray'}]" :key="net.id">
                     <button type="button" @click="toggleNetwork(net.id)"
                         class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition"
-                        :class="networks.includes(net.id)
-                            ? (net.color === 'purple' ? 'bg-purple-100 border-purple-400 text-purple-700' : net.color === 'blue' ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-gray-800 border-gray-700 text-white')
-                            : 'bg-white border-gray-300 text-gray-500 hover:border-gray-400'">
+                        :class="networks.includes(net.id) ? (net.color === 'purple' ? 'bg-[#006AAB]/10 border-[#006AAB] text-[#006AAB]' : net.color === 'blue' ? 'bg-[#006AAB]/10 border-blue-400 text-[#006AAB]' : 'bg-gray-800 border-gray-700 text-white') : 'bg-white border-gray-300 text-gray-500 hover:border-gray-400'">
                         <span class="inline-flex h-2 w-2 rounded-full" :class="networks.includes(net.id) ? 'bg-green-500' : 'bg-gray-300'"></span>
                         <span x-text="net.label"></span>
                     </button>
@@ -54,12 +52,12 @@
         {# Time slots row #}
         <div class="grid gap-3" :style="slotGridStyle">
             <template x-for="(slot, i) in slots" :key="i">
-                <div class="bg-white rounded-lg border border-indigo-200 p-3 text-center">
-                    <div class="text-xs font-bold uppercase tracking-wide text-indigo-600 mb-1" x-text="slot.day"></div>
+                <div class="bg-white rounded-lg border border-[#006AAB]/30 p-3 text-center">
+                    <div class="text-xs font-bold uppercase tracking-wide text-[#006AAB] mb-1" x-text="slot.day"></div>
                     <input type="date" :value="slotDateISO(i)" @change="updateSlotDate(i, $event.target.value)"
                         class="w-full text-center text-xs text-gray-500 mb-1 border-none bg-transparent focus:outline-none focus:ring-0 cursor-pointer px-0 py-0">
                     <input type="time" x-model="slot.time"
-                        class="w-full text-center text-sm font-medium px-2 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                        class="w-full text-center text-sm font-medium px-2 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent">
                 </div>
             </template>
         </div>
@@ -77,23 +75,23 @@
         <div class="space-y-2">
             <template x-for="(post, i) in posts" :key="post.id">
                 <div class="border rounded-lg transition"
-                    :class="expanded === post.id ? 'border-indigo-300 bg-indigo-50/30' : 'border-gray-200 hover:border-purple-300'">
+                    :class="expanded === post.id ? 'border-[#006AAB]/30 bg-[#006AAB]/5' : 'border-gray-200 hover:border-[#006AAB]/30'">
                     {# Collapsed Row #}
                     <div class="flex items-center gap-3 px-4 py-3 cursor-pointer" @click="expanded = expanded === post.id ? null : post.id">
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700 min-w-[70px] justify-center" x-text="post.type"></span>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#006AAB]/10 text-[#006AAB] min-w-[70px] justify-center" x-text="post.type"></span>
                         <div class="flex-1 min-w-0">
                             <div class="font-semibold text-sm text-gray-900 truncate" x-text="post.title"></div>
                             <div class="text-xs text-gray-400 truncate mt-0.5" x-text="(post.caption || '').substring(0, 60) + (post.caption && post.caption.length > 60 ? '...' : '')"></div>
                         </div>
-                        <span class="text-xs font-medium text-indigo-600 whitespace-nowrap" x-text="postSlotLabel(i)"></span>
+                        <span class="text-xs font-medium text-[#006AAB] whitespace-nowrap" x-text="postSlotLabel(i)"></span>
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold"
-                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700' : post.publishStatus === 'scheduled' ? 'bg-blue-100 text-blue-700' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700' : post.publishStatus === 'failed' ? 'bg-red-100 text-red-700' : (post.caption && slots[i]?.time) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
+                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700' : post.publishStatus === 'scheduled' ? 'bg-[#006AAB]/10 text-[#006AAB]' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700' : post.publishStatus === 'failed' ? 'bg-red-100 text-red-700' : (post.caption && slots[i]?.time) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
                             x-text="post.publishStatus === 'published' ? 'Published' : post.publishStatus === 'scheduled' ? 'Scheduled' : post.publishStatus === 'publishing' ? 'Publishing...' : post.publishStatus === 'failed' ? 'Failed' : (post.caption && slots[i]?.time) ? 'Ready' : 'Needs attention'"></span>
                         <button type="button"
                             @click.stop="postNowTarget = post; showPostNowModal = true"
                             :disabled="!post.caption || networks.length === 0 || post.publishStatus === 'publishing' || post.publishStatus === 'published' || post.publishStatus === 'scheduled'"
                             class="inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition"
-                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700 cursor-default' : post.publishStatus === 'scheduled' ? 'bg-blue-100 text-blue-700 cursor-default' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700 cursor-wait' : (!post.caption || networks.length === 0) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-sm'"
+                            :class="post.publishStatus === 'published' ? 'bg-green-100 text-green-700 cursor-default' : post.publishStatus === 'scheduled' ? 'bg-[#006AAB]/10 text-[#006AAB] cursor-default' : post.publishStatus === 'publishing' ? 'bg-amber-100 text-amber-700 cursor-wait' : (!post.caption || networks.length === 0) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-sm'"
                             x-text="post.publishStatus === 'published' ? 'Published' : post.publishStatus === 'scheduled' ? 'Scheduled' : post.publishStatus === 'publishing' ? 'Publishing...' : '&#x25B6; Post Now'">
                         </button>
                         <svg class="w-4 h-4 text-gray-400 transition-transform" :class="expanded === post.id ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -106,7 +104,7 @@
                         <div>
                             <label class="block text-xs font-medium text-gray-700 mb-1">Caption</label>
                             <textarea x-model="post.caption" rows="3" maxlength="2200"
-                                class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-[#006AAB]/30 focus:outline-none focus:ring-2 focus:ring-[#E58434]"
                                 placeholder="Write the caption for this post..."></textarea>
                             <div class="flex justify-between mt-1">
                                 <span class="text-[10px] text-gray-400">Pre-filled from generated caption</span>
@@ -120,9 +118,7 @@
                                     <button type="button"
                                         @click="selectCaption(post.id, variant.key)"
                                         class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-                                        :class="post.selectedCaptionKey === variant.key
-                                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                                            : 'border-gray-300 bg-white text-gray-600 hover:border-indigo-300 hover:text-indigo-700'">
+                                        :class="post.selectedCaptionKey === variant.key ? 'border-[#006AAB]/30 bg-[#006AAB]/5 text-[#006AAB]' : 'border-gray-300 bg-white text-gray-600 hover:border-[#006AAB]/40 hover:text-[#006AAB]'">
                                         <span x-text="variant.label"></span>
                                     </button>
                                 </template>
@@ -135,14 +131,14 @@
                             <div>
                                 <label class="block text-xs font-medium text-gray-700 mb-1">Override time <span class="font-normal text-gray-400">(optional)</span></label>
                                 <input type="datetime-local" x-model="post.timeOverride"
-                                    class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                                    class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent">
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-700 mb-1">Override networks <span class="font-normal text-gray-400">(optional)</span></label>
                                 <div class="flex gap-1.5">
                                     <template x-for="net in ['IG','FB','TT']" :key="net">
                                         <button type="button"
-                                            class="px-2.5 py-1 text-[11px] font-semibold rounded-full border border-gray-300 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition"
+                                            class="px-2.5 py-1 text-[11px] font-semibold rounded-full border border-gray-300 text-[var(--lippe-deep-blue)] hover:border-[#006AAB]/40 hover:text-[#006AAB] transition"
                                             x-text="net"></button>
                                     </template>
                                 </div>
@@ -159,7 +155,7 @@
             <button type="button" @click="showReviewModal = true"
                 :disabled="!allSlotsSet"
                 class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition"
-                :class="allSlotsSet ? 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500' : 'bg-gray-300 cursor-not-allowed'">
+                :class="allSlotsSet ? 'bg-[#006AAB] hover:bg-[#006AAB] focus:ring-2 focus:ring-offset-2 focus:ring-[#E58434]' : 'bg-gray-300 cursor-not-allowed'">
                 <span>Review &amp; Arm Dispatch</span>
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
@@ -183,13 +179,13 @@
         <div class="absolute inset-0" @click="showReviewModal = false"></div>
         <div class="relative z-10 w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl">
             {# Header #}
-            <div class="border-b border-gray-200 bg-indigo-50 px-6 py-5">
+            <div class="border-b border-gray-200 bg-[#006AAB]/5 px-6 py-5">
                 <div class="flex items-start justify-between">
                     <div>
                         <h3 class="text-lg font-semibold text-gray-900">Review &amp; Arm Dispatch</h3>
                         <p class="mt-1 text-sm text-gray-600" x-text="summaryLine"></p>
                     </div>
-                    <button type="button" @click="showReviewModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50">
+                    <button type="button" @click="showReviewModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-[var(--lippe-deep-blue)] hover:bg-gray-50">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
@@ -214,17 +210,17 @@
                             <tr class="border-b border-gray-100">
                                 <td class="py-3">
                                     <div class="flex items-center gap-2">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-purple-100 text-purple-700" x-text="post.type"></span>
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-[#006AAB]/10 text-[#006AAB]" x-text="post.type"></span>
                                         <span class="font-medium text-gray-900 text-xs" x-text="post.title.substring(0, 25) + (post.title.length > 25 ? '\u2026' : '')"></span>
                                     </div>
                                 </td>
                                 <td class="py-3 text-xs text-gray-700" x-text="slots[i]?.day.toUpperCase()"></td>
-                                <td class="py-3 text-xs font-medium text-indigo-600" x-text="post.timeOverride ? 'Custom' : (slots[i]?.time || '\u2014')"></td>
+                                <td class="py-3 text-xs font-medium text-[#006AAB]" x-text="post.timeOverride ? 'Custom' : (slots[i]?.time || '\u2014')"></td>
                                 <td class="py-3">
                                     <div class="flex gap-1">
                                         <template x-for="net in networks" :key="net">
                                             <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                                                :class="net === 'instagram' ? 'bg-purple-100 text-purple-700' : net === 'facebook' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'"
+                                                :class="net === 'instagram' ? 'bg-[#006AAB]/10 text-[#006AAB]' : net === 'facebook' ? 'bg-[#006AAB]/10 text-[#006AAB]' : 'bg-gray-100 text-gray-700'"
                                                 x-text="net === 'instagram' ? 'IG' : net === 'facebook' ? 'FB' : 'TT'"></span>
                                         </template>
                                     </div>
@@ -253,13 +249,13 @@
             {# Confirm #}
             <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
                 <button type="button" @click="showReviewModal = false"
-                    class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition">
+                    class="px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] hover:text-gray-900 transition">
                     Back to editing
                 </button>
                 <button type="button" @click="armDispatch()"
                     :disabled="!canArm"
                     class="inline-flex items-center gap-2 rounded-md px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition"
-                    :class="canArm ? 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500' : 'bg-gray-300 cursor-not-allowed'">
+                    :class="canArm ? 'bg-[#006AAB] hover:bg-[#006AAB] focus:ring-2 focus:ring-offset-2 focus:ring-[#E58434]' : 'bg-gray-300 cursor-not-allowed'">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                     </svg>
@@ -281,7 +277,7 @@
                         <h3 class="text-lg font-semibold text-gray-900">Publish Now</h3>
                         <p class="mt-1 text-sm text-gray-600">This will publish the post immediately.</p>
                     </div>
-                    <button type="button" @click="showPostNowModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50">
+                    <button type="button" @click="showPostNowModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-[var(--lippe-deep-blue)] hover:bg-gray-50">
                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
@@ -298,7 +294,7 @@
                     <div class="flex gap-1.5 mt-1">
                         <template x-for="net in networks" :key="net">
                             <span class="text-[11px] font-semibold px-2 py-0.5 rounded"
-                                :class="net === 'instagram' ? 'bg-purple-100 text-purple-700' : net === 'facebook' ? 'bg-blue-100 text-blue-700' : 'bg-gray-800 text-white'"
+                                :class="net === 'instagram' ? 'bg-[#006AAB]/10 text-[#006AAB]' : net === 'facebook' ? 'bg-[#006AAB]/10 text-[#006AAB]' : 'bg-gray-800 text-white'"
                                 x-text="net === 'instagram' ? 'IG' : net === 'facebook' ? 'FB' : 'TT'"></span>
                         </template>
                     </div>
@@ -309,7 +305,7 @@
             </div>
             <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
                 <button type="button" @click="showPostNowModal = false"
-                    class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+                    class="px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] hover:text-gray-900">Cancel</button>
                 <button type="button" @click="postNow()"
                     :disabled="postNowSaving"
                     class="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition"
