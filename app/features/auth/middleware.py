@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Auth Middleware
+Lippe Lift Studio Auth Middleware
 Session cookie management and route protection.
 """
 

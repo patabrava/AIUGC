@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Phase 5 Testscript: QA Review
+Lippe Lift Studio Phase 5 Testscript: QA Review
 Whole-app end-to-end test for quality assurance workflow.
 Per Constitution § VIII: Test end-to-end in real environment
 Per Canon § 3.2: S6_QA state management and transitions
@@ -300,7 +300,7 @@ async def get_batch(client: httpx.AsyncClient, batch_id: str) -> Optional[Dict[s
 
 
 if __name__ == "__main__":
-    print("\nFLOW-FORGE Phase 5 QA Review Testscript")
+    print("\nLippe Lift Studio Phase 5 QA Review Testscript")
     print("Make sure the dev server is running on http://localhost:8000")
     print("Press Enter to continue...")
     input()

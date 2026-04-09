@@ -1,1 +1,1 @@
-"""FLOW-FORGE Topics Feature"""
+"""Lippe Lift Studio Topics Feature"""

@@ -51,18 +51,18 @@ from app.features.topics.topic_validation import (
 
 logger = get_logger(__name__)
 
-PROMPT1_STAGE3_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 stage-3 script agent.
+PROMPT1_STAGE3_SYSTEM_PROMPT = """You are the Lippe Lift Studio PROMPT_1 stage-3 script agent.
 Follow the user prompt exactly.
 Return only the final script text.
 Do not invent facts beyond the provided dossier context.
 Keep all output fully in German."""
 
-PROMPT1_RESEARCH_SYSTEM_PROMPT = """You are the Flow Forge topic research dossier agent.
+PROMPT1_RESEARCH_SYSTEM_PROMPT = """You are the Lippe Lift Studio topic research dossier agent.
 Return a dense, factual German research dossier as raw prose with short lists.
 Do not return JSON, arrays, or fenced code blocks.
 Keep all content fully in German."""
 
-PROMPT1_RESEARCH_NORMALIZER_SYSTEM_PROMPT = """You are the Flow Forge research dossier normalization agent.
+PROMPT1_RESEARCH_NORMALIZER_SYSTEM_PROMPT = """You are the Lippe Lift Studio research dossier normalization agent.
 You receive a completed deep-research reply that may be prose or Markdown.
 Convert it into exactly one valid JSON object for the research dossier schema.
 Do not wrap the result in Markdown or commentary.
@@ -70,7 +70,7 @@ Keep all content fully in German.
 Derive lane_candidates from clearly distinct sub-angles already present in the raw research reply.
 Do not invent facts that are not supported by the raw reply."""
 
-PROMPT1_NORMALIZER_SYSTEM_PROMPT = """You are the Flow Forge PROMPT_1 normalization agent.
+PROMPT1_NORMALIZER_SYSTEM_PROMPT = """You are the Lippe Lift Studio PROMPT_1 normalization agent.
 You receive a raw assistant reply that failed validation because it was not valid JSON.
 Rewrite it into a valid JSON array with exactly the requested number of items.
 Never invent additional information beyond what is present in the raw reply.

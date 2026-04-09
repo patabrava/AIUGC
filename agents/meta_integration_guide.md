@@ -1,6 +1,6 @@
 # Meta Integration Guide
 
-Use this guide when you need to reconnect or recreate the Meta login flow for FLOW-FORGE.
+Use this guide when you need to reconnect or recreate the Meta login flow for Lippe Lift Studio.
 
 ## Current Working Setup
 

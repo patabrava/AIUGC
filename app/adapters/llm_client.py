@@ -1,5 +1,5 @@
 """
-FLOW-FORGE LLM Client Adapter
+Lippe Lift Studio LLM Client Adapter
 Wrapper for OpenAI and Gemini clients.
 Per Constitution § VI: Adapterize Specialists
 """

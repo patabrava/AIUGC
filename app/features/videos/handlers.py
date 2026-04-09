@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Video Generation Handlers
+Lippe Lift Studio Video Generation Handlers
 FastAPI route handlers for video generation operations.
 Per Constitution § V: Locality & Vertical Slices
 Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
@@ -73,7 +73,7 @@ _WORDS_PER_SECOND = 2.5
 
 _GLOBAL_VEO_ANCHOR_RELATIVE_PATH = "static/images/sarah.jpg"
 _GLOBAL_VEO_ANCHOR_PATH = Path(__file__).resolve().parents[3] / _GLOBAL_VEO_ANCHOR_RELATIVE_PATH
-_GLOBAL_VEO_ANCHOR_OBJECT_KEY = "flow-forge/images/anchors/sarah.jpg"
+_GLOBAL_VEO_ANCHOR_OBJECT_KEY = "Lippe Lift Studio/images/anchors/sarah.jpg"
 # Keep the live preview path text-only until the API explicitly supports image.inlineData.
 _GLOBAL_VEO_ANCHOR_ENABLED = False
 

@@ -41,8 +41,8 @@ def _make_fake_settings():
         cloudflare_r2_public_base_url="https://cdn.example.com",
         cloudflare_r2_region="auto",
         cloudflare_r2_endpoint_url=None,
-        cloudflare_r2_video_prefix="flow-forge/videos",
-        cloudflare_r2_image_prefix="flow-forge/images",
+        cloudflare_r2_video_prefix="Lippe Lift Studio/videos",
+        cloudflare_r2_image_prefix="Lippe Lift Studio/images",
     )
 
 
@@ -68,8 +68,8 @@ def test_upload_video_to_cloudflare_r2(monkeypatch):
     assert uploaded["Bucket"] == "ugc-videos"
     assert uploaded["ContentType"] == "video/mp4"
     assert result["storage_provider"] == "cloudflare_r2"
-    assert result["storage_key"].startswith("flow-forge/videos/")
-    assert result["url"].startswith("https://cdn.example.com/flow-forge/videos/")
+    assert result["storage_key"].startswith("Lippe Lift Studio/videos/")
+    assert result["url"].startswith("https://cdn.example.com/Lippe Lift Studio/videos/")
 
 
 def test_ingest_video_from_public_url(monkeypatch):
@@ -86,7 +86,7 @@ def test_ingest_video_from_public_url(monkeypatch):
 
     assert client._http_client.calls == ["https://provider.example.com/video.mp4"]
     assert fake_s3.calls[0]["Body"] == b"remote-video-bytes"
-    assert result["storage_key"].startswith("flow-forge/videos/")
+    assert result["storage_key"].startswith("Lippe Lift Studio/videos/")
 
 
 def test_upload_image_to_cloudflare_r2(monkeypatch):
@@ -104,5 +104,5 @@ def test_upload_image_to_cloudflare_r2(monkeypatch):
     assert uploaded["Bucket"] == "ugc-videos"
     assert uploaded["ContentType"] == "image/png"
     assert result["storage_provider"] == "cloudflare_r2"
-    assert result["storage_key"].startswith("flow-forge/images/")
-    assert result["url"].startswith("https://cdn.example.com/flow-forge/images/")
+    assert result["storage_key"].startswith("Lippe Lift Studio/images/")
+    assert result["url"].startswith("https://cdn.example.com/Lippe Lift Studio/images/")

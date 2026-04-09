@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Posts Schemas
+Lippe Lift Studio Posts Schemas
 Pydantic models for video prompt assembly (Phase 3).
 Per Constitution § II: Validated Boundaries
 """

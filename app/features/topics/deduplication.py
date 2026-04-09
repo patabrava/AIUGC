@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Topic Deduplication
+Lippe Lift Studio Topic Deduplication
 Jaccard similarity-based deduplication logic.
 Per Canon § 1.2: Research with De-duplication
 """

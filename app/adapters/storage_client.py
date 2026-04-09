@@ -42,7 +42,7 @@ class StorageClient:
         self.bucket_name = settings.cloudflare_r2_bucket_name
         self.public_base_url = settings.cloudflare_r2_public_base_url.rstrip("/")
         self.object_prefix = _strip_slashes(settings.cloudflare_r2_video_prefix)
-        self.image_prefix = _strip_slashes(getattr(settings, "cloudflare_r2_image_prefix", "flow-forge/images"))
+        self.image_prefix = _strip_slashes(getattr(settings, "cloudflare_r2_image_prefix", "Lippe Lift Studio/images"))
 
         endpoint_url = settings.cloudflare_r2_endpoint_url or (
             f"https://{settings.cloudflare_r2_account_id}.r2.cloudflarestorage.com"

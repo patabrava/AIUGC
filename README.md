@@ -1,4 +1,4 @@
-# FLOW-FORGE UGC System
+# Lippe Lift Studio UGC System
 
 **Version:** 1.0  
 **Date:** 2025-11-06
@@ -140,7 +140,7 @@ See [docs/vertex-ai-testing.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/
 ## Project Structure
 
 ```
-flow-forge/
+Lippe Lift Studio/
 ├── app/
 │   ├── main.py              # FastAPI application
 │   ├── core/                # Config, logging, errors, state machine

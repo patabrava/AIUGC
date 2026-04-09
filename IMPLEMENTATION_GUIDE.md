@@ -1,4 +1,4 @@
-# FLOW-FORGE Implementation Guide
+# Lippe Lift Studio Implementation Guide
 
 **Version:** 1.0 | **Date:** 2025-11-05
 
@@ -13,7 +13,7 @@
 ## Repository Structure
 
 ```
-flow-forge/
+Lippe Lift Studio/
 ├── api/index.py              # Vercel adapter
 ├── app/
 │   ├── main.py               # FastAPI app

@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Vercel Adapter
+Lippe Lift Studio Vercel Adapter
 Exports FastAPI app for Vercel serverless deployment.
 """
 

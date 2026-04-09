@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Auth Handlers
+Lippe Lift Studio Auth Handlers
 Login, OTP verification, and logout routes.
 """
 
@@ -67,7 +67,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
             "request": request,
             "step": "email",
             "email": normalized_email,
-            "error": "This email is not authorized to access FLOW-FORGE.",
+            "error": "This email is not authorized to access Lippe Lift Studio.",
             "otp_code_length": settings.auth_otp_code_length,
             "bypass_auth_in_development": settings.is_auth_bypassed,
         })

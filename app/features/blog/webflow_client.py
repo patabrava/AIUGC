@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Webflow Client Adapter
+Lippe Lift Studio Webflow Client Adapter
 Thin wrapper for Webflow CMS API v2.
 Per Constitution § VI: Adapterize Specialists
 """

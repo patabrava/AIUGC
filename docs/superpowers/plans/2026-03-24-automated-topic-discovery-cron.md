@@ -1036,7 +1036,7 @@ git commit -m "feat: add GET /topics/cron-status health endpoint"
 
 - [ ] **Step 1: Add `CRON_RESEARCH_NICHE` to the env anchor in `docker-compose.yml`**
 
-Add to the `x-flow-forge-env` block (after the `CRON_SECRET` line):
+Add to the `x-Lippe Lift Studio-env` block (after the `CRON_SECRET` line):
 
 ```yaml
   CRON_RESEARCH_NICHE: ${CRON_RESEARCH_NICHE:-Schwerbehinderung, Treppenlifte, Barrierefreiheit}
@@ -1053,7 +1053,7 @@ Add after the `worker` service block (after line 81):
       context: .
       dockerfile: Dockerfile
     command: ["python", "workers/topic_researcher.py"]
-    environment: *flow-forge-env
+    environment: *Lippe Lift Studio-env
     restart: unless-stopped
     depends_on:
       web:

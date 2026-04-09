@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FLOW-FORGE Testscript: Phase 1 - Batch Management
+Lippe Lift Studio Testscript: Phase 1 - Batch Management
 Objective: Verify batch CRUD operations, state machine, and dashboard UI
 Prerequisites: Phase 0 passing, dev server running
 Per Constitution § VIII: Whole-App Testscripts
@@ -269,7 +269,7 @@ class TestScriptPhase1:
     def run(self):
         """Run all tests."""
         self.log("=" * 60)
-        self.log("FLOW-FORGE Testscript: Phase 1 - Batch Management")
+        self.log("Lippe Lift Studio Testscript: Phase 1 - Batch Management")
         self.log("=" * 60)
         self.log(f"Base URL: {self.base_url}")
         self.log("")

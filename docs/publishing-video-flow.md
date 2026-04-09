@@ -1,6 +1,6 @@
 # Video Posting Flow (Meta + TikTok)
 
-This document explains how video posting works in FLOW-FORGE, including the user flow, UI elements, stage transitions, and the files involved.
+This document explains how video posting works in Lippe Lift Studio, including the user flow, UI elements, stage transitions, and the files involved.
 
 ## 1) Operator Flow (What to click)
 

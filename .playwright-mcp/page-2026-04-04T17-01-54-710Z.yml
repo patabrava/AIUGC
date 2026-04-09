@@ -1,0 +1,158 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e4]:
+      - link "Lippe Lift UGC System" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - img "Lippe Lift UGC System" [ref=e7]
+      - generic [ref=e8]:
+        - button "Meta TikTok Accounts" [ref=e9] [cursor=pointer]:
+          - generic [ref=e10]:
+            - generic [ref=e11]: Meta
+            - generic [ref=e13]: TikTok
+          - generic [ref=e15]: Accounts
+        - link "Topics" [ref=e16] [cursor=pointer]:
+          - /url: /topics
+        - link "Batches" [ref=e17] [cursor=pointer]:
+          - /url: /batches
+        - link "API Docs" [ref=e18] [cursor=pointer]:
+          - /url: /docs
+        - button "Log out" [ref=e20] [cursor=pointer]:
+          - img [ref=e21]
+  - main [ref=e23]:
+    - generic [ref=e24]:
+      - navigation [ref=e25]:
+        - list [ref=e26]:
+          - listitem [ref=e27]:
+            - link "Batches" [ref=e28] [cursor=pointer]:
+              - /url: /batches
+          - listitem [ref=e29]: /
+          - listitem [ref=e30]: value 32s vertex test
+      - generic [ref=e32]:
+        - heading "value 32s vertex test" [level=2] [ref=e33]
+        - paragraph [ref=e34]: Created 2026-04-04T16:44:00.362078Z
+      - generic [ref=e35]:
+        - heading "Progress" [level=3] [ref=e36]
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - img [ref=e40]
+            - generic [ref=e42]: Setup
+          - generic [ref=e44]:
+            - img [ref=e46]
+            - generic [ref=e48]: Seeded
+          - generic [ref=e50]:
+            - generic [ref=e51]: "3"
+            - generic [ref=e52]: Scripted
+          - generic [ref=e54]:
+            - generic [ref=e55]: "4"
+            - generic [ref=e56]: Prompts
+          - generic [ref=e58]:
+            - generic [ref=e59]: "5"
+            - generic [ref=e60]: QA
+          - generic [ref=e62]:
+            - generic [ref=e63]: "6"
+            - generic [ref=e64]: Plan
+          - generic [ref=e66]:
+            - generic [ref=e67]: "7"
+            - generic [ref=e68]: Complete
+      - generic [ref=e71]:
+        - generic [ref=e72]:
+          - heading "Video Production" [level=3] [ref=e73]
+          - generic [ref=e74]: 1/1 Ready
+        - paragraph [ref=e75]: Generate prompts for each post below, then configure batch settings and submit to production.
+      - generic [ref=e76]:
+        - generic [ref=e78]:
+          - heading "Posts" [level=3] [ref=e79]
+          - generic [ref=e80]: 1 active
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]: value
+            - generic [ref=e85]: Created 2026-04-04T16:44:12.377357Z
+            - generic [ref=e86]: Updated 2026-04-04T16:45:47.591842Z
+          - 'heading "Wohnraumsuche: rollstuhlgerechte Wohnungen finden, Beratung, Immobilienportale." [level=4] [ref=e87]'
+          - paragraph [ref=e88]: Definitionen rechtliche Grundlagen DIN 18040-2 - Wohnraumsuche, rollstuhlgerechte Wohnungen, Beratung und Immobilienportale
+          - generic [ref=e90]: Script Approved
+          - paragraph [ref=e92]: Seniorengerecht klingt gut, aber ist rechtlich wertlos! Viele Begriffe auf Immobilienportalen wie "behindertenfreundlich" sind ungeschützt und garantieren keine echte Barrierefreiheit. Nur "rollstuhlgerecht" nach DIN 18040-2 sichert dir wirklich ausreichend Bewegungsflächen und Türbreiten. Achte auf die Kennzeichnung "R", um böse Überraschungen zu vermeiden. Stell Förderanträge bei der Pflegekasse oder KfW immer, bevor du Maßnahmen beginnst.
+          - generic [ref=e93]:
+            - paragraph [ref=e94]: Caption
+            - paragraph [ref=e95]: "Rollstuhlgerecht ist nicht gleich barrierefrei! Das Wichtigste, was dir niemand sagt. Nur Wohnungen mit \"R\"-Kennzeichnung nach DIN 18040-2 erfüllen hohe Anforderungen an Bewegungsflächen von 150x150cm. Speichere diesen Tipp für deine Suche. #Rollstuhlgerecht #BarrierefreiWohnen #Immobiliensuche #Inklusion"
+          - paragraph [ref=e96]:
+            - text: "Quelle 1: vertexaisearch.cloud.google.com –"
+            - link "View source" [ref=e97] [cursor=pointer]:
+              - /url: https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGNyuOhFcAOBI02mC5tpWd7_7ia_8bJD2eG3E3Afdv_ws4DxvGmMn95FE81q8NYnJAznecccNo889VxK6pahS57T4HfqWVnzbfiamF1v1oruWu69g34IpoU66RD
+          - paragraph [ref=e98]: "Disclaimer: Keine individuelle Rechts-, Therapie- oder Medizinberatung."
+          - generic [ref=e100]:
+            - generic [ref=e101]:
+              - generic [ref=e102]:
+                - generic [ref=e103]: Ready for Generation
+                - generic [ref=e104]: "ID: ab67ca41-0846-44bc-9eeb-844610bf9f10"
+              - paragraph [ref=e105]: Prompt assembled on prior run. Review the summary below or regenerate to refresh the template.
+              - generic [ref=e106]:
+                - generic [ref=e107]:
+                  - img [ref=e108]
+                  - generic [ref=e110]: "Script length: 445 characters • Spoken duration ≈ 24.0s"
+                - generic [ref=e111]:
+                  - img [ref=e112]
+                  - generic [ref=e114]: "Strict fact anchor: Die Unterscheidung zwischen „barrierefrei“ und „rollstuhlgerecht“ ist durch die DIN 18040-2 klar normiert, wobei rollstuhlgerechte Wohnungen (Kennzeichnung „R“) deutlich höhere Anforderungen an Bewegungsflächen und Türbreiten stellen."
+            - generic [ref=e116]:
+              - generic [ref=e117]:
+                - paragraph [ref=e118]: Current Prompt
+                - generic [ref=e119]:
+                  - paragraph [ref=e120]: Character
+                  - paragraph [ref=e121]: 38-year-old German woman with long, light brown hair with natural blonde highlights, straight with a slight natural wave, parted slightly off-center to the left, falling softly around the shoulders and framing the face; hazel, almond-shaped eyes with subtle crow's feet at the outer corners; naturally full, soft-arched eyebrows in a light brown shade; a straight nose with a gently rounded tip; medium-full lips with a natural muted-pink tone; a friendly oval face with a soft jawline and gently rounded chin; soft forehead lines that are faint at rest; gentle laugh lines framing the mouth; warm light-medium skin tone with neutral undertones and smooth natural skin texture; slim build with relaxed upright posture.
+                - generic [ref=e122]:
+                  - paragraph [ref=e123]: Style
+                  - paragraph [ref=e124]: Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, soft flattering indoor light, and natural skin texture.
+                - generic [ref=e125]:
+                  - paragraph [ref=e126]: Action
+                  - paragraph [ref=e127]: "Seated in a wheelchair in the bedroom, she speaks directly to camera in one continuous take. She speaks at a natural conversational pace, uses small natural hand gestures and subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly at the end of the line. She says: Seniorengerecht klingt gut, aber ist rechtlich wertlos! Viele Begriffe auf Immobilienportalen wie \"behindertenfreundlich\" sind ungeschützt und garantieren keine echte Barrierefreiheit. Nur \"rollstuhlgerecht\" nach DIN 18040-2 sichert dir wirklich ausreichend Bewegungsflächen und Türbreiten. Achte auf die Kennzeichnung \"R\", um böse Überraschungen zu vermeiden. Stell Förderanträge bei der Pflegekasse oder KfW immer, bevor du Maßnahmen beginnst. (After the final spoken word, speech stops completely. She does not begin a new word or syllable. Her mouth comes to rest, she holds a gentle smile, and remains still for a brief moment before the clip ends.)"
+                - generic [ref=e128]:
+                  - paragraph [ref=e129]: Scene
+                  - paragraph [ref=e130]: "Scene: The woman is sitting on a wheelchair in a brightly lit modern bedroom with pink walls. Clean, minimal décor. Natural daylight streams through an unseen window camera-right, supplemented by soft ambient lighting creating even, flattering illumination across the space. The wheelchair is partially visible in the frame."
+                - generic [ref=e131]:
+                  - paragraph [ref=e132]: Cinematography
+                  - paragraph [ref=e133]: "Cinematography: Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie distance. The camera is handheld but stable, with only minimal natural movement. The framing remains consistent throughout the shot without noticeable camera drift or reframing."
+                - generic [ref=e134]:
+                  - paragraph [ref=e135]: Dialogue
+                  - paragraph [ref=e136]: Seniorengerecht klingt gut, aber ist rechtlich wertlos! Viele Begriffe auf Immobilienportalen wie "behindertenfreundlich" sind ungeschützt und garantieren keine echte Barrierefreiheit. Nur "rollstuhlgerecht" nach DIN 18040-2 sichert dir wirklich ausreichend Bewegungsflächen und Türbreiten. Achte auf die Kennzeichnung "R", um böse Überraschungen zu vermeiden. Stell Förderanträge bei der Pflegekasse oder KfW immer, bevor du Maßnahmen beginnst.
+                - generic [ref=e137]:
+                  - paragraph [ref=e138]: Ending Directive
+                  - paragraph [ref=e139]: After the final spoken word, speech stops completely. She does not begin a new word or syllable. Her mouth comes to rest, she holds a gentle smile, and remains still for a brief moment before the clip ends.
+                - generic [ref=e140]:
+                  - paragraph [ref=e141]: Audio Block
+                  - paragraph [ref=e142]: "Audio: Recorded with a modern smartphone microphone in a quiet indoor room. The voice is clear, natural, and close to the microphone. No music and no background voices. Subtle natural room acoustics typical of a small bedroom. After the final word, the audio gently settles into a quiet room tone for a brief moment before the clip ends."
+                - generic [ref=e143]:
+                  - paragraph [ref=e144]: Negatives
+                  - paragraph [ref=e145]: subtitles, captions, watermark, text overlays, words on screen, logos, branding, poor lighting, blurry footage, low resolution, unwanted objects, character inconsistency, lip-sync drift, cartoon styling, unrealistic proportions, distorted hands, artificial lighting, oversaturation, excessive camera shake, background voices, music bed, audio hiss, static, clipping, abrupt cuts, angle changes, mirror appearing or disappearing, layout changes, background drift, new furniture, extra plants, wall color change, bedding color change, different room, lighting shift
+              - generic [ref=e146]:
+                - button "Regenerate Prompt" [ref=e147] [cursor=pointer]:
+                  - img [ref=e148]
+                  - text: Regenerate Prompt
+                - button "Maximize Prompt" [ref=e150] [cursor=pointer]:
+                  - img [ref=e151]
+                  - text: Maximize Prompt
+          - generic [ref=e156]:
+            - generic [ref=e157]: Video Generation
+            - generic [ref=e158]: ○ Pending
+      - generic [ref=e159]:
+        - heading "Batch Video Generation Settings" [level=3] [ref=e160]
+        - generic [ref=e161]:
+          - generic [ref=e163]:
+            - generic [ref=e164]: Provider
+            - combobox "Provider Provider Veo 3.1 (Gemini API)" [ref=e165]:
+              - option "Veo 3.1 (Gemini API)" [selected]
+              - option "Veo 3.1 (Vertex AI)"
+          - generic [ref=e167]:
+            - generic [ref=e168]:
+              - paragraph [ref=e169]: Duration-routed batch
+              - paragraph [ref=e170]: 32s selected at batch setup.
+            - generic [ref=e171]:
+              - generic [ref=e172]: Veo 3.1
+              - generic [ref=e173]: 32s target
+          - button "Generate All Videos" [ref=e175] [cursor=pointer]:
+            - img [ref=e176]
+            - generic [ref=e178]: Generate All Videos
+  - contentinfo [ref=e179]:
+    - paragraph [ref=e181]:
+      - text: Lippe Lift Studio UGC System © 2025 |
+      - link "System Health" [ref=e182] [cursor=pointer]:
+        - /url: /health

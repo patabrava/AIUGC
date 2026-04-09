@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Video Prompt Assembly
+Lippe Lift Studio Video Prompt Assembly
 Simple prompt builder that inserts Phase 2 dialogue into video generation template.
 Per Canon Phase 3: S4_SCRIPTED → S5_PROMPTS_BUILT
 """

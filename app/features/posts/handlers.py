@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Posts Handlers
+Lippe Lift Studio Posts Handlers
 FastAPI route handlers for post operations.
 Per Constitution § V: Locality & Vertical Slices
 """

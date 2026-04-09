@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FLOW-FORGE Testscript: Phase 2 - Topic Discovery
+Lippe Lift Studio Testscript: Phase 2 - Topic Discovery
 Objective: Verify topic generation, deduplication, and state transition S1→S2
 Prerequisites: Phase 0 & 1 passing, dev server running, LLM API keys configured
 Per Constitution § VIII: Whole-App Testscripts
@@ -289,7 +289,7 @@ class TestScriptPhase2:
     def run(self):
         """Run all tests."""
         self.log("=" * 60)
-        self.log("FLOW-FORGE Testscript: Phase 2 - Topic Discovery")
+        self.log("Lippe Lift Studio Testscript: Phase 2 - Topic Discovery")
         self.log("=" * 60)
         self.log(f"Base URL: {self.base_url}")
         self.log("")

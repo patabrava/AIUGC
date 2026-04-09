@@ -1,4 +1,4 @@
--- Migration: Baseline FLOW-FORGE schema for blank Supabase projects
+-- Migration: Baseline Lippe Lift Studio schema for blank Supabase projects
 -- Date: 2026-03-16
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

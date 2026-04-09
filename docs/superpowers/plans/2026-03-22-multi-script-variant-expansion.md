@@ -837,7 +837,7 @@ def expand_topic_variants(
                 llm = get_llm_client()
                 raw = llm.generate_gemini_json(
                     prompt=variant_prompt,
-                    system_prompt="You are the Flow Forge PROMPT_1 stage-3 script agent. Return only valid JSON. Keep all output fully in German.",
+                    system_prompt="You are the Lippe Lift Studio PROMPT_1 stage-3 script agent. Return only valid JSON. Keep all output fully in German.",
                 )
                 parsed = parse_prompt1_response(raw, expected_count=1)
                 prompt1_item = parsed[0] if parsed else None

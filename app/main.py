@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Main Application
+Lippe Lift Studio Main Application
 FastAPI application with error handling and middleware.
 Per Constitution § I: Canon Supremacy
 """
@@ -134,7 +134,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI application
 app = FastAPI(
-    title="FLOW-FORGE UGC System",
+    title="Lippe Lift Studio UGC System",
     description="Deterministic UGC video production system",
     version="1.0.0",
     docs_url=None if settings.is_production else "/docs",
@@ -196,7 +196,7 @@ async def auth_middleware(request: Request, call_next):
 # Global exception handler
 @app.exception_handler(FlowForgeException)
 async def flowforge_exception_handler(request: Request, exc: FlowForgeException):
-    """Handle custom FLOW-FORGE exceptions."""
+    """Handle custom Lippe Lift Studio exceptions."""
     logger.error(
         "flowforge_exception",
         code=exc.code,

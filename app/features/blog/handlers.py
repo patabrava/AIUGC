@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Blog Handlers
+Lippe Lift Studio Blog Handlers
 FastAPI route handlers for blog post operations.
 Per Constitution § V: Locality & Vertical Slices
 """

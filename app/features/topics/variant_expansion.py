@@ -303,7 +303,7 @@ def expand_topic_variants(
                 llm = get_llm_client()
                 raw = llm.generate_gemini_text(
                     prompt=variant_prompt,
-                    system_prompt="You are the Flow Forge PROMPT_1 stage-3 script agent. Return only the final script text. Keep all output fully in German.",
+                    system_prompt="You are the Lippe Lift Studio PROMPT_1 stage-3 script agent. Return only the final script text. Keep all output fully in German.",
                     max_tokens=3200,
                 )
                 script_text = re.sub(r"\s+", " ", str(raw or "").strip())

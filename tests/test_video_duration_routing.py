@@ -500,7 +500,7 @@ def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
     assert base64.b64decode(anchor_bundle["first_frame_image"]["data_base64"]) == expected_bytes
     assert anchor_bundle["metadata"]["anchor_image_enabled"] is True
     assert anchor_bundle["metadata"]["anchor_image_source_path"] == "static/images/sarah.jpg"
-    assert anchor_bundle["metadata"]["anchor_image_storage_key"] == "flow-forge/images/anchors/sarah.jpg"
+    assert anchor_bundle["metadata"]["anchor_image_storage_key"] == "Lippe Lift Studio/images/anchors/sarah.jpg"
 
 
 def test_submit_video_request_passes_anchor_image_to_veo_client(monkeypatch):

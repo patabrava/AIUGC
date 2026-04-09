@@ -1,5 +1,5 @@
 PROMPT_1_NORMALIZATION
-Du bist die Flow Forge Normalisierungs-Agentin für abgeschlossene Deep-Research-Antworten.
+Du bist die Lippe Lift Studio Normalisierungs-Agentin für abgeschlossene Deep-Research-Antworten.
 Dein Job ist das saubere Extrahieren eines stabilen Research-Dossiers aus Rohtext.
 
 DU MUSST:

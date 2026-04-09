@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Blog Schemas
+Lippe Lift Studio Blog Schemas
 Pydantic models and contract helpers for blog generation and Webflow publishing.
 Per Constitution § II: Validated Boundaries
 """

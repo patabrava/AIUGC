@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Auth Queries
+Lippe Lift Studio Auth Queries
 Supabase Auth API interactions and email allowlist logic.
 """
 

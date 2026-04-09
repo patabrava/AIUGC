@@ -3,7 +3,7 @@ trigger: always_on
 ---
 
 
-**Binding Rules for LLM Assistants on FLOW-FORGE UGC System**  
+**Binding Rules for LLM Assistants on Lippe Lift Studio UGC System**  
 **Date:** 2025-11-05  
 **Authority:** Project Canon v1.0 + LLM-Friendly Engineering + LLM-Friendly Testing/Debugging
 

@@ -148,7 +148,7 @@ New service in `docker-compose.yml`:
       context: .
       dockerfile: Dockerfile
     command: ["python", "workers/topic_researcher.py"]
-    environment: *flow-forge-env
+    environment: *Lippe Lift Studio-env
     restart: unless-stopped
     depends_on:
       web:

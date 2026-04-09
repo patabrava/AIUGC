@@ -1,4 +1,4 @@
-# FLOW-FORGE Architecture
+# Lippe Lift Studio Architecture
 
 Date: 2026-03-21  
 Status: Current runtime architecture

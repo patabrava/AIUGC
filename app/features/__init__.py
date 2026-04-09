@@ -1,1 +1,1 @@
-"""FLOW-FORGE Features Module"""
+"""Lippe Lift Studio Features Module"""

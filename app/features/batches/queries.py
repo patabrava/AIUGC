@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Batches Database Queries
+Lippe Lift Studio Batches Database Queries
 Database operations for batches.
 Per Constitution § V: Locality & Vertical Slices
 """

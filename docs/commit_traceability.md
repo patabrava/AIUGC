@@ -21,7 +21,7 @@ This log maps recent commits to functional impact so operators can audit behavio
   - refreshes generated implementation intent from Meta-login-focused contract to topics-hub contract
   - preserves a distinct commit boundary for generated planning artifact changes
 
-### `782009e` docs(architecture): add current FLOW-FORGE runtime architecture
+### `782009e` docs(architecture): add current Lippe Lift Studio runtime architecture
 - Scope:
   - added [architecture.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/architecture.md)
 - Impact:

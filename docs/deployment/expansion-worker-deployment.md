@@ -64,7 +64,7 @@ expansion-worker:
       condition: service_healthy
 ```
 
-If you deploy with `docker-compose.yml`, keep the same service shape but replace `env_file` with the shared `environment: *flow-forge-env` anchor used by the other services.
+If you deploy with `docker-compose.yml`, keep the same service shape but replace `env_file` with the shared `environment: *Lippe Lift Studio-env` anchor used by the other services.
 
 ## Environment Variables
 

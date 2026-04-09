@@ -1,5 +1,5 @@
 """
-FLOW-FORGE QA Handlers
+Lippe Lift Studio QA Handlers
 FastAPI route handlers for quality assurance operations.
 Per Constitution § V: Locality & Vertical Slices
 Per Canon § 3.2: S6_QA state management

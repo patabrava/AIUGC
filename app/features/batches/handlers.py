@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Batches Handlers
+Lippe Lift Studio Batches Handlers
 FastAPI route handlers for batch operations.
 Per Constitution § V: Locality & Vertical Slices
 """

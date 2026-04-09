@@ -1,4 +1,4 @@
-# FLOW-FORGE UGC System Dependencies
+# Lippe Lift Studio UGC System Dependencies
 # Version: 1.0
 # Date: 2025-11-05
 # Pinned versions per Constitution § III

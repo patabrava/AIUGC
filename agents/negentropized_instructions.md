@@ -4,7 +4,7 @@
 Create a read-first topics hub page that lets batch owner/editors browse existing topics, inspect their script variants, review research-run history, and launch a new deep research run for one topic on demand.
 
 ## Primary User / Actor
-Batch owner/editor working inside the FLOW-FORGE web app while managing topic inventory and deciding whether a topic needs fresh research.
+Batch owner/editor working inside the Lippe Lift Studio web app while managing topic inventory and deciding whether a topic needs fresh research.
 
 ## Inputs
 - Existing topic registry rows

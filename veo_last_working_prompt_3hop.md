@@ -13,8 +13,8 @@ Source log: `.runlogs/veo_live_rerun_442adbea-c82c-4772-a62e-65bda4826e28_202604
 - Extension hops: `3`
 - Fixed seed: `58220512`
 - Quota bypass: `True`
-- Final video URL: `https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/flow-forge/videos/20260402T143712Z_post_442adbea-c82c-4772-a62e-65bda4826e28.mp4`
-- Captioned video URL: `https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/flow-forge/videos/20260402T143755Z_captioned_20260402T143755Z_442adbea-c82c-4772-a62e-65bda4826e28.mp4`
+- Final video URL: `https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/Lippe Lift Studio/videos/20260402T143712Z_post_442adbea-c82c-4772-a62e-65bda4826e28.mp4`
+- Captioned video URL: `https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/Lippe Lift Studio/videos/20260402T143755Z_captioned_20260402T143755Z_442adbea-c82c-4772-a62e-65bda4826e28.mp4`
 
 ## Packed Segments
 1. So kurz ist die europaweite Frist, um deine Hilfe bei Bahnreisen anzumelden. Die neue EU-Verordnung hat die alte 48-Stunden-Frist halbiert.

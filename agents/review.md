@@ -1,4 +1,4 @@
-# FLOW-FORGE Review
+# Lippe Lift Studio Review
 
 Date: 2026-03-21
 Review mode: LIRA senior audit for `app/features/topics/agents.py` and `architecture.md`

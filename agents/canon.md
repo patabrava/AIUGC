@@ -1,4 +1,4 @@
-# FLOW-FORGE Topic Generation Canon
+# Lippe Lift Studio Topic Generation Canon
 
 Date: 2026-03-21
 Scope: `app/features/topics/agents.py` refactor canon for the existing topic-generation slice
@@ -7,7 +7,7 @@ Locality Budget: `{files: 6, LOC/file: <=260 target and <=500 hard, deps: 0}`
 
 ## Project Summary
 
-FLOW-FORGE is a FastAPI + Jinja + HTMX vertical-slice monolith that generates topic-backed UGC post seeds, then advances batches through script review, prompt generation, QA, and publishing. The requested refactor scope is narrow: make the topic-generation slice lean enough to continue development without rewriting the surrounding batch workflow.
+Lippe Lift Studio is a FastAPI + Jinja + HTMX vertical-slice monolith that generates topic-backed UGC post seeds, then advances batches through script review, prompt generation, QA, and publishing. The requested refactor scope is narrow: make the topic-generation slice lean enough to continue development without rewriting the surrounding batch workflow.
 
 ## Current Actual Runtime
 

@@ -1,6 +1,6 @@
 # app/features/blog/queries.py
 """
-FLOW-FORGE Blog Queries
+Lippe Lift Studio Blog Queries
 Supabase queries for blog fields on the posts table.
 Per Constitution § V: Locality & Vertical Slices
 """

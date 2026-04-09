@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Error Models and Exception Classes
+Lippe Lift Studio Error Models and Exception Classes
 Standard error envelopes per Canon § 5.
 Per Constitution § II: Validated Boundaries
 """
@@ -39,7 +39,7 @@ class SuccessResponse(BaseModel):
 # Custom Exception Classes
 
 class FlowForgeException(Exception):
-    """Base exception for all FLOW-FORGE errors."""
+    """Base exception for all Lippe Lift Studio errors."""
     
     def __init__(
         self,

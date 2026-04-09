@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Batches Schemas
+Lippe Lift Studio Batches Schemas
 Pydantic models for batch validation.
 Per Constitution § II: Validated Boundaries
 """

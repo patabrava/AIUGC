@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Video Generation Schemas
+Lippe Lift Studio Video Generation Schemas
 Pydantic models for video generation requests and responses.
 Per Constitution § II: Validated Boundaries
 Per Canon § 5: API Contracts

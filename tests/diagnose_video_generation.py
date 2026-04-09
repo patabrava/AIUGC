@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Video Generation Diagnostic Tool
+Lippe Lift Studio Video Generation Diagnostic Tool
 Comprehensive debugging for video generation request chain.
 Per Constitution § X: Hypothesis-Driven Debugging
 """
@@ -410,7 +410,7 @@ def diagnose_video_endpoint(post_id: str) -> Dict[str, Any]:
 def main():
     """Run full diagnostic suite."""
     print("\n" + "=" * 80)
-    print("  FLOW-FORGE VIDEO GENERATION DIAGNOSTIC TOOL")
+    print("  Lippe Lift Studio VIDEO GENERATION DIAGNOSTIC TOOL")
     print("  Comprehensive debugging for video generation request chain")
     print("=" * 80)
     

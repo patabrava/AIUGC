@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Auth Schemas
+Lippe Lift Studio Auth Schemas
 Pydantic models for OTP login request and verification.
 """
 

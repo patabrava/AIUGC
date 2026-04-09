@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Supabase Adapter
+Lippe Lift Studio Supabase Adapter
 Singleton client for Supabase database and storage.
 Per Constitution § VI: Vanilla-First Implementation
 """

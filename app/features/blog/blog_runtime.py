@@ -1,6 +1,6 @@
 # app/features/blog/blog_runtime.py
 """
-FLOW-FORGE Blog Runtime
+Lippe Lift Studio Blog Runtime
 LLM generation logic: reads dossier, builds prompt, calls LLM, validates response.
 Per Constitution § V: Locality & Vertical Slices
 """

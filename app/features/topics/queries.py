@@ -1,4 +1,4 @@
-"""FLOW-FORGE Topics Database Queries."""
+"""Lippe Lift Studio Topics Database Queries."""
 
 from __future__ import annotations
 

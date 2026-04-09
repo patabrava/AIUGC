@@ -1,5 +1,5 @@
 """
-FLOW-FORGE QA Schemas
+Lippe Lift Studio QA Schemas
 Pydantic models for QA operations.
 Per Constitution § II: Validated Boundaries
 Per Canon § 7.2: Video Validation Rules

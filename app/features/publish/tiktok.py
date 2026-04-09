@@ -184,7 +184,7 @@ def _derive_tiktok_readiness(account: Dict[str, Any], creator_info: Optional[Dic
         publish_ready = False
     elif publish_ready:
         readiness_status = "publish_ready"
-        readiness_reason = "This TikTok login can post directly from FLOW-FORGE."
+        readiness_reason = "This TikTok login can post directly from Lippe Lift Studio."
     elif draft_ready:
         readiness_status = "draft_ready"
         readiness_reason = "This TikTok login can upload drafts."
@@ -664,7 +664,7 @@ def _build_tiktok_post_info(
     disable_duet: bool,
     disable_stitch: bool,
 ) -> Dict[str, Any]:
-    title = " ".join(str(caption or "").split())[:150].strip() or "Posted from FLOW-FORGE"
+    title = " ".join(str(caption or "").split())[:150].strip() or "Posted from Lippe Lift Studio"
     return {
         "title": title,
         "privacy_level": privacy_level,
@@ -944,14 +944,14 @@ async def get_tiktok_account():
 
 @router.post("/api/tiktok/upload-draft", response_model=SuccessResponse)
 async def upload_tiktok_draft(request: TikTokUploadDraftRequest):
-    """Upload a generated FLOW-FORGE video as a TikTok draft."""
+    """Upload a generated Lippe Lift Studio video as a TikTok draft."""
     job = await upload_tiktok_draft_for_post(request.post_id, caption=request.caption)
     return SuccessResponse(data=TikTokPublishJobResponse(**_sanitize_publish_job(job)).model_dump())
 
 
 @router.post("/api/tiktok/publish", response_model=SuccessResponse)
 async def publish_tiktok_direct(request: TikTokPublishRequest):
-    """Direct-post a generated FLOW-FORGE video to TikTok."""
+    """Direct-post a generated Lippe Lift Studio video to TikTok."""
     job = await publish_tiktok_direct_for_post(
         request.post_id,
         caption=request.caption,
@@ -964,7 +964,7 @@ async def publish_tiktok_direct(request: TikTokPublishRequest):
 
 
 async def upload_tiktok_draft_for_post(post_id: str, caption: Optional[str] = None) -> Dict[str, Any]:
-    """Upload a generated FLOW-FORGE video as a TikTok draft."""
+    """Upload a generated Lippe Lift Studio video as a TikTok draft."""
     return await _publish_tiktok_post(
         post_id,
         caption=caption,
@@ -985,7 +985,7 @@ async def publish_tiktok_direct_for_post(
     disable_duet: bool,
     disable_stitch: bool,
 ) -> Dict[str, Any]:
-    """Direct-post a generated FLOW-FORGE video to TikTok."""
+    """Direct-post a generated Lippe Lift Studio video to TikTok."""
     settings = _require_tiktok_settings()
     if settings.tiktok_environment == "sandbox":
         raise ValidationError(

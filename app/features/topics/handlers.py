@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Topics Handlers
+Lippe Lift Studio Topics Handlers
 FastAPI route handlers for topic discovery.
 Per Constitution § V: Locality & Vertical Slices
 """

@@ -1,5 +1,5 @@
 """
-FLOW-FORGE State Machine Core
+Lippe Lift Studio State Machine Core
 State definitions and transition logic per Canon § 3.
 Per Constitution § VII: State Machine Discipline
 """

@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Publish Schemas
+Lippe Lift Studio Publish Schemas
 Pydantic models for publish planning and social media dispatch.
 Per Constitution § II: Validated Boundaries
 Per Canon § 3.2: S7_PUBLISH_PLAN state

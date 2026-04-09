@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FLOW-FORGE Testscript: Phase 0 - Foundation
+Lippe Lift Studio Testscript: Phase 0 - Foundation
 Objective: Verify FastAPI skeleton, config, logging, Supabase connection, error envelopes, health endpoint
 Prerequisites: requirements.txt installed, .env configured
 Per Constitution § VIII: Whole-App Testscripts
@@ -183,7 +183,7 @@ class TestScriptPhase0:
     def run(self):
         """Run all tests."""
         self.log("=" * 60)
-        self.log("FLOW-FORGE Testscript: Phase 0 - Foundation")
+        self.log("Lippe Lift Studio Testscript: Phase 0 - Foundation")
         self.log("=" * 60)
         self.log(f"Base URL: {self.base_url}")
         self.log("")

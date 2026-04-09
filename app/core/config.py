@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Configuration Module
+Lippe Lift Studio Configuration Module
 Loads and validates environment variables using Pydantic Settings.
 Per Constitution § III: Deterministic Execution
 """
@@ -89,11 +89,11 @@ class Settings(BaseSettings):
         description="Optional explicit Cloudflare R2 S3 endpoint URL",
     )
     cloudflare_r2_video_prefix: str = Field(
-        default="flow-forge/videos",
+        default="Lippe Lift Studio/videos",
         description="Object key prefix for generated videos in Cloudflare R2",
     )
     cloudflare_r2_image_prefix: str = Field(
-        default="flow-forge/images",
+        default="Lippe Lift Studio/images",
         description="Object key prefix for generated images in Cloudflare R2",
     )
     use_url_based_upload: bool = Field(

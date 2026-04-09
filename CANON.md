@@ -1,4 +1,4 @@
-# FLOW-FORGE UGC System — Project Canon v1.0
+# Lippe Lift Studio UGC System — Project Canon v1.0
 
 **Version:** 1.0  
 **Date:** 2025-11-05  
@@ -9,7 +9,7 @@
 ## 1. System Overview
 
 ### 1.1 Mission Statement
-FLOW-FORGE is a deterministic UGC video production system that enables editors to:
+Lippe Lift Studio is a deterministic UGC video production system that enables editors to:
 - Choose per-type post counts (value/lifestyle/product)
 - Approve and modify AI-generated scripts
 - Generate short vertical videos using Veo 3.1 or Sora 2

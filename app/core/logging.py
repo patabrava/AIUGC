@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Logging Configuration
+Lippe Lift Studio Logging Configuration
 Structured logging with correlation IDs using structlog.
 Per Constitution § IX: Observable Implementation
 """

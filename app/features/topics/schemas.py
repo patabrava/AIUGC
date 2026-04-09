@@ -1,5 +1,5 @@
 """
-FLOW-FORGE Topics Schemas
+Lippe Lift Studio Topics Schemas
 Pydantic models for topic discovery and validation.
 Per Constitution § II: Validated Boundaries
 """

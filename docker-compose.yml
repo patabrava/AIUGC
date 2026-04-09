@@ -1,8 +1,8 @@
-x-flow-forge-build: &flow-forge-build
+x-Lippe Lift Studio-build: &Lippe Lift Studio-build
   context: ${DOCKER_BUILD_CONTEXT:-.}
   dockerfile: Dockerfile
 
-x-flow-forge-env: &flow-forge-env
+x-Lippe Lift Studio-env: &Lippe Lift Studio-env
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_KEY: ${SUPABASE_KEY}
   SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
@@ -34,7 +34,7 @@ x-flow-forge-env: &flow-forge-env
   CLOUDFLARE_R2_PUBLIC_BASE_URL: ${CLOUDFLARE_R2_PUBLIC_BASE_URL}
   CLOUDFLARE_R2_REGION: ${CLOUDFLARE_R2_REGION:-auto}
   CLOUDFLARE_R2_ENDPOINT_URL: ${CLOUDFLARE_R2_ENDPOINT_URL}
-  CLOUDFLARE_R2_VIDEO_PREFIX: ${CLOUDFLARE_R2_VIDEO_PREFIX:-flow-forge/videos}
+  CLOUDFLARE_R2_VIDEO_PREFIX: ${CLOUDFLARE_R2_VIDEO_PREFIX:-Lippe Lift Studio/videos}
   USE_URL_BASED_UPLOAD: ${USE_URL_BASED_UPLOAD:-false}
   TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY}
   TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET}
@@ -59,9 +59,9 @@ x-flow-forge-env: &flow-forge-env
 
 services:
   web:
-    build: *flow-forge-build
+    build: *Lippe Lift Studio-build
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment: *flow-forge-env
+    environment: *Lippe Lift Studio-env
     ports:
       - "${APP_PORT:-8000}:8000"
     restart: unless-stopped
@@ -85,36 +85,36 @@ services:
       start_period: 20s
 
   worker:
-    build: *flow-forge-build
+    build: *Lippe Lift Studio-build
     command: ["python", "workers/video_poller.py"]
-    environment: *flow-forge-env
+    environment: *Lippe Lift Studio-env
     restart: unless-stopped
     depends_on:
       web:
         condition: service_healthy
 
   expansion-worker:
-    build: *flow-forge-build
+    build: *Lippe Lift Studio-build
     command: ["python", "workers/expansion_worker.py"]
-    environment: *flow-forge-env
+    environment: *Lippe Lift Studio-env
     restart: unless-stopped
     depends_on:
       web:
         condition: service_healthy
 
   topic-worker:
-    build: *flow-forge-build
+    build: *Lippe Lift Studio-build
     command: ["python", "workers/topic_worker.py"]
-    environment: *flow-forge-env
+    environment: *Lippe Lift Studio-env
     restart: unless-stopped
     depends_on:
       web:
         condition: service_healthy
 
   caption-worker:
-    build: *flow-forge-build
+    build: *Lippe Lift Studio-build
     command: ["python", "-m", "workers.caption_worker"]
-    environment: *flow-forge-env
+    environment: *Lippe Lift Studio-env
     restart: unless-stopped
     depends_on:
       web:

@@ -1,1 +1,1 @@
-"""FLOW-FORGE UGC System - Application Package"""
+"""Lippe Lift Studio UGC System - Application Package"""

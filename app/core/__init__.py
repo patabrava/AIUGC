@@ -1,1 +1,1 @@
-"""FLOW-FORGE Core Module"""
+"""Lippe Lift Studio Core Module"""

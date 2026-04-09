@@ -83,7 +83,7 @@ Wired a chaining branch into `_handle_veo_video`: when hops remain, call `_submi
 
 ### Successful: 16:9 base + extension
 - Base: 8.0s → Extended: 15.0s (single combined video)
-- URL: `https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/flow-forge/videos/20260324T163407Z_veo_extension_test_16s.mp4`
+- URL: `https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/Lippe Lift Studio/videos/20260324T163407Z_veo_extension_test_16s.mp4`
 - Used simplified prompt (not production)
 
 ### Pending: 9:16 with production prompt

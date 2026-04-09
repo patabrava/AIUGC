@@ -1,4 +1,4 @@
-"""FLOW-FORGE Adapters Module"""
+"""Lippe Lift Studio Adapters Module"""
 
 from .sora_client import get_sora_client  # noqa: F401
 

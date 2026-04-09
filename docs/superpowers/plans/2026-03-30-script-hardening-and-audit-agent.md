@@ -666,7 +666,7 @@ logger = get_logger(__name__)
 AUDIT_PROMPT_PATH = Path(__file__).parent / "prompt_data" / "audit_prompt.txt"
 
 AUDIT_SYSTEM_PROMPT = (
-    "You are the Flow Forge audit agent.\n"
+    "You are the Lippe Lift Studio audit agent.\n"
     "Evaluate the script and return ONLY valid JSON.\n"
     "No markdown fences, no extra text.\n"
     "All notes in German."
