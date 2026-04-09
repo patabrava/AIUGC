@@ -4,128 +4,245 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign In — FLOW-FORGE</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23006AAB'/%3E%3Cpath d='M14 44V20h8v16h16v8H14zm18 0V20h8v16h10v8H32z' fill='white'/%3E%3C/svg%3E">
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/brand.css">
     <style>
         [x-cloak] { display: none !important; }
+        .glass-modal {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #9ca3af; }
     </style>
 </head>
-<body class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, var(--lippe-cream) 0%, #ede7f6 100%);">
-    <div class="w-full max-w-sm mx-4">
-        <div class="bg-white rounded-2xl shadow-lg p-10 text-center" x-data="{ step: '{{ step }}', loading: false }">
-            <!-- Logo -->
-            <div class="mb-2">
-                <div class="w-12 h-12 mx-auto mb-3 rounded-xl flex items-center justify-center" class="brand-button-primary brand-focus text-white">
-                    <span class="text-white text-xl font-bold">FF</span>
-                </div>
-                <h1 class="text-xl font-semibold text-gray-900" x-show="step === 'email'">FLOW-FORGE</h1>
-                <h1 class="text-xl font-semibold text-gray-900" x-show="step === 'otp'" x-cloak>Check your email</h1>
-                <p class="text-sm text-gray-500 mt-1" x-show="step === 'email'">Sign in to your workspace</p>
-                <p class="text-sm text-gray-500 mt-1" x-show="step === 'otp'" x-cloak>
-                    We sent a code to <strong class="text-gray-900">{{ email }}</strong>
-                </p>
-            </div>
-
-            {% if bypass_auth_in_development %}
-            <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left">
-                <p class="text-xs font-semibold uppercase tracking-wide text-amber-800">Local auth bypass</p>
-                <p class="mt-1 text-sm text-amber-900">Development mode skips Supabase auth and signs you in locally so rate limits do not block test runs.</p>
-            </div>
-            {% endif %}
-
-            {% if error %}
-            <div class="mt-4 mb-2 p-3 rounded-lg bg-red-50 border border-red-200">
-                <p class="text-sm text-red-700">{{ error }}</p>
-            </div>
-            {% endif %}
-
-            <!-- Step 1: Email -->
-            <form
-                x-show="step === 'email'"
-                method="post"
-                action="/auth/send-otp"
-                class="mt-6 text-left"
-                @submit="loading = true"
-            >
-                <label class="block text-xs font-medium mb-1.5" style="color: var(--lippe-blue);">Email address</label>
-                <input
-                    type="email"
-                    name="email"
-                    value="{{ email }}"
-                    required
-                    autofocus
-                    placeholder="you@lippelift.de"
-                    class="w-full px-3.5 py-3 rounded-lg border-2 text-sm text-gray-900 focus:outline-none transition"
-                    style="border-color: var(--lippe-blue); background: #f9f7fc;"
-                >
-                <button
-                    type="submit"
-                    class="w-full mt-4 py-3 rounded-lg text-white font-semibold text-sm transition disabled:opacity-50"
-                    class="brand-button-primary brand-focus text-white"
-                    :disabled="loading"
-                >
-                    <span x-show="!loading">Send verification code</span>
-                    <span x-show="loading" x-cloak>Sending...</span>
-                </button>
-                <p class="mt-4 text-xs text-gray-400 text-center">Only @lippelift.de emails and approved accounts</p>
-            </form>
-
-            <!-- Step 2: OTP -->
-            <form
-                x-show="step === 'otp'"
-                x-cloak
-                method="post"
-                action="/auth/verify-otp"
-                class="mt-6 text-left"
-                @submit="loading = true"
-                x-data="otpForm({{ otp_code_length }})"
-            >
-                <input type="hidden" name="email" value="{{ email }}">
-                <input type="hidden" name="token" :value="digits.join('')" x-ref="tokenField">
-
-                <div class="grid gap-1.5 sm:gap-2 mb-5" :style="`grid-template-columns: repeat(${otpLength}, minmax(0, 1fr));`">
-                    <template x-for="(digit, index) in digits" :key="index">
-                        <input
-                            type="text"
-                            inputmode="numeric"
-                            maxlength="1"
-                            class="w-full h-10 sm:h-11 text-center text-lg sm:text-xl font-semibold rounded-lg border-2 focus:outline-none transition"
-                            :style="digit ? 'border-color: var(--lippe-blue); background: #f9f7fc;' : 'border-color: #CAC4D0; background: white;'"
-                            :value="digit"
-                            @input="handleInput($event, index)"
-                            @keydown.backspace="handleBackspace($event, index)"
-                            @paste.prevent="handlePaste($event)"
-                            x-ref="otpInput"
-                        >
-                    </template>
+<body class="app-shell flex items-center justify-center">
+    <div x-data="{ showModal: null }" class="w-full contents">
+        <!-- Main Login Container -->
+        <div class="w-full max-w-sm mx-4 relative z-10">
+            <div class="brand-panel rounded-[2rem] shadow-xl p-10 text-center" x-data="{ step: '{{ step }}', loading: false }">
+                <!-- Logo -->
+                <div class="mb-2">
+                    <img src="/static/images/logo-Lippe-Lift_01.png" alt="Lippe Lift" class="h-12 w-auto mx-auto mb-4" x-show="step === 'email'">
+                    
+                    <h1 class="text-2xl font-brand-heading font-bold tracking-tight" x-show="step === 'email'"> FLOW-FORGE Workspace</h1>
+                    <h1 class="text-2xl font-brand-heading font-bold tracking-tight" x-show="step === 'otp'" x-cloak>Check your email</h1>
+                    <p class="text-sm mt-1 opacity-70" x-show="step === 'email'">Sign in to continue</p>
+                    <p class="text-sm mt-1 opacity-70" x-show="step === 'otp'" x-cloak>
+                        We sent a code to <strong>{{ email }}</strong>
+                    </p>
                 </div>
 
-                <button
-                    type="submit"
-                    class="w-full py-3 rounded-lg text-white font-semibold text-sm transition disabled:opacity-50"
-                    class="brand-button-primary brand-focus text-white"
-                    :disabled="loading || digits.join('').length < otpLength"
-                >
-                    <span x-show="!loading">Verify & sign in</span>
-                    <span x-show="loading" x-cloak>Verifying...</span>
-                </button>
+                {% if bypass_auth_in_development %}
+                <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-amber-800">Local auth bypass</p>
+                    <p class="mt-1 text-sm text-amber-900">Development mode skips Supabase auth and signs you in locally so rate limits do not block test runs.</p>
+                </div>
+                {% endif %}
 
-                <div class="mt-4 text-center">
-                    <button
-                        type="button"
-                        class="text-sm font-medium hover:underline"
-                        style="color: var(--lippe-blue);"
-                        @click="
-                            step = 'email';
-                            loading = false;
-                        "
+                {% if error %}
+                <div class="mt-4 mb-2 p-3 rounded-lg bg-red-50 border border-red-200">
+                    <p class="text-sm text-red-700">{{ error }}</p>
+                </div>
+                {% endif %}
+
+                <!-- Step 1: Email -->
+                <form
+                    x-show="step === 'email'"
+                    method="post"
+                    action="/auth/send-otp"
+                    class="mt-6 text-left"
+                    @submit="loading = true"
+                >
+                    <label class="block font-brand-heading text-xs font-bold mb-1.5 uppercase tracking-wide opacity-80">Email address</label>
+                    <input
+                        type="email"
+                        name="email"
+                        value="{{ email }}"
+                        required
+                        autofocus
+                        placeholder="you@lippelift.de"
+                        class="w-full px-4 py-3 rounded-xl border-2 border-[var(--lippe-border)] focus:border-[var(--lippe-blue)] focus:outline-none transition-colors bg-white/50 focus:bg-white brand-focus"
                     >
-                        Resend code
+                    <button
+                        type="submit"
+                        class="w-full mt-5 py-3 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all disabled:opacity-50 brand-button-primary brand-focus"
+                        :disabled="loading"
+                    >
+                        <span x-show="!loading">Send verification code</span>
+                        <span x-show="loading" x-cloak class="flex items-center justify-center gap-2">
+                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            Sending...
+                        </span>
                     </button>
-                    <p class="text-xs text-gray-400 mt-1.5">Code expires in 10 minutes</p>
+                    <p class="mt-4 text-xs text-gray-400 text-center">Only @lippelift.de emails and approved accounts</p>
+                </form>
+
+                <!-- Step 2: OTP -->
+                <form
+                    x-show="step === 'otp'"
+                    x-cloak
+                    method="post"
+                    action="/auth/verify-otp"
+                    class="mt-6 text-left"
+                    @submit="loading = true"
+                    x-data="otpForm({{ otp_code_length }})"
+                >
+                    <input type="hidden" name="email" value="{{ email }}">
+                    <input type="hidden" name="token" :value="digits.join('')" x-ref="tokenField">
+
+                    <div class="grid gap-2 mb-5" :style="`grid-template-columns: repeat(${otpLength}, minmax(0, 1fr));`">
+                        <template x-for="(digit, index) in digits" :key="index">
+                            <input
+                                type="text"
+                                inputmode="numeric"
+                                maxlength="1"
+                                class="w-full h-12 text-center text-xl font-bold rounded-xl border-2 focus:outline-none transition-colors bg-white/50 focus:bg-white"
+                                :style="digit ? 'border-color: var(--lippe-blue); background: rgba(255, 255, 255, 0.9);' : 'border-color: var(--lippe-border);'"
+                                :value="digit"
+                                @input="handleInput($event, index)"
+                                @keydown.backspace="handleBackspace($event, index)"
+                                @paste.prevent="handlePaste($event)"
+                                x-ref="otpInput"
+                            >
+                        </template>
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="w-full py-3 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all disabled:opacity-50 brand-button-primary brand-focus"
+                        :disabled="loading || digits.join('').length < otpLength"
+                    >
+                        <span x-show="!loading">Verify & sign in</span>
+                        <span x-show="loading" x-cloak class="flex items-center justify-center gap-2">
+                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            Verifying...
+                        </span>
+                    </button>
+
+                    <div class="mt-4 text-center">
+                        <button
+                            type="button"
+                            class="text-sm font-medium hover:opacity-80 transition-opacity"
+                            style="color: var(--lippe-blue, #4f46e5);"
+                            @click="step = 'email'; loading = false;"
+                        >
+                            Resend code
+                        </button>
+                        <p class="text-xs text-gray-400 mt-1.5">Code expires in 10 minutes</p>
+                    </div>
+                </form>
+
+                <!-- Footer Links -->
+                <div class="mt-8 text-center text-xs text-gray-500 border-t border-gray-100 pt-5">
+                    By signing in, you agree to our<br>
+                    <button type="button" @click="showModal = 'terms'" class="font-medium hover:text-gray-900 transition-colors mt-1 underline decoration-gray-300 underline-offset-2">Terms of Service</button>
+                    <span class="px-1 text-gray-300">&middot;</span>
+                    <button type="button" @click="showModal = 'privacy'" class="font-medium hover:text-gray-900 transition-colors mt-1 underline decoration-gray-300 underline-offset-2">Privacy Policy</button>
                 </div>
-            </form>
+            </div>
+        </div>
+
+        <!-- Modals for Policies -->
+        <div x-show="showModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <!-- Backdrop -->
+            <div x-show="showModal" 
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0"
+                 x-transition:enter-end="opacity-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="opacity-100"
+                 x-transition:leave-end="opacity-0"
+                 class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" 
+                 @click="showModal = null">
+            </div>
+            
+            <!-- Modal Content -->
+            <div x-show="showModal" 
+                 x-transition:enter="transition ease-spring duration-500"
+                 x-transition:enter-start="opacity-0 translate-y-8 scale-95"
+                 x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="opacity-100 translate-y-0 scale-100"
+                 x-transition:leave-end="opacity-0 translate-y-4 scale-95"
+                 class="relative w-full max-w-3xl h-[85vh] sm:h-[75vh] glass-modal rounded-[24px] flex flex-col overflow-hidden text-left"
+                 @keydown.escape.window="showModal = null">
+                
+                <!-- Terms of Service -->
+                <div x-show="showModal === 'terms'" class="flex flex-col h-full bg-white/50">
+                    <div class="p-6 sm:px-8 sm:py-6 border-b border-gray-100/60 flex justify-between items-center bg-white/70">
+                        <div>
+                            <h2 class="text-2xl font-bold tracking-tight text-gray-900">Terms of Service</h2>
+                            <p class="text-sm text-gray-500 mt-1">Version 2.1 &mdash; Valid from April 2026</p>
+                        </div>
+                        <button @click="showModal = null" class="p-2 rounded-full hover:bg-gray-100 transition-colors">
+                            <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-8 text-gray-700">
+                        <div class="prose prose-sm sm:prose-base max-w-none text-gray-600">
+                            <p class="font-medium text-gray-900 text-lg mb-6 tracking-tight">Welcome to the FLOW-FORGE Workspace. By accessing this proprietary orchestration system, you consent to the following operational parameters aligned with our core mission for high-quality User-Generated Content generation.</p>
+                            
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">1. Workspace Access & Authorized Use</h3>
+                            <p class="mb-5 leading-relaxed">Access to FLOW-FORGE is strictly bound to valid <code>@lippelift.de</code> email addresses and individually approved external collaborators. You hold exclusive responsibility for all batch commands, approvals, and system interactions performed under your account. The platform is meant exclusively for ideation, script generation, human-in-the-loop review, and publishing of validated UGC output for internal use. System access must not be shared or automated through external botting scripts.</p>
+
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">2. AI-Generated Content & Quality Assurance</h3>
+                            <p class="mb-5 leading-relaxed">The FLOW-FORGE engine utilizes large language models alongside specialized routines (PROMPT_1, PROMPT_2) yielding advanced topical discovery. While the platform accelerates initial production, it is imperative that <strong>all AI-generated topics, script iterations, and final media undergo stringent human QA review</strong>. You retain ultimate responsibility for fact-checking output, validating strict tone compliance, and precluding any off-brand artifacts before initiating a publishing manifest.</p>
+
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">3. Source Protection & Intellectual Property</h3>
+                            <p class="mb-5 leading-relaxed">This orchestration suite relies on rigorously optimized internal architectures—such as explicit duration-tier handling (8s, 16s, 32s logic), strict JSON extractors, and distinct vendor prompt topologies (e.g., Veo specific segments). You agree not to reverse-engineer, duplicate, or extract the underlying semantic logic, structural algorithms, base seeds, or deployment configuration outside this supervised workspace environment.</p>
+
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">4. System Integrity & Limits</h3>
+                            <p class="mb-5 leading-relaxed">The execution environment connects with metered external APIs to ensure reliable generation sequences. Bypassing rate-limiter implementations, circumventing intentional backend validation, or willfully causing redundant and excessive deep research iterations falls outside standard operating procedures and violates these terms. FLOW-FORGE administrators reserve the right to throttle usage anomalies or suspend access privileges instantly to preserve general operational stability.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Privacy Policy -->
+                <div x-show="showModal === 'privacy'" class="flex flex-col h-full bg-white/50" x-cloak>
+                    <div class="p-6 sm:px-8 sm:py-6 border-b border-gray-100/60 flex justify-between items-center bg-white/70">
+                        <div>
+                            <h2 class="text-2xl font-bold tracking-tight text-gray-900">Privacy Policy</h2>
+                            <p class="text-sm text-gray-500 mt-1">Version 2.0 &mdash; Valid from April 2026</p>
+                        </div>
+                        <button @click="showModal = null" class="p-2 rounded-full hover:bg-gray-100 transition-colors">
+                            <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-8 text-gray-700">
+                         <div class="prose prose-sm sm:prose-base max-w-none text-gray-600">
+                            <p class="font-medium text-gray-900 text-lg mb-6 tracking-tight">Safeguarding data integrity within FLOW-FORGE ensures our generative pipelines preserve intellectual consistency while ensuring observability standards.</p>
+
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">1. Internal Telemetry & Activity Logging</h3>
+                            <p class="mb-5 leading-relaxed">To uphold "human-in-the-loop" transparency and architectural reliability, FLOW-FORGE persistently logs operational engagement metrics. This data tracks schema validations, script modifications, prompt executions, and system connections to external infrastructure. These logs establish robust debug scopes for continuous backend refinement and aid operators in navigating workflow congestion points securely.</p>
+
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">2. Exchanging Data With Foundation APIs</h3>
+                            <p class="mb-5 leading-relaxed">System orchestration entails routing localized context batches through third-party platforms (including specialized agents for video synthesis and script extrapolation). We enforce stringent enterprise bounds ensuring that <strong>no prompt topologies, internal seeds, or derived workspaces are integrated into the proprietary training loops of these AI providers</strong>. Simultaneously, do not ingest unauthorized Personal Identifiable Information (PII) into raw generation fields without prior masking.</p>
+
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">3. Authentication Persistence</h3>
+                            <p class="mb-5 leading-relaxed">Sign-in exchanges occur exclusively by utilizing discrete OTP mechanisms connected directly to valid project databases. We actively circumvent long-lived, unanchored credentials within the repository tree, preferring ephemeral state persistence that limits unauthorized lateral movements upon workspace entry.</p>
+
+                            <h3 class="text-gray-900 font-bold mb-2 text-[15px] uppercase tracking-wide">4. Internal Policy & Removal</h3>
+                            <p class="mb-5 leading-relaxed">All telemetry data and batch content generated within FLOW-FORGE persists according to established continuous testing and historical aggregation directives. Usage logs and historical schema artifacts generated remain retained as reference for AI generation efficacy even following access revocation.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-5 border-t border-[var(--lippe-border)] bg-white/80 backdrop-blur-md flex justify-end rounded-b-[24px]">
+                    <button @click="showModal = null" class="px-6 py-2.5 text-sm font-semibold rounded-xl shadow hover:shadow-md transition-all brand-button-primary brand-focus">Understood</button>
+                </div>
+            </div>
         </div>
     </div>
 
