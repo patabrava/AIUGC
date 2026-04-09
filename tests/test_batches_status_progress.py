@@ -773,3 +773,56 @@ def test_batches_list_modal_includes_product_count_input(monkeypatch):
     assert response.status_code == 200
     assert 'name="post_type_counts.product"' in response.text
     assert "value + lifestyle + product" in response.text
+
+
+def test_batch_detail_progress_uses_lippe_lift_stepper_classes():
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("batches/detail/_progress_stepper.html")
+
+    html = template.render(
+        batch={"state": "S4_SCRIPTED"},
+        batch_view={
+            "progress_states": [
+                {"code": "S1_SETUP", "label": "Setup"},
+                {"code": "S2_SEEDED", "label": "Seeded"},
+                {"code": "S4_SCRIPTED", "label": "Scripted"},
+            ],
+        },
+    )
+
+    assert "brand-panel brand-stepper-card" in html
+    assert "brand-progress-step" in html
+    assert "brand-progress-label" in html
+
+
+def test_batch_detail_workflow_panels_use_branded_status_classes():
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("batches/detail/_workflow_panels.html")
+
+    html = template.render(
+        batch={"id": "batch-1", "state": "S2_SEEDED"},
+        batch_view={
+            "review_summary": {
+                "approved_scripts_count": 1,
+                "removed_scripts_count": 0,
+                "pending_scripts_count": 0,
+            },
+            "prompt_ready_count": 0,
+            "active_posts_count": 1,
+            "qa_passed_count": 0,
+        },
+    )
+
+    assert "brand-panel brand-workflow-banner" in html
+    assert "brand-workflow-banner--review" in html
+    assert "brand-button-primary" in html
+
+
+def test_batch_macros_keep_lippe_lift_badge_classes():
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("batches/detail/_view_macros.html")
+
+    rendered = template.module.review_status_chip("approved", False)
+
+    assert "brand-status-chip" in rendered
+    assert "brand-status-chip--approved" in rendered

@@ -1,18 +1,18 @@
 {% macro progress_step_classes(current_state, state_code) -%}
-{% if current_state == state_code %}bg-purple-600 text-white{% elif current_state > state_code %}bg-green-500 text-white{% else %}bg-gray-200 text-gray-500{% endif %}
+{% if current_state == state_code %}brand-progress-step brand-progress-step--current{% elif current_state > state_code %}brand-progress-step brand-progress-step--complete{% else %}brand-progress-step brand-progress-step--upcoming{% endif %}
 {%- endmacro %}
 
 {% macro progress_label_classes(current_state, state_code) -%}
-{% if current_state == state_code %}text-purple-600{% else %}text-gray-500{% endif %}
+{% if current_state == state_code %}brand-progress-label brand-progress-label--current{% else %}brand-progress-label{% endif %}
 {%- endmacro %}
 
 {% macro connector_classes(current_state, state_code) -%}
-{% if current_state > state_code %}bg-green-500{% else %}bg-gray-200{% endif %}
+{% if current_state > state_code %}brand-progress-connector brand-progress-connector--complete{% else %}brand-progress-connector{% endif %}
 {%- endmacro %}
 
 {% macro review_status_chip(review_status, is_removed) -%}
 {% if review_status == "approved" %}
-<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+<span class="brand-status-chip brand-status-chip--approved inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
     Script Approved
 </span>
 {% elif is_removed %}
