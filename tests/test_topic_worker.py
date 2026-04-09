@@ -55,3 +55,25 @@ def test_run_topic_worker_tick_honors_intervals(monkeypatch):
     assert events == ["reconcile"]
     assert last_audit_run == 100.0
     assert last_research_run == 100.0
+
+
+def test_resolve_startup_research_timestamp_reconciles_stale_wrapper_first(monkeypatch):
+    """Startup should reconcile stale wrappers before gating the next daily discovery run."""
+    from workers import topic_worker
+
+    state = {"reconciled": False}
+
+    def _reconcile():
+        state["reconciled"] = True
+
+    monkeypatch.setattr(topic_worker, "_reconcile_stale_running_cron_run", _reconcile)
+    monkeypatch.setattr(topic_worker, "_get_last_run_timestamp", lambda: 100.0)
+    monkeypatch.setattr(
+        topic_worker,
+        "_get_active_cron_timestamp",
+        lambda: 0.0 if state["reconciled"] else 200.0,
+    )
+
+    resolved = topic_worker._resolve_startup_research_timestamp()
+
+    assert resolved == 100.0

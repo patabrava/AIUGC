@@ -38,6 +38,7 @@ POLL_INTERVAL_SECONDS = int(
 
 
 def _resolve_startup_research_timestamp() -> float:
+    _reconcile_stale_running_cron_run()
     last_run = _get_last_run_timestamp()
     active_run = _get_active_cron_timestamp()
     return max(last_run, active_run)

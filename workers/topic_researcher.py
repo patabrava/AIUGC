@@ -38,6 +38,7 @@ TARGET_TIERS = [8, 16, 32]
 POST_TYPE = "value"
 NICHE = os.environ.get("CRON_RESEARCH_NICHE", "Schwerbehinderung, Treppenlifte, Barrierefreiheit")
 CRON_STALE_AFTER_SECONDS = 15 * 60
+CRON_CHILD_WINDOW_GRACE_SECONDS = 60
 MIN_ACTIVE_FAMILY_COVERAGE = int(os.environ.get("TOPIC_MIN_ACTIVE_FAMILY_COVERAGE", "5"))
 
 def _get_last_run_timestamp() -> float:
@@ -136,6 +137,20 @@ def _heartbeat_cron_run(
     )
 
 
+def _row_created_within_wrapper_window(
+    row: Dict[str, Any],
+    *,
+    started_at: datetime,
+    updated_at: datetime,
+    grace_seconds: int = CRON_CHILD_WINDOW_GRACE_SECONDS,
+) -> bool:
+    created_at = _parse_utc_timestamp(row.get("created_at"))
+    if created_at is None:
+        return False
+    latest_relevant_at = updated_at.timestamp() + max(0, grace_seconds)
+    return started_at.timestamp() <= created_at.timestamp() <= latest_relevant_at
+
+
 def _reconcile_stale_running_cron_run(max_age_seconds: int = CRON_STALE_AFTER_SECONDS) -> Optional[Dict[str, Any]]:
     """Close a stale running wrapper when the worker lost its terminal update."""
     latest = get_latest_cron_run(status="running")
@@ -150,7 +165,11 @@ def _reconcile_stale_running_cron_run(max_age_seconds: int = CRON_STALE_AFTER_SE
     running_children = [
         row
         for row in list_topic_research_runs(limit=50, status="running")
-        if (created_at := _parse_utc_timestamp(row.get("created_at"))) is not None and created_at >= started_at
+        if _row_created_within_wrapper_window(
+            row,
+            started_at=started_at,
+            updated_at=updated_at,
+        )
     ]
     if running_children:
         return None
@@ -166,12 +185,20 @@ def _reconcile_stale_running_cron_run(max_age_seconds: int = CRON_STALE_AFTER_SE
     completed_children = [
         row
         for row in list_topic_research_runs(limit=50, status="completed")
-        if (created_at := _parse_utc_timestamp(row.get("created_at"))) is not None and created_at >= started_at
+        if _row_created_within_wrapper_window(
+            row,
+            started_at=started_at,
+            updated_at=updated_at,
+        )
     ]
     failed_children = [
         row
         for row in list_topic_research_runs(limit=50, status="failed")
-        if (created_at := _parse_utc_timestamp(row.get("created_at"))) is not None and created_at >= started_at
+        if _row_created_within_wrapper_window(
+            row,
+            started_at=started_at,
+            updated_at=updated_at,
+        )
     ]
     details = {
         "recovered": True,

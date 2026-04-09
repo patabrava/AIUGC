@@ -31,7 +31,7 @@ def test_sensitive_setting_defaults_do_not_ship_live_values():
 
 
 def test_http_exception_is_normalized_into_shared_error_envelope():
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://localhost")
 
     response = client.put("/posts/test-post-id/script", data={"script_text": ""})
 

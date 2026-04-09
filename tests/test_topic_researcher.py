@@ -208,3 +208,38 @@ def test_reconcile_stale_running_cron_run_finalizes_wrapper():
     assert result is not None
     assert mock_update.call_args[1]["status"] == "completed"
     assert mock_update.call_args[1]["topics_completed"] == 2
+
+
+def test_reconcile_stale_running_cron_run_ignores_unrelated_later_running_children():
+    """Unrelated running topic research rows should not block stale cron recovery forever."""
+    from workers.topic_researcher import _reconcile_stale_running_cron_run
+
+    stale_started = datetime.now(timezone.utc) - timedelta(days=2)
+    stale_updated = stale_started + timedelta(minutes=15)
+    latest = {
+        "id": "run-1",
+        "started_at": stale_started.isoformat(),
+        "updated_at": stale_updated.isoformat(),
+        "status": "running",
+        "topics_requested": 5,
+        "topics_completed": 0,
+        "topics_failed": 3,
+    }
+    unrelated_running_child = {
+        "id": "child-running-1",
+        "created_at": (stale_updated + timedelta(hours=2)).isoformat(),
+        "status": "running",
+        "target_length_tier": 32,
+        "topic_registry_id": None,
+        "result_summary": {},
+    }
+
+    with patch("workers.topic_researcher.get_latest_cron_run", return_value=latest), \
+         patch("workers.topic_researcher.list_topic_research_runs") as mock_runs, \
+         patch("workers.topic_researcher.update_cron_run") as mock_update:
+        mock_runs.side_effect = [[unrelated_running_child], [], []]
+        result = _reconcile_stale_running_cron_run(max_age_seconds=60)
+
+    assert result is not None
+    assert mock_update.call_args[1]["status"] == "failed"
+    assert mock_update.call_args[1]["topics_failed"] == 3
