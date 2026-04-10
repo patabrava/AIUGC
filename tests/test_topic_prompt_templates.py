@@ -87,6 +87,7 @@ def test_build_prompt2_uses_32s_text_template():
     assert "32-Sekunden-UGC-Videos" in prompt
     assert "40-66 Wörter" in prompt
     assert "5-6 Sätze" in prompt
+    assert "ZIELWORTZAHL: 40-66 Wörter" in prompt
     assert "core:" not in prompt
 
 
@@ -98,9 +99,23 @@ def test_build_prompt2_uses_16s_text_template():
     )
 
     assert "16-Sekunden-UGC-Videos" in prompt
-    assert "24-34 Wörter" in prompt
+    assert "20-34 Wörter" in prompt
     assert "2 Sprechblöcke" in prompt
+    assert "ZIELWORTZAHL: 20-34 Wörter" in prompt
+    assert "Beide Sprechblöcke müssen voll ausgearbeitet sein" in prompt
     assert "core:" not in prompt
+
+
+def test_build_prompt2_uses_8s_text_template():
+    prompt = build_prompt2(
+        topic="Barrierefreie Bahnreisen",
+        scripts_per_category=5,
+        profile=get_duration_profile(8),
+    )
+
+    assert "8-Sekunden-UGC-Videos" in prompt
+    assert "16-20 Wörter" in prompt
+    assert "ZIELWORTZAHL: 16-20 Wörter" in prompt
 
 
 def _sample_product() -> ProductKnowledgeEntry:

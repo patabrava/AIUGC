@@ -61,15 +61,24 @@
                 </div>
                 <p class="mt-1 text-xs text-[#1C2740]/60">Sorted by least coverage</p>
 
-                <div id="topic-browser" class="mt-4">
-                    {% include "topics/partials/topic_list.html" %}
+                <div id="topics-hub-hydration"
+                     hx-get="/topics/hydrate{{ request.url.query and ('?' + request.url.query) or '' }}"
+                     hx-trigger="load"
+                     hx-swap="outerHTML">
+                    <div class="space-y-4">
+                        <div class="rounded-2xl border border-dashed border-[#1C2740]/10 bg-white px-4 py-8 text-sm text-[#1C2740]/60">
+                            Loading topics...
+                        </div>
+                        <div class="rounded-2xl border border-dashed border-[#1C2740]/10 bg-white px-4 py-8 text-sm text-[#1C2740]/60">
+                            Loading active research...
+                        </div>
+                    </div>
                 </div>
             </div>
 
             {# ── RIGHT PANEL: Launch Panel ── #}
             <div id="launch-panel" class="brand-launch-panel p-5 sm:p-7 overflow-y-auto lg:h-full min-h-0">
                 {% include "topics/partials/launch_panel.html" %}
-                {% include "topics/partials/active_runs.html" %}
             </div>
 
         </div>

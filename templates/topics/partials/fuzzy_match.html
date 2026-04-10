@@ -15,7 +15,12 @@
                 class="flex-1 rounded-xl border border-[#1C2740]/10 bg-white px-4 py-3 text-sm font-semibold text-[#1C2740] transition hover:bg-[#FFF2E2]/50">
             Use existing
         </button>
-        <form method="post" action="/topics/runs" class="flex-1">
+        <form method="post"
+              action="/topics/runs"
+              hx-post="/topics/runs"
+              hx-target="#launch-panel"
+              hx-swap="innerHTML"
+              class="flex-1">
             <input type="hidden" name="new_topic_title" value="{{ query }}">
             <input type="hidden" name="trigger_source" value="hub">
             <button type="submit" class="w-full rounded-xl brand-button-primary px-4 py-3 text-sm font-bold transition brand-focus text-white">

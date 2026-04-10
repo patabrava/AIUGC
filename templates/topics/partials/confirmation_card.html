@@ -6,7 +6,12 @@
     <p class="mt-1 text-sm text-[#1C2740]">
         {{ topic.post_type or 'unknown' }} · {{ topic.script_count }} existing script{{ 's' if topic.script_count != 1 else '' }}
     </p>
-    <form method="post" action="/topics/runs" class="mt-4 flex gap-3">
+    <form method="post"
+          action="/topics/runs"
+          hx-post="/topics/runs"
+          hx-target="#launch-panel"
+          hx-swap="innerHTML"
+          class="mt-4 flex gap-3">
         <input type="hidden" name="topic_registry_id" value="{{ topic.id or '' }}">
         <input type="hidden" name="post_type" value="{{ topic.post_type or '' }}">
         <input type="hidden" name="trigger_source" value="hub">

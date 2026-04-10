@@ -1019,6 +1019,7 @@ class LLMClient:
         final_text_parts: List[str] = []
         is_complete = False
         resume_attempt = 0
+        max_resume_attempts = 3
         idle_stream_timeout_seconds = max(8, min(max(poll_interval_seconds, 1) * 2, 20))
 
         def handle_stream_event(event: Dict[str, Any]) -> None:
@@ -1181,6 +1182,15 @@ class LLMClient:
 
         while not is_complete and interaction_id and time.monotonic() < deadline:
             resume_attempt += 1
+            if resume_attempt > max_resume_attempts:
+                logger.warning(
+                    "gemini_deep_research_stream_fallback_to_poll",
+                    interaction_id=interaction_id,
+                    last_event_id=last_event_id,
+                    resume_attempts=resume_attempt - 1,
+                    reason="too_many_resume_timeouts",
+                )
+                break
             time.sleep(min(max(poll_interval_seconds, 1), 2))
             try:
                 with self.gemini_http_client.stream(
@@ -1240,6 +1250,14 @@ class LLMClient:
                         "retry_message": None,
                     }
                 )
+                if resume_attempt >= max_resume_attempts:
+                    logger.warning(
+                        "gemini_deep_research_stream_resume_limit_reached",
+                        interaction_id=interaction_id,
+                        last_event_id=last_event_id,
+                        attempts=resume_attempt,
+                    )
+                    break
 
         if not is_complete and interaction_id:
             poll_result = self._generate_gemini_deep_research_poll_result(

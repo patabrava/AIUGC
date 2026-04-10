@@ -962,9 +962,11 @@ def parse_topic_research_response(
         cleaned = cleaned[:-3]
     cleaned = cleaned.strip()
 
+    contaminated_topic_list = False
     try:
         parsed = _parse_json_or_yaml(cleaned)
-        if _looks_like_topic_list_payload(parsed):
+        contaminated_topic_list = _looks_like_topic_list_payload(parsed)
+        if contaminated_topic_list:
             raise ValidationError(
                 message="Contaminated research payload",
                 details={"reason": "topic_list_payload_detected", "seed_topic": seed_topic, "post_type": post_type},
@@ -973,12 +975,19 @@ def parse_topic_research_response(
         payload = _normalize_research_dossier_payload(payload)
     except ValidationError:
         try:
-            payload = _synthesize_research_dossier_from_text(
-                cleaned,
-                seed_topic=seed_topic,
-                post_type=post_type,
-                target_length_tier=target_length_tier,
-            )
+            if contaminated_topic_list:
+                payload = _synthesize_research_dossier_from_seed(
+                    seed_topic=seed_topic,
+                    post_type=post_type,
+                    target_length_tier=target_length_tier,
+                )
+            else:
+                payload = _synthesize_research_dossier_from_text(
+                    cleaned,
+                    seed_topic=seed_topic,
+                    post_type=post_type,
+                    target_length_tier=target_length_tier,
+                )
         except PydanticValidationError:
             payload = _synthesize_research_dossier_from_seed(
                 seed_topic=seed_topic,

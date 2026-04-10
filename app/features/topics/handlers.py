@@ -58,13 +58,13 @@ from app.core.config import get_settings
 from app.features.topics.hub import (
     _build_script_variants,
     _wants_html,
-    build_launch_hub_payload,
     build_topic_hub_payload,
     fuzzy_match_topic,
     get_random_topic,
     harvest_topics_to_bank_sync,
     launch_topic_research_run,
     parse_topic_filters,
+    _topic_bank_rows,
 )
 
 logger = get_logger(__name__)
@@ -83,6 +83,7 @@ _COVERAGE_TASKS: Dict[str, Thread] = {}
 _COVERAGE_WAITERS: Dict[str, Dict[str, int]] = {}
 _TOPIC_BANK_RESEARCH_TASKS: Dict[str, Thread] = {}
 _TOPIC_BANK_RESEARCH_LOCK = RLock()
+_LIFESTYLE_COLLECTION_MAX_ATTEMPTS = 2
 
 
 def _attach_publish_captions(
@@ -164,6 +165,53 @@ def _build_lifestyle_fallback_candidates(
         existing_titles.add(title.lower())
         existing_scripts.append(rotation)
     return candidates
+
+
+def _force_fill_lifestyle_candidates(
+    *,
+    count: int,
+    existing_titles: set,
+    existing_scripts: List[str],
+    target_length_tier: Optional[int],
+) -> List[Dict[str, Any]]:
+    """Create deterministic lifestyle candidates even when overlap filters ran dry.
+
+    This is a last-resort path for operational reliability: we prefer distinct
+    candidates, but we still need to complete the batch instead of stalling in
+    S1_SETUP when the generator keeps producing near-duplicates.
+    """
+    forced: List[Dict[str, Any]] = []
+    for fallback in _LIFESTYLE_FALLBACK_CANDIDATES:
+        if len(forced) >= count:
+            break
+        base_title = fallback["title"].strip()
+        title = base_title
+        suffix = 2
+        while title.lower() in existing_titles:
+            title = f"{base_title} {suffix}"
+            suffix += 1
+        rotation = fallback["rotation"].strip()
+        cta = fallback["cta"].strip()
+        script = f"{rotation} {cta}".strip()
+        forced.append(
+            {
+                "title": title,
+                "template_title": fallback["title"].strip(),
+                "rotation": rotation,
+                "cta": cta,
+                "spoken_duration": max(1, (len(script.split()) + 2) // 3),
+                "dialog_scripts": SimpleNamespace(
+                    problem_agitate_solution=[script],
+                    testimonial=[script],
+                    transformation=[script],
+                    description=f"Lifestyle-Beitrag zu: {fallback['title'].strip()}",
+                ),
+                "framework": "PAL",
+            }
+        )
+        existing_titles.add(title.lower())
+        existing_scripts.append(rotation)
+    return forced
 
 
 def _topic_family_signature(topic: Dict[str, Any]) -> str:
@@ -943,7 +991,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             required_topics = count
             collected_candidates: List[Dict[str, Any]] = []
             attempts = 0
-            max_attempts = 5
+            max_attempts = _LIFESTYLE_COLLECTION_MAX_ATTEMPTS
             def _same_lane(topic: Dict[str, Any]) -> bool:
                 topic_type = str(topic.get("post_type") or "").strip()
                 return topic_type in {"", post_type}
@@ -1100,6 +1148,40 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                                 "spoken_duration": float(candidate["spoken_duration"]),
                             }
                         )
+                remaining_after_fallback = required_topics - len(collected_candidates)
+                if remaining_after_fallback > 0:
+                    forced_candidates = _force_fill_lifestyle_candidates(
+                        count=remaining_after_fallback,
+                        existing_titles=existing_titles,
+                        existing_scripts=existing_scripts,
+                        target_length_tier=resolved_target_tier,
+                    )
+                    if forced_candidates:
+                        logger.warning(
+                            "lifestyle_topic_force_filled",
+                            batch_id=batch_id,
+                            missing=remaining_after_fallback,
+                            synthesized=len(forced_candidates),
+                        )
+                        for candidate in forced_candidates:
+                            if len(collected_candidates) >= required_topics:
+                                break
+                            collected_candidates.append(candidate)
+                            candidate_title = str(candidate.get("title") or "").strip().lower()
+                            candidate_script = str(candidate.get("rotation") or "").strip()
+                            if candidate_title:
+                                existing_titles.add(candidate_title)
+                            if candidate_script:
+                                existing_scripts.append(candidate_script)
+                            dedupe_reference.append(
+                                {
+                                    "title": candidate["title"],
+                                    "rotation": candidate["rotation"],
+                                    "cta": candidate["cta"],
+                                    "script": candidate_script,
+                                    "spoken_duration": float(candidate["spoken_duration"]),
+                                }
+                            )
 
             for topic_data in collected_candidates[:required_topics]:
                 update_seeding_progress(
@@ -1634,7 +1716,16 @@ async def list_topics_endpoint(request: Request):
     """Render the topics hub or return the legacy JSON API payload."""
     try:
         if _wants_html(request):
-            payload = build_topic_hub_payload(request)
+            filters = parse_topic_filters(request)
+            payload = {
+                "filters": filters,
+                "basic_topic_count": len(_topic_bank_rows()),
+                "generated_topic_count": 0,
+                "total_topics": 0,
+                "topics": [],
+                "basic_topics": [],
+                "generated_topics": [],
+            }
             templates = Jinja2Templates(directory="templates")
             return templates.TemplateResponse(
                 "topics/hub.html",
@@ -1664,6 +1755,17 @@ async def list_topics_endpoint(request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list topics",
         )
+
+
+@router.get("/hydrate")
+async def hydrate_topics_hub_endpoint(request: Request):
+    """Load the expensive hub sections after the shell has rendered."""
+    payload = build_topic_hub_payload(request)
+    templates = Jinja2Templates(directory="templates")
+    return templates.TemplateResponse(
+        "topics/partials/hub_hydration.html",
+        {"request": request, **payload},
+    )
 
 
 @router.post("/runs")
@@ -1705,12 +1807,12 @@ async def launch_topic_research_endpoint(request: Request):
         )
 
         if _wants_html(request):
-            redirect_url = "/topics"
-            response = RedirectResponse(
-                url=redirect_url,
-                status_code=status.HTTP_303_SEE_OTHER,
+            templates = Jinja2Templates(directory="templates")
+            response = templates.TemplateResponse(
+                "topics/partials/run_card.html",
+                {"request": request, "run": result["run"]},
             )
-            response.headers["HX-Trigger"] = "topic-research-launched"
+            response.headers["HX-Trigger"] = json.dumps({"topic-research-launched": True})
             return response
 
         return SuccessResponse(

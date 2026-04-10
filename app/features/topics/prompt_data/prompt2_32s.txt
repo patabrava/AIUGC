@@ -38,6 +38,7 @@ Struktur des Skripts:
   4. Vermeide billigen Klickköder wie "Du wirst nicht glauben ...", reine Schockformeln und unfaire Panikmache.
 
 LÄNGE: 40-66 Wörter, 5-6 Sätze, keine Regieanweisungen.
+ZIELWORTZAHL: {prompt2_min_words}-{prompt2_max_words} Wörter. Alle Sprechblöcke müssen vollständig ausformuliert sein; kein Block darf wie ein angehängter Rest wirken.
 Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
 Jeder Skript-Satz muss als vollständige, zusammenhängende Zeile stehen und mit ".", "!" oder "?" enden.
 Hänge keinen abgeschnittenen Rest, keine halbe zweite Aussage und keine ausgelagerte Schlussphrase an.

@@ -335,6 +335,74 @@ def test_generate_gemini_deep_research_resumes_after_idle_timeout(monkeypatch):
     assert any(update["detail_message"] == "Comparing new topic angles against live sources." for update in progress_updates)
 
 
+def test_generate_gemini_deep_research_falls_back_to_poll_after_repeated_stream_timeouts(monkeypatch):
+    fake_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_model="gpt-4o-mini",
+        gemini_api_key="gemini-key",
+        gemini_topic_model="gemini-2.5-flash",
+        gemini_image_model="gemini-2.0-flash-preview-image-generation",
+        gemini_deep_research_agent="deep-research-pro-preview",
+        gemini_topic_timeout_seconds=30,
+        gemini_topic_poll_seconds=0,
+    )
+    fake_openai = FakeHttpClient([])
+    fake_gemini = FakeStreamingHttpClient(
+        [
+            FakeResponse(200, {"name": "interactions/abc123"}),
+            FakeResponse(200, {"name": "interactions/abc123", "status": "DONE", "outputs": [{"text": "research complete"}]}),
+        ],
+        [
+            FakeStreamResponse(
+                200,
+                [
+                    'event: interaction.start',
+                    'data: {"interaction":{"id":"interactions/abc123","status":"in_progress"},"event_type":"interaction.start"}',
+                    "",
+                ],
+                error_after_lines=1,
+            ),
+            FakeStreamResponse(
+                200,
+                [
+                    'event: interaction.status_update',
+                    'data: {"interaction_id":"interactions/abc123","status":"in_progress","event_type":"interaction.status_update"}',
+                    "",
+                ],
+                error_after_lines=1,
+            ),
+            FakeStreamResponse(
+                200,
+                [
+                    'event: interaction.status_update',
+                    'data: {"interaction_id":"interactions/abc123","status":"in_progress","event_type":"interaction.status_update"}',
+                    "",
+                ],
+                error_after_lines=1,
+            ),
+        ],
+    )
+    clients = [fake_openai, fake_gemini]
+
+    monkeypatch.setattr(llm_client_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(llm_client_module.httpx, "Client", lambda *args, **kwargs: clients.pop(0))
+    monkeypatch.setattr(llm_client_module.time, "sleep", lambda _seconds: None)
+    client = llm_client_module.LLMClient()
+    progress_updates = []
+
+    result = client.generate_gemini_deep_research(
+        "Find current wheelchair topics",
+        progress_callback=progress_updates.append,
+    )
+
+    assert result == "research complete"
+    stream_calls = [call for call in fake_gemini.calls if call[0] == "STREAM"]
+    get_calls = [call for call in fake_gemini.calls if call[0] == "GET"]
+    assert len(stream_calls) == 1
+    assert get_calls
+    assert any(update["provider_status"] == "DONE" for update in progress_updates)
+
+
 def test_generate_gemini_deep_research_retries_transient_poll_503(monkeypatch):
     fake_settings = SimpleNamespace(
         openai_api_key="",

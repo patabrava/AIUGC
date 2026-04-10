@@ -502,6 +502,80 @@ def test_discover_topics_falls_back_for_missing_lifestyle_posts(monkeypatch):
     assert {post["post_type"] for post in created_posts} == {"value", "lifestyle"}, created_posts
 
 
+def test_discover_topics_force_fills_lifestyle_posts_when_overlap_filters_exhaust(monkeypatch):
+    batch = {
+        "id": "batch-lifestyle-force-fill",
+        "brand": "Force Fill Fixture",
+        "state": "S1_SETUP",
+        "post_type_counts": {"value": 0, "lifestyle": 3, "product": 0},
+        "target_length_tier": 16,
+    }
+    created_posts = []
+
+    repeated_topic = {
+        "title": "Gemeinsam unterwegs trotz kleiner Hürden",
+        "rotation": "Du planst den Tag, aber plötzlich kippt der Ablauf wieder.",
+        "cta": "Trotzdem bleibt ihr nicht stehen.",
+        "spoken_duration": 9.0,
+        "dialog_scripts": _dialog_scripts("Du planst den Tag, aber plötzlich kippt der Ablauf wieder."),
+        "framework": "PAL",
+    }
+
+    def fake_get_batch_by_id(batch_id: str):
+        assert batch_id == batch["id"]
+        return dict(batch)
+
+    def fake_get_all_topics_from_registry():
+        return []
+
+    def fake_generate_lifestyle_topics(count: int = 1, target_length_tier=None):
+        return [dict(repeated_topic) for _ in range(count)]
+
+    def fake_deduplicate_topics(new_topics, existing_topics, threshold=0.35):
+        return list(new_topics[:1])
+
+    def fake_build_lifestyle_seed_payload(topic_data, dialog_scripts):
+        return {"script": dialog_scripts.problem_agitate_solution[0], "canonical_topic": topic_data["title"]}
+
+    def fake_add_topic_to_registry(**kwargs):
+        return {"id": f"registry-{kwargs['title']}"}
+
+    def fake_store_topic_bank_entry(**kwargs):
+        return {"id": f"bank-{kwargs['title']}", "title": kwargs["title"], "family_fingerprint": f"fp-{kwargs['title']}"}
+
+    def fake_upsert_topic_script_variants(**kwargs):
+        return None
+
+    def fake_create_post_for_batch(**kwargs):
+        post = {"id": f"post-{len(created_posts) + 1}", **kwargs}
+        created_posts.append(post)
+        return post
+
+    def fake_update_batch_state(batch_id: str, target_state):
+        batch["state"] = getattr(target_state, "value", target_state)
+        return {"id": batch_id, "state": batch["state"]}
+
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
+    monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", fake_get_all_topics_from_registry)
+    monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)
+    monkeypatch.setattr(topic_handlers, "deduplicate_topics", fake_deduplicate_topics)
+    monkeypatch.setattr(topic_handlers, "build_lifestyle_seed_payload", fake_build_lifestyle_seed_payload)
+    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", fake_add_topic_to_registry)
+    monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption=f"Caption for {kwargs['topic_title']}"))
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
+    monkeypatch.setattr(topic_handlers, "update_batch_state", fake_update_batch_state)
+
+    topic_handlers.clear_seeding_progress(batch["id"])
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert result["posts_created"] == 3, result
+    assert batch["state"] == "S2_SEEDED", batch
+    assert len(created_posts) == 3, created_posts
+    assert len({post["topic_title"] for post in created_posts}) == 3, created_posts
+
+
 def test_mixed_batch_lifestyle_dedupe_stays_lane_scoped(monkeypatch):
     batch = {
         "id": "batch-mixed-lane-scope",
