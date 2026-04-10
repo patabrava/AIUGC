@@ -1,6 +1,6 @@
 {% from "batches/detail/_view_macros.html" import connector_classes, progress_label_classes, progress_step_classes %}
 
-<div class="brand-panel brand-stepper-card mb-6">
+<div class="brand-panel brand-stepper-card mb-6 overflow-hidden rounded-2xl border border-[#006AAB]/12 bg-[#FFFDF9]">
     <div class="mb-4 flex items-center justify-between gap-4">
         <div>
             <p class="brand-section-eyebrow">Workflow</p>
@@ -47,7 +47,7 @@
                 <span class="text-xs font-semibold uppercase tracking-[0.18em] {{ progress_label_classes(batch.state, progress_state.code) }}">
                     {{ progress_state.label }}
                 </span>
-                <span class="block text-xs text-gray-500">{{ progress_state.code }}</span>
+                <span class="block text-xs text-[#1C2740]/55">{{ progress_state.code }}</span>
             </div>
         </div>
         {% if not loop.last %}

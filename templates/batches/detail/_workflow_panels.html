@@ -1,5 +1,5 @@
 {% if batch.state == 'S2_SEEDED' %}
-<div class="brand-panel brand-workflow-banner brand-workflow-banner--review mb-6">
+<div class="brand-panel brand-workflow-banner brand-workflow-banner--review mb-6 rounded-2xl border border-[#006AAB]/12 bg-[#F6FAFF]">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div class="flex-1">
             <p class="brand-section-eyebrow">Script Review</p>
@@ -21,12 +21,12 @@
 {% endif %}
 
 {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
-<div id="video-workflow" class="brand-panel brand-workflow-banner brand-workflow-banner--production mb-6">
+<div id="video-workflow" class="brand-panel brand-workflow-banner brand-workflow-banner--production mb-6 rounded-2xl border border-[#006AAB]/12 bg-[#FFFDF9]">
     <div class="flex items-center justify-between">
         <div>
             <div class="flex items-center gap-3 mb-2">
                 <h3 class="text-xl font-bold text-gray-900">Video Production</h3>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
+                <span class="inline-flex items-center rounded-full border border-[#006AAB]/20 bg-[#EAF3FB] px-3 py-1 text-xs font-semibold text-[#1C2740]">
                     {{ batch_view.prompt_ready_count }}/{{ batch_view.active_posts_count }} Ready
                 </span>
             </div>
@@ -43,12 +43,12 @@
 {% endif %}
 
 {% if batch.state == 'S5_PROMPTS_BUILT' %}
-<div id="prompts-workflow" class="brand-panel brand-workflow-banner brand-workflow-banner--production mb-6">
+<div id="prompts-workflow" class="brand-panel brand-workflow-banner brand-workflow-banner--production mb-6 rounded-2xl border border-[#006AAB]/12 bg-[#FFFDF9]">
     <div class="flex items-center justify-between">
         <div class="flex-1">
             <div class="flex items-center gap-3 mb-2">
                 <h3 class="text-xl font-bold text-gray-900">Prompts Ready</h3>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB]">
+                <span class="inline-flex items-center rounded-full border border-[#006AAB]/20 bg-[#EAF3FB] px-3 py-1 text-xs font-semibold text-[#1C2740]">
                     {{ batch_view.prompt_ready_count }}/{{ batch_view.active_posts_count }} Prepared
                 </span>
             </div>
@@ -59,12 +59,12 @@
     </div>
 </div>
 {% elif batch.state == 'S6_QA' %}
-<div id="qa-workflow" class="brand-panel brand-workflow-banner brand-workflow-banner--qa mb-6">
+<div id="qa-workflow" class="brand-panel brand-workflow-banner brand-workflow-banner--qa mb-6 rounded-2xl border border-[#006AAB]/12 bg-[#FFFDF9]">
     <div class="flex items-center justify-between">
         <div class="flex-1">
             <div class="flex items-center gap-3 mb-2">
                 <h3 class="text-xl font-bold text-gray-900">Quality Assurance Review</h3>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                <span class="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
                     {{ batch_view.qa_passed_count }}/{{ batch_view.active_posts_count }} Approved
                 </span>
             </div>

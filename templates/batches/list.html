@@ -34,7 +34,7 @@
         class="mb-4 space-y-3"
     >
         <template x-for="(info, id) in batchProgress" :key="id">
-            <div class="rounded-xl border p-4 shadow-sm transition" :class="progressCardClasses(info)">
+            <div class="rounded-2xl border p-4 shadow-sm transition" :class="progressCardClasses(info)">
                 <div class="flex items-start justify-between gap-4">
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-3">
@@ -54,31 +54,31 @@
                                 </template>
                             </div>
                             <div class="min-w-0">
-                                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-75">Batch Seeding</p>
-                                <p class="text-base font-semibold leading-tight" x-text="info.brand"></p>
+                                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1C2740]/55">Batch Seeding</p>
+                                <p class="text-base font-semibold leading-tight text-[#1C2740]" x-text="info.brand"></p>
                             </div>
                         </div>
                         <div class="mt-4" aria-live="polite">
                             <div class="flex flex-wrap items-center gap-2">
-                                <p class="text-sm font-semibold" x-text="info.stageLabel || 'Generating topics and posts'"></p>
+                                <p class="text-sm font-semibold text-[#1C2740]" x-text="info.stageLabel || 'Generating topics and posts'"></p>
                                 <template x-if="info.isRetrying">
-                                    <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide" :class="progressBadgeClasses(info)">
+                                    <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]" :class="progressBadgeClasses(info)">
                                         Retry in progress
                                     </span>
                                 </template>
                                 <template x-if="info.streamState === 'reconnecting'">
-                                    <span class="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                                    <span class="inline-flex items-center rounded-full border border-[#E58434]/30 bg-[#FFF2E2] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1C2740]">
                                         Reconnecting
                                     </span>
                                 </template>
                             </div>
-                            <p class="mt-1 text-sm leading-6 opacity-90" x-text="info.detailMessage || 'Generating topics and posts from the current batch mix.'"></p>
+                            <p class="mt-1 text-sm leading-6 text-[#1C2740]/80" x-text="info.detailMessage || 'Generating topics and posts from the current batch mix.'"></p>
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-2">
                         <button
                             type="button"
-                            class="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white/50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide transition hover:bg-white/80"
+                            class="inline-flex items-center gap-1 rounded-full border border-[#006AAB]/15 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1C2740] transition hover:border-[#006AAB]/25 hover:bg-white"
                             @click="toggleSoundEnabled()"
                             :aria-pressed="soundEnabled ? 'true' : 'false'"
                         >
@@ -102,55 +102,55 @@
                         </div>
                         <div class="mt-3 flex flex-wrap gap-2">
                             <template x-for="step in checkpointSteps(info)" :key="step.key">
-                                <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition" :class="checkpointClasses(step)">
+                                <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold tracking-wide transition" :class="checkpointClasses(step)">
                                     <span class="inline-block h-2 w-2 rounded-full" :class="checkpointDotClasses(step)"></span>
                                     <span x-text="step.label"></span>
                                 </div>
                             </template>
                         </div>
                     </div>
-                    <div class="rounded-lg bg-black/5 p-3 text-xs leading-5">
+                    <div class="rounded-lg bg-[#1C2740]/5 p-3 text-xs leading-5 text-[#1C2740]">
                         <div class="flex items-center justify-between">
-                            <span class="font-semibold uppercase tracking-wide opacity-70">Status</span>
+                            <span class="font-semibold uppercase tracking-wide text-[#1C2740]/60">Status</span>
                             <span x-text="formatRelativeTime(info.lastUpdatedAt)"></span>
                         </div>
-                        <p class="mt-2 font-medium" x-text="postCountLabel(info)"></p>
+                        <p class="mt-2 font-medium text-[#1C2740]" x-text="postCountLabel(info)"></p>
                         <template x-if="info.interactionId">
-                            <p class="mt-1 break-all opacity-80" x-text="`Interaction: ${info.interactionId}`"></p>
+                            <p class="mt-1 break-all text-[#1C2740]/75" x-text="`Interaction: ${info.interactionId}`"></p>
                         </template>
                         <template x-if="info.retryMessage">
-                            <p class="mt-1 opacity-80" x-text="info.retryMessage"></p>
+                            <p class="mt-1 text-[#1C2740]/75" x-text="info.retryMessage"></p>
                         </template>
                         <template x-if="info.state">
-                            <p class="mt-2 opacity-80" x-text="`Batch state: ${info.state}`"></p>
+                            <p class="mt-2 text-[#1C2740]/75" x-text="`Batch state: ${info.state}`"></p>
                         </template>
-                        <p class="mt-2 opacity-80" x-text="streamStateLabel(info)"></p>
+                        <p class="mt-2 text-[#1C2740]/75" x-text="streamStateLabel(info)"></p>
                         <template x-if="info.lastEventId">
-                            <p class="mt-1 opacity-70" x-text="`Last event: ${info.lastEventId}`"></p>
+                            <p class="mt-1 text-[#1C2740]/60" x-text="`Last event: ${info.lastEventId}`"></p>
                         </template>
                     </div>
                 </div>
 
-                <div class="mt-3 rounded-lg bg-[#1C2740] p-3 text-white/90 shadow-inner">
+                <div class="mt-3 rounded-2xl border border-[#006AAB]/12 bg-[#1C2740] p-3 text-white/90 shadow-inner">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1C2740]/60">Live research feed</p>
-                            <p class="mt-1 text-sm text-[#1C2740]/40">Short progress notes stream in here while the batch is being prepared.</p>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#B7CCE7]">Live research feed</p>
+                            <p class="mt-1 text-sm text-white/65">Short progress notes stream in here while the batch is being prepared.</p>
                         </div>
-                        <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide" :class="streamBadgeClasses(info)">
+                        <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]" :class="streamBadgeClasses(info)">
                             <span x-text="info.streamState || 'polling'"></span>
                         </span>
                     </div>
                     <div class="mt-3 max-h-52 overflow-y-auto rounded-lg bg-black/20 p-2">
                         <template x-if="!info.events || info.events.length === 0">
-                            <p class="px-2 py-3 text-sm text-[#1C2740]/60">Waiting for the first live research event...</p>
+                            <p class="px-2 py-3 text-sm text-white/55">Waiting for the first live research event...</p>
                         </template>
                         <div class="space-y-2">
                             <template x-for="event in visibleEvents(info)" :key="event.event_id">
-                                <div class="rounded-md border border-white/10 bg-white/5 px-3 py-2">
+                                <div class="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
                                     <div class="flex items-center justify-between gap-3">
-                                        <p class="text-xs font-semibold uppercase tracking-wide" :class="eventLabelClasses(event)" x-text="eventLabel(event)"></p>
-                                        <span class="text-[11px] text-[#1C2740]/60" x-text="formatEventTime(event.created_at)"></span>
+                                        <p class="text-xs font-semibold uppercase tracking-[0.18em]" :class="eventLabelClasses(event)" x-text="eventLabel(event)"></p>
+                                        <span class="text-[11px] text-white/50" x-text="formatEventTime(event.created_at)"></span>
                                     </div>
                                     <p class="mt-1 text-sm leading-5 text-white/90" x-text="eventSummary(event)"></p>
                                 </div>
@@ -640,31 +640,31 @@
                 },
                 checkpointClasses(step) {
                     if (step.status === 'complete') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
-                    if (step.status === 'active') return 'border-violet-300 bg-violet-100 text-violet-900';
+                    if (step.status === 'active') return 'border-[#006AAB]/20 bg-[#EAF3FB] text-[#1C2740]';
                     if (step.status === 'failed') return 'border-rose-200 bg-rose-50 text-rose-800';
-                    return 'border-[#1C2740]/10 bg-white/80 text-[#1C2740]/60';
+                    return 'border-[#1C2740]/10 bg-white/80 text-[#1C2740]/55';
                 },
                 checkpointDotClasses(step) {
                     if (step.status === 'complete') return 'bg-emerald-500';
-                    if (step.status === 'active') return 'bg-violet-600 animate-pulse';
+                    if (step.status === 'active') return 'bg-[#006AAB] animate-pulse';
                     if (step.status === 'failed') return 'bg-rose-500';
                     return 'bg-[#1C2740]/20';
                 },
                 progressCardClasses(info) {
-                    if (info.stage === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-950';
-                    if (info.stage === 'failed') return 'border-rose-200 bg-rose-50 text-rose-950';
-                    if (info.isRetrying || info.stage === 'retry_wait') return 'border-amber-200 bg-amber-50 text-amber-950';
-                    return 'border-violet-200 bg-violet-50 text-violet-950';
+                    if (info.stage === 'completed') return 'border-emerald-200 bg-[#F4FBF7] text-[#1C2740]';
+                    if (info.stage === 'failed') return 'border-rose-200 bg-rose-50 text-[#1C2740]';
+                    if (info.isRetrying || info.stage === 'retry_wait') return 'border-[#E58434]/20 bg-[#FFF2E2] text-[#1C2740]';
+                    return 'border-[#006AAB]/18 bg-[#F6FAFF] text-[#1C2740]';
                 },
                 progressIconClasses(info) {
                     if (info.stage === 'completed') return 'border-emerald-300 bg-emerald-100 text-emerald-700';
                     if (info.stage === 'failed') return 'border-rose-300 bg-rose-100 text-rose-700';
-                    if (info.isRetrying || info.stage === 'retry_wait') return 'border-amber-300 bg-amber-100 text-amber-700';
-                    return 'border-violet-300 bg-violet-100 text-violet-700';
+                    if (info.isRetrying || info.stage === 'retry_wait') return 'border-[#E58434]/25 bg-[#FFF2E2] text-[#1C2740]';
+                    return 'border-[#006AAB]/20 bg-[#B7CCE7]/35 text-[#006AAB]';
                 },
                 progressBadgeClasses(info) {
                     if (info.stage === 'failed') return 'border-rose-300 bg-rose-100 text-rose-800';
-                    return 'border-amber-300 bg-amber-100 text-amber-800';
+                    return 'border-[#E58434]/25 bg-[#FFF2E2] text-[#1C2740]';
                 },
                 postCountLabel(info) {
                     if (!info.expected) {
@@ -686,9 +686,9 @@
                 },
                 streamBadgeClasses(info) {
                     if (info.streamState === 'live') return 'border-emerald-300 bg-emerald-100 text-emerald-900';
-                    if (info.streamState === 'reconnecting') return 'border-amber-300 bg-amber-100 text-amber-900';
-                    if (info.streamState === 'closed') return 'border-[#1C2740]/10 bg-[#1C2740]/5 text-[#1C2740]';
-                    return 'border-violet-300 bg-violet-100 text-violet-900';
+                    if (info.streamState === 'reconnecting') return 'border-[#E58434]/25 bg-[#FFF2E2] text-[#1C2740]';
+                    if (info.streamState === 'closed') return 'border-white/10 bg-white/5 text-white/80';
+                    return 'border-[#B7CCE7]/50 bg-[#B7CCE7]/18 text-white';
                 },
                 visibleEvents(info) {
                     const events = Array.isArray(info.events) ? info.events.slice(-8) : [];
@@ -705,9 +705,9 @@
                 eventLabelClasses(event) {
                     if (event.event_type === 'interaction.complete') return 'text-emerald-300';
                     if (event.event_type === 'interaction.failed') return 'text-rose-300';
-                    if (event.event_type === 'content.delta') return 'text-sky-300';
-                    if (event.event_type === 'progress.post_created') return 'text-violet-300';
-                    return 'text-[#1C2740]/40';
+                    if (event.event_type === 'content.delta') return 'text-[#B7CCE7]';
+                    if (event.event_type === 'progress.post_created') return 'text-[#FFD9A0]';
+                    return 'text-white/55';
                 },
                 eventSummary(event) {
                     return eventSummaryText(event);

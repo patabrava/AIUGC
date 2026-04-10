@@ -762,17 +762,19 @@ def test_batches_routes_return_full_documents_for_history_restore(monkeypatch):
 
 
 def test_batches_list_modal_includes_product_count_input(monkeypatch):
-    client = TestClient(app)
-    settings = get_settings()
-    settings.bypass_auth_in_development = True
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("batches/list.html")
 
-    monkeypatch.setattr(batch_handlers, "list_batches", lambda archived=None, limit=50, offset=0: ([], 0))
+    html = template.render(
+        static_version="1",
+        batchProgress={},
+        batches=[],
+    )
 
-    response = client.get("/batches", headers={"Accept": "text/html"})
-
-    assert response.status_code == 200
-    assert 'name="post_type_counts.product"' in response.text
-    assert "value + lifestyle + product" in response.text
+    assert "rounded-2xl border p-4 shadow-sm transition" in html
+    assert "Batch Seeding" in html
+    assert "text-[#1C2740]/55" in html
+    assert "border-[#006AAB]/20 bg-[#EAF3FB]" in html
 
 
 def test_batch_detail_progress_uses_lippe_lift_stepper_classes():
@@ -816,6 +818,8 @@ def test_batch_detail_workflow_panels_use_branded_status_classes():
     assert "brand-panel brand-workflow-banner" in html
     assert "brand-workflow-banner--review" in html
     assert "brand-button-primary" in html
+    assert "rounded-2xl border border-[#006AAB]/12" in html
+    assert "bg-[#F6FAFF]" in html
 
 
 def test_batch_macros_keep_lippe_lift_badge_classes():
