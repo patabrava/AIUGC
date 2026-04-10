@@ -16,7 +16,8 @@
             <p class="mt-1 text-sm text-gray-500">Manage your UGC video production batches</p>
         </div>
         <button 
-            @click="showCreateModal = true"
+            type="button"
+            data-create-batch-open
             class="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium brand-button-primary focus:outline-none focus:ring-2 focus:ring-offset-2 transition sm:w-auto w-full brand-focus text-white"
         >
             <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -220,13 +221,28 @@
 
     <!-- Create Batch Modal -->
     <div 
-        x-show="showCreateModal" 
-        x-cloak
-        class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50 px-4"
-        @click.self="showCreateModal = false"
+        id="create-batch-modal"
+        data-create-batch-modal
+        class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-500 bg-opacity-75 px-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-batch-modal-title"
+        aria-hidden="true"
     >
         <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Create New Batch</h3>
+            <div class="mb-4 flex items-start justify-between gap-4">
+                <h3 id="create-batch-modal-title" class="text-lg font-medium text-gray-900">Create New Batch</h3>
+                <button
+                    type="button"
+                    data-create-batch-close
+                    class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#006AAB]"
+                    aria-label="Close create batch dialog"
+                >
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
             
             <form 
                 hx-post="/batches" 
@@ -253,7 +269,7 @@
                     }));
                     console.log('Batch creation started:', brand);
                 "
-                @htmx:after-request="showCreateModal = false"
+                data-create-batch-form
             >
                 <div class="space-y-4">
                     <div>
@@ -320,13 +336,7 @@
                 </div>
                 
                 <div class="mt-6 flex justify-end space-x-3">
-                    <button 
-                        type="button"
-                        @click="showCreateModal = false"
-                        class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-[var(--lippe-deep-blue)] hover:bg-gray-50"
-                    >
-                        Cancel
-                    </button>
+                    <button type="button" data-create-batch-close class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-[var(--lippe-deep-blue)] hover:bg-gray-50">Cancel</button>
                     <button 
                         type="submit"
                         class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium brand-button-primary inline-flex items-center brand-focus text-white"
@@ -960,6 +970,69 @@
                 }
             }
         });
+
+        const modal = document.querySelector('[data-create-batch-modal]');
+        const openButton = document.querySelector('[data-create-batch-open]');
+        const closeButtons = document.querySelectorAll('[data-create-batch-close]');
+        const form = document.querySelector('[data-create-batch-form]');
+
+        if (modal && openButton) {
+            const syncClosedState = () => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                modal.setAttribute('aria-hidden', 'true');
+                modal.removeAttribute('aria-busy');
+            };
+
+            const openModal = () => {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                modal.setAttribute('aria-hidden', 'false');
+                const firstField = modal.querySelector('input, select, textarea, button');
+                if (firstField) {
+                    firstField.focus();
+                }
+            };
+
+            const closeModal = () => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                modal.setAttribute('aria-hidden', 'true');
+                modal.removeAttribute('aria-busy');
+                openButton.focus();
+            };
+
+            syncClosedState();
+            openButton.addEventListener('click', openModal);
+            closeButtons.forEach((button) => button.addEventListener('click', closeModal));
+            modal.addEventListener('click', (event) => {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+
+            if (form) {
+                form.addEventListener('htmx:after-request', closeModal);
+                form.addEventListener('submit', () => {
+                    modal.setAttribute('aria-busy', 'true');
+                });
+                form.addEventListener('htmx:responseError', () => {
+                    modal.removeAttribute('aria-busy');
+                });
+            }
+
+            window.addEventListener('pageshow', syncClosedState);
+            document.body.addEventListener('htmx:afterSwap', (event) => {
+                if (event.detail && event.detail.target && event.detail.target.id === 'batches-list-content') {
+                    syncClosedState();
+                }
+            });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && !modal.classList.contains('hidden')) {
+                    closeModal();
+                }
+            });
+        }
     })();
 </script>
 {% endblock %}
