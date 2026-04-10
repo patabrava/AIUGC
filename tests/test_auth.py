@@ -64,6 +64,17 @@ def test_is_email_allowed_rejected():
     assert is_email_allowed("hacker@evil.com") is False
 
 
+def test_is_email_allowed_reviewer_email(monkeypatch):
+    import app.core.config as config_module
+    from app.features.auth.queries import is_email_allowed
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "tiktok-review@lippelift.xyz")
+    monkeypatch.delenv("ALLOWED_EMAILS", raising=False)
+
+    assert is_email_allowed("tiktok-review@lippelift.xyz") is True
+
+
 def test_session_cookie_roundtrip():
     from app.features.auth.middleware import encode_session_cookie, decode_session_cookie
     data = {"access_token": "abc123", "refresh_token": "def456"}
@@ -283,3 +294,57 @@ async def test_production_proxy_loopback_still_requires_login(monkeypatch):
     assert response is not None
     assert response.status_code == 302
     assert response.headers["location"] == "/auth/login"
+
+
+def test_reviewer_login_sets_session_cookie(monkeypatch):
+    import app.core.config as config_module
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "tiktok-review@lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
+
+    client = TestClient(app, base_url="https://lippelift.xyz")
+    response = client.get("/auth/review?token=review-secret-token", allow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/batches"
+    assert "ff_session=" in response.headers.get("set-cookie", "")
+
+
+def test_reviewer_login_rejects_invalid_token(monkeypatch):
+    import app.core.config as config_module
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "tiktok-review@lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
+
+    client = TestClient(app, base_url="https://lippelift.xyz")
+    response = client.get("/auth/review?token=wrong-token")
+
+    assert response.status_code == 403
+    assert "Invalid reviewer access link." in response.text
+
+
+def test_reviewer_login_requires_configuration(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "")
+    monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "")
+
+    client = TestClient(app, base_url="https://lippelift.xyz")
+    response = client.get("/auth/review?token=anything")
+
+    assert response.status_code == 503
+    assert "Reviewer login is not configured yet." in response.text

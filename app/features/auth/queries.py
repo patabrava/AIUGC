@@ -25,6 +25,10 @@ def is_email_allowed(email: str) -> bool:
     if domain == settings.allowed_email_domain.lower():
         return True
 
+    reviewer_email = settings.reviewer_login_email.strip().lower()
+    if reviewer_email and normalized == reviewer_email:
+        return True
+
     explicit = [e.strip().lower() for e in settings.allowed_emails.split(",") if e.strip()]
     return normalized in explicit
 
@@ -111,9 +115,20 @@ async def verify_otp(email: str, token: str) -> Optional[Dict[str, Any]]:
     }
 
 
+def _reviewer_token_email(token: str) -> Optional[str]:
+    if token.startswith("review-access-token:"):
+        return token.split(":", 1)[1]
+    if token.startswith("review-refresh-token:"):
+        return token.split(":", 1)[1]
+    return None
+
+
 async def get_user_from_token(access_token: str) -> Optional[Dict[str, Any]]:
     """Validate an access token and return user info, or None if invalid."""
     settings = get_settings()
+    reviewer_email = _reviewer_token_email(access_token)
+    if reviewer_email:
+        return {"email": reviewer_email}
     if settings.is_auth_bypassed and access_token.startswith("local-access-token:"):
         return {"email": access_token.split(":", 1)[1]}
 
@@ -132,6 +147,13 @@ async def get_user_from_token(access_token: str) -> Optional[Dict[str, Any]]:
 async def refresh_session(refresh_token: str) -> Optional[Dict[str, Any]]:
     """Refresh an expired session. Returns new session dict or None."""
     settings = get_settings()
+    reviewer_email = _reviewer_token_email(refresh_token)
+    if reviewer_email:
+        return {
+            "access_token": f"review-access-token:{reviewer_email}",
+            "refresh_token": refresh_token,
+            "user": {"email": reviewer_email},
+        }
     if settings.is_auth_bypassed and refresh_token.startswith("local-refresh-token:"):
         email = refresh_token.split(":", 1)[1]
         return {

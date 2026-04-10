@@ -174,6 +174,14 @@ class Settings(BaseSettings):
     # Auth
     allowed_email_domain: str = Field("lippelift.de", description="Email domain allowed for login")
     allowed_emails: str = Field("caposk817@gmail.com", description="Comma-separated list of explicitly allowed emails")
+    reviewer_login_email: str = Field(
+        "",
+        description="Optional fixed reviewer account email for passwordless review-only login",
+    )
+    reviewer_login_token: str = Field(
+        "",
+        description="Secret token that unlocks the reviewer login route",
+    )
     session_cookie_name: str = Field("ff_session", description="Name of the session cookie")
     session_max_age: int = Field(2592000, description="Session cookie max age in seconds (default 30 days)")
     auth_otp_code_length: int = Field(8, ge=6, le=10, description="Expected Supabase email OTP length")
@@ -233,16 +241,13 @@ class Settings(BaseSettings):
         return self.is_development and self.bypass_auth_in_development
 
 
-# Singleton instance
+# Singleton compatibility hook retained for tests and older imports.
 _settings: Optional[Settings] = None
 
 
 def get_settings() -> Settings:
-    """Get or create settings singleton."""
-    global _settings
-    if _settings is None:
-        _settings = Settings()
-    return _settings
+    """Load settings from the current environment."""
+    return Settings()
 
 
 def fingerprint_secret(value: str, *, prefix_length: int = 12) -> str:

@@ -3,7 +3,7 @@ Lippe Lift Studio Auth Handlers
 Login, OTP verification, and logout routes.
 """
 
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -21,6 +21,24 @@ templates = Jinja2Templates(directory="templates")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+
+def _build_session_response(email: str, settings, redirect_url: str = "/batches") -> RedirectResponse:
+    cookie_data = {
+        "access_token": f"review-access-token:{email}",
+        "refresh_token": f"review-refresh-token:{email}",
+    }
+    cookie_value = encode_session_cookie(cookie_data, settings.token_encryption_key)
+    response = RedirectResponse(url=redirect_url, status_code=302)
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=cookie_value,
+        max_age=settings.session_max_age,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+    )
+    return response
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render the login page."""
@@ -34,7 +52,43 @@ async def login_page(request: Request):
         "error": None,
         "otp_code_length": settings.auth_otp_code_length,
         "bypass_auth_in_development": settings.is_auth_bypassed,
+        "reviewer_login_enabled": bool(settings.reviewer_login_email.strip() and settings.reviewer_login_token.strip()),
     })
+
+
+@router.get("/review", response_class=HTMLResponse)
+async def reviewer_login(request: Request, token: str = Query(default="")):
+    """Passwordless reviewer login for TikTok review access."""
+    settings = get_settings()
+    reviewer_email = settings.reviewer_login_email.strip().lower()
+    reviewer_token = settings.reviewer_login_token.strip()
+
+    if not reviewer_email or not reviewer_token:
+        logger.warning("reviewer_login_not_configured")
+        return templates.TemplateResponse("auth/login.html", {
+            "request": request,
+            "step": "email",
+            "email": "",
+            "error": "Reviewer login is not configured yet.",
+            "otp_code_length": settings.auth_otp_code_length,
+            "bypass_auth_in_development": settings.is_auth_bypassed,
+            "reviewer_login_enabled": False,
+        }, status_code=503)
+
+    if token != reviewer_token:
+        logger.warning("reviewer_login_denied", token_present=bool(token))
+        return templates.TemplateResponse("auth/login.html", {
+            "request": request,
+            "step": "email",
+            "email": "",
+            "error": "Invalid reviewer access link.",
+            "otp_code_length": settings.auth_otp_code_length,
+            "bypass_auth_in_development": settings.is_auth_bypassed,
+            "reviewer_login_enabled": True,
+        }, status_code=403)
+
+    logger.info("reviewer_login_success", email=reviewer_email)
+    return _build_session_response(reviewer_email, settings)
 
 
 @router.post("/send-otp", response_class=HTMLResponse)
@@ -44,20 +98,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
     settings = get_settings()
 
     if should_bypass_auth(request):
-        cookie_data = {
-            "access_token": f"local-access-token:{normalized_email}",
-            "refresh_token": f"local-refresh-token:{normalized_email}",
-        }
-        cookie_value = encode_session_cookie(cookie_data, settings.token_encryption_key)
-        response = RedirectResponse(url="/batches", status_code=302)
-        response.set_cookie(
-            key=settings.session_cookie_name,
-            value=cookie_value,
-            max_age=settings.session_max_age,
-            httponly=True,
-            secure=settings.is_production,
-            samesite="lax",
-        )
+        response = _build_session_response(normalized_email, settings)
         logger.info("auth_login_bypassed_local", email=normalized_email)
         return response
 
@@ -70,6 +111,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
             "error": "This email is not authorized to access Lippe Lift Studio.",
             "otp_code_length": settings.auth_otp_code_length,
             "bypass_auth_in_development": settings.is_auth_bypassed,
+            "reviewer_login_enabled": bool(settings.reviewer_login_email.strip() and settings.reviewer_login_token.strip()),
         })
 
     try:
@@ -83,6 +125,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
             "error": str(e),
             "otp_code_length": settings.auth_otp_code_length,
             "bypass_auth_in_development": settings.is_auth_bypassed,
+            "reviewer_login_enabled": bool(settings.reviewer_login_email.strip() and settings.reviewer_login_token.strip()),
         })
 
     return templates.TemplateResponse("auth/login.html", {
@@ -92,6 +135,7 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
         "error": None,
         "otp_code_length": settings.auth_otp_code_length,
         "bypass_auth_in_development": settings.is_auth_bypassed,
+        "reviewer_login_enabled": bool(settings.reviewer_login_email.strip() and settings.reviewer_login_token.strip()),
     })
 
 
@@ -103,20 +147,7 @@ async def handle_verify_otp(request: Request, email: str = Form(...), token: str
     settings = get_settings()
 
     if should_bypass_auth(request):
-        cookie_data = {
-            "access_token": f"local-access-token:{normalized_email}",
-            "refresh_token": f"local-refresh-token:{normalized_email}",
-        }
-        cookie_value = encode_session_cookie(cookie_data, settings.token_encryption_key)
-        response = RedirectResponse(url="/batches", status_code=302)
-        response.set_cookie(
-            key=settings.session_cookie_name,
-            value=cookie_value,
-            max_age=settings.session_max_age,
-            httponly=True,
-            secure=settings.is_production,
-            samesite="lax",
-        )
+        response = _build_session_response(normalized_email, settings)
         logger.info("auth_otp_bypassed_local_verified", email=normalized_email)
         return response
 
@@ -129,6 +160,7 @@ async def handle_verify_otp(request: Request, email: str = Form(...), token: str
             "error": "Invalid or expired code. Please try again.",
             "otp_code_length": settings.auth_otp_code_length,
             "bypass_auth_in_development": settings.is_auth_bypassed,
+            "reviewer_login_enabled": bool(settings.reviewer_login_email.strip() and settings.reviewer_login_token.strip()),
         })
 
     settings = get_settings()
