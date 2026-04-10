@@ -315,9 +315,12 @@ def test_generate_caption_bundle_uses_extended_profile_when_research_is_deep():
     )
     assert bundle["caption_profile"] == "extended"
     assert bundle["selected_key"] == "extended"
-    assert "TL;DR:" in bundle["selected_body"]
-    assert "Quellen" in bundle["selected_body"]
-    assert "https://source-a.example" in bundle["selected_body"]
+    assert "Kurz gesagt:" in bundle["selected_body"]
+    assert "Basierend auf:" in bundle["selected_body"]
+    assert "https://source-a.example" not in bundle["selected_body"]
+    assert "https://source-b.example" not in bundle["selected_body"]
+    assert "https://source-c.example" not in bundle["selected_body"]
+    assert bundle["source_labels"]
 
 
 def test_generate_caption_bundle_extended_profile_handles_long_source_urls():
@@ -348,7 +351,8 @@ def test_generate_caption_bundle_extended_profile_handles_long_source_urls():
     assert bundle["selected_key"] == "extended"
     assert len(bundle["selected_body"]) <= captions.EXTENDED_CAPTION_MAX_CHARS
     for url in long_urls[:3]:
-        assert url in bundle["selected_body"]
+        assert url not in bundle["selected_body"]
+    assert "Basierend auf:" in bundle["selected_body"]
 
 
 def test_generate_caption_bundle_falls_back_to_standard_when_extended_validation_fails():
@@ -449,8 +453,9 @@ def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
         },
     )
     assert bundle["caption_profile"] == "extended"
-    assert "https://one.example" in bundle["selected_body"]
-    assert "TL;DR:" in bundle["selected_body"]
+    assert "https://one.example" not in bundle["selected_body"]
+    assert "Kurz gesagt:" in bundle["selected_body"]
+    assert "Basierend auf:" in bundle["selected_body"]
     assert set(bundle.keys()) >= {
         "variants",
         "selected_key",

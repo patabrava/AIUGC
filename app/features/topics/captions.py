@@ -20,8 +20,8 @@ logger = structlog.get_logger(__name__)
 VARIANT_KEYS = ("curiosity", "personal", "provocative")
 CAPTION_MIN_CHARS = 80
 CAPTION_MAX_CHARS = 400
-EXTENDED_CAPTION_MIN_CHARS = 220
-EXTENDED_CAPTION_MAX_CHARS = 1400
+EXTENDED_CAPTION_MIN_CHARS = 450
+EXTENDED_CAPTION_MAX_CHARS = 1000
 EXTENDED_CAPTION_KEY = "extended"
 
 _MARKER_PATTERN = re.compile(r"^\[(curiosity|personal|provocative)\]\s*$", re.IGNORECASE)
@@ -41,6 +41,15 @@ _TITLE_STOPWORDS = {
     "mich", "mir", "ist", "war", "mal", "denn", "dann", "weil", "dass", "dieser",
     "diese", "dieses", "diesem", "jeder", "jede", "jedes", "manchmal", "immer",
     "oft", "sehr", "viel", "mehr", "hier", "dort", "schon", "ganz", "gar",
+}
+
+_SOURCE_LABEL_STOPWORDS = _TITLE_STOPWORDS | {
+    "quelle", "quellen", "basierend", "auf", "bericht", "studie", "studien", "analyse",
+    "status", "quo", "stand", "april", "quelle1", "quelle2", "quelle3",
+    "betrifft", "bleiben", "bleibt", "helfen", "hilft", "kosten", "kostet", "muss",
+    "muessen", "müssen", "zeigen", "zeigt", "wirkt", "wirken", "braucht", "brauchen",
+    "ist", "sind", "wird", "werden", "genau", "wirklich", "viele", "vielen", "viel",
+    "oft", "dann", "schon", "hier", "dort", "spaeter", "später",
 }
 
 
@@ -170,6 +179,29 @@ def _normalize_source_url(url: Any) -> str:
     return normalized.rstrip("/")
 
 
+def _compact_source_label(value: Any) -> str:
+    text = _normalize_line_breaks(str(value or "")).strip()
+    if not text:
+        return ""
+    text = re.sub(r"(?i)^quelle\s*\d+\s*:\s*", "", text)
+    text = re.sub(r"(?i)^basierend\s+auf\s*:\s*", "", text)
+    text = re.sub(r"(?i)^https?://\S+$", "", text)
+    text = re.sub(r"(?i)\bvertexaisearch\.cloud\.google\.com\b", "", text)
+    tokens = [
+        token
+        for token in re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", text)
+        if token.lower() not in _SOURCE_LABEL_STOPWORDS
+    ]
+    if not tokens:
+        return ""
+    label = " ".join(tokens[:4]).strip(" -–—,:;")
+    if not label:
+        return ""
+    if len(label) > 48:
+        label = label[:45].rstrip(" -–—,:;") + "..."
+    return label
+
+
 def _collect_caption_source_urls(seed_payload: Optional[Dict[str, Any]]) -> List[str]:
     payload = dict(seed_payload or {})
     candidates: List[str] = []
@@ -195,6 +227,72 @@ def _collect_caption_source_urls(seed_payload: Optional[Dict[str, Any]]) -> List
             seen.add(normalized)
             urls.append(normalized)
     return urls
+
+
+def _collect_caption_source_labels(
+    seed_payload: Optional[Dict[str, Any]],
+    research_facts: Optional[List[str]] = None,
+) -> List[str]:
+    payload = dict(seed_payload or {})
+    facts = sanitize_fact_fragments(list(research_facts or []))
+    candidates: List[str] = []
+
+    for key in ("source_summary", "cluster_summary", "topic", "canonical_topic"):
+        value = payload.get(key)
+        if value:
+            candidates.append(value)
+
+    source = payload.get("source")
+    if isinstance(source, dict):
+        candidates.extend([
+            source.get("title") or "",
+            source.get("label") or "",
+            source.get("summary") or "",
+        ])
+    elif isinstance(source, str):
+        candidates.append(source)
+
+    for key in ("source_urls", "sources"):
+        for item in list(payload.get(key) or []):
+            if isinstance(item, dict):
+                candidates.extend([
+                    item.get("title") or "",
+                    item.get("label") or "",
+                    item.get("summary") or "",
+                    item.get("url") or "",
+                ])
+            else:
+                candidates.append(item)
+
+    labels: List[str] = []
+    seen = set()
+    for index, candidate in enumerate(candidates):
+        label = _compact_source_label(candidate)
+        if not label or "vertexaisearch" in str(candidate).lower() or label.lower().startswith("quelle"):
+            fallback_fact = facts[index] if index < len(facts) else (facts[-1] if facts else "")
+            label = _compact_source_label(fallback_fact)
+        if not label:
+            continue
+        normalized = label.lower()
+        if normalized not in seen:
+            seen.add(normalized)
+            labels.append(label)
+        if len(labels) >= 3:
+            break
+
+    if len(labels) < 3:
+        for fact in facts:
+            label = _compact_source_label(fact)
+            if not label:
+                continue
+            normalized = label.lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                labels.append(label)
+            if len(labels) >= 3:
+                break
+
+    return labels[:3]
 
 
 def _collect_caption_facts(
@@ -279,26 +377,39 @@ def _build_extended_caption(
 ) -> Optional[Dict[str, Any]]:
     facts = _collect_caption_facts(seed_payload, research_facts)
     source_urls = _collect_caption_source_urls(seed_payload)
+    source_labels = _collect_caption_source_labels(seed_payload, research_facts)
     if len(facts) < 5 or len(source_urls) < 3:
+        return None
+    if len(source_labels) < 3:
         return None
 
     headline_fact = _clip_sentence(facts[0], 70)
-    summary_bits = [_clip_sentence(fact, 50) for fact in facts[:2] if fact]
+    why_it_matters = _clip_sentence(
+        f"Warum das wichtig ist: {facts[1] if len(facts) > 1 else facts[0]}",
+        160,
+    )
+    what_it_changes = _clip_sentence(
+        f"Was das konkret bedeutet: {facts[2] if len(facts) > 2 else facts[1] if len(facts) > 1 else facts[0]}",
+        180,
+    )
     evidence_lines = [
-        f"- {_clip_sentence(fact, 60)}"
-        for fact in facts[2:5]
+        f"- {_clip_sentence(fact, 70)}"
+        for fact in facts[3:6]
         if fact
     ]
     if len(evidence_lines) < 2:
         return None
 
     hook = _clip_sentence(f"Wichtiger Punkt: {headline_fact}", 100)
-    tldr = "TL;DR: " + " ".join(summary_bits[:2]).strip()
-    sources_block = "Quellen.\n" + "\n".join(source_urls[:3])
+    quick_takeaway = _clip_sentence(
+        "Kurz gesagt: " + " ".join(part for part in [why_it_matters, what_it_changes] if part),
+        260,
+    )
+    sources_block = "Basierend auf: " + " · ".join(source_labels[:3])
     hashtags = " ".join(_extended_caption_hashtags(topic_title, post_type))
     body = "\n\n".join([
         hook,
-        tldr,
+        quick_takeaway,
         "Mehr dazu.\n" + "\n".join(evidence_lines),
         sources_block,
         _extended_caption_cta(post_type),
@@ -309,11 +420,12 @@ def _build_extended_caption(
         "body": _normalize_line_breaks(body),
         "facts": facts,
         "source_urls": source_urls,
+        "source_labels": source_labels,
     }
 
 
 def _validate_extended_caption(
-    caption: str, *, script: str, source_urls: List[str], fact_count: int,
+    caption: str, *, script: str, source_urls: List[str], source_labels: List[str], fact_count: int,
 ) -> Dict[str, Any]:
     normalized = _normalize_line_breaks(caption)
     char_count = len(normalized)
@@ -323,12 +435,14 @@ def _validate_extended_caption(
             message="Extended caption does not match target length bucket",
             details={"char_count": char_count, "expected": {"min": EXTENDED_CAPTION_MIN_CHARS, "max": EXTENDED_CAPTION_MAX_CHARS}},
         )
-    if "TL;DR:" not in normalized:
-        raise ValidationError(message="Extended caption missing TL;DR block", details={})
-    if "Quellen" not in normalized:
-        raise ValidationError(message="Extended caption missing source block", details={})
+    if "Kurz gesagt:" not in normalized:
+        raise ValidationError(message="Extended caption missing summary block", details={})
+    if "Basierend auf" not in normalized:
+        raise ValidationError(message="Extended caption missing source-label block", details={})
     if len(source_urls) < 3:
         raise ValidationError(message="Extended caption source links too thin", details={"source_urls": source_urls})
+    if len(source_labels) < 3:
+        raise ValidationError(message="Extended caption source labels too thin", details={"source_labels": source_labels})
     if fact_count < 5:
         raise ValidationError(message="Extended caption fact pool too thin", details={"fact_count": fact_count})
     if len(hashtags) < 3 or len(hashtags) > 6:
@@ -339,15 +453,14 @@ def _validate_extended_caption(
         raise ValidationError(message="Extended caption appears mixed-language", details={})
     if _script_overlap_ratio(script, normalized) > 0.85:
         raise ValidationError(message="Extended caption repeats script too closely", details={})
+    if re.search(r"https?://", normalized, flags=re.IGNORECASE):
+        raise ValidationError(message="Extended caption must not expose raw URLs", details={})
     metadata_issues = detect_metadata_copy_issues(normalized)
     if metadata_issues:
         raise ValidationError(
             message="Extended caption contains research-note leakage or malformed copy",
             details={"issues": metadata_issues},
         )
-    for url in source_urls[:3]:
-        if url not in normalized:
-            raise ValidationError(message="Extended caption missing source link in body", details={"url": url})
     return {
         "key": EXTENDED_CAPTION_KEY,
         "body": normalized,
@@ -664,6 +777,7 @@ def generate_caption_bundle(
     profile = select_caption_profile(seed_payload)
     depth_reason = _caption_depth_reason(seed_payload)
     source_urls = _collect_caption_source_urls(seed_payload)
+    source_labels = _collect_caption_source_labels(seed_payload, facts)
 
     if profile == EXTENDED_CAPTION_KEY:
         try:
@@ -680,6 +794,7 @@ def generate_caption_bundle(
                 extended["body"],
                 script=script,
                 source_urls=extended["source_urls"],
+                source_labels=extended["source_labels"],
                 fact_count=len(extended["facts"]),
             )
             logger.info(
@@ -697,6 +812,7 @@ def generate_caption_bundle(
                 "caption_profile": EXTENDED_CAPTION_KEY,
                 "caption_depth_reason": depth_reason,
                 "source_urls": extended["source_urls"][:3],
+                "source_labels": extended["source_labels"][:3],
             }
         except Exception as exc:
             logger.warning(
@@ -716,6 +832,7 @@ def generate_caption_bundle(
             standard_bundle["caption_profile"] = "standard"
             standard_bundle["caption_depth_reason"] = depth_reason
             standard_bundle["source_urls"] = source_urls
+            standard_bundle["source_labels"] = source_labels
             standard_bundle["last_error"] = getattr(exc, "message", str(exc))
             return standard_bundle
 
@@ -730,6 +847,7 @@ def generate_caption_bundle(
     standard_bundle["caption_profile"] = "standard"
     standard_bundle["caption_depth_reason"] = depth_reason
     standard_bundle["source_urls"] = source_urls
+    standard_bundle["source_labels"] = source_labels
     return standard_bundle
 
 

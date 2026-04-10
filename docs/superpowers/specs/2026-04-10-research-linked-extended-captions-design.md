@@ -36,7 +36,7 @@ That means the safest change is inside `app/features/topics/captions.py`. The do
 Keep the public caption bundle flow unchanged, but add a deterministic profile decision inside the generator:
 
 - `standard` profile: current short caption behavior stays exactly as it is today.
-- `extended` profile: a long-form research caption with a hook, short TL;DR, evidence lines, source links, CTA, and hashtags.
+- `extended` profile: a long-form research caption with a hook, short summary, evidence lines, source labels, CTA, and hashtags.
 
 Both profiles still return the same bundle shape and still feed the same `selected_body` into `publish_caption`.
 
@@ -59,37 +59,38 @@ The gate should be pure and deterministic. It should inspect the already-built s
 The extended caption should be structured for mobile scanning:
 
 - `Hook`: one strong line that opens the caption
-- `TL;DR`: 1-2 short sentences that state the main takeaway quickly
+- `Kurz gesagt:` 1-2 short sentences that state the main takeaway quickly
 - `Evidence`: 2-4 compact bullets or short paragraphs with concrete research facts
-- `Sources`: 2-3 research URLs, shown plainly in the caption text
+- `Sources`: 2-3 short source labels or source titles, shown plainly in the caption text
 - `CTA`: one direct action, such as save, share, or comment
 - `Hashtags`: `3-5` relevant tags, not a long spam block
 
 Target length:
 
 - `standard`: keep the current 80-400 character contract
-- `extended`: target roughly `500-1,100` characters, with a hard upper bound of `1,200`
+- `extended`: target roughly `450-900` characters, with a hard upper bound of `1,000`
 
 The caption should feel materially more informative than the current short format, but still be readable on a phone without becoming a blog post.
 
 ### 4. Source Link Handling
 
-The extended caption must include research links only when they are already present in the seed payload.
+The extended caption must include readable source labels only when they are already present in the seed payload.
 
 Source resolution order:
 
-1. `seed_payload["source"]["url"]`
-2. any normalized `source_urls` already attached to the payload path
-3. de-duplicated URLs extracted from the research payload
+1. `seed_payload["source"]["title"]`
+2. any normalized `source_urls` already attached to the payload path, transformed into readable labels for public copy
+3. de-duplicated source titles/labels extracted from the research payload
 
 Rules:
 
-- never invent or fabricate source links
-- never include more than `3` links in the caption body
-- if source URLs are missing, fall back to the standard caption path
-- if a URL is malformed or empty, skip it instead of failing the batch
+- never invent or fabricate source labels
+- never include raw Vertex redirect URLs in the public caption body
+- never include more than `3` source labels in the caption body
+- if source labels are missing, fall back to the standard caption path
+- keep the full raw URLs in internal metadata and the source drawer, not in the public caption
 
-The source block should use plain URLs or compact labeled lines so the text remains copyable in Instagram.
+The source block should use compact labels like `Quelle: PBefG, hvv, VDV` or similar plain-language references that remain copyable and readable in Instagram.
 
 ### 5. Validation And Fallback
 
@@ -98,8 +99,8 @@ Validation should become profile-aware:
 - `standard` profile keeps the current validator and current fallback behavior
 - `extended` profile gets a stricter structure check:
   - hook present
-  - TL;DR present
-  - source block present
+  - summary block present
+  - source-label block present
   - `3-5` hashtags
   - no obvious script echo
   - no metadata leakage
@@ -147,13 +148,13 @@ Add regression tests for:
 - extended profile selected when the payload has `3+` URLs and `5+` facts
 - standard profile retained when the payload is too thin
 - fallback to standard when extended validation fails
-- source links included in the extended output
+- source labels included in the extended output
 
 ## Test Strategy
 
 1. Validate that the current short caption behavior still passes unchanged.
 2. Verify the depth gate is deterministic and only turns on with deep research payloads.
-3. Verify an extended caption contains source links, a TL;DR, and a compact CTA/hashtag block.
+3. Verify an extended caption contains source labels, a short summary block, and a compact CTA/hashtag block.
 4. Verify malformed or missing source data drops back to the short path without failing the batch.
 
 ## Non-Goals

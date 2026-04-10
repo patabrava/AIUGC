@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a depth-gated extended publish-caption path that emits research-linked long-form captions only when the seed payload is rich enough, while preserving the current short caption as the default fallback.
+**Goal:** Add a depth-gated extended publish-caption path that emits Instagram-native long-form captions only when the seed payload is rich enough, while preserving the current short caption as the default fallback.
 
-**Architecture:** Keep the public caption bundle contract stable and implement the new behavior inside the existing topic caption generator. The generator will classify each payload as `standard` or `extended` using a pure depth gate over already-available seed data, then render the appropriate caption shape and fall back to the current short path whenever the long-form path is too thin or fails validation. Downstream publish code stays unchanged because `publish_caption` still comes from `resolve_selected_caption(...)` and the bundle shape remains the same.
+**Architecture:** Keep the public caption bundle contract stable and implement the new behavior inside the existing topic caption generator. The generator will classify each payload as `standard` or `extended` using a pure depth gate over already-available seed data, then render the appropriate caption shape and fall back to the current short path whenever the long-form path is too thin or fails validation. The extended profile must read like a real Instagram educational caption: readable prose, compact source labels, no raw Vertex redirect URLs in public copy. Downstream publish code stays unchanged because `publish_caption` still comes from `resolve_selected_caption(...)` and the bundle shape remains the same.
 
 **Tech Stack:** Python 3.11, pytest, existing `app.features.topics.captions` module, existing prompt text file, existing structured validation utilities. No new dependencies.
 
@@ -82,7 +82,7 @@ git commit -m "feat: add extended caption profile gate"
 
 - [ ] **Step 1: Write the failing test**
 
-Add tests that prove the extended path renders a long-form caption with a TL;DR block, a compact source block, and a short CTA/hashtag tail, while malformed extended output falls back to the existing short caption.
+Add tests that prove the extended path renders a long-form caption with a `Kurz gesagt:` block, a compact source-label block, and a short CTA/hashtag tail, while malformed extended output falls back to the existing short caption.
 
 ```python
 def test_generate_caption_bundle_uses_extended_profile_when_research_is_deep():
@@ -102,8 +102,9 @@ def test_generate_caption_bundle_uses_extended_profile_when_research_is_deep():
         },
     )
     assert bundle["caption_profile"] == "extended"
-    assert "TL;DR" in bundle["selected_body"]
-    assert "https://source-a.example" in bundle["selected_body"]
+    assert "Kurz gesagt:" in bundle["selected_body"]
+    assert "Basierend auf:" in bundle["selected_body"]
+    assert "https://source-a.example" not in bundle["selected_body"]
 ```
 
 ```python
@@ -141,7 +142,7 @@ Expected: FAIL because the generator does not yet route between profiles.
 Extend `generate_caption_bundle(...)` so it:
 
 - accepts or derives the caption profile from the payload
-- renders an extended caption with hook, TL;DR, evidence, sources, CTA, and hashtags when the gate passes
+- renders an extended caption with hook, short summary, evidence, source labels, CTA, and hashtags when the gate passes
 - keeps the current short caption generation path unchanged for `standard`
 - falls back to the standard caption if the extended output fails validation, is too long, or lacks usable source URLs
 
@@ -175,7 +176,7 @@ git add app/features/topics/captions.py app/features/topics/prompt_data/captions
 git commit -m "feat: add extended caption generation and fallback"
 ```
 
-### Task 3: Add regression coverage for source links, validation, and unchanged defaults
+### Task 3: Add regression coverage for source labels, validation, and unchanged defaults
 
 **Files:**
 - Modify: `tests/test_caption_generation.py`
@@ -184,7 +185,7 @@ git commit -m "feat: add extended caption generation and fallback"
 
 Add coverage for the visible contract:
 
-- the long-form caption includes source URLs when the payload has them
+- the long-form caption includes human-readable source labels when the payload has them
 - the standard path remains unchanged for thin payloads
 - the bundle still returns the same keys downstream code expects
 
@@ -205,7 +206,7 @@ def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
         },
     )
     assert set(bundle.keys()) >= {"variants", "selected_key", "selected_body", "selection_reason"}
-    assert "https://one.example" in bundle["selected_body"]
+    assert "Basierend auf:" in bundle["selected_body"]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -235,7 +236,7 @@ def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
     )
     assert bundle["caption_profile"] == "extended"
     assert "https://one.example" in bundle["selected_body"]
-    assert "TL;DR" in bundle["selected_body"]
+    assert "Kurz gesagt:" in bundle["selected_body"]
     assert set(bundle.keys()) >= {"variants", "selected_key", "selected_body", "selection_reason"}
 
 
@@ -265,7 +266,7 @@ Expected: PASS with the existing short-caption tests still green and the new ext
 
 ```bash
 git add tests/test_caption_generation.py
-git commit -m "test: cover extended caption fallback and source links"
+git commit -m "test: cover extended caption fallback and source labels"
 ```
 
 ## Self-Review Checklist
