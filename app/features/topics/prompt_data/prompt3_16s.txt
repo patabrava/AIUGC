@@ -12,6 +12,7 @@ HARTE REGELN:
 - Nenne nur dieses Produkt und keine anderen Produkte.
 - Nutze nur die Fakten aus diesem Prompt.
 - Halte den Scripttext auf 24-34 Wörter und 3-4 Sätze.
+- Im Script nur echte Umlaute schreiben: ä, ö, ü. Keine Umschreibungen mit ae, oe, ue.
 - Du-Form, endkundentauglich, direkter Hook, kein LinkedIn-Ton.
 - Wenn die Antwort leicht anders aufgebaut ist, akzeptiere sinngemäße Labels wie Produkt/Produktname, Angle/Winkel/Hook, Script/Text/Sprechtext, CTA/Call to action und Fakten/Stichpunkte.
 - Keine Hashtags, keine Emojis, keine Aufzählungen im Script.
