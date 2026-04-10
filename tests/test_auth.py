@@ -316,6 +316,30 @@ def test_reviewer_login_sets_session_cookie(monkeypatch):
     assert "ff_session=" in response.headers.get("set-cookie", "")
 
 
+def test_reviewer_email_direct_login_from_send_otp(monkeypatch):
+    import app.core.config as config_module
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "tiktok-review@lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
+
+    client = TestClient(app, base_url="https://lippelift.xyz")
+    response = client.post(
+        "/auth/send-otp",
+        data={"email": "tiktok-review@lippelift.xyz"},
+        allow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/batches"
+    assert "ff_session=" in response.headers.get("set-cookie", "")
+
+
 def test_reviewer_login_rejects_invalid_token(monkeypatch):
     import app.core.config as config_module
     from fastapi.testclient import TestClient

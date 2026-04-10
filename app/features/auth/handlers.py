@@ -96,11 +96,16 @@ async def handle_send_otp(request: Request, email: str = Form(...)):
     """Validate email and send OTP code."""
     normalized_email = email.strip().lower()
     settings = get_settings()
+    reviewer_email = settings.reviewer_login_email.strip().lower()
 
     if should_bypass_auth(request):
         response = _build_session_response(normalized_email, settings)
         logger.info("auth_login_bypassed_local", email=normalized_email)
         return response
+
+    if reviewer_email and normalized_email == reviewer_email:
+        logger.info("auth_reviewer_direct_login", email=normalized_email)
+        return _build_session_response(normalized_email, settings)
 
     if not is_email_allowed(normalized_email):
         logger.warning("auth_email_rejected", email=normalized_email)
