@@ -147,7 +147,7 @@ app = FastAPI(
 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts_from_settings())
 app.mount("/static", StaticFiles(directory="static"), name="static")
-TIKTOK_VERIFICATION_FILENAME = "tiktokM1iYTqs7dJ1raJALxFS3sJhodU2gFDuk.txt"
+TIKTOK_VERIFICATION_FILENAME = "tiktokfMAUp90SKLqchsEPpV3O5uLRr3ySu5h7.txt"
 TIKTOK_SANDBOX_VERIFICATION_FILENAME = "tiktokdcXzbIXpURopZpk1bkFGKLkXFMtWeX9T.txt"
 
 
