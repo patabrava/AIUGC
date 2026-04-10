@@ -260,13 +260,13 @@ def _extended_caption_hashtags(topic_title: str, post_type: str) -> List[str]:
     else:
         base.insert(0, "#MehrKlarheit")
     deduped = list(dict.fromkeys(tag for tag in base if tag))
-    return deduped[:5]
+    return deduped[:3]
 
 
 def _extended_caption_cta(post_type: str) -> str:
     if post_type == "product":
-        return "Speicher dir den Post fuer spaeter und schick ihn weiter, wenn gerade jemand nach einer konkreten Hilfe sucht."
-    return "Speicher dir den Post fuer spaeter und teil ihn mit jemandem, der die Infos gerade praktisch brauchen kann."
+        return "Speicher dir den Post fuer spaeter und schick ihn weiter."
+    return "Speicher dir den Post fuer spaeter und teil ihn weiter."
 
 
 def _build_extended_caption(
@@ -282,19 +282,19 @@ def _build_extended_caption(
     if len(facts) < 5 or len(source_urls) < 3:
         return None
 
-    headline_fact = _clip_sentence(facts[0], 140)
-    summary_bits = [_clip_sentence(fact, 120) for fact in facts[:2] if fact]
+    headline_fact = _clip_sentence(facts[0], 70)
+    summary_bits = [_clip_sentence(fact, 50) for fact in facts[:2] if fact]
     evidence_lines = [
-        f"- {_clip_sentence(fact, 150)}"
+        f"- {_clip_sentence(fact, 60)}"
         for fact in facts[2:5]
         if fact
     ]
     if len(evidence_lines) < 2:
         return None
 
-    hook = _clip_sentence(f"Wichtiger Punkt zu {topic_title}: {headline_fact}", 170)
+    hook = _clip_sentence(f"Wichtiger Punkt: {headline_fact}", 100)
     tldr = "TL;DR: " + " ".join(summary_bits[:2]).strip()
-    sources_block = "Quellenlinks.\n" + "\n".join(source_urls[:3])
+    sources_block = "Quellen.\n" + "\n".join(source_urls[:3])
     hashtags = " ".join(_extended_caption_hashtags(topic_title, post_type))
     body = "\n\n".join([
         hook,
