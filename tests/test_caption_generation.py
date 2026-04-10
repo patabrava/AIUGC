@@ -3,6 +3,7 @@ import pytest
 from app.core.errors import ValidationError
 from app.features.publish import handlers as publish_handlers
 from app.features.topics import captions
+from app.features.topics.response_parsers import parse_topic_research_response
 
 
 CURIOSITY_BODY = (
@@ -513,6 +514,37 @@ def test_resolve_selected_caption_prefers_bundle():
 def test_resolve_selected_caption_falls_back_to_caption():
     seed_data = {"caption": "Fallback caption.", "description": "Legacy."}
     assert captions.resolve_selected_caption(seed_data) == "Fallback caption."
+
+
+def test_parse_topic_research_response_preserves_multiple_source_urls():
+    raw = """
+    # Forschungsdossier: Barrierefreiheit
+
+    Das Thema betrifft aktuelle Regeln, praktische Ausnahmen und konkrete Alltagshuerden im deutschen Alltag.
+    Wichtige Details sind Fristen, Zuständigkeiten und die Frage, welche Stellen die Informationen aktuell halten.
+
+    Quellen:
+    - Tagesschau: [Tagesschau](https://www.tagesschau.de/)
+    - BMAS: [BMAS](https://www.bmas.de/)
+    - DB: [Deutsche Bahn](https://www.bahn.de/)
+
+    Weitere Details:
+    - Fristen und Ausnahmen werden sauber eingeordnet.
+    - Praxistaugliche Hinweise helfen dabei, die Lage im Alltag sofort zu verstehen.
+    - Der Text liefert genug Kontext, damit die Normalisierung nicht auf den Seed zurueckfallen muss.
+    """
+
+    dossier = parse_topic_research_response(
+        raw,
+        seed_topic="Barrierefreiheit",
+        post_type="value",
+        target_length_tier=8,
+    )
+    payload = dossier.model_dump(mode="json")
+    assert len(payload["sources"]) >= 3
+    assert len(payload["source_urls"]) >= 3
+    assert payload["source_urls"][0]["url"].startswith("https://")
+    assert payload["sources"][0]["url"] == payload["source_urls"][0]["url"]
 
 
 # --- default_publish_caption ---

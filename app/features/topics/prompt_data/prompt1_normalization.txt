@@ -34,6 +34,7 @@ ERFORDERLICHE SCHLÜSSEL:
 - risk_notes
 - disclaimer
 - lane_candidates
+- source_urls
 
 LANE-REGELN:
 - Jede Lane muss sich klar von den anderen unterscheiden.
@@ -45,6 +46,7 @@ LANE-REGELN:
 QUALITÄT:
 - Bevorzuge wenige, stabile Lanes statt künstlich aufgeblähter Vielfalt.
 - Clustere nur echte Unterwinkel.
+- Bewahre alle Quellen-URLs aus der Rohantwort, wenn sie als Markdown-Links, Bulletpoints oder nackte URLs vorkommen.
 - Wenn die Rohantwort unvollständig ist, speichere den sicheren Kern und lasse nichts halluzinieren.
 - Keine Markdown-Fences.
 - Keine Kommentare.

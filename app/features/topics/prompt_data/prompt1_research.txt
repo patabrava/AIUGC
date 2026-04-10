@@ -21,7 +21,8 @@ WICHTIG:
 INHALTLICHE ERWARTUNG:
 - Beschreibe das Seed-Topic mit mehreren klar getrennten Unterwinkeln.
 - Nenne aktuelle Fakten, Fristen, Risiken, Ausnahmen und hilfreiche Details.
-- Führe Quellen direkt im Text an, damit die nächste Stufe sie sauber extrahieren kann.
+- Führe einen klaren Quellenblock direkt im Text an, idealerweise mit 3-5 konkreten URLs als eigenen Bulletpoints.
+- Wenn möglich, nenne zu jeder Quelle einen kurzen deutschen Titel und die vollständige URL.
 - Wenn sinnvoll, ordne Erkenntnisse in kompakte Unterabschnitte oder Bulletpoints.
 
 QUALITÄT:

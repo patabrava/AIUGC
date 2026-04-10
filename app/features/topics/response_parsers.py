@@ -690,11 +690,48 @@ def _ensure_minimum_lane_candidates(payload: Dict[str, Any], minimum: int = 3) -
 
 def _normalize_research_dossier_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(payload or {})
-    normalized["sources"] = [
-        {"title": _clip_text(item.get("title"), 400), "url": str(item.get("url") or "").strip()}
-        for item in list(normalized.get("sources") or [])
-        if isinstance(item, dict) and str(item.get("url") or "").strip()
-    ][:8]
+    raw_sources = list(normalized.get("sources") or [])
+    raw_source_urls = list(normalized.get("source_urls") or [])
+
+    canonical_sources: List[Dict[str, str]] = []
+
+    def _append_source(title: Any, url: Any) -> None:
+        normalized_url = str(url or "").strip()
+        if not normalized_url:
+            return
+        normalized_title = _clip_text(title, 400) or normalized.get("topic") or normalized.get("seed_topic") or "Quelle"
+        canonical_sources.append({"title": normalized_title, "url": normalized_url})
+
+    for item in raw_sources:
+        if not isinstance(item, dict):
+            continue
+        _append_source(item.get("title"), item.get("url"))
+
+    for item in raw_source_urls:
+        if isinstance(item, dict):
+            _append_source(item.get("title"), item.get("url"))
+        elif isinstance(item, str):
+            _append_source(None, item)
+
+    if not canonical_sources:
+        canonical_sources = []
+
+    deduped_sources: List[Dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for source in canonical_sources:
+        url = str(source.get("url") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        deduped_sources.append(
+            {
+                "title": _clip_text(source.get("title"), 400),
+                "url": url,
+            }
+        )
+
+    normalized["sources"] = deduped_sources[:8]
+    normalized["source_urls"] = deduped_sources[:8]
     normalized["cluster_id"] = _clip_text(normalized.get("cluster_id"), 120)
     normalized["topic"] = _clip_text(normalized.get("topic"), 240)
     normalized["anchor_topic"] = _clip_text(normalized.get("anchor_topic"), 240, default=normalized["topic"])
@@ -717,6 +754,10 @@ def _slugify_research_label(value: str) -> str:
 
 def _extract_urls_from_text(text: str) -> List[str]:
     urls: List[str] = []
+    for _label, url in re.findall(r"\[([^\]]+)\]\((https?://[^\s)>\"]+)\)", text or ""):
+        normalized = url.strip().rstrip(".,;)")
+        if normalized and normalized not in urls:
+            urls.append(normalized)
     for match in re.findall(r"https?://[^\s)>\"]+", text or ""):
         url = match.strip().rstrip(".,;)")
         if url and url not in urls:
@@ -844,6 +885,7 @@ def _synthesize_research_dossier_from_text(
         "cluster_summary": cluster_summary,
         "framework_candidates": ["PAL"],
         "sources": sources,
+        "source_urls": list(sources),
         "source_summary": source_summary,
         "facts": facts,
         "angle_options": angle_options,
@@ -878,6 +920,7 @@ def _synthesize_research_dossier_from_seed(
         "cluster_summary": cluster_summary,
         "framework_candidates": ["PAL"],
         "sources": [{"title": topic, "url": f"https://example.com/{_slugify_research_label(topic)}"}],
+        "source_urls": [{"title": topic, "url": f"https://example.com/{_slugify_research_label(topic)}"}],
         "source_summary": source_summary,
         "facts": [topic],
         "angle_options": [topic],
@@ -929,11 +972,19 @@ def parse_topic_research_response(
         payload = parsed if isinstance(parsed, dict) else {}
         payload = _normalize_research_dossier_payload(payload)
     except ValidationError:
-        payload = _synthesize_research_dossier_from_seed(
-            seed_topic=seed_topic,
-            post_type=post_type,
-            target_length_tier=target_length_tier,
-        )
+        try:
+            payload = _synthesize_research_dossier_from_text(
+                cleaned,
+                seed_topic=seed_topic,
+                post_type=post_type,
+                target_length_tier=target_length_tier,
+            )
+        except PydanticValidationError:
+            payload = _synthesize_research_dossier_from_seed(
+                seed_topic=seed_topic,
+                post_type=post_type,
+                target_length_tier=target_length_tier,
+            )
     try:
         return ResearchDossier(**payload)
     except PydanticValidationError as exc:

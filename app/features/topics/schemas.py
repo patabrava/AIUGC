@@ -78,6 +78,7 @@ class ResearchDossier(BaseModel):
     cluster_summary: str = Field(..., min_length=20, max_length=1200)
     framework_candidates: List[str] = Field(..., min_length=1, max_length=4)
     sources: List[ResearchAgentSource] = Field(default_factory=list, min_length=1, max_length=8)
+    source_urls: List[Dict[str, Any]] = Field(default_factory=list, max_length=8)
     source_summary: str = Field(..., min_length=35, max_length=1200)
     facts: List[str] = Field(default_factory=list, min_length=1, max_length=20)
     angle_options: List[str] = Field(default_factory=list, min_length=1, max_length=10)
