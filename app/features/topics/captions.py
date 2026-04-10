@@ -20,6 +20,9 @@ logger = structlog.get_logger(__name__)
 VARIANT_KEYS = ("curiosity", "personal", "provocative")
 CAPTION_MIN_CHARS = 80
 CAPTION_MAX_CHARS = 400
+EXTENDED_CAPTION_MIN_CHARS = 220
+EXTENDED_CAPTION_MAX_CHARS = 1400
+EXTENDED_CAPTION_KEY = "extended"
 
 _MARKER_PATTERN = re.compile(r"^\[(curiosity|personal|provocative)\]\s*$", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"(?<!\w)#[A-Za-zÀ-ÿ0-9_]+")
@@ -156,6 +159,201 @@ def _clean_caption_fact(fact: str) -> str:
     if len(cleaned) > 120:
         cleaned = cleaned[:117].rstrip(" ,;:") + "..."
     return cleaned
+
+
+def _normalize_source_url(url: Any) -> str:
+    normalized = str(url or "").strip()
+    if not normalized:
+        return ""
+    if not re.match(r"^https?://", normalized, flags=re.IGNORECASE):
+        return ""
+    return normalized.rstrip("/")
+
+
+def _collect_caption_source_urls(seed_payload: Optional[Dict[str, Any]]) -> List[str]:
+    payload = dict(seed_payload or {})
+    candidates: List[str] = []
+
+    source = payload.get("source")
+    if isinstance(source, dict):
+        candidates.append(source.get("url") or "")
+    elif isinstance(source, str):
+        candidates.append(source)
+
+    for key in ("source_urls", "sources"):
+        for item in list(payload.get(key) or []):
+            if isinstance(item, dict):
+                candidates.append(item.get("url") or "")
+            else:
+                candidates.append(item)
+
+    urls: List[str] = []
+    seen = set()
+    for candidate in candidates:
+        normalized = _normalize_source_url(candidate)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            urls.append(normalized)
+    return urls
+
+
+def _collect_caption_facts(
+    seed_payload: Optional[Dict[str, Any]], research_facts: Optional[List[str]] = None,
+) -> List[str]:
+    payload = dict(seed_payload or {})
+    strict_seed = payload.get("strict_seed") or {}
+    source_facts = list(strict_seed.get("facts") or [])
+    if not source_facts:
+        source_facts = list(research_facts or [])
+    sanitized = sanitize_fact_fragments(source_facts)
+    facts: List[str] = []
+    seen = set()
+    for fact in sanitized:
+        cleaned = _clean_caption_fact(fact)
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            facts.append(cleaned)
+    return facts
+
+
+def select_caption_profile(seed_payload: Optional[Dict[str, Any]]) -> str:
+    facts = _collect_caption_facts(seed_payload)
+    urls = _collect_caption_source_urls(seed_payload)
+    if len(facts) >= 5 and len(urls) >= 3:
+        return EXTENDED_CAPTION_KEY
+    return "standard"
+
+
+def _caption_depth_reason(seed_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    facts = _collect_caption_facts(seed_payload)
+    urls = _collect_caption_source_urls(seed_payload)
+    return {
+        "usable_fact_count": len(facts),
+        "source_url_count": len(urls),
+        "thresholds": {"facts": 5, "source_urls": 3},
+    }
+
+
+def _ensure_terminal_punctuation(text: str) -> str:
+    normalized = _normalize_line_breaks(text).rstrip()
+    if not normalized:
+        return ""
+    if normalized[-1] in ".!?":
+        return normalized
+    return f"{normalized}."
+
+
+def _clip_sentence(text: str, limit: int) -> str:
+    normalized = re.sub(r"\s+", " ", _normalize_line_breaks(text)).strip()
+    if len(normalized) <= limit:
+        return _ensure_terminal_punctuation(normalized)
+    clipped = normalized[:limit].rstrip(" ,;:-")
+    return _ensure_terminal_punctuation(f"{clipped}...")
+
+
+def _extended_caption_hashtags(topic_title: str, post_type: str) -> List[str]:
+    base = _fallback_caption_hashtags(topic_title, post_type, "curiosity")
+    if post_type == "value":
+        base.insert(0, "#MehrWissen")
+    elif post_type == "product":
+        base.insert(0, "#ProduktCheck")
+    else:
+        base.insert(0, "#MehrKlarheit")
+    deduped = list(dict.fromkeys(tag for tag in base if tag))
+    return deduped[:5]
+
+
+def _extended_caption_cta(post_type: str) -> str:
+    if post_type == "product":
+        return "Speicher dir den Post fuer spaeter und schick ihn weiter, wenn gerade jemand nach einer konkreten Hilfe sucht."
+    return "Speicher dir den Post fuer spaeter und teil ihn mit jemandem, der die Infos gerade praktisch brauchen kann."
+
+
+def _build_extended_caption(
+    *,
+    topic_title: str,
+    post_type: str,
+    script: str,
+    seed_payload: Optional[Dict[str, Any]],
+    research_facts: Optional[List[str]],
+) -> Optional[Dict[str, Any]]:
+    facts = _collect_caption_facts(seed_payload, research_facts)
+    source_urls = _collect_caption_source_urls(seed_payload)
+    if len(facts) < 5 or len(source_urls) < 3:
+        return None
+
+    headline_fact = _clip_sentence(facts[0], 140)
+    summary_bits = [_clip_sentence(fact, 120) for fact in facts[:2] if fact]
+    evidence_lines = [
+        f"- {_clip_sentence(fact, 150)}"
+        for fact in facts[2:5]
+        if fact
+    ]
+    if len(evidence_lines) < 2:
+        return None
+
+    hook = _clip_sentence(f"Wichtiger Punkt zu {topic_title}: {headline_fact}", 170)
+    tldr = "TL;DR: " + " ".join(summary_bits[:2]).strip()
+    sources_block = "Quellenlinks.\n" + "\n".join(source_urls[:3])
+    hashtags = " ".join(_extended_caption_hashtags(topic_title, post_type))
+    body = "\n\n".join([
+        hook,
+        tldr,
+        "Mehr dazu.\n" + "\n".join(evidence_lines),
+        sources_block,
+        _extended_caption_cta(post_type),
+        hashtags,
+    ]).strip()
+    return {
+        "key": EXTENDED_CAPTION_KEY,
+        "body": _normalize_line_breaks(body),
+        "facts": facts,
+        "source_urls": source_urls,
+    }
+
+
+def _validate_extended_caption(
+    caption: str, *, script: str, source_urls: List[str], fact_count: int,
+) -> Dict[str, Any]:
+    normalized = _normalize_line_breaks(caption)
+    char_count = len(normalized)
+    hashtags = _extract_hashtags(normalized)
+    if char_count < EXTENDED_CAPTION_MIN_CHARS or char_count > EXTENDED_CAPTION_MAX_CHARS:
+        raise ValidationError(
+            message="Extended caption does not match target length bucket",
+            details={"char_count": char_count, "expected": {"min": EXTENDED_CAPTION_MIN_CHARS, "max": EXTENDED_CAPTION_MAX_CHARS}},
+        )
+    if "TL;DR:" not in normalized:
+        raise ValidationError(message="Extended caption missing TL;DR block", details={})
+    if "Quellen" not in normalized:
+        raise ValidationError(message="Extended caption missing source block", details={})
+    if len(source_urls) < 3:
+        raise ValidationError(message="Extended caption source links too thin", details={"source_urls": source_urls})
+    if fact_count < 5:
+        raise ValidationError(message="Extended caption fact pool too thin", details={"fact_count": fact_count})
+    if len(hashtags) < 3 or len(hashtags) > 6:
+        raise ValidationError(message="Extended caption hashtag count invalid", details={"hashtags": hashtags})
+    if _count_emojis(normalized) > 1:
+        raise ValidationError(message="Extended caption emoji count invalid", details={"emoji_count": _count_emojis(normalized)})
+    if _looks_mixed_language(normalized):
+        raise ValidationError(message="Extended caption appears mixed-language", details={})
+    if _script_overlap_ratio(script, normalized) > 0.85:
+        raise ValidationError(message="Extended caption repeats script too closely", details={})
+    metadata_issues = detect_metadata_copy_issues(normalized)
+    if metadata_issues:
+        raise ValidationError(
+            message="Extended caption contains research-note leakage or malformed copy",
+            details={"issues": metadata_issues},
+        )
+    for url in source_urls[:3]:
+        if url not in normalized:
+            raise ValidationError(message="Extended caption missing source link in body", details={"url": url})
+    return {
+        "key": EXTENDED_CAPTION_KEY,
+        "body": normalized,
+        "char_count": char_count,
+        "hashtags": hashtags,
+    }
 
 
 def _fallback_caption_hashtags(topic_title: str, post_type: str, key: str) -> List[str]:
@@ -359,19 +557,16 @@ def _select_best_variant(
     return first_key, by_key[first_key]
 
 
-def generate_caption_bundle(
+def _generate_standard_caption_bundle(
     *,
-    topic_title: str,
+    canonical_topic: str,
     post_type: str,
     script: str,
-    llm_factory: Optional[Callable] = None,
-    canonical_topic: Optional[str] = None,
-    research_facts: Optional[List[str]] = None,
+    selected_key: str,
+    facts: List[str],
+    llm_factory: Optional[Callable],
 ) -> Dict[str, Any]:
-    canonical_topic = str(canonical_topic or topic_title or "").strip()
-    selected_key = select_caption_variant_key(topic_title=canonical_topic, post_type=post_type, script=script)
     script_hook = extract_script_hook(script)
-    facts = sanitize_fact_fragments(list(research_facts or []))
     llm_factory = llm_factory or get_llm_client
     llm = llm_factory()
     prompt = _build_caption_prompt(
@@ -442,13 +637,100 @@ def generate_caption_bundle(
         selected_key=selected_key,
         last_error=getattr(last_error, "message", str(last_error)) if last_error else None,
     )
-    return _build_fallback_caption_variants(
+    fallback = _build_fallback_caption_variants(
         topic_title=canonical_topic,
         post_type=post_type,
         script=script,
         research_facts=facts,
         selected_key=selected_key,
     )
+    fallback["last_error"] = getattr(last_error, "message", str(last_error)) if last_error else None
+    return fallback
+
+
+def generate_caption_bundle(
+    *,
+    topic_title: str,
+    post_type: str,
+    script: str,
+    llm_factory: Optional[Callable] = None,
+    canonical_topic: Optional[str] = None,
+    research_facts: Optional[List[str]] = None,
+    seed_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    canonical_topic = str(canonical_topic or topic_title or "").strip()
+    selected_key = select_caption_variant_key(topic_title=canonical_topic, post_type=post_type, script=script)
+    facts = sanitize_fact_fragments(list(research_facts or []))
+    profile = select_caption_profile(seed_payload)
+    depth_reason = _caption_depth_reason(seed_payload)
+    source_urls = _collect_caption_source_urls(seed_payload)
+
+    if profile == EXTENDED_CAPTION_KEY:
+        try:
+            extended = _build_extended_caption(
+                topic_title=canonical_topic,
+                post_type=post_type,
+                script=script,
+                seed_payload=seed_payload,
+                research_facts=facts,
+            )
+            if not extended:
+                raise ValidationError(message="Extended caption source data too thin", details=depth_reason)
+            validated = _validate_extended_caption(
+                extended["body"],
+                script=script,
+                source_urls=extended["source_urls"],
+                fact_count=len(extended["facts"]),
+            )
+            logger.info(
+                "extended_caption_bundle_generated",
+                topic_title=canonical_topic[:60],
+                char_count=len(validated["body"]),
+                source_url_count=len(extended["source_urls"]),
+            )
+            return {
+                "variants": [validated],
+                "selected_key": EXTENDED_CAPTION_KEY,
+                "selected_body": validated["body"],
+                "selection_reason": "research_depth_gate",
+                "last_error": None,
+                "caption_profile": EXTENDED_CAPTION_KEY,
+                "caption_depth_reason": depth_reason,
+                "source_urls": extended["source_urls"][:3],
+            }
+        except Exception as exc:
+            logger.warning(
+                "extended_caption_fallback_to_standard",
+                topic_title=canonical_topic[:60],
+                error=getattr(exc, "message", str(exc)),
+                details=str(getattr(exc, "details", {}))[:200],
+            )
+            standard_bundle = _generate_standard_caption_bundle(
+                canonical_topic=canonical_topic,
+                post_type=post_type,
+                script=script,
+                selected_key=selected_key,
+                facts=facts,
+                llm_factory=llm_factory,
+            )
+            standard_bundle["caption_profile"] = "standard"
+            standard_bundle["caption_depth_reason"] = depth_reason
+            standard_bundle["source_urls"] = source_urls
+            standard_bundle["last_error"] = getattr(exc, "message", str(exc))
+            return standard_bundle
+
+    standard_bundle = _generate_standard_caption_bundle(
+        canonical_topic=canonical_topic,
+        post_type=post_type,
+        script=script,
+        selected_key=selected_key,
+        facts=facts,
+        llm_factory=llm_factory,
+    )
+    standard_bundle["caption_profile"] = "standard"
+    standard_bundle["caption_depth_reason"] = depth_reason
+    standard_bundle["source_urls"] = source_urls
+    return standard_bundle
 
 
 def attach_caption_bundle(
@@ -477,6 +759,7 @@ def attach_caption_bundle(
         llm_factory=llm_factory,
         canonical_topic=canonical_topic,
         research_facts=research_facts,
+        seed_payload=payload,
     )
     payload["canonical_topic"] = canonical_topic
     payload["caption_bundle"] = bundle

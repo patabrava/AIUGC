@@ -226,6 +226,7 @@ def test_build_caption_prompt_includes_new_fields():
     assert "[personal]" in prompt
     assert "[provocative]" in prompt
     assert "[short_paragraph]" not in prompt
+    assert "STANDARD-Kurzcaption-Profil" in prompt
 
 
 # --- Parse ---
@@ -243,6 +244,25 @@ def test_parse_text_variants_with_new_markers():
 
 
 # --- End-to-end generation ---
+
+
+def test_caption_profile_gate_uses_extended_only_for_deep_payloads():
+    deep_payload = {
+        "strict_seed": {"facts": ["F1", "F2", "F3", "F4", "F5"]},
+        "source": {"url": "https://one.example"},
+        "source_urls": [
+            {"url": "https://one.example"},
+            {"url": "https://two.example"},
+            {"url": "https://three.example"},
+        ],
+    }
+    thin_payload = {
+        "strict_seed": {"facts": ["F1", "F2"]},
+        "source_urls": [{"url": "https://one.example"}],
+    }
+
+    assert captions.select_caption_profile(deep_payload) == "extended"
+    assert captions.select_caption_profile(thin_payload) == "standard"
 
 
 def test_generate_caption_bundle_with_new_structure():
@@ -265,6 +285,75 @@ def test_generate_caption_bundle_with_new_structure():
     assert bundle["selected_key"] in VARIANT_KEYS
     assert bundle["selected_body"]
     assert bundle["selection_reason"] == "hash_variant"
+    assert bundle["caption_profile"] == "standard"
+
+
+def test_generate_caption_bundle_uses_extended_profile_when_research_is_deep():
+    bundle = captions.generate_caption_bundle(
+        topic_title="Barrierefreiheit",
+        post_type="value",
+        script="Ein anderes Skript mit klar getrennten Aussagen fuer den Test.",
+        research_facts=["F1", "F2", "F3", "F4", "F5"],
+        seed_payload={
+            "strict_seed": {
+                "facts": [
+                    "Aufzuege fallen oft genau dann aus, wenn du keine Alternative hast.",
+                    "Viele Fahrgastinfos bleiben fuer Screenreader unklar formatiert.",
+                    "Niederflureinstiege helfen nur, wenn der Spalt wirklich ueberbrueckt wird.",
+                    "Assistenz muss haeufig vorab angemeldet werden und kostet sonst Zeit.",
+                    "Klare Echtzeitdaten senken Stress bei knappen Umstiegen spuerbar.",
+                ]
+            },
+            "source": {"url": "https://source-a.example"},
+            "source_urls": [
+                {"url": "https://source-a.example"},
+                {"url": "https://source-b.example"},
+                {"url": "https://source-c.example"},
+            ],
+        },
+    )
+    assert bundle["caption_profile"] == "extended"
+    assert bundle["selected_key"] == "extended"
+    assert "TL;DR:" in bundle["selected_body"]
+    assert "Quellen" in bundle["selected_body"]
+    assert "https://source-a.example" in bundle["selected_body"]
+
+
+def test_generate_caption_bundle_falls_back_to_standard_when_extended_validation_fails():
+    class FakeLLM:
+        def generate_gemini_text(self, **kwargs):
+            return (
+                f"[curiosity]\n{CURIOSITY_BODY}\n\n"
+                f"[personal]\n{PERSONAL_BODY}\n\n"
+                f"[provocative]\n{PROVOCATIVE_BODY}"
+            )
+
+    bundle = captions.generate_caption_bundle(
+        topic_title="Barrierefreiheit",
+        post_type="value",
+        script="Ein anderes Skript mit klar getrennten Aussagen fuer den Test.",
+        research_facts=["F1", "F2", "F3", "F4", "F5"],
+        llm_factory=lambda: FakeLLM(),
+        seed_payload={
+            "strict_seed": {
+                "facts": [
+                    "This source says the platform fails users when the lift is broken.",
+                    "The update explains that screenreader labels remain inconsistent.",
+                    "The report shows that boarding gaps still block independent travel.",
+                    "The guide says assistance must be booked early with your operator.",
+                    "The dashboard claims realtime alerts reduce missed transfers with good data.",
+                ]
+            },
+            "source_urls": [
+                {"url": "https://source-a.example"},
+                {"url": "https://source-b.example"},
+                {"url": "https://source-c.example"},
+            ],
+        },
+    )
+    assert bundle["selected_body"]
+    assert bundle["caption_profile"] == "standard"
+    assert bundle["selection_reason"] == "hash_variant"
 
 
 def test_generate_caption_bundle_falls_back_on_persistent_failure():
@@ -283,6 +372,7 @@ def test_generate_caption_bundle_falls_back_on_persistent_failure():
     assert bundle["selected_key"] in VARIANT_KEYS
     assert bundle["selected_body"]
     assert bundle["selection_reason"] == "local_fallback"
+    assert bundle["caption_profile"] == "standard"
 
 
 def test_generate_caption_bundle_falls_back_on_llm_error():
@@ -300,6 +390,69 @@ def test_generate_caption_bundle_falls_back_on_llm_error():
     assert len(bundle["variants"]) == 3
     assert bundle["selected_key"] in VARIANT_KEYS
     assert bundle["selection_reason"] == "local_fallback"
+    assert bundle["caption_profile"] == "standard"
+
+
+def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
+    bundle = captions.generate_caption_bundle(
+        topic_title="Thema",
+        post_type="value",
+        script="Ein anderes Skript fuer den Bundle-Shape-Test.",
+        research_facts=["F1", "F2", "F3", "F4", "F5"],
+        seed_payload={
+            "strict_seed": {
+                "facts": [
+                    "Digitale Wegeleitung spart Zeit, wenn die Ansage spaet kommt.",
+                    "Viele Aufzuege melden Ausfaelle nicht konsistent an Apps weiter.",
+                    "Barrierefreie Toiletten helfen nur, wenn sie klar ausgeschildert sind.",
+                    "Begleitservice braucht oft Vorlauf und klare Kontaktwege.",
+                    "Klare Notfallinfos senken Stress im Umstieg deutlich.",
+                ]
+            },
+            "source_urls": [
+                {"url": "https://one.example"},
+                {"url": "https://two.example"},
+                {"url": "https://three.example"},
+            ],
+        },
+    )
+    assert bundle["caption_profile"] == "extended"
+    assert "https://one.example" in bundle["selected_body"]
+    assert "TL;DR:" in bundle["selected_body"]
+    assert set(bundle.keys()) >= {
+        "variants",
+        "selected_key",
+        "selected_body",
+        "selection_reason",
+        "caption_profile",
+        "caption_depth_reason",
+        "source_urls",
+    }
+
+
+def test_thin_payload_keeps_standard_path_and_bundle_shape():
+    bundle = captions.generate_caption_bundle(
+        topic_title="Thema",
+        post_type="value",
+        script="Ein anderes Skript fuer den Standardpfad.",
+        research_facts=["F1"],
+        llm_factory=lambda: _make_stub_llm(),
+        seed_payload={
+            "strict_seed": {"facts": ["Nur ein Fakt."]},
+            "source_urls": [{"url": "https://one.example"}],
+        },
+    )
+    assert bundle["caption_profile"] == "standard"
+    assert bundle["selected_key"] in VARIANT_KEYS
+    assert set(bundle.keys()) >= {
+        "variants",
+        "selected_key",
+        "selected_body",
+        "selection_reason",
+        "caption_profile",
+        "caption_depth_reason",
+        "source_urls",
+    }
 
 
 # --- attach_caption_bundle ---

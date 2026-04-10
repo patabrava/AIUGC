@@ -1,4 +1,5 @@
 Du bekommst ein Thema, ein Skript, den Skript-Hook und Recherche-Fakten.
+Dieses Prompt ist nur fuer das STANDARD-Kurzcaption-Profil.
 Erstelle exakt 3 Caption-Varianten mit UNTERSCHIEDLICHEN emotionalen Winkeln.
 Jede Caption folgt der gleichen Struktur: Hook, Body, CTA, Hashtags.
 
@@ -51,6 +52,7 @@ Emotionale Winkel:
 Regeln:
 - Jeder Hook muss einen ANDEREN emotionalen Winkel haben als die anderen zwei.
 - Body muss einen KONKRETEN Fakt aus den Recherche-Fakten enthalten — keine generischen Sätze.
+- Erzeuge keine Langform-Caption mit Quellenblock, TL;DR oder Linkliste. Das uebernimmt ein separater deterministischer Extended-Pfad.
 - Wenn die Recherche-Fakten knapp oder generisch sind, nutze trotzdem das Thema und das Skript als saubere Grundlage und bleib strikt im Markerformat.
 - Gesamtlänge pro Caption (inkl. Hook, Body, CTA, Hashtags): 150-300 Zeichen.
 - Alles auf Deutsch, natürlich gesprochen, keine Übersetzungsartefakte.
