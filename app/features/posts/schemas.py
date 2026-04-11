@@ -138,4 +138,5 @@ class UpdatePromptRequest(BaseModel):
     ending: str = Field(..., min_length=1, description="Ending directive text")
     audio_block: str = Field(..., min_length=1, description="Audio block text")
     universal_negatives: str = Field(..., min_length=1, description="Universal negatives text")
+    veo_prompt: str = Field(..., min_length=1, description="Exact Veo prompt text sent to provider")
     veo_negative_prompt: str = Field(..., min_length=1, description="VEO negative prompt text")

@@ -204,6 +204,7 @@
                     ('Scene', prompt.scene),
                     ('Cinematography', prompt.cinematography),
                     ('Dialogue', prompt_audio.get('dialogue') if prompt_audio else None),
+                    ('VEO Prompt (Sent to Provider)', prompt.veo_prompt),
                     ('Ending Directive', prompt.ending_directive),
                     ('Audio Block', prompt.audio_block),
                     ('Negatives', prompt.veo_negative_prompt or prompt.universal_negatives)
@@ -443,7 +444,7 @@
             <div>
                 <button
                     hx-post="/videos/{{ post.id }}/generate"
-                    hx-vals='js:{provider: "veo_3_1", format: "9:16"}'
+                    hx-vals='js:{provider: "vertex_ai", format: "9:16"}'
                     hx-swap="none"
                     hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
                     class="px-4 py-2 text-sm font-medium brand-button-primary rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition brand-focus text-white"

@@ -138,6 +138,7 @@ def test_video_prompt_and_update_request_roundtrip_editable_fields():
         ending="Custom ending",
         audio_block="Custom audio",
         universal_negatives="Custom negatives",
+        veo_prompt="Character:\nCustom character",
         veo_negative_prompt="Custom veo negatives",
     )
     assert request.dialogue == "Custom dialogue"
@@ -155,6 +156,7 @@ def test_update_prompt_request_rejects_empty_fields():
             ending="Custom ending",
             audio_block="Custom audio",
             universal_negatives="Custom negatives",
+            veo_prompt="Character:\nCustom character",
             veo_negative_prompt="Custom veo negatives",
         )
 

@@ -328,6 +328,7 @@ async def update_post_prompt(post_id: str, request: Request):
                 "ending": str(form.get("ending", "")).strip(),
                 "audio_block": str(form.get("audio_block", "")).strip(),
                 "universal_negatives": str(form.get("universal_negatives", "")).strip(),
+                "veo_prompt": str(form.get("veo_prompt", "")).strip(),
                 "veo_negative_prompt": str(form.get("veo_negative_prompt", "")).strip(),
             })
 
@@ -385,18 +386,8 @@ async def update_post_prompt(post_id: str, request: Request):
             ending=payload.ending,
             audio_block=payload.audio_block,
         )
-        updated_prompt["veo_prompt"] = build_optimized_prompt(
-            payload.dialogue,
-            negative_constraints=None,
-            prompt_mode="standard_final",
-            character=payload.character,
-            action=payload.action,
-            style=payload.style,
-            scene=payload.scene,
-            cinematography=payload.cinematography,
-            ending=payload.ending,
-            audio_block=payload.audio_block,
-        )
+        # Preserve operator-edited Veo prompt verbatim; this is the exact text sent at submit time.
+        updated_prompt["veo_prompt"] = payload.veo_prompt.strip()
         validate_video_prompt(updated_prompt)
 
         supabase.table("posts").update({

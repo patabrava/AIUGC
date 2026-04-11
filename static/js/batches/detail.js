@@ -21,6 +21,7 @@
                 ending: toText(prompt?.ending_directive),
                 audio_block: toText(prompt?.audio_block),
                 universal_negatives: toText(prompt?.universal_negatives),
+                veo_prompt: toText(prompt?.veo_prompt),
                 veo_negative_prompt: toText(prompt?.veo_negative_prompt),
             };
         };

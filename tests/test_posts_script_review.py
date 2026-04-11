@@ -128,6 +128,7 @@ def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch)
             "ending": "Edited ending.",
             "audio_block": "Edited audio block.",
             "universal_negatives": "Edited universal negatives.",
+            "veo_prompt": "Character:\nEdited character\n\nDialogue:\n\"Edited dialogue.\"",
             "veo_negative_prompt": "Edited veo negatives.",
         },
     )
@@ -138,7 +139,7 @@ def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch)
     assert stored_prompt["character"] == "Edited character"
     assert stored_prompt["audio"]["dialogue"] == "Edited dialogue."
     assert stored_prompt["optimized_prompt"]
-    assert stored_prompt["veo_prompt"]
+    assert stored_prompt["veo_prompt"] == "Character:\nEdited character\n\nDialogue:\n\"Edited dialogue.\""
 
 
 def test_update_script_accepts_long_edits_within_generated_script_bounds(monkeypatch):
