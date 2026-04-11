@@ -4,12 +4,14 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, Callable, Dict, List, Optional
 
 import structlog
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ValidationError
+from app.core.config import get_settings
 from app.features.topics.topic_validation import (
     detect_metadata_copy_issues,
     sanitize_fact_fragments,
@@ -23,6 +25,13 @@ CAPTION_MAX_CHARS = 400
 EXTENDED_CAPTION_MIN_CHARS = 450
 EXTENDED_CAPTION_MAX_CHARS = 1000
 EXTENDED_CAPTION_KEY = "extended"
+VALUE_CAPTION_KEY = "informative"
+VALUE_CAPTION_MIN_CHARS = 200
+VALUE_CAPTION_MAX_CHARS = 1200
+VALUE_CAPTION_QUALITY_PASS = 80
+VALUE_CAPTION_QUALITY_WARN = 60
+VALUE_CAPTION_CTA_TEXT = "Mehr dazu im Beitrag."
+_VALUE_CAPTION_CTA_MARKERS = ("mehr dazu", "speicher", "kommentier", "teile", "schick", "folge", "folgt")
 
 _MARKER_PATTERN = re.compile(r"^\[(curiosity|personal|provocative)\]\s*$", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"(?<!\w)#[A-Za-zÀ-ÿ0-9_]+")
@@ -176,7 +185,238 @@ def _normalize_source_url(url: Any) -> str:
         return ""
     if not re.match(r"^https?://", normalized, flags=re.IGNORECASE):
         return ""
+    if _is_placeholder_source_url(normalized):
+        return ""
     return normalized.rstrip("/")
+
+
+def _is_placeholder_source_url(url: str) -> bool:
+    normalized = str(url or "").strip().lower()
+    if not normalized:
+        return True
+    try:
+        host = urlsplit(normalized).netloc.lower()
+    except Exception:
+        return True
+    if not host:
+        return True
+    return host == "example.com" or host.endswith(".example.com") or host.startswith("example.")
+
+
+def _value_caption_mode_enabled() -> bool:
+    try:
+        return bool(get_settings().value_caption_informative_mode)
+    except Exception:
+        return True
+
+
+def _value_caption_fact_pool(
+    seed_payload: Optional[Dict[str, Any]],
+    research_facts: Optional[List[str]] = None,
+    *,
+    topic_title: str = "",
+    script: str = "",
+) -> List[str]:
+    payload = dict(seed_payload or {})
+    strict_seed = payload.get("strict_seed") or {}
+    candidates: List[Any] = []
+    candidates.extend(list(strict_seed.get("facts") or []))
+    candidates.extend(list(research_facts or []))
+    for key in ("source_summary", "description", "caption", "script"):
+        value = payload.get(key)
+        if value:
+            candidates.append(value)
+    if topic_title:
+        candidates.append(topic_title)
+    if script:
+        candidates.append(script)
+
+    facts = sanitize_fact_fragments(candidates)
+    pool: List[str] = []
+    seen = set()
+    for fact in facts:
+        for segment in re.split(r"(?<=[.!?])\s+", fact):
+            cleaned = _clean_caption_fact(segment)
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            pool.append(cleaned)
+    return pool
+
+
+def _value_caption_fact_line(facts: List[str], index: int, fallback_text: str) -> str:
+    candidate = facts[index] if index < len(facts) else fallback_text
+    if not candidate:
+        return ""
+    return _clip_sentence(candidate, 180)
+
+
+def _build_value_informative_caption_body(
+    *,
+    topic_title: str,
+    post_type: str,
+    script: str,
+    seed_payload: Optional[Dict[str, Any]],
+    research_facts: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    facts = _value_caption_fact_pool(
+        seed_payload,
+        research_facts,
+        topic_title=topic_title,
+        script=script,
+    )
+    payload = dict(seed_payload or {})
+    source_summary = str(payload.get("source_summary") or payload.get("description") or "").strip()
+    fallback_one = source_summary or script or topic_title
+    fallback_two = script or source_summary or topic_title
+
+    fact_one = _value_caption_fact_line(facts, 0, fallback_one)
+    fact_two = _value_caption_fact_line(facts, 1, fallback_two)
+    if not fact_one:
+        fact_one = _clip_sentence(fallback_one or topic_title, 180)
+    if not fact_two:
+        fact_two = _clip_sentence(fallback_two or topic_title, 180)
+    if fact_one == fact_two and source_summary and source_summary != fact_one:
+        fact_two = _clip_sentence(source_summary, 180)
+
+    hook = _clip_sentence(f"{topic_title}: Darauf kommt es wirklich an.", 120)
+    takeaway = _clip_sentence(
+        "Kurz gesagt: " + " ".join(part for part in [fact_one.rstrip(".!?"), fact_two.rstrip(".!?")] if part),
+        260,
+    )
+    hashtags = " ".join(
+        dict.fromkeys(
+            [
+                "#MehrWissen",
+                *_fallback_caption_hashtags(topic_title, post_type, "curiosity")[:3],
+            ]
+        )
+    )
+    body = "\n".join(
+        [
+            hook,
+            fact_one,
+            fact_two,
+            takeaway,
+            VALUE_CAPTION_CTA_TEXT,
+            hashtags,
+        ]
+    ).strip()
+    return {
+        "key": VALUE_CAPTION_KEY,
+        "body": _normalize_line_breaks(body),
+        "facts": facts,
+        "generation_mode": "fallback_informative",
+    }
+
+
+def _evaluate_caption_quality(
+    *,
+    topic_title: str,
+    post_type: str,
+    script: str,
+    body: str,
+    facts: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    normalized = _normalize_line_breaks(body)
+    lines = [line.strip() for line in normalized.split("\n") if line.strip()]
+    hashtags = _extract_hashtags(normalized)
+    content_lines = [
+        line
+        for line in lines[1:]
+        if not line.startswith("#")
+        and not any(marker in line.lower() for marker in _VALUE_CAPTION_CTA_MARKERS)
+    ]
+    char_count = len(normalized)
+    fact_line_count = len(content_lines)
+    score = 0
+
+    if char_count >= 220:
+        score += 35
+    elif char_count >= 150:
+        score += 20
+    elif char_count >= 80:
+        score += 10
+
+    if fact_line_count >= 3:
+        score += 35
+    elif fact_line_count == 2:
+        score += 25
+    elif fact_line_count == 1:
+        score += 10
+
+    if any("mehr dazu" in line.lower() for line in lines):
+        score += 20
+
+    if 3 <= len(hashtags) <= 5:
+        score += 10
+
+    if not _looks_mixed_language(normalized):
+        score += 5
+
+    overlap = _script_overlap_ratio(script, normalized)
+    if overlap > 0.65:
+        score -= 20
+
+    if detect_metadata_copy_issues(normalized):
+        score -= 20
+
+    score = max(0, min(100, score))
+    if score >= VALUE_CAPTION_QUALITY_PASS:
+        status = "pass"
+    elif score >= VALUE_CAPTION_QUALITY_WARN:
+        status = "warn"
+    else:
+        status = "fail"
+
+    return {
+        "quality_score": score,
+        "quality_status": status,
+        "fact_line_count": fact_line_count,
+        "char_count": char_count,
+        "hashtags": hashtags,
+        "usable_fact_count": len(facts or []),
+        "has_more_dazu": any("mehr dazu" in line.lower() for line in lines),
+    }
+
+
+def _finalize_caption_bundle_metadata(
+    bundle: Dict[str, Any],
+    *,
+    topic_title: str,
+    post_type: str,
+    script: str,
+    seed_payload: Optional[Dict[str, Any]] = None,
+    generation_mode: str,
+    research_facts: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    final_bundle = dict(bundle or {})
+    facts = _value_caption_fact_pool(
+        seed_payload,
+        research_facts,
+        topic_title=topic_title,
+        script=script,
+    )
+    quality = _evaluate_caption_quality(
+        topic_title=topic_title,
+        post_type=post_type,
+        script=script,
+        body=str(final_bundle.get("selected_body") or ""),
+        facts=facts,
+    )
+    final_bundle["generation_mode"] = generation_mode
+    final_bundle["quality_score"] = quality["quality_score"]
+    final_bundle["quality_status"] = quality["quality_status"]
+    final_bundle["quality_notes"] = {
+        "fact_line_count": quality["fact_line_count"],
+        "usable_fact_count": quality["usable_fact_count"],
+        "char_count": quality["char_count"],
+        "has_more_dazu": quality["has_more_dazu"],
+    }
+    final_bundle["caption_review_required"] = (
+        post_type == "value" and quality["quality_status"] == "fail"
+    )
+    return final_bundle
 
 
 def _compact_source_label(value: Any) -> str:
@@ -761,7 +1001,7 @@ def _generate_standard_caption_bundle(
     return fallback
 
 
-def generate_caption_bundle(
+def _generate_legacy_caption_bundle(
     *,
     topic_title: str,
     post_type: str,
@@ -851,6 +1091,113 @@ def generate_caption_bundle(
     return standard_bundle
 
 
+def generate_caption_bundle(
+    *,
+    topic_title: str,
+    post_type: str,
+    script: str,
+    llm_factory: Optional[Callable] = None,
+    canonical_topic: Optional[str] = None,
+    research_facts: Optional[List[str]] = None,
+    seed_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    canonical_topic = str(canonical_topic or topic_title or "").strip()
+    if post_type == "value" and _value_caption_mode_enabled():
+        legacy_bundle = _generate_legacy_caption_bundle(
+            topic_title=topic_title,
+            post_type=post_type,
+            script=script,
+            llm_factory=llm_factory,
+            canonical_topic=canonical_topic,
+            research_facts=research_facts,
+            seed_payload=seed_payload,
+        )
+        quality = _evaluate_caption_quality(
+            topic_title=canonical_topic,
+            post_type=post_type,
+            script=script,
+            body=str(legacy_bundle.get("selected_body") or ""),
+            facts=_value_caption_fact_pool(
+                seed_payload,
+                research_facts,
+                topic_title=canonical_topic,
+                script=script,
+            ),
+        )
+        if quality["quality_status"] == "fail":
+            fallback_bundle = _build_value_informative_caption_body(
+                topic_title=canonical_topic,
+                post_type=post_type,
+                script=script,
+                seed_payload=seed_payload,
+                research_facts=research_facts,
+            )
+            fallback_quality = _evaluate_caption_quality(
+                topic_title=canonical_topic,
+                post_type=post_type,
+                script=script,
+                body=fallback_bundle["body"],
+                facts=fallback_bundle.get("facts") or [],
+            )
+            final_bundle = {
+                "variants": [
+                    {
+                        "key": fallback_bundle["key"],
+                        "body": fallback_bundle["body"],
+                        "char_count": len(fallback_bundle["body"]),
+                        "hashtags": _extract_hashtags(fallback_bundle["body"]),
+                    }
+                ],
+                "selected_key": fallback_bundle["key"],
+                "selected_body": fallback_bundle["body"],
+                "selection_reason": "deterministic_value_fallback",
+                "last_error": legacy_bundle.get("last_error"),
+                "caption_profile": legacy_bundle.get("caption_profile", "standard"),
+                "caption_depth_reason": legacy_bundle.get("caption_depth_reason", _caption_depth_reason(seed_payload)),
+                "source_urls": list(legacy_bundle.get("source_urls") or []),
+                "source_labels": list(legacy_bundle.get("source_labels") or []),
+            }
+            return _finalize_caption_bundle_metadata(
+                final_bundle,
+                topic_title=canonical_topic,
+                post_type=post_type,
+                script=script,
+                seed_payload=seed_payload,
+                generation_mode="fallback_informative",
+                research_facts=fallback_bundle.get("facts") or research_facts,
+            )
+
+        legacy_bundle["selection_reason"] = "llm_informative"
+        return _finalize_caption_bundle_metadata(
+            legacy_bundle,
+            topic_title=canonical_topic,
+            post_type=post_type,
+            script=script,
+            seed_payload=seed_payload,
+            generation_mode="llm_informative",
+            research_facts=research_facts,
+        )
+
+    legacy_bundle = _generate_legacy_caption_bundle(
+        topic_title=topic_title,
+        post_type=post_type,
+        script=script,
+        llm_factory=llm_factory,
+        canonical_topic=canonical_topic,
+        research_facts=research_facts,
+        seed_payload=seed_payload,
+    )
+    return _finalize_caption_bundle_metadata(
+        legacy_bundle,
+        topic_title=canonical_topic,
+        post_type=post_type,
+        script=script,
+        seed_payload=seed_payload,
+        generation_mode="standard_legacy",
+        research_facts=research_facts,
+    )
+
+
 def attach_caption_bundle(
     seed_payload: Dict[str, Any],
     *,
@@ -870,17 +1217,57 @@ def attach_caption_bundle(
         topic_title=topic_title,
         payload={**payload, **({"canonical_topic": canonical_topic} if canonical_topic else {})},
     )
-    bundle = generate_caption_bundle(
-        topic_title=canonical_topic,
-        post_type=post_type,
-        script=script,
-        llm_factory=llm_factory,
-        canonical_topic=canonical_topic,
-        research_facts=research_facts,
-        seed_payload=payload,
-    )
+    try:
+        bundle = generate_caption_bundle(
+            topic_title=canonical_topic,
+            post_type=post_type,
+            script=script,
+            llm_factory=llm_factory,
+            canonical_topic=canonical_topic,
+            research_facts=research_facts,
+            seed_payload=payload,
+        )
+    except Exception as exc:
+        if post_type != "value" or not _value_caption_mode_enabled():
+            raise
+        logger.warning(
+            "value_caption_bundle_fallback_unexpected_error",
+            topic_title=canonical_topic[:60],
+            error=str(exc),
+        )
+        fallback_bundle = _build_value_informative_caption_body(
+            topic_title=canonical_topic,
+            post_type=post_type,
+            script=script,
+            seed_payload=payload,
+            research_facts=research_facts,
+        )
+        bundle = _finalize_caption_bundle_metadata(
+            {
+                "variants": [
+                    {
+                        "key": fallback_bundle["key"],
+                        "body": fallback_bundle["body"],
+                        "char_count": len(fallback_bundle["body"]),
+                        "hashtags": _extract_hashtags(fallback_bundle["body"]),
+                    }
+                ],
+                "selected_key": fallback_bundle["key"],
+                "selected_body": fallback_bundle["body"],
+                "selection_reason": "deterministic_value_fallback",
+                "caption_profile": "standard",
+                "caption_depth_reason": _caption_depth_reason(payload),
+            },
+            topic_title=canonical_topic,
+            post_type=post_type,
+            script=script,
+            seed_payload=payload,
+            generation_mode="fallback_informative",
+            research_facts=fallback_bundle.get("facts") or research_facts,
+        )
     payload["canonical_topic"] = canonical_topic
     payload["caption_bundle"] = bundle
     payload["description"] = bundle["selected_body"]
     payload["caption"] = bundle["selected_body"]
+    payload["caption_review_required"] = bool(bundle.get("caption_review_required"))
     return payload

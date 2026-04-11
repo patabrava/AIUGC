@@ -442,7 +442,7 @@ def create_post_for_batch(
         "topic_cta": topic_cta,
         "spoken_duration": spoken_duration,
         "seed_data": resolved_seed_data,
-        "publish_caption": resolve_selected_caption(resolved_seed_data),
+        "publish_caption": resolve_selected_caption(resolved_seed_data) or topic_rotation or topic_cta or topic_title,
     }
     
     response = supabase.client.table("posts").insert(post_data).execute()

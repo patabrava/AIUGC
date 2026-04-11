@@ -180,7 +180,7 @@
             batchId: options.batchId || null,
             targetLengthTier: options.targetLengthTier || null,
             pipelineRoute: options.pipelineRoute || null,
-            provider: 'veo_3_1',
+            provider: 'vertex_ai',
             aspectRatio: '9:16',
             duration: String(options.targetLengthTier || 8),
             resolution: '720p',
@@ -273,7 +273,7 @@
             },
             init() {
                 if (this.isDurationRouted) {
-                    this.provider = 'veo_3_1';
+                    this.provider = 'vertex_ai';
                     this.duration = String(this.targetLengthTier || 8);
                 }
                 this.$watch('provider', () => {

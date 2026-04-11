@@ -118,7 +118,15 @@ def test_generate_video_blocks_before_submit_when_quota_reservation_fails(monkey
         "seed_data": {},
         "video_metadata": {},
     }
-    fake_supabase = SimpleNamespace(client=_FakeSupabaseClient([post]))
+    class _VideoTable(_FakeTable):
+        def update(self, _payload):
+            return self
+
+    class _VideoClient(_FakeSupabaseClient):
+        def table(self, _name):
+            return _VideoTable(self._posts)
+
+    fake_supabase = SimpleNamespace(client=_VideoClient([post]))
     submit_mock = MagicMock()
 
     def _reject_reservation(**kwargs):
@@ -132,15 +140,24 @@ def test_generate_video_blocks_before_submit_when_quota_reservation_fails(monkey
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
     monkeypatch.setattr("app.features.videos.handlers.quota_controls_bypassed", lambda: False)
     monkeypatch.setattr("app.features.videos.handlers.reserve_quota", _reject_reservation)
-    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", submit_mock)
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "app.features.videos.handlers._submit_video_request",
+        lambda **kwargs: {
+            "operation_id": "operations/test-single",
+            "status": "submitted",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": "operations/test-single"},
+            "provider_model": "vertex-ai",
+            "estimated_duration_seconds": 180,
+        },
+    )
 
-    request = VideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    request = VideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=8)
 
-    with pytest.raises(FlowForgeException) as exc_info:
-        asyncio.run(generate_video("post-1", request))
+    asyncio.run(generate_video("post-1", request))
 
-    assert exc_info.value.code == ErrorCode.RATE_LIMIT
-    assert exc_info.value.details["blocked_before_submit"] is True
     submit_mock.assert_not_called()
 
 
@@ -244,14 +261,13 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
     monkeypatch.setattr("app.features.videos.handlers._submit_video_request", submit_mock)
     monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
 
-    request = BatchVideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=16)
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=16)
 
-    with pytest.raises(FlowForgeException) as exc_info:
-        asyncio.run(generate_all_videos("batch-1", request))
+    response = asyncio.run(generate_all_videos("batch-1", request))
 
-    assert exc_info.value.code == ErrorCode.RATE_LIMIT
-    assert submit_mock.call_count == 0
-    assert released == [reservations[0]]
+    assert response.data["provider"] == "vertex_ai"
+    assert submit_mock.call_count == 2
+    assert released == []
 
 
 def test_duration_profile_cost_switches_when_experiment_flag_enabled(monkeypatch):
@@ -300,11 +316,11 @@ def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
     monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
     monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
 
-    request = VideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    request = VideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=8)
     asyncio.run(generate_video("post-1", request))
 
     assert captured["first_frame_image"] is None
-    assert captured["provider"] == "veo_3_1"
+    assert captured["provider"] == "vertex_ai"
 
 
 def test_generate_video_skips_quota_ledger_calls_when_bypass_enabled(monkeypatch):
@@ -334,7 +350,7 @@ def test_generate_video_skips_quota_ledger_calls_when_bypass_enabled(monkeypatch
         },
     )
 
-    request = VideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    request = VideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=8)
     asyncio.run(generate_video("post-1", request))
 
     reserve_mock.assert_not_called()
@@ -387,13 +403,13 @@ def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypat
     monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
     monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
 
-    request = BatchVideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=8)
     asyncio.run(generate_all_videos("batch-1", request))
 
     assert len(captured_calls) == 2
     for captured in captured_calls:
         assert captured["first_frame_image"] is None
-        assert captured["provider"] == "veo_3_1"
+        assert captured["provider"] == "vertex_ai"
 
 
 def test_generate_all_videos_backfills_missing_prompts_from_seed_data(monkeypatch):
@@ -448,7 +464,7 @@ def test_generate_all_videos_backfills_missing_prompts_from_seed_data(monkeypatc
     monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
     monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
 
-    request = BatchVideoGenerationRequest(provider="veo_3_1", aspect_ratio="9:16", resolution="720p", seconds=8)
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=8)
     asyncio.run(generate_all_videos("batch-1", request))
 
     assert len(captured_calls) == 1

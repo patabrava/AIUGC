@@ -331,13 +331,22 @@ def test_build_veo_extended_base_prompt_uses_efficient_32s_visual_contract():
 
 def test_batch_video_generation_request_accepts_duration_tier_seconds():
     req = BatchVideoGenerationRequest(
-        provider="veo_3_1",
+        provider="vertex_ai",
         seconds=16,
         target_length_tier=16,
     )
 
     assert req.seconds == 16
     assert req.target_length_tier == 16
+
+
+def test_batch_video_generation_request_rejects_gemini_provider():
+    with pytest.raises(Exception):
+        BatchVideoGenerationRequest(
+            provider="veo_3_1",
+            seconds=16,
+            target_length_tier=16,
+        )
 
 
 def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():

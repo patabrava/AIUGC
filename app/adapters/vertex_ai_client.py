@@ -7,6 +7,7 @@ fetchPredictOperation on the model path is the correct way to poll.
 
 from __future__ import annotations
 
+import os
 import base64
 from copy import deepcopy
 from typing import Optional, Dict, Any
@@ -20,6 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
+from app.core.config import resolve_google_application_credentials_path
 
 logger = get_logger(__name__)
 
@@ -376,6 +378,9 @@ class VertexAIClient:
 
     def _get_credentials(self):
         if self._credentials is None:
+            adc_path = resolve_google_application_credentials_path(self._settings)
+            if adc_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
             try:
                 self._credentials, _ = google.auth.default(
                     scopes=["https://www.googleapis.com/auth/cloud-platform"]

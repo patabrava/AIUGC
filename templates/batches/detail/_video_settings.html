@@ -13,32 +13,26 @@
         <div class="mb-4" x-show="isDurationRouted" x-cloak>
             <label class="flex flex-col text-sm max-w-xs" for="provider-select">
                 <span class="text-gray-700 font-medium">Provider</span>
-                <select
+                <div
                     id="provider-select"
-                    name="provider"
-                    class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#006AAB] focus:outline-none focus:ring-2 focus:ring-[#E58434]"
-                    x-model="provider"
+                    class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
                 >
-                    <option value="veo_3_1">Veo 3.1 (Gemini API)</option>
-                    <option value="vertex_ai">Veo 3.1 (Vertex AI)</option>
-                </select>
+                    Vertex AI only
+                </div>
             </label>
         </div>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4" x-show="!isDurationRouted">
             <div class="rounded-lg border border-[#006AAB]/30 bg-[#006AAB]/5 px-4 py-3 text-sm text-[#006AAB] sm:col-span-3">
-                Veo 3.1 is selected automatically. Choose the duration tier and aspect ratio below.
+                Vertex AI is selected automatically. Choose the duration tier and aspect ratio below.
             </div>
             <label class="flex flex-col text-sm" for="provider-select">
                 <span class="text-gray-700 font-medium">Provider</span>
-                <select
+                <div
                     id="provider-select"
-                    name="provider"
-                    class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#006AAB] focus:outline-none focus:ring-2 focus:ring-[#E58434]"
-                    x-model="provider"
+                    class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
                 >
-                    <option value="veo_3_1">Veo 3.1 (Gemini API)</option>
-                    <option value="vertex_ai">Veo 3.1 (Vertex AI)</option>
-                </select>
+                    Vertex AI only
+                </div>
             </label>
             <label class="flex flex-col text-sm" for="aspect-select">
                 <span class="text-gray-700 font-medium">Aspect Ratio</span>
@@ -84,6 +78,7 @@
                 </div>
             </div>
         </div>
+        <input type="hidden" name="provider" value="vertex_ai" x-model="provider" />
         <input type="hidden" name="resolution" x-model="resolution" />
         <input type="hidden" name="seconds" x-model="duration" />
         <div class="mt-4" aria-live="polite" x-show="submitError || submitStatusMessage" x-cloak>

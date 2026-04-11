@@ -4,6 +4,9 @@
 {% set source = seed.get('source') %}
 {% set primary_script = seed.get('script') or post.topic_rotation %}
 {% set caption = post.review_caption or post.publish_caption or ((seed.get('caption_bundle') or {}).get('selected_body')) or seed.get('caption') or seed.get('description') %}
+{% set caption_bundle = seed.get('caption_bundle') or {} %}
+{% set caption_generation_mode = caption_bundle.get('generation_mode') or 'standard_legacy' %}
+{% set caption_review_required = seed.get('caption_review_required') == True or caption_bundle.get('caption_review_required') == True %}
 {% set canonical_topic = seed.get('canonical_topic') or post.topic_title %}
 {% set research_title = seed.get('research_title') or post.topic_title %}
 {% set review_status = seed.get('script_review_status') or 'pending' %}
@@ -136,7 +139,24 @@
 
     {% if caption %}
     <div class="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-        <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Caption</p>
+        <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Caption</p>
+            {% if post.post_type == 'value' %}
+                {% if caption_review_required %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+                    Needs Review
+                </span>
+                {% else %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-100 text-green-800">
+                    Informative
+                </span>
+                {% endif %}
+            {% elif caption_generation_mode == 'fallback_informative' %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-100 text-green-800">
+                Informative
+            </span>
+            {% endif %}
+        </div>
         <p class="mt-1 text-sm text-gray-700 whitespace-pre-line">{{ caption }}</p>
     </div>
     {% endif %}

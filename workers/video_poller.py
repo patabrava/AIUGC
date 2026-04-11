@@ -26,7 +26,7 @@ from app.adapters.supabase_client import get_supabase
 from app.adapters.sora_client import get_sora_client
 from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
-from app.core.config import get_settings, google_ai_context_fingerprint
+from app.core.config import get_settings, google_ai_context_fingerprint, resolve_google_application_credentials_path
 from app.core.errors import FlowForgeException, ValidationError
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.videos.prompt_audit import record_prompt_audit
@@ -76,6 +76,12 @@ logger.info(
     "video_poller_startup_context",
     **google_ai_context_fingerprint(),
 )
+
+
+def _ensure_google_adc_env() -> None:
+    adc_path = resolve_google_application_credentials_path()
+    if adc_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
 
 if not _veo_available:
     logger.warning(
@@ -1192,6 +1198,7 @@ def _decode_vertex_video_uri(video_uri: str) -> bytes:
         import base64
         return base64.b64decode(b64_data)
     if video_uri.startswith("gs://"):
+        _ensure_google_adc_env()
         bucket_and_object = video_uri[5:]
         bucket, _, object_name = bucket_and_object.partition("/")
         if not bucket or not object_name:
@@ -1239,6 +1246,7 @@ def _stage_vertex_video_bytes_to_gcs(
     if prefix:
         normalized_object_name = f"{prefix.rstrip('/')}/{normalized_object_name}"
 
+    _ensure_google_adc_env()
     credentials, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/devstorage.read_write"]
     )
@@ -1673,6 +1681,8 @@ def _submit_extension_hop(
 
     extension_seconds = metadata.get("veo_extension_seconds", 7)
     generated_seconds = metadata.get("generated_seconds", 0) + extension_seconds
+    lease_refreshed_at = _utc_now()
+    poller_identity = _poller_identity()
 
     metadata.update({
         "veo_extension_hops_completed": hops_completed + 1,
@@ -1681,6 +1691,11 @@ def _submit_extension_hop(
         "chain_status": "extending",
         "generated_seconds": generated_seconds,
         "vertex_output_gcs_uri": output_gcs_uri,
+        VIDEO_POLL_LEASE_OWNER_KEY: poller_identity,
+        VIDEO_POLL_LEASE_ACQUIRED_KEY: _utc_now_iso(lease_refreshed_at),
+        VIDEO_POLL_LEASE_EXPIRES_KEY: _utc_now_iso(lease_refreshed_at + timedelta(seconds=VIDEO_POLL_LEASE_SECONDS)),
+        "last_polled_by": poller_identity,
+        "last_polled_at": _utc_now_iso(lease_refreshed_at),
     })
     if quota_consume_error:
         metadata["quota_consume_error"] = quota_consume_error
@@ -1688,6 +1703,8 @@ def _submit_extension_hop(
     metadata.pop("veo_extension_last_retryable_error", None)
     metadata.pop("provider_status_code", None)
     metadata.pop("provider_response_body", None)
+    metadata.pop("error", None)
+    metadata.pop("error_type", None)
 
     supabase = get_supabase().client
     supabase.table("posts").update({

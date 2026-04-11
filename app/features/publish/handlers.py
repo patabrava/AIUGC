@@ -603,6 +603,29 @@ def _default_publish_caption(post: Dict[str, Any]) -> str:
     return resolve_selected_caption(seed_data)
 
 
+def _value_caption_publish_guard_enabled() -> bool:
+    try:
+        return bool(get_settings().value_caption_block_on_publish)
+    except Exception:
+        return False
+
+
+def _value_caption_requires_review(post: Dict[str, Any]) -> bool:
+    seed_data = _load_json_object(post.get("seed_data"))
+    caption_bundle = _load_json_object(seed_data.get("caption_bundle"))
+    post_type = str(post.get("post_type") or seed_data.get("post_type") or "").strip().lower()
+    if post_type != "value":
+        return False
+    return bool(
+        seed_data.get("caption_review_required")
+        or caption_bundle.get("caption_review_required")
+    )
+
+
+def _should_block_value_caption_publish(post: Dict[str, Any]) -> bool:
+    return _value_caption_publish_guard_enabled() and _value_caption_requires_review(post)
+
+
 def get_post_schedules(batch_id: str) -> List[Dict[str, Any]]:
     """Get all publish-planning fields for posts in a batch."""
     supabase = get_supabase()
@@ -1318,7 +1341,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
     now = datetime.utcnow().isoformat()
     supabase = get_supabase().client
     due_response = supabase.table("posts").select(
-        "id, batch_id, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
+        "id, batch_id, post_type, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
     ).eq("publish_status", "scheduled").lte("scheduled_at", now).order("scheduled_at").limit(limit).execute()
 
     due_posts = due_response.data or []
@@ -1329,6 +1352,25 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
 
     for due_post in due_posts:
         if _is_removed_post(due_post):
+            continue
+
+        if _should_block_value_caption_publish(due_post):
+            supabase.table("posts").update(
+                {
+                    "publish_results": {
+                        **_load_json_object(due_post.get("publish_results")),
+                        "dispatch": {
+                            "status": "blocked",
+                            "error_code": ErrorCode.VALIDATION_ERROR.value,
+                            "error_message": "Value caption requires review before publish dispatch.",
+                            "details": {"caption_review_required": True},
+                            "last_attempt_at": datetime.utcnow().isoformat(),
+                        },
+                    },
+                }
+            ).eq("id", due_post["id"]).execute()
+            processed += 1
+            failed += 1
             continue
 
         claim = supabase.table("posts").update({"publish_status": "publishing"}).eq(
@@ -1506,7 +1548,7 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
 
     # 1. Load post and validate status
     post_resp = supabase.table("posts").select(
-        "id, batch_id, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
+        "id, batch_id, post_type, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
     ).eq("id", post_id).execute()
     if not post_resp.data:
         raise NotFoundError(f"Post {post_id} not found")
@@ -1519,6 +1561,12 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
         raise ValidationError(
             f"Post must be in pending, draft, or scheduled status, got {post['publish_status']}",
             details={"publish_status": post["publish_status"]},
+        )
+
+    if _should_block_value_caption_publish(post):
+        raise ValidationError(
+            "Value caption requires review before publish dispatch.",
+            details={"post_id": post_id, "caption_review_required": True},
         )
 
     # 2. Validate batch state

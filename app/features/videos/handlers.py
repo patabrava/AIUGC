@@ -730,34 +730,14 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             correlation_id=correlation_id,
         )
         
-        prompt_request = _build_provider_prompt_request(video_prompt, request.provider)
+        provider = "vertex_ai"
+        prompt_request = _build_provider_prompt_request(video_prompt, provider)
 
         requested_units = 0
-        if request.provider == VEO_PROVIDER and not quota_controls_bypassed():
-            requested_units = chain_cost_units(None, provider=request.provider)
-            quota_reservation_key = build_reservation_key(
-                provider=request.provider,
-                post_id=post_id,
-                correlation_id=correlation_id,
-            )
-            reserve_quota(
-                provider=request.provider,
-                post_id=post_id,
-                batch_id=post.get("batch_id"),
-                reservation_key=quota_reservation_key,
-                requested_units=requested_units,
-                require_immediate_slot=True,
-            )
-            quota_reserved = True
-
-        anchor_image_bundle = (
-            _resolve_global_veo_anchor_image(correlation_id)
-            if _GLOBAL_VEO_ANCHOR_ENABLED and request.provider == VEO_PROVIDER
-            else None
-        )
-        veo_seed = random.randint(0, 2**32 - 1) if request.provider == "veo_3_1" else None
+        anchor_image_bundle = None
+        veo_seed = None
         submission_result = _submit_video_request(
-            provider=request.provider,
+            provider=provider,
             prompt_text=prompt_request["prompt_text"] or "",
             negative_prompt=prompt_request.get("negative_prompt"),
             aspect_ratio=request.aspect_ratio,
@@ -767,8 +747,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             seconds=request.seconds,
             size=request.size,
             correlation_id=correlation_id,
-            provider_duration_seconds=request.seconds if request.provider == "veo_3_1" else None,
-            first_frame_image=anchor_image_bundle["first_frame_image"] if anchor_image_bundle else None,
+            provider_duration_seconds=None,
+            first_frame_image=None,
             seed=veo_seed,
         )
 
@@ -781,7 +761,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             operation_id=operation_id,
             units=1,
             correlation_id=correlation_id,
-            provider=request.provider,
+            provider=provider,
             post_id=post_id,
             batch_id=post.get("batch_id"),
         )
@@ -791,7 +771,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         record_prompt_audit(
             post_id=post_id,
             operation_id=operation_id,
-            provider=request.provider,
+            provider=provider,
             prompt_text=prompt_request["prompt_text"] or "",
             negative_prompt=prompt_request.get("negative_prompt"),
             prompt_path=prompt_request["prompt_path"],
@@ -833,14 +813,14 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             "video_operation_id_paid_request",
             post_id=post_id,
             operation_id=operation_id,
-            provider=request.provider,
+            provider=provider,
             correlation_id=correlation_id,
             message="PAID VIDEO SUBMITTED - Operation ID logged for recovery"
         )
 
         try:
             supabase.table("posts").update({
-                "video_provider": request.provider,
+                "video_provider": provider,
                 "video_format": request.aspect_ratio,
                 "video_operation_id": operation_id,
                 "video_status": db_status,
@@ -851,20 +831,20 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 "video_db_update_failed_but_video_submitted",
                 post_id=post_id,
                 operation_id=operation_id,
-                provider=request.provider,
+                provider=provider,
                 correlation_id=correlation_id,
                 error=str(db_error),
                 message="DATABASE UPDATE FAILED - Video is still processing at provider. Use operation_id to recover."
             )
             # Write to fallback recovery file
-            _write_recovery_record(post_id, operation_id, request.provider, correlation_id)
+            _write_recovery_record(post_id, operation_id, provider, correlation_id)
             raise
 
         logger.info(
             "video_generation_submitted",
             post_id=post_id,
             correlation_id=correlation_id,
-            provider=request.provider,
+            provider=provider,
             provider_model=provider_model,
             aspect_ratio=request.aspect_ratio,
             resolution=request.resolution,
@@ -877,7 +857,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             data=VideoGenerationResponse(
                 post_id=post_id,
                 operation_id=operation_id,
-                provider=request.provider,
+                provider=provider,
                 provider_model=provider_model,
                 status=submission_result.get("status", "submitted"),
                 estimated_duration_seconds=submission_result.get("estimated_duration_seconds"),
@@ -896,7 +876,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             )
         if (
             quota_reservation_key
-            and request.provider == VEO_PROVIDER
+            and provider == VEO_PROVIDER
             and exc.status_code == 429
             and not exc.details.get("blocked_before_submit")
         ):

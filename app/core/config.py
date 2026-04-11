@@ -5,6 +5,8 @@ Per Constitution § III: Deterministic Execution
 """
 
 import hashlib
+import os
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from typing import Any, Literal, Optional
@@ -67,6 +69,10 @@ class Settings(BaseSettings):
     # Video Providers
     google_ai_api_key: str = Field("", description="Google AI API key for VEO 3.1")
     google_ai_project_id: Optional[str] = Field(None, description="Google Cloud project ID")
+    google_application_credentials: str = Field(
+        "",
+        description="Optional explicit path to Google Application Default Credentials JSON",
+    )
     vertex_ai_project_id: str = Field("", description="Google Cloud project ID for Vertex AI video generation")
     vertex_ai_location: str = Field("us-central1", description="Vertex AI region for video generation")
     vertex_ai_enabled: bool = Field(default=False, description="Enable the explicit Vertex AI provider path")
@@ -142,6 +148,16 @@ class Settings(BaseSettings):
     veo_quota_project_scope: str = Field(
         default="default-gemini-project",
         description="Operator label for the Google project whose Veo quota is being guarded",
+    )
+
+    # Caption reliability
+    value_caption_informative_mode: bool = Field(
+        default=True,
+        description="Prefer informative captions for value posts and fall back deterministically when LLM output is weak",
+    )
+    value_caption_block_on_publish: bool = Field(
+        default=False,
+        description="Block publish dispatch for value posts whose captions still require review",
     )
     
     # Social Media
@@ -264,4 +280,20 @@ def google_ai_context_fingerprint(settings: Optional[Settings] = None) -> dict[s
         "google_ai_api_key_fingerprint": fingerprint_secret(resolved.google_ai_api_key),
         "google_ai_api_key_present": bool(resolved.google_ai_api_key),
         "google_ai_project_id": resolved.google_ai_project_id or "unset",
+        "google_application_credentials_configured": bool(resolve_google_application_credentials_path(resolved)),
     }
+
+
+def resolve_google_application_credentials_path(settings: Optional[Settings] = None) -> Optional[str]:
+    """Return a usable ADC path when one is configured or present in the standard Cloud SDK location."""
+    resolved = settings or get_settings()
+
+    explicit = (getattr(resolved, "google_application_credentials", "") or "").strip() or os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if explicit and Path(explicit).expanduser().is_file():
+        return str(Path(explicit).expanduser())
+
+    default_adc = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+    if default_adc.is_file():
+        return str(default_adc)
+
+    return None

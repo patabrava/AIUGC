@@ -250,11 +250,11 @@ def test_parse_text_variants_with_new_markers():
 def test_caption_profile_gate_uses_extended_only_for_deep_payloads():
     deep_payload = {
         "strict_seed": {"facts": ["F1", "F2", "F3", "F4", "F5"]},
-        "source": {"url": "https://one.example"},
+        "source": {"url": "https://www.bahn.de/service"},
         "source_urls": [
-            {"url": "https://one.example"},
-            {"url": "https://two.example"},
-            {"url": "https://three.example"},
+            {"url": "https://www.bahn.de/service"},
+            {"url": "https://www.bmas.de/DE/Service/Service-Kontakt"},
+            {"url": "https://www.gkv-spitzenverband.de/"},
         ],
     }
     thin_payload = {
@@ -282,11 +282,14 @@ def test_generate_caption_bundle_with_new_structure():
         research_facts=["Viele Kommunen nutzten Ausnahmen.", "Ab 2026 gelten neue Regeln."],
         llm_factory=lambda: FakeLLM(),
     )
-    assert len(bundle["variants"]) == 3
-    assert bundle["selected_key"] in VARIANT_KEYS
+    assert len(bundle["variants"]) == 1
+    assert bundle["selected_key"] == "informative"
     assert bundle["selected_body"]
-    assert bundle["selection_reason"] == "hash_variant"
+    assert bundle["selection_reason"] == "deterministic_value_fallback"
     assert bundle["caption_profile"] == "standard"
+    assert bundle["generation_mode"] == "fallback_informative"
+    assert bundle["quality_status"] == "pass"
+    assert bundle["caption_review_required"] is False
 
 
 def test_generate_caption_bundle_uses_extended_profile_when_research_is_deep():
@@ -389,7 +392,9 @@ def test_generate_caption_bundle_falls_back_to_standard_when_extended_validation
     )
     assert bundle["selected_body"]
     assert bundle["caption_profile"] == "standard"
-    assert bundle["selection_reason"] == "hash_variant"
+    assert bundle["selection_reason"] == "deterministic_value_fallback"
+    assert bundle["generation_mode"] == "fallback_informative"
+    assert bundle["quality_status"] == "pass"
 
 
 def test_generate_caption_bundle_falls_back_on_persistent_failure():
@@ -404,11 +409,12 @@ def test_generate_caption_bundle_falls_back_on_persistent_failure():
         research_facts=[],
         llm_factory=lambda: BadLLM(),
     )
-    assert len(bundle["variants"]) == 3
-    assert bundle["selected_key"] in VARIANT_KEYS
+    assert len(bundle["variants"]) == 1
+    assert bundle["selected_key"] == "informative"
     assert bundle["selected_body"]
-    assert bundle["selection_reason"] == "local_fallback"
+    assert bundle["selection_reason"] == "deterministic_value_fallback"
     assert bundle["caption_profile"] == "standard"
+    assert bundle["generation_mode"] == "fallback_informative"
 
 
 def test_generate_caption_bundle_falls_back_on_llm_error():
@@ -423,10 +429,11 @@ def test_generate_caption_bundle_falls_back_on_llm_error():
         research_facts=[],
         llm_factory=lambda: ErrorLLM(),
     )
-    assert len(bundle["variants"]) == 3
-    assert bundle["selected_key"] in VARIANT_KEYS
-    assert bundle["selection_reason"] == "local_fallback"
+    assert len(bundle["variants"]) == 1
+    assert bundle["selected_key"] == "informative"
+    assert bundle["selection_reason"] == "deterministic_value_fallback"
     assert bundle["caption_profile"] == "standard"
+    assert bundle["generation_mode"] == "fallback_informative"
 
 
 def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
@@ -480,7 +487,7 @@ def test_thin_payload_keeps_standard_path_and_bundle_shape():
         },
     )
     assert bundle["caption_profile"] == "standard"
-    assert bundle["selected_key"] in VARIANT_KEYS
+    assert bundle["selected_key"] == "informative"
     assert set(bundle.keys()) >= {
         "variants",
         "selected_key",
@@ -511,9 +518,10 @@ def test_attach_caption_bundle_sets_description_and_caption():
         post_type="value",
         llm_factory=lambda: _make_stub_llm(),
     )
-    assert enriched["caption_bundle"]["selected_key"] in VARIANT_KEYS
+    assert enriched["caption_bundle"]["selected_key"] == "informative"
     assert enriched["description"] == enriched["caption_bundle"]["selected_body"]
     assert enriched["caption"] == enriched["caption_bundle"]["selected_body"]
+    assert enriched["caption_review_required"] is False
 
 
 def test_attach_caption_bundle_overwrites_preexisting_caption():
