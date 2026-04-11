@@ -360,11 +360,18 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
         buckets["transformation"] = [fallback_script]
         logger.info("single_category_format_detected", message="Using Problem-Agitieren-Lösung script as fallback for other categories")
 
-    if not description_text and buckets["problem_agitate_solution"]:
+    if buckets["problem_agitate_solution"]:
         fallback_desc = buckets["problem_agitate_solution"][0]
-        if len(fallback_desc) >= 35:
+        if not description_text:
             description_text = fallback_desc
             logger.warning("description_synthesized_from_script", message="Beschreibung section missing, using script as fallback description")
+        elif len(description_text.strip()) < 35:
+            description_text = fallback_desc
+            logger.warning("description_replaced_from_script", message="Beschreibung too short, using script as fallback description")
+
+    if description_text and len(description_text.strip()) < 35:
+        padded = f"{description_text.strip()} Damit ist das Thema fuer den Alltag klarer einzuordnen."
+        description_text = padded.strip()
 
     payload = {**buckets, "description": description_text}
     try:

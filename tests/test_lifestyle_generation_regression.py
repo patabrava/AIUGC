@@ -8,6 +8,7 @@ import app.features.topics.agents as topic_agents
 import app.features.topics.handlers as topic_handlers
 from app.core.errors import ValidationError
 from app.features.topics.schemas import DialogScripts
+from app.features.topics.topic_validation import get_prompt2_word_bounds
 
 
 LIFESTYLE_TEMPLATES = {
@@ -574,6 +575,88 @@ def test_discover_topics_force_fills_lifestyle_posts_when_overlap_filters_exhaus
     assert batch["state"] == "S2_SEEDED", batch
     assert len(created_posts) == 3, created_posts
     assert len({post["topic_title"] for post in created_posts}) == 3, created_posts
+
+
+def test_force_fill_lifestyle_candidates_builds_tier_valid_16s_scripts():
+    candidates = topic_handlers._force_fill_lifestyle_candidates(
+        count=1,
+        existing_titles=set(),
+        existing_scripts=[],
+        target_length_tier=16,
+    )
+
+    assert len(candidates) == 1
+    script = candidates[0]["dialog_scripts"].problem_agitate_solution[0]
+    min_words, max_words = get_prompt2_word_bounds(16)
+    assert min_words <= len(script.split()) <= max_words, script
+
+
+def test_lifestyle_batch_persists_primary_dialog_script_not_short_rotation(monkeypatch):
+    batch = {
+        "id": "batch-lifestyle-primary-script",
+        "brand": "Primary Script Fixture",
+        "state": "S1_SETUP",
+        "post_type_counts": {"value": 0, "lifestyle": 1, "product": 0},
+        "target_length_tier": 16,
+    }
+    persisted = {}
+    created_posts = []
+    short_rotation = "Kleine Wege werden ohne Barrierefreiheit schnell zu echter Zusatzarbeit im Alltag."
+    primary_script = (
+        "Kleine Wege werden ohne Barrierefreiheit schnell zu echter Zusatzarbeit im Alltag. "
+        "Mit einer klaren Routine bleibst du trotzdem deutlich entspannter."
+    )
+
+    def fake_get_batch_by_id(batch_id: str):
+        assert batch_id == batch["id"]
+        return dict(batch)
+
+    def fake_generate_lifestyle_topics(count: int = 1, target_length_tier=None):
+        return [
+            {
+                "title": "Kleine Wege werden ohne Barrierefreiheit schnell gross",
+                "rotation": short_rotation,
+                "cta": "Schick das an jemanden, der das kennt.",
+                "spoken_duration": 10.0,
+                "dialog_scripts": _dialog_scripts(primary_script),
+                "framework": "PAL",
+            }
+        ]
+
+    def fake_deduplicate_topics(new_topics, existing_topics, threshold=0.35):
+        return list(new_topics)
+
+    def fake_build_lifestyle_seed_payload(topic_data, dialog_scripts):
+        return {"script": dialog_scripts.problem_agitate_solution[0], "canonical_topic": topic_data["title"]}
+
+    def fake_store_topic_bank_entry(**kwargs):
+        persisted["topic_script"] = kwargs["topic_script"]
+        return {"id": "bank-1", "title": kwargs["title"], "family_fingerprint": "fp-1"}
+
+    def fake_upsert_topic_script_variants(**kwargs):
+        persisted["variant_script"] = kwargs["variants"][0]["script"]
+        return None
+
+    def fake_create_post_for_batch(**kwargs):
+        created_posts.append(kwargs)
+        return {"id": "post-1", **kwargs}
+
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
+    monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)
+    monkeypatch.setattr(topic_handlers, "deduplicate_topics", fake_deduplicate_topics)
+    monkeypatch.setattr(topic_handlers, "build_lifestyle_seed_payload", fake_build_lifestyle_seed_payload)
+    monkeypatch.setattr(topic_handlers, "store_topic_bank_entry", fake_store_topic_bank_entry)
+    monkeypatch.setattr(topic_handlers, "upsert_topic_script_variants", fake_upsert_topic_script_variants)
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption="ok"))
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
+    monkeypatch.setattr(topic_handlers, "update_batch_state", lambda batch_id, target_state: {"id": batch_id, "state": getattr(target_state, "value", target_state)})
+
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert result["posts_created"] == 1
+    assert persisted["topic_script"] == primary_script
+    assert created_posts[0]["topic_rotation"] == primary_script
 
 
 def test_mixed_batch_lifestyle_dedupe_stays_lane_scoped(monkeypatch):

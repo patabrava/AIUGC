@@ -34,7 +34,11 @@ from app.features.topics.deduplication import deduplicate_topics
 from app.features.topics.variant_expansion import expand_topic_variants
 from app.features.topics.seed_builders import build_research_seed_data
 from app.features.topics.seed_builders import build_product_seed_payload
-from app.features.topics.topic_validation import classify_script_overlap
+from app.features.topics.topic_validation import (
+    classify_script_overlap,
+    get_prompt2_word_bounds,
+    sanitize_spoken_fragment,
+)
 from app.features.topics.queries import (
     get_all_topics_from_registry,
     add_topic_to_registry,
@@ -83,7 +87,7 @@ _COVERAGE_TASKS: Dict[str, Thread] = {}
 _COVERAGE_WAITERS: Dict[str, Dict[str, int]] = {}
 _TOPIC_BANK_RESEARCH_TASKS: Dict[str, Thread] = {}
 _TOPIC_BANK_RESEARCH_LOCK = RLock()
-_LIFESTYLE_COLLECTION_MAX_ATTEMPTS = 2
+_LIFESTYLE_COLLECTION_MAX_ATTEMPTS = 1
 
 
 def _attach_publish_captions(
@@ -144,14 +148,17 @@ def _build_lifestyle_fallback_candidates(
         rotation = fallback["rotation"].strip()
         if any(classify_script_overlap(rotation, script) for script in existing_scripts):
             continue
-        cta = fallback["cta"].strip()
-        script = f"{rotation} {cta}".strip()
+        script = _build_tier_valid_lifestyle_script(
+            rotation=rotation,
+            title=title,
+            target_length_tier=target_length_tier,
+        )
         candidates.append(
             {
                 "title": title,
                 "template_title": title,
                 "rotation": rotation,
-                "cta": cta,
+                "cta": fallback["cta"].strip(),
                 "spoken_duration": max(1, (len(script.split()) + 2) // 3),
                 "dialog_scripts": SimpleNamespace(
                     problem_agitate_solution=[script],
@@ -191,14 +198,17 @@ def _force_fill_lifestyle_candidates(
             title = f"{base_title} {suffix}"
             suffix += 1
         rotation = fallback["rotation"].strip()
-        cta = fallback["cta"].strip()
-        script = f"{rotation} {cta}".strip()
+        script = _build_tier_valid_lifestyle_script(
+            rotation=rotation,
+            title=base_title,
+            target_length_tier=target_length_tier,
+        )
         forced.append(
             {
                 "title": title,
                 "template_title": fallback["title"].strip(),
                 "rotation": rotation,
-                "cta": cta,
+                "cta": fallback["cta"].strip(),
                 "spoken_duration": max(1, (len(script.split()) + 2) // 3),
                 "dialog_scripts": SimpleNamespace(
                     problem_agitate_solution=[script],
@@ -212,6 +222,48 @@ def _force_fill_lifestyle_candidates(
         existing_titles.add(title.lower())
         existing_scripts.append(rotation)
     return forced
+
+
+def _build_tier_valid_lifestyle_script(
+    *,
+    rotation: str,
+    title: str,
+    target_length_tier: Optional[int],
+) -> str:
+    """Expand deterministic fallback copy until it satisfies the tier envelope."""
+    tier = int(target_length_tier or 8)
+    min_words, max_words = get_prompt2_word_bounds(tier)
+    base = sanitize_spoken_fragment(rotation, ensure_terminal=True)
+    if not base:
+        base = sanitize_spoken_fragment(title, ensure_terminal=True)
+
+    if tier <= 8:
+        single_sentence_variants = [
+            f"{base.rstrip('.!?')}, und mit einer klaren Routine sparst du dir im Alltag oft unnötigen Stress.",
+            f"{base.rstrip('.!?')}, weil kleine Anpassungen dir im Alltag spürbar mehr Ruhe und Beweglichkeit geben.",
+        ]
+        for variant in single_sentence_variants:
+            cleaned = sanitize_spoken_fragment(variant, ensure_terminal=True)
+            if min_words <= len(cleaned.split()) <= max_words:
+                return cleaned
+        return sanitize_spoken_fragment(single_sentence_variants[0], ensure_terminal=True)
+
+    supporting_sentences = [
+        "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter.",
+        "Genau solche Kleinigkeiten entscheiden oft darüber, ob sich ein Weg leicht oder unnötig anstrengend anfühlt.",
+        "Darüber wird selten gesprochen, obwohl es im Rollstuhl-Alltag ständig wieder passiert.",
+        "Wenn du das einmal sauber gelöst hast, sparst du dir später Zeit, Kraft und Nerven.",
+    ]
+    script = base
+    for sentence in supporting_sentences:
+        cleaned = sanitize_spoken_fragment(f"{script} {sentence}", ensure_terminal=True)
+        word_count = len(cleaned.split())
+        if word_count > max_words:
+            continue
+        script = cleaned
+        if word_count >= min_words:
+            return script
+    return sanitize_spoken_fragment(script, ensure_terminal=True)
 
 
 def _topic_family_signature(topic: Dict[str, Any]) -> str:
@@ -1201,6 +1253,11 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     retry_message=None,
                 )
                 dialog_scripts = topic_data["dialog_scripts"]
+                primary_script = (
+                    dialog_scripts.problem_agitate_solution[0]
+                    if getattr(dialog_scripts, "problem_agitate_solution", None)
+                    else topic_data["rotation"]
+                )
                 seed_payload = build_lifestyle_seed_payload(
                     topic_data=topic_data,
                     dialog_scripts=dialog_scripts
@@ -1216,7 +1273,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
 
                 stored_row = store_topic_bank_entry(
                     title=topic_data["title"],
-                    topic_script=topic_data["rotation"],
+                    topic_script=primary_script,
                     post_type=post_type,
                     target_length_tier=resolved_target_tier,
                     research_payload={},
@@ -1233,7 +1290,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     target_length_tier=resolved_target_tier,
                     research_dossier={},
                     prompt1_item=SimpleNamespace(
-                        script=topic_data["rotation"],
+                        script=primary_script,
                         caption=seed_payload.get("caption", ""),
                     ),
                     dialog_scripts=dialog_scripts,
@@ -1253,7 +1310,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     batch_id=batch_id,
                     post_type=post_type,
                     topic_title=topic_data["title"],
-                    topic_rotation=topic_data["rotation"],
+                    topic_rotation=primary_script,
                     topic_cta=topic_data["cta"],
                     spoken_duration=float(topic_data["spoken_duration"]),
                     seed_data=seed_payload,
@@ -1279,7 +1336,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                 )
                 dedup_topic_record: Dict[str, Any] = {
                     "title": topic_data["title"],
-                    "rotation": topic_data["rotation"],
+                    "rotation": primary_script,
                     "cta": topic_data["cta"],
                     "spoken_duration": float(topic_data["spoken_duration"]),
                     "post_type": post_type,

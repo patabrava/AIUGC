@@ -260,6 +260,25 @@ Warum ist Barrierefreiheit in Deutschland immer noch so verdammt schwer?
     assert len(result.transformation) >= 1
 
 
+def test_parse_prompt2_repairs_short_description_from_script():
+    from app.features.topics.response_parsers import parse_prompt2_response
+
+    raw = """## Problem-Agitieren-Lösung Ads
+Dieser kleine Fehler kostet dich im Alltag oft unnötig Zeit und Kraft, obwohl du ihn mit einer sauberen Routine leicht vermeiden kannst.
+
+## Testimonial Ads
+Dieser kleine Fehler kostet dich im Alltag oft unnötig Zeit und Kraft, obwohl du ihn mit einer sauberen Routine leicht vermeiden kannst.
+
+## Transformation Ads
+Dieser kleine Fehler kostet dich im Alltag oft unnötig Zeit und Kraft, obwohl du ihn mit einer sauberen Routine leicht vermeiden kannst.
+
+## Beschreibung
+Zu kurz.
+"""
+    result = parse_prompt2_response(raw, max_per_category=5)
+    assert len(result.description) >= 35
+
+
 def test_prompt1_8s_contains_new_word_range_and_guardrails():
     prompt = build_prompt1(post_type="value", desired_topics=1)
     assert "16-18 Wörter" in prompt

@@ -99,6 +99,23 @@ def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifest
     assert 8 <= len(payload["script"].split()) <= 66
 
 
+def test_validate_pre_persistence_topic_payload_repairs_short_16s_lifestyle_script():
+    payload = validate_pre_persistence_topic_payload(
+        {
+            "topic": "Rollstuhl-Alltag",
+            "title": "Rollstuhl-Alltag",
+            "script": "Der spontane Umweg kostet dich heute wieder Kraft und Zeit.",
+            "caption": "Kleine Anpassungen entlasten den Alltag.",
+            "source_summary": "Kleine Anpassungen entlasten den Alltag mit dem Rollstuhl deutlich.",
+            "disclaimer": "Keine Rechts- oder medizinische Beratung.",
+        },
+        target_length_tier=16,
+        post_type="lifestyle",
+        current_year=2026,
+    )
+    assert 20 <= len(payload["script"].split()) <= 34
+
+
 def test_validate_pre_persistence_topic_payload_strips_dash_from_all_text_fields():
     payload = validate_pre_persistence_topic_payload(
         {

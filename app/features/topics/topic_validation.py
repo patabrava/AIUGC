@@ -545,8 +545,8 @@ def validate_pre_persistence_topic_payload(
         min_words, max_words = _get_pre_persistence_prompt1_word_bounds(target_length_tier)
     word_count = _script_word_count(script)
 
-    # One repair attempt for short 8s scripts by appending a safe clause.
-    if int(target_length_tier or 8) == 8 and word_count < min_words:
+    # One repair attempt for short scripts by appending a safe clause.
+    if word_count < min_words:
         addon_source = normalized.get("source_summary") or normalized.get("caption") or ""
         addon = sanitize_spoken_fragment(addon_source, ensure_terminal=False)
         addon = addon.rstrip(".!?").strip()
@@ -580,10 +580,14 @@ def validate_pre_persistence_topic_payload(
                 "für dich",
                 "ganz konkret im Alltag",
                 "ganz konkret im Alltag für dich",
+                "und sparst dir so unnötigen Stress",
+                "und genau das entlastet dich im Alltag",
+                "und damit wird der Alltag spürbar leichter",
             ]
         )
         for clause in repair_suffixes:
-            for separator in (", ", " "):
+            separators = (", ", " ") if int(target_length_tier or 8) == 8 else (" ", ". ")
+            for separator in separators:
                 repaired = sanitize_spoken_fragment(f"{script.rstrip('.!?')}{separator}{clause}.", ensure_terminal=True)
                 repaired_words = _script_word_count(repaired)
                 if min_words <= repaired_words <= max_words and repaired_words >= word_count:
