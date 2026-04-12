@@ -190,7 +190,8 @@ class VeoClient:
             return {
                 "operation_id": operation_name,
                 "status": "submitted",
-                "done": False
+                "done": False,
+                "provider_model": self._resolve_model_id(model),
             }
 
         except Exception as e:
