@@ -1,0 +1,131 @@
+version: "3.9"
+
+x-env: &app-env
+  SUPABASE_URL: ${SUPABASE_URL}
+  SUPABASE_KEY: ${SUPABASE_KEY}
+  SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+  GEMINI_API_KEY: ${GEMINI_API_KEY}
+  GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY}
+  VERTEX_AI_PROJECT_ID: ${VERTEX_AI_PROJECT_ID}
+  VERTEX_AI_LOCATION: ${VERTEX_AI_LOCATION:-us-central1}
+  VERTEX_AI_OUTPUT_GCS_URI: ${VERTEX_AI_OUTPUT_GCS_URI}
+  VERTEX_AI_ENABLED: ${VERTEX_AI_ENABLED:-true}
+  GOOGLE_APPLICATION_CREDENTIALS_JSON: ${GOOGLE_APPLICATION_CREDENTIALS_JSON}
+  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+  CLOUDFLARE_R2_ACCOUNT_ID: ${CLOUDFLARE_R2_ACCOUNT_ID}
+  CLOUDFLARE_R2_ACCESS_KEY_ID: ${CLOUDFLARE_R2_ACCESS_KEY_ID}
+  CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${CLOUDFLARE_R2_SECRET_ACCESS_KEY}
+  CLOUDFLARE_R2_BUCKET_NAME: ${CLOUDFLARE_R2_BUCKET_NAME}
+  CLOUDFLARE_R2_PUBLIC_BASE_URL: ${CLOUDFLARE_R2_PUBLIC_BASE_URL}
+  CLOUDFLARE_R2_REGION: ${CLOUDFLARE_R2_REGION:-auto}
+  CLOUDFLARE_R2_ENDPOINT_URL: ${CLOUDFLARE_R2_ENDPOINT_URL}
+  META_APP_ID: ${META_APP_ID}
+  META_APP_SECRET: ${META_APP_SECRET}
+  META_REDIRECT_URI: ${META_REDIRECT_URI}
+  TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY}
+  TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET}
+  TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI}
+  TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-sandbox}
+  TIKTOK_SANDBOX_ACCOUNT: ${TIKTOK_SANDBOX_ACCOUNT}
+  APP_URL: ${APP_URL}
+  APP_HOST: ${APP_HOST}
+  ALLOWED_EMAILS: ${ALLOWED_EMAILS}
+  REVIEWER_LOGIN_EMAIL: ${REVIEWER_LOGIN_EMAIL}
+  REVIEWER_LOGIN_TOKEN: ${REVIEWER_LOGIN_TOKEN}
+  PRIVACY_POLICY_URL: ${PRIVACY_POLICY_URL}
+  TERMS_URL: ${TERMS_URL}
+  TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+  CRON_SECRET: ${CRON_SECRET}
+  WEBFLOW_API_TOKEN: ${WEBFLOW_API_TOKEN}
+  WEBFLOW_SITE_ID: ${WEBFLOW_SITE_ID}
+  WEBFLOW_COLLECTION_ID: ${WEBFLOW_COLLECTION_ID}
+  VEO_DISABLE_LOCAL_QUOTA_GUARD: ${VEO_DISABLE_LOCAL_QUOTA_GUARD:-false}
+  VEO_DISABLE_ALL_QUOTA_CONTROLS: ${VEO_DISABLE_ALL_QUOTA_CONTROLS:-false}
+  DEBUG: ${DEBUG:-0}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  DOCKER_BUILD_CONTEXT: ${DOCKER_BUILD_CONTEXT:-https://github.com/patabrava/AIUGC.git#main}
+
+x-runtime-base: &runtime-base
+  image: python:3.11-slim
+  restart: unless-stopped
+  environment:
+    <<: *app-env
+  command:
+    - sh
+    - -lc
+    - >-
+      set -eu;
+      export DEBIAN_FRONTEND=noninteractive;
+      if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+        apt-get update -o Acquire::Retries=3 &&
+        apt-get install -y --no-install-recommends ca-certificates ffmpeg git &&
+        rm -rf /var/lib/apt/lists/*;
+      fi;
+      repo_url="$${DOCKER_BUILD_CONTEXT%%#*}";
+      repo_ref="";
+      if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
+        repo_ref="$${DOCKER_BUILD_CONTEXT#*#}";
+      fi;
+      if [ ! -d /app/.git ]; then
+        rm -rf /app &&
+        git clone --depth 1 "$$repo_url" /app;
+      fi;
+      cd /app;
+      if [ -n "$$repo_ref" ]; then
+        git fetch --depth 1 origin "$$repo_ref" &&
+        git checkout -f "$$repo_ref";
+      fi;
+      python -m pip install --upgrade pip;
+      python -m pip install --retries 5 --timeout 120 -r requirements.txt;
+      exec sh -lc "$$SERVICE_CMD"
+
+services:
+  web:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      SERVICE_CMD: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.aiugc-prod-web.rule=Host(`lippelift.xyz`) || Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)
+      - traefik.http.routers.aiugc-prod-web.entrypoints=websecure
+      - traefik.http.routers.aiugc-prod-web.tls.certresolver=letsencrypt
+      - traefik.http.services.aiugc-prod-web.loadbalancer.server.port=8000
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      SERVICE_CMD: python workers/video_poller.py
+
+  expansion-worker:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      SERVICE_CMD: python workers/expansion_worker.py
+
+  topic-worker:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      SERVICE_CMD: python workers/topic_worker.py
+
+  caption-worker:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      SERVICE_CMD: python -m workers.caption_worker
