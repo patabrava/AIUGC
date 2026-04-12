@@ -26,7 +26,7 @@ def test_settings_respect_app_env_file_override(monkeypatch, tmp_path: Path):
 
 
 def test_example_production_env_lists_required_live_keys():
-    env_text = Path(".env.production.example").read_text(encoding="utf-8")
+    env_text = Path(__file__).resolve().parents[1].joinpath(".env.production.example").read_text(encoding="utf-8")
     required = [
         "SUPABASE_URL=",
         "SUPABASE_SERVICE_KEY=",
