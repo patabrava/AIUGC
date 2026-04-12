@@ -251,11 +251,7 @@ def test_caption_profile_gate_uses_extended_only_for_deep_payloads():
     deep_payload = {
         "strict_seed": {"facts": ["F1", "F2", "F3", "F4", "F5"]},
         "source": {"url": "https://www.bahn.de/service"},
-        "source_urls": [
-            {"url": "https://www.bahn.de/service"},
-            {"url": "https://www.bmas.de/DE/Service/Service-Kontakt"},
-            {"url": "https://www.gkv-spitzenverband.de/"},
-        ],
+        "source_urls": [{"url": "https://www.bahn.de/service"}],
     }
     thin_payload = {
         "strict_seed": {"facts": ["F1", "F2"]},
@@ -309,11 +305,7 @@ def test_generate_caption_bundle_uses_extended_profile_when_research_is_deep():
                 ]
             },
             "source": {"url": "https://source-a.example"},
-            "source_urls": [
-                {"url": "https://source-a.example"},
-                {"url": "https://source-b.example"},
-                {"url": "https://source-c.example"},
-            ],
+            "source_urls": [{"url": "https://source-a.example"}],
         },
     )
     assert bundle["caption_profile"] == "extended"
@@ -383,11 +375,7 @@ def test_generate_caption_bundle_falls_back_to_standard_when_extended_validation
                     "The dashboard claims realtime alerts reduce missed transfers with good data.",
                 ]
             },
-            "source_urls": [
-                {"url": "https://source-a.example"},
-                {"url": "https://source-b.example"},
-                {"url": "https://source-c.example"},
-            ],
+            "source_urls": [{"url": "https://source-a.example"}],
         },
     )
     assert bundle["selected_body"]
@@ -452,11 +440,7 @@ def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
                     "Klare Notfallinfos senken Stress im Umstieg deutlich.",
                 ]
             },
-            "source_urls": [
-                {"url": "https://one.example"},
-                {"url": "https://two.example"},
-                {"url": "https://three.example"},
-            ],
+            "source_urls": [{"url": "https://one.example"}],
         },
     )
     assert bundle["caption_profile"] == "extended"

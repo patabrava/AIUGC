@@ -20,7 +20,7 @@
 
 - [ ] **Step 1: Write the failing test**
 
-Add a unit test that proves a seed payload with `3` distinct source URLs and `5` usable facts selects the `extended` profile, and a thin payload keeps `standard`.
+Add a unit test that proves a seed payload with `1` source URL and `5` usable facts selects the `extended` profile, and a thin payload keeps `standard`.
 
 ```python
 def test_caption_profile_gate_uses_extended_only_for_deep_payloads():
@@ -144,7 +144,7 @@ Extend `generate_caption_bundle(...)` so it:
 - accepts or derives the caption profile from the payload
 - renders an extended caption with hook, short summary, evidence, source labels, CTA, and hashtags when the gate passes
 - keeps the current short caption generation path unchanged for `standard`
-- falls back to the standard caption if the extended output fails validation, is too long, or lacks usable source URLs
+- falls back to the standard caption if the extended output fails validation, is too long, or lacks a usable source URL
 
 Use the existing validation helpers where possible, and keep any new long-form validation deterministic and local to `captions.py`.
 

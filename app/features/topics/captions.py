@@ -14,6 +14,7 @@ from app.core.errors import ValidationError
 from app.core.config import get_settings
 from app.features.topics.topic_validation import (
     detect_metadata_copy_issues,
+    INCOMPLETE_TRAILING_TOKENS,
     sanitize_fact_fragments,
 )
 
@@ -557,7 +558,7 @@ def _collect_caption_facts(
 def select_caption_profile(seed_payload: Optional[Dict[str, Any]]) -> str:
     facts = _collect_caption_facts(seed_payload)
     urls = _collect_caption_source_urls(seed_payload)
-    if len(facts) >= 5 and len(urls) >= 3:
+    if len(facts) >= 5 and len(urls) >= 1:
         return EXTENDED_CAPTION_KEY
     return "standard"
 
@@ -568,7 +569,7 @@ def _caption_depth_reason(seed_payload: Optional[Dict[str, Any]]) -> Dict[str, A
     return {
         "usable_fact_count": len(facts),
         "source_url_count": len(urls),
-        "thresholds": {"facts": 5, "source_urls": 3},
+        "thresholds": {"facts": 5, "source_urls": 1},
     }
 
 
@@ -584,9 +585,22 @@ def _ensure_terminal_punctuation(text: str) -> str:
 def _clip_sentence(text: str, limit: int) -> str:
     normalized = re.sub(r"\s+", " ", _normalize_line_breaks(text)).strip()
     if len(normalized) <= limit:
-        return _ensure_terminal_punctuation(normalized)
-    clipped = normalized[:limit].rstrip(" ,;:-")
-    return _ensure_terminal_punctuation(f"{clipped}...")
+        clipped = _ensure_terminal_punctuation(normalized)
+    else:
+        clipped = normalized[:limit].rstrip(" ,;:-")
+        clipped = _ensure_terminal_punctuation(f"{clipped}...")
+    while True:
+        tokens = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", clipped.lower())
+        if not tokens or tokens[-1] not in INCOMPLETE_TRAILING_TOKENS:
+            return clipped
+        clipped = re.sub(
+            r"\s+[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+(?:\.\.\.|[.!?])?$",
+            "",
+            clipped,
+        ).rstrip(" ,;:-")
+        if not clipped:
+            return ""
+        clipped = _ensure_terminal_punctuation(clipped)
 
 
 def _extended_caption_hashtags(topic_title: str, post_type: str) -> List[str]:
@@ -618,9 +632,9 @@ def _build_extended_caption(
     facts = _collect_caption_facts(seed_payload, research_facts)
     source_urls = _collect_caption_source_urls(seed_payload)
     source_labels = _collect_caption_source_labels(seed_payload, research_facts)
-    if len(facts) < 5 or len(source_urls) < 3:
+    if len(facts) < 5 or len(source_urls) < 1:
         return None
-    if len(source_labels) < 3:
+    if len(source_labels) < 1:
         return None
 
     headline_fact = _clip_sentence(facts[0], 70)
@@ -679,9 +693,9 @@ def _validate_extended_caption(
         raise ValidationError(message="Extended caption missing summary block", details={})
     if "Basierend auf" not in normalized:
         raise ValidationError(message="Extended caption missing source-label block", details={})
-    if len(source_urls) < 3:
+    if len(source_urls) < 1:
         raise ValidationError(message="Extended caption source links too thin", details={"source_urls": source_urls})
-    if len(source_labels) < 3:
+    if len(source_labels) < 1:
         raise ValidationError(message="Extended caption source labels too thin", details={"source_labels": source_labels})
     if fact_count < 5:
         raise ValidationError(message="Extended caption fact pool too thin", details={"fact_count": fact_count})

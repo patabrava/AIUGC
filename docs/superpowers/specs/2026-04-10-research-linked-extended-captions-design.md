@@ -46,7 +46,7 @@ The extended profile should only activate when the payload is genuinely research
 
 Use a simple rule:
 
-- at least `3` distinct source URLs
+- at least `1` source URL
 - at least `5` usable facts
 - no missing source metadata needed for the source block
 
@@ -145,7 +145,7 @@ Update the prompt template so it can render both the short and extended instruct
 
 Add regression tests for:
 
-- extended profile selected when the payload has `3+` URLs and `5+` facts
+- extended profile selected when the payload has `1+` URL and `5+` facts
 - standard profile retained when the payload is too thin
 - fallback to standard when extended validation fails
 - source labels included in the extended output
