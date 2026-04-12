@@ -115,6 +115,7 @@ def test_github_action_deploys_on_push_to_main():
     assert data["jobs"]["deploy"]["environment"] == "production"
     steps = data["jobs"]["deploy"]["steps"]
     step_text = "\n".join(str(step) for step in steps)
+    assert "actions/checkout@v5" in step_text
     assert "appleboy/ssh-action" in step_text
     assert "scripts/deploy/production.sh" in step_text
     assert "mkdir -p \"$APP_ROOT\"" in step_text
