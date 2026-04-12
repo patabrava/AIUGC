@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 from app.core.config import Settings
 
 
@@ -38,3 +40,19 @@ def test_example_production_env_lists_required_live_keys():
     ]
     for item in required:
         assert item in env_text
+
+
+def test_production_compose_uses_repo_build_and_server_env_file():
+    data = yaml.safe_load(Path("docker-compose.production.yml").read_text(encoding="utf-8"))
+    web = data["services"]["web"]
+    worker = data["services"]["worker"]
+    assert web["build"]["context"] == "."
+    assert worker["build"]["context"] == "."
+    assert web["env_file"] == ["${APP_ENV_FILE:-/opt/aiugc-prod/.env.production}"]
+    assert "DOCKER_BUILD_CONTEXT" not in Path("docker-compose.production.yml").read_text(encoding="utf-8")
+
+
+def test_production_compose_has_live_healthcheck():
+    data = yaml.safe_load(Path("docker-compose.production.yml").read_text(encoding="utf-8"))
+    health = data["services"]["web"]["healthcheck"]
+    assert "/health" in "".join(health["test"])

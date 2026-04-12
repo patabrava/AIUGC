@@ -1,0 +1,63 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-/opt/aiugc-prod/.env.production}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.aiugc-prod-web.rule=Host(`lippelift.xyz`) || Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)
+      - traefik.http.routers.aiugc-prod-web.entrypoints=websecure
+      - traefik.http.routers.aiugc-prod-web.tls.certresolver=letsencrypt
+      - traefik.http.services.aiugc-prod-web.loadbalancer.server.port=8000
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-/opt/aiugc-prod/.env.production}
+    command: python workers/video_poller.py
+
+  expansion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-/opt/aiugc-prod/.env.production}
+    command: python workers/expansion_worker.py
+
+  topic-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-/opt/aiugc-prod/.env.production}
+    command: python workers/topic_worker.py
+
+  caption-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-/opt/aiugc-prod/.env.production}
+    command: python -m workers.caption_worker
