@@ -5,6 +5,10 @@ import yaml
 from app.core.config import Settings
 
 COMPOSE_PATH = Path(__file__).resolve().parents[1] / "docker-compose.production.yml"
+LEGACY_COMPOSE_PATHS = [
+    Path(__file__).resolve().parents[1] / "docker-compose.yml",
+    Path(__file__).resolve().parents[1] / "docker-compose.yaml",
+]
 DEPLOY_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "deploy" / "production.sh"
 WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "deploy-production.yml"
 
@@ -68,6 +72,20 @@ def test_production_compose_has_live_healthcheck():
     data = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
     health = data["services"]["web"]["healthcheck"]
     assert health["test"][-1] == "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+
+
+def test_legacy_compose_files_follow_production_build_contract():
+    assert LEGACY_COMPOSE_PATHS[0].read_text(encoding="utf-8") == LEGACY_COMPOSE_PATHS[1].read_text(encoding="utf-8")
+    for path in LEGACY_COMPOSE_PATHS:
+        compose_text = path.read_text(encoding="utf-8")
+        data = yaml.safe_load(compose_text)
+        web = data["services"]["web"]
+        worker = data["services"]["worker"]
+        assert web["build"]["context"] == "."
+        assert worker["build"]["context"] == "."
+        assert any(".env.production" in entry for entry in web["env_file"])
+        assert "DOCKER_BUILD_CONTEXT" not in compose_text
+        assert "git clone" not in compose_text
 
 
 def test_production_deploy_script_contract():

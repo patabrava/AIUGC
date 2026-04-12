@@ -1,246 +1,71 @@
-x-flow-forge-env: &flow-forge-env
-  SUPABASE_URL: ${SUPABASE_URL}
-  SUPABASE_KEY: ${SUPABASE_KEY}
-  SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
-  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-  OPENAI_API_KEY: ${OPENAI_API_KEY}
-  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-  GEMINI_API_KEY: ${GEMINI_API_KEY}
-  GEMINI_TOPIC_MODEL: ${GEMINI_TOPIC_MODEL:-gemini-2.5-flash}
-  GEMINI_DEEP_RESEARCH_AGENT: ${GEMINI_DEEP_RESEARCH_AGENT:-deep-research-pro-preview-12-2025}
-  GEMINI_TOPIC_TIMEOUT_SECONDS: ${GEMINI_TOPIC_TIMEOUT_SECONDS:-600}
-  GEMINI_TOPIC_POLL_SECONDS: ${GEMINI_TOPIC_POLL_SECONDS:-5}
-  TOPIC_AUDIT_INTERVAL_SECONDS: ${TOPIC_AUDIT_INTERVAL_SECONDS:-60}
-  TOPIC_RESEARCH_INTERVAL_SECONDS: ${TOPIC_RESEARCH_INTERVAL_SECONDS:-86400}
-  TOPIC_WORKER_POLL_INTERVAL_SECONDS: ${TOPIC_WORKER_POLL_INTERVAL_SECONDS:-60}
-  GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY}
-  GOOGLE_AI_PROJECT_ID: ${GOOGLE_AI_PROJECT_ID}
-  GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-project-89aac146-ec35-4755-b83}
-  VERTEX_AI_PROJECT_ID: ${VERTEX_AI_PROJECT_ID:-project-89aac146-ec35-4755-b83}
-  VERTEX_AI_LOCATION: ${VERTEX_AI_LOCATION:-us-central1}
-  VERTEX_AI_OUTPUT_GCS_URI: ${VERTEX_AI_OUTPUT_GCS_URI:-gs://project-89aac146-ec35-4755-b83-vertex-output/}
-  VERTEX_AI_ENABLED: ${VERTEX_AI_ENABLED:-true}
-  VERTEX_AI_API_KEY: ${VERTEX_AI_API_KEY}
-  GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
-  GOOGLE_APPLICATION_CREDENTIALS_JSON: ${GOOGLE_APPLICATION_CREDENTIALS_JSON}
-  VEO_DISABLE_LOCAL_QUOTA_GUARD: ${VEO_DISABLE_LOCAL_QUOTA_GUARD:-false}
-  VEO_DISABLE_ALL_QUOTA_CONTROLS: ${VEO_DISABLE_ALL_QUOTA_CONTROLS:-false}
-  VEO_QUOTA_FREEZE_ON_UNEXPECTED_429: ${VEO_QUOTA_FREEZE_ON_UNEXPECTED_429:-true}
-  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
-  CLOUDFLARE_R2_ACCOUNT_ID: ${CLOUDFLARE_R2_ACCOUNT_ID}
-  CLOUDFLARE_R2_ACCESS_KEY_ID: ${CLOUDFLARE_R2_ACCESS_KEY_ID}
-  CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${CLOUDFLARE_R2_SECRET_ACCESS_KEY}
-  CLOUDFLARE_R2_BUCKET_NAME: ${CLOUDFLARE_R2_BUCKET_NAME}
-  CLOUDFLARE_R2_PUBLIC_BASE_URL: ${CLOUDFLARE_R2_PUBLIC_BASE_URL}
-  CLOUDFLARE_R2_REGION: ${CLOUDFLARE_R2_REGION:-auto}
-  CLOUDFLARE_R2_ENDPOINT_URL: ${CLOUDFLARE_R2_ENDPOINT_URL}
-  CLOUDFLARE_R2_VIDEO_PREFIX: ${CLOUDFLARE_R2_VIDEO_PREFIX:-flow-forge/videos}
-  USE_URL_BASED_UPLOAD: ${USE_URL_BASED_UPLOAD:-false}
-  TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY}
-  TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET}
-  TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI}
-  TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-sandbox}
-  TIKTOK_SANDBOX_ACCOUNT: ${TIKTOK_SANDBOX_ACCOUNT}
-  INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN}
-  META_APP_ID: ${META_APP_ID}
-  META_APP_SECRET: ${META_APP_SECRET}
-  META_REDIRECT_URI: ${META_REDIRECT_URI}
-  APP_URL: ${APP_URL:-http://localhost:8000}
-  APP_HOST: ${APP_HOST:-localhost}
-  PRIVACY_POLICY_URL: ${PRIVACY_POLICY_URL}
-  TERMS_URL: ${TERMS_URL}
-  TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
-  CRON_SECRET: ${CRON_SECRET}
-  CRON_RESEARCH_NICHE: ${CRON_RESEARCH_NICHE:-Schwerbehinderung, Treppenlifte, Barrierefreiheit}
-  VIDEO_POLLER_IDENTITY: ${VIDEO_POLLER_IDENTITY:-}
-  ALLOWED_EMAILS: ${ALLOWED_EMAILS}
-  REVIEWER_LOGIN_EMAIL: ${REVIEWER_LOGIN_EMAIL}
-  REVIEWER_LOGIN_TOKEN: ${REVIEWER_LOGIN_TOKEN}
-  WEBFLOW_API_TOKEN: ${WEBFLOW_API_TOKEN}
-  WEBFLOW_SITE_ID: ${WEBFLOW_SITE_ID}
-  WEBFLOW_COLLECTION_ID: ${WEBFLOW_COLLECTION_ID}
-  DEBUG: ${DEBUG:-0}
-  LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  ENVIRONMENT: ${ENVIRONMENT:-production}
-  DOCKER_BUILD_CONTEXT: ${DOCKER_BUILD_CONTEXT:-https://github.com/patabrava/AIUGC.git#main}
-
-x-flow-forge-base: &flow-forge-base
-  image: python:3.11-slim
-  restart: unless-stopped
-  environment: *flow-forge-env
-
 services:
   web:
-    <<: *flow-forge-base
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-        export DEBIAN_FRONTEND=noninteractive
-        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
-          apt-get update -o Acquire::Retries=3
-          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
-          rm -rf /var/lib/apt/lists/*
-        fi
-        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
-        repo_ref=""
-        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
-        fi
-        if [ ! -d /app/.git ]; then
-          rm -rf /app
-          git clone --depth 1 "$$repo_url" /app
-        fi
-        cd /app
-        if [ -n "$$repo_ref" ]; then
-          git fetch --depth 1 origin "$$repo_ref"
-          git checkout -f "$$repo_ref"
-        fi
-        python -m pip install --upgrade pip
-        python -m pip install --retries 5 --timeout 120 -r requirements.txt
-        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
-    ports:
-      - "${APP_PORT:-8000}:8000"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    expose:
+      - "8000"
+    networks:
+      - default
+      - traefik
     labels:
       - traefik.enable=true
-      - traefik.http.routers.aiugc-prod-web.rule=Host(`lippelift.xyz`) || Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)
-      - traefik.http.routers.aiugc-prod-web.entrypoints=websecure
-      - traefik.http.routers.aiugc-prod-web.tls.certresolver=letsencrypt
+      - 'traefik.http.routers.aiugc-prod-web.rule=${TRAEFIK_HOST_RULE:-Host(`localhost`)}'
+      - 'traefik.http.routers.aiugc-prod-web.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}'
+      - 'traefik.http.routers.aiugc-prod-web.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}'
       - traefik.http.services.aiugc-prod-web.loadbalancer.server.port=8000
     healthcheck:
       test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
-        ]
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
 
   worker:
-    <<: *flow-forge-base
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-        export DEBIAN_FRONTEND=noninteractive
-        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
-          apt-get update -o Acquire::Retries=3
-          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
-          rm -rf /var/lib/apt/lists/*
-        fi
-        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
-        repo_ref=""
-        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
-        fi
-        if [ ! -d /app/.git ]; then
-          rm -rf /app
-          git clone --depth 1 "$$repo_url" /app
-        fi
-        cd /app
-        if [ -n "$$repo_ref" ]; then
-          git fetch --depth 1 origin "$$repo_ref"
-          git checkout -f "$$repo_ref"
-        fi
-        python -m pip install --upgrade pip
-        python -m pip install --retries 5 --timeout 120 -r requirements.txt
-        exec python workers/video_poller.py
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    command: python workers/video_poller.py
 
   expansion-worker:
-    <<: *flow-forge-base
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-        export DEBIAN_FRONTEND=noninteractive
-        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
-          apt-get update -o Acquire::Retries=3
-          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
-          rm -rf /var/lib/apt/lists/*
-        fi
-        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
-        repo_ref=""
-        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
-        fi
-        if [ ! -d /app/.git ]; then
-          rm -rf /app
-          git clone --depth 1 "$$repo_url" /app
-        fi
-        cd /app
-        if [ -n "$$repo_ref" ]; then
-          git fetch --depth 1 origin "$$repo_ref"
-          git checkout -f "$$repo_ref"
-        fi
-        python -m pip install --upgrade pip
-        python -m pip install --retries 5 --timeout 120 -r requirements.txt
-        exec python workers/expansion_worker.py
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    command: python workers/expansion_worker.py
 
   topic-worker:
-    <<: *flow-forge-base
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-        export DEBIAN_FRONTEND=noninteractive
-        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
-          apt-get update -o Acquire::Retries=3
-          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
-          rm -rf /var/lib/apt/lists/*
-        fi
-        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
-        repo_ref=""
-        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
-        fi
-        if [ ! -d /app/.git ]; then
-          rm -rf /app
-          git clone --depth 1 "$$repo_url" /app
-        fi
-        cd /app
-        if [ -n "$$repo_ref" ]; then
-          git fetch --depth 1 origin "$$repo_ref"
-          git checkout -f "$$repo_ref"
-        fi
-        python -m pip install --upgrade pip
-        python -m pip install --retries 5 --timeout 120 -r requirements.txt
-        exec python workers/topic_worker.py
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    command: python workers/topic_worker.py
 
   caption-worker:
-    <<: *flow-forge-base
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-        export DEBIAN_FRONTEND=noninteractive
-        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
-          apt-get update -o Acquire::Retries=3
-          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
-          rm -rf /var/lib/apt/lists/*
-        fi
-        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
-        repo_ref=""
-        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
-        fi
-        if [ ! -d /app/.git ]; then
-          rm -rf /app
-          git clone --depth 1 "$$repo_url" /app
-        fi
-        cd /app
-        if [ -n "$$repo_ref" ]; then
-          git fetch --depth 1 origin "$$repo_ref"
-          git checkout -f "$$repo_ref"
-        fi
-        python -m pip install --upgrade pip
-        python -m pip install --retries 5 --timeout 120 -r requirements.txt
-        exec python -m workers.caption_worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    command: python -m workers.caption_worker
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}
