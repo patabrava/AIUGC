@@ -6,6 +6,7 @@ from app.core.config import Settings
 
 COMPOSE_PATH = Path(__file__).resolve().parents[1] / "docker-compose.production.yml"
 DEPLOY_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "deploy" / "production.sh"
+WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "deploy-production.yml"
 
 
 def test_settings_respect_app_env_file_override(monkeypatch, tmp_path: Path):
@@ -66,7 +67,7 @@ def test_production_compose_uses_repo_build_and_server_env_file():
 def test_production_compose_has_live_healthcheck():
     data = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
     health = data["services"]["web"]["healthcheck"]
-    assert "/health" in "".join(health["test"])
+    assert health["test"][-1] == "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
 
 
 def test_production_deploy_script_contract():
@@ -74,8 +75,22 @@ def test_production_deploy_script_contract():
     required = [
         "git fetch origin main",
         "git merge --ff-only origin/main",
-        'docker compose -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans',
-        'curl --fail --silent --show-error "$HEALTHCHECK_URL"',
+        'docker compose -f docker-compose.production.yml',
+        '--env-file "$ENV_FILE"',
+        'up -d --build --remove-orphans',
+        'curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL"',
     ]
     for item in required:
         assert item in script_text
+    assert 'HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/health}"' in script_text
+
+
+def test_github_action_deploys_on_push_to_main():
+    data = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    assert data["name"] == "Deploy Production"
+    workflow_on = data.get("on", data.get(True))
+    assert workflow_on["push"]["branches"] == ["main"]
+    steps = data["jobs"]["deploy"]["steps"]
+    step_text = "\n".join(str(step) for step in steps)
+    assert "appleboy/ssh-action" in step_text
+    assert "scripts/deploy/production.sh" in step_text

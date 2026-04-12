@@ -1,0 +1,27 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          script: |
+            export APP_ROOT="${{ secrets.PROD_APP_ROOT }}"
+            export REPO_DIR="${{ secrets.PROD_APP_ROOT }}/repo"
+            export ENV_FILE="${{ secrets.PROD_APP_ROOT }}/.env.production"
+            export HEALTHCHECK_URL="https://lippelift.xyz/health"
+            cd "$REPO_DIR"
+            bash scripts/deploy/production.sh
