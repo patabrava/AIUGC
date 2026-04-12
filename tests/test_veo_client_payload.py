@@ -42,9 +42,11 @@ def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(mon
         aspect_ratio="9:16",
         resolution="720p",
         duration_seconds=8,
+        model="veo-3.1-fast-generate-001",
     )
 
     payload = fake_http_client.post_calls[0]["json"]
+    assert "models/veo-3.1-fast-generate-001:predictLongRunning" in fake_http_client.post_calls[0]["url"]
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
     assert payload["parameters"]["durationSeconds"] == 8
@@ -106,6 +108,7 @@ def test_veo_submission_includes_first_frame_inline_image(monkeypatch):
         aspect_ratio="9:16",
         resolution="720p",
         duration_seconds=8,
+        model="veo-3.1-lite-generate-001",
         first_frame_image={
             "mime_type": "image/jpeg",
             "data_base64": base64.b64encode(anchor_bytes).decode("ascii"),
@@ -119,6 +122,7 @@ def test_veo_submission_includes_first_frame_inline_image(monkeypatch):
     assert payload["parameters"]["aspectRatio"] == "9:16"
     assert payload["parameters"]["resolution"] == "720p"
     assert payload["parameters"]["durationSeconds"] == 8
+    assert "models/veo-3.1-lite-generate-001:predictLongRunning" in fake_http_client.post_calls[0]["url"]
     assert submission["operation_id"] == "operations/test-operation"
 
     veo_module.VeoClient._instance = None

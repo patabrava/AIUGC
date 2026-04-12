@@ -18,6 +18,14 @@ class VideoGenerationRequest(BaseModel):
         ..., 
         description="Video generation provider (vertex_ai)"
     )
+    model: Optional[Literal[
+        "veo-3.1-generate-001",
+        "veo-3.1-fast-generate-001",
+        "veo-3.1-lite-generate-001",
+    ]] = Field(
+        default=None,
+        description="Optional Veo model identifier to use when submitting to Vertex AI.",
+    )
     aspect_ratio: Literal["9:16", "16:9"] = Field(
         default="9:16",
         description="Target video aspect ratio"
@@ -157,6 +165,14 @@ class BatchVideoGenerationRequest(BaseModel):
     provider: Literal["vertex_ai"] = Field(
         ...,
         description="Video generation provider for all posts"
+    )
+    model: Optional[Literal[
+        "veo-3.1-generate-001",
+        "veo-3.1-fast-generate-001",
+        "veo-3.1-lite-generate-001",
+    ]] = Field(
+        default=None,
+        description="Optional Veo model identifier to use when submitting batch videos.",
     )
     aspect_ratio: Literal["9:16", "16:9"] = Field(
         default="9:16",

@@ -20,10 +20,23 @@
                     Vertex AI only
                 </div>
             </label>
+            <label class="mt-4 flex flex-col text-sm max-w-xs" for="model-select-routed">
+                <span class="text-gray-700 font-medium">Veo Model</span>
+                <select
+                    id="model-select-routed"
+                    name="model"
+                    class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#006AAB] focus:outline-none focus:ring-2 focus:ring-[#E58434]"
+                    x-model="model"
+                >
+                    <option value="veo-3.1-generate-001">Veo 3.1</option>
+                    <option value="veo-3.1-fast-generate-001">Veo 3.1 Fast</option>
+                    <option value="veo-3.1-lite-generate-001">Veo 3.1 Lite</option>
+                </select>
+            </label>
         </div>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4" x-show="!isDurationRouted">
             <div class="rounded-lg border border-[#006AAB]/30 bg-[#006AAB]/5 px-4 py-3 text-sm text-[#006AAB] sm:col-span-3">
-                Vertex AI is selected automatically. Choose the duration tier and aspect ratio below.
+                Vertex AI is selected automatically. Choose the duration tier, aspect ratio, and Veo model below.
             </div>
             <label class="flex flex-col text-sm" for="provider-select">
                 <span class="text-gray-700 font-medium">Provider</span>
@@ -33,6 +46,19 @@
                 >
                     Vertex AI only
                 </div>
+            </label>
+            <label class="flex flex-col text-sm" for="model-select">
+                <span class="text-gray-700 font-medium">Veo Model</span>
+                <select
+                    id="model-select"
+                    name="model"
+                    class="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#006AAB] focus:outline-none focus:ring-2 focus:ring-[#E58434]"
+                    x-model="model"
+                >
+                    <option value="veo-3.1-generate-001">Veo 3.1</option>
+                    <option value="veo-3.1-fast-generate-001">Veo 3.1 Fast</option>
+                    <option value="veo-3.1-lite-generate-001">Veo 3.1 Lite</option>
+                </select>
             </label>
             <label class="flex flex-col text-sm" for="aspect-select">
                 <span class="text-gray-700 font-medium">Aspect Ratio</span>
@@ -73,12 +99,14 @@
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30">Veo 3.1</span>
+                    <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-text="modelLabel"></span>
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-text="`${targetLengthTier}s target`"></span>
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-show="pipelineRoute === 'veo_extended'">720p chain</span>
                 </div>
             </div>
         </div>
         <input type="hidden" name="provider" value="vertex_ai" x-model="provider" />
+        <input type="hidden" name="model" x-model="model" />
         <input type="hidden" name="resolution" x-model="resolution" />
         <input type="hidden" name="seconds" x-model="duration" />
         <div class="mt-4" aria-live="polite" x-show="submitError || submitStatusMessage" x-cloak>

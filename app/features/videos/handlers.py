@@ -38,6 +38,12 @@ from app.features.batches.queries import get_batch_by_id
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.posts.prompt_text import build_full_prompt_text
 from app.features.posts.prompt_builder import (
+    DEFAULT_CHARACTER,
+    DEFAULT_CINEMATOGRAPHY,
+    DEFAULT_STYLE,
+    LEGACY_32_CINEMATOGRAPHY,
+    LEGACY_32_STYLE,
+    LEGACY_SHORT_CHARACTER,
     build_video_prompt_from_seed,
     build_veo_prompt_segment,
     split_dialogue_sentences,
@@ -689,6 +695,13 @@ def _build_veo_extended_base_prompt(
 
     profile = get_duration_profile(target_length_tier) if target_length_tier is not None else None
     base_segment = segments[0] if segments else ""
+    if profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE:
+        prompt_character = LEGACY_SHORT_CHARACTER if target_length_tier == 32 else DEFAULT_CHARACTER
+        prompt_style = LEGACY_32_STYLE if target_length_tier == 32 else DEFAULT_STYLE
+        prompt_cinematography = LEGACY_32_CINEMATOGRAPHY if target_length_tier == 32 else DEFAULT_CINEMATOGRAPHY
+        prompt_scene = None
+        prompt_action = None
+        prompt_audio_block = None
     segment_metadata = {
         "veo_segments": segments,
         "veo_segments_total": len(segments),
@@ -719,7 +732,7 @@ def _build_veo_extended_base_prompt(
         cinematography=prompt_cinematography,
         ending=prompt_ending,
         audio_block=prompt_audio_block,
-        legacy_32_visuals=False,
+        legacy_32_visuals=bool(target_length_tier == 32),
     ), segment_metadata
 
 
@@ -784,6 +797,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         veo_seed = None
         submission_result = _submit_video_request(
             provider=provider,
+            model=request.model,
             prompt_text=prompt_request["prompt_text"] or "",
             negative_prompt=prompt_request.get("negative_prompt"),
             aspect_ratio=request.aspect_ratio,
@@ -1138,6 +1152,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     "post_id": post_id,
                     "seed_data": seed_data,
                     "submission_plan": submission_plan,
+                    "model": request.model,
                     "profile": profile,
                     "is_extended": is_extended,
                     "prompt_text": prompt_text,
@@ -1194,6 +1209,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             try:
                 submission_result = _submit_video_request(
                     provider=submission_plan["provider"],
+                    model=item.get("model"),
                     prompt_text=prompt_text,
                     negative_prompt=negative_prompt,
                     aspect_ratio=submission_plan["aspect_ratio"],
@@ -1609,6 +1625,7 @@ def _build_provider_prompt_request(video_prompt: Dict[str, Any], provider: str) 
 def _submit_video_request(
     *,
     provider: str,
+    model: Optional[str] = None,
     prompt_text: str,
     negative_prompt: Optional[str],
     aspect_ratio: str,
@@ -1641,6 +1658,7 @@ def _submit_video_request(
                 duration_seconds=veo_duration_seconds,
                 first_frame_image=first_frame_image,
                 seed=seed,
+                model=model,
             )
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
@@ -1677,7 +1695,7 @@ def _submit_video_request(
         return {
             "operation_id": result["operation_id"],
             "status": result.get("status", "submitted"),
-            "provider_model": "veo-3.1",
+            "provider_model": result.get("provider_model", model or "veo-3.1-generate-preview"),
             "requested_size": requested_size,
             "provider_requested_size": provider_requested_size,
             "estimated_duration_seconds": 180,
@@ -1748,4 +1766,3 @@ def _map_size_from_aspect_ratio(aspect_ratio: str, resolution: str) -> Optional[
         ("16:9", "1080p"): "1920x1080",
     }
     return mapping.get((aspect_ratio, resolution))
-

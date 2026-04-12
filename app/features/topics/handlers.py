@@ -1866,7 +1866,7 @@ async def launch_topic_research_endpoint(request: Request):
         if _wants_html(request):
             templates = Jinja2Templates(directory="templates")
             response = templates.TemplateResponse(
-                "topics/partials/run_card.html",
+                "topics/partials/run_status_compact.html",
                 {"request": request, "run": result["run"]},
             )
             response.headers["HX-Trigger"] = json.dumps({"topic-research-launched": True})
@@ -1938,17 +1938,25 @@ async def get_topic_research_run_endpoint(request: Request, run_id: str):
             templates = Jinja2Templates(directory="templates")
             compact = str(request.query_params.get("compact") or "").strip()
             if compact == "1":
-                return templates.TemplateResponse(
+                response = templates.TemplateResponse(
                     "topics/partials/run_status_compact.html",
                     {"request": request, "run": run},
                 )
-            return templates.TemplateResponse(
-                "topics/partials/run_card.html",
-                {
-                    "request": request,
-                    "run": run,
-                },
-            )
+            else:
+                response = templates.TemplateResponse(
+                    "topics/partials/run_card.html",
+                    {
+                        "request": request,
+                        "run": run,
+                    },
+                )
+            if str(run.get("status") or "").strip() in {"completed", "failed"}:
+                response.headers["HX-Trigger"] = json.dumps(
+                    {
+                        "topics-hub-refresh": True,
+                    }
+                )
+            return response
         return SuccessResponse(data=run)
     except Exception as exc:
         logger.exception("topic_research_run_fetch_failed", run_id=run_id, error=str(exc))

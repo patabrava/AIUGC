@@ -181,9 +181,15 @@
             targetLengthTier: options.targetLengthTier || null,
             pipelineRoute: options.pipelineRoute || null,
             provider: 'vertex_ai',
+            model: 'veo-3.1-generate-001',
             aspectRatio: '9:16',
             duration: String(options.targetLengthTier || 8),
             resolution: '720p',
+            modelLabels: {
+                'veo-3.1-generate-001': 'Veo 3.1',
+                'veo-3.1-fast-generate-001': 'Veo 3.1 Fast',
+                'veo-3.1-lite-generate-001': 'Veo 3.1 Lite',
+            },
             supportedSizes: {
                 veo_3_1: {
                     '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
@@ -206,6 +212,9 @@
                 const aspectMap = providerMap[aspect] || {};
                 return aspectMap[resolution] || null;
             },
+            get modelLabel() {
+                return this.modelLabels[this.model] || this.model;
+            },
             async submitBatch() {
                 if (this.isSubmitting || !this.batchId) {
                     return;
@@ -221,11 +230,12 @@
                             'Content-Type': 'application/json',
                             'X-Correlation-ID': `batch_video_settings_${this.batchId}`,
                         },
-                        body: JSON.stringify({
-                            provider: this.provider,
-                            aspect_ratio: this.aspectRatio,
-                            resolution: this.resolution,
-                            seconds: Number(this.duration),
+                    body: JSON.stringify({
+                        provider: this.provider,
+                        model: this.model,
+                        aspect_ratio: this.aspectRatio,
+                        resolution: this.resolution,
+                        seconds: Number(this.duration),
                             target_length_tier: this.isDurationRouted ? Number(this.duration) : null,
                             size: this.getProviderSize(this.aspectRatio, this.resolution),
                         }),
@@ -275,6 +285,9 @@
                 if (this.isDurationRouted) {
                     this.provider = 'vertex_ai';
                     this.duration = String(this.targetLengthTier || 8);
+                }
+                if (!this.modelLabels[this.model]) {
+                    this.model = 'veo-3.1-generate-preview';
                 }
                 this.$watch('provider', () => {
                     this.resolution = this.aspectRatio === '16:9' ? '1080p' : '720p';

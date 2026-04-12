@@ -82,6 +82,40 @@ def test_resolve_video_submission_plan_preserves_vertex_provider_for_duration_ro
     assert plan["profile"].route == "veo_extended"
 
 
+def test_submit_video_request_threads_selected_veo_model(monkeypatch):
+    class FakeVeoClient:
+        def __init__(self):
+            self.calls = []
+
+        def submit_video_generation(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "operation_id": "operations/model-test",
+                "status": "submitted",
+                "provider_model": kwargs["model"],
+            }
+
+    fake_client = FakeVeoClient()
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: fake_client)
+
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        model="veo-3.1-fast-generate-001",
+        prompt_text="Hallo Welt",
+        negative_prompt="subtitles",
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size="720x1280",
+        correlation_id="corr-model",
+    )
+
+    assert fake_client.calls[0]["model"] == "veo-3.1-fast-generate-001"
+    assert result["provider_model"] == "veo-3.1-fast-generate-001"
+
+
 def test_build_submission_metadata_initializes_extension_chain():
     batch = {"id": "new-batch", "target_length_tier": 32, "video_pipeline_route": "veo_extended"}
     plan = video_handlers._resolve_video_submission_plan(

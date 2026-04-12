@@ -17,7 +17,9 @@ logger = get_logger(__name__)
 
 
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-_VEO_MODEL_ID = "veo-3.1-generate-preview"
+_VEO_MODEL_ID = "veo-3.1-generate-001"
+_VEO_MODEL_FAST_ID = "veo-3.1-fast-generate-001"
+_VEO_MODEL_LITE_ID = "veo-3.1-lite-generate-001"
 
 
 class VeoClient:
@@ -55,6 +57,7 @@ class VeoClient:
         first_frame_image: Optional[Dict[str, str]] = None,
         reference_images: Optional[list] = None,
         seed: Optional[int] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Submit video generation request to VEO 3.1.
@@ -130,7 +133,7 @@ class VeoClient:
             )
 
             response = self._http_client.post(
-                f"{_GEMINI_API_BASE}/models/{_VEO_MODEL_ID}:predictLongRunning",
+                f"{_GEMINI_API_BASE}/models/{self._resolve_model_id(model)}:predictLongRunning",
                 headers=self._build_headers(include_json=True),
                 json=payload
             )
@@ -551,6 +554,14 @@ class VeoClient:
         if include_json:
             headers["Content-Type"] = "application/json"
         return headers
+
+    def _resolve_model_id(self, model: Optional[str]) -> str:
+        requested = (model or "").strip()
+        if not requested:
+            return _VEO_MODEL_ID
+        if requested in {_VEO_MODEL_ID, _VEO_MODEL_FAST_ID, _VEO_MODEL_LITE_ID}:
+            return requested
+        raise ValueError(f"Unsupported Veo model: {requested}")
 
     def _payload_for_logging(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Redact bulky inline image data so request logging stays readable."""

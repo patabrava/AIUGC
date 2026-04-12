@@ -1,4 +1,6 @@
-<div id="topics-hub-hydration" class="space-y-4">
+<div id="topics-hub-hydration"
+     class="space-y-4"
+     hx-trigger="topics-hub-refresh from:body">
     {% include "topics/partials/topic_list.html" %}
     {% include "topics/partials/active_runs.html" %}
 </div>

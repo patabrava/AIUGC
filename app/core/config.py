@@ -269,7 +269,10 @@ _settings: Optional[Settings] = None
 
 def get_settings() -> Settings:
     """Load settings from the current environment."""
-    return Settings()
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
 
 
 def fingerprint_secret(value: str, *, prefix_length: int = 12) -> str:
