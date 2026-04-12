@@ -5,6 +5,7 @@ import yaml
 from app.core.config import Settings
 
 COMPOSE_PATH = Path(__file__).resolve().parents[1] / "docker-compose.production.yml"
+DEPLOY_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "deploy" / "production.sh"
 
 
 def test_settings_respect_app_env_file_override(monkeypatch, tmp_path: Path):
@@ -66,3 +67,15 @@ def test_production_compose_has_live_healthcheck():
     data = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
     health = data["services"]["web"]["healthcheck"]
     assert "/health" in "".join(health["test"])
+
+
+def test_production_deploy_script_contract():
+    script_text = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+    required = [
+        "git fetch origin main",
+        "git merge --ff-only origin/main",
+        'docker compose -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans',
+        'curl --fail --silent --show-error "$HEALTHCHECK_URL"',
+    ]
+    for item in required:
+        assert item in script_text
