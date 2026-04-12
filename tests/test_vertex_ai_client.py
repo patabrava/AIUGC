@@ -48,6 +48,49 @@ def test_submit_text_video_posts_vertex_rest_payload():
     call_kwargs = mock_http.post.call_args.kwargs
     assert call_kwargs["json"]["parameters"]["aspectRatio"] == "9:16"
     assert call_kwargs["json"]["parameters"]["durationSeconds"] == 8
+    assert call_kwargs["headers"]["x-goog-user-project"] == "test-project"
+
+
+def test_submit_text_video_uses_quota_project_on_google_auth():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"name": "operation-123"}
+    mock_response.raise_for_status.return_value = None
+
+    mock_credentials = SimpleNamespace(token="token", expired=False)
+    mock_http = MagicMock()
+    mock_http.post.return_value = mock_response
+
+    with patch("app.adapters.vertex_ai_client.VertexSettings", return_value=_settings()), \
+        patch("app.adapters.vertex_ai_client.google.auth.default", return_value=(mock_credentials, None)) as mock_default, \
+        patch("app.adapters.vertex_ai_client.Request"), \
+        patch("app.adapters.vertex_ai_client.httpx.Client", return_value=mock_http):
+        client = _fresh_client()
+        client.submit_text_video(
+            prompt="A product spins on a table.",
+            correlation_id="corr-1",
+            aspect_ratio="9:16",
+            duration_seconds=8,
+        )
+
+    assert mock_default.call_args.kwargs["quota_project_id"] == "test-project"
+
+
+def test_get_credentials_wraps_with_quota_project_when_available():
+    wrapped_credentials = SimpleNamespace(token="token", expired=False)
+    mock_credentials = SimpleNamespace(
+        token="token",
+        expired=False,
+        with_quota_project=MagicMock(return_value=wrapped_credentials),
+    )
+
+    with patch("app.adapters.vertex_ai_client.VertexSettings", return_value=_settings()), \
+        patch("app.adapters.vertex_ai_client.google.auth.default", return_value=(mock_credentials, None)), \
+        patch("app.adapters.vertex_ai_client.Request"):
+        client = _fresh_client()
+        creds = client._get_credentials()
+
+    assert creds is wrapped_credentials
+    mock_credentials.with_quota_project.assert_called_once_with("test-project")
 
 
 def test_submit_image_video_accepts_image_bytes():

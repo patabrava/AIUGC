@@ -63,8 +63,19 @@ def _maybe_run_audit(now: float, last_audit_run: float) -> float:
     return now
 
 
+def _is_research_due(now: float, last_research_run: float) -> bool:
+    if not last_research_run:
+        return True
+    return not _is_same_utc_day(now, last_research_run)
+
+
 def _maybe_run_research(now: float, last_research_run: float) -> float:
-    if last_research_run and _is_same_utc_day(now, last_research_run):
+    if not _is_research_due(now, last_research_run):
+        logger.info(
+            "topic_worker_research_not_due",
+            last_research_run=last_research_run,
+            current_utc_day=datetime.fromtimestamp(now, tz=timezone.utc).date().isoformat(),
+        )
         return last_research_run
 
     logger.info(
@@ -85,6 +96,15 @@ def run_topic_worker_tick(
     current_time = time.time() if now is None else now
     _reconcile_stale_running_cron_run()
 
+    research_due = _is_research_due(current_time, last_research_run)
+    if research_due:
+        try:
+            last_research_run = _maybe_run_research(current_time, last_research_run)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            logger.exception("topic_worker_discovery_cycle_failed")
+
     try:
         last_audit_run = _maybe_run_audit(current_time, last_audit_run)
     except KeyboardInterrupt:
@@ -92,12 +112,13 @@ def run_topic_worker_tick(
     except Exception:
         logger.exception("topic_worker_audit_cycle_failed")
 
-    try:
-        last_research_run = _maybe_run_research(current_time, last_research_run)
-    except KeyboardInterrupt:
-        raise
-    except Exception:
-        logger.exception("topic_worker_discovery_cycle_failed")
+    if not research_due:
+        try:
+            last_research_run = _maybe_run_research(current_time, last_research_run)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            logger.exception("topic_worker_discovery_cycle_failed")
 
     return last_audit_run, last_research_run
 

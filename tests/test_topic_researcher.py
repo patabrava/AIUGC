@@ -177,6 +177,56 @@ def test_run_discovery_cycle_marks_run_failed_on_unhandled_error():
     assert mock_update.call_args[1]["error_message"] == "boom"
 
 
+def test_topic_worker_tick_runs_research_before_audit_when_due():
+    """The daily research branch should run before the audit drain when the run is due."""
+    from workers import topic_worker
+
+    calls = []
+
+    def fake_research(now, last_research_run):
+        calls.append("research")
+        return now
+
+    def fake_audit(now, last_audit_run):
+        calls.append("audit")
+        return now
+
+    with patch.object(topic_worker, "_reconcile_stale_running_cron_run"), \
+         patch.object(topic_worker, "_maybe_run_research", side_effect=fake_research), \
+         patch.object(topic_worker, "_maybe_run_audit", side_effect=fake_audit):
+        topic_worker.run_topic_worker_tick(last_audit_run=0.0, last_research_run=0.0, now=1_000.0)
+
+    assert calls == ["research", "audit"]
+
+
+def test_topic_worker_tick_skips_research_when_same_utc_day():
+    """When the last research run happened today, the worker should only audit."""
+    from workers import topic_worker
+
+    calls = []
+
+    def fake_research(now, last_research_run):
+        calls.append("research")
+        return last_research_run
+
+    def fake_audit(now, last_audit_run):
+        calls.append("audit")
+        return now
+
+    same_day = datetime(2026, 4, 12, 1, 0, tzinfo=timezone.utc).timestamp()
+
+    with patch.object(topic_worker, "_reconcile_stale_running_cron_run"), \
+         patch.object(topic_worker, "_maybe_run_research", side_effect=fake_research), \
+         patch.object(topic_worker, "_maybe_run_audit", side_effect=fake_audit):
+        topic_worker.run_topic_worker_tick(
+            last_audit_run=0.0,
+            last_research_run=same_day,
+            now=datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc).timestamp(),
+        )
+
+    assert calls == ["audit", "research"]
+
+
 def test_reconcile_stale_running_cron_run_finalizes_wrapper():
     """A stale running wrapper with no active child runs should be finalized."""
     from workers.topic_researcher import _reconcile_stale_running_cron_run

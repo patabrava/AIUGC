@@ -45,6 +45,10 @@ class VertexSettings(BaseSettings):
         validation_alias=AliasChoices("VERTEX_AI_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"),
     )
     vertex_ai_location: str = Field(default="us-central1", validation_alias=AliasChoices("VERTEX_AI_LOCATION"))
+    google_application_credentials: str = Field(
+        default="",
+        validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS"),
+    )
 
 
 class VertexAIClient:
@@ -383,7 +387,8 @@ class VertexAIClient:
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
             try:
                 self._credentials, _ = google.auth.default(
-                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                    quota_project_id=self._settings.vertex_ai_project_id or None,
                 )
             except google.auth.exceptions.DefaultCredentialsError as exc:
                 raise ValidationError(
@@ -391,6 +396,9 @@ class VertexAIClient:
                     "Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.",
                     {"error": str(exc)},
                 ) from exc
+            quota_project_id = self._settings.vertex_ai_project_id or None
+            if quota_project_id and hasattr(self._credentials, "with_quota_project"):
+                self._credentials = self._credentials.with_quota_project(quota_project_id)
         if self._credentials.expired or not self._credentials.token:
             self._credentials.refresh(Request())
         return self._credentials
@@ -400,6 +408,9 @@ class VertexAIClient:
         headers = {
             "Authorization": f"Bearer {creds.token}",
         }
+        quota_project_id = getattr(creds, "quota_project_id", None) or self._settings.vertex_ai_project_id
+        if quota_project_id:
+            headers["x-goog-user-project"] = quota_project_id
         if include_json:
             headers["Content-Type"] = "application/json"
         return headers
