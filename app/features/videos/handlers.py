@@ -41,6 +41,7 @@ from app.features.posts.prompt_builder import (
     build_video_prompt_from_seed,
     build_veo_prompt_segment,
     split_dialogue_sentences,
+    sync_video_prompt_with_seed_data,
     validate_video_prompt,
 )
 from app.features.videos.prompt_audit import record_prompt_audit
@@ -216,6 +217,37 @@ def _load_or_build_video_prompt(
             video_prompt = None
 
     if isinstance(video_prompt, dict) and video_prompt:
+        seed_data = _normalize_seed_data(post.get("seed_data"))
+        legacy_32_visuals = bool(
+            post.get("target_length_tier") == 32
+            or seed_data.get("target_length_tier") == 32
+        )
+        video_metadata = post.get("video_metadata")
+        if isinstance(video_metadata, str):
+            try:
+                video_metadata = json.loads(video_metadata)
+            except json.JSONDecodeError:
+                video_metadata = {}
+        if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
+            legacy_32_visuals = True
+
+        synced_prompt = sync_video_prompt_with_seed_data(
+            video_prompt,
+            seed_data,
+            legacy_32_visuals=legacy_32_visuals,
+        )
+        if synced_prompt != video_prompt:
+            supabase_client.table("posts").update({
+                "video_prompt_json": synced_prompt,
+            }).eq("id", post["id"]).execute()
+            post["video_prompt_json"] = synced_prompt
+            logger.info(
+                "video_prompt_synced_from_seed_data",
+                post_id=post.get("id"),
+                batch_id=post.get("batch_id"),
+                correlation_id=correlation_id,
+            )
+            return synced_prompt
         return video_prompt
 
     seed_data = _normalize_seed_data(post.get("seed_data"))

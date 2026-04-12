@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from app.features.posts.prompt_builder import build_video_prompt_from_seed, split_dialogue_sentences, build_optimized_prompt, build_veo_prompt_segment
+from app.features.posts.prompt_builder import build_video_prompt_from_seed, split_dialogue_sentences, build_optimized_prompt, build_veo_prompt_segment, sync_video_prompt_with_seed_data
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE
 from app.features.posts.schemas import AudioSection, UpdatePromptRequest, VideoPrompt
 
@@ -113,6 +113,44 @@ def test_legacy_32_prompt_build_uses_legacy_visual_scene():
     assert prompt["scene"] == LEGACY_SCENE
     assert "The woman is sitting on a wheelchair" in prompt["scene"]
     assert "A tidy modern bedroom" not in prompt["scene"]
+
+
+def test_video_prompt_prefers_character_text_from_seed_data():
+    character = (
+        "38-year-old German woman with shoulder-length light brown hair, subtle blonde "
+        "highlights, hazel eyes, a warm light-medium skin tone, a soft oval face, and a "
+        "friendly natural expression. She looks directly into the camera with calm confidence."
+    )
+
+    prompt = build_video_prompt_from_seed(
+        {
+            "script": "Beispielsatz.",
+            "character": character,
+        }
+    )
+
+    assert prompt["character"] == character
+    assert character in prompt["optimized_prompt"]
+    assert character in prompt["veo_prompt"]
+
+
+def test_sync_video_prompt_with_seed_data_repairs_stale_default_character():
+    seed_character = (
+        "38-year-old German woman with shoulder-length light brown hair, subtle blonde highlights, "
+        "hazel eyes, and a calm direct-to-camera expression."
+    )
+    stale_prompt = build_video_prompt_from_seed({"script": "Beispielsatz."})
+
+    synced_prompt = sync_video_prompt_with_seed_data(
+        stale_prompt,
+        {
+            "script": "Beispielsatz.",
+            "character": seed_character,
+        },
+    )
+
+    assert synced_prompt["character"] == seed_character
+    assert seed_character in synced_prompt["veo_prompt"]
 
 
 def test_video_prompt_and_update_request_roundtrip_editable_fields():

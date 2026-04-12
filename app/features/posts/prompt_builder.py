@@ -18,6 +18,7 @@ __all__ = [
     "SORA_NEGATIVE_CONSTRAINTS",
     "VEO_NEGATIVE_PROMPT",
     "build_video_prompt_from_seed",
+    "sync_video_prompt_with_seed_data",
     "validate_video_prompt",
     "build_optimized_prompt",
     "split_dialogue_sentences",
@@ -140,6 +141,15 @@ LEAN_FINAL_AUDIO_BLOCK = (
 
 DEFAULT_CHARACTER = (
     "38-year-old German woman with shoulder-length light brown hair with subtle blonde "
+    "highlights, softly layered and resting around the shoulders; hazel almond-shaped eyes; "
+    "naturally full light-brown brows; a straight nose with a gently rounded tip; medium-full "
+    "muted-pink lips; a friendly oval face with a soft jawline and rounded chin; faint forehead "
+    "lines and subtle smile lines; warm light-medium skin tone with natural skin texture; calm, "
+    "direct-to-camera expression and relaxed upright posture."
+)
+
+LEGACY_SHORT_CHARACTER = (
+    "38-year-old German woman with shoulder-length light brown hair with subtle blonde "
     "highlights, hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural "
     "expression."
 )
@@ -180,6 +190,13 @@ LEGACY_32_CINEMATOGRAPHY = (
     "reframing."
 )
 
+CHARACTER_SOURCE_KEYS = (
+    "character",
+    "character_prompt",
+    "character_description",
+    "prompt_character",
+)
+
 logger = get_logger(__name__)
 
 
@@ -213,6 +230,70 @@ def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
         "audio_block": STANDARD_FINAL_AUDIO_BLOCK,
         "ending_directive": STANDARD_FINAL_ENDING_DIRECTIVE,
     }
+
+
+def _resolve_character_value(seed_data: Dict[str, Any], legacy_32_visuals: bool) -> str:
+    for key in CHARACTER_SOURCE_KEYS:
+        value = seed_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return LEGACY_32_CHARACTER if legacy_32_visuals else DEFAULT_CHARACTER
+
+
+def sync_video_prompt_with_seed_data(
+    video_prompt: Dict[str, Any],
+    seed_data: Dict[str, Any],
+    *,
+    legacy_32_visuals: bool = False,
+) -> Dict[str, Any]:
+    if not isinstance(video_prompt, dict) or not isinstance(seed_data, dict):
+        return video_prompt
+
+    resolved_character = _resolve_character_value(seed_data, legacy_32_visuals)
+    current_character = str(video_prompt.get("character") or "").strip()
+    if not resolved_character or current_character == resolved_character:
+        return video_prompt
+    if current_character not in {DEFAULT_CHARACTER, LEGACY_SHORT_CHARACTER, LEGACY_32_CHARACTER}:
+        return video_prompt
+
+    updated_prompt = dict(video_prompt)
+    updated_prompt["character"] = resolved_character
+
+    audio_payload = updated_prompt.get("audio")
+    if isinstance(audio_payload, dict):
+        dialogue = str(audio_payload.get("dialogue") or "").strip()
+    else:
+        dialogue = ""
+
+    if dialogue:
+        updated_prompt["optimized_prompt"] = build_optimized_prompt(
+            dialogue,
+            negative_constraints=updated_prompt.get("universal_negatives"),
+            prompt_mode="standard_final",
+            character=resolved_character,
+            action=updated_prompt.get("action"),
+            style=updated_prompt.get("style"),
+            scene=updated_prompt.get("scene"),
+            cinematography=updated_prompt.get("cinematography"),
+            ending=updated_prompt.get("ending_directive"),
+            audio_block=updated_prompt.get("audio_block"),
+            legacy_32_visuals=legacy_32_visuals,
+        )
+        updated_prompt["veo_prompt"] = build_optimized_prompt(
+            dialogue,
+            negative_constraints=None,
+            prompt_mode="standard_final",
+            character=resolved_character,
+            action=updated_prompt.get("action"),
+            style=updated_prompt.get("style"),
+            scene=updated_prompt.get("scene"),
+            cinematography=updated_prompt.get("cinematography"),
+            ending=updated_prompt.get("ending_directive"),
+            audio_block=updated_prompt.get("audio_block"),
+            legacy_32_visuals=legacy_32_visuals,
+        )
+
+    return updated_prompt
 
 
 def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals: bool = False) -> Dict[str, Any]:
@@ -260,10 +341,17 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals
         f"subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly at the end of the line. She says: {script_line}"
     )
 
+    # Assemble complete prompt using template defaults
+    character_value = _resolve_character_value(seed_data, legacy_32_visuals)
+    style_value = LEGACY_32_STYLE if legacy_32_visuals else DEFAULT_STYLE
+    scene_value = LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY
+    cinematography_value = LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY
+
     optimized_prompt = build_optimized_prompt(
         normalized_dialogue,
         negative_constraints=SORA_NEGATIVE_CONSTRAINTS,
         prompt_mode="standard_final",
+        character=character_value,
         action=action_value,
         audio_block=STANDARD_FINAL_AUDIO_BLOCK,
         ending=STANDARD_FINAL_ENDING_DIRECTIVE,
@@ -273,6 +361,7 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals
         normalized_dialogue,
         negative_constraints=None,
         prompt_mode="standard_final",
+        character=character_value,
         action=action_value,
         audio_block=STANDARD_FINAL_AUDIO_BLOCK,
         ending=STANDARD_FINAL_ENDING_DIRECTIVE,
@@ -281,12 +370,6 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals
 
     # Keep a single audio block in the final prompt to avoid contradictory synthesis cues.
     audio_section = AudioSection(dialogue=normalized_dialogue, capture=STANDARD_FINAL_AUDIO_BLOCK)
-
-    # Assemble complete prompt using template defaults
-    character_value = LEGACY_32_CHARACTER if legacy_32_visuals else DEFAULT_CHARACTER
-    style_value = LEGACY_32_STYLE if legacy_32_visuals else DEFAULT_STYLE
-    scene_value = LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY
-    cinematography_value = LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY
 
     base_prompt = VideoPrompt(
         character=character_value,

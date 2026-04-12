@@ -168,3 +168,104 @@ def test_update_script_accepts_long_edits_within_generated_script_bounds(monkeyp
     assert storage["posts"][0]["seed_data"]["script_review_status"] == "pending"
     assert "video_excluded" not in storage["posts"][0]["seed_data"]
     assert storage["posts"][0]["video_prompt_json"] is None
+
+
+def test_build_prompt_preserves_existing_manual_prompt_edits(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "seed_data": {
+                    "script_review_status": "approved",
+                    "script": "Original script sentence.",
+                },
+                "video_prompt_json": {
+                    "character": "Edited long character prompt",
+                    "style": "Edited style",
+                    "action": "Edited action",
+                    "scene": "Edited scene",
+                    "cinematography": "Edited cinematography",
+                    "audio": {
+                        "dialogue": "Edited dialogue.",
+                        "capture": "Edited audio block.",
+                    },
+                    "ending_directive": "Edited ending.",
+                    "audio_block": "Edited audio block.",
+                    "universal_negatives": "Edited negatives.",
+                    "veo_prompt": "Character:\nEdited long character prompt",
+                    "veo_negative_prompt": "Edited veo negatives.",
+                    "optimized_prompt": "Character:\nEdited long character prompt",
+                },
+            }
+        ]
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.post("/posts/post-1/build-prompt")
+
+    assert response.status_code == 200, response.text
+    stored_prompt = storage["posts"][0]["video_prompt_json"]
+    assert stored_prompt["character"] == "Edited long character prompt"
+    assert stored_prompt["veo_prompt"] == "Character:\nEdited long character prompt"
+    assert stored_prompt["audio"]["dialogue"] == "Edited dialogue."
+
+
+def test_update_prompt_rebuilds_veo_prompt_from_structured_fields_when_raw_prompt_unchanged(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "seed_data": {
+                    "script": "Original script sentence.",
+                    "script_review_status": "approved",
+                },
+                "video_prompt_json": {
+                    "character": "Old character",
+                    "style": "Old style",
+                    "action": "Old action",
+                    "scene": "Old scene",
+                    "cinematography": "Old cinematography",
+                    "audio": {
+                        "dialogue": "Old dialogue.",
+                        "capture": "Old audio block.",
+                    },
+                    "ending_directive": "Old ending.",
+                    "audio_block": "Old audio block.",
+                    "universal_negatives": "Old negatives.",
+                    "veo_prompt": "Character:\nOld character\n\nDialogue:\n\"Old dialogue.\"",
+                    "veo_negative_prompt": "Old veo negatives.",
+                    "optimized_prompt": "Character:\nOld character",
+                },
+            }
+        ]
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.patch(
+        "/posts/post-1/prompt",
+        json={
+            "character": "Edited long character prompt",
+            "style": "Edited style",
+            "action": "Edited action",
+            "scene": "Edited scene",
+            "cinematography": "Edited cinematography",
+            "dialogue": "Edited dialogue.",
+            "ending": "Edited ending.",
+            "audio_block": "Edited audio block.",
+            "universal_negatives": "Edited negatives.",
+            "veo_prompt": "Character:\nOld character\n\nDialogue:\n\"Old dialogue.\"",
+            "veo_negative_prompt": "Edited veo negatives.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    stored_prompt = storage["posts"][0]["video_prompt_json"]
+    assert stored_prompt["character"] == "Edited long character prompt"
+    assert "Edited long character prompt" in stored_prompt["veo_prompt"]
+    assert "Edited dialogue." in stored_prompt["veo_prompt"]

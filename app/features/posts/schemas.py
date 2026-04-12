@@ -22,7 +22,7 @@ class AudioSection(BaseModel):
 class VideoPrompt(BaseModel):
     """Complete video generation prompt structure per Phase 3 requirements."""
     character: str = Field(
-        default="Character: 38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights, hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural expression.",
+        default="Character: 38-year-old German woman with shoulder-length light brown hair with subtle blonde highlights, softly layered and resting around the shoulders; hazel almond-shaped eyes; naturally full light-brown brows; a straight nose with a gently rounded tip; medium-full muted-pink lips; a friendly oval face with a soft jawline and rounded chin; faint forehead lines and subtle smile lines; warm light-medium skin tone with natural skin texture; calm, direct-to-camera expression and relaxed upright posture.",
         description="Character definition"
     )
     action: str = Field(

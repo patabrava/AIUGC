@@ -24,7 +24,7 @@ from app.features.batches.schemas import (
     PostDetail,
 )
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, LEGACY_SCENE
-from app.features.posts.prompt_builder import build_video_prompt_from_seed
+from app.features.posts.prompt_builder import build_video_prompt_from_seed, sync_video_prompt_with_seed_data
 from app.features.batches.queries import (
     create_batch,
     get_batch_by_id,
@@ -524,22 +524,28 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                         post_id=p.get("id")
                     )
                     video_prompt = None
+            legacy_32_visuals = bool(
+                p.get("target_length_tier") == 32
+                or normalized_seed.get("target_length_tier") == 32
+            )
+            video_metadata = p.get("video_metadata")
+            if isinstance(video_metadata, str):
+                try:
+                    video_metadata = json.loads(video_metadata)
+                except json.JSONDecodeError:
+                    video_metadata = {}
+            if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
+                legacy_32_visuals = True
+
+            video_prompt = sync_video_prompt_with_seed_data(
+                video_prompt,
+                normalized_seed,
+                legacy_32_visuals=legacy_32_visuals,
+            )
             video_prompt = _refresh_prompt_scene_for_display(video_prompt)
 
             if not video_prompt and normalized_seed:
                 try:
-                    legacy_32_visuals = bool(
-                        p.get("target_length_tier") == 32
-                        or normalized_seed.get("target_length_tier") == 32
-                    )
-                    video_metadata = p.get("video_metadata")
-                    if isinstance(video_metadata, str):
-                        try:
-                            video_metadata = json.loads(video_metadata)
-                        except json.JSONDecodeError:
-                            video_metadata = {}
-                    if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
-                        legacy_32_visuals = True
                     video_prompt = build_video_prompt_from_seed(
                         normalized_seed,
                         legacy_32_visuals=legacy_32_visuals,

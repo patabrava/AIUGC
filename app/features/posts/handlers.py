@@ -52,6 +52,29 @@ def _should_use_legacy_32_visuals(post: dict) -> bool:
     return seed_data.get("target_length_tier") == 32
 
 
+def _build_edited_veo_prompt(
+    *,
+    existing_prompt: dict,
+    payload: UpdatePromptRequest,
+) -> str:
+    existing_veo_prompt = str(existing_prompt.get("veo_prompt") or "").strip()
+    submitted_veo_prompt = payload.veo_prompt.strip()
+    if submitted_veo_prompt and submitted_veo_prompt != existing_veo_prompt:
+        return submitted_veo_prompt
+    return build_optimized_prompt(
+        payload.dialogue,
+        negative_constraints=None,
+        prompt_mode="standard_final",
+        character=payload.character,
+        action=payload.action,
+        style=payload.style,
+        scene=payload.scene,
+        cinematography=payload.cinematography,
+        ending=payload.ending,
+        audio_block=payload.audio_block,
+    )
+
+
 def _load_post_seed_data(post_id: str, supabase_client):
     """Fetch post plus normalized seed data for localized S2 review updates."""
     response = supabase_client.table("posts").select("id, batch_id, seed_data, video_prompt_json").eq("id", post_id).execute()
@@ -249,6 +272,31 @@ async def build_post_prompt(post_id: str):
             seed_data,
             legacy_32_visuals=_should_use_legacy_32_visuals(post),
         )
+
+        existing_prompt = _parse_json_document(post.get("video_prompt_json"))
+        if isinstance(existing_prompt, dict) and existing_prompt:
+            preserved_fields = (
+                "character",
+                "style",
+                "action",
+                "scene",
+                "cinematography",
+                "ending_directive",
+                "audio_block",
+                "universal_negatives",
+                "veo_prompt",
+                "veo_negative_prompt",
+                "optimized_prompt",
+            )
+            for field_name in preserved_fields:
+                if existing_prompt.get(field_name):
+                    video_prompt[field_name] = existing_prompt[field_name]
+            existing_audio = existing_prompt.get("audio")
+            if isinstance(existing_audio, dict):
+                video_prompt["audio"] = {
+                    **video_prompt.get("audio", {}),
+                    **{key: value for key, value in existing_audio.items() if value},
+                }
         
         # Validate assembled prompt
         validate_video_prompt(video_prompt)
@@ -386,8 +434,10 @@ async def update_post_prompt(post_id: str, request: Request):
             ending=payload.ending,
             audio_block=payload.audio_block,
         )
-        # Preserve operator-edited Veo prompt verbatim; this is the exact text sent at submit time.
-        updated_prompt["veo_prompt"] = payload.veo_prompt.strip()
+        updated_prompt["veo_prompt"] = _build_edited_veo_prompt(
+            existing_prompt=existing_prompt,
+            payload=payload,
+        )
         validate_video_prompt(updated_prompt)
 
         supabase.table("posts").update({
