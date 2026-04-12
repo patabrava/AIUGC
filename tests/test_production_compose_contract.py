@@ -113,6 +113,11 @@ def test_hostinger_runtime_checkout_tracks_remote_main():
     assert 'git reset --hard "origin/$$repo_ref"' in compose_text
 
 
+def test_hostinger_runtime_healthcheck_waits_for_bootstrap():
+    data = yaml.safe_load((Path(__file__).resolve().parents[1] / "docker-compose.hostinger-runtime.yaml").read_text(encoding="utf-8"))
+    assert data["services"]["web"]["healthcheck"]["start_period"] == "300s"
+
+
 def test_github_action_deploys_on_push_to_main():
     data = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     assert data["name"] == "Deploy Production"
