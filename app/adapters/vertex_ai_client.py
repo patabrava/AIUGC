@@ -49,6 +49,10 @@ class VertexSettings(BaseSettings):
         default="",
         validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS"),
     )
+    google_application_credentials_json: str = Field(
+        default="",
+        validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS_JSON"),
+    )
 
 
 class VertexAIClient:

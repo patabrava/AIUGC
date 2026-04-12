@@ -61,3 +61,24 @@ def test_vertex_settings_resolve_google_application_credentials_from_env_file(mo
     settings = VertexSettings()
 
     assert resolve_google_application_credentials_path(settings) == str(adc_path)
+
+
+def test_vertex_settings_materialize_google_application_credentials_json(monkeypatch, tmp_path: Path):
+    adc_json = '{"type":"authorized_user","client_id":"abc","client_secret":"def","refresh_token":"ghi"}'
+    monkeypatch.chdir(tmp_path)
+    _write_minimal_env(
+        tmp_path,
+        [
+            "VERTEX_AI_ENABLED=true",
+            "VERTEX_AI_PROJECT_ID=my-project",
+            f"GOOGLE_APPLICATION_CREDENTIALS_JSON={adc_json}",
+        ],
+    )
+
+    settings = VertexSettings()
+    resolved = resolve_google_application_credentials_path(settings)
+
+    assert resolved is not None
+    materialized = Path(resolved)
+    assert materialized.is_file()
+    assert materialized.read_text(encoding="utf-8") == adc_json

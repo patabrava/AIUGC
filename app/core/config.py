@@ -6,6 +6,7 @@ Per Constitution § III: Deterministic Execution
 
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, Field, field_validator, model_validator
@@ -72,6 +73,11 @@ class Settings(BaseSettings):
     google_application_credentials: str = Field(
         "",
         description="Optional explicit path to Google Application Default Credentials JSON",
+    )
+    google_application_credentials_json: str = Field(
+        "",
+        validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS_JSON"),
+        description="Optional raw ADC JSON for environments that inject credentials as a secret value",
     )
     vertex_ai_project_id: str = Field("", description="Google Cloud project ID for Vertex AI video generation")
     vertex_ai_location: str = Field("us-central1", description="Vertex AI region for video generation")
@@ -292,8 +298,33 @@ def resolve_google_application_credentials_path(settings: Optional[Settings] = N
     if explicit and Path(explicit).expanduser().is_file():
         return str(Path(explicit).expanduser())
 
+    inline_json = (
+        (getattr(resolved, "google_application_credentials_json", "") or "").strip()
+        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
+    )
+    if not inline_json and explicit.startswith("{"):
+        inline_json = explicit
+
+    if inline_json:
+        materialized_path = _materialize_google_adc_json(inline_json)
+        if materialized_path:
+            return materialized_path
+
     default_adc = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
     if default_adc.is_file():
         return str(default_adc)
 
     return None
+
+
+def _materialize_google_adc_json(raw_json: str) -> Optional[str]:
+    payload = (raw_json or "").strip()
+    if not payload:
+        return None
+
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    target = Path(tempfile.gettempdir()) / f"aiugc-google-adc-{digest}.json"
+    if not target.exists():
+        target.write_text(payload, encoding="utf-8")
+        target.chmod(0o600)
+    return str(target)
