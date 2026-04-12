@@ -1869,7 +1869,17 @@ async def launch_topic_research_endpoint(request: Request):
                 "topics/partials/run_status_compact.html",
                 {"request": request, "run": result["run"]},
             )
-            response.headers["HX-Trigger"] = json.dumps({"topic-research-launched": True})
+            topic_id = str((result.get("topic") or {}).get("id") or launch_request.topic_registry_id or "").strip()
+            trigger_payload = json.dumps(
+                {
+                    "topic-research-launched": {"topicId": topic_id},
+                    "topics-hub-refresh": True,
+                    "topics-hub-show-generated": {"topicId": topic_id},
+                    "open-scripts-drawer": {"topicId": topic_id},
+                }
+            )
+            response.headers["HX-Trigger"] = trigger_payload
+            response.headers["HX-Trigger-After-Settle"] = trigger_payload
             return response
 
         return SuccessResponse(
@@ -1951,11 +1961,20 @@ async def get_topic_research_run_endpoint(request: Request, run_id: str):
                     },
                 )
             if str(run.get("status") or "").strip() in {"completed", "failed"}:
-                response.headers["HX-Trigger"] = json.dumps(
+                topic_id = str(
+                    run.get("topic_registry_id")
+                    or (run.get("result_summary") or {}).get("topic_registry_id")
+                    or ""
+                ).strip()
+                trigger_payload = json.dumps(
                     {
                         "topics-hub-refresh": True,
+                        "topics-hub-show-generated": {"topicId": topic_id} if topic_id else True,
+                        "open-scripts-drawer": {"topicId": topic_id} if topic_id else True,
                     }
                 )
+                response.headers["HX-Trigger"] = trigger_payload
+                response.headers["HX-Trigger-After-Settle"] = trigger_payload
             return response
         return SuccessResponse(data=run)
     except Exception as exc:
