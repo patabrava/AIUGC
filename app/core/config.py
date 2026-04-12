@@ -22,6 +22,10 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore"
     )
+
+    def __init__(self, **values: Any):
+        values.setdefault("_env_file", os.getenv("APP_ENV_FILE", ".env"))
+        super().__init__(**values)
     
     # Application
     environment: Literal["development", "staging", "production"] = "development"
