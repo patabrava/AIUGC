@@ -127,6 +127,7 @@ def test_process_video_operation_skips_foreign_environment(monkeypatch):
     handled = []
 
     monkeypatch.setattr("workers.video_poller._poller_environment", lambda: "development")
+    monkeypatch.setattr("workers.video_poller._poller_scope", lambda: "localhost")
     monkeypatch.setattr(
         "workers.video_poller._claim_video_poll_lease",
         lambda post, correlation_id: claimed.append((post["id"], correlation_id)),
@@ -142,7 +143,7 @@ def test_process_video_operation_skips_foreign_environment(monkeypatch):
             "video_provider": "vertex_ai",
             "video_operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-lite-generate-001/operations/op-1",
             "video_metadata": {
-                "poller_environment": "production",
+                "poller_scope": "lippelift.xyz",
             },
         }
     )

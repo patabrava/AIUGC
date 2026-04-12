@@ -15,6 +15,7 @@ import os
 import random
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import ValidationError as PydanticValidationError
 import httpx
@@ -84,29 +85,75 @@ _GLOBAL_VEO_ANCHOR_OBJECT_KEY = "Lippe Lift Studio/images/anchors/sarah.jpg"
 _GLOBAL_VEO_ANCHOR_ENABLED = False
 
 
-def _resolve_global_veo_anchor_image(correlation_id: str) -> Dict[str, Any]:
-    """Load the global Sarah portrait and mirror it to a fixed Cloudflare R2 key."""
+def _load_global_veo_anchor_asset(
+    *,
+    correlation_id: str,
+    strict: bool,
+) -> Optional[Dict[str, Any]]:
+    """Load the global Sarah anchor image, optionally raising on failure."""
     if not _GLOBAL_VEO_ANCHOR_PATH.exists():
-        raise ValidationError(
-            "Global Veo anchor image is missing.",
-            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
+        if strict:
+            raise ValidationError(
+                "Global Veo anchor image is missing.",
+                {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
+            )
+        logger.warning(
+            "veo_anchor_image_missing_text_only_fallback",
+            correlation_id=correlation_id,
+            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
         )
+        return None
 
     try:
         image_bytes = _GLOBAL_VEO_ANCHOR_PATH.read_bytes()
     except OSError as exc:
-        raise ValidationError(
-            "Global Veo anchor image could not be read.",
-            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH, "error": str(exc)},
-        ) from exc
+        if strict:
+            raise ValidationError(
+                "Global Veo anchor image could not be read.",
+                {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH, "error": str(exc)},
+            ) from exc
+        logger.warning(
+            "veo_anchor_image_unreadable_text_only_fallback",
+            correlation_id=correlation_id,
+            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
+            error=str(exc),
+        )
+        return None
 
     if not image_bytes:
-        raise ValidationError(
-            "Global Veo anchor image is empty.",
-            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
+        if strict:
+            raise ValidationError(
+                "Global Veo anchor image is empty.",
+                {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
+            )
+        logger.warning(
+            "veo_anchor_image_empty_text_only_fallback",
+            correlation_id=correlation_id,
+            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
         )
+        return None
 
     mime_type = mimetypes.guess_type(_GLOBAL_VEO_ANCHOR_PATH.name)[0] or "image/jpeg"
+    return {
+        "image_bytes": image_bytes,
+        "mime_type": mime_type,
+        "first_frame_image": {
+            "mime_type": mime_type,
+            "data_base64": base64.b64encode(image_bytes).decode("ascii"),
+        },
+    }
+
+
+def _resolve_global_veo_anchor_image(correlation_id: str) -> Dict[str, Any]:
+    """Load the global Sarah portrait and mirror it to a fixed Cloudflare R2 key."""
+    anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=True)
+    if anchor_asset is None:
+        raise ValidationError(
+            "Global Veo anchor image is missing.",
+            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
+        )
+    image_bytes = anchor_asset["image_bytes"]
+    mime_type = anchor_asset["mime_type"]
     metadata = {
         "anchor_image_enabled": True,
         "anchor_image_source_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
@@ -132,10 +179,7 @@ def _resolve_global_veo_anchor_image(correlation_id: str) -> Dict[str, Any]:
         )
 
     return {
-        "first_frame_image": {
-            "mime_type": mime_type,
-            "data_base64": base64.b64encode(image_bytes).decode("ascii"),
-        },
+        "first_frame_image": anchor_asset["first_frame_image"],
         "metadata": metadata,
     }
 
@@ -341,6 +385,7 @@ def _build_submission_metadata(
         "requested_size": requested_size,
         "provider_aspect_ratio": provider_aspect_ratio,
         "poller_environment": settings.environment,
+        "poller_scope": _resolve_poller_scope(settings),
     }
 
     provider_requested_size = (
@@ -386,6 +431,21 @@ def _build_submission_metadata(
         metadata.update(segment_metadata)
 
     return metadata
+
+
+def _resolve_poller_scope(settings: Any) -> str:
+    app_url = str(getattr(settings, "app_url", "") or "").strip()
+    if app_url:
+        parsed = urlparse(app_url if "://" in app_url else f"https://{app_url}")
+        host = (parsed.hostname or "").strip().lower()
+        if host:
+            return host
+
+    app_host = str(getattr(settings, "app_host", "") or "").strip().lower()
+    if app_host:
+        return app_host
+
+    return str(getattr(settings, "environment", "") or "development").strip().lower() or "development"
 
 
 def _uses_actual_efficient_long_route(profile: Optional[Any]) -> bool:
@@ -1664,6 +1724,11 @@ def _submit_video_request(
         requested_aspect = requested_aspect_ratio or aspect_ratio
         veo_duration_seconds = provider_duration_seconds or seconds
         model_name = model or "veo-3.1-generate-001"
+        resolved_first_frame_image = first_frame_image
+        if resolved_first_frame_image is None:
+            anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=False)
+            if anchor_asset is not None:
+                resolved_first_frame_image = anchor_asset["first_frame_image"]
         if veo_duration_seconds not in {4, 6, 8}:
             veo_duration_seconds = 8
         try:
@@ -1674,7 +1739,7 @@ def _submit_video_request(
                 aspect_ratio=provider_aspect,
                 resolution=resolution,
                 duration_seconds=veo_duration_seconds,
-                first_frame_image=first_frame_image,
+                first_frame_image=resolved_first_frame_image,
                 seed=seed,
                 model=model_name,
             )
@@ -1723,16 +1788,15 @@ def _submit_video_request(
     if provider == "vertex_ai":
         vertex_client = get_vertex_ai_client()
         settings = get_settings()
-        image_path = Path(__file__).resolve().parents[2] / "static" / "images" / "sarah.jpg"
         vertex_duration = provider_duration_seconds or seconds
         output_gcs_uri = settings.vertex_ai_output_gcs_uri or None
+        anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=False)
         try:
-            if image_path.exists():
-                image_bytes = image_path.read_bytes()
+            if anchor_asset is not None:
                 result = vertex_client.submit_image_video(
                     prompt=prompt_text,
-                    image_bytes=image_bytes,
-                    mime_type="image/jpeg",
+                    image_bytes=anchor_asset["image_bytes"],
+                    mime_type=anchor_asset["mime_type"],
                     correlation_id=correlation_id,
                     aspect_ratio=aspect_ratio,
                     duration_seconds=vertex_duration,

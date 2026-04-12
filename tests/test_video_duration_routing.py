@@ -116,7 +116,7 @@ def test_submit_video_request_threads_selected_veo_model(monkeypatch):
     assert result["provider_model"] == "veo-3.1-fast-generate-001"
 
 
-def test_submit_video_request_threads_selected_vertex_model(monkeypatch):
+def test_submit_video_request_threads_selected_vertex_model(monkeypatch, tmp_path):
     captured = {}
 
     class FakeVertexClient:
@@ -130,34 +130,26 @@ def test_submit_video_request_threads_selected_vertex_model(monkeypatch):
 
     monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
     monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": ""})())
-
-    static_dir = Path(video_handlers.__file__).resolve().parents[2] / "static" / "images"
-    static_dir.mkdir(parents=True, exist_ok=True)
-    image_path = static_dir / "sarah.jpg"
-    original_bytes = image_path.read_bytes() if image_path.exists() else None
+    image_path = tmp_path / "sarah.jpg"
     image_path.write_bytes(b"fake-jpeg")
+    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", image_path)
 
-    try:
-        result = video_handlers._submit_video_request(
-            provider="vertex_ai",
-            model="veo-3.1-lite-generate-001",
-            prompt_text="Hallo Welt",
-            negative_prompt=None,
-            aspect_ratio="9:16",
-            provider_aspect_ratio="9:16",
-            requested_aspect_ratio="9:16",
-            resolution="720p",
-            seconds=8,
-            size="720x1280",
-            correlation_id="corr-vertex-model",
-        )
-    finally:
-        if original_bytes is None:
-            image_path.unlink(missing_ok=True)
-        else:
-            image_path.write_bytes(original_bytes)
+    result = video_handlers._submit_video_request(
+        provider="vertex_ai",
+        model="veo-3.1-lite-generate-001",
+        prompt_text="Hallo Welt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size="720x1280",
+        correlation_id="corr-vertex-model",
+    )
 
     assert captured["model"] == "veo-3.1-lite-generate-001"
+    assert captured["image_bytes"] == b"fake-jpeg"
     assert result["provider_model"] == "veo-3.1-lite-generate-001"
     assert result["requested_model"] == "veo-3.1-lite-generate-001"
 
@@ -193,6 +185,7 @@ def test_build_submission_metadata_initializes_extension_chain():
     assert metadata["requested_size"] == "720x1280"
     assert metadata["provider_requested_size"] == "720x1280"
     assert metadata["poller_environment"] == get_settings().environment
+    assert metadata["poller_scope"]
     assert "postprocess_crop_aspect_ratio" not in metadata
     assert "postprocess_strategy" not in metadata
 
@@ -662,3 +655,99 @@ def test_submit_video_request_passes_anchor_image_to_veo_client(monkeypatch):
 
     assert captured["first_frame_image"] == first_frame_image
     assert result["operation_id"] == "operations/test"
+
+
+def test_submit_video_request_auto_attaches_anchor_image_to_veo_client(monkeypatch, tmp_path):
+    captured = {}
+    image_path = tmp_path / "sarah.jpg"
+    image_path.write_bytes(b"veo-anchor")
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured.update(kwargs)
+            return {"operation_id": "operations/test", "status": "submitted"}
+
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", image_path)
+
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr",
+        provider_duration_seconds=8,
+    )
+
+    assert base64.b64decode(captured["first_frame_image"]["data_base64"]) == b"veo-anchor"
+    assert captured["first_frame_image"]["mime_type"] == "image/jpeg"
+    assert result["operation_id"] == "operations/test"
+
+
+def test_submit_video_request_falls_back_when_anchor_unreadable(monkeypatch):
+    captured = {"veo_first_frame_image": "unset", "vertex_mode": None}
+
+    class UnreadableAnchorPath:
+        name = "sarah.jpg"
+
+        @staticmethod
+        def exists() -> bool:
+            return True
+
+        @staticmethod
+        def read_bytes() -> bytes:
+            raise OSError("permission denied")
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured["veo_first_frame_image"] = kwargs.get("first_frame_image")
+            return {"operation_id": "operations/veo", "status": "submitted"}
+
+    class FakeVertexClient:
+        def submit_image_video(self, **kwargs):
+            captured["vertex_mode"] = "image"
+            return {"operation_id": "operations/image", "status": "submitted", "provider_model": kwargs.get("model")}
+
+        def submit_text_video(self, **kwargs):
+            captured["vertex_mode"] = "text"
+            return {"operation_id": "operations/text", "status": "submitted", "provider_model": kwargs.get("model")}
+
+    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", UnreadableAnchorPath())
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": ""})())
+
+    _ = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr-veo-fallback",
+        provider_duration_seconds=8,
+    )
+    _ = video_handlers._submit_video_request(
+        provider="vertex_ai",
+        model="veo-3.1-lite-generate-001",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size="720x1280",
+        correlation_id="corr-vertex-fallback",
+    )
+
+    assert captured["veo_first_frame_image"] is None
+    assert captured["vertex_mode"] == "text"

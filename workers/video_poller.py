@@ -13,7 +13,7 @@ import socket
 import subprocess
 import tempfile
 import atexit
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Union
 import httpx
@@ -287,10 +287,29 @@ def _poller_environment() -> str:
 
 def _post_matches_poller_environment(post: Dict[str, Any]) -> bool:
     metadata = post.get("video_metadata") or {}
+    target_scope = str(metadata.get("poller_scope") or "").strip().lower()
+    if target_scope:
+        return target_scope == _poller_scope()
     target_environment = str(metadata.get("poller_environment") or "").strip().lower()
     if not target_environment:
         return True
     return target_environment == _poller_environment()
+
+
+def _poller_scope() -> str:
+    settings = get_settings()
+    app_url = str(settings.app_url or "").strip()
+    if app_url:
+        parsed = urlparse(app_url if "://" in app_url else f"https://{app_url}")
+        host = (parsed.hostname or "").strip().lower()
+        if host:
+            return host
+
+    app_host = str(settings.app_host or "").strip().lower()
+    if app_host:
+        return app_host
+
+    return _poller_environment()
 
 
 def _clear_terminal_polling_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
