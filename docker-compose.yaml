@@ -1,7 +1,3 @@
-x-flow-forge-build: &flow-forge-build
-  context: ${DOCKER_BUILD_CONTEXT:-.}
-  dockerfile: Dockerfile
-
 x-flow-forge-env: &flow-forge-env
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_KEY: ${SUPABASE_KEY}
@@ -66,15 +62,46 @@ x-flow-forge-env: &flow-forge-env
   DEBUG: ${DEBUG:-0}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   ENVIRONMENT: ${ENVIRONMENT:-production}
+  DOCKER_BUILD_CONTEXT: ${DOCKER_BUILD_CONTEXT:-https://github.com/patabrava/AIUGC.git#main}
+
+x-flow-forge-base: &flow-forge-base
+  image: python:3.11-slim
+  restart: unless-stopped
+  environment: *flow-forge-env
 
 services:
   web:
-    build: *flow-forge-build
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment: *flow-forge-env
+    <<: *flow-forge-base
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        export DEBIAN_FRONTEND=noninteractive
+        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+          apt-get update -o Acquire::Retries=3
+          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
+          rm -rf /var/lib/apt/lists/*
+        fi
+        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_ref=""
+        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        fi
+        if [ ! -d /app/.git ]; then
+          rm -rf /app
+          git clone --depth 1 "$repo_url" /app
+        fi
+        cd /app
+        if [ -n "$repo_ref" ]; then
+          git fetch --depth 1 origin "$repo_ref"
+          git checkout -f "$repo_ref"
+        fi
+        python -m pip install --upgrade pip
+        python -m pip install --retries 5 --timeout 120 -r requirements.txt
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "${APP_PORT:-8000}:8000"
-    restart: unless-stopped
     labels:
       - traefik.enable=true
       - traefik.http.routers.aiugc-prod-web.rule=Host(`lippelift.xyz`) || Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)
@@ -95,37 +122,125 @@ services:
       start_period: 20s
 
   worker:
-    build: *flow-forge-build
-    command: ["python", "workers/video_poller.py"]
-    environment: *flow-forge-env
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
+    <<: *flow-forge-base
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        export DEBIAN_FRONTEND=noninteractive
+        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+          apt-get update -o Acquire::Retries=3
+          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
+          rm -rf /var/lib/apt/lists/*
+        fi
+        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_ref=""
+        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        fi
+        if [ ! -d /app/.git ]; then
+          rm -rf /app
+          git clone --depth 1 "$repo_url" /app
+        fi
+        cd /app
+        if [ -n "$repo_ref" ]; then
+          git fetch --depth 1 origin "$repo_ref"
+          git checkout -f "$repo_ref"
+        fi
+        python -m pip install --upgrade pip
+        python -m pip install --retries 5 --timeout 120 -r requirements.txt
+        exec python workers/video_poller.py
 
   expansion-worker:
-    build: *flow-forge-build
-    command: ["python", "workers/expansion_worker.py"]
-    environment: *flow-forge-env
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
+    <<: *flow-forge-base
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        export DEBIAN_FRONTEND=noninteractive
+        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+          apt-get update -o Acquire::Retries=3
+          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
+          rm -rf /var/lib/apt/lists/*
+        fi
+        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_ref=""
+        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        fi
+        if [ ! -d /app/.git ]; then
+          rm -rf /app
+          git clone --depth 1 "$repo_url" /app
+        fi
+        cd /app
+        if [ -n "$repo_ref" ]; then
+          git fetch --depth 1 origin "$repo_ref"
+          git checkout -f "$repo_ref"
+        fi
+        python -m pip install --upgrade pip
+        python -m pip install --retries 5 --timeout 120 -r requirements.txt
+        exec python workers/expansion_worker.py
 
   topic-worker:
-    build: *flow-forge-build
-    command: ["python", "workers/topic_worker.py"]
-    environment: *flow-forge-env
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
+    <<: *flow-forge-base
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        export DEBIAN_FRONTEND=noninteractive
+        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+          apt-get update -o Acquire::Retries=3
+          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
+          rm -rf /var/lib/apt/lists/*
+        fi
+        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_ref=""
+        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        fi
+        if [ ! -d /app/.git ]; then
+          rm -rf /app
+          git clone --depth 1 "$repo_url" /app
+        fi
+        cd /app
+        if [ -n "$repo_ref" ]; then
+          git fetch --depth 1 origin "$repo_ref"
+          git checkout -f "$repo_ref"
+        fi
+        python -m pip install --upgrade pip
+        python -m pip install --retries 5 --timeout 120 -r requirements.txt
+        exec python workers/topic_worker.py
 
   caption-worker:
-    build: *flow-forge-build
-    command: ["python", "-m", "workers.caption_worker"]
-    environment: *flow-forge-env
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
+    <<: *flow-forge-base
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        export DEBIAN_FRONTEND=noninteractive
+        if ! command -v git >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+          apt-get update -o Acquire::Retries=3
+          apt-get install -y --no-install-recommends ca-certificates ffmpeg git
+          rm -rf /var/lib/apt/lists/*
+        fi
+        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_ref=""
+        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        fi
+        if [ ! -d /app/.git ]; then
+          rm -rf /app
+          git clone --depth 1 "$repo_url" /app
+        fi
+        cd /app
+        if [ -n "$repo_ref" ]; then
+          git fetch --depth 1 origin "$repo_ref"
+          git checkout -f "$repo_ref"
+        fi
+        python -m pip install --upgrade pip
+        python -m pip install --retries 5 --timeout 120 -r requirements.txt
+        exec python -m workers.caption_worker
