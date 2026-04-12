@@ -83,19 +83,19 @@ services:
           apt-get install -y --no-install-recommends ca-certificates ffmpeg git
           rm -rf /var/lib/apt/lists/*
         fi
-        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
         repo_ref=""
-        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
         fi
         if [ ! -d /app/.git ]; then
           rm -rf /app
-          git clone --depth 1 "$repo_url" /app
+          git clone --depth 1 "$$repo_url" /app
         fi
         cd /app
-        if [ -n "$repo_ref" ]; then
-          git fetch --depth 1 origin "$repo_ref"
-          git checkout -f "$repo_ref"
+        if [ -n "$$repo_ref" ]; then
+          git fetch --depth 1 origin "$$repo_ref"
+          git checkout -f "$$repo_ref"
         fi
         python -m pip install --upgrade pip
         python -m pip install --retries 5 --timeout 120 -r requirements.txt
@@ -134,19 +134,19 @@ services:
           apt-get install -y --no-install-recommends ca-certificates ffmpeg git
           rm -rf /var/lib/apt/lists/*
         fi
-        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
         repo_ref=""
-        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
         fi
         if [ ! -d /app/.git ]; then
           rm -rf /app
-          git clone --depth 1 "$repo_url" /app
+          git clone --depth 1 "$$repo_url" /app
         fi
         cd /app
-        if [ -n "$repo_ref" ]; then
-          git fetch --depth 1 origin "$repo_ref"
-          git checkout -f "$repo_ref"
+        if [ -n "$$repo_ref" ]; then
+          git fetch --depth 1 origin "$$repo_ref"
+          git checkout -f "$$repo_ref"
         fi
         python -m pip install --upgrade pip
         python -m pip install --retries 5 --timeout 120 -r requirements.txt
@@ -165,19 +165,19 @@ services:
           apt-get install -y --no-install-recommends ca-certificates ffmpeg git
           rm -rf /var/lib/apt/lists/*
         fi
-        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
         repo_ref=""
-        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
         fi
         if [ ! -d /app/.git ]; then
           rm -rf /app
-          git clone --depth 1 "$repo_url" /app
+          git clone --depth 1 "$$repo_url" /app
         fi
         cd /app
-        if [ -n "$repo_ref" ]; then
-          git fetch --depth 1 origin "$repo_ref"
-          git checkout -f "$repo_ref"
+        if [ -n "$$repo_ref" ]; then
+          git fetch --depth 1 origin "$$repo_ref"
+          git checkout -f "$$repo_ref"
         fi
         python -m pip install --upgrade pip
         python -m pip install --retries 5 --timeout 120 -r requirements.txt
@@ -196,19 +196,19 @@ services:
           apt-get install -y --no-install-recommends ca-certificates ffmpeg git
           rm -rf /var/lib/apt/lists/*
         fi
-        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
         repo_ref=""
-        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
         fi
         if [ ! -d /app/.git ]; then
           rm -rf /app
-          git clone --depth 1 "$repo_url" /app
+          git clone --depth 1 "$$repo_url" /app
         fi
         cd /app
-        if [ -n "$repo_ref" ]; then
-          git fetch --depth 1 origin "$repo_ref"
-          git checkout -f "$repo_ref"
+        if [ -n "$$repo_ref" ]; then
+          git fetch --depth 1 origin "$$repo_ref"
+          git checkout -f "$$repo_ref"
         fi
         python -m pip install --upgrade pip
         python -m pip install --retries 5 --timeout 120 -r requirements.txt
@@ -227,19 +227,19 @@ services:
           apt-get install -y --no-install-recommends ca-certificates ffmpeg git
           rm -rf /var/lib/apt/lists/*
         fi
-        repo_url="${DOCKER_BUILD_CONTEXT%%#*}"
+        repo_url="$${DOCKER_BUILD_CONTEXT%%#*}"
         repo_ref=""
-        if [ "$repo_url" != "$DOCKER_BUILD_CONTEXT" ]; then
-          repo_ref="${DOCKER_BUILD_CONTEXT#*#}"
+        if [ "$$repo_url" != "$$DOCKER_BUILD_CONTEXT" ]; then
+          repo_ref="$${DOCKER_BUILD_CONTEXT#*#}"
         fi
         if [ ! -d /app/.git ]; then
           rm -rf /app
-          git clone --depth 1 "$repo_url" /app
+          git clone --depth 1 "$$repo_url" /app
         fi
         cd /app
-        if [ -n "$repo_ref" ]; then
-          git fetch --depth 1 origin "$repo_ref"
-          git checkout -f "$repo_ref"
+        if [ -n "$$repo_ref" ]; then
+          git fetch --depth 1 origin "$$repo_ref"
+          git checkout -f "$$repo_ref"
         fi
         python -m pip install --upgrade pip
         python -m pip install --retries 5 --timeout 120 -r requirements.txt
