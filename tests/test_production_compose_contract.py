@@ -93,9 +93,12 @@ def test_production_deploy_script_contract():
     required = [
         "git fetch origin main",
         "git merge --ff-only origin/main",
-        'docker compose -f docker-compose.production.yml',
+        "COMPOSE_CMD=(docker compose)",
+        "command -v docker-compose",
+        'echo "Neither \'docker compose\' nor \'docker-compose\' is available on the production host."',
         '--env-file "$ENV_FILE"',
         'up -d --build --remove-orphans',
+        '"${COMPOSE_CMD[@]}" -f docker-compose.production.yml',
         'curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL"',
     ]
     for item in required:

@@ -26,8 +26,12 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
-  echo "docker compose v2 is required on the production host." >&2
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE_CMD=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE_CMD=(docker-compose)
+else
+  echo "Neither 'docker compose' nor 'docker-compose' is available on the production host." >&2
   exit 1
 fi
 
@@ -35,7 +39,7 @@ git fetch origin main
 git checkout main
 git merge --ff-only origin/main
 
-docker compose -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans
+"${COMPOSE_CMD[@]}" -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans
 
 for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
   if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL" >/dev/null; then
@@ -46,5 +50,5 @@ for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
 done
 
 echo "Healthcheck failed after $MAX_HEALTH_RETRIES attempts: $HEALTHCHECK_URL" >&2
-docker compose -f docker-compose.production.yml --env-file "$ENV_FILE" ps || true
+"${COMPOSE_CMD[@]}" -f docker-compose.production.yml --env-file "$ENV_FILE" ps || true
 exit 1
