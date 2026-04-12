@@ -15,7 +15,7 @@
 <div id="post-{{ post.id }}" class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-[#006AAB]/30 transition" data-post-card="post-{{ post.id }}">
     <div class="flex items-center space-x-3 text-xs text-gray-500">
         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB] uppercase tracking-wide">
-            {{ post.post_type }}
+            {{ post.post_type or ('Manual Draft' if batch.creation_mode == 'manual' else 'Unassigned') }}
         </span>
         <span>Created {{ post.created_at or '—' }}</span>
         {% if post.updated_at %}<span>Updated {{ post.updated_at }}</span>{% endif %}
@@ -61,6 +61,20 @@
                 hx-swap="none"
                 hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
             >
+                {% if batch.creation_mode == 'manual' %}
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500">Post Type</label>
+                    <input
+                        class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent"
+                        type="text"
+                        name="post_type"
+                        value="{{ post.post_type or '' }}"
+                        placeholder="e.g. testimonial_story"
+                        maxlength="120"
+                    >
+                    <p class="mt-1 text-xs text-gray-500">Use any freeform post type you want for this manual draft.</p>
+                </div>
+                {% endif %}
                 <textarea
                     class="w-full px-3 py-2 text-sm text-gray-800 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent"
                     rows="{{ script_rows }}"

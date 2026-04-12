@@ -5,6 +5,7 @@ Per Constitution § V: Locality & Vertical Slices
 """
 
 import json
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -25,6 +26,11 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 class UpdateScriptRequest(BaseModel):
     """Request to update post script."""
     script_text: str = Field(..., min_length=1, max_length=900, description="Script text")
+    post_type: Optional[str] = Field(
+        default=None,
+        max_length=120,
+        description="Optional freeform post type (manual drafts only)",
+    )
 
 
 class UpdateScriptReviewRequest(BaseModel):
@@ -77,7 +83,12 @@ def _build_edited_veo_prompt(
 
 def _load_post_seed_data(post_id: str, supabase_client):
     """Fetch post plus normalized seed data for localized S2 review updates."""
-    response = supabase_client.table("posts").select("id, batch_id, seed_data, video_prompt_json").eq("id", post_id).execute()
+    response = (
+        supabase_client.table("posts")
+        .select("id, batch_id, post_type, seed_data, video_prompt_json")
+        .eq("id", post_id)
+        .execute()
+    )
 
     if not response.data:
         raise FlowForgeException(
@@ -90,6 +101,22 @@ def _load_post_seed_data(post_id: str, supabase_client):
     seed_data = _parse_json_document(post.get("seed_data"))
 
     return post, seed_data
+
+
+def _load_batch_creation_mode(batch_id: str, supabase_client) -> str:
+    try:
+        response = (
+            supabase_client.table("batches")
+            .select("id, creation_mode")
+            .eq("id", batch_id)
+            .execute()
+        )
+    except Exception:
+        # Batch lookup should never block script edits; default to automated behavior.
+        return "automated"
+    if not response.data:
+        return "automated"
+    return str(response.data[0].get("creation_mode") or "automated")
 
 
 @router.put("/{post_id}/script", response_model=SuccessResponse)
@@ -105,6 +132,7 @@ async def update_post_script(post_id: str, request: Request):
             data = await request.json()
             payload = UpdateScriptRequest.model_validate(data)
             script_text = payload.script_text
+            submitted_post_type = payload.post_type
         else:
             form = await request.form()
             script_text = str(form.get("script_text", "")).strip()
@@ -113,19 +141,36 @@ async def update_post_script(post_id: str, request: Request):
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="script_text is required"
                 )
+            submitted_post_type_raw = form.get("post_type", None)
+            submitted_post_type = None if submitted_post_type_raw is None else str(submitted_post_type_raw).strip()
         
         supabase = get_supabase().client
         
-        _, current_seed = _load_post_seed_data(post_id, supabase)
+        post, current_seed = _load_post_seed_data(post_id, supabase)
+        batch_creation_mode = _load_batch_creation_mode(post["batch_id"], supabase)
         current_seed["script"] = script_text
         current_seed["script_review_status"] = "pending"
         current_seed.pop("video_excluded", None)
 
-        supabase.table("posts").update({
+        is_manual_batch = batch_creation_mode == "manual" or current_seed.get("manual_draft") is True
+        resolved_post_type = (submitted_post_type or str(post.get("post_type") or "").strip()) if is_manual_batch else str(post.get("post_type") or "").strip()
+        if is_manual_batch and not resolved_post_type:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="post_type is required for manual batches",
+            )
+        if resolved_post_type:
+            current_seed["post_type"] = resolved_post_type
+
+        update_payload = {
             "seed_data": current_seed,
             # Editing the script must invalidate any prompt assembled from the old text.
             "video_prompt_json": None,
-        }).eq("id", post_id).execute()
+        }
+        if resolved_post_type:
+            update_payload["post_type"] = resolved_post_type
+
+        supabase.table("posts").update(update_payload).eq("id", post_id).execute()
         
         logger.info(
             "post_script_updated",
@@ -133,7 +178,10 @@ async def update_post_script(post_id: str, request: Request):
             script_length=len(script_text)
         )
         
-        return SuccessResponse(data={"id": post_id, "script_text": script_text})
+        response_payload = {"id": post_id, "script_text": script_text}
+        if resolved_post_type:
+            response_payload["post_type"] = resolved_post_type
+        return SuccessResponse(data=response_payload)
     
     except FlowForgeException:
         raise
