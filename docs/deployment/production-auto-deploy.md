@@ -3,6 +3,7 @@
 ## Server bootstrap
 
 Production deploys must run from a VPS checkout and a server-only env file at `/opt/aiugc-prod/.env.production`.
+The Traefik router defaults to `Host(\`lippelift.xyz\`)` when `TRAEFIK_HOST_RULE` is missing, so live routing still works with a minimal env file.
 
 ```bash
 sudo mkdir -p /opt/aiugc-prod

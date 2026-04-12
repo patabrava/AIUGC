@@ -43,6 +43,7 @@ END_LLM_FRIENDLY_PLAN_TEST_DEBUG
 
 2) Specific repo rules
 - Live `lippelift.xyz` deploys must run from a VPS checkout plus `/opt/aiugc-prod/.env.production` through `scripts/deploy/production.sh`; do not rely on Hostinger repo-wrapper env injection or repo `.env`, or pushes to `main` will diverge from the live runtime.
+- Production Traefik host routing defaults must stay `${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}` in every production-aligned compose file; never default to localhost or live routing will break when VPS env files omit `TRAEFIK_HOST_RULE`.
 - Production auth bypass must never trust proxy loopback `request.client.host`; only bypass on localhost-style requested hosts while `ENVIRONMENT=development`, or reverse proxies like Traefik will silently disable login on the live site.
 - Topic cron endpoints under `/topics/cron` must bypass the global auth middleware because the route itself validates `Bearer $CRON_SECRET`; otherwise Hostinger scheduler requests get redirected to `/auth/login` before cron auth can run.
 - Topic cron wrappers must treat malformed batch rows or transient batch-list failures as non-fatal and report them in `failed_batches`; never let one bad row or query exception turn the whole cron into HTTP 500.

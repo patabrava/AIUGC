@@ -60,7 +60,7 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     assert any(".env.production" in entry for entry in web["env_file"])
     assert "DOCKER_BUILD_CONTEXT" not in compose_text
     assert "/opt/aiugc-prod/.env.production" not in compose_text
-    assert "lippelift.xyz" not in compose_text
+    assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
     assert "srv1498567.hstgr.cloud" not in compose_text
     assert "TRAEFIK_HOST_RULE" in compose_text
     assert "TRAEFIK_ENTRYPOINTS" in compose_text
@@ -86,6 +86,7 @@ def test_legacy_compose_files_follow_production_build_contract():
         assert any(".env.production" in entry for entry in web["env_file"])
         assert "DOCKER_BUILD_CONTEXT" not in compose_text
         assert "git clone" not in compose_text
+        assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
 
 
 def test_production_deploy_script_contract():

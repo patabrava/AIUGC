@@ -14,7 +14,7 @@ services:
       - traefik
     labels:
       - traefik.enable=true
-      - 'traefik.http.routers.aiugc-prod-web.rule=${TRAEFIK_HOST_RULE:-Host(`localhost`)}'
+      - 'traefik.http.routers.aiugc-prod-web.rule=${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}'
       - 'traefik.http.routers.aiugc-prod-web.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}'
       - 'traefik.http.routers.aiugc-prod-web.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}'
       - traefik.http.services.aiugc-prod-web.loadbalancer.server.port=8000
