@@ -1,4 +1,4 @@
-"""Unified topic worker.
+"""Unified topic worker loop.
 
 Owns both discovery and audit timing so the deployed topic container can
 drain pending scripts and expand coverage without a second topic service.
