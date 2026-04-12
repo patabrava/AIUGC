@@ -178,7 +178,7 @@ def test_run_discovery_cycle_marks_run_failed_on_unhandled_error():
 
 
 def test_topic_worker_tick_runs_research_before_audit_when_due():
-    """The daily research branch should run before the audit drain when the run is due."""
+    """The daily tick should audit first and then run discovery when due."""
     from workers import topic_worker
 
     calls = []
@@ -196,7 +196,7 @@ def test_topic_worker_tick_runs_research_before_audit_when_due():
          patch.object(topic_worker, "_maybe_run_audit", side_effect=fake_audit):
         topic_worker.run_topic_worker_tick(last_audit_run=0.0, last_research_run=0.0, now=1_000.0)
 
-    assert calls == ["research", "audit"]
+    assert calls == ["audit", "research"]
 
 
 def test_topic_worker_tick_skips_research_when_same_utc_day():
@@ -224,7 +224,7 @@ def test_topic_worker_tick_skips_research_when_same_utc_day():
             now=datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc).timestamp(),
         )
 
-    assert calls == ["audit", "research"]
+    assert calls == ["audit"]
 
 
 def test_reconcile_stale_running_cron_run_finalizes_wrapper():

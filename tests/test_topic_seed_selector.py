@@ -104,3 +104,21 @@ def test_select_seeds_phase2_fallback(mock_get_topics, mock_get_researched):
             seeds, source = select_seeds(max_topics=2)
     assert source in ("llm_generated", "mixed")
     assert len(seeds) <= 2
+
+
+@patch("workers.topic_seed_selector.get_researched_topic_texts")
+@patch("workers.topic_seed_selector.get_all_topics_from_registry")
+def test_select_seeds_uses_fallback_bank_when_llm_returns_empty(mock_get_topics, mock_get_researched):
+    """If Gemini produces nothing, the selector should still return deterministic fallback seeds."""
+    mock_get_topics.return_value = []
+    mock_get_researched.return_value = []
+    from workers.topic_seed_selector import select_seeds
+
+    with patch("workers.topic_seed_selector.load_seed_topics_from_yaml") as mock_yaml, \
+         patch("workers.topic_seed_selector._generate_llm_seeds", return_value=[]):
+        mock_yaml.return_value = []
+        seeds, source = select_seeds(max_topics=3, niche="Barrierefreiheit im Alltag")
+
+    assert len(seeds) == 3
+    assert source == "fallback_bank"
+    assert all(isinstance(seed, str) and seed.strip() for seed in seeds)

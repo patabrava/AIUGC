@@ -97,14 +97,6 @@ def run_topic_worker_tick(
     _reconcile_stale_running_cron_run()
 
     research_due = _is_research_due(current_time, last_research_run)
-    if research_due:
-        try:
-            last_research_run = _maybe_run_research(current_time, last_research_run)
-        except KeyboardInterrupt:
-            raise
-        except Exception:
-            logger.exception("topic_worker_discovery_cycle_failed")
-
     try:
         last_audit_run = _maybe_run_audit(current_time, last_audit_run)
     except KeyboardInterrupt:
@@ -112,7 +104,7 @@ def run_topic_worker_tick(
     except Exception:
         logger.exception("topic_worker_audit_cycle_failed")
 
-    if not research_due:
+    if research_due:
         try:
             last_research_run = _maybe_run_research(current_time, last_research_run)
         except KeyboardInterrupt:

@@ -4,6 +4,7 @@ Determines which topics to research next: Phase 1 (YAML bank) then Phase 2 (LLM-
 """
 import os
 import sys
+import time
 from typing import List, Tuple
 
 import yaml
@@ -27,6 +28,8 @@ TOPIC_BANK_PATH = os.path.join(
 )
 
 DEFAULT_NICHE = "Schwerbehinderung, Treppenlifte, Barrierefreiheit"
+MAX_LLM_SEED_ATTEMPTS = int(os.environ.get("TOPIC_LLM_SEED_ATTEMPTS", "3"))
+LLM_SEED_BACKOFF_SECONDS = float(os.environ.get("TOPIC_LLM_SEED_BACKOFF_SECONDS", "2"))
 
 
 def _get_existing_research_titles() -> List[str]:
@@ -131,6 +134,39 @@ def _generate_llm_seeds(
     return [l for l in lines if len(l) > 10][:count]
 
 
+def _build_fallback_seeds(existing_titles: List[str], count: int, niche: str) -> List[str]:
+    """Generate deterministic non-empty fallback seeds when Gemini produces nothing."""
+    base_topics = [
+        f"Die 3 häufigsten Missverständnisse zu {niche}",
+        f"So erkennst du versteckte Barrieren bei {niche}",
+        f"Ein einfacher Weg, um {niche} im Alltag besser zu machen",
+        f"Was viele bei {niche} zuerst falsch machen",
+        f"Ein schneller Praxis-Tipp zu {niche}",
+        f"Warum {niche} oft an kleinen Details scheitert",
+        f"Der unterschätzte Hebel für bessere {niche}",
+        f"Das solltest du bei {niche} sofort prüfen",
+    ]
+
+    existing = {title.lower().strip() for title in existing_titles}
+    fallback: List[str] = []
+    for topic in base_topics:
+        candidate = topic.strip()
+        if not candidate or candidate.lower() in existing:
+            continue
+        fallback.append(candidate)
+        if len(fallback) >= count:
+            break
+
+    if len(fallback) < count:
+        suffix = 1
+        while len(fallback) < count:
+            candidate = f"{niche} - neuer Blickwinkel {suffix}"
+            if candidate.lower() not in existing and candidate not in fallback:
+                fallback.append(candidate)
+            suffix += 1
+    return fallback[:count]
+
+
 def select_seeds(
     max_topics: int = 5,
     niche: str = DEFAULT_NICHE,
@@ -153,15 +189,37 @@ def select_seeds(
 
     if remaining > 0:
         existing_titles = _get_existing_research_titles()
-        llm_seeds = _generate_llm_seeds(existing_titles, remaining, niche)
+        llm_seeds: List[str] = []
+        for attempt in range(MAX_LLM_SEED_ATTEMPTS):
+            try:
+                llm_seeds = _generate_llm_seeds(existing_titles, remaining, niche)
+                if llm_seeds:
+                    break
+            except Exception as exc:
+                logger.warning(
+                    "topic_seed_llm_generation_failed",
+                    attempt=attempt + 1,
+                    max_attempts=MAX_LLM_SEED_ATTEMPTS,
+                    error=str(exc),
+                )
+            if attempt + 1 < MAX_LLM_SEED_ATTEMPTS:
+                time.sleep(LLM_SEED_BACKOFF_SECONDS * (attempt + 1))
+
         llm_filtered = filter_unresearched_seeds(llm_seeds)
         seeds.extend(llm_filtered[:remaining])
         llm_added = len(llm_filtered[:remaining])
 
+        if len(seeds) < max_topics:
+            fallback = _build_fallback_seeds(existing_titles + seeds, max_topics - len(seeds), niche)
+            fallback = filter_unresearched_seeds(fallback)
+            seeds.extend(fallback[: max_topics - len(seeds)])
+
     if llm_added == 0:
-        source = "yaml_bank"
+        source = "yaml_bank" if len(seeds) else "fallback_bank"
     elif len(unresearched) == 0:
         source = "llm_generated"
     else:
         source = "mixed"
+    if len(seeds) and len(unresearched) == 0 and llm_added == 0:
+        source = "fallback_bank"
     return seeds[:max_topics], source
