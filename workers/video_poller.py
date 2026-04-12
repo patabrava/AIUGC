@@ -281,6 +281,18 @@ def _quota_reservation_key(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
     return str(value)
 
 
+def _poller_environment() -> str:
+    return str(get_settings().environment or "").strip().lower() or "development"
+
+
+def _post_matches_poller_environment(post: Dict[str, Any]) -> bool:
+    metadata = post.get("video_metadata") or {}
+    target_environment = str(metadata.get("poller_environment") or "").strip().lower()
+    if not target_environment:
+        return True
+    return target_environment == _poller_environment()
+
+
 def _clear_terminal_polling_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
     """Remove transient poller/attempt state once a video reaches terminal success."""
     cleaned = dict(metadata)
@@ -305,6 +317,21 @@ def _clear_terminal_polling_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]
         cleaned.pop(key, None)
     cleaned["chain_status"] = "caption_pending"
     cleaned["video_poll_recovery"] = "terminal_success_metadata_cleared"
+    return cleaned
+
+
+def _clear_transient_polling_errors(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove stale retry/polling error fields while a video is actively progressing."""
+    cleaned = dict(metadata)
+    for key in (
+        "error",
+        "error_type",
+        "failed_at",
+        "provider_status_code",
+        "provider_response_body",
+        "last_poll_recovery",
+    ):
+        cleaned.pop(key, None)
     return cleaned
 
 
@@ -769,6 +796,15 @@ def process_video_operation(post: Dict[str, Any]):
     metadata = post.get("video_metadata") or {}
     operation_id = post.get("video_operation_id") or metadata.get("operation_id")
     provider = post.get("video_provider") or metadata.get("provider")
+    if not _post_matches_poller_environment(post):
+        logger.info(
+            "video_poll_skipped_foreign_environment",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            poller_environment=_poller_environment(),
+            target_environment=(metadata.get("poller_environment") or ""),
+        )
+        return
 
     if not operation_id or not provider:
         logger.warning(
@@ -1249,10 +1285,11 @@ def _handle_vertex_ai_video(post: Dict[str, Any], operation_id: str, correlation
     else:
         new_status = "processing"
         supabase = get_supabase().client
+        metadata = _clear_transient_polling_errors(post.get("video_metadata") or {})
         supabase.table("posts").update({
             "video_status": new_status,
             "video_metadata": {
-                **(post.get("video_metadata") or {}),
+                **metadata,
                 "provider": provider,
                 "provider_status": status_result.get("status"),
             }
@@ -1488,7 +1525,7 @@ def _store_completed_video(
 def _mark_processing(post_id: str, correlation_id: str, operation_id: str) -> None:
     supabase = get_supabase().client
     post_response = supabase.table("posts").select("video_metadata").eq("id", post_id).single().execute()
-    existing_metadata = (post_response.data or {}).get("video_metadata") or {}
+    existing_metadata = _clear_transient_polling_errors((post_response.data or {}).get("video_metadata") or {})
     supabase.table("posts").update({
         "video_status": "processing",
         "video_metadata": {

@@ -287,7 +287,7 @@
                     this.duration = String(this.targetLengthTier || 8);
                 }
                 if (!this.modelLabels[this.model]) {
-                    this.model = 'veo-3.1-generate-preview';
+                    this.model = 'veo-3.1-generate-001';
                 }
                 this.$watch('provider', () => {
                     this.resolution = this.aspectRatio === '16:9' ? '1080p' : '720p';

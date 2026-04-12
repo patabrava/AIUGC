@@ -317,16 +317,30 @@ def _build_submission_metadata(
     submission_result: Dict[str, Any],
     segment_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    settings = get_settings()
+    metadata = dict(existing_metadata)
+    for key in (
+        "error",
+        "error_type",
+        "failed_at",
+        "provider_status_code",
+        "provider_response_body",
+        "last_polled_by",
+        "last_polled_at",
+        "last_poll_recovery",
+    ):
+        metadata.pop(key, None)
     requested_aspect_ratio = submission_plan.get("requested_aspect_ratio") or submission_plan["aspect_ratio"]
     requested_size = submission_result.get("requested_size") or submission_plan.get("requested_size")
     provider_aspect_ratio = submission_plan.get("provider_aspect_ratio") or requested_aspect_ratio
     metadata = {
-        **existing_metadata,
+        **metadata,
         "requested_aspect_ratio": requested_aspect_ratio,
         "requested_resolution": submission_plan["resolution"],
         "requested_seconds": submission_plan["seconds"],
         "requested_size": requested_size,
         "provider_aspect_ratio": provider_aspect_ratio,
+        "poller_environment": settings.environment,
     }
 
     provider_requested_size = (
@@ -363,6 +377,9 @@ def _build_submission_metadata(
     provider_model = submission_result.get("provider_model")
     if provider_model:
         metadata["provider_model"] = provider_model
+    requested_model = submission_result.get("requested_model")
+    if requested_model:
+        metadata["requested_model"] = requested_model
     if submission_result.get("provider_metadata"):
         metadata["provider_metadata"] = submission_result["provider_metadata"]
     if segment_metadata:
@@ -1646,6 +1663,7 @@ def _submit_video_request(
         provider_aspect = provider_aspect_ratio or aspect_ratio
         requested_aspect = requested_aspect_ratio or aspect_ratio
         veo_duration_seconds = provider_duration_seconds or seconds
+        model_name = model or "veo-3.1-generate-001"
         if veo_duration_seconds not in {4, 6, 8}:
             veo_duration_seconds = 8
         try:
@@ -1658,7 +1676,7 @@ def _submit_video_request(
                 duration_seconds=veo_duration_seconds,
                 first_frame_image=first_frame_image,
                 seed=seed,
-                model=model,
+                model=model_name,
             )
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
@@ -1695,7 +1713,7 @@ def _submit_video_request(
         return {
             "operation_id": result["operation_id"],
             "status": result.get("status", "submitted"),
-            "provider_model": result.get("provider_model", model or "veo-3.1-generate-preview"),
+            "provider_model": result.get("provider_model", model_name),
             "requested_size": requested_size,
             "provider_requested_size": provider_requested_size,
             "estimated_duration_seconds": 180,
@@ -1719,6 +1737,7 @@ def _submit_video_request(
                     aspect_ratio=aspect_ratio,
                     duration_seconds=vertex_duration,
                     output_gcs_uri=output_gcs_uri,
+                    model=model,
                 )
             else:
                 result = vertex_client.submit_text_video(
@@ -1727,6 +1746,7 @@ def _submit_video_request(
                     aspect_ratio=aspect_ratio,
                     duration_seconds=vertex_duration,
                     output_gcs_uri=output_gcs_uri,
+                    model=model,
                 )
         except ValidationError as exc:
             raise FlowForgeException(
@@ -1743,6 +1763,7 @@ def _submit_video_request(
             "operation_id": result["operation_id"],
             "status": result.get("status", "submitted"),
             "provider_model": result.get("provider_model", "vertex_ai"),
+            "requested_model": model,
             "requested_size": requested_size,
             "provider_requested_size": requested_size,
             "estimated_duration_seconds": 180,

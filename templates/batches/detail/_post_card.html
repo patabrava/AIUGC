@@ -318,6 +318,14 @@
                     {% else %}
                     <p>Video is being generated. This typically takes 2-3 minutes.</p>
                     {% endif %}
+                    {% if post.video_metadata and (post.video_metadata.get('requested_model') or post.video_metadata.get('provider_model')) %}
+                    <p class="text-xs text-gray-500 mt-1">
+                        Requested model: {{ post.video_metadata.get('requested_model') or '—' }}
+                        {% if post.video_metadata.get('provider_model') %}
+                        · Provider model: {{ post.video_metadata.get('provider_model') }}
+                        {% endif %}
+                    </p>
+                    {% endif %}
                     <p class="text-xs text-gray-500 mt-1">Operation ID: {{ post.video_operation_id }}</p>
                     {% if post.video_url %}
                     <p class="text-xs text-gray-500 mt-1">Displaying the previous video while the new generation is still in progress.</p>
@@ -326,6 +334,14 @@
                 {% elif is_captioning %}
                 <div class="mt-2 text-sm text-gray-600">
                     <p>Video is ready and captions are still being processed.</p>
+                    {% if post.video_metadata and (post.video_metadata.get('requested_model') or post.video_metadata.get('provider_model')) %}
+                    <p class="text-xs text-gray-500 mt-1">
+                        Requested model: {{ post.video_metadata.get('requested_model') or '—' }}
+                        {% if post.video_metadata.get('provider_model') %}
+                        · Provider model: {{ post.video_metadata.get('provider_model') }}
+                        {% endif %}
+                    </p>
+                    {% endif %}
                     <p class="text-xs text-gray-500 mt-1">Operation ID: {{ post.video_operation_id }}</p>
                 </div>
                 {% elif video_status == 'failed' %}

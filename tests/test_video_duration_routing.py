@@ -116,6 +116,52 @@ def test_submit_video_request_threads_selected_veo_model(monkeypatch):
     assert result["provider_model"] == "veo-3.1-fast-generate-001"
 
 
+def test_submit_video_request_threads_selected_vertex_model(monkeypatch):
+    captured = {}
+
+    class FakeVertexClient:
+        def submit_image_video(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-lite-generate-001/operations/op-123",
+                "status": "submitted",
+                "provider_model": kwargs["model"],
+            }
+
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": ""})())
+
+    static_dir = Path(video_handlers.__file__).resolve().parents[2] / "static" / "images"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    image_path = static_dir / "sarah.jpg"
+    original_bytes = image_path.read_bytes() if image_path.exists() else None
+    image_path.write_bytes(b"fake-jpeg")
+
+    try:
+        result = video_handlers._submit_video_request(
+            provider="vertex_ai",
+            model="veo-3.1-lite-generate-001",
+            prompt_text="Hallo Welt",
+            negative_prompt=None,
+            aspect_ratio="9:16",
+            provider_aspect_ratio="9:16",
+            requested_aspect_ratio="9:16",
+            resolution="720p",
+            seconds=8,
+            size="720x1280",
+            correlation_id="corr-vertex-model",
+        )
+    finally:
+        if original_bytes is None:
+            image_path.unlink(missing_ok=True)
+        else:
+            image_path.write_bytes(original_bytes)
+
+    assert captured["model"] == "veo-3.1-lite-generate-001"
+    assert result["provider_model"] == "veo-3.1-lite-generate-001"
+    assert result["requested_model"] == "veo-3.1-lite-generate-001"
+
+
 def test_build_submission_metadata_initializes_extension_chain():
     batch = {"id": "new-batch", "target_length_tier": 32, "video_pipeline_route": "veo_extended"}
     plan = video_handlers._resolve_video_submission_plan(
@@ -146,8 +192,50 @@ def test_build_submission_metadata_initializes_extension_chain():
     assert metadata["provider_aspect_ratio"] == "9:16"
     assert metadata["requested_size"] == "720x1280"
     assert metadata["provider_requested_size"] == "720x1280"
+    assert metadata["poller_environment"] == get_settings().environment
     assert "postprocess_crop_aspect_ratio" not in metadata
     assert "postprocess_strategy" not in metadata
+
+
+def test_build_submission_metadata_clears_stale_polling_errors():
+    metadata = video_handlers._build_submission_metadata(
+        existing_metadata={
+            "error": "No Google Cloud Application Default Credentials found.",
+            "error_type": "ValidationError",
+            "failed_at": "2026-04-12T18:00:00Z",
+            "provider_status_code": 401,
+            "provider_response_body": "old error",
+            "last_polled_by": "worker-a",
+            "last_polled_at": "2026-04-12T18:01:00Z",
+            "last_poll_recovery": "stale",
+        },
+        submission_plan={
+            "aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "resolution": "720p",
+            "seconds": 8,
+            "requested_size": "720x1280",
+            "provider_requested_size": "720x1280",
+            "profile": None,
+        },
+        submission_result={
+            "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-fast-generate-001/operations/op-456",
+            "provider_model": "veo-3.1-fast-generate-001",
+            "requested_model": "veo-3.1-fast-generate-001",
+            "requested_size": "720x1280",
+        },
+    )
+
+    assert "error" not in metadata
+    assert "error_type" not in metadata
+    assert "failed_at" not in metadata
+    assert "provider_status_code" not in metadata
+    assert "provider_response_body" not in metadata
+    assert "last_polled_by" not in metadata
+    assert "last_polled_at" not in metadata
+    assert "last_poll_recovery" not in metadata
+    assert metadata["provider_model"] == "veo-3.1-fast-generate-001"
+    assert metadata["requested_model"] == "veo-3.1-fast-generate-001"
 
 
 def test_extended_route_uses_isolated_submission_statuses():

@@ -120,6 +120,37 @@ def test_claim_video_poll_lease_skips_when_other_worker_owns_active_lease(monkey
     fake_supabase.client.table.assert_not_called()
 
 
+def test_process_video_operation_skips_foreign_environment(monkeypatch):
+    from workers.video_poller import process_video_operation
+
+    claimed = []
+    handled = []
+
+    monkeypatch.setattr("workers.video_poller._poller_environment", lambda: "development")
+    monkeypatch.setattr(
+        "workers.video_poller._claim_video_poll_lease",
+        lambda post, correlation_id: claimed.append((post["id"], correlation_id)),
+    )
+    monkeypatch.setattr(
+        "workers.video_poller._handle_vertex_ai_video",
+        lambda post, operation_id, correlation_id: handled.append((post["id"], operation_id, correlation_id)),
+    )
+
+    process_video_operation(
+        {
+            "id": "post-foreign-env",
+            "video_provider": "vertex_ai",
+            "video_operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-lite-generate-001/operations/op-1",
+            "video_metadata": {
+                "poller_environment": "production",
+            },
+        }
+    )
+
+    assert claimed == []
+    assert handled == []
+
+
 def test_clear_expired_poller_leases_removes_only_expired_entries(monkeypatch):
     from workers.video_poller import _clear_expired_poller_leases
 
@@ -1195,7 +1226,6 @@ def test_process_video_operation_skips_lease_when_operation_data_missing(monkeyp
     handle_mock = MagicMock()
     monkeypatch.setattr("workers.video_poller._claim_video_poll_lease", lease_mock)
     monkeypatch.setattr("workers.video_poller._handle_vertex_ai_video", handle_mock)
-    monkeypatch.setattr("workers.video_poller._handle_sora_video", handle_mock)
     monkeypatch.setattr("workers.video_poller.get_supabase", lambda: MagicMock())
 
     process_video_operation(post)
