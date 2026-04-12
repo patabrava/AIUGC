@@ -4,6 +4,8 @@ import yaml
 
 from app.core.config import Settings
 
+COMPOSE_PATH = Path(__file__).resolve().parents[1] / "docker-compose.production.yml"
+
 
 def test_settings_respect_app_env_file_override(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env.production"
@@ -43,16 +45,21 @@ def test_example_production_env_lists_required_live_keys():
 
 
 def test_production_compose_uses_repo_build_and_server_env_file():
-    data = yaml.safe_load(Path("docker-compose.production.yml").read_text(encoding="utf-8"))
+    compose_text = COMPOSE_PATH.read_text(encoding="utf-8")
+    data = yaml.safe_load(compose_text)
     web = data["services"]["web"]
     worker = data["services"]["worker"]
     assert web["build"]["context"] == "."
     assert worker["build"]["context"] == "."
-    assert web["env_file"] == ["${APP_ENV_FILE:-/opt/aiugc-prod/.env.production}"]
-    assert "DOCKER_BUILD_CONTEXT" not in Path("docker-compose.production.yml").read_text(encoding="utf-8")
+    assert web["env_file"] == ["${APP_ENV_FILE:-.env.production}"]
+    assert "DOCKER_BUILD_CONTEXT" not in compose_text
+    assert "/opt/aiugc-prod/.env.production" not in compose_text
+    assert "lippelift.xyz" not in compose_text
+    assert "srv1498567.hstgr.cloud" not in compose_text
+    assert "TRAEFIK_HOST_RULE" in compose_text
 
 
 def test_production_compose_has_live_healthcheck():
-    data = yaml.safe_load(Path("docker-compose.production.yml").read_text(encoding="utf-8"))
+    data = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
     health = data["services"]["web"]["healthcheck"]
     assert "/health" in "".join(health["test"])
