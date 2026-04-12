@@ -94,3 +94,8 @@ def test_github_action_deploys_on_push_to_main():
     step_text = "\n".join(str(step) for step in steps)
     assert "appleboy/ssh-action" in step_text
     assert "scripts/deploy/production.sh" in step_text
+    assert "mkdir -p \"$APP_ROOT\"" in step_text
+    assert "git clone https://github.com/patabrava/AIUGC.git \"$REPO_DIR\"" in step_text
+    assert "export APP_ROOT=\"${APP_ROOT:-/opt/aiugc-prod}\"" in step_text
+    assert "export REPO_DIR=\"${APP_ROOT}/repo\"" in step_text
+    assert "export ENV_FILE=\"${APP_ROOT}/.env.production\"" in step_text

@@ -20,8 +20,13 @@ jobs:
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           script: |
             export APP_ROOT="${{ secrets.PROD_APP_ROOT }}"
-            export REPO_DIR="${{ secrets.PROD_APP_ROOT }}/repo"
-            export ENV_FILE="${{ secrets.PROD_APP_ROOT }}/.env.production"
+            export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
+            export REPO_DIR="${APP_ROOT}/repo"
+            export ENV_FILE="${APP_ROOT}/.env.production"
             export HEALTHCHECK_URL="https://lippelift.xyz/health"
+            mkdir -p "$APP_ROOT"
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
+            fi
             cd "$REPO_DIR"
             bash scripts/deploy/production.sh
