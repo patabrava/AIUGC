@@ -22,7 +22,6 @@ import httpx
 from app.adapters.supabase_client import get_supabase
 from app.adapters.storage_client import get_storage_client
 from app.adapters.veo_client import get_veo_client
-from app.adapters.sora_client import get_sora_client
 from app.adapters.vertex_ai_client import get_vertex_ai_client
 from app.core.config import get_settings
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
@@ -617,6 +616,14 @@ def _build_veo_extended_base_prompt(
     if not isinstance(video_prompt, dict):
         video_prompt = {}
 
+    prompt_character = str(video_prompt.get("character") or "").strip() or None
+    prompt_style = str(video_prompt.get("style") or "").strip() or None
+    prompt_action = str(video_prompt.get("action") or "").strip() or None
+    prompt_scene = str(video_prompt.get("scene") or "").strip() or None
+    prompt_cinematography = str(video_prompt.get("cinematography") or "").strip() or None
+    prompt_ending = str(video_prompt.get("ending_directive") or "").strip() or None
+    prompt_audio_block = str(video_prompt.get("audio_block") or "").strip() or None
+
     prompt_audio = video_prompt.get("audio") or {}
     if not isinstance(prompt_audio, dict):
         prompt_audio = {}
@@ -673,6 +680,13 @@ def _build_veo_extended_base_prompt(
         base_segment,
         include_quotes=False,
         include_ending=False,
+        character=prompt_character,
+        action=prompt_action,
+        style=prompt_style,
+        scene=prompt_scene,
+        cinematography=prompt_cinematography,
+        ending=prompt_ending,
+        audio_block=prompt_audio_block,
         legacy_32_visuals=False,
     ), segment_metadata
 
@@ -1545,15 +1559,6 @@ def _build_provider_prompt_text(video_prompt: Dict[str, Any], provider: str) -> 
     if provider == "veo_3_1":
         return _build_veo_prompt_text(video_prompt)
 
-    if provider in {"sora_2", "sora_2_pro"}:
-        optimized_prompt = video_prompt.get("optimized_prompt")
-        if optimized_prompt:
-            logger.debug(
-                "sora_optimized_prompt_selected",
-                prompt_length=len(optimized_prompt)
-            )
-            return optimized_prompt, "sora_optimized_prompt"
-
     # Fallback to canonical composition
     return build_full_prompt_text(video_prompt), "full_prompt_text_fallback"
 
@@ -1695,78 +1700,6 @@ def _submit_video_request(
             "vertex_output_gcs_uri": output_gcs_uri,
         }
 
-    if provider in {"sora_2", "sora_2_pro"}:
-        sora_client = get_sora_client()
-        valid_seconds = {4, 8, 12}
-        if seconds not in valid_seconds:
-            raise FlowForgeException(
-                code=ErrorCode.VALIDATION_ERROR,
-                message="Sora requires seconds to be one of 4, 8, or 12",
-                details={"seconds": seconds, "allowed_seconds": sorted(valid_seconds)},
-            )
-
-        target_size = size or _map_sora_size(aspect_ratio, resolution)
-        if not target_size:
-            raise FlowForgeException(
-                code=ErrorCode.VALIDATION_ERROR,
-                message="Unsupported size for Sora",
-                details={
-                    "aspect_ratio": aspect_ratio,
-                    "resolution": resolution,
-                    "allowed_sizes": {
-                        "9:16": {"720p": "720x1280", "1080p": "1024x1792"},
-                        "16:9": {"720p": "1280x720", "1080p": "1792x1024"},
-                    },
-                },
-            )
-
-        model = "sora-2-pro" if provider == "sora_2_pro" else "sora-2"
-        seconds_literal = str(seconds)
-
-        try:
-            submission = sora_client.submit_video_generation(
-                prompt=prompt_text,
-                correlation_id=correlation_id,
-                model=model,
-                seconds=seconds_literal,
-                size=target_size,
-            )
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            try:
-                error_payload = exc.response.json()
-            except ValueError:
-                error_payload = {"body": exc.response.text[:500]}
-
-            error_message = error_payload.get("error", {}).get("message") if isinstance(error_payload, dict) else None
-            code = ErrorCode.VALIDATION_ERROR if status_code in {400, 422} else ErrorCode.THIRD_PARTY_FAIL
-            message = error_message or "Sora video submission failed"
-
-            raise FlowForgeException(
-                code=code,
-                message=message,
-                details={
-                    "provider": provider,
-                    "status_code": status_code,
-                    "response": error_payload,
-                    "request": {
-                        "seconds": seconds_literal,
-                        "size": target_size,
-                        "model": model,
-                    },
-                },
-                status_code=422 if code == ErrorCode.VALIDATION_ERROR else 503,
-            )
-
-        return {
-            "operation_id": submission["video_id"],
-            "status": submission.get("status", "queued"),
-            "provider_model": submission.get("model", model),
-            "requested_size": submission.get("size", target_size),
-            "estimated_duration_seconds": seconds * 60,  # conservative placeholder
-            "provider_metadata": submission,
-        }
-
     raise FlowForgeException(
         code=ErrorCode.VALIDATION_ERROR,
         message="Unsupported video provider",
@@ -1784,13 +1717,3 @@ def _map_size_from_aspect_ratio(aspect_ratio: str, resolution: str) -> Optional[
     }
     return mapping.get((aspect_ratio, resolution))
 
-
-def _map_sora_size(aspect_ratio: str, resolution: str) -> Optional[str]:
-    """Map aspect ratio + resolution pairs to Sora-supported pixel sizes."""
-    mapping = {
-        ("9:16", "720p"): "720x1280",
-        ("9:16", "1080p"): "1024x1792",
-        ("16:9", "720p"): "1280x720",
-        ("16:9", "1080p"): "1792x1024",
-    }
-    return mapping.get((aspect_ratio, resolution))

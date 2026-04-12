@@ -1,6 +1,6 @@
 """
 Video Generation Polling Worker
-Runs on Railway, polls VEO/Sora operations and updates Supabase.
+Runs on Railway, polls video operations and updates Supabase.
 Per Constitution § III: Deterministic Execution
 Per Constitution § IX: Observable Implementation
 """
@@ -24,7 +24,6 @@ from google.auth.transport.requests import Request
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app.adapters.supabase_client import get_supabase
-from app.adapters.sora_client import get_sora_client
 from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings, google_ai_context_fingerprint, resolve_google_application_credentials_path
@@ -811,8 +810,6 @@ def process_video_operation(post: Dict[str, Any]):
                 return
 
             _handle_veo_video(post, operation_id, correlation_id)
-        elif provider in {"sora_2", "sora_2_pro"}:
-            _handle_sora_video(post, operation_id, correlation_id)
         elif provider == "vertex_ai":
             if not _vertex_ai_available or get_vertex_ai_client is None:
                 logger.warning(
@@ -1194,57 +1191,6 @@ def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: s
         )
     else:
         _mark_processing(post_id, correlation_id, operation_id)
-
-
-def _handle_sora_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:
-    post_id = post["id"]
-    provider = post.get("video_provider", "sora_2")
-    sora_client = get_sora_client()
-
-    status_result = sora_client.check_video_status(
-        video_id=operation_id,
-        correlation_id=correlation_id
-    )
-
-    status = status_result.get("status", "queued")
-    progress = status_result.get("progress")
-
-    logger.debug(
-        "sora_status_polled",
-        post_id=post_id,
-        correlation_id=correlation_id,
-        status=status,
-        progress=progress
-    )
-
-    if status == "completed":
-        video_bytes = sora_client.download_video(
-            video_id=operation_id,
-            correlation_id=correlation_id,
-        )
-
-        _store_completed_video(
-            post_id=post_id,
-            provider=provider,
-            video_source=video_bytes,
-            correlation_id=correlation_id,
-            provider_metadata=status_result,
-            existing_metadata=post.get("video_metadata") or {}
-        )
-    elif status in {"failed", "cancelled"}:
-        raise ValueError(f"Sora video failed with status {status}")
-    else:
-        new_status = "processing" if status in {"in_progress", "processing"} else "submitted"
-        supabase = get_supabase().client
-        supabase.table("posts").update({
-            "video_status": new_status,
-            "video_metadata": {
-                **(post.get("video_metadata") or {}),
-                "provider": provider,
-                "progress": progress,
-                "provider_status": status,
-            }
-        }).eq("id", post_id).execute()
 
 
 def _handle_vertex_ai_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:
