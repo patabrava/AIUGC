@@ -140,6 +140,61 @@ def test_get_batch_status_requeues_stalled_s1_batch(monkeypatch):
     assert scheduled == [("batch-recover", "status_recovery")]
 
 
+def test_get_batch_status_skips_manual_drafts_even_on_legacy_rows(monkeypatch):
+    scheduled = []
+
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "brand": "Manual",
+            "state": "S1_SETUP",
+            "updated_at": "2026-03-19T21:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda batch_id: {
+            "posts_count": 1,
+            "posts_by_state": {},
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_posts_by_batch",
+        lambda batch_id: [
+            {
+                "id": "post-1",
+                "seed_data": {
+                    "manual_draft": True,
+                    "script_review_status": "pending",
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", lambda batch_id: None)
+    monkeypatch.setattr(
+        batch_handlers,
+        "start_seeding_interaction",
+        lambda *args, **kwargs: scheduled.append(("start", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda *args, **kwargs: scheduled.append(("schedule", args, kwargs)),
+    )
+
+    response = asyncio.run(batch_handlers.get_batch_status("batch-manual"))
+
+    assert response.ok is True
+    assert response.data["state"] == "S1_SETUP"
+    assert response.data["posts_count"] == 1
+    assert response.data["progress"] is None
+    assert scheduled == []
+
+
 def test_get_batch_status_resumes_coverage_pending_batch_when_audited_bank_is_ready(monkeypatch):
     scheduled = []
     batch_handlers._COVERAGE_RECOVERY_LAST_SCHEDULED_AT.clear()
@@ -527,6 +582,49 @@ def test_build_batch_detail_view_does_not_poll_videos_during_s2_script_review():
     assert view["should_poll_videos"] is False
 
 
+def test_build_batch_detail_view_prefers_last_requested_batch_model():
+    batch_payload = {
+        "state": "S5_PROMPTS_BUILT",
+        "target_length_tier": 8,
+        "meta_connection": {},
+        "tiktok_connection": {},
+        "posts": [
+            {
+                "id": "post-1",
+                "post_type": "value",
+                "topic_title": "Older request",
+                "video_url": None,
+                "video_status": "submitted",
+                "video_metadata": {
+                    "requested_model": "veo-3.1-fast-generate-001",
+                },
+                "seed_data": {
+                    "script_review_status": "approved",
+                },
+            },
+            {
+                "id": "post-2",
+                "post_type": "value",
+                "topic_title": "Newest request",
+                "video_url": None,
+                "video_status": "submitted",
+                "video_metadata": {
+                    "requested_model": "veo-3.1-lite-generate-001",
+                    "provider_model": "veo-3.1-lite-generate-001",
+                },
+                "seed_data": {
+                    "script_review_status": "approved",
+                },
+            },
+        ],
+    }
+
+    view = batch_handlers._build_batch_detail_view(batch_payload)
+
+    assert view["video_generation_settings"]["initial_model"] == "veo-3.1-lite-generate-001"
+    assert view["video_generation_settings"]["target_length_tier"] == 8
+
+
 def test_batch_detail_template_shows_video_feedback_in_s4_and_extended_states():
     template_path = Path("templates/batches/detail/_post_card.html")
     content = template_path.read_text(encoding="utf-8")
@@ -564,6 +662,38 @@ def test_batch_detail_template_exposes_an_explicit_script_save_action_in_s2():
     assert 'name="script_text"' in rendered
     assert 'type="submit"' in rendered
     assert 'Save changes' in rendered
+
+
+def test_batch_detail_template_renders_manual_editor_even_for_blank_scripts():
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("batches/detail/_post_card.html")
+
+    rendered = template.render(
+        batch={"state": "S2_SEEDED", "creation_mode": "manual"},
+        post={
+            "id": "post-1",
+            "post_type": "value",
+            "created_at": "2026-03-16T10:00:00+00:00",
+            "updated_at": None,
+            "topic_title": "Beispielthema",
+            "topic_rotation": "",
+            "seed_data": {
+                "script": "",
+                "manual_draft": True,
+                "manual_post_type": "",
+                "script_review_status": "pending",
+            },
+            "blog_enabled": False,
+            "blog_status": None,
+            "video_prompt_json": None,
+            "video_status": "pending",
+            "video_url": None,
+        },
+    )
+
+    assert 'name="post_type"' in rendered
+    assert 'name="script_text"' in rendered
+    assert 'Manual Draft' in rendered
 
 
 def test_batch_detail_templates_compile_without_syntax_errors():

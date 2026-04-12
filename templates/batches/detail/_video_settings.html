@@ -5,7 +5,8 @@
     x-data='videoSettingsComponent({
         batchId: {{ batch.id | tojson }},
         targetLengthTier: {{ batch.target_length_tier | tojson }},
-        pipelineRoute: {{ batch.video_pipeline_route | tojson }}
+        pipelineRoute: {{ batch.video_pipeline_route | tojson }},
+        initialModel: {{ batch_view.video_generation_settings.initial_model | tojson }}
     })'
 >
     <h3 class="text-lg font-medium text-gray-900 mb-4">Batch Video Generation Settings</h3>

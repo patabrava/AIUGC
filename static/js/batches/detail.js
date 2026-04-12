@@ -176,20 +176,24 @@
     };
 
     window.videoSettingsComponent = function (options = {}) {
+        const DEFAULT_MODEL = 'veo-3.1-generate-001';
+        const supportedModels = {
+            'veo-3.1-generate-001': 'Veo 3.1',
+            'veo-3.1-fast-generate-001': 'Veo 3.1 Fast',
+            'veo-3.1-lite-generate-001': 'Veo 3.1 Lite',
+        };
+        const storageKey = options.batchId ? `batch-video-settings:${options.batchId}` : null;
+
         return {
             batchId: options.batchId || null,
             targetLengthTier: options.targetLengthTier || null,
             pipelineRoute: options.pipelineRoute || null,
             provider: 'vertex_ai',
-            model: 'veo-3.1-generate-001',
+            model: DEFAULT_MODEL,
             aspectRatio: '9:16',
             duration: String(options.targetLengthTier || 8),
             resolution: '720p',
-            modelLabels: {
-                'veo-3.1-generate-001': 'Veo 3.1',
-                'veo-3.1-fast-generate-001': 'Veo 3.1 Fast',
-                'veo-3.1-lite-generate-001': 'Veo 3.1 Lite',
-            },
+            modelLabels: supportedModels,
             supportedSizes: {
                 veo_3_1: {
                     '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
@@ -214,6 +218,47 @@
             },
             get modelLabel() {
                 return this.modelLabels[this.model] || this.model;
+            },
+            restorePersistedSettings() {
+                if (!storageKey) {
+                    return;
+                }
+                try {
+                    const rawValue = window.localStorage.getItem(storageKey);
+                    if (!rawValue) {
+                        return;
+                    }
+                    const persisted = JSON.parse(rawValue);
+                    if (persisted?.provider === 'vertex_ai') {
+                        this.provider = 'vertex_ai';
+                    }
+                    if (persisted?.model && this.modelLabels[persisted.model]) {
+                        this.model = persisted.model;
+                    }
+                    if (!this.isDurationRouted && (persisted?.aspectRatio === '9:16' || persisted?.aspectRatio === '16:9')) {
+                        this.aspectRatio = persisted.aspectRatio;
+                    }
+                    if (!this.isDurationRouted && ['720p', '1080p'].includes(persisted?.resolution)) {
+                        this.resolution = persisted.resolution;
+                    }
+                    if (!this.isDurationRouted && ['8', '16', '32'].includes(String(persisted?.duration))) {
+                        this.duration = String(persisted.duration);
+                    }
+                } catch (_error) {
+                    window.localStorage.removeItem(storageKey);
+                }
+            },
+            persistSettings() {
+                if (!storageKey) {
+                    return;
+                }
+                window.localStorage.setItem(storageKey, JSON.stringify({
+                    provider: this.provider,
+                    model: this.model,
+                    aspectRatio: this.aspectRatio,
+                    resolution: this.resolution,
+                    duration: this.duration,
+                }));
             },
             async submitBatch() {
                 if (this.isSubmitting || !this.batchId) {
@@ -286,16 +331,31 @@
                     this.provider = 'vertex_ai';
                     this.duration = String(this.targetLengthTier || 8);
                 }
+                if (this.modelLabels[options.initialModel]) {
+                    this.model = options.initialModel;
+                }
+                this.restorePersistedSettings();
                 if (!this.modelLabels[this.model]) {
-                    this.model = 'veo-3.1-generate-001';
+                    this.model = DEFAULT_MODEL;
                 }
                 this.$watch('provider', () => {
                     this.resolution = this.aspectRatio === '16:9' ? '1080p' : '720p';
+                    this.persistSettings();
                 });
                 this.$watch('aspectRatio', (value) => {
                     this.resolution = this.pipelineRoute === 'veo_extended'
                         ? '720p'
                         : value === '16:9' ? '1080p' : '720p';
+                    this.persistSettings();
+                });
+                this.$watch('model', () => {
+                    this.persistSettings();
+                });
+                this.$watch('resolution', () => {
+                    this.persistSettings();
+                });
+                this.$watch('duration', () => {
+                    this.persistSettings();
                 });
             },
         };

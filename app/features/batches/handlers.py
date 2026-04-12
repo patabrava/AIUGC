@@ -32,7 +32,8 @@ from app.features.batches.queries import (
     update_batch_state,
     archive_batch,
     duplicate_batch,
-    get_batch_posts_summary
+    get_batch_posts_summary,
+    create_manual_draft_posts,
 )
 from app.core.video_profiles import normalize_target_length_tier
 from app.features.topics.handlers import discover_topics_for_batch
@@ -45,6 +46,7 @@ from app.features.topics.handlers import (
     start_seeding_interaction,
     update_seeding_progress,
 )
+from app.features.topics.queries import get_posts_by_batch
 from app.features.publish.handlers import (
     _effective_meta_connection,
     _sanitize_meta_connection as _publish_sanitize_meta_connection,
@@ -95,6 +97,33 @@ def _refresh_prompt_scene_for_display(video_prompt: Optional[Dict[str, Any]]) ->
     return refreshed
 
 
+def _batch_has_manual_drafts(batch: Dict[str, Any]) -> bool:
+    if str(batch.get("creation_mode") or "").strip() == "manual":
+        return True
+
+    batch_id = str(batch.get("id") or "").strip()
+    if not batch_id:
+        return False
+
+    try:
+        for post in get_posts_by_batch(batch_id):
+            seed_data = post.get("seed_data") or {}
+            if isinstance(seed_data, str):
+                try:
+                    seed_data = json.loads(seed_data)
+                except json.JSONDecodeError:
+                    seed_data = {}
+            if isinstance(seed_data, dict) and seed_data.get("manual_draft") is True:
+                return True
+    except Exception as exc:
+        logger.warning(
+            "manual_batch_detection_failed",
+            batch_id=batch_id,
+            error=str(exc),
+        )
+    return False
+
+
 @router.post("", response_model=SuccessResponse, status_code=status.HTTP_201_CREATED)
 async def create_batch_endpoint(request: Request):
     """
@@ -122,28 +151,48 @@ async def create_batch_endpoint(request: Request):
                 "lifestyle": int(form.get("post_type_counts.lifestyle", 0) or 0),
                 "product": int(form.get("post_type_counts.product", 0) or 0)
             }
+            creation_mode = str(form.get("creation_mode", "automated") or "automated").strip() or "automated"
+            manual_post_count = form.get("manual_post_count")
             payload = CreateBatchRequest.model_validate(
                 {
                     "brand": str(form.get("brand", "")).strip(),
+                    "creation_mode": creation_mode,
                     "post_type_counts": post_type_counts,
-                    "target_length_tier": int(form.get("target_length_tier", 8) or 8)
+                    "manual_post_count": int(manual_post_count) if manual_post_count not in {None, ""} else None,
+                    "target_length_tier": int(form.get("target_length_tier", 8) or 8),
                 }
             )
 
         batch = create_batch(
             brand=payload.brand,
-            post_type_counts=payload.post_type_counts.model_dump(),
-            target_length_tier=normalize_target_length_tier(payload.target_length_tier)
+            post_type_counts=payload.post_type_counts.model_dump() if payload.post_type_counts else {},
+            target_length_tier=normalize_target_length_tier(payload.target_length_tier),
+            creation_mode=payload.creation_mode,
+            manual_post_count=payload.manual_post_count,
         )
-        start_seeding_interaction(
-            batch_id=batch["id"],
-            brand=batch["brand"],
-            expected_posts=payload.post_type_counts.total,
-        )
+        expected_posts = payload.manual_post_count if payload.creation_mode == "manual" else payload.post_type_counts.total
 
-        schedule_batch_discovery(batch["id"], reason="batch_create")
+        if payload.creation_mode == "manual":
+            create_manual_draft_posts(
+                batch_id=batch["id"],
+                manual_post_count=payload.manual_post_count or 0,
+                target_length_tier=normalize_target_length_tier(payload.target_length_tier),
+            )
+            batch = update_batch_state(batch["id"], BatchState.S2_SEEDED)
+        else:
+            start_seeding_interaction(
+                batch_id=batch["id"],
+                brand=batch["brand"],
+                expected_posts=payload.post_type_counts.total,
+            )
+            schedule_batch_discovery(batch["id"], reason="batch_create")
 
         if _wants_html(request):
+            if payload.creation_mode == "manual":
+                response = PlainTextResponse("", status_code=status.HTTP_200_OK)
+                response.headers["HX-Redirect"] = f"/batches/{batch['id']}"
+                return response
+
             batches, total = list_batches()
             batch_responses = [BatchResponse(**b).model_dump(mode="json") for b in batches]
             context = {
@@ -154,13 +203,13 @@ async def create_batch_endpoint(request: Request):
             }
             response = templates.TemplateResponse("batches/list.html", context)
             response.headers["HX-Trigger"] = json.dumps({
-                "batch_created": {
-                    "batch_id": batch["id"],
-                    "brand": batch["brand"],
-                    "expected_posts": payload.post_type_counts.total,
-                    "target_length_tier": batch.get("target_length_tier"),
-                }
-            })
+                    "batch_created": {
+                        "batch_id": batch["id"],
+                        "brand": batch["brand"],
+                        "expected_posts": expected_posts,
+                        "target_length_tier": batch.get("target_length_tier"),
+                    }
+                })
             return response
 
         return SuccessResponse(data=BatchResponse(**batch))
@@ -337,6 +386,30 @@ def _resolve_review_caption(post: Dict[str, Any]) -> str:
     )
 
 
+def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: list[Dict[str, Any]]) -> Dict[str, Any]:
+    """Derive batch-level video settings so the UI can rehydrate across HTMX rerenders."""
+    initial_model = "veo-3.1-generate-001"
+
+    for post in reversed(posts):
+        video_metadata = post.get("video_metadata") or {}
+        if not isinstance(video_metadata, dict):
+            continue
+        requested_model = str(video_metadata.get("requested_model") or "").strip()
+        provider_model = str(video_metadata.get("provider_model") or "").strip()
+        if requested_model:
+            initial_model = requested_model
+            break
+        if provider_model.startswith("veo-"):
+            initial_model = provider_model
+            break
+
+    return {
+        "initial_model": initial_model,
+        "target_length_tier": batch_detail.get("target_length_tier"),
+        "pipeline_route": batch_detail.get("video_pipeline_route"),
+    }
+
+
 def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     """Prepare template-only derived data for the batch detail page."""
     batch_state = batch_detail.get("state")
@@ -451,6 +524,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         "selected_meta_page": meta_publish_state.get("selected_page") or {},
         "selected_instagram_account": meta_publish_state.get("selected_instagram") or {},
         "available_meta_pages": meta_publish_state.get("available_pages") or [],
+        "video_generation_settings": _build_batch_video_generation_settings(batch_detail, posts),
     }
 
 
@@ -509,10 +583,15 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
         posts_data = get_posts_by_batch(batch_id)
+        batch_creation_mode = str(batch.get("creation_mode") or "").strip()
         
         posts_list = []
         for p in posts_data:
             normalized_seed = _normalize_seed_data(p.get("seed_data"))
+            manual_post_type = str(normalized_seed.get("manual_post_type") or "").strip()
+            display_post_type = manual_post_type or str(p.get("post_type") or "").strip()
+            if batch_creation_mode == "manual" and not manual_post_type and display_post_type == "value":
+                display_post_type = ""
 
             video_prompt = p.get("video_prompt_json")
             if isinstance(video_prompt, str):
@@ -606,7 +685,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             posts_list.append(
                 PostDetail(
                     id=p["id"],
-                    post_type=p["post_type"],
+                    post_type=display_post_type or p["post_type"],
                     topic_title=p["topic_title"],
                     topic_rotation=p["topic_rotation"],
                     topic_cta=p["topic_cta"],
@@ -644,8 +723,14 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                 )
             )
 
+        derived_creation_mode = str(batch.get("creation_mode") or "").strip()
+        if not derived_creation_mode:
+            has_manual_drafts = any(bool((p.seed_data or {}).get("manual_draft")) for p in posts_list)
+            derived_creation_mode = "manual" if has_manual_drafts else "automated"
+
         batch_detail = {
             **batch,
+            "creation_mode": derived_creation_mode,
             **posts_summary,
             "meta_connection": _sanitize_meta_connection(
                 _effective_meta_connection(batch_id, batch.get("meta_connection"))
@@ -687,6 +772,22 @@ async def get_batch_status(batch_id: str):
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
         progress = get_seeding_progress(batch_id)
+
+        is_manual_batch = _batch_has_manual_drafts(batch) or (
+            batch.get("state") == BatchState.S2_SEEDED.value
+            and not batch.get("post_type_counts")
+        )
+
+        if is_manual_batch:
+            payload = {
+                "id": batch["id"],
+                "state": batch["state"],
+                "posts_count": posts_summary["posts_count"],
+                "posts_by_state": posts_summary["posts_by_state"],
+                "updated_at": batch["updated_at"],
+                "progress": progress,
+            }
+            return SuccessResponse(data=payload)
 
         if (
             batch["state"] == BatchState.S1_SETUP.value
