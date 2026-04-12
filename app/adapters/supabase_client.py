@@ -12,6 +12,23 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _looks_like_jwt(value: str) -> bool:
+    token = (value or "").strip()
+    return token.count(".") == 2 and all(part for part in token.split("."))
+
+
+def _resolve_supabase_api_key(*, public_key: str, service_key: str) -> str:
+    if _looks_like_jwt(service_key):
+        return service_key
+    if _looks_like_jwt(public_key):
+        logger.warning(
+            "supabase_service_key_invalid_fallback_to_public_key",
+            service_key_present=bool(service_key),
+        )
+        return public_key
+    return service_key or public_key
+
+
 class SupabaseAdapter:
     """Singleton adapter for Supabase client."""
     
@@ -29,7 +46,10 @@ class SupabaseAdapter:
             settings = get_settings()
             self._client = create_client(
                 supabase_url=settings.supabase_url,
-                supabase_key=settings.supabase_service_key
+                supabase_key=_resolve_supabase_api_key(
+                    public_key=settings.supabase_key,
+                    service_key=settings.supabase_service_key,
+                ),
             )
             logger.info(
                 "supabase_client_initialized",

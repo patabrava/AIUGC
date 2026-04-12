@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.main import app
 import app.main as main_module
+import app.adapters.supabase_client as supabase_client_module
 from app.features.qa.handlers import _active_posts_ready_for_publish
 
 
@@ -131,3 +132,57 @@ def test_google_ai_key_alignment_detector_flags_mismatch():
         google_ai_api_key = "google-key"
 
     assert Settings.google_ai_keys_aligned(DummySettings()) is False
+
+
+def test_supabase_adapter_uses_valid_service_key(monkeypatch):
+    captured = {}
+
+    class DummySettings:
+        supabase_url = "https://example.supabase.co"
+        supabase_key = "ey.public.payload"
+        supabase_service_key = "ey.service.payload"
+
+    def _fake_create_client(*, supabase_url, supabase_key):
+        captured["url"] = supabase_url
+        captured["key"] = supabase_key
+        return object()
+
+    monkeypatch.setattr(supabase_client_module, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(supabase_client_module, "create_client", _fake_create_client)
+    supabase_client_module.SupabaseAdapter._instance = None
+    supabase_client_module.SupabaseAdapter._client = None
+
+    adapter = supabase_client_module.SupabaseAdapter()
+
+    assert adapter.client is not None
+    assert captured == {
+        "url": "https://example.supabase.co",
+        "key": "ey.service.payload",
+    }
+
+
+def test_supabase_adapter_falls_back_when_service_key_is_malformed(monkeypatch):
+    captured = {}
+
+    class DummySettings:
+        supabase_url = "https://example.supabase.co"
+        supabase_key = "ey.public.payload"
+        supabase_service_key = "ey.bad.payloadey.bad.payload"
+
+    def _fake_create_client(*, supabase_url, supabase_key):
+        captured["url"] = supabase_url
+        captured["key"] = supabase_key
+        return object()
+
+    monkeypatch.setattr(supabase_client_module, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(supabase_client_module, "create_client", _fake_create_client)
+    supabase_client_module.SupabaseAdapter._instance = None
+    supabase_client_module.SupabaseAdapter._client = None
+
+    adapter = supabase_client_module.SupabaseAdapter()
+
+    assert adapter.client is not None
+    assert captured == {
+        "url": "https://example.supabase.co",
+        "key": "ey.public.payload",
+    }
