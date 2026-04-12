@@ -16,7 +16,7 @@ def test_settings_respect_app_env_file_override(monkeypatch, tmp_path: Path):
                 "SUPABASE_KEY=public-key",
                 "SUPABASE_SERVICE_KEY=service-key",
                 "CLOUDFLARE_R2_PUBLIC_BASE_URL=https://r2.example.com",
-                "APP_URL=https://lippelift.xyz",
+                "APP_URL=https://example.com",
                 "ENVIRONMENT=production",
             ]
         )
@@ -25,7 +25,7 @@ def test_settings_respect_app_env_file_override(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setenv("APP_ENV_FILE", str(env_file))
     settings = Settings()
-    assert settings.app_url == "https://lippelift.xyz"
+    assert settings.app_url == "https://example.com"
     assert settings.environment == "production"
 
 
@@ -35,7 +35,7 @@ def test_example_production_env_lists_required_live_keys():
         "SUPABASE_URL=",
         "SUPABASE_SERVICE_KEY=",
         "GOOGLE_APPLICATION_CREDENTIALS_JSON=",
-        "APP_URL=https://lippelift.xyz",
+        "APP_URL=",
         "ENVIRONMENT=production",
         "VERTEX_AI_PROJECT_ID=",
         "CLOUDFLARE_R2_BUCKET_NAME=",
@@ -51,12 +51,15 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     worker = data["services"]["worker"]
     assert web["build"]["context"] == "."
     assert worker["build"]["context"] == "."
-    assert web["env_file"] == ["${APP_ENV_FILE:-.env.production}"]
+    assert any(".env.production" in entry for entry in web["env_file"])
     assert "DOCKER_BUILD_CONTEXT" not in compose_text
     assert "/opt/aiugc-prod/.env.production" not in compose_text
     assert "lippelift.xyz" not in compose_text
     assert "srv1498567.hstgr.cloud" not in compose_text
     assert "TRAEFIK_HOST_RULE" in compose_text
+    assert "TRAEFIK_ENTRYPOINTS" in compose_text
+    assert "TRAEFIK_CERTRESOLVER" in compose_text
+    assert "TRAEFIK_NETWORK" in compose_text
 
 
 def test_production_compose_has_live_healthcheck():

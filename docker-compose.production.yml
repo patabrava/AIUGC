@@ -7,13 +7,16 @@ services:
     env_file:
       - ${APP_ENV_FILE:-.env.production}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
+    networks:
+      - default
+      - traefik
     labels:
       - traefik.enable=true
       - 'traefik.http.routers.aiugc-prod-web.rule=${TRAEFIK_HOST_RULE:-Host(`localhost`)}'
-      - traefik.http.routers.aiugc-prod-web.entrypoints=websecure
-      - traefik.http.routers.aiugc-prod-web.tls.certresolver=letsencrypt
+      - 'traefik.http.routers.aiugc-prod-web.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}'
+      - 'traefik.http.routers.aiugc-prod-web.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}'
       - traefik.http.services.aiugc-prod-web.loadbalancer.server.port=8000
     healthcheck:
       test:
@@ -61,3 +64,8 @@ services:
     env_file:
       - ${APP_ENV_FILE:-.env.production}
     command: python -m workers.caption_worker
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}
