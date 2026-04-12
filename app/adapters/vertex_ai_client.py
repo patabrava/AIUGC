@@ -389,6 +389,12 @@ class VertexAIClient:
             adc_path = resolve_google_application_credentials_path(self._settings)
             if adc_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
+            project_id = self._settings.vertex_ai_project_id.strip()
+            if project_id:
+                if not os.getenv("GOOGLE_CLOUD_PROJECT"):
+                    os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
+                if not os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT"):
+                    os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] = project_id
             try:
                 self._credentials, _ = google.auth.default(
                     scopes=["https://www.googleapis.com/auth/cloud-platform"],

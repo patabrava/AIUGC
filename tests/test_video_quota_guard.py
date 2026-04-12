@@ -412,6 +412,50 @@ def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypat
         assert captured["provider"] == "vertex_ai"
 
 
+def test_generate_all_videos_routes_32s_vertex_submission_through_duration_profile(monkeypatch):
+    posts = [
+        {
+            "id": "post-32",
+            "batch_id": "batch-32",
+            "video_prompt_json": {"veo_prompt": "Prompt 32"},
+            "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz."},
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+    captured_calls = []
+
+    def _fake_submit(**kwargs):
+        captured_calls.append(kwargs)
+        return {
+            "operation_id": "operations/test-32",
+            "status": "submitted",
+            "provider_model": "vertex_ai",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": "operations/test-32"},
+        }
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: {"id": batch_id, "target_length_tier": 32})
+    monkeypatch.setattr("app.features.videos.handlers.ensure_immediate_submit_slot", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.release_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
+
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=32)
+    asyncio.run(generate_all_videos("batch-32", request))
+
+    assert len(captured_calls) == 1
+    captured = captured_calls[0]
+    assert captured["provider"] == "vertex_ai"
+    assert captured["seconds"] == 32
+    assert captured["provider_duration_seconds"] == 8
+
+
 def test_generate_all_videos_backfills_missing_prompts_from_seed_data(monkeypatch):
     posts = [
         {

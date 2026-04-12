@@ -81,3 +81,84 @@ class TestPollerCaptionHandoff:
 
         assert result == b"vertex-video-bytes"
         mock_http_get.assert_called_once()
+
+    @patch("workers.video_poller._trim_tail", return_value=(b"fake_video_bytes", {}))
+    @patch("workers.video_poller.get_storage_client")
+    @patch("workers.video_poller.get_supabase")
+    def test_store_completed_video_clears_stale_lease_and_error_metadata(
+        self,
+        mock_sb_factory,
+        mock_storage,
+        mock_trim,
+    ):
+        from workers.video_poller import _store_completed_video
+
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.upload_video.return_value = {
+            "storage_provider": "cloudflare_r2",
+            "storage_key": "test/key.mp4",
+            "url": "https://cdn.example.com/test/key.mp4",
+            "size": 1024,
+            "file_path": "test/key.mp4",
+            "file_type": "video/mp4",
+            "thumbnail_url": None,
+        }
+        mock_storage.return_value = mock_storage_instance
+
+        mock_client = MagicMock()
+        mock_sb_factory.return_value.client = mock_client
+        mock_table = mock_client.table.return_value
+        mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+            "video_metadata": {
+                "video_poll_lease_owner": "e47c0b94b840:1",
+                "video_poll_lease_acquired_at": "2026-04-12T12:00:00Z",
+                "video_poll_lease_expires_at": "2026-04-12T12:05:00Z",
+                "last_polled_by": "e47c0b94b840:1",
+                "last_polled_at": "2026-04-12T12:02:00Z",
+                "error": "old adc failure",
+                "error_type": "HTTPStatusError",
+                "provider_status_code": 403,
+                "provider_response_body": "old body",
+                "quota_consume_error": "stale quota error",
+                "veo_extension_retry_after": "2026-04-12T12:03:00Z",
+                "veo_extension_last_retryable_error": "retry later",
+                "veo_extension_rate_limit_retry_count": 3,
+                "veo_extension_input_retry_count": 2,
+                "last_poll_recovery": "startup_expired_lease_cleanup",
+            },
+            "batch_id": "batch_123",
+        }
+        mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+        _store_completed_video(
+            post_id="post_123",
+            provider="vertex_ai",
+            video_source=b"fake_video_bytes",
+            correlation_id="test_corr",
+            provider_metadata={"done": True, "video_uri": "data:video/mp4;base64,AAAA"},
+            existing_metadata=mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value.data["video_metadata"],
+        )
+
+        update_calls = mock_table.update.call_args_list
+        found = False
+        for call in update_calls:
+            data = call[0][0]
+            if data.get("video_status") == VIDEO_STATUS_CAPTION_PENDING:
+                found = True
+                metadata = data["video_metadata"]
+                assert metadata["chain_status"] == "caption_pending"
+                assert metadata["video_poll_recovery"] == "terminal_success_metadata_cleared"
+                assert "video_poll_lease_owner" not in metadata
+                assert "video_poll_lease_acquired_at" not in metadata
+                assert "video_poll_lease_expires_at" not in metadata
+                assert "last_polled_by" not in metadata
+                assert "last_polled_at" not in metadata
+                assert "error" not in metadata
+                assert "error_type" not in metadata
+                assert "provider_status_code" not in metadata
+                assert "provider_response_body" not in metadata
+                assert "quota_consume_error" not in metadata
+                assert "veo_extension_retry_after" not in metadata
+                assert "veo_extension_last_retryable_error" not in metadata
+                assert "veo_extension_input_retry_count" not in metadata
+        assert found, "No update call set terminal caption_pending cleanup"

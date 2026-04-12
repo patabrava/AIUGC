@@ -120,6 +120,105 @@ def test_claim_video_poll_lease_skips_when_other_worker_owns_active_lease(monkey
     fake_supabase.client.table.assert_not_called()
 
 
+def test_clear_expired_poller_leases_removes_only_expired_entries(monkeypatch):
+    from workers.video_poller import _clear_expired_poller_leases
+
+    expired = (
+        datetime.now(timezone.utc) - timedelta(seconds=10)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    active = (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    updates = []
+
+    class FakeUpdate:
+        def __init__(self, payload, post_id):
+            self.payload = payload
+            self.post_id = post_id
+
+        def eq(self, *args, **kwargs):
+            return self
+
+        def execute(self):
+            updates.append((self.post_id, self.payload))
+            return MagicMock(data=[])
+
+    class FakeTable:
+        def __init__(self):
+            self._selected = False
+            self._status_values = None
+
+        def select(self, *args, **kwargs):
+            self._selected = True
+            return self
+
+        def in_(self, column, values):
+            self._status_values = values
+            return self
+
+        def execute(self):
+            return MagicMock(
+                data=[
+                    {
+                        "id": "expired-post",
+                        "video_metadata": {
+                            "video_poll_lease_owner": "worker-old",
+                            "video_poll_lease_expires_at": expired,
+                            "video_poll_lease_acquired_at": expired,
+                        },
+                    },
+                    {
+                        "id": "active-post",
+                        "video_metadata": {
+                            "video_poll_lease_owner": "worker-old",
+                            "video_poll_lease_expires_at": active,
+                            "video_poll_lease_acquired_at": active,
+                        },
+                    },
+                ]
+            )
+
+        def update(self, payload):
+            return FakeUpdate(payload, getattr(self, "_current_id", None))
+
+    class FakeSupabase:
+        def __init__(self):
+            self.client = MagicMock()
+            self.table_obj = FakeTable()
+            self.client.table.side_effect = lambda name: self.table_obj
+
+    fake_supabase = FakeSupabase()
+
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("workers.video_poller.get_pollable_video_statuses", lambda: ["submitted", "processing"])
+
+    _clear_expired_poller_leases()
+
+    assert updates, "expected expired leases to be cleared"
+    payload = updates[0][1]
+    assert payload["video_metadata"]["last_poll_recovery"] == "startup_expired_lease_cleanup"
+    assert "video_poll_lease_owner" not in payload["video_metadata"]
+    assert "video_poll_lease_expires_at" not in payload["video_metadata"]
+
+
+def test_acquire_poller_lock_exits_when_lock_held(monkeypatch):
+    import builtins
+    import io
+    from workers.video_poller import _acquire_poller_lock
+
+    fake_handle = io.StringIO()
+
+    class DummyFcntl:
+        def flock(self, fd, mode):
+            raise OSError("locked")
+
+    monkeypatch.setitem(__import__("sys").modules, "fcntl", DummyFcntl())
+    monkeypatch.setattr(builtins, "open", lambda *args, **kwargs: fake_handle)
+
+    assert _acquire_poller_lock() is False
+
+
 from workers.video_poller import _needs_extension_hop
 
 
@@ -771,6 +870,8 @@ def test_handle_vertex_ai_video_chains_when_hops_remaining():
     mock_vertex.check_operation_status.assert_called_once()
 
 
+
+
 def test_handle_veo_video_downloads_bytes_when_postprocess_needed():
     """Portrait fallback must bypass URL ingest and download bytes for the final crop step."""
     from workers.video_poller import _handle_veo_video
@@ -1079,3 +1180,25 @@ def test_process_video_operation_defers_vertex_polling_errors(monkeypatch):
     assert captured_update["payload"]["video_status"] == "processing"
     assert captured_update["payload"]["video_metadata"]["provider_status_code"] == 503
     assert captured_update["payload"]["video_metadata"]["error_type"] == "HTTPStatusError"
+
+
+def test_process_video_operation_skips_lease_when_operation_data_missing(monkeypatch):
+    from workers.video_poller import process_video_operation
+
+    post = {
+        "id": "post-missing-op",
+        "updated_at": "2026-03-31T10:00:00Z",
+        "video_metadata": {},
+    }
+
+    lease_mock = MagicMock()
+    handle_mock = MagicMock()
+    monkeypatch.setattr("workers.video_poller._claim_video_poll_lease", lease_mock)
+    monkeypatch.setattr("workers.video_poller._handle_vertex_ai_video", handle_mock)
+    monkeypatch.setattr("workers.video_poller._handle_sora_video", handle_mock)
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: MagicMock())
+
+    process_video_operation(post)
+
+    lease_mock.assert_not_called()
+    handle_mock.assert_not_called()
