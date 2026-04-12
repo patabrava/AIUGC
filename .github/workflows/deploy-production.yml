@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,11 +16,11 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.PROD_SSH_HOST }}
-          username: ${{ secrets.PROD_SSH_USER }}
-          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          host: ${{ secrets.PROD_SSH_HOST || vars.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER || vars.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
           script: |
-            export APP_ROOT="${{ secrets.PROD_APP_ROOT }}"
+            export APP_ROOT="${{ secrets.PROD_APP_ROOT || vars.PROD_APP_ROOT }}"
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
             export REPO_DIR="${APP_ROOT}/repo"
             export ENV_FILE="${APP_ROOT}/.env.production"

@@ -111,6 +111,7 @@ def test_github_action_deploys_on_push_to_main():
     assert data["name"] == "Deploy Production"
     workflow_on = data.get("on", data.get(True))
     assert workflow_on["push"]["branches"] == ["main"]
+    assert data["jobs"]["deploy"]["environment"] == "production"
     steps = data["jobs"]["deploy"]["steps"]
     step_text = "\n".join(str(step) for step in steps)
     assert "appleboy/ssh-action" in step_text
@@ -120,3 +121,7 @@ def test_github_action_deploys_on_push_to_main():
     assert "export APP_ROOT=\"${APP_ROOT:-/opt/aiugc-prod}\"" in step_text
     assert "export REPO_DIR=\"${APP_ROOT}/repo\"" in step_text
     assert "export ENV_FILE=\"${APP_ROOT}/.env.production\"" in step_text
+    assert "secrets.PROD_SSH_HOST || vars.PROD_SSH_HOST" in step_text
+    assert "secrets.PROD_SSH_USER || vars.PROD_SSH_USER" in step_text
+    assert "secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY" in step_text
+    assert "secrets.PROD_APP_ROOT || vars.PROD_APP_ROOT" in step_text
