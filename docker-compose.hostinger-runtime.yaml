@@ -75,7 +75,8 @@ x-runtime-base: &runtime-base
       cd /app;
       if [ -n "$$repo_ref" ]; then
         git fetch --depth 1 origin "$$repo_ref" &&
-        git checkout -f "$$repo_ref";
+        git checkout -f -B "$$repo_ref" "origin/$$repo_ref" &&
+        git reset --hard "origin/$$repo_ref";
       fi;
       python -m pip install --upgrade pip;
       python -m pip install --retries 5 --timeout 120 -r requirements.txt;

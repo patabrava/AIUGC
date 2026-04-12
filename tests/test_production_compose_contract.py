@@ -107,6 +107,12 @@ def test_production_deploy_script_contract():
     assert 'HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/health}"' in script_text
 
 
+def test_hostinger_runtime_checkout_tracks_remote_main():
+    compose_text = (Path(__file__).resolve().parents[1] / "docker-compose.hostinger-runtime.yaml").read_text(encoding="utf-8")
+    assert 'git checkout -f -B "$$repo_ref" "origin/$$repo_ref"' in compose_text
+    assert 'git reset --hard "origin/$$repo_ref"' in compose_text
+
+
 def test_github_action_deploys_on_push_to_main():
     data = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     assert data["name"] == "Deploy Production"
