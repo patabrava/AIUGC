@@ -152,6 +152,42 @@ def test_process_video_operation_skips_foreign_environment(monkeypatch):
     assert handled == []
 
 
+def test_handle_vertex_ai_video_surfaces_provider_error(monkeypatch):
+    from workers.video_poller import _handle_vertex_ai_video
+    from app.core.errors import FlowForgeException
+
+    class FakeVertexClient:
+        def check_operation_status(self, *, operation_id, correlation_id):
+            return {
+                "operation_id": operation_id,
+                "done": True,
+                "status": "failed",
+                "video_uri": None,
+                "provider": "vertex_ai",
+                "error": {
+                    "code": 3,
+                    "message": "Veo could not generate videos because the input image violates Vertex AI's usage guidelines.",
+                },
+            }
+
+    monkeypatch.setattr("workers.video_poller.get_vertex_ai_client", lambda: FakeVertexClient())
+
+    post = {
+        "id": "post-vertex-error",
+        "video_provider": "vertex_ai",
+        "video_operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1",
+        "video_metadata": {},
+    }
+
+    with pytest.raises(FlowForgeException) as exc_info:
+        _handle_vertex_ai_video(post, post["video_operation_id"], "corr-vertex-error")
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code.value == "third_party_fail"
+    assert "usage guidelines" in exc_info.value.message
+    assert exc_info.value.details["provider_error"]["code"] == 3
+
+
 def test_clear_expired_poller_leases_removes_only_expired_entries(monkeypatch):
     from workers.video_poller import _clear_expired_poller_leases
 
@@ -1212,6 +1248,65 @@ def test_process_video_operation_defers_vertex_polling_errors(monkeypatch):
     assert captured_update["payload"]["video_status"] == "processing"
     assert captured_update["payload"]["video_metadata"]["provider_status_code"] == 503
     assert captured_update["payload"]["video_metadata"]["error_type"] == "HTTPStatusError"
+
+
+def test_process_video_operation_marks_vertex_provider_failures_as_failed(monkeypatch):
+    from app.core.errors import ErrorCode, FlowForgeException
+    from workers.video_poller import process_video_operation
+
+    post = {
+        "id": "post-vertex-provider-failed",
+        "video_operation_id": "op-vertex-provider-failed",
+        "video_provider": "vertex_ai",
+        "updated_at": "2026-03-31T10:00:00Z",
+        "video_metadata": {
+            "video_pipeline_route": "veo_extended",
+            "veo_extension_hops_target": 1,
+            "veo_extension_hops_completed": 0,
+            "chain_status": "submitted",
+        },
+    }
+
+    provider_error = {
+        "code": 3,
+        "message": "Veo could not generate videos because the input image violates Vertex AI's usage guidelines. Support codes: 15236754",
+    }
+    error = FlowForgeException(
+        code=ErrorCode.THIRD_PARTY_FAIL,
+        message=provider_error["message"],
+        details={"provider_error": provider_error},
+        status_code=503,
+    )
+
+    captured_update = {}
+
+    class FakeUpdate:
+        def __init__(self, payload):
+            captured_update["payload"] = payload
+
+        def eq(self, *args, **kwargs):
+            return self
+
+        def execute(self):
+            return MagicMock()
+
+    class FakeTable:
+        def update(self, payload):
+            return FakeUpdate(payload)
+
+    fake_supabase = MagicMock()
+    fake_supabase.client.table.return_value = FakeTable()
+
+    monkeypatch.setattr("workers.video_poller._claim_video_poll_lease", lambda post, correlation_id: post)
+    monkeypatch.setattr("workers.video_poller._handle_vertex_ai_video", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_supabase)
+
+    process_video_operation(post)
+
+    assert captured_update["payload"]["video_status"] == "failed"
+    assert captured_update["payload"]["video_metadata"]["error_type"] == "FlowForgeException"
+    assert "usage guidelines" in captured_update["payload"]["video_metadata"]["error"]
+    assert captured_update["payload"]["video_metadata"]["error_details"]["provider_error"]["code"] == 3
 
 
 def test_process_video_operation_skips_lease_when_operation_data_missing(monkeypatch):

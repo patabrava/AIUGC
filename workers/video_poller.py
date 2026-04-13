@@ -27,7 +27,7 @@ from app.adapters.supabase_client import get_supabase
 from app.adapters.storage_client import get_storage_client
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings, google_ai_context_fingerprint, resolve_google_application_credentials_path
-from app.core.errors import FlowForgeException, ValidationError
+from app.core.errors import ErrorCode, FlowForgeException, ValidationError
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.videos.prompt_audit import record_prompt_audit
 from app.features.videos.quota_guard import (
@@ -462,6 +462,10 @@ def _failure_metadata(
     if isinstance(error, httpx.HTTPStatusError):
         metadata["provider_status_code"] = error.response.status_code
         metadata["provider_response_body"] = error.response.text[:4000]
+    if isinstance(error, FlowForgeException):
+        metadata["error_details"] = error.details
+        metadata["error_code"] = str(error.code)
+        metadata["error_status_code"] = error.status_code
     return metadata
 
 
@@ -908,28 +912,30 @@ def process_video_operation(post: Dict[str, Any]):
                 retry_metadata["provider_status_code"] = e.response.status_code
                 retry_metadata["provider_response_body"] = e.response.text[:4000]
 
-            try:
-                supabase = get_supabase().client
-                supabase.table("posts").update({
-                    "video_status": "processing",
-                    "video_metadata": retry_metadata,
-                }).eq("id", post_id).execute()
-                logger.warning(
-                    "vertex_video_polling_deferred",
-                    post_id=post_id,
-                    correlation_id=correlation_id,
-                    operation_id=operation_id,
-                    error_type=e.__class__.__name__,
-                )
-                return
-            except Exception as update_error:
-                logger.exception(
-                    "vertex_video_polling_deferral_failed",
-                    post_id=post_id,
-                    correlation_id=correlation_id,
-                    operation_id=operation_id,
-                    error=str(update_error),
-                )
+            should_defer = isinstance(e, httpx.HTTPStatusError) and e.response.status_code in {429, 500, 502, 503, 504}
+            if should_defer:
+                try:
+                    supabase = get_supabase().client
+                    supabase.table("posts").update({
+                        "video_status": "processing",
+                        "video_metadata": retry_metadata,
+                    }).eq("id", post_id).execute()
+                    logger.warning(
+                        "vertex_video_polling_deferred",
+                        post_id=post_id,
+                        correlation_id=correlation_id,
+                        operation_id=operation_id,
+                        error_type=e.__class__.__name__,
+                    )
+                    return
+                except Exception as update_error:
+                    logger.exception(
+                        "vertex_video_polling_deferral_failed",
+                        post_id=post_id,
+                        correlation_id=correlation_id,
+                        operation_id=operation_id,
+                        error=str(update_error),
+                    )
         if provider == "veo_3_1":
             if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
                 if _quota_controls_bypassed():
@@ -1260,6 +1266,7 @@ def _handle_vertex_ai_video(post: Dict[str, Any], operation_id: str, correlation
 
     done = status_result.get("done", False)
     video_uri = status_result.get("video_uri")
+    provider_error = status_result.get("error")
 
     logger.debug(
         "vertex_ai_status_polled",
@@ -1268,6 +1275,21 @@ def _handle_vertex_ai_video(post: Dict[str, Any], operation_id: str, correlation
         done=done,
         has_video_uri=bool(video_uri),
     )
+
+    if done and provider_error:
+        message = "Vertex AI operation failed"
+        if isinstance(provider_error, dict):
+            message = str(provider_error.get("message") or message)
+        raise FlowForgeException(
+            code=ErrorCode.THIRD_PARTY_FAIL,
+            message=message,
+            details={
+                "provider": provider,
+                "operation_id": operation_id,
+                "provider_error": provider_error,
+            },
+            status_code=503,
+        )
 
     if done and video_uri:
         metadata = post.get("video_metadata") or {}
@@ -1300,7 +1322,16 @@ def _handle_vertex_ai_video(post: Dict[str, Any], operation_id: str, correlation
             existing_metadata=metadata,
         )
     elif done and not video_uri:
-        raise ValueError("Vertex AI operation completed but returned no video URI")
+        raise FlowForgeException(
+            code=ErrorCode.THIRD_PARTY_FAIL,
+            message="Vertex AI operation completed without a downloadable video",
+            details={
+                "provider": provider,
+                "operation_id": operation_id,
+                "status_result": status_result,
+            },
+            status_code=503,
+        )
     else:
         new_status = "processing"
         supabase = get_supabase().client

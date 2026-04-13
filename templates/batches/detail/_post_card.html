@@ -363,10 +363,17 @@
                 </div>
                 {% elif video_status == 'failed' %}
                 <div class="mt-2 text-sm text-red-600">
+                    {% set error_text = (post.video_metadata.get('error') if post.video_metadata else '') %}
+                    {% set error_text_lc = (error_text | lower) %}
                     {% if post.video_metadata and post.video_metadata.get('rai_retry_count', 0) >= 3 %}
                     <div class="bg-red-50 border border-red-200 rounded-md p-2 mb-1">
                         <p class="font-medium">Safety filter blocked after 3 retries</p>
                         <p class="text-xs text-red-500 mt-1">Google's content filter repeatedly rejected this prompt. Try modifying the dialogue — removing specific financial amounts or medical terms may help. Non-English prompts have higher false-positive rates.</p>
+                    </div>
+                    {% elif 'usage guidelines' in error_text_lc %}
+                    <div class="bg-red-50 border border-red-200 rounded-md p-2 mb-1">
+                        <p class="font-medium">Provider rejected this generation</p>
+                        <p class="text-xs text-red-500 mt-1">Vertex AI flagged this request against usage guidelines. Review the prompt/anchor and retry with adjusted content.</p>
                     </div>
                     {% else %}
                     <p>Video generation failed. Please try again.</p>
