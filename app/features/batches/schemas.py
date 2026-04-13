@@ -7,7 +7,7 @@ Per Constitution § II: Validated Boundaries
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, validator
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Literal
 from datetime import datetime
 from app.core.states import BatchState
 
@@ -33,7 +33,20 @@ class PostTypeCounts(BaseModel):
 class CreateBatchRequest(BaseModel):
     """Request to create a new batch."""
     brand: str = Field(..., min_length=1, max_length=100, description="Brand name")
-    post_type_counts: PostTypeCounts = Field(..., description="Post type distribution")
+    creation_mode: Literal["automated", "manual"] = Field(
+        default="automated",
+        description="Batch creation mode",
+    )
+    post_type_counts: Optional[PostTypeCounts] = Field(
+        default=None,
+        description="Post type distribution for automated batches",
+    )
+    manual_post_count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Number of blank manual drafts to create",
+    )
     target_length_tier: int = Field(
         default=8,
         ge=8,
@@ -47,12 +60,27 @@ class CreateBatchRequest(BaseModel):
             raise ValueError("Brand name cannot be empty")
         return v.strip()
     
-    @validator('post_type_counts')
+    @validator('post_type_counts', always=True)
     def validate_total_posts(cls, v):
+        if v is None:
+            return v
         if v.total == 0:
             raise ValueError("Total post count must be greater than 0")
         if v.total > 100:
             raise ValueError("Total post count cannot exceed 100")
+        return v
+
+    @validator('manual_post_count', always=True)
+    def validate_manual_post_count(cls, v, values):
+        if values.get("creation_mode") == "manual" and v is None:
+            raise ValueError("Manual post count must be provided for manual batches")
+        return v
+
+    @validator('post_type_counts', always=True)
+    def validate_creation_mode_contract(cls, v, values):
+        creation_mode = values.get("creation_mode") or "automated"
+        if creation_mode == "automated" and v is None:
+            raise ValueError("Post type counts are required for automated batches")
         return v
 
     @validator('target_length_tier')
@@ -67,7 +95,9 @@ class BatchResponse(BaseModel):
     id: str
     brand: str
     state: BatchState
+    creation_mode: str = "automated"
     post_type_counts: Dict[str, int]
+    manual_post_count: Optional[int] = None
     target_length_tier: Optional[int] = None
     created_at: datetime
     updated_at: datetime
@@ -86,7 +116,7 @@ class BatchListResponse(BaseModel):
 class PostDetail(BaseModel):
     """Post detail model for batch view."""
     id: str
-    post_type: str
+    post_type: Optional[str] = None
     topic_title: str
     topic_rotation: str
     topic_cta: str
@@ -123,7 +153,9 @@ class BatchDetailResponse(BaseModel):
     id: str
     brand: str
     state: BatchState
+    creation_mode: str = "automated"
     post_type_counts: Dict[str, int]
+    manual_post_count: Optional[int] = None
     target_length_tier: Optional[int] = None
     video_pipeline_route: Optional[str] = None
     created_at: datetime

@@ -250,18 +250,21 @@
                 hx-select="#batches-list-content"
                 hx-swap="outerHTML"
                 hx-indicator="#batch-spinner"
+                x-data="{ creationMode: 'automated' }"
                 @htmx:before-request="
                     const brand = $event.detail.elt.querySelector('[name=brand]').value;
+                    const creationMode = $event.detail.elt.querySelector('[name=creation_mode]').value || 'automated';
                     const value = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.value\']').value) || 0;
                     const lifestyle = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.lifestyle\']').value) || 0;
                     const product = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.product\']').value) || 0;
+                    const manualPostCount = parseInt($event.detail.elt.querySelector('[name=manual_post_count]')?.value) || 0;
                     const targetLengthTier = parseInt($event.detail.elt.querySelector('[name=target_length_tier]').value) || 8;
                     const tempId = 'temp-' + Date.now();
                     window.dispatchEvent(new CustomEvent('batch-progress:update', {
                         detail: {
                             batchId: tempId,
                             brand,
-                            expected: value + lifestyle + product,
+                            expected: creationMode === 'manual' ? manualPostCount : value + lifestyle + product,
                             targetLengthTier,
                             posts: 0,
                             isTemp: true,
@@ -281,8 +284,21 @@
                             class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                     </div>
-                    
+
                     <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Batch Mode</label>
+                        <select
+                            name="creation_mode"
+                            x-model="creationMode"
+                            class="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
+                        >
+                            <option value="automated">Automated</option>
+                            <option value="manual">Manual</option>
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">Automated uses the research agent. Manual lets you define each draft yourself.</p>
+                    </div>
+                    
+                    <div x-show="creationMode === 'automated'" x-cloak>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Post Type Counts</label>
                         <div class="space-y-2">
                             <div class="flex items-center justify-between">
@@ -319,6 +335,19 @@
                                 >
                             </div>
                         </div>
+                    </div>
+
+                    <div x-show="creationMode === 'manual'" x-cloak>
+                        <label class="block text-sm font-medium text-gray-700">Manual Draft Count</label>
+                        <input
+                            type="number"
+                            name="manual_post_count"
+                            min="1"
+                            max="100"
+                            value="3"
+                            class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
+                        >
+                        <p class="mt-1 text-xs text-gray-500">Manual batches create blank draft posts that you will edit by hand.</p>
                     </div>
 
                     <div>

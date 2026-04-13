@@ -1387,6 +1387,53 @@ def test_discover_topics_for_batch_runs_off_event_loop(monkeypatch):
     assert result["state"] == "S2_SEEDED"
 
 
+def test_discover_topics_for_manual_batch_skips_gemini(monkeypatch):
+    updated = []
+
+    monkeypatch.setattr(
+        topic_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "state": "S1_SETUP",
+            "creation_mode": "manual",
+            "post_type_counts": {},
+            "target_length_tier": 16,
+        },
+    )
+    monkeypatch.setattr(
+        topic_handlers,
+        "get_posts_by_batch",
+        lambda batch_id: [
+            {
+                "id": "post-1",
+                "seed_data": {
+                    "manual_draft": True,
+                    "script_review_status": "pending",
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        topic_handlers,
+        "update_batch_state",
+        lambda batch_id, target_state: updated.append((batch_id, target_state.value)) or {
+            "id": batch_id,
+            "state": target_state.value,
+        },
+    )
+    monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", lambda: (_ for _ in ()).throw(AssertionError("Gemini path should not run")))
+    monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini path should not run")))
+    monkeypatch.setattr(topic_handlers, "generate_product_topics", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini path should not run")))
+
+    result = asyncio.run(topic_handlers.discover_topics_for_batch("batch-manual"))
+
+    assert result["manual_batch"] is True
+    assert result["state"] == "S2_SEEDED"
+    assert result["posts_created"] == 1
+    assert updated == [("batch-manual", "S2_SEEDED")]
+
+
 def test_cron_topic_discovery_continues_after_one_batch_failure(monkeypatch):
     from app.features.topics import handlers as topic_handlers
     from app.core.states import BatchState

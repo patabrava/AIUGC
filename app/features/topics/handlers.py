@@ -484,6 +484,30 @@ def _topic_bank_research_key(*, post_type: str, target_length_tier: int) -> str:
     return f"{post_type}:{target_length_tier}"
 
 
+def _batch_has_manual_drafts(batch_id: str) -> bool:
+    try:
+        batch = get_batch_by_id(batch_id)
+        if str(batch.get("creation_mode") or "").strip() == "manual":
+            return True
+
+        for post in get_posts_by_batch(batch_id):
+            seed_data = post.get("seed_data") or {}
+            if isinstance(seed_data, str):
+                try:
+                    seed_data = json.loads(seed_data)
+                except json.JSONDecodeError:
+                    seed_data = {}
+            if isinstance(seed_data, dict) and seed_data.get("manual_draft") is True:
+                return True
+    except Exception as exc:
+        logger.warning(
+            "manual_batch_detection_failed",
+            batch_id=batch_id,
+            error=str(exc),
+        )
+    return False
+
+
 def _run_topic_bank_research_task(post_type: str, target_length_tier: int) -> None:
     try:
         harvest_topics_to_bank_sync(
@@ -854,6 +878,17 @@ def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
         _DISCOVERY_TASKS[batch_id] = None  # type: ignore[assignment]
 
     batch = get_batch_by_id(batch_id)
+    if _batch_has_manual_drafts(batch_id):
+        logger.info(
+            "batch_autoseed_skipped_manual_batch",
+            batch_id=batch_id,
+            state=batch.get("state"),
+            reason=reason,
+        )
+        with _SEEDING_PROGRESS_LOCK:
+            if _DISCOVERY_TASKS.get(batch_id) is None:
+                _DISCOVERY_TASKS.pop(batch_id, None)
+        return False
     if batch["state"] != BatchState.S1_SETUP.value:
         logger.info(
             "batch_autoseed_skipped_non_setup",
@@ -916,6 +951,24 @@ def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     """Synchronous topic discovery workflow executed off the request event loop."""
     batch = get_batch_by_id(batch_id)
+
+    manual_drafts_present = _batch_has_manual_drafts(batch_id)
+    if manual_drafts_present:
+        logger.info(
+            "topic_discovery_skipped_manual_batch",
+            batch_id=batch_id,
+            state=batch.get("state"),
+        )
+        if batch.get("state") == BatchState.S1_SETUP.value:
+            update_batch_state(batch_id, BatchState.S2_SEEDED)
+            batch = {**batch, "state": BatchState.S2_SEEDED.value}
+        return {
+            "batch_id": batch_id,
+            "posts_created": len(get_posts_by_batch(batch_id)),
+            "state": batch.get("state"),
+            "topics": [],
+            "manual_batch": True,
+        }
 
     if batch["state"] != BatchState.S1_SETUP.value:
         raise ValidationError(

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.adapters.supabase_client import get_supabase
+from postgrest.exceptions import APIError
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
 from app.features.posts.prompt_builder import build_video_prompt_from_seed, validate_video_prompt, build_optimized_prompt
@@ -161,16 +162,28 @@ async def update_post_script(post_id: str, request: Request):
             )
         if resolved_post_type:
             current_seed["post_type"] = resolved_post_type
+            current_seed["manual_post_type"] = resolved_post_type
 
         update_payload = {
             "seed_data": current_seed,
             # Editing the script must invalidate any prompt assembled from the old text.
             "video_prompt_json": None,
         }
-        if resolved_post_type:
-            update_payload["post_type"] = resolved_post_type
 
         supabase.table("posts").update(update_payload).eq("id", post_id).execute()
+        if resolved_post_type:
+            try:
+                supabase.table("posts").update({"post_type": resolved_post_type}).eq("id", post_id).execute()
+            except APIError as exc:
+                error_text = str(exc)
+                if exc.code == "PGRST204" or "posts_post_type_check" in error_text or "check" in error_text.lower():
+                    logger.warning(
+                        "manual_post_type_column_update_fallback",
+                        post_id=post_id,
+                        error=error_text,
+                    )
+                else:
+                    raise
         
         logger.info(
             "post_script_updated",
