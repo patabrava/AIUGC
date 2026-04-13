@@ -51,7 +51,7 @@ def poll(client, op, label):
 
 def main():
     settings = get_settings()
-    client = genai.Client(api_key=settings.google_ai_api_key)
+    client = genai.Client(api_key=settings.gemini_api_key)
 
     # --- API CALL 1: Base generation ---
     print("=== API CALL 1/2: Base generation ===")
@@ -83,7 +83,7 @@ def main():
 
     # Download base to check duration
     import httpx
-    resp = httpx.get(base_video.uri, headers={"x-goog-api-key": settings.google_ai_api_key}, follow_redirects=True, timeout=60)
+    resp = httpx.get(base_video.uri, headers={"x-goog-api-key": settings.gemini_api_key}, follow_redirects=True, timeout=60)
     base_dur = parse_mp4_duration(resp.content)
     print(f"  Base: {len(resp.content):,} bytes, ~{base_dur:.1f}s")
 
@@ -112,7 +112,7 @@ def main():
     ext_video = ext_op.response.generated_videos[0].video
     print(f"  Extended video URI: {ext_video.uri[:80]}...")
 
-    resp = httpx.get(ext_video.uri, headers={"x-goog-api-key": settings.google_ai_api_key}, follow_redirects=True, timeout=60)
+    resp = httpx.get(ext_video.uri, headers={"x-goog-api-key": settings.gemini_api_key}, follow_redirects=True, timeout=60)
     ext_dur = parse_mp4_duration(resp.content)
     print(f"  Extended: {len(resp.content):,} bytes, ~{ext_dur:.1f}s")
 

@@ -48,9 +48,9 @@ def diagnose_environment() -> Dict[str, Any]:
         settings = get_settings()
         
         # Check Google AI API Key
-        has_key = bool(settings.google_ai_api_key)
-        print_check(has_key, "GOOGLE_AI_API_KEY present", 
-                   f"Length: {len(settings.google_ai_api_key) if has_key else 0}")
+        has_key = bool(settings.gemini_api_key)
+        print_check(has_key, "GEMINI_API_KEY present", 
+                   f"Length: {len(settings.gemini_api_key) if has_key else 0}")
         results["checks"].append({"name": "google_api_key", "passed": has_key})
         
         if not has_key:
@@ -129,10 +129,10 @@ def diagnose_veo_direct() -> Dict[str, Any]:
         from app.core.config import get_settings
         settings = get_settings()
         
-        api_key = settings.google_ai_api_key
+        api_key = settings.gemini_api_key
         
         if not api_key:
-            print_check(False, "GOOGLE_AI_API_KEY not configured")
+            print_check(False, "GEMINI_API_KEY not configured")
             results["passed"] = False
             return results
         

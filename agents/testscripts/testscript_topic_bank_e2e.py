@@ -42,8 +42,8 @@ def _json(value: Any) -> str:
 async def main() -> int:
     configure_logging()
 
-    if not os.getenv("GOOGLE_AI_API_KEY") and os.getenv("GEMINI_API_KEY"):
-        os.environ["GOOGLE_AI_API_KEY"] = os.environ["GEMINI_API_KEY"]
+    if not os.getenv("GEMINI_API_KEY") and os.getenv("GEMINI_API_KEY"):
+        os.environ["GEMINI_API_KEY"] = os.environ["GEMINI_API_KEY"]
     if not os.getenv("SUPABASE_KEY") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
         os.environ["SUPABASE_KEY"] = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     if not os.getenv("SUPABASE_SERVICE_KEY") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
@@ -52,7 +52,7 @@ async def main() -> int:
     for required in (
         "SUPABASE_URL",
         "SUPABASE_SERVICE_KEY",
-        "GOOGLE_AI_API_KEY",
+        "GEMINI_API_KEY",
     ):
         _require_env(required)
 

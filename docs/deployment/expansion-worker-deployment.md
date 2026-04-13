@@ -71,7 +71,7 @@ If you deploy with `docker-compose.yml`, keep the same service shape but replace
 The expansion worker needs the same env vars as the API server:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `GOOGLE_AI_API_KEY` (for Gemini)
+- `GEMINI_API_KEY` (canonical Gemini key)
 - `ENVIRONMENT` (development/production)
 
 ## Notes

@@ -151,7 +151,6 @@ def test_settings_allow_missing_openai_for_topics():
         supabase_key="anon",
         supabase_service_key="service",
         openai_api_key="",
-        google_ai_api_key="veo-key",
         gemini_api_key="gemini-key",
         cloudflare_r2_account_id="acct",
         cloudflare_r2_access_key_id="key",

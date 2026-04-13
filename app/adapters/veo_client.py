@@ -41,7 +41,7 @@ class VeoClient:
             return
         
         settings = get_settings()
-        self._api_key = settings.google_ai_api_key
+        self._api_key = settings.gemini_api_key
         self._http_client = httpx.Client(timeout=30.0, follow_redirects=True)
         self._initialized = True
         logger.info("veo_client_initialized")

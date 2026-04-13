@@ -63,17 +63,9 @@ async def lifespan(app: FastAPI):
         debug=settings.debug,
         **google_ai_context_fingerprint(settings),
     )
-    if not settings.google_ai_keys_aligned():
-        logger.warning(
-            "google_ai_key_alignment_mismatch",
-            gemini_api_key_present=bool(settings.gemini_api_key),
-            google_ai_api_key_present=bool(settings.google_ai_api_key),
-            message="GEMINI_API_KEY and GOOGLE_AI_API_KEY differ; VEO requests will keep using the active Google AI key fingerprint"
-        )
     logger.info(
-        "google_ai_key_alignment_verified",
+        "gemini_api_key_alignment_verified",
         gemini_api_key_present=bool(settings.gemini_api_key),
-        google_ai_api_key_present=bool(settings.google_ai_api_key),
     )
     
     # Defer Supabase client creation until the first real database operation.

@@ -7,7 +7,7 @@ import pytest
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
-os.environ.setdefault("GOOGLE_AI_API_KEY", "test-google-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-google-key")
 os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
 os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
 os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
@@ -27,8 +27,15 @@ from app.features.qa.handlers import _active_posts_ready_for_publish
 def test_sensitive_setting_defaults_do_not_ship_live_values():
     assert Settings.model_fields["supabase_key"].default == ""
     assert Settings.model_fields["supabase_service_key"].default == ""
-    assert Settings.model_fields["google_ai_api_key"].default == ""
     assert Settings.model_fields["cron_secret"].default == ""
+
+
+def test_settings_load_gemini_api_key_from_canonical_env(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "canonical-gemini-key")
+
+    settings = Settings()
+
+    assert settings.gemini_api_key == "canonical-gemini-key"
 
 
 def test_http_exception_is_normalized_into_shared_error_envelope():
@@ -92,6 +99,7 @@ def test_app_lifespan_logs_google_ai_context_fingerprint(monkeypatch):
     monkeypatch.setattr(main_module, "logger", FakeLogger())
     monkeypatch.setattr(main_module, "recover_stalled_batches", lambda **kwargs: [])
     monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: [])
+    monkeypatch.setattr(main_module.settings, "gemini_api_key", "test-google-key")
 
     async def _run():
         async with main_module.lifespan(app):
@@ -104,8 +112,8 @@ def test_app_lifespan_logs_google_ai_context_fingerprint(monkeypatch):
     startup_events = [data for event, data in recorded if event == "application_startup"]
     assert startup_events, "application_startup log was not emitted"
     startup = startup_events[0]
-    assert startup["google_ai_api_key_present"] is True
-    assert startup["google_ai_api_key_fingerprint"] == fingerprint_secret("test-google-key")
+    assert startup["gemini_api_key_present"] is True
+    assert startup["gemini_api_key_fingerprint"] == fingerprint_secret("test-google-key")
     assert startup["google_ai_project_id"] == "unset"
 
 
@@ -113,25 +121,17 @@ def test_google_ai_context_fingerprint_is_stable_and_redacted():
     from app.core.config import fingerprint_secret, google_ai_context_fingerprint
 
     class DummySettings:
-        google_ai_api_key = "alpha-key"
+        gemini_api_key = "alpha-key"
         google_ai_project_id = "project-123"
 
     first = google_ai_context_fingerprint(DummySettings())
     second = google_ai_context_fingerprint(DummySettings())
 
     assert first == second
-    assert first["google_ai_api_key_present"] is True
-    assert first["google_ai_api_key_fingerprint"] == fingerprint_secret("alpha-key")
-    assert first["google_ai_api_key_fingerprint"] != "alpha-key"
+    assert first["gemini_api_key_present"] is True
+    assert first["gemini_api_key_fingerprint"] == fingerprint_secret("alpha-key")
+    assert first["gemini_api_key_fingerprint"] != "alpha-key"
     assert first["google_ai_project_id"] == "project-123"
-
-
-def test_google_ai_key_alignment_detector_flags_mismatch():
-    class DummySettings:
-        gemini_api_key = "gemini-key"
-        google_ai_api_key = "google-key"
-
-    assert Settings.google_ai_keys_aligned(DummySettings()) is False
 
 
 def test_supabase_adapter_uses_valid_service_key(monkeypatch):

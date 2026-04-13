@@ -28,7 +28,7 @@ def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(mon
     monkeypatch.setattr(
         veo_module,
         "get_settings",
-        lambda: SimpleNamespace(google_ai_api_key="test-key"),
+        lambda: SimpleNamespace(gemini_api_key="test-key"),
     )
     fake_http_client = FakeHttpClient()
     veo_module.VeoClient._instance = None
@@ -57,11 +57,37 @@ def test_veo_submission_includes_aspect_ratio_resolution_and_negative_prompt(mon
     veo_module.VeoClient._instance = None
 
 
+def test_veo_submission_uses_gemini_api_key(monkeypatch):
+    monkeypatch.setattr(
+        veo_module,
+        "get_settings",
+        lambda: SimpleNamespace(gemini_api_key="fresh-key"),
+    )
+    fake_http_client = FakeHttpClient()
+    veo_module.VeoClient._instance = None
+    client = veo_module.VeoClient()
+    client._http_client = fake_http_client
+
+    client.submit_video_generation(
+        prompt="portrait product demo",
+        negative_prompt=None,
+        correlation_id="test-correlation",
+        aspect_ratio="9:16",
+        resolution="720p",
+        duration_seconds=8,
+        model="veo-3.1-fast-generate-001",
+    )
+
+    assert fake_http_client.post_calls[0]["headers"]["x-goog-api-key"] == "fresh-key"
+
+    veo_module.VeoClient._instance = None
+
+
 def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
     monkeypatch.setattr(
         veo_module,
         "get_settings",
-        lambda: SimpleNamespace(google_ai_api_key="test-key"),
+        lambda: SimpleNamespace(gemini_api_key="test-key"),
     )
     fake_http_client = FakeHttpClient()
     veo_module.VeoClient._instance = None
@@ -93,7 +119,7 @@ def test_veo_submission_includes_first_frame_inline_image(monkeypatch):
     monkeypatch.setattr(
         veo_module,
         "get_settings",
-        lambda: SimpleNamespace(google_ai_api_key="test-key"),
+        lambda: SimpleNamespace(gemini_api_key="test-key"),
     )
     fake_http_client = FakeHttpClient()
     veo_module.VeoClient._instance = None

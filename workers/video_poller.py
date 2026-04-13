@@ -1959,13 +1959,6 @@ def _reconcile_batches_ready_for_qa() -> None:
 
 if __name__ == "__main__":
     settings = get_settings()
-    if not settings.google_ai_keys_aligned():
-        logger.warning(
-            "google_ai_key_alignment_mismatch",
-            gemini_api_key_present=bool(settings.gemini_api_key),
-            google_ai_api_key_present=bool(settings.google_ai_api_key),
-            message="GEMINI_API_KEY and GOOGLE_AI_API_KEY differ; continuing with the active Google AI key fingerprint",
-        )
 
     if not _acquire_poller_lock():
         sys.exit(0)

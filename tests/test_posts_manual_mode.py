@@ -8,7 +8,7 @@ import pytest
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
-os.environ.setdefault("GOOGLE_AI_API_KEY", "test-google-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-google-key")
 os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
 os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
 os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")

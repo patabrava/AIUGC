@@ -67,14 +67,14 @@ def run_trace(*, post_type_counts: Dict[str, int], target_length_tier: int, trig
     configure_logging()
     _load_local_env_file()
 
-    if not os.getenv("GOOGLE_AI_API_KEY") and os.getenv("GEMINI_API_KEY"):
-        os.environ["GOOGLE_AI_API_KEY"] = os.environ["GEMINI_API_KEY"]
+    if not os.getenv("GEMINI_API_KEY") and os.getenv("GEMINI_API_KEY"):
+        os.environ["GEMINI_API_KEY"] = os.environ["GEMINI_API_KEY"]
     if not os.getenv("SUPABASE_KEY") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
         os.environ["SUPABASE_KEY"] = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     if not os.getenv("SUPABASE_SERVICE_KEY") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
         os.environ["SUPABASE_SERVICE_KEY"] = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
-    for required in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY", "GOOGLE_AI_API_KEY"):
+    for required in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY", "GEMINI_API_KEY"):
         _require_env(required)
 
     llm = get_llm_client()
@@ -224,7 +224,7 @@ def run_trace(*, post_type_counts: Dict[str, int], target_length_tier: int, trig
             "log_level": os.getenv("LOG_LEVEL"),
             "has_supabase_url": bool(os.getenv("SUPABASE_URL")),
             "has_supabase_service_key": bool(os.getenv("SUPABASE_SERVICE_KEY")),
-            "has_google_ai_api_key": bool(os.getenv("GOOGLE_AI_API_KEY")),
+            "has_gemini_api_key": bool(os.getenv("GEMINI_API_KEY")),
         },
         "requested_run": {
             "post_type_counts": post_type_counts,

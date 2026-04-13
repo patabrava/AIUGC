@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "service-key")
 os.environ.setdefault("SUPABASE_KEY", "service-key")
-os.environ.setdefault("GOOGLE_AI_API_KEY", "test-google-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-google-key")
 os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "account-id")
 os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "access-key")
 os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "secret-key")

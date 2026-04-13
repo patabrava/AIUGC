@@ -90,9 +90,9 @@ def main() -> int:
     configure_logging()
     logger = get_logger(__name__)
     settings = get_settings()
-    api_key = settings.google_ai_api_key
+    api_key = settings.gemini_api_key
     if not api_key:
-        print("❌ GOOGLE_AI_API_KEY missing in environment (.env)")
+        print("❌ GEMINI_API_KEY missing in environment (.env)")
         return 1
 
     seed_data = _load_seed(args.seed)

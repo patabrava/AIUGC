@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        populate_by_name=True,
         extra="ignore"
     )
 
@@ -48,7 +49,11 @@ class Settings(BaseSettings):
     # LLM Providers
     openai_api_key: str = Field("", description="OpenAI API key (required for Sora video generation)")
     openai_model: str = Field("gpt-4o-mini", description="Default OpenAI model identifier")
-    gemini_api_key: str = Field("", description="Gemini API key for topic generation")
+    gemini_api_key: str = Field(
+        "",
+        validation_alias=AliasChoices("gemini_api_key", "GEMINI_API_KEY", "GEMINI_API_KEY"),
+        description="Canonical Gemini API key for topic generation and VEO requests",
+    )
     gemini_topic_model: str = Field("gemini-2.5-flash", description="Gemini model for topic generation and repair")
     gemini_image_model: str = Field(
         "gemini-3.1-flash-image-preview",
@@ -72,7 +77,6 @@ class Settings(BaseSettings):
     )
     
     # Video Providers
-    google_ai_api_key: str = Field("", description="Google AI API key for VEO 3.1")
     google_ai_project_id: Optional[str] = Field(None, description="Google Cloud project ID")
     google_application_credentials: str = Field(
         "",
@@ -233,11 +237,6 @@ class Settings(BaseSettings):
             raise ValueError("APP_URL must be set in production for host validation")
         return self
 
-    def google_ai_keys_aligned(self) -> bool:
-        if not self.gemini_api_key or not self.google_ai_api_key:
-            return True
-        return self.gemini_api_key == self.google_ai_api_key
-
     @field_validator("cloudflare_r2_public_base_url")
     @classmethod
     def validate_r2_public_base_url(cls, v):
@@ -290,8 +289,8 @@ def google_ai_context_fingerprint(settings: Optional[Settings] = None) -> dict[s
     """Summarize the active Google AI context for startup logging."""
     resolved = settings or get_settings()
     return {
-        "google_ai_api_key_fingerprint": fingerprint_secret(resolved.google_ai_api_key),
-        "google_ai_api_key_present": bool(resolved.google_ai_api_key),
+        "gemini_api_key_fingerprint": fingerprint_secret(resolved.gemini_api_key),
+        "gemini_api_key_present": bool(resolved.gemini_api_key),
         "google_ai_project_id": resolved.google_ai_project_id or "unset",
         "google_application_credentials_configured": bool(resolve_google_application_credentials_path(resolved)),
     }
