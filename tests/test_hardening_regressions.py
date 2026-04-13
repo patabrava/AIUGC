@@ -142,10 +142,24 @@ def test_supabase_adapter_uses_valid_service_key(monkeypatch):
         supabase_key = "ey.public.payload"
         supabase_service_key = "ey.service.payload"
 
+    class _FakeQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            return object()
+
+    class _FakeClient:
+        def table(self, *_args, **_kwargs):
+            return _FakeQuery()
+
     def _fake_create_client(*, supabase_url, supabase_key):
         captured["url"] = supabase_url
         captured["key"] = supabase_key
-        return object()
+        return _FakeClient()
 
     monkeypatch.setattr(supabase_client_module, "get_settings", lambda: DummySettings())
     monkeypatch.setattr(supabase_client_module, "create_client", _fake_create_client)
@@ -169,10 +183,24 @@ def test_supabase_adapter_falls_back_when_service_key_is_malformed(monkeypatch):
         supabase_key = "ey.public.payload"
         supabase_service_key = "ey.bad.payloadey.bad.payload"
 
+    class _FakeQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            return object()
+
+    class _FakeClient:
+        def table(self, *_args, **_kwargs):
+            return _FakeQuery()
+
     def _fake_create_client(*, supabase_url, supabase_key):
         captured["url"] = supabase_url
         captured["key"] = supabase_key
-        return object()
+        return _FakeClient()
 
     monkeypatch.setattr(supabase_client_module, "get_settings", lambda: DummySettings())
     monkeypatch.setattr(supabase_client_module, "create_client", _fake_create_client)
@@ -186,3 +214,50 @@ def test_supabase_adapter_falls_back_when_service_key_is_malformed(monkeypatch):
         "url": "https://example.supabase.co",
         "key": "ey.public.payload",
     }
+
+
+def test_supabase_adapter_falls_back_to_public_key_after_auth_probe_failure(monkeypatch):
+    captured = {"keys": []}
+
+    class DummySettings:
+        supabase_url = "https://example.supabase.co"
+        supabase_key = "ey.public.payload"
+        supabase_service_key = "ey.service.payload"
+
+    class _FakeQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            if len(captured["keys"]) == 1:
+                raise RuntimeError("Invalid API key")
+            return object()
+
+    class _FakeTable:
+        def select(self, *_args, **_kwargs):
+            return _FakeQuery()
+
+    class _FakeClient:
+        def __init__(self, key: str):
+            captured["keys"].append(key)
+
+        def table(self, *_args, **_kwargs):
+            return _FakeTable()
+
+    def _fake_create_client(*, supabase_url, supabase_key):
+        captured["url"] = supabase_url
+        return _FakeClient(supabase_key)
+
+    monkeypatch.setattr(supabase_client_module, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(supabase_client_module, "create_client", _fake_create_client)
+    supabase_client_module.SupabaseAdapter._instance = None
+    supabase_client_module.SupabaseAdapter._client = None
+
+    adapter = supabase_client_module.SupabaseAdapter()
+
+    assert adapter.client is not None
+    assert captured["url"] == "https://example.supabase.co"
+    assert captured["keys"] == ["ey.service.payload", "ey.public.payload"]

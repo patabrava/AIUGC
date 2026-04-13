@@ -29,6 +29,15 @@ def _resolve_supabase_api_key(*, public_key: str, service_key: str) -> str:
     return service_key or public_key
 
 
+def _is_invalid_api_key_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "invalid api key" in message or "double check your supabase" in message
+
+
+def _probe_supabase_client(client: Client) -> None:
+    client.table("batches").select("id").limit(1).execute()
+
+
 class SupabaseAdapter:
     """Singleton adapter for Supabase client."""
     
@@ -44,17 +53,42 @@ class SupabaseAdapter:
         """Initialize Supabase client if not already initialized."""
         if self._client is None:
             settings = get_settings()
-            self._client = create_client(
-                supabase_url=settings.supabase_url,
-                supabase_key=_resolve_supabase_api_key(
-                    public_key=settings.supabase_key,
-                    service_key=settings.supabase_service_key,
-                ),
-            )
-            logger.info(
-                "supabase_client_initialized",
-                url=settings.supabase_url
-            )
+            candidates = []
+            service_key = (settings.supabase_service_key or "").strip()
+            public_key = (settings.supabase_key or "").strip()
+            primary_key = _resolve_supabase_api_key(public_key=public_key, service_key=service_key)
+            for candidate in (primary_key, public_key, service_key):
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+
+            last_error: Optional[Exception] = None
+            for candidate in candidates:
+                try:
+                    client = create_client(
+                        supabase_url=settings.supabase_url,
+                        supabase_key=candidate,
+                    )
+                    _probe_supabase_client(client)
+                    self._client = client
+                    logger.info(
+                        "supabase_client_initialized",
+                        url=settings.supabase_url,
+                        api_key_source="service" if candidate == service_key else "public",
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if _is_invalid_api_key_error(exc):
+                        logger.warning(
+                            "supabase_client_candidate_rejected",
+                            api_key_source="service" if candidate == service_key else "public",
+                            error=str(exc),
+                        )
+                        continue
+                    raise
+
+            if self._client is None and last_error is not None:
+                raise last_error
     
     @property
     def client(self) -> Client:
