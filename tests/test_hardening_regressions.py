@@ -181,7 +181,7 @@ def test_supabase_adapter_falls_back_when_service_key_is_malformed(monkeypatch):
     class DummySettings:
         supabase_url = "https://example.supabase.co"
         supabase_key = "ey.public.payload"
-        supabase_service_key = "ey.bad.payloadey.bad.payload"
+        supabase_service_key = "not-a-jwt-token"
 
     class _FakeQuery:
         def select(self, *_args, **_kwargs):
@@ -261,3 +261,44 @@ def test_supabase_adapter_falls_back_to_public_key_after_auth_probe_failure(monk
     assert adapter.client is not None
     assert captured["url"] == "https://example.supabase.co"
     assert captured["keys"] == ["ey.service.payload", "ey.public.payload"]
+
+
+def test_supabase_adapter_normalizes_wrapped_supabase_keys(monkeypatch):
+    captured = {}
+
+    class DummySettings:
+        supabase_url = "https://example.supabase.co"
+        supabase_key = '"ey.public.payload"'
+        supabase_service_key = "  'ey.service.payload'  "
+
+    class _FakeQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            return object()
+
+    class _FakeClient:
+        def table(self, *_args, **_kwargs):
+            return _FakeQuery()
+
+    def _fake_create_client(*, supabase_url, supabase_key):
+        captured["url"] = supabase_url
+        captured["key"] = supabase_key
+        return _FakeClient()
+
+    monkeypatch.setattr(supabase_client_module, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(supabase_client_module, "create_client", _fake_create_client)
+    supabase_client_module.SupabaseAdapter._instance = None
+    supabase_client_module.SupabaseAdapter._client = None
+
+    adapter = supabase_client_module.SupabaseAdapter()
+
+    assert adapter.client is not None
+    assert captured == {
+        "url": "https://example.supabase.co",
+        "key": "ey.service.payload",
+    }

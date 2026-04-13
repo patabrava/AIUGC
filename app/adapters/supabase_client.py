@@ -4,6 +4,7 @@ Singleton client for Supabase database and storage.
 Per Constitution § VI: Vanilla-First Implementation
 """
 
+import re
 from typing import Optional
 from supabase import create_client, Client
 from app.core.config import get_settings
@@ -17,16 +18,28 @@ def _looks_like_jwt(value: str) -> bool:
     return token.count(".") == 2 and all(part for part in token.split("."))
 
 
+def _normalize_supabase_key(value: str) -> str:
+    token = (value or "").strip().strip("\"'`")
+    if _looks_like_jwt(token):
+        return token
+    match = re.search(r"([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)", token)
+    if match:
+        return match.group(1)
+    return token
+
+
 def _resolve_supabase_api_key(*, public_key: str, service_key: str) -> str:
-    if _looks_like_jwt(service_key):
-        return service_key
-    if _looks_like_jwt(public_key):
+    normalized_service_key = _normalize_supabase_key(service_key)
+    normalized_public_key = _normalize_supabase_key(public_key)
+    if _looks_like_jwt(normalized_service_key):
+        return normalized_service_key
+    if _looks_like_jwt(normalized_public_key):
         logger.warning(
             "supabase_service_key_invalid_fallback_to_public_key",
             service_key_present=bool(service_key),
         )
-        return public_key
-    return service_key or public_key
+        return normalized_public_key
+    return normalized_service_key or normalized_public_key
 
 
 def _is_invalid_api_key_error(exc: Exception) -> bool:
@@ -54,8 +67,8 @@ class SupabaseAdapter:
         if self._client is None:
             settings = get_settings()
             candidates = []
-            service_key = (settings.supabase_service_key or "").strip()
-            public_key = (settings.supabase_key or "").strip()
+            service_key = _normalize_supabase_key(settings.supabase_service_key or "")
+            public_key = _normalize_supabase_key(settings.supabase_key or "")
             primary_key = _resolve_supabase_api_key(public_key=public_key, service_key=service_key)
             for candidate in (primary_key, public_key, service_key):
                 if candidate and candidate not in candidates:
