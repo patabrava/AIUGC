@@ -669,6 +669,11 @@ def test_submit_video_request_auto_attaches_anchor_image_to_veo_client(monkeypat
 
     monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
     monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", image_path)
+    monkeypatch.setattr(
+        video_handlers,
+        "get_settings",
+        lambda: type("S", (), {"veo_use_reference_image": True})(),
+    )
 
     result = video_handlers._submit_video_request(
         provider="veo_3_1",
@@ -686,6 +691,42 @@ def test_submit_video_request_auto_attaches_anchor_image_to_veo_client(monkeypat
 
     assert base64.b64decode(captured["first_frame_image"]["data_base64"]) == b"veo-anchor"
     assert captured["first_frame_image"]["mime_type"] == "image/jpeg"
+    assert result["operation_id"] == "operations/test"
+
+
+def test_submit_video_request_skips_anchor_image_when_toggle_disabled(monkeypatch, tmp_path):
+    captured = {}
+    image_path = tmp_path / "sarah.jpg"
+    image_path.write_bytes(b"veo-anchor")
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured.update(kwargs)
+            return {"operation_id": "operations/test", "status": "submitted"}
+
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", image_path)
+    monkeypatch.setattr(
+        video_handlers,
+        "get_settings",
+        lambda: type("S", (), {"veo_use_reference_image": False})(),
+    )
+
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr",
+        provider_duration_seconds=8,
+    )
+
+    assert captured["first_frame_image"] is None
     assert result["operation_id"] == "operations/test"
 
 
@@ -720,7 +761,11 @@ def test_submit_video_request_falls_back_when_anchor_unreadable(monkeypatch):
     monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", UnreadableAnchorPath())
     monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
     monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
-    monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": ""})())
+    monkeypatch.setattr(
+        video_handlers,
+        "get_settings",
+        lambda: type("S", (), {"veo_use_reference_image": True, "vertex_ai_output_gcs_uri": ""})(),
+    )
 
     _ = video_handlers._submit_video_request(
         provider="veo_3_1",

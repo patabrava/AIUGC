@@ -28,6 +28,25 @@ def test_vertex_settings_default_to_disabled(monkeypatch, tmp_path: Path):
     assert settings.vertex_ai_enabled is False
 
 
+def test_veo_reference_image_toggle_defaults_to_disabled(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VEO_USE_REFERENCE_IMAGE", raising=False)
+    _write_minimal_env(tmp_path)
+
+    settings = Settings()
+
+    assert settings.veo_use_reference_image is False
+
+
+def test_veo_reference_image_toggle_accepts_false(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    _write_minimal_env(tmp_path, ["VEO_USE_REFERENCE_IMAGE=false"])
+
+    settings = Settings()
+
+    assert settings.veo_use_reference_image is False
+
+
 def test_vertex_settings_use_explicit_project_and_location(monkeypatch, tmp_path: Path):
     monkeypatch.chdir(tmp_path)
     _write_minimal_env(

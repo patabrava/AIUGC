@@ -159,6 +159,11 @@ class Settings(BaseSettings):
         default=False,
         description="Bypass all Veo quota guards, freezes, and reservations for controlled testing",
     )
+    veo_use_reference_image: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VEO_USE_REFERENCE_IMAGE"),
+        description="Attach the global first-frame reference image for Veo and Vertex video submissions",
+    )
     veo_quota_project_scope: str = Field(
         default="default-gemini-project",
         description="Operator label for the Google project whose Veo quota is being guarded",

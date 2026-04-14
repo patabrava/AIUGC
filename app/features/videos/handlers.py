@@ -1720,12 +1720,14 @@ def _submit_video_request(
 
     if provider == "veo_3_1":
         veo_client = get_veo_client()
+        settings = get_settings()
+        use_reference_image = bool(getattr(settings, "veo_use_reference_image", True))
         provider_aspect = provider_aspect_ratio or aspect_ratio
         requested_aspect = requested_aspect_ratio or aspect_ratio
         veo_duration_seconds = provider_duration_seconds or seconds
         model_name = model or "veo-3.1-generate-001"
         resolved_first_frame_image = first_frame_image
-        if resolved_first_frame_image is None:
+        if use_reference_image and resolved_first_frame_image is None:
             anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=False)
             if anchor_asset is not None:
                 resolved_first_frame_image = anchor_asset["first_frame_image"]
@@ -1788,9 +1790,12 @@ def _submit_video_request(
     if provider == "vertex_ai":
         vertex_client = get_vertex_ai_client()
         settings = get_settings()
+        use_reference_image = bool(getattr(settings, "veo_use_reference_image", True))
         vertex_duration = provider_duration_seconds or seconds
         output_gcs_uri = settings.vertex_ai_output_gcs_uri or None
-        anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=False)
+        anchor_asset = None
+        if use_reference_image:
+            anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=False)
         try:
             if anchor_asset is not None:
                 result = vertex_client.submit_image_video(
