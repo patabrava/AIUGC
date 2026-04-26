@@ -55,3 +55,40 @@ def test_caption_worker_aligns_transcript_to_script():
         aligned_words = [w.word for w in transcript_arg.words]
         assert "Juli" in aligned_words, f"Expected 'Juli' in aligned words, got {aligned_words}"
         assert "Julie" not in aligned_words
+
+
+def test_caption_worker_uses_bounded_post_projection(monkeypatch):
+    """The caption poller should not fetch full post rows on every idle pass."""
+    selected_fields = {}
+
+    class FakeTable:
+        def __init__(self, name):
+            self._name = name
+
+        def select(self, fields, *args, **kwargs):
+            selected_fields[self._name] = fields
+            return self
+
+        def in_(self, *args, **kwargs):
+            return self
+
+        def limit(self, *args, **kwargs):
+            return self
+
+        def execute(self):
+            return MagicMock(data=[])
+
+    class FakeSupabase:
+        client = MagicMock()
+
+    fake_sb = FakeSupabase()
+    fake_sb.client.table = lambda name: FakeTable(name)
+    monkeypatch.setattr("workers.caption_worker.get_supabase", lambda: fake_sb)
+
+    from workers.caption_worker import poll_caption_pending
+
+    poll_caption_pending()
+
+    assert selected_fields["posts"] != "*"
+    assert "video_status" not in selected_fields["posts"]
+    assert "publish_results" not in selected_fields["posts"]

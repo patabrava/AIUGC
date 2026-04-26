@@ -33,6 +33,7 @@ logger = get_logger(__name__)
 POLL_INTERVAL_SECONDS = 10
 MAX_CAPTION_RETRIES = 3
 CAPTION_BATCH_LIMIT = 5
+CAPTION_POLL_SELECT_FIELDS = "id,batch_id,video_url,video_metadata,seed_data"
 
 
 def poll_caption_pending() -> None:
@@ -40,7 +41,7 @@ def poll_caption_pending() -> None:
     statuses = list(get_caption_pollable_statuses())
     result = (
         supabase.table("posts")
-        .select("*")
+        .select(CAPTION_POLL_SELECT_FIELDS)
         .in_("video_status", statuses)
         .limit(CAPTION_BATCH_LIMIT)
         .execute()
