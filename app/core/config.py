@@ -121,7 +121,7 @@ class Settings(BaseSettings):
         description="Enable source URL ingestion before storing videos in Cloudflare R2"
     )
     video_poller_enable_script_bank_expansion: bool = Field(
-        default=True,
+        default=False,
         description="Enable the daily topic script-bank expansion inside the video poller worker",
     )
     video_poller_identity: str = Field(
