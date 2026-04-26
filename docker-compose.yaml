@@ -42,6 +42,8 @@ services:
     restart: unless-stopped
     env_file:
       - ${APP_ENV_FILE:-.env.production}
+    environment:
+      VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION: ${VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION:-false}
     command: python workers/expansion_worker.py
 
   topic-worker:

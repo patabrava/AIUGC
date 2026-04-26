@@ -108,6 +108,7 @@ services:
     <<: *runtime-base
     environment:
       <<: *app-env
+      VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION: ${VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION:-false}
       SERVICE_CMD: python workers/expansion_worker.py
 
   topic-worker:
