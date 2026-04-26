@@ -40,6 +40,71 @@ def test_poll_pending_videos_includes_extended_statuses(monkeypatch):
     assert "processing" in queried
 
 
+def test_poll_pending_videos_uses_bounded_post_projection(monkeypatch):
+    """The poller must not transfer full post rows every idle cycle."""
+    selected_fields = {}
+
+    class FakeTable:
+        def __init__(self, name):
+            self._name = name
+
+        def select(self, fields, *a, **kw):
+            selected_fields[self._name] = fields
+            return self
+
+        def in_(self, col, values):
+            return self
+
+        def execute(self):
+            return MagicMock(data=[])
+
+    class FakeSupabase:
+        client = MagicMock()
+
+    fake_sb = FakeSupabase()
+    fake_sb.client.table = lambda name: FakeTable(name)
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_sb)
+    monkeypatch.setattr("workers.video_poller._maybe_reconcile_batches_ready_for_qa", lambda active_post_count: None)
+
+    from workers.video_poller import poll_pending_videos
+    poll_pending_videos()
+
+    assert selected_fields["posts"] != "*"
+    assert "seed_data" not in selected_fields["posts"]
+    assert "video_prompt_json" not in selected_fields["posts"]
+
+
+def test_poll_pending_videos_skips_idle_reconcile_until_due(monkeypatch):
+    """Idle poll cycles should not walk every S4/S5 batch every 10 seconds."""
+    class FakeTable:
+        def select(self, *a, **kw):
+            return self
+
+        def in_(self, *a, **kw):
+            return self
+
+        def execute(self):
+            return MagicMock(data=[])
+
+    class FakeSupabase:
+        client = MagicMock()
+
+    fake_sb = FakeSupabase()
+    fake_sb.client.table = lambda name: FakeTable()
+    monkeypatch.setattr("workers.video_poller.get_supabase", lambda: fake_sb)
+
+    from workers import video_poller
+    monkeypatch.setattr(video_poller, "_last_idle_reconcile_at", 1000.0)
+    monkeypatch.setattr(video_poller.time, "time", lambda: 1005.0)
+    monkeypatch.setattr(
+        video_poller,
+        "_reconcile_batches_ready_for_qa",
+        lambda: (_ for _ in ()).throw(AssertionError("idle reconcile ran too soon")),
+    )
+
+    video_poller.poll_pending_videos()
+
+
 def test_claim_video_poll_lease_uses_updated_at_compare_and_set(monkeypatch):
     from workers.video_poller import _claim_video_poll_lease
 

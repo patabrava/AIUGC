@@ -100,6 +100,10 @@ if not _veo_available:
 POLL_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
 RAI_MAX_RETRIES = 3
+IDLE_RECONCILE_INTERVAL_SECONDS = int(os.getenv("VIDEO_POLLER_IDLE_RECONCILE_INTERVAL_SECONDS", "900"))
+VIDEO_POLL_SELECT_FIELDS = (
+    "id,batch_id,video_status,video_operation_id,video_provider,video_metadata,updated_at"
+)
 VIDEO_POLL_LEASE_SECONDS = max(POLL_INTERVAL_SECONDS * 3, 30)
 VIDEO_POLL_LEASE_OWNER_KEY = "video_poll_lease_owner"
 VIDEO_POLL_LEASE_ACQUIRED_KEY = "video_poll_lease_acquired_at"
@@ -110,6 +114,7 @@ VEO_EXTENSION_INPUT_NOT_READY_MESSAGE = (
 )
 VIDEO_POLLER_LOCK_PATH = os.path.join(tempfile.gettempdir(), "aiugc-video-poller.lock")
 _VIDEO_POLLER_LOCK_HANDLE = None
+_last_idle_reconcile_at = 0.0
 
 
 def _poller_identity() -> str:
@@ -792,7 +797,7 @@ def poll_pending_videos():
         supabase = get_supabase().client
         
         # Fetch posts awaiting video completion
-        response = supabase.table("posts").select("*").in_(
+        response = supabase.table("posts").select(VIDEO_POLL_SELECT_FIELDS).in_(
             "video_status", list(get_pollable_video_statuses())
         ).execute()
         
@@ -802,7 +807,7 @@ def poll_pending_videos():
         for post in posts:
             process_video_operation(post)
 
-        _reconcile_batches_ready_for_qa()
+        _maybe_reconcile_batches_ready_for_qa(active_post_count=len(posts))
     
     except Exception as e:
         logger.exception("poll_cycle_failed", error=str(e))
@@ -1986,6 +1991,21 @@ def _reconcile_batches_ready_for_qa() -> None:
             batch_id,
             correlation_id=f"reconcile_{batch_id}"
         )
+
+
+def _maybe_reconcile_batches_ready_for_qa(*, active_post_count: int) -> None:
+    """Avoid high-volume idle Supabase reads while preserving active recovery."""
+    global _last_idle_reconcile_at
+    if active_post_count > 0:
+        _reconcile_batches_ready_for_qa()
+        return
+
+    now = time.time()
+    if now - _last_idle_reconcile_at < IDLE_RECONCILE_INTERVAL_SECONDS:
+        return
+
+    _last_idle_reconcile_at = now
+    _reconcile_batches_ready_for_qa()
 
 
 if __name__ == "__main__":
