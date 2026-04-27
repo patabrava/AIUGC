@@ -344,7 +344,7 @@ def test_publish_tiktok_direct_persists_published_post_result(monkeypatch):
     )
 
     job = response.data
-    assert job["status"] == "submitted"
+    assert job["status"] == "published"
     assert job["tiktok_publish_id"] == "publish-direct-1"
     assert storage["publish_jobs"][0]["post_mode"] == "direct"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "published"
@@ -422,7 +422,7 @@ def test_publish_tiktok_direct_allows_s8_complete_after_meta_publish(monkeypatch
         )
     )
 
-    assert response.data["status"] == "submitted"
+    assert response.data["status"] == "published"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "published"
     assert storage["posts"][0]["platform_ids"]["tiktok"] == "tt-post-1"
 

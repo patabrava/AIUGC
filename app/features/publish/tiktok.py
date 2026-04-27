@@ -92,23 +92,21 @@ def _state_secret() -> str:
 
 def _require_tiktok_settings() -> Any:
     settings = get_settings()
-    missing = [
-        name
-        for name, value in [
-            ("TIKTOK_CLIENT_KEY", settings.tiktok_client_key),
-            ("TIKTOK_CLIENT_SECRET", settings.tiktok_client_secret),
-            ("TIKTOK_REDIRECT_URI", settings.tiktok_redirect_uri),
-            ("TOKEN_ENCRYPTION_KEY", settings.token_encryption_key),
-            ("APP_URL", settings.app_url),
-            ("PRIVACY_POLICY_URL", settings.privacy_policy_url),
-            ("TERMS_URL", settings.terms_url),
-            ("TIKTOK_SANDBOX_ACCOUNT", settings.tiktok_sandbox_account),
-        ]
-        if not value
+    required = [
+        ("TIKTOK_CLIENT_KEY", settings.tiktok_client_key),
+        ("TIKTOK_CLIENT_SECRET", settings.tiktok_client_secret),
+        ("TIKTOK_REDIRECT_URI", settings.tiktok_redirect_uri),
+        ("TOKEN_ENCRYPTION_KEY", settings.token_encryption_key),
+        ("APP_URL", settings.app_url),
+        ("PRIVACY_POLICY_URL", settings.privacy_policy_url),
+        ("TERMS_URL", settings.terms_url),
     ]
+    if settings.tiktok_environment == "sandbox":
+        required.append(("TIKTOK_SANDBOX_ACCOUNT", settings.tiktok_sandbox_account))
+    missing = [name for name, value in required if not value]
     if missing:
         raise ValidationError(
-            "TikTok sandbox integration is not configured.",
+            "TikTok integration is not configured.",
             details={"missing_env": missing},
         )
     return settings
@@ -549,7 +547,9 @@ def _map_tiktok_publish_job_status(provider_status: str, post_mode: str) -> str:
     normalized = str(provider_status or "").upper()
     if normalized == "FAILED":
         return "failed"
-    if normalized in {"PUBLISH_COMPLETE", "SEND_TO_USER_INBOX"}:
+    if normalized == "PUBLISH_COMPLETE":
+        return "published"
+    if normalized == "SEND_TO_USER_INBOX":
         return "submitted"
     if post_mode in {"draft", "direct"}:
         return "submitted"

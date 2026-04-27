@@ -1252,6 +1252,17 @@ def _coerce_publish_confirm(value: Any, *, default: bool = True) -> bool:
     return str(value).lower() in {"1", "true", "yes", "on"}
 
 
+def _tiktok_job_result_status(tiktok_job: Dict[str, Any]) -> str:
+    """Map TikTok job/provider completion into the post-level status used by the UI."""
+    tiktok_payload = _load_json_object(tiktok_job.get("response_payload_json"))
+    provider_status = str(tiktok_payload.get("provider_status") or tiktok_job.get("status") or "").upper()
+    if tiktok_job.get("status") == "failed" or provider_status == "FAILED":
+        return "failed"
+    if tiktok_job.get("status") == "published" or provider_status == "PUBLISH_COMPLETE":
+        return "published"
+    return "publishing"
+
+
 async def _resolve_confirm_publish_request(
     http_request: Request,
     batch_id: str,
@@ -1417,7 +1428,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
                         remote_id = str(provider_post_ids[0]) if provider_post_ids else str(tiktok_job.get("tiktok_publish_id") or tiktok_job.get("id"))
                         provider_status = str(tiktok_payload.get("provider_status") or tiktok_job.get("status") or "").upper()
                         publish_results[network] = {
-                            "status": "published" if tiktok_job.get("status") == "published" else "publishing",
+                            "status": _tiktok_job_result_status(tiktok_job),
                             "post_mode": "direct",
                             "provider_status": provider_status,
                             "publish_id": tiktok_job.get("tiktok_publish_id"),
@@ -1425,11 +1436,11 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
                             "post_id": str(provider_post_ids[0]) if provider_post_ids else None,
                             "fail_reason": tiktok_payload.get("fail_reason"),
                             "error_message": tiktok_job.get("error_message") or "",
-                            "published_at": datetime.utcnow().isoformat() if tiktok_job.get("status") == "published" else None,
+                            "published_at": datetime.utcnow().isoformat() if _tiktok_job_result_status(tiktok_job) == "published" else None,
                             "last_attempt_at": datetime.utcnow().isoformat(),
                             "attempt_count": attempt_count,
                         }
-                        if tiktok_job.get("status") == "published" and provider_post_ids:
+                        if _tiktok_job_result_status(tiktok_job) == "published" and provider_post_ids:
                             platform_ids[network] = str(provider_post_ids[0])
                         continue
                     else:
@@ -1646,7 +1657,7 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
                     provider_status = str(tiktok_payload.get("provider_status") or tiktok_job.get("status") or "").upper()
                     post_mode = "draft" if tiktok_env == "sandbox" else "direct"
                     publish_results[network] = {
-                        "status": "published" if tiktok_job.get("status") == "published" else "publishing",
+                        "status": _tiktok_job_result_status(tiktok_job),
                         "post_mode": post_mode,
                         "provider_status": provider_status,
                         "publish_id": tiktok_job.get("tiktok_publish_id"),
@@ -1654,11 +1665,11 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
                         "post_id": str(provider_post_ids[0]) if provider_post_ids else None,
                         "fail_reason": tiktok_payload.get("fail_reason"),
                         "error_message": tiktok_job.get("error_message") or "",
-                        "published_at": datetime.utcnow().isoformat() if tiktok_job.get("status") == "published" else None,
+                        "published_at": datetime.utcnow().isoformat() if _tiktok_job_result_status(tiktok_job) == "published" else None,
                         "last_attempt_at": datetime.utcnow().isoformat(),
                         "attempt_count": attempt_count,
                     }
-                    if tiktok_job.get("status") == "published" and provider_post_ids:
+                    if _tiktok_job_result_status(tiktok_job) == "published" and provider_post_ids:
                         platform_ids[network] = str(provider_post_ids[0])
                     continue
                 else:

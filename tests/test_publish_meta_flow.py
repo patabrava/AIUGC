@@ -382,6 +382,86 @@ def test_dispatch_due_posts_includes_tiktok_direct_post(monkeypatch):
     assert post["publish_results"]["tiktok"]["provider_status"] == "PUBLISH_COMPLETE"
 
 
+def test_dispatch_due_posts_treats_completed_tiktok_job_as_published(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "video_url": "https://cdn.example.com/video.mp4",
+                "seed_data": {"script_review_status": "approved"},
+                "scheduled_at": "2026-03-17T08:00:00",
+                "publish_caption": "Shared caption",
+                "social_networks": ["tiktok"],
+                "publish_status": "scheduled",
+                "publish_results": {},
+                "platform_ids": {},
+            }
+        ]
+    }
+
+    monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(publish_handlers, "_list_batch_rows", lambda fields="id,meta_connection": [])
+    monkeypatch.setattr(
+        publish_handlers,
+        "_load_batch",
+        lambda batch_id, fields="id,state,meta_connection": {
+            "id": batch_id,
+            "state": BatchState.S7_PUBLISH_PLAN.value,
+            "meta_connection": {},
+        },
+    )
+    monkeypatch.setattr(publish_handlers, "_reconcile_completed_batches", lambda batch_ids: None)
+    monkeypatch.setattr(
+        publish_handlers,
+        "get_tiktok_publish_state",
+        lambda: asyncio.sleep(
+            0,
+            result={
+                "status": "connected",
+                "environment": "production",
+                "publish_ready": True,
+                "creator_info": {"privacy_level_options": ["SELF_ONLY"]},
+            },
+        ),
+    )
+
+    async def _completed_tiktok_publish(post_id, *, caption=None, privacy_level, disable_comment, disable_duet, disable_stitch):
+        return {
+            "id": "job-1",
+            "status": "submitted",
+            "tiktok_publish_id": "tt-publish-1",
+            "response_payload_json": {
+                "provider_status": "PUBLISH_COMPLETE",
+                "publicaly_available_post_id": ["tt-post-1"],
+            },
+            "error_message": "",
+        }
+
+    monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", _completed_tiktok_publish)
+
+    result = asyncio.run(publish_handlers.dispatch_due_posts())
+
+    assert result["published"] == 1
+    post = storage["posts"][0]
+    assert post["publish_status"] == "published"
+    assert post["platform_ids"]["tiktok"] == "tt-post-1"
+    assert post["publish_results"]["tiktok"]["status"] == "published"
+
+
+def test_tiktok_job_result_status_preserves_failed_provider_job():
+    status = publish_handlers._tiktok_job_result_status(
+        {
+            "status": "failed",
+            "response_payload_json": {
+                "provider_status": "FAILED",
+            },
+        }
+    )
+
+    assert status == "failed"
+
+
 def test_workspace_meta_connection_prefers_connected_state(monkeypatch):
     monkeypatch.setattr(
         publish_handlers,
@@ -735,26 +815,28 @@ def test_batch_meta_connection_sanitizer_preserves_publish_readiness():
 
 
 def test_post_schedule_request_accepts_utc_iso_timestamp():
+    scheduled_at = (datetime.utcnow() + timedelta(days=14)).replace(microsecond=0).isoformat() + "Z"
     request = PostScheduleRequest(
         post_id="post-1",
-        scheduled_at="2026-03-20T02:00:00Z",
+        scheduled_at=scheduled_at,
         publish_caption="Caption",
         social_networks=[SocialNetwork.FACEBOOK],
     )
 
-    assert request.scheduled_at.isoformat() == "2026-03-20T02:00:00+00:00"
+    assert request.scheduled_at.isoformat() == scheduled_at.replace("Z", "+00:00")
 
 
 def test_update_post_schedule_request_accepts_utc_iso_timestamp():
     from app.features.publish.schemas import UpdatePostScheduleRequest
 
+    scheduled_at = (datetime.utcnow() + timedelta(days=14)).replace(microsecond=0).isoformat() + "Z"
     request = UpdatePostScheduleRequest(
-        scheduled_at="2026-03-20T02:00:00Z",
+        scheduled_at=scheduled_at,
         publish_caption="Caption",
         social_networks=[SocialNetwork.INSTAGRAM],
     )
 
-    assert request.scheduled_at.isoformat() == "2026-03-20T02:00:00+00:00"
+    assert request.scheduled_at.isoformat() == scheduled_at.replace("Z", "+00:00")
 
 
 def test_derive_publish_status_does_not_treat_tiktok_inbox_as_published():

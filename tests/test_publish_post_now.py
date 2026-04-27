@@ -170,6 +170,43 @@ class TestPublishPostNowEndpoint:
         assert result["publish_status"] == "published"
         assert result["publish_results"]["facebook"]["status"] == "published"
 
+    def test_tiktok_completed_provider_job_is_published(self, monkeypatch):
+        storage = _make_storage(networks=["tiktok"])
+        monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+        monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
+        monkeypatch.setattr(publish_handlers, "_effective_meta_connection", lambda batch_id, mc: mc)
+        monkeypatch.setattr(publish_handlers, "_ensure_meta_targets_for_networks", lambda networks, mc: None)
+
+        async def fake_tiktok_state():
+            return {
+                "status": "connected",
+                "environment": "production",
+                "publish_ready": True,
+                "creator_info": {"privacy_level_options": ["SELF_ONLY"]},
+            }
+
+        monkeypatch.setattr(publish_handlers, "get_tiktok_publish_state", fake_tiktok_state)
+
+        async def fake_tiktok_publish(post_id, *, caption=None, privacy_level, disable_comment, disable_duet, disable_stitch):
+            return {
+                "id": "job-1",
+                "status": "submitted",
+                "tiktok_publish_id": "tt-publish-1",
+                "response_payload_json": {
+                    "provider_status": "PUBLISH_COMPLETE",
+                    "publicaly_available_post_id": ["tt-post-1"],
+                },
+                "error_message": "",
+            }
+
+        monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", fake_tiktok_publish)
+
+        result = _run(publish_handlers.publish_post_now("post-1", ["tiktok"]))
+
+        assert result["publish_status"] == "published"
+        assert result["platform_ids"]["tiktok"] == "tt-post-1"
+        assert result["publish_results"]["tiktok"]["status"] == "published"
+
     def test_rejects_wrong_batch_state(self, monkeypatch):
         storage = _make_storage(batch_state="S6_QA")
         monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))

@@ -43,6 +43,7 @@ def test_example_production_env_lists_required_live_keys():
         "GOOGLE_APPLICATION_CREDENTIALS_JSON=",
         "APP_URL=",
         "ENVIRONMENT=production",
+        "TIKTOK_ENVIRONMENT=production",
         "VERTEX_AI_PROJECT_ID=",
         "CLOUDFLARE_R2_BUCKET_NAME=",
     ]
@@ -116,6 +117,7 @@ def test_hostinger_runtime_checkout_tracks_remote_main():
     assert 'git checkout -f -B "$$repo_ref" "origin/$$repo_ref"' in compose_text
     assert 'git reset --hard "origin/$$repo_ref"' in compose_text
     assert "traefik.http.routers.lippelift-web.rule" in compose_text
+    assert "TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-production}" in compose_text
     assert "external: true" not in compose_text
 
 

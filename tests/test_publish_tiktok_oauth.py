@@ -98,6 +98,20 @@ def _settings():
     )
 
 
+def _production_settings_without_sandbox_account():
+    return SimpleNamespace(
+        tiktok_client_key="client-key",
+        tiktok_client_secret="client-secret",
+        tiktok_redirect_uri="http://localhost:8000/api/auth/tiktok/callback",
+        tiktok_environment="production",
+        tiktok_sandbox_account="",
+        token_encryption_key="encryption-secret",
+        app_url="http://localhost:8000",
+        privacy_policy_url="https://example.com/privacy",
+        terms_url="https://example.com/terms",
+    )
+
+
 async def _exchange_stub(code: str, code_verifier: str):
     assert code == "auth-code"
     assert code_verifier
@@ -138,6 +152,14 @@ def test_start_tiktok_oauth_builds_signed_pkce_redirect(monkeypatch):
     payload = tiktok.decode_signed_state(state, _settings().token_encryption_key)
     assert payload["batch_id"] == "batch-1"
     assert payload["code_verifier"]
+
+
+def test_tiktok_production_config_does_not_require_sandbox_handle(monkeypatch):
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings_without_sandbox_account)
+
+    settings = tiktok._require_tiktok_settings()
+
+    assert settings.tiktok_environment == "production"
 
 
 def test_tiktok_callback_persists_connected_account(monkeypatch):
