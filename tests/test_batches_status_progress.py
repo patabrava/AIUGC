@@ -505,6 +505,12 @@ def test_build_batch_detail_view_exposes_caption_variants():
                 "topic_title": "Beispielthema",
                 "publish_caption": "",
                 "video_url": None,
+                "publish_results": {
+                    "tiktok": {
+                        "status": "published",
+                        "provider_status": "PUBLISH_COMPLETE",
+                    }
+                },
                 "seed_data": {
                     "description": "Ein generischer Abschnitt, der nicht als Review-Caption dienen soll.",
                     "caption": "Ein noch generischerer Alttext.",
@@ -528,6 +534,7 @@ def test_build_batch_detail_view_exposes_caption_variants():
     assert view["publish_posts_json"][0]["selectedCaptionKey"] == "short_paragraph"
     assert len(view["publish_posts_json"][0]["captionOptions"]) == 3
     assert view["publish_posts_json"][0]["captionOptions"][1]["label"] == "Medium Bullets"
+    assert view["publish_posts_json"][0]["publishResults"]["tiktok"]["status"] == "published"
 
 
 def test_build_batch_detail_view_polls_while_video_is_submitted():

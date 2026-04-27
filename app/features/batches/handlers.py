@@ -49,6 +49,7 @@ from app.features.topics.handlers import (
 from app.features.topics.queries import get_posts_by_batch
 from app.features.publish.handlers import (
     _effective_meta_connection,
+    _load_json_object,
     _sanitize_meta_connection as _publish_sanitize_meta_connection,
 )
 from app.features.blog.schemas import normalize_blog_content
@@ -513,6 +514,8 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
                 "selectedCaptionKey": ((post.get("seed_data") or {}).get("caption_bundle") or {}).get("selected_key") or "",
                 "videoUrl": post.get("video_url"),
                 "publishStatus": post.get("publish_status") or "pending",
+                "publishResults": _load_json_object(post.get("publish_results")),
+                "platformIds": _load_json_object(post.get("platform_ids")),
                 "scheduledAt": post.get("scheduled_at"),
                 "socialNetworks": _normalize_string_list(post.get("social_networks")),
             }

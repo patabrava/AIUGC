@@ -374,6 +374,8 @@
                 networksOverride: null,
                 caption: (p.caption || '').trim() || ((p.captionOptions || []).find((item) => item.key === p.selectedCaptionKey)?.body || ''),
                 selectedCaptionKey: p.selectedCaptionKey || ((p.captionOptions || [])[0]?.key || ''),
+                publishResults: p.publishResults || {},
+                platformIds: p.platformIds || {},
             })),
             expanded: null,
             showReviewModal: false,
@@ -435,6 +437,34 @@
                 const days = [...new Set(this.slots.map(s => s.day))];
                 const dayRange = days.length === 1 ? days[0] : `${this.slots[0].day}\u2013${this.slots[this.slots.length - 1].day}`;
                 return `${this.posts.length} posts \u00b7 ${dayRange} \u00b7 ${nets || 'No networks selected'}`;
+            },
+            publishStatusLabel(post, index) {
+                const tiktokStatus = (post.publishResults?.tiktok?.status || '').toLowerCase();
+                if (post.publishStatus === 'failed' && tiktokStatus === 'published') {
+                    return 'TikTok published';
+                }
+                if (post.publishStatus === 'failed' && tiktokStatus === 'failed') {
+                    return 'TikTok failed';
+                }
+                if (post.publishStatus === 'published') return 'Published';
+                if (post.publishStatus === 'scheduled') return 'Scheduled';
+                if (post.publishStatus === 'publishing') return 'Publishing...';
+                if (post.publishStatus === 'failed') return 'Failed';
+                return (post.caption && this.slots[index]?.time) ? 'Ready' : 'Needs attention';
+            },
+            publishStatusClass(post, index) {
+                const tiktokStatus = (post.publishResults?.tiktok?.status || '').toLowerCase();
+                if (post.publishStatus === 'failed' && tiktokStatus === 'published') {
+                    return 'bg-green-100 text-green-700';
+                }
+                if (post.publishStatus === 'failed' && tiktokStatus === 'failed') {
+                    return 'bg-red-100 text-red-700';
+                }
+                if (post.publishStatus === 'published') return 'bg-green-100 text-green-700';
+                if (post.publishStatus === 'scheduled') return 'bg-[#006AAB]/10 text-[#006AAB]';
+                if (post.publishStatus === 'publishing') return 'bg-amber-100 text-amber-700';
+                if (post.publishStatus === 'failed') return 'bg-red-100 text-red-700';
+                return (post.caption && this.slots[index]?.time) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700';
             },
             get warnings() {
                 const w = [];
@@ -581,9 +611,12 @@
                     const idx = this.posts.findIndex(p => p.id === this.postNowTarget.id);
                     if (idx !== -1) {
                         this.posts[idx].publishStatus = data.data?.publish_status || 'published';
+                        this.posts[idx].publishResults = data.data?.publish_results || this.posts[idx].publishResults || {};
+                        this.posts[idx].platformIds = data.data?.platform_ids || this.posts[idx].platformIds || {};
                     }
                     this.showPostNowModal = false;
-                    this.successMessage = 'Post published successfully!';
+                    const tiktokStatus = data.data?.publish_results?.tiktok?.status;
+                    this.successMessage = tiktokStatus === 'published' ? 'TikTok published successfully!' : 'Post published successfully!';
                     setTimeout(() => this.successMessage = '', 5000);
                 } catch (err) {
                     this.postNowError = err.message || 'Network error';
