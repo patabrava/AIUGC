@@ -288,19 +288,16 @@ def _unique_topic_suggestions(
 ) -> List[Dict[str, Any]]:
     unique: List[Dict[str, Any]] = []
     seen_topic_families: set[str] = set()
+    if existing_topics is None:
+        existing_topics = []
+
     for suggestion in suggestions:
         family_signature = _topic_family_signature(suggestion)
         if family_signature and family_signature in seen_topic_families:
             continue
         if family_signature:
             seen_topic_families.add(family_signature)
-        unique.append(suggestion)
-        if len(unique) >= limit:
-            break
-    if existing_topics is None:
-        existing_topics = []
-    semantic_candidates: List[Dict[str, Any]] = []
-    for suggestion in unique:
+
         seed_payload = suggestion.get("seed_payload") if isinstance(suggestion, dict) else None
         canonical_topic = ""
         if isinstance(seed_payload, dict):
@@ -313,16 +310,17 @@ def _unique_topic_suggestions(
             or ""
         ).strip()
         cta = str(suggestion.get("cta") or rotation or suggestion.get("title") or "").strip()
-        semantic_candidates.append(
-            {
-                **suggestion,
-                "rotation": rotation,
-                "cta": cta,
-                "script": str(suggestion.get("script") or rotation or suggestion.get("title") or "").strip(),
-            }
-        )
-    filtered = deduplicate_topics(semantic_candidates, existing_topics, threshold=semantic_threshold)
-    return filtered[:limit]
+        semantic_candidate = {
+            **suggestion,
+            "rotation": rotation,
+            "cta": cta,
+            "script": str(suggestion.get("script") or rotation or suggestion.get("title") or "").strip(),
+        }
+        if deduplicate_topics([semantic_candidate], existing_topics + unique, threshold=semantic_threshold):
+            unique.append(semantic_candidate)
+            if len(unique) >= limit:
+                break
+    return unique[:limit]
 
 
 def _utc_now_iso() -> str:
@@ -1006,7 +1004,7 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             continue
         stored_suggestions = list_topic_suggestions(
             target_length_tier=resolved_target_tier,
-            limit=max(count * 3, count),
+            limit=max(count * 20, 50),
             post_type=post_type,
         )
         unique_stored_suggestions = _unique_topic_suggestions(
