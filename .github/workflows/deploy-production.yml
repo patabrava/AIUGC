@@ -42,6 +42,7 @@ jobs:
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
             export REPO_DIR="${APP_ROOT}/repo"
             export ENV_FILE="${APP_ROOT}/.env.production"
+            export APP_ENV_FILE="$ENV_FILE"
             export HEALTHCHECK_URL="https://lippelift.xyz/health"
             mkdir -p "$APP_ROOT"
             if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
@@ -67,6 +68,7 @@ jobs:
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
             export REPO_DIR="${APP_ROOT}/repo"
             export ENV_FILE="${APP_ROOT}/.env.production"
+            export APP_ENV_FILE="$ENV_FILE"
             export HEALTHCHECK_URL="https://lippelift.xyz/health"
             mkdir -p "$APP_ROOT"
             if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
