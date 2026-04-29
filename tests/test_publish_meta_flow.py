@@ -292,7 +292,7 @@ def test_dispatch_due_posts_records_network_results_individually(monkeypatch):
     assert post["publish_results"]["instagram"]["error_code"] == "validation_error"
 
 
-def test_dispatch_due_posts_includes_tiktok_direct_post(monkeypatch):
+def test_dispatch_due_posts_uploads_tiktok_draft(monkeypatch):
     storage = {
         "posts": [
             {
@@ -346,22 +346,21 @@ def test_dispatch_due_posts_includes_tiktok_direct_post(monkeypatch):
         ),
     )
 
-    async def _fake_tiktok_publish(post_id, *, caption=None, privacy_level, disable_comment, disable_duet, disable_stitch):
+    async def _fake_tiktok_publish(post_id, *, caption=None):
         assert post_id == "post-1"
         assert caption == "Shared caption"
-        assert privacy_level == "SELF_ONLY"
         return {
             "id": "job-1",
-            "status": "published",
+            "status": "submitted",
             "tiktok_publish_id": "tt-publish-1",
             "response_payload_json": {
-                "provider_status": "PUBLISH_COMPLETE",
-                "publicaly_available_post_id": ["tt-post-1"],
+                "provider_status": "SEND_TO_USER_INBOX",
+                "publicaly_available_post_id": [],
             },
             "error_message": "",
         }
 
-    monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", _fake_tiktok_publish)
+    monkeypatch.setattr(publish_handlers, "upload_tiktok_draft_for_post", _fake_tiktok_publish)
     monkeypatch.setattr(
         publish_handlers,
         "_reconcile_completed_batches",
@@ -371,18 +370,19 @@ def test_dispatch_due_posts_includes_tiktok_direct_post(monkeypatch):
     result = asyncio.run(publish_handlers.dispatch_due_posts())
 
     assert result["processed"] == 1
-    assert result["published"] == 1
+    assert result["published"] == 0
     assert result["failed"] == 0
     assert touched_batches == ["batch-1"]
 
     post = storage["posts"][0]
-    assert post["publish_status"] == "published"
-    assert post["platform_ids"]["tiktok"] == "tt-post-1"
-    assert post["publish_results"]["tiktok"]["status"] == "published"
-    assert post["publish_results"]["tiktok"]["provider_status"] == "PUBLISH_COMPLETE"
+    assert post["publish_status"] == "publishing"
+    assert post["platform_ids"] == {"facebook": "fb-remote-1", "instagram": "ig-remote-1"}
+    assert post["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
+    assert post["publish_results"]["tiktok"]["provider_status"] == "SEND_TO_USER_INBOX"
+    assert post["publish_results"]["tiktok"]["post_mode"] == "draft"
 
 
-def test_dispatch_due_posts_treats_completed_tiktok_job_as_published(monkeypatch):
+def test_dispatch_due_posts_tracks_tiktok_draft_as_user_action(monkeypatch):
     storage = {
         "posts": [
             {
@@ -426,27 +426,27 @@ def test_dispatch_due_posts_treats_completed_tiktok_job_as_published(monkeypatch
         ),
     )
 
-    async def _completed_tiktok_publish(post_id, *, caption=None, privacy_level, disable_comment, disable_duet, disable_stitch):
+    async def _completed_tiktok_publish(post_id, *, caption=None):
         return {
             "id": "job-1",
             "status": "submitted",
             "tiktok_publish_id": "tt-publish-1",
             "response_payload_json": {
-                "provider_status": "PUBLISH_COMPLETE",
-                "publicaly_available_post_id": ["tt-post-1"],
+                "provider_status": "SEND_TO_USER_INBOX",
+                "publicaly_available_post_id": [],
             },
             "error_message": "",
         }
 
-    monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", _completed_tiktok_publish)
+    monkeypatch.setattr(publish_handlers, "upload_tiktok_draft_for_post", _completed_tiktok_publish)
 
     result = asyncio.run(publish_handlers.dispatch_due_posts())
 
-    assert result["published"] == 1
+    assert result["published"] == 0
     post = storage["posts"][0]
-    assert post["publish_status"] == "published"
-    assert post["platform_ids"]["tiktok"] == "tt-post-1"
-    assert post["publish_results"]["tiktok"]["status"] == "published"
+    assert post["publish_status"] == "publishing"
+    assert post["platform_ids"] == {}
+    assert post["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
 
 
 def test_tiktok_job_result_status_preserves_failed_provider_job():

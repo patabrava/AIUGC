@@ -440,6 +440,9 @@
             },
             publishStatusLabel(post, index) {
                 const tiktokStatus = (post.publishResults?.tiktok?.status || '').toLowerCase();
+                if (post.publishStatus === 'publishing' && tiktokStatus === 'awaiting_user_action') {
+                    return 'Draft uploaded';
+                }
                 if (post.publishStatus === 'failed' && tiktokStatus === 'published') {
                     return 'TikTok published';
                 }
@@ -454,6 +457,9 @@
             },
             publishStatusClass(post, index) {
                 const tiktokStatus = (post.publishResults?.tiktok?.status || '').toLowerCase();
+                if (post.publishStatus === 'publishing' && tiktokStatus === 'awaiting_user_action') {
+                    return 'bg-[#006AAB]/10 text-[#006AAB]';
+                }
                 if (post.publishStatus === 'failed' && tiktokStatus === 'published') {
                     return 'bg-green-100 text-green-700';
                 }
@@ -616,7 +622,11 @@
                     }
                     this.showPostNowModal = false;
                     const tiktokStatus = data.data?.publish_results?.tiktok?.status;
-                    this.successMessage = tiktokStatus === 'published' ? 'TikTok published successfully!' : 'Post published successfully!';
+                    this.successMessage = tiktokStatus === 'awaiting_user_action'
+                        ? 'TikTok draft uploaded successfully!'
+                        : tiktokStatus === 'published'
+                            ? 'TikTok published successfully!'
+                            : 'Post published successfully!';
                     setTimeout(() => this.successMessage = '', 5000);
                 } catch (err) {
                     this.postNowError = err.message || 'Network error';

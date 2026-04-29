@@ -170,7 +170,7 @@ class TestPublishPostNowEndpoint:
         assert result["publish_status"] == "published"
         assert result["publish_results"]["facebook"]["status"] == "published"
 
-    def test_tiktok_completed_provider_job_is_published(self, monkeypatch):
+    def test_tiktok_draft_upload_is_recorded(self, monkeypatch):
         storage = _make_storage(networks=["tiktok"])
         monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
         monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
@@ -187,25 +187,26 @@ class TestPublishPostNowEndpoint:
 
         monkeypatch.setattr(publish_handlers, "get_tiktok_publish_state", fake_tiktok_state)
 
-        async def fake_tiktok_publish(post_id, *, caption=None, privacy_level, disable_comment, disable_duet, disable_stitch):
+        async def fake_tiktok_publish(post_id, *, caption=None):
             return {
                 "id": "job-1",
                 "status": "submitted",
                 "tiktok_publish_id": "tt-publish-1",
                 "response_payload_json": {
-                    "provider_status": "PUBLISH_COMPLETE",
-                    "publicaly_available_post_id": ["tt-post-1"],
+                    "provider_status": "SEND_TO_USER_INBOX",
+                    "publicaly_available_post_id": [],
                 },
                 "error_message": "",
             }
 
-        monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", fake_tiktok_publish)
+        monkeypatch.setattr(publish_handlers, "upload_tiktok_draft_for_post", fake_tiktok_publish)
 
         result = _run(publish_handlers.publish_post_now("post-1", ["tiktok"]))
 
-        assert result["publish_status"] == "published"
-        assert result["platform_ids"]["tiktok"] == "tt-post-1"
-        assert result["publish_results"]["tiktok"]["status"] == "published"
+        assert result["publish_status"] == "publishing"
+        assert result["platform_ids"] == {}
+        assert result["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
+        assert result["publish_results"]["tiktok"]["post_mode"] == "draft"
 
     def test_rejects_wrong_batch_state(self, monkeypatch):
         storage = _make_storage(batch_state="S6_QA")
