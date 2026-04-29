@@ -297,6 +297,7 @@ def burn_captions(
             "-map", "0:a?",
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-c:a", "copy",
+            "-movflags", "+faststart",
             output_path,
         ]
 

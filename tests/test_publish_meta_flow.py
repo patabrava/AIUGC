@@ -885,6 +885,41 @@ def test_publish_instagram_reel_uses_selected_page_token(monkeypatch):
     assert calls[2]["url"].endswith("/ig-1/media_publish")
 
 
+def test_publish_instagram_reel_falls_back_to_raw_video_when_captioned_mp4_is_not_faststart(monkeypatch):
+    calls = []
+
+    async def _fake_meta_request(method, url, *, params=None, data=None):
+        calls.append({"method": method, "url": url, "params": params, "data": data})
+        if url.endswith("/media"):
+            return {"id": "container-1"}
+        if url.endswith("/media_publish"):
+            return {"id": "ig-media-1"}
+        if url.endswith("/container-1"):
+            return {"status_code": "FINISHED"}
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
+    monkeypatch.setattr(publish_handlers, "_mp4_url_has_front_moov", lambda url: url == "https://cdn.example.com/raw.mp4")
+
+    remote_id = asyncio.run(
+        publish_handlers._publish_instagram_reel(
+            {
+                "video_url": "https://cdn.example.com/captioned.mp4",
+                "raw_video_url": "https://cdn.example.com/raw.mp4",
+                "video_metadata": {"caption_video_url": "https://cdn.example.com/captioned.mp4"},
+                "publish_caption": "Caption",
+            },
+            {
+                "selected_page": {"id": "page-1", "access_token": "page-token"},
+                "selected_instagram": {"id": "ig-1"},
+            },
+        )
+    )
+
+    assert remote_id == "ig-media-1"
+    assert calls[0]["data"]["video_url"] == "https://cdn.example.com/raw.mp4"
+
+
 def test_wait_for_instagram_container_retries_until_finished(monkeypatch):
     statuses = iter(["IN_PROGRESS", "IN_PROGRESS", "FINISHED"])
     calls = []

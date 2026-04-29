@@ -94,6 +94,8 @@ class TestBurnCaptions:
             cmd = mock_run.call_args[0][0]
             assert "ffmpeg" in cmd[0]
             assert "-filter_complex" in cmd
+            assert "-movflags" in cmd
+            assert "+faststart" in cmd
         finally:
             os.unlink(input_path)
             if output_path and os.path.exists(output_path):

@@ -593,6 +593,38 @@ def _resolve_video_url(post: Dict[str, Any]) -> str:
     return post.get("video_url") or ""
 
 
+def _mp4_url_has_front_moov(url: str) -> bool:
+    """Return whether a remote MP4 exposes moov before mdat for Instagram ingestion."""
+    if not url.startswith(("http://", "https://")):
+        return True
+    try:
+        response = httpx.get(url, headers={"Range": "bytes=0-65535"}, timeout=10.0, follow_redirects=True)
+    except Exception as exc:
+        logger.warning("instagram_video_faststart_probe_failed", error=str(exc))
+        return True
+
+    if response.status_code not in {200, 206}:
+        logger.warning("instagram_video_faststart_probe_unexpected_status", status_code=response.status_code)
+        return True
+
+    head = response.content
+    moov_index = head.find(b"moov")
+    mdat_index = head.find(b"mdat")
+    return moov_index >= 0 and (mdat_index < 0 or moov_index < mdat_index)
+
+
+def _resolve_instagram_video_url(post: Dict[str, Any]) -> str:
+    """Use the captioned video unless it is an existing non-faststart MP4."""
+    video_url = post.get("video_url") or ""
+    metadata = _load_json_object(post.get("video_metadata"))
+    captioned_url = metadata.get("caption_video_url")
+    raw_url = post.get("raw_video_url") or metadata.get("raw_video_url") or metadata.get("source_video_url")
+    if captioned_url and raw_url and video_url == captioned_url and not _mp4_url_has_front_moov(captioned_url):
+        logger.warning("instagram_captioned_video_not_faststart_using_raw", raw_video_url=raw_url)
+        return str(raw_url)
+    return str(video_url)
+
+
 def _default_publish_caption(post: Dict[str, Any]) -> str:
     """Use stored caption when available, otherwise fall back to the generated seed bundle."""
     caption = (post.get("publish_caption") or "").strip()
@@ -1184,9 +1216,10 @@ async def _publish_instagram_reel(post: Dict[str, Any], meta_connection: Dict[st
     selected_page, selected_instagram = _get_selected_meta_targets(meta_connection)
     ig_id = selected_instagram.get("id")
     page_token = selected_page.get("access_token")
+    video_url = _resolve_instagram_video_url(post)
     if not ig_id or not page_token:
         raise ValidationError("Instagram target is unavailable for this batch.")
-    if not post.get("video_url"):
+    if not video_url:
         raise ValidationError("Post has no video_url for Instagram publishing.")
 
     container = await _meta_request(
@@ -1194,7 +1227,7 @@ async def _publish_instagram_reel(post: Dict[str, Any], meta_connection: Dict[st
         f"{META_GRAPH_BASE}/{ig_id}/media",
         data={
             "media_type": "REELS",
-            "video_url": post["video_url"],
+            "video_url": video_url,
             "caption": post["publish_caption"],
             "share_to_feed": "true",
             "access_token": page_token,
@@ -1394,6 +1427,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
 
         post = dict(claim.data[0])
         post["publish_caption"] = _default_publish_caption(post)
+        post["raw_video_url"] = post.get("video_url") or ""
         post["video_url"] = _resolve_video_url(post)
         post["social_networks"] = _load_string_list(post.get("social_networks"))
         publish_results = _load_json_object(post.get("publish_results"))
@@ -1613,6 +1647,7 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
 
     post = dict(claim.data[0])
     post["publish_caption"] = publish_caption if publish_caption else _default_publish_caption(post)
+    post["raw_video_url"] = post.get("video_url") or ""
     post["video_url"] = _resolve_video_url(post)
     post["social_networks"] = social_networks
     publish_results = _load_json_object(post.get("publish_results"))
