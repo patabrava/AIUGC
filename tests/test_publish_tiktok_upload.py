@@ -276,10 +276,11 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
 
 
 def test_tiktok_draft_proxy_route_serves_video_from_public_domain(monkeypatch):
+    post_id = "123e4567-e89b-12d3-a456-426614174000"
     storage = {
         "posts": [
             {
-                "id": "post-1",
+                "id": post_id,
                 "batch_id": "batch-1",
                 "topic_title": "Topic",
                 "seed_data": {"script_review_status": "approved"},
@@ -300,7 +301,7 @@ def test_tiktok_draft_proxy_route_serves_video_from_public_domain(monkeypatch):
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
     monkeypatch.setattr(tiktok.httpx, "AsyncClient", lambda *args, **kwargs: _ProxyClient(_ProxyResponse()))
 
-    response = asyncio.run(tiktok.serve_tiktok_draft_video("post-1"))
+    response = asyncio.run(tiktok.serve_tiktok_draft_video(f"post-{post_id}"))
 
     assert response.media_type == "video/mp4"
 

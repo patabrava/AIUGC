@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urlparse
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -688,6 +689,18 @@ def _build_tiktok_draft_proxy_url(post_id: str) -> str:
     return f"{settings.app_url.rstrip('/')}/tiktok/drafts/{post_id}/video.mp4"
 
 
+def _normalize_tiktok_post_id(post_id: str) -> str:
+    normalized = str(post_id or "").strip()
+    if normalized.startswith("post-"):
+        candidate = normalized.removeprefix("post-")
+        try:
+            UUID(candidate)
+        except ValueError:
+            return normalized
+        return candidate
+    return normalized
+
+
 def _build_tiktok_post_info(
     *,
     caption: str,
@@ -833,6 +846,7 @@ async def _upload_video_chunks(upload_url: str, video_bytes: bytes, content_type
 
 
 def _load_post_for_tiktok(post_id: str, *, mode: str) -> Dict[str, Any]:
+    post_id = _normalize_tiktok_post_id(post_id)
     response = get_supabase().client.table("posts").select(
         "id,batch_id,topic_title,seed_data,video_url,video_metadata,publish_caption,publish_results,platform_ids,social_networks,publish_status"
     ).eq("id", post_id).execute()
