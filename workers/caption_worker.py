@@ -31,12 +31,17 @@ from app.core.video_profiles import (
 logger = get_logger(__name__)
 
 POLL_INTERVAL_SECONDS = 10
+CAPTION_IDLE_BACKOFF_SECONDS = int(os.getenv("CAPTION_IDLE_BACKOFF_SECONDS", "45"))
 MAX_CAPTION_RETRIES = 3
 CAPTION_BATCH_LIMIT = 5
 CAPTION_POLL_SELECT_FIELDS = "id,batch_id,video_url,video_metadata,seed_data"
 
 
-def poll_caption_pending() -> None:
+def _caption_worker_sleep_seconds(rows_seen_count: int) -> int:
+    return CAPTION_IDLE_BACKOFF_SECONDS if rows_seen_count == 0 else POLL_INTERVAL_SECONDS
+
+
+def poll_caption_pending() -> int:
     supabase = get_supabase().client
     statuses = list(get_caption_pollable_statuses())
     result = (
@@ -48,13 +53,16 @@ def poll_caption_pending() -> None:
     )
     posts = result.data or []
     if not posts:
-        return
+        return 0
     logger.info("caption_poll_found", count=len(posts))
+    rows_seen_count = 0
     for post in posts:
+        rows_seen_count += 1
         try:
             _process_caption_post(post)
         except Exception:
             logger.exception("caption_post_error", post_id=post.get("id"))
+    return rows_seen_count
 
 
 def _process_caption_post(post: dict[str, Any]) -> None:
@@ -204,13 +212,14 @@ def main():
     logger.info("caption_worker_starting", environment=settings.environment)
     while True:
         try:
-            poll_caption_pending()
+            rows_seen_count = poll_caption_pending()
         except KeyboardInterrupt:
             logger.info("caption_worker_shutdown")
             break
         except Exception:
             logger.exception("caption_worker_poll_error")
-        time.sleep(POLL_INTERVAL_SECONDS)
+            rows_seen_count = 1
+        time.sleep(_caption_worker_sleep_seconds(rows_seen_count))
 
 
 if __name__ == "__main__":

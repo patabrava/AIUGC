@@ -352,10 +352,9 @@ def test_acquire_poller_lock_exits_when_lock_held(monkeypatch):
     assert _acquire_poller_lock() is False
 
 
-from workers.video_poller import _needs_extension_hop
-
-
 def test_needs_extension_hop_returns_true_when_hops_remaining():
+    from workers.video_poller import _needs_extension_hop
+
     metadata = {
         "video_pipeline_route": "veo_extended",
         "veo_extension_hops_target": 4,
@@ -365,6 +364,8 @@ def test_needs_extension_hop_returns_true_when_hops_remaining():
 
 
 def test_needs_extension_hop_returns_false_when_all_hops_done():
+    from workers.video_poller import _needs_extension_hop
+
     metadata = {
         "video_pipeline_route": "veo_extended",
         "veo_extension_hops_target": 2,
@@ -374,11 +375,15 @@ def test_needs_extension_hop_returns_false_when_all_hops_done():
 
 
 def test_needs_extension_hop_returns_false_for_short_route():
+    from workers.video_poller import _needs_extension_hop
+
     metadata = {"video_pipeline_route": "short", "veo_extension_hops_target": 0, "veo_extension_hops_completed": 0}
     assert _needs_extension_hop(metadata) is False
 
 
 def test_needs_extension_hop_returns_false_for_missing_metadata():
+    from workers.video_poller import _needs_extension_hop
+
     assert _needs_extension_hop({}) is False
     assert _needs_extension_hop(None) is False
 

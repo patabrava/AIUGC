@@ -632,6 +632,24 @@ def test_build_batch_detail_view_polls_while_video_is_submitted():
     assert view["should_poll_videos"] is True
 
 
+def test_batch_detail_template_uses_slower_refresh_interval():
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    template = (repo_root / "templates/batches/detail.html").read_text(encoding="utf-8")
+    assert 'hx-trigger="every 5s"' not in template
+    assert 'hx-trigger="every 15s"' in template
+
+
+def test_topic_run_card_uses_slower_refresh_interval():
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    template = (repo_root / "templates/topics/partials/run_card.html").read_text(encoding="utf-8")
+    assert 'hx-trigger="load, every 6s"' not in template
+    assert 'hx-trigger="load, every 15s"' in template
+
+
 def test_build_batch_detail_view_does_not_poll_idle_scripted_batch():
     batch_payload = {
         "state": "S4_SCRIPTED",

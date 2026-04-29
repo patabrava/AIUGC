@@ -92,3 +92,36 @@ def test_caption_worker_uses_bounded_post_projection(monkeypatch):
     assert selected_fields["posts"] != "*"
     assert "video_status" not in selected_fields["posts"]
     assert "publish_results" not in selected_fields["posts"]
+
+
+def test_caption_worker_uses_longer_backoff_when_queue_is_empty():
+    from workers import caption_worker
+
+    assert caption_worker._caption_worker_sleep_seconds(rows_seen_count=0) == 45
+
+
+def test_caption_worker_keeps_active_backoff_after_poll_error(monkeypatch):
+    from workers import caption_worker
+
+    monkeypatch.setattr(caption_worker, "configure_logging", lambda: None)
+    monkeypatch.setattr(
+        caption_worker,
+        "get_settings",
+        lambda: type("Settings", (), {"environment": "test"})(),
+    )
+
+    poll_side_effects = [Exception("boom"), KeyboardInterrupt()]
+
+    def fake_poll():
+        outcome = poll_side_effects.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    sleep_args = []
+    monkeypatch.setattr(caption_worker, "poll_caption_pending", fake_poll)
+    monkeypatch.setattr(caption_worker.time, "sleep", lambda seconds: sleep_args.append(seconds))
+
+    caption_worker.main()
+
+    assert sleep_args == [10]
