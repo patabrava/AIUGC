@@ -520,6 +520,8 @@ def _load_string_list(value: Any) -> List[str]:
 
 def _derive_post_publish_status(networks: List[str], publish_results: Dict[str, Any]) -> str:
     if not networks:
+        networks = [str(network) for network, result in publish_results.items() if isinstance(result, dict)]
+    if not networks:
         return "pending"
     statuses = [str((publish_results.get(network) or {}).get("status", "pending")) for network in networks]
     if all(status == "published" for status in statuses):

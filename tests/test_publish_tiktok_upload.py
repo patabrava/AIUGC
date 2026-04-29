@@ -233,6 +233,19 @@ async def _unexpected_upload_call(*args, **kwargs):
     raise AssertionError("Draft upload should use PULL_FROM_URL without chunk upload.")
 
 
+def test_tiktok_status_refresh_derives_networks_from_results_when_selection_missing():
+    status = tiktok._derive_post_publish_status(
+        [],
+        {
+            "facebook": {"status": "published"},
+            "instagram": {"status": "published"},
+            "tiktok": {"status": "publishing"},
+        },
+    )
+
+    assert status == "publishing"
+
+
 def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
     storage = {
         "posts": [
