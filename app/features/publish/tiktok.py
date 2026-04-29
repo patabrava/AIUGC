@@ -13,7 +13,7 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from app.adapters.supabase_client import get_supabase
 from app.core.config import get_settings
@@ -682,6 +682,11 @@ async def _initialize_inbox_video_pull_from_url(access_token: str, video_url: st
     return data
 
 
+def _build_tiktok_draft_proxy_url(post_id: str) -> str:
+    settings = _require_tiktok_settings()
+    return f"{settings.app_url.rstrip('/')}/tiktok/drafts/{post_id}/video.mp4"
+
+
 def _build_tiktok_post_info(
     *,
     caption: str,
@@ -1002,6 +1007,26 @@ async def upload_tiktok_draft_for_post(post_id: str, caption: Optional[str] = No
     )
 
 
+@router.get("/tiktok/drafts/{post_id}/video.mp4")
+async def serve_tiktok_draft_video(post_id: str):
+    """Serve a generated video from the public app domain for TikTok pull-from-URL drafts."""
+    post = _load_post_for_tiktok(post_id, mode="draft")
+    source_url = str(post["video_url"])
+    async with httpx.AsyncClient(timeout=TIKTOK_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        response = await client.get(source_url)
+    if response.is_error or not response.content:
+        raise ThirdPartyError(
+            "Unable to proxy TikTok draft video.",
+            details={"post_id": post_id, "status_code": response.status_code, "source_url": source_url},
+        )
+    content_type = response.headers.get("content-type") or "video/mp4"
+    headers = {
+        "Content-Length": str(len(response.content)),
+        "Cache-Control": "public, max-age=300",
+    }
+    return StreamingResponse(iter([response.content]), media_type=content_type, headers=headers)
+
+
 async def publish_tiktok_direct_for_post(
     post_id: str,
     *,
@@ -1072,9 +1097,10 @@ async def _publish_tiktok_post(
     }
     creator_info: Dict[str, Any] = {}
     if mode == "draft":
+        draft_proxy_url = _build_tiktok_draft_proxy_url(post["id"])
         request_payload["source_info"] = {
             "source": "PULL_FROM_URL",
-            "video_url": video_url,
+            "video_url": draft_proxy_url,
         }
     job = _create_publish_job(
         connected_account_id=str(account["id"]),
@@ -1085,7 +1111,10 @@ async def _publish_tiktok_post(
     )
     try:
         if mode == "draft":
-            init_payload = await _initialize_inbox_video_pull_from_url(account["access_token_plain"], video_url)
+            init_payload = await _initialize_inbox_video_pull_from_url(
+                account["access_token_plain"],
+                _build_tiktok_draft_proxy_url(post["id"]),
+            )
         if mode == "direct":
             video_bytes, content_type = await _download_video_bytes(video_url)
             video_size = len(video_bytes)

@@ -127,6 +127,32 @@ class _FakeSupabase:
         self.client = _FakeClient(storage)
 
 
+class _ProxyResponse:
+    def __init__(self, content=b"video-bytes", content_type="video/mp4", status_code=200):
+        self.content = content
+        self.status_code = status_code
+        self.headers = {"content-type": content_type}
+
+    @property
+    def is_error(self):
+        return self.status_code >= 400
+
+
+class _ProxyClient:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url):
+        assert url == "https://cdn.example.com/video.mp4"
+        return self.response
+
+
 def _settings():
     return SimpleNamespace(
         tiktok_client_key="client-key",
@@ -173,7 +199,7 @@ async def _init_stub(access_token: str, video_size: int):
 
 async def _init_url_stub(access_token: str, video_url: str):
     assert access_token == "access-token"
-    assert video_url == "https://cdn.example.com/video.mp4"
+    assert video_url == "http://localhost:8000/tiktok/drafts/post-1/video.mp4"
     return {
         "publish_id": "publish-1",
     }
@@ -247,6 +273,36 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
     assert storage["publish_jobs"][0]["caption"] == "TikTok caption"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
     assert storage["posts"][0]["publish_results"]["tiktok"]["provider_status"] == "SEND_TO_USER_INBOX"
+
+
+def test_tiktok_draft_proxy_route_serves_video_from_public_domain(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "topic_title": "Topic",
+                "seed_data": {"script_review_status": "approved"},
+                "video_url": "https://cdn.example.com/video.mp4",
+                "video_metadata": {"requested_seconds": 8},
+                "publish_caption": "Local caption",
+                "publish_results": {},
+                "platform_ids": {},
+            }
+        ],
+        "batches": [{"id": "batch-1", "state": "S8_COMPLETE"}],
+        "media_assets": [],
+        "publish_jobs": [],
+        "connected_accounts": [],
+    }
+
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok.httpx, "AsyncClient", lambda *args, **kwargs: _ProxyClient(_ProxyResponse()))
+
+    response = asyncio.run(tiktok.serve_tiktok_draft_video("post-1"))
+
+    assert response.media_type == "video/mp4"
 
 
 def test_upload_tiktok_draft_allows_s8_complete_after_meta_publish(monkeypatch):
