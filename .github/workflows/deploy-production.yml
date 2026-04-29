@@ -13,6 +13,7 @@ jobs:
       PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST != '' && secrets.PROD_SSH_HOST || vars.PROD_SSH_HOST }}
       PROD_SSH_USER: ${{ secrets.PROD_SSH_USER != '' && secrets.PROD_SSH_USER || vars.PROD_SSH_USER }}
       PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY != '' && secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
+      PROD_SSH_PASSWORD: ${{ secrets.PROD_SSH_PASSWORD != '' && secrets.PROD_SSH_PASSWORD || vars.PROD_SSH_PASSWORD }}
       PROD_APP_ROOT: ${{ secrets.PROD_APP_ROOT != '' && secrets.PROD_APP_ROOT || vars.PROD_APP_ROOT }}
     steps:
       - name: Checkout
@@ -22,9 +23,33 @@ jobs:
         run: |
           test -n "$PROD_SSH_HOST" || { echo "Missing PROD_SSH_HOST (GitHub secret or variable)."; exit 1; }
           test -n "$PROD_SSH_USER" || { echo "Missing PROD_SSH_USER (GitHub secret or variable)."; exit 1; }
-          test -n "$PROD_SSH_PRIVATE_KEY" || { echo "Missing PROD_SSH_PRIVATE_KEY or SSH_PRIVATE_KEY GitHub secret."; exit 1; }
+          if [ -z "$PROD_SSH_PRIVATE_KEY" ] && [ -z "$PROD_SSH_PASSWORD" ]; then
+            echo "Missing PROD_SSH_PRIVATE_KEY or PROD_SSH_PASSWORD GitHub secret."
+            exit 1
+          fi
 
-      - name: Deploy over SSH
+      - name: Deploy over SSH with password
+        if: env.PROD_SSH_PASSWORD != ''
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ env.PROD_SSH_HOST }}
+          username: ${{ env.PROD_SSH_USER }}
+          password: ${{ env.PROD_SSH_PASSWORD }}
+          script: |
+            export APP_ROOT="${{ env.PROD_APP_ROOT }}"
+            export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
+            export REPO_DIR="${APP_ROOT}/repo"
+            export ENV_FILE="${APP_ROOT}/.env.production"
+            export HEALTHCHECK_URL="https://lippelift.xyz/health"
+            mkdir -p "$APP_ROOT"
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
+            fi
+            cd "$REPO_DIR"
+            bash scripts/deploy/production.sh
+
+      - name: Deploy over SSH with key
+        if: env.PROD_SSH_PASSWORD == ''
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ env.PROD_SSH_HOST }}
