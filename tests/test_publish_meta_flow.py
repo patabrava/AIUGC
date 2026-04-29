@@ -987,6 +987,25 @@ def test_wait_for_instagram_container_retries_until_finished(monkeypatch):
     assert all(call["params"]["access_token"] == "page-token" for call in calls)
 
 
+def test_wait_for_instagram_container_tolerates_transient_error(monkeypatch):
+    statuses = iter(["ERROR", "IN_PROGRESS", "FINISHED"])
+    calls = []
+
+    async def _fake_meta_request(method, url, *, params=None, data=None):
+        calls.append({"method": method, "url": url, "params": params, "data": data})
+        return {"status_code": next(statuses)}
+
+    async def _fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
+    monkeypatch.setattr(publish_handlers.asyncio, "sleep", _fake_sleep)
+
+    asyncio.run(publish_handlers._wait_for_instagram_container("container-1", "page-token"))
+
+    assert len(calls) == 3
+
+
 def test_wait_for_instagram_container_reports_last_status_on_timeout(monkeypatch):
     async def _fake_meta_request(method, url, *, params=None, data=None):
         return {"status_code": "IN_PROGRESS"}

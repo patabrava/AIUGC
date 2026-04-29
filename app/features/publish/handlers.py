@@ -1266,11 +1266,13 @@ async def _wait_for_instagram_container(container_id: str, page_token: str) -> N
         last_status_code = status_code or "UNKNOWN"
         if status_code in {"FINISHED", "PUBLISHED"}:
             return
-        if status_code in {"ERROR", "EXPIRED"}:
+        if status_code == "EXPIRED":
             raise ThirdPartyError(
                 "Instagram media container failed before publish.",
                 details={"container_id": container_id, "status_code": status_code},
             )
+        if status_code == "ERROR":
+            logger.warning("instagram_media_container_transient_error", container_id=container_id)
         await asyncio.sleep(INSTAGRAM_POLL_SECONDS)
 
     raise ThirdPartyError(
