@@ -13,14 +13,16 @@ from copy import deepcopy
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.errors import ThirdPartyError, ValidationError
+from app.adapters.vertex_gemini_client import get_vertex_gemini_client
 
 logger = get_logger(__name__)
 
 GEMINI_IMAGE_MODEL_ALIASES = {
-    "nanobanana-2": "gemini-3.1-flash-image-preview",
-    "nano-banana-2": "gemini-3.1-flash-image-preview",
-    "nano banana 2": "gemini-3.1-flash-image-preview",
-    "nanobanana2": "gemini-3.1-flash-image-preview",
+    "nanobanana-2": "gemini-2.5-flash-image",
+    "nano-banana-2": "gemini-2.5-flash-image",
+    "nano banana 2": "gemini-2.5-flash-image",
+    "nanobanana2": "gemini-2.5-flash-image",
+    "gemini-3.1-flash-image-preview": "gemini-2.5-flash-image",
 }
 
 
@@ -32,6 +34,21 @@ class LLMClient:
         self.openai_api_key = settings.openai_api_key
         self.default_openai_model = settings.openai_model
         self.gemini_api_key = settings.gemini_api_key
+        self.gemini_provider = getattr(
+            settings,
+            "gemini_provider",
+            "gemini_api" if settings.gemini_api_key else "vertex",
+        )
+        self.gemini_api_fallback_enabled = getattr(
+            settings,
+            "gemini_api_fallback_enabled",
+            self.gemini_provider == "gemini_api",
+        )
+        self.gemini_deep_research_provider = getattr(
+            settings,
+            "gemini_deep_research_provider",
+            "gemini_api" if self.gemini_provider == "gemini_api" else "vertex_grounded",
+        )
         self.default_gemini_model = settings.gemini_topic_model
         self.default_gemini_image_model = settings.gemini_image_model
         self.gemini_deep_research_agent = settings.gemini_deep_research_agent
@@ -66,6 +83,14 @@ class LLMClient:
         }
 
     def _gemini_params(self) -> Dict[str, str]:
+        if not self.gemini_api_fallback_enabled:
+            raise ThirdPartyError(
+                message="Legacy Gemini API fallback is not enabled",
+                details={
+                    "provider": "gemini_api",
+                    "required_env": "GEMINI_API_FALLBACK_ENABLED=true",
+                },
+            )
         if not self.gemini_api_key:
             raise ThirdPartyError(
                 message="Gemini API key not configured",
@@ -88,7 +113,7 @@ class LLMClient:
     def _resolve_gemini_image_model(self, model: Optional[str]) -> str:
         raw_model = (model or self.default_gemini_image_model or "").strip()
         if not raw_model:
-            return "gemini-3.1-flash-image-preview"
+            return "gemini-2.5-flash-image"
         return GEMINI_IMAGE_MODEL_ALIASES.get(raw_model.lower(), raw_model)
     
     def generate_openai(
@@ -503,6 +528,16 @@ class LLMClient:
         thinking_budget: Optional[int] = None,
     ) -> str:
         """Generate plain text using Gemini generateContent."""
+        if self.gemini_provider == "vertex":
+            return get_vertex_gemini_client().generate_text(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                thinking_budget=thinking_budget,
+            )
+
         target_model = model or self.default_gemini_model
         full_prompt = self._merge_prompts(system_prompt, prompt)
         payload: Dict[str, Any] = {
@@ -575,6 +610,16 @@ class LLMClient:
         temperature: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Generate structured JSON using Gemini responseSchema."""
+        if self.gemini_provider == "vertex":
+            return get_vertex_gemini_client().generate_json(
+                prompt=prompt,
+                json_schema=json_schema,
+                system_prompt=system_prompt,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
         target_model = model or self.default_gemini_model
         full_prompt = self._merge_prompts(system_prompt, prompt)
         schema_payload = self._to_gemini_response_schema(json_schema.get("schema", json_schema))
@@ -653,6 +698,16 @@ class LLMClient:
         temperature: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Generate a single image using Gemini and return image bytes plus mime type."""
+        if self.gemini_provider == "vertex":
+            target_model = self._resolve_gemini_image_model(model) if model else None
+            return get_vertex_gemini_client().generate_image(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=target_model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
         target_model = self._resolve_gemini_image_model(model)
         full_prompt = self._merge_prompts(system_prompt, prompt)
         payload: Dict[str, Any] = {
@@ -734,6 +789,42 @@ class LLMClient:
         progress_callback: Optional[Any] = None,
     ) -> str:
         """Run Gemini Deep Research via the Interactions API and return final text."""
+        if self.gemini_deep_research_provider == "vertex_grounded":
+            if progress_callback:
+                progress_callback(
+                    {
+                        "provider_status": "SUBMITTED",
+                        "detail_message": "Vertex Gemini accepted the grounded research request.",
+                        "is_retrying": False,
+                        "retry_message": None,
+                    }
+                )
+            result = get_vertex_gemini_client().generate_grounded_research(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=1.0,
+            )
+            if progress_callback:
+                progress_callback(
+                    {
+                        "provider_status": "COMPLETED",
+                        "detail_message": "Vertex Gemini returned the grounded research dossier.",
+                        "is_retrying": False,
+                        "retry_message": None,
+                    }
+                )
+            return result
+
+        if not self.gemini_api_fallback_enabled:
+            raise ThirdPartyError(
+                message="Native Gemini Deep Research requires the legacy Gemini API fallback path.",
+                details={
+                    "provider": "gemini_api",
+                    "required_env": "GEMINI_API_FALLBACK_ENABLED=true",
+                    "reason": "Google documents Deep Research Interactions for Gemini API, not Vertex AI.",
+                },
+            )
+
         target_agent = agent or self.gemini_deep_research_agent
         effective_timeout = timeout_seconds or self.gemini_topic_timeout_seconds
         effective_poll = poll_interval_seconds or self.gemini_topic_poll_seconds

@@ -72,8 +72,10 @@ async def lifespan(app: FastAPI):
         **google_ai_context_fingerprint(settings),
     )
     logger.info(
-        "gemini_api_key_alignment_verified",
-        gemini_api_key_present=bool(settings.gemini_api_key),
+        "gemini_provider_alignment_verified",
+        gemini_provider=settings.gemini_provider,
+        gemini_deep_research_provider=settings.gemini_deep_research_provider,
+        gemini_api_fallback_enabled=settings.gemini_api_fallback_enabled,
     )
     
     # Defer Supabase client creation until the first real database operation.

@@ -28,6 +28,43 @@ def test_vertex_settings_default_to_disabled(monkeypatch, tmp_path: Path):
     assert settings.vertex_ai_enabled is False
 
 
+def test_gemini_provider_defaults_to_vertex_without_legacy_fallback(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    _write_minimal_env(tmp_path)
+
+    settings = Settings()
+
+    assert settings.gemini_provider == "vertex"
+    assert settings.gemini_api_fallback_enabled is False
+    assert settings.gemini_deep_research_provider == "vertex_grounded"
+    assert settings.vertex_gemini_model == "gemini-2.5-flash"
+    assert settings.vertex_gemini_image_model == "gemini-2.5-flash-image"
+    assert settings.vertex_grounded_research_model == "gemini-2.5-pro"
+    assert settings.vertex_grounded_research_location == "global"
+
+
+def test_gemini_provider_accepts_legacy_fallback(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    _write_minimal_env(
+        tmp_path,
+        [
+            "GEMINI_PROVIDER=gemini_api",
+            "GEMINI_API_FALLBACK_ENABLED=true",
+            "GEMINI_DEEP_RESEARCH_PROVIDER=gemini_api",
+            "VERTEX_GEMINI_MODEL=gemini-2.5-pro",
+            "VERTEX_GROUNDED_RESEARCH_LOCATION=us-central1",
+        ],
+    )
+
+    settings = Settings()
+
+    assert settings.gemini_provider == "gemini_api"
+    assert settings.gemini_api_fallback_enabled is True
+    assert settings.gemini_deep_research_provider == "gemini_api"
+    assert settings.vertex_gemini_model == "gemini-2.5-pro"
+    assert settings.vertex_grounded_research_location == "us-central1"
+
+
 def test_veo_reference_image_toggle_defaults_to_disabled(monkeypatch, tmp_path: Path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("VEO_USE_REFERENCE_IMAGE", raising=False)
