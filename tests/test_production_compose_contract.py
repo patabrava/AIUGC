@@ -142,6 +142,7 @@ def test_github_action_deploys_on_push_to_main():
     assert "git fetch origin main" in step_text
     assert "git checkout -B main origin/main" in step_text
     assert "git reset --hard origin/main" in step_text
+    assert "git clean -fd" in step_text
     assert "export APP_ROOT=\"${APP_ROOT:-/opt/aiugc-prod}\"" in step_text
     assert "export REPO_DIR=\"${APP_ROOT}/repo\"" in step_text
     assert "export ENV_FILE=\"${APP_ROOT}/.env.production\"" in step_text
