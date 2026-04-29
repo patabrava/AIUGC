@@ -684,6 +684,7 @@ async def _initialize_inbox_video_pull_from_url(access_token: str, video_url: st
 
 def _build_tiktok_draft_proxy_url(post_id: str) -> str:
     settings = _require_tiktok_settings()
+    # TikTok draft uploads must fetch from a public app URL, not a private R2 URL.
     return f"{settings.app_url.rstrip('/')}/tiktok/drafts/{post_id}/video.mp4"
 
 
