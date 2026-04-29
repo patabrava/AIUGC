@@ -101,7 +101,12 @@ See `.env.example` for all required variables:
 - `SUPABASE_KEY`: Supabase anon key
 - `SUPABASE_SERVICE_KEY`: Supabase service role key
 - `OPENAI_API_KEY`: OpenAI API key
-- `GEMINI_API_KEY`: Gemini API key for topic research and generation
+- `GEMINI_PROVIDER=vertex`: Default Gemini transport through Vertex AI
+- `GEMINI_DEEP_RESEARCH_PROVIDER=vertex_grounded`: Research transport through Vertex Gemini with Google Search grounding
+- `VERTEX_AI_PROJECT_ID`: Google Cloud project that owns billing and Vertex access
+- `VERTEX_AI_LOCATION`: Vertex location for standard Gemini calls, default `us-central1`
+- `VERTEX_GROUNDED_RESEARCH_LOCATION`: Vertex location for grounded research, default `global`
+- `GEMINI_API_KEY`: Legacy fallback only when `GEMINI_API_FALLBACK_ENABLED=true`
 - `ANTHROPIC_API_KEY`: Anthropic API key
 - Additional keys for video providers, Cloudflare R2, and social platforms
 - TikTok sandbox requires:
@@ -116,18 +121,22 @@ See `.env.example` for all required variables:
   - `TOKEN_ENCRYPTION_KEY`
 
 ### Vertex AI Testing (Local)
-For explicit Vertex testing, enable the Vertex endpoint and authenticate with Google ADC.
+For Vertex Gemini and video testing, enable Vertex and authenticate with Google ADC.
 
 Required env vars:
 - `VERTEX_AI_PROJECT_ID`
 - `VERTEX_AI_LOCATION` (default: `us-central1`)
 - `VERTEX_AI_ENABLED=true`
+- `GEMINI_PROVIDER=vertex`
+- `GEMINI_DEEP_RESEARCH_PROVIDER=vertex_grounded`
 
 Auth:
 - Local: `gcloud auth application-default login`
 - GCP: attach a service account with Vertex permissions
 
 See [docs/vertex-ai-testing.md](/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/.worktrees/vertex-ai-video-plan/docs/vertex-ai-testing.md) for request examples.
+
+Native Gemini Deep Research is still a legacy Gemini API Interactions feature. The Vertex default uses Gemini with Google Search grounding so usage is billed through the configured Google Cloud project.
 
 ## Architecture
 

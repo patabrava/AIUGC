@@ -49,19 +49,54 @@ class Settings(BaseSettings):
     # LLM Providers
     openai_api_key: str = Field("", description="OpenAI API key (required for Sora video generation)")
     openai_model: str = Field("gpt-4o-mini", description="Default OpenAI model identifier")
+    gemini_provider: Literal["vertex", "gemini_api"] = Field(
+        "vertex",
+        validation_alias=AliasChoices("GEMINI_PROVIDER"),
+        description="Primary Gemini transport. Use Vertex by default; gemini_api is legacy fallback only.",
+    )
+    gemini_api_fallback_enabled: bool = Field(
+        False,
+        validation_alias=AliasChoices("GEMINI_API_FALLBACK_ENABLED"),
+        description="Allow the consumer Gemini API key path for explicitly unsupported Vertex features.",
+    )
+    gemini_deep_research_provider: Literal["vertex_grounded", "gemini_api"] = Field(
+        "vertex_grounded",
+        validation_alias=AliasChoices("GEMINI_DEEP_RESEARCH_PROVIDER"),
+        description="Research transport. vertex_grounded uses Vertex Gemini with Google Search grounding.",
+    )
     gemini_api_key: str = Field(
         "",
-        validation_alias=AliasChoices("gemini_api_key", "GEMINI_API_KEY", "GEMINI_API_KEY"),
-        description="Canonical Gemini API key for topic generation and VEO requests",
+        validation_alias=AliasChoices("gemini_api_key", "GEMINI_API_KEY"),
+        description="Legacy Gemini API key. Only used when GEMINI_API_FALLBACK_ENABLED=true.",
     )
-    gemini_topic_model: str = Field("gemini-2.5-flash", description="Gemini model for topic generation and repair")
+    gemini_topic_model: str = Field("gemini-2.5-flash", description="Legacy Gemini API model for fallback topic generation")
     gemini_image_model: str = Field(
-        "gemini-3.1-flash-image-preview",
-        description="Gemini image generation model for blog previews (Nano Banana 2 preview)",
+        "gemini-2.5-flash-image",
+        description="Legacy Gemini API image model for fallback blog previews",
     )
     gemini_deep_research_agent: str = Field(
-        "deep-research-pro-preview-12-2025",
-        description="Gemini Interactions API agent for Deep Research topic discovery",
+        "deep-research-preview-04-2026",
+        description="Legacy Gemini Interactions API agent for Deep Research fallback",
+    )
+    vertex_gemini_model: str = Field(
+        "gemini-2.5-flash",
+        validation_alias=AliasChoices("VERTEX_GEMINI_MODEL"),
+        description="Vertex Gemini model for text and JSON generation",
+    )
+    vertex_gemini_image_model: str = Field(
+        "gemini-2.5-flash-image",
+        validation_alias=AliasChoices("VERTEX_GEMINI_IMAGE_MODEL"),
+        description="Vertex Gemini image generation model",
+    )
+    vertex_grounded_research_model: str = Field(
+        "gemini-2.5-pro",
+        validation_alias=AliasChoices("VERTEX_GROUNDED_RESEARCH_MODEL"),
+        description="Vertex Gemini model used for grounded research replacement",
+    )
+    vertex_grounded_research_location: str = Field(
+        "global",
+        validation_alias=AliasChoices("VERTEX_GROUNDED_RESEARCH_LOCATION"),
+        description="Vertex location for grounded Search requests.",
     )
     gemini_topic_timeout_seconds: int = Field(
         600,
@@ -294,9 +329,14 @@ def google_ai_context_fingerprint(settings: Optional[Settings] = None) -> dict[s
     """Summarize the active Google AI context for startup logging."""
     resolved = settings or get_settings()
     return {
+        "gemini_provider": resolved.gemini_provider,
+        "gemini_deep_research_provider": resolved.gemini_deep_research_provider,
+        "gemini_api_fallback_enabled": resolved.gemini_api_fallback_enabled,
         "gemini_api_key_fingerprint": fingerprint_secret(resolved.gemini_api_key),
         "gemini_api_key_present": bool(resolved.gemini_api_key),
-        "google_ai_project_id": resolved.google_ai_project_id or "unset",
+        "vertex_ai_project_id": resolved.vertex_ai_project_id or "unset",
+        "vertex_ai_location": resolved.vertex_ai_location,
+        "vertex_grounded_research_location": resolved.vertex_grounded_research_location,
         "google_application_credentials_configured": bool(resolve_google_application_credentials_path(resolved)),
     }
 

@@ -115,6 +115,8 @@ def test_blog_content_model_accepts_webflow_contract():
 
 def test_gemini_image_generation_maps_nanobanana_alias():
     client = LLMClient()
+    client.gemini_provider = "gemini_api"
+    client.gemini_api_fallback_enabled = True
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -137,10 +139,10 @@ def test_gemini_image_generation_maps_nanobanana_alias():
     with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
         result = client.generate_gemini_image(prompt="Quadratisches Coverbild", model="nanobanana-2")
 
-    assert result["model"] == "gemini-3.1-flash-image-preview"
+    assert result["model"] == "gemini-2.5-flash-image"
     assert result["image_bytes"] == b"png-bytes"
     call = mock_post.call_args
-    assert call.args[0] == "/models/gemini-3.1-flash-image-preview:generateContent"
+    assert call.args[0] == "/models/gemini-2.5-flash-image:generateContent"
     assert call.kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
     assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
 
@@ -257,6 +259,8 @@ def test_webflow_client_create_and_publish_payloads_are_correct():
 
 def test_gemini_image_generation_decodes_inline_image_bytes():
     client = LLMClient()
+    client.gemini_provider = "gemini_api"
+    client.gemini_api_fallback_enabled = True
     png_bytes = b"\x89PNG\r\n\x1a\nimage-bytes"
     encoded = base64.b64encode(png_bytes).decode("ascii")
     mock_response = MagicMock()
