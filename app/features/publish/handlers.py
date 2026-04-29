@@ -12,6 +12,9 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import subprocess
+import tempfile
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from app.adapters.supabase_client import get_supabase
+from app.adapters.storage_client import get_storage_client
 from app.core.config import get_settings
 from app.core.errors import (
     ErrorCode,
@@ -617,12 +621,81 @@ def _resolve_instagram_video_url(post: Dict[str, Any]) -> str:
     """Use the captioned video unless it is an existing non-faststart MP4."""
     video_url = post.get("video_url") or ""
     metadata = _load_json_object(post.get("video_metadata"))
+    instagram_url = metadata.get("instagram_video_url")
+    if instagram_url:
+        return str(instagram_url)
     captioned_url = metadata.get("caption_video_url")
     raw_url = post.get("raw_video_url") or metadata.get("raw_video_url") or metadata.get("source_video_url")
     if captioned_url and raw_url and video_url == captioned_url and not _mp4_url_has_front_moov(captioned_url):
         logger.warning("instagram_captioned_video_not_faststart_using_raw", raw_video_url=raw_url)
         return str(raw_url)
     return str(video_url)
+
+
+def _create_instagram_safe_video(post: Dict[str, Any], source_url: str) -> str:
+    """Transcode and persist an Instagram Graph compatible video variant."""
+    post_id = str(post.get("id") or "post")
+    with tempfile.TemporaryDirectory(prefix="instagram_video_") as tmpdir:
+        input_path = os.path.join(tmpdir, "input.mp4")
+        output_path = os.path.join(tmpdir, "instagram.mp4")
+        with httpx.stream("GET", source_url, follow_redirects=True, timeout=120.0) as response:
+            if response.is_error:
+                raise ThirdPartyError(
+                    "Unable to download source video for Instagram publishing.",
+                    details={"status_code": response.status_code, "source_url": source_url},
+                )
+            with open(input_path, "wb") as handle:
+                for chunk in response.iter_bytes():
+                    handle.write(chunk)
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p",
+            "-c:v", "libx264",
+            "-profile:v", "high",
+            "-level:v", "4.0",
+            "-preset", "medium",
+            "-crf", "22",
+            "-x264-params", "keyint=60:min-keyint=60:scenecut=0",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "48000",
+            "-ac", "2",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        if result.returncode != 0:
+            raise ThirdPartyError(
+                "Instagram video transcode failed.",
+                details={"post_id": post_id, "stderr": result.stderr[-500:]},
+            )
+
+        with open(output_path, "rb") as handle:
+            uploaded = get_storage_client().upload_video(
+                video_bytes=handle.read(),
+                file_name=f"instagram_{post_id}.mp4",
+                correlation_id=f"instagram_transcode_{post_id}",
+                content_type="video/mp4",
+            )
+    instagram_url = str(uploaded["url"])
+    metadata = _load_json_object(post.get("video_metadata"))
+    metadata["instagram_video_url"] = instagram_url
+    metadata["instagram_video_storage_key"] = uploaded.get("storage_key")
+    get_supabase().client.table("posts").update({"video_metadata": metadata}).eq("id", post_id).execute()
+    logger.info("instagram_safe_video_created", post_id=post_id, instagram_video_url=instagram_url)
+    return instagram_url
+
+
+def _ensure_instagram_video_url(post: Dict[str, Any]) -> str:
+    metadata = _load_json_object(post.get("video_metadata"))
+    if metadata.get("instagram_video_url"):
+        return str(metadata["instagram_video_url"])
+    source_url = _resolve_instagram_video_url(post)
+    if not source_url:
+        return ""
+    return _create_instagram_safe_video(post, source_url)
 
 
 def _default_publish_caption(post: Dict[str, Any]) -> str:
@@ -1216,7 +1289,7 @@ async def _publish_instagram_reel(post: Dict[str, Any], meta_connection: Dict[st
     selected_page, selected_instagram = _get_selected_meta_targets(meta_connection)
     ig_id = selected_instagram.get("id")
     page_token = selected_page.get("access_token")
-    video_url = _resolve_instagram_video_url(post)
+    video_url = _ensure_instagram_video_url(post)
     if not ig_id or not page_token:
         raise ValidationError("Instagram target is unavailable for this batch.")
     if not video_url:

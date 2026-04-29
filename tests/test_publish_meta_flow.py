@@ -867,6 +867,7 @@ def test_publish_instagram_reel_uses_selected_page_token(monkeypatch):
         publish_handlers._publish_instagram_reel(
             {
                 "video_url": "https://cdn.example.com/reel.mp4",
+                "video_metadata": {"instagram_video_url": "https://cdn.example.com/reel.mp4"},
                 "publish_caption": "Caption",
             },
             {
@@ -900,6 +901,12 @@ def test_publish_instagram_reel_falls_back_to_raw_video_when_captioned_mp4_is_no
 
     monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
     monkeypatch.setattr(publish_handlers, "_mp4_url_has_front_moov", lambda url: url == "https://cdn.example.com/raw.mp4")
+    transcoded = {}
+    monkeypatch.setattr(
+        publish_handlers,
+        "_create_instagram_safe_video",
+        lambda post, source_url: transcoded.setdefault("source_url", source_url),
+    )
 
     remote_id = asyncio.run(
         publish_handlers._publish_instagram_reel(
@@ -918,6 +925,46 @@ def test_publish_instagram_reel_falls_back_to_raw_video_when_captioned_mp4_is_no
 
     assert remote_id == "ig-media-1"
     assert calls[0]["data"]["video_url"] == "https://cdn.example.com/raw.mp4"
+    assert transcoded["source_url"] == "https://cdn.example.com/raw.mp4"
+
+
+def test_publish_instagram_reel_uses_persisted_instagram_safe_video(monkeypatch):
+    calls = []
+
+    async def _fake_meta_request(method, url, *, params=None, data=None):
+        calls.append({"method": method, "url": url, "params": params, "data": data})
+        if url.endswith("/media"):
+            return {"id": "container-1"}
+        if url.endswith("/media_publish"):
+            return {"id": "ig-media-1"}
+        if url.endswith("/container-1"):
+            return {"status_code": "FINISHED"}
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr(publish_handlers, "_meta_request", _fake_meta_request)
+    monkeypatch.setattr(
+        publish_handlers,
+        "_create_instagram_safe_video",
+        lambda post, source_url: (_ for _ in ()).throw(AssertionError("should reuse persisted URL")),
+    )
+
+    remote_id = asyncio.run(
+        publish_handlers._publish_instagram_reel(
+            {
+                "id": "post-1",
+                "video_url": "https://cdn.example.com/captioned.mp4",
+                "video_metadata": {"instagram_video_url": "https://cdn.example.com/instagram-safe.mp4"},
+                "publish_caption": "Caption",
+            },
+            {
+                "selected_page": {"id": "page-1", "access_token": "page-token"},
+                "selected_instagram": {"id": "ig-1"},
+            },
+        )
+    )
+
+    assert remote_id == "ig-media-1"
+    assert calls[0]["data"]["video_url"] == "https://cdn.example.com/instagram-safe.mp4"
 
 
 def test_wait_for_instagram_container_retries_until_finished(monkeypatch):
