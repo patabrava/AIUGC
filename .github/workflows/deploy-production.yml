@@ -53,6 +53,9 @@ jobs:
               git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
             fi
             cd "$REPO_DIR"
+            git fetch origin main
+            git checkout -B main origin/main
+            git reset --hard origin/main
             bash scripts/deploy/production.sh
 
       - name: Deploy over SSH with key
@@ -79,4 +82,7 @@ jobs:
               git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
             fi
             cd "$REPO_DIR"
+            git fetch origin main
+            git checkout -B main origin/main
+            git reset --hard origin/main
             bash scripts/deploy/production.sh
