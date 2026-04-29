@@ -656,6 +656,32 @@ async def _initialize_inbox_video_upload(access_token: str, video_size: int) -> 
     return data
 
 
+async def _initialize_inbox_video_pull_from_url(access_token: str, video_url: str) -> Dict[str, Any]:
+    if not str(video_url or "").startswith("https://"):
+        raise ValidationError(
+            "TikTok draft upload requires an https video URL.",
+            details={"video_url": video_url},
+        )
+    payload = await _tiktok_request(
+        "POST",
+        "/v2/post/publish/inbox/video/init/",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+        },
+        json_body={
+            "source_info": {
+                "source": "PULL_FROM_URL",
+                "video_url": video_url,
+            }
+        },
+    )
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not data.get("publish_id"):
+        raise ThirdPartyError("TikTok draft upload init did not return publish_id.", details=redact_secret_payload(data))
+    return data
+
+
 def _build_tiktok_post_info(
     *,
     caption: str,
@@ -1015,16 +1041,24 @@ async def _publish_tiktok_post(
 ) -> Dict[str, Any]:
     post = _load_post_for_tiktok(post_id, mode=mode)
     account = _load_tiktok_account_secret()
-    video_bytes, content_type = await _download_video_bytes(str(post["video_url"]))
-    video_size = len(video_bytes)
+    video_url = str(post["video_url"])
+    video_bytes: Optional[bytes] = None
+    content_type = "video/mp4"
+    video_size = 0
 
     video_metadata = _load_json_object(post.get("video_metadata"))
     duration_seconds = video_metadata.get("duration_seconds") or video_metadata.get("requested_seconds")
+    media_file_size = int(
+        video_metadata.get("size_bytes")
+        or video_metadata.get("file_size_bytes")
+        or video_metadata.get("size")
+        or 0
+    )
     media_asset = _upsert_media_asset(
         source_url=str(post["video_url"]),
         storage_key=_storage_key_from_url(str(post["video_url"])),
         mime_type=content_type,
-        file_size=video_size,
+        file_size=media_file_size,
         duration_seconds=float(duration_seconds) if duration_seconds is not None else None,
         status="ready",
     )
@@ -1039,8 +1073,8 @@ async def _publish_tiktok_post(
     creator_info: Dict[str, Any] = {}
     if mode == "draft":
         request_payload["source_info"] = {
-            "source": "FILE_UPLOAD",
-            "video_size": video_size,
+            "source": "PULL_FROM_URL",
+            "video_url": video_url,
         }
     job = _create_publish_job(
         connected_account_id=str(account["id"]),
@@ -1050,7 +1084,19 @@ async def _publish_tiktok_post(
         request_payload_json=request_payload,
     )
     try:
+        if mode == "draft":
+            init_payload = await _initialize_inbox_video_pull_from_url(account["access_token_plain"], video_url)
         if mode == "direct":
+            video_bytes, content_type = await _download_video_bytes(video_url)
+            video_size = len(video_bytes)
+            media_asset = _upsert_media_asset(
+                source_url=str(post["video_url"]),
+                storage_key=_storage_key_from_url(str(post["video_url"])),
+                mime_type=content_type,
+                file_size=video_size,
+                duration_seconds=float(duration_seconds) if duration_seconds is not None else None,
+                status="ready",
+            )
             creator_info = await _query_creator_info(account["access_token_plain"])
             _validate_creator_info_for_direct_post(
                 creator_info,
@@ -1083,35 +1129,24 @@ async def _publish_tiktok_post(
                     "total_chunk_count": init_payload["total_chunk_count"],
                 },
             }
-        else:
-            init_payload = await _initialize_inbox_video_upload(account["access_token_plain"], video_size)
-            request_payload = {
-                **request_payload,
-                "source_info": {
-                    "source": "FILE_UPLOAD",
-                    "video_size": video_size,
-                    "chunk_size": init_payload["chunk_size"],
-                    "total_chunk_count": init_payload["total_chunk_count"],
-                },
-            }
         if mode == "direct":
             _update_publish_job(
                 str(job["id"]),
                 {"request_payload_json": redact_secret_payload(request_payload)},
             )
-        await _upload_video_chunks(
-            str(init_payload["upload_url"]),
-            video_bytes,
-            content_type,
-            int(init_payload["chunk_size"]),
-            int(init_payload["total_chunk_count"]),
-        )
+            await _upload_video_chunks(
+                str(init_payload["upload_url"]),
+                video_bytes,
+                content_type,
+                int(init_payload["chunk_size"]),
+                int(init_payload["total_chunk_count"]),
+            )
         status_payload = await _poll_publish_status(
             account["access_token_plain"],
             str(init_payload["publish_id"]),
             post_mode=mode,
         )
-        provider_status = str(status_payload.get("status") or "PROCESSING_UPLOAD").upper()
+        provider_status = str(status_payload.get("status") or ("PROCESSING_DOWNLOAD" if mode == "draft" else "PROCESSING_UPLOAD")).upper()
         fail_reason = str(status_payload.get("fail_reason") or "")
         provider_post_ids = status_payload.get("publicaly_available_post_id") or []
         provider_post_id = str(provider_post_ids[0]) if provider_post_ids else None

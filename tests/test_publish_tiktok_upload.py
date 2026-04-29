@@ -171,6 +171,14 @@ async def _init_stub(access_token: str, video_size: int):
     }
 
 
+async def _init_url_stub(access_token: str, video_url: str):
+    assert access_token == "access-token"
+    assert video_url == "https://cdn.example.com/video.mp4"
+    return {
+        "publish_id": "publish-1",
+    }
+
+
 async def _direct_init_stub(access_token: str, *, video_size: int, caption: str, privacy_level: str, disable_comment: bool, disable_duet: bool, disable_stitch: bool):
     assert access_token == "access-token"
     assert video_size == len(b"video-bytes")
@@ -195,6 +203,10 @@ async def _upload_stub(upload_url: str, video_bytes: bytes, content_type: str, c
     assert total_chunk_count == 1
 
 
+async def _unexpected_upload_call(*args, **kwargs):
+    raise AssertionError("Draft upload should use PULL_FROM_URL without chunk upload.")
+
+
 def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
     storage = {
         "posts": [
@@ -204,7 +216,7 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
                 "topic_title": "Topic",
                 "seed_data": {"script_review_status": "approved", "description": "Fallback caption"},
                 "video_url": "https://cdn.example.com/video.mp4",
-                "video_metadata": {"requested_seconds": 8},
+                "video_metadata": {"requested_seconds": 8, "size_bytes": len(b"video-bytes")},
                 "publish_caption": "Local caption",
                 "publish_results": {},
                 "platform_ids": {},
@@ -218,10 +230,10 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
 
     monkeypatch.setattr(tiktok, "get_settings", _production_settings)
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
-    monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
-    monkeypatch.setattr(tiktok, "_initialize_inbox_video_upload", _init_stub)
+    monkeypatch.setattr(tiktok, "_initialize_inbox_video_pull_from_url", _init_url_stub)
     monkeypatch.setattr(tiktok, "_poll_publish_status", lambda access_token, publish_id, *, post_mode: asyncio.sleep(0, result={"status": "SEND_TO_USER_INBOX"}))
-    monkeypatch.setattr(tiktok, "_upload_video_chunks", _upload_stub)
+    monkeypatch.setattr(tiktok, "_download_video_bytes", _unexpected_upload_call)
+    monkeypatch.setattr(tiktok, "_upload_video_chunks", _unexpected_upload_call)
 
     response = asyncio.run(
         tiktok.upload_tiktok_draft(TikTokUploadDraftRequest(post_id="post-1", caption="TikTok caption"))
@@ -231,6 +243,7 @@ def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):
     assert job["status"] == "submitted"
     assert job["tiktok_publish_id"] == "publish-1"
     assert storage["media_assets"][0]["source_url"] == "https://cdn.example.com/video.mp4"
+    assert storage["media_assets"][0]["file_size"] == len(b"video-bytes")
     assert storage["publish_jobs"][0]["caption"] == "TikTok caption"
     assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
     assert storage["posts"][0]["publish_results"]["tiktok"]["provider_status"] == "SEND_TO_USER_INBOX"
@@ -245,7 +258,7 @@ def test_upload_tiktok_draft_allows_s8_complete_after_meta_publish(monkeypatch):
                 "topic_title": "Topic",
                 "seed_data": {"script_review_status": "approved", "description": "Fallback caption"},
                 "video_url": "https://cdn.example.com/video.mp4",
-                "video_metadata": {"requested_seconds": 8},
+                "video_metadata": {"requested_seconds": 8, "size_bytes": len(b"video-bytes")},
                 "publish_caption": "Local caption",
                 "publish_results": {
                     "facebook": {"status": "published"},
@@ -265,10 +278,10 @@ def test_upload_tiktok_draft_allows_s8_complete_after_meta_publish(monkeypatch):
 
     monkeypatch.setattr(tiktok, "get_settings", _production_settings)
     monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
-    monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
-    monkeypatch.setattr(tiktok, "_initialize_inbox_video_upload", _init_stub)
+    monkeypatch.setattr(tiktok, "_initialize_inbox_video_pull_from_url", _init_url_stub)
     monkeypatch.setattr(tiktok, "_poll_publish_status", lambda access_token, publish_id, *, post_mode: asyncio.sleep(0, result={"status": "SEND_TO_USER_INBOX"}))
-    monkeypatch.setattr(tiktok, "_upload_video_chunks", _upload_stub)
+    monkeypatch.setattr(tiktok, "_download_video_bytes", _unexpected_upload_call)
+    monkeypatch.setattr(tiktok, "_upload_video_chunks", _unexpected_upload_call)
 
     response = asyncio.run(
         tiktok.upload_tiktok_draft(TikTokUploadDraftRequest(post_id="post-1", caption="TikTok caption"))
