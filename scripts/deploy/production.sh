@@ -8,6 +8,7 @@ HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/health}"
 MAX_HEALTH_RETRIES="${MAX_HEALTH_RETRIES:-20}"
 HEALTHCHECK_INTERVAL_SECONDS="${HEALTHCHECK_INTERVAL_SECONDS:-3}"
 REPO_REMOTE="${REPO_REMOTE:-https://github.com/patabrava/AIUGC.git}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-aiugc-prod}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing env file: $ENV_FILE" >&2
@@ -39,7 +40,11 @@ git fetch origin main
 git checkout main
 git merge --ff-only origin/main
 
-"${COMPOSE_CMD[@]}" -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans
+if ! "${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT_NAME" -f docker-compose.production.yml --env-file "$ENV_FILE" down --remove-orphans; then
+  echo "Compose teardown reported a non-fatal failure; continuing with a fresh deploy." >&2
+fi
+
+"${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT_NAME" -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans
 
 for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
   if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL" >/dev/null; then
@@ -50,5 +55,5 @@ for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
 done
 
 echo "Healthcheck failed after $MAX_HEALTH_RETRIES attempts: $HEALTHCHECK_URL" >&2
-"${COMPOSE_CMD[@]}" -f docker-compose.production.yml --env-file "$ENV_FILE" ps || true
+"${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT_NAME" -f docker-compose.production.yml --env-file "$ENV_FILE" ps || true
 exit 1

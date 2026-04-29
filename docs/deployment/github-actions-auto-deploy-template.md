@@ -55,6 +55,7 @@ The important behavior is:
 - refuse to deploy if the server env file is missing
 - refuse to deploy if the host checkout has uncommitted local changes
 - update the host checkout from `origin/main`
+- tear down the previous compose project before `up`
 - run the production compose file with the server env file
 - wait for `HEALTHCHECK_URL`
 
@@ -64,6 +65,7 @@ Recommended shape:
 git fetch origin main
 git checkout main
 git merge --ff-only origin/main
+docker compose -p aiugc-prod -f docker-compose.production.yml --env-file "$ENV_FILE" down --remove-orphans
 docker compose -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans
 curl --fail "$HEALTHCHECK_URL"
 ```

@@ -16,6 +16,7 @@ bash scripts/deploy/production.sh
 ```
 
 The deploy script enforces a health gate before success by checking `https://lippelift.xyz/health`.
+It also uses a fixed Compose project name and tears down the old stack before bringing the production stack back up, which avoids stale-container name conflicts during redeploys.
 
 ## GitHub secrets
 
