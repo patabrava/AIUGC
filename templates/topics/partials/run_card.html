@@ -2,7 +2,7 @@
     class="rounded-2xl border border-[#1C2740]/10 bg-[#FFF2E2]/50 p-4 shadow-sm"
     {% if run.status == 'running' %}
     hx-get="/topics/runs/{{ run.id }}"
-    hx-trigger="load, every 6s"
+    hx-trigger="load, every 15s"
     hx-swap="outerHTML"
     {% endif %}
 >

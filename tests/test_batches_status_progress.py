@@ -534,6 +534,34 @@ def test_seeding_interaction_emits_resumable_events():
     assert updated["interaction_id"] == started["interaction_id"]
 
 
+def test_terminal_seeding_progress_emits_a_single_feed_event():
+    topic_handlers.clear_seeding_progress("batch-terminal-events")
+
+    topic_handlers.start_seeding_interaction(
+        batch_id="batch-terminal-events",
+        brand="Demo",
+        expected_posts=4,
+    )
+    topic_handlers.update_seeding_progress(
+        "batch-terminal-events",
+        stage="failed",
+        stage_label="Topic generation stopped",
+        detail_message="Script failed tier envelope for 8s.",
+        posts_created=0,
+        expected_posts=4,
+        is_retrying=False,
+        retry_message=None,
+    )
+
+    events = topic_handlers.get_seeding_events("batch-terminal-events")
+
+    assert [event["event_type"] for event in events] == [
+        "interaction.start",
+        "interaction.failed",
+    ]
+    assert events[-1]["summary"] == "Script failed tier envelope for 8s."
+
+
 def test_build_batch_detail_view_exposes_caption_variants():
     batch_payload = {
         "state": "S7_PUBLISH_PLAN",
@@ -775,6 +803,12 @@ def test_batch_detail_templates_compile_without_syntax_errors():
     env.get_template("batches/detail/_post_card.html")
     env.get_template("batches/detail/_posts_section.html")
     env.get_template("batches/detail.html")
+
+    batch_detail_template = Path("templates/batches/detail.html").read_text()
+    run_card_template = Path("templates/topics/partials/run_card.html").read_text()
+
+    assert 'hx-trigger="every 15s"' in batch_detail_template
+    assert 'hx-trigger="load, every 15s"' in run_card_template
 
 
 def test_batch_summary_uses_narrow_post_select(monkeypatch):
