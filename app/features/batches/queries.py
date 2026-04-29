@@ -18,6 +18,10 @@ from app.features.topics.queries import create_post_for_batch
 logger = get_logger(__name__)
 
 _QUERY_RETRY_DELAYS = (0.15, 0.35, 0.75)
+BATCH_LIST_FIELDS = (
+    "id,brand,state,post_type_counts,target_length_tier,created_at,updated_at,archived"
+)
+POSTS_SUMMARY_FIELDS = "id,post_type"
 
 
 def _execute_with_retry(operation_name: str, callback):
@@ -164,7 +168,7 @@ def list_batches(
     """List batches with optional filtering."""
     supabase = get_supabase()
 
-    query = supabase.client.table("batches").select("*", count="exact")
+    query = supabase.client.table("batches").select(BATCH_LIST_FIELDS, count="exact")
     
     if archived is not None:
         query = query.eq("archived", archived)
@@ -263,7 +267,7 @@ def get_batch_posts_summary(batch_id: str) -> Dict[str, Any]:
     # Get all posts for batch
     response = _execute_with_retry(
         "get_batch_posts_summary",
-        lambda: supabase.client.table("posts").select("*").eq("batch_id", batch_id).execute(),
+        lambda: supabase.client.table("posts").select(POSTS_SUMMARY_FIELDS).eq("batch_id", batch_id).execute(),
     )
     
     posts = response.data

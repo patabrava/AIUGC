@@ -455,7 +455,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         active_posts_count += 1
-        if post.get("video_status") in polling_video_statuses or not post.get("video_url"):
+        if post.get("video_status") in polling_video_statuses:
             active_video_poll_count += 1
         if post.get("video_prompt_json"):
             prompt_ready_count += 1

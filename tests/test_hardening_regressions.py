@@ -81,6 +81,27 @@ def test_app_lifespan_does_not_eagerly_create_supabase_client(monkeypatch):
     assert calls["count"] == 0
 
 
+def test_health_check_caches_database_probe(monkeypatch):
+    calls = {"count": 0}
+
+    class FakeSupabase:
+        def health_check(self):
+            calls["count"] += 1
+            return True
+
+    monkeypatch.setattr(main_module, "get_supabase", lambda: FakeSupabase())
+    main_module._health_db_cache.update({"checked_at": 0.0, "healthy": True, "error": None})
+
+    import asyncio
+
+    first = asyncio.run(main_module.health_check())
+    second = asyncio.run(main_module.health_check())
+
+    assert first["checks"]["database"] == "ok"
+    assert second["checks"]["database"] == "ok"
+    assert calls["count"] == 1
+
+
 def test_app_lifespan_logs_google_ai_context_fingerprint(monkeypatch):
     from app.core.config import fingerprint_secret
 

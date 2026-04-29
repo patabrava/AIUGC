@@ -5,6 +5,7 @@ Per Constitution § I: Canon Supremacy
 """
 
 import uuid
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -39,6 +40,13 @@ except ModuleNotFoundError:
 # Configure logging on module import
 configure_logging()
 logger = get_logger(__name__)
+
+_HEALTH_DB_CACHE_SECONDS = 60
+_health_db_cache = {
+    "checked_at": 0.0,
+    "healthy": True,
+    "error": None,
+}
 settings = get_settings()
 
 
@@ -258,14 +266,25 @@ async def health_check():
     Per Constitution § IX: Observable Implementation
     """
     settings = get_settings()
-    db_healthy = True
-    db_error = None
-    try:
-        supabase = get_supabase()
-        db_healthy = supabase.health_check()
-    except Exception as exc:
-        db_healthy = False
-        db_error = str(exc)
+    db_healthy = bool(_health_db_cache["healthy"])
+    db_error = _health_db_cache["error"]
+    now = time.monotonic()
+    checked_at = float(_health_db_cache["checked_at"])
+    if checked_at <= 0 or now - checked_at >= _HEALTH_DB_CACHE_SECONDS:
+        try:
+            supabase = get_supabase()
+            db_healthy = supabase.health_check()
+            db_error = None
+        except Exception as exc:
+            db_healthy = False
+            db_error = str(exc)
+        _health_db_cache.update(
+            {
+                "checked_at": now,
+                "healthy": db_healthy,
+                "error": db_error,
+            }
+        )
     
     health_status = {
         "status": "healthy" if db_healthy else "unhealthy",

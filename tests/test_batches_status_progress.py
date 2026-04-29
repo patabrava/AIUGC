@@ -22,8 +22,49 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.config import get_settings
 from app.features.batches import handlers as batch_handlers
+from app.features.batches import queries as batch_queries
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.topics import handlers as topic_handlers
+from app.features.topics import queries as topic_queries
+
+
+def test_unique_topic_suggestions_scans_past_early_semantic_duplicates():
+    suggestions = [
+        {
+            "title": f"Wheelchair curb technique {index}",
+            "rotation": "Use the same safe curb approach every time.",
+            "cta": "Practice the safe curb approach.",
+            "script": "Use the same safe curb approach every time.",
+            "family_fingerprint": f"family-{index}",
+        }
+        for index in range(3)
+    ]
+    suggestions.extend(
+        [
+            {
+                "title": "Doorway clearance checklist",
+                "rotation": "Measure the narrowest doorway before buying equipment.",
+                "cta": "Save the doorway width before your next appointment.",
+                "script": "Measure the narrowest doorway before buying equipment.",
+                "family_fingerprint": "family-doorway",
+            },
+            {
+                "title": "Ramp angle quick check",
+                "rotation": "Check the ramp angle with a phone before committing.",
+                "cta": "Test the ramp angle before you roll.",
+                "script": "Check the ramp angle with a phone before committing.",
+                "family_fingerprint": "family-ramp",
+            },
+        ]
+    )
+
+    result = topic_handlers._unique_topic_suggestions(suggestions, 3, existing_topics=[])
+
+    assert [row["family_fingerprint"] for row in result] == [
+        "family-0",
+        "family-doorway",
+        "family-ramp",
+    ]
 
 
 def test_get_batch_status_includes_live_progress(monkeypatch):
@@ -563,6 +604,32 @@ def test_build_batch_detail_view_polls_while_video_is_submitted():
     assert view["should_poll_videos"] is True
 
 
+def test_build_batch_detail_view_does_not_poll_idle_scripted_batch():
+    batch_payload = {
+        "state": "S4_SCRIPTED",
+        "meta_connection": {},
+        "tiktok_connection": {},
+        "posts": [
+            {
+                "id": "post-1",
+                "post_type": "value",
+                "topic_title": "Beispielthema",
+                "publish_caption": "",
+                "video_url": None,
+                "video_status": "pending",
+                "seed_data": {
+                    "description": "Ein generischer Abschnitt.",
+                    "script_review_status": "approved",
+                },
+            }
+        ],
+    }
+
+    view = batch_handlers._build_batch_detail_view(batch_payload)
+
+    assert view["should_poll_videos"] is False
+
+
 def test_build_batch_detail_view_does_not_poll_videos_during_s2_script_review():
     batch_payload = {
         "state": "S2_SEEDED",
@@ -708,6 +775,80 @@ def test_batch_detail_templates_compile_without_syntax_errors():
     env.get_template("batches/detail/_post_card.html")
     env.get_template("batches/detail/_posts_section.html")
     env.get_template("batches/detail.html")
+
+
+def test_batch_summary_uses_narrow_post_select(monkeypatch):
+    captured = {}
+
+    class FakeQuery:
+        def select(self, fields):
+            captured["fields"] = fields
+            return self
+
+        def eq(self, key, value):
+            captured["filter"] = (key, value)
+            return self
+
+        def execute(self):
+            return _FakeResponse(
+                [
+                    {"id": "post-1", "post_type": "value", "seed_data": {"large": "ignored"}},
+                    {"id": "post-2", "post_type": "lifestyle"},
+                ]
+            )
+
+    class FakeClient:
+        def table(self, table_name):
+            captured["table"] = table_name
+            return FakeQuery()
+
+    class FakeAdapter:
+        client = FakeClient()
+
+    monkeypatch.setattr(batch_queries, "get_supabase", lambda: FakeAdapter())
+
+    summary = batch_queries.get_batch_posts_summary("batch-1")
+
+    assert captured == {
+        "table": "posts",
+        "fields": "id,post_type",
+        "filter": ("batch_id", "batch-1"),
+    }
+    assert summary == {"posts_count": 2, "posts_by_state": {"value": 1, "lifestyle": 1}}
+
+
+def test_get_posts_by_batch_uses_bounded_detail_fields(monkeypatch):
+    captured = {}
+
+    class FakeQuery:
+        def select(self, fields):
+            captured["fields"] = fields
+            return self
+
+        def eq(self, key, value):
+            captured["filter"] = (key, value)
+            return self
+
+        def execute(self):
+            return _FakeResponse([{"id": "post-1"}])
+
+    class FakeClient:
+        def table(self, table_name):
+            captured["table"] = table_name
+            return FakeQuery()
+
+    class FakeAdapter:
+        client = FakeClient()
+
+    monkeypatch.setattr(topic_queries, "_get_supabase_adapter", lambda: FakeAdapter())
+
+    rows = topic_queries.get_posts_by_batch("batch-1")
+
+    assert rows == [{"id": "post-1"}]
+    assert captured["table"] == "posts"
+    assert captured["filter"] == ("batch_id", "batch-1")
+    assert captured["fields"] == topic_queries.POSTS_BY_BATCH_FIELDS
+    assert "*" not in captured["fields"]
 
 
 class _FakeResponse:

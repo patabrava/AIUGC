@@ -1351,11 +1351,20 @@ def get_existing_variant_pairs(
     return response.data or []
 
 
-def get_posts_by_batch(batch_id: str) -> List[Dict[str, Any]]:
+POSTS_BY_BATCH_FIELDS = (
+    "id,batch_id,post_type,topic_title,topic_rotation,topic_cta,spoken_duration,"
+    "seed_data,video_prompt_json,video_status,video_url,video_metadata,video_operation_id,"
+    "video_provider,qa_pass,qa_notes,qa_auto_checks,scheduled_at,social_networks,"
+    "publish_caption,publish_status,platform_ids,publish_results,blog_enabled,blog_status,"
+    "blog_content,blog_webflow_item_id,blog_scheduled_at,blog_published_at,created_at,updated_at"
+)
+
+
+def get_posts_by_batch(batch_id: str, fields: str = POSTS_BY_BATCH_FIELDS) -> List[Dict[str, Any]]:
     """Get all posts for a batch."""
     supabase = _get_supabase_adapter()
     
-    response = supabase.client.table("posts").select("*").eq("batch_id", batch_id).execute()
+    response = supabase.client.table("posts").select(fields).eq("batch_id", batch_id).execute()
     
     return response.data
 
