@@ -11,10 +11,10 @@ services:
       - "8000"
     labels:
       - traefik.enable=true
-      - 'traefik.http.routers.lippelift-web.rule=${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}'
-      - 'traefik.http.routers.lippelift-web.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}'
-      - 'traefik.http.routers.lippelift-web.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}'
-      - traefik.http.services.lippelift-web.loadbalancer.server.port=8000
+      - 'traefik.http.routers.lippelift-prod-web-v2.rule=${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}'
+      - 'traefik.http.routers.lippelift-prod-web-v2.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}'
+      - 'traefik.http.routers.lippelift-prod-web-v2.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}'
+      - traefik.http.services.lippelift-prod-web-v2.loadbalancer.server.port=8000
     healthcheck:
       test:
         - CMD
