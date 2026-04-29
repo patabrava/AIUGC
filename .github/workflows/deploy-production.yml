@@ -14,6 +14,7 @@ jobs:
       PROD_SSH_USER: ${{ secrets.PROD_SSH_USER != '' && secrets.PROD_SSH_USER || vars.PROD_SSH_USER }}
       PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY != '' && secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
       PROD_SSH_PASSWORD: ${{ secrets.PROD_SSH_PASSWORD != '' && secrets.PROD_SSH_PASSWORD || vars.PROD_SSH_PASSWORD }}
+      PROD_ENV_FILE_B64: ${{ secrets.PROD_ENV_FILE_B64 }}
       PROD_APP_ROOT: ${{ secrets.PROD_APP_ROOT != '' && secrets.PROD_APP_ROOT || vars.PROD_APP_ROOT }}
     steps:
       - name: Checkout
@@ -35,6 +36,7 @@ jobs:
           host: ${{ env.PROD_SSH_HOST }}
           username: ${{ env.PROD_SSH_USER }}
           password: ${{ env.PROD_SSH_PASSWORD }}
+          envs: PROD_ENV_FILE_B64
           script: |
             export APP_ROOT="${{ env.PROD_APP_ROOT }}"
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
@@ -42,6 +44,10 @@ jobs:
             export ENV_FILE="${APP_ROOT}/.env.production"
             export HEALTHCHECK_URL="https://lippelift.xyz/health"
             mkdir -p "$APP_ROOT"
+            if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
+              printf '%s' "$PROD_ENV_FILE_B64" | base64 -d > "$ENV_FILE"
+              chmod 600 "$ENV_FILE"
+            fi
             if [ ! -d "$REPO_DIR/.git" ]; then
               git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
             fi
@@ -55,6 +61,7 @@ jobs:
           host: ${{ env.PROD_SSH_HOST }}
           username: ${{ env.PROD_SSH_USER }}
           key: ${{ env.PROD_SSH_PRIVATE_KEY }}
+          envs: PROD_ENV_FILE_B64
           script: |
             export APP_ROOT="${{ env.PROD_APP_ROOT }}"
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
@@ -62,6 +69,10 @@ jobs:
             export ENV_FILE="${APP_ROOT}/.env.production"
             export HEALTHCHECK_URL="https://lippelift.xyz/health"
             mkdir -p "$APP_ROOT"
+            if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
+              printf '%s' "$PROD_ENV_FILE_B64" | base64 -d > "$ENV_FILE"
+              chmod 600 "$ENV_FILE"
+            fi
             if [ ! -d "$REPO_DIR/.git" ]; then
               git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
             fi
