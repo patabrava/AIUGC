@@ -1335,40 +1335,49 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     canonical_topic=str(seed_payload.get("canonical_topic") or topic_data["title"]),
                 )
 
-                stored_row = store_topic_bank_entry(
-                    title=topic_data["title"],
-                    topic_script=primary_script,
-                    post_type=post_type,
-                    target_length_tier=resolved_target_tier,
-                    research_payload={},
-                    origin_kind="provider",
-                )
-                seed_payload["family_id"] = stored_row["id"]
-                seed_payload["family_fingerprint"] = stored_row.get("family_fingerprint") or _topic_family_signature(
-                    {"title": topic_data["title"], "seed_payload": seed_payload}
-                )
+                try:
+                    stored_row = store_topic_bank_entry(
+                        title=topic_data["title"],
+                        topic_script=primary_script,
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        research_payload={},
+                        origin_kind="provider",
+                    )
+                    seed_payload["family_id"] = stored_row["id"]
+                    seed_payload["family_fingerprint"] = stored_row.get("family_fingerprint") or _topic_family_signature(
+                        {"title": topic_data["title"], "seed_payload": seed_payload}
+                    )
 
-                variants = _build_script_variants(
-                    topic_title=topic_data["title"],
-                    post_type=post_type,
-                    target_length_tier=resolved_target_tier,
-                    research_dossier={},
-                    prompt1_item=SimpleNamespace(
-                        script=primary_script,
-                        caption=seed_payload.get("caption", ""),
-                    ),
-                    dialog_scripts=dialog_scripts,
-                    seed_payload=seed_payload,
-                )
-                upsert_topic_script_variants(
-                    topic_registry_id=stored_row["id"],
-                    title=stored_row["title"],
-                    post_type=post_type,
-                    target_length_tier=resolved_target_tier,
-                    topic_research_dossier_id=None,
-                    variants=variants,
-                    origin_kind="provider",
-                )
+                    variants = _build_script_variants(
+                        topic_title=topic_data["title"],
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        research_dossier={},
+                        prompt1_item=SimpleNamespace(
+                            script=primary_script,
+                            caption=seed_payload.get("caption", ""),
+                        ),
+                        dialog_scripts=dialog_scripts,
+                        seed_payload=seed_payload,
+                    )
+                    upsert_topic_script_variants(
+                        topic_registry_id=stored_row["id"],
+                        title=stored_row["title"],
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        topic_research_dossier_id=None,
+                        variants=variants,
+                        origin_kind="provider",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "direct_topic_bank_persistence_failed",
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        title=topic_data["title"],
+                        error=str(exc),
+                    )
 
                 post = create_post_for_batch(
                     batch_id=batch_id,
@@ -1456,45 +1465,54 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     canonical_topic=str(seed_payload.get("canonical_topic") or topic_data["product_name"]),
                 )
 
-                stored_row = store_topic_bank_entry(
-                    title=topic_data["title"],
-                    topic_script=topic_data["rotation"],
-                    post_type=post_type,
-                    target_length_tier=resolved_target_tier,
-                    research_payload={},
-                    origin_kind="provider",
-                )
-                seed_payload["family_id"] = stored_row["id"]
-                seed_payload["family_fingerprint"] = stored_row.get("family_fingerprint") or _topic_family_signature(
-                    {"title": topic_data["title"], "seed_payload": seed_payload}
-                )
+                try:
+                    stored_row = store_topic_bank_entry(
+                        title=topic_data["title"],
+                        topic_script=topic_data["rotation"],
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        research_payload={},
+                        origin_kind="provider",
+                    )
+                    seed_payload["family_id"] = stored_row["id"]
+                    seed_payload["family_fingerprint"] = stored_row.get("family_fingerprint") or _topic_family_signature(
+                        {"title": topic_data["title"], "seed_payload": seed_payload}
+                    )
 
-                variants = _build_script_variants(
-                    topic_title=topic_data["title"],
-                    post_type=post_type,
-                    target_length_tier=resolved_target_tier,
-                    research_dossier={},
-                    prompt1_item=SimpleNamespace(
-                        script=topic_data["rotation"],
-                        caption=seed_payload.get("caption", ""),
-                    ),
-                    dialog_scripts=SimpleNamespace(
-                        problem_agitate_solution=[topic_data["script"]],
-                        testimonial=[topic_data["script"]],
-                        transformation=[topic_data["script"]],
-                        description=seed_payload.get("description", ""),
-                    ),
-                    seed_payload=seed_payload,
-                )
-                upsert_topic_script_variants(
-                    topic_registry_id=stored_row["id"],
-                    title=stored_row["title"],
-                    post_type=post_type,
-                    target_length_tier=resolved_target_tier,
-                    topic_research_dossier_id=None,
-                    variants=variants,
-                    origin_kind="provider",
-                )
+                    variants = _build_script_variants(
+                        topic_title=topic_data["title"],
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        research_dossier={},
+                        prompt1_item=SimpleNamespace(
+                            script=topic_data["rotation"],
+                            caption=seed_payload.get("caption", ""),
+                        ),
+                        dialog_scripts=SimpleNamespace(
+                            problem_agitate_solution=[topic_data["script"]],
+                            testimonial=[topic_data["script"]],
+                            transformation=[topic_data["script"]],
+                            description=seed_payload.get("description", ""),
+                        ),
+                        seed_payload=seed_payload,
+                    )
+                    upsert_topic_script_variants(
+                        topic_registry_id=stored_row["id"],
+                        title=stored_row["title"],
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        topic_research_dossier_id=None,
+                        variants=variants,
+                        origin_kind="provider",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "direct_topic_bank_persistence_failed",
+                        post_type=post_type,
+                        target_length_tier=resolved_target_tier,
+                        title=topic_data["title"],
+                        error=str(exc),
+                    )
 
                 post = create_post_for_batch(
                     batch_id=batch_id,
