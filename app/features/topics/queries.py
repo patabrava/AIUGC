@@ -1267,6 +1267,18 @@ def upsert_topic_script_variants(
             response = supabase.client.table("topic_scripts").insert(payload).execute()
         except Exception as exc:
             error_text = str(exc)
+            if "topic_scripts_tier_fingerprint_key" in error_text:
+                logger.info(
+                    "topic_script_global_duplicate_skipped",
+                    topic_registry_id=topic_registry_id,
+                    target_length_tier=tier,
+                    bucket=bucket,
+                    lane_key=lane_key,
+                    duplicate_reason="database_fingerprint_conflict",
+                    error=error_text,
+                )
+                duplicate_scripts_skipped += 1
+                continue
             if "topic_scripts_variant_unique_idx" not in error_text:
                 raise
             race_conflict_rows = (

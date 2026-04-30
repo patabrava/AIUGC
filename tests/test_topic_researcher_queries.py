@@ -1255,6 +1255,67 @@ def test_upsert_topic_script_variants_allows_distinct_scripts_within_same_topic(
 
 
 @patch("app.features.topics.queries.get_supabase")
+def test_upsert_topic_script_variants_skips_live_fingerprint_conflict(mock_get_sb):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = []
+            self._filters = {}
+            self._payload = None
+            self._mode = None
+
+        def select(self, *_args, **_kwargs):
+            self._mode = "select"
+            self._filters = {}
+            return self
+
+        def eq(self, key, value):
+            self._filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self._mode = "insert"
+            self._payload = payload
+            return self
+
+        def execute(self):
+            if self._mode == "select":
+                return _FakeResponse([])
+            if self._mode == "insert":
+                raise Exception(
+                    "duplicate key value violates unique constraint "
+                    "\"topic_scripts_tier_fingerprint_key\""
+                )
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = MagicMock(client=MagicMock(table=MagicMock(return_value=fake_table)))
+
+    from app.features.topics.queries import upsert_topic_script_variants
+
+    stored = upsert_topic_script_variants(
+        topic_registry_id="topic-new",
+        title="Fallback Lifestyle",
+        post_type="lifestyle",
+        target_length_tier=32,
+        topic_research_dossier_id=None,
+        variants=[
+            {
+                "bucket": "problem_agitate_solution",
+                "script": "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter.",
+                "hook_style": "problem-agitate-solution",
+                "target_length_tier": 32,
+            }
+        ],
+    )
+
+    assert stored == []
+
+
+@patch("app.features.topics.queries.get_supabase")
 def test_upsert_topic_script_variants_repairs_citation_residue_before_insert(mock_get_sb):
     class _FakeResponse:
         def __init__(self, data):
