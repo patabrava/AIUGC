@@ -38,6 +38,7 @@ from app.features.topics.topic_validation import (
     classify_script_overlap,
     get_prompt2_word_bounds,
     sanitize_spoken_fragment,
+    trim_spoken_script_to_word_bounds,
 )
 from app.features.topics.queries import (
     get_all_topics_from_registry,
@@ -238,6 +239,15 @@ def _build_tier_valid_lifestyle_script(
         base = sanitize_spoken_fragment(title, ensure_terminal=True)
 
     if tier <= 8:
+        title_hook = " ".join(str(title or "").split()[:6]).strip() or "Barrierefreiheit im Alltag"
+        compact_variants = [
+            f"{title_hook} wird leichter, wenn du Wege, Pausen und Hilfe vorher klar planst.",
+            f"{title_hook} spart Kraft, wenn du Wege vorher prüfst und kleine Hürden direkt mitplanst.",
+        ]
+        for variant in compact_variants:
+            cleaned = sanitize_spoken_fragment(variant, ensure_terminal=True)
+            if min_words <= len(cleaned.split()) <= max_words:
+                return cleaned
         single_sentence_variants = [
             f"{base.rstrip('.!?')}, und mit einer klaren Routine sparst du dir im Alltag oft unnötigen Stress.",
             f"{base.rstrip('.!?')}, weil kleine Anpassungen dir im Alltag spürbar mehr Ruhe und Beweglichkeit geben.",
@@ -246,7 +256,10 @@ def _build_tier_valid_lifestyle_script(
             cleaned = sanitize_spoken_fragment(variant, ensure_terminal=True)
             if min_words <= len(cleaned.split()) <= max_words:
                 return cleaned
-        return sanitize_spoken_fragment(single_sentence_variants[0], ensure_terminal=True)
+        trimmed = trim_spoken_script_to_word_bounds(single_sentence_variants[0], min_words=min_words, max_words=max_words)
+        if min_words <= len(trimmed.split()) <= max_words:
+            return trimmed
+        return sanitize_spoken_fragment(compact_variants[0], ensure_terminal=True)
 
     supporting_sentences = [
         "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter.",

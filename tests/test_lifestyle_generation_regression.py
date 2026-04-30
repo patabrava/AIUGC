@@ -577,17 +577,18 @@ def test_discover_topics_force_fills_lifestyle_posts_when_overlap_filters_exhaus
     assert len({post["topic_title"] for post in created_posts}) == 3, created_posts
 
 
-def test_force_fill_lifestyle_candidates_builds_tier_valid_16s_scripts():
+@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
+def test_force_fill_lifestyle_candidates_builds_tier_valid_scripts(target_length_tier):
     candidates = topic_handlers._force_fill_lifestyle_candidates(
         count=1,
         existing_titles=set(),
         existing_scripts=[],
-        target_length_tier=16,
+        target_length_tier=target_length_tier,
     )
 
     assert len(candidates) == 1
     script = candidates[0]["dialog_scripts"].problem_agitate_solution[0]
-    min_words, max_words = get_prompt2_word_bounds(16)
+    min_words, max_words = get_prompt2_word_bounds(target_length_tier)
     assert min_words <= len(script.split()) <= max_words, script
 
 
