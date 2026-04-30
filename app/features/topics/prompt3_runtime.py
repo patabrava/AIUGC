@@ -10,6 +10,7 @@ from typing import Callable, Dict, List, Optional
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
+from app.core.logging import get_logger
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.content_utils import strip_cta_from_script
 from app.features.topics.product_knowledge import get_product_knowledge_base, plan_product_mix
@@ -27,6 +28,7 @@ from app.features.topics.topic_validation import (
 
 _INACTIVE_PRODUCT_MARKERS = ("LL12", "Konstanz")
 _RETRYABLE_PROVIDER_STATUS_CODES = {429, 500, 503}
+logger = get_logger(__name__)
 
 
 def _normalize(value: str) -> str:
@@ -47,6 +49,60 @@ def _is_retryable_provider_error(exc: ThirdPartyError) -> bool:
         return int(status_code) in _RETRYABLE_PROVIDER_STATUS_CODES
     except (TypeError, ValueError):
         return False
+
+
+def _build_product_fallback_script(entry, *, target_length_tier: int) -> str:
+    fact = sanitize_spoken_fragment((entry.facts or [entry.summary])[0], ensure_terminal=False).rstrip(".!?")
+    if not fact:
+        fact = "die Lösung deinen Alltag zuhause besser planbar macht"
+    product = entry.product_name
+    if target_length_tier <= 8:
+        script = f"{product} hilft dir zuhause, weil {fact} und dein Alltag dadurch sicherer planbar bleibt."
+    elif target_length_tier <= 16:
+        script = (
+            f"{product} hilft dir zuhause. {fact} bleibt der zentrale Vorteil. "
+            "So wird deine Treppe sicherer, ruhiger und ohne unnötigen Umbau besser planbar."
+        )
+    else:
+        script = (
+            f"{product} hilft dir zuhause. {fact} bleibt der zentrale Vorteil. "
+            "Das gibt dir mehr Sicherheit auf Wegen, die jeden Tag zählen. "
+            "Die Planung bleibt klar und alltagstauglich. So wird dein Zuhause ohne unnötigen Umbau besser nutzbar."
+        )
+    min_words, max_words = get_prompt3_word_bounds(target_length_tier)
+    cleaned = sanitize_spoken_fragment(script, ensure_terminal=True)
+    if len(cleaned.split()) > max_words:
+        cleaned = trim_spoken_script_to_word_bounds(cleaned, min_words=min_words, max_words=max_words)
+    while len(cleaned.split()) < min_words:
+        cleaned = sanitize_spoken_fragment(
+            f"{cleaned.rstrip('.!?')} und bleibt dadurch im Alltag besser nutzbar.",
+            ensure_terminal=True,
+        )
+        if len(cleaned.split()) > max_words:
+            cleaned = trim_spoken_script_to_word_bounds(cleaned, min_words=min_words, max_words=max_words)
+            break
+    return cleaned
+
+
+def _build_product_fallback_topic(entry, *, target_length_tier: int, reason: str) -> Dict[str, object]:
+    script = _build_product_fallback_script(entry, target_length_tier=target_length_tier)
+    cta = f"Frag nach {entry.product_name} für dein Zuhause."
+    rotation = strip_cta_from_script(script, cta) or script
+    return {
+        "title": f"{entry.product_name}: verlässliche Lösung für zuhause",
+        "rotation": rotation,
+        "cta": cta,
+        "spoken_duration": max(1, int(estimate_script_duration_seconds(script) or math.ceil(len(script.split()) / 2.6))),
+        "script": script,
+        "framework": "PAL",
+        "product_name": entry.product_name,
+        "angle": "verlässliche Lösung für zuhause",
+        "facts": list(entry.facts[:5]),
+        "source_summary": entry.summary,
+        "support_facts": entry.support_facts,
+        "generation_mode": "synthetic_fallback",
+        "fallback_reason": reason,
+    }
 
 
 def generate_product_topics(
@@ -79,19 +135,10 @@ def generate_product_topics(
                     max_tokens=1200,
                     thinking_budget=0,
                 )
-            except ThirdPartyError as exc:
-                last_error = exc.message
-                if not _is_retryable_provider_error(exc) or attempt >= 2:
-                    raise ValidationError(
-                        message="PROMPT_3 generation failed after provider retries",
-                        details={
-                            "product_name": entry.product_name,
-                            "target_length_tier": profile.target_length_tier,
-                            "last_error": last_error,
-                            "provider_details": exc.details,
-                        },
-                    ) from exc
-                time.sleep(min(2 * (attempt + 1), 6))
+            except (ThirdPartyError, ValidationError) as exc:
+                last_error = getattr(exc, "message", str(exc))
+                if isinstance(exc, ThirdPartyError) and _is_retryable_provider_error(exc) and attempt < 2:
+                    time.sleep(min(2 * (attempt + 1), 6))
                 continue
             min_words, max_words = get_prompt3_word_bounds(profile.target_length_tier)
             try:
@@ -176,13 +223,18 @@ def generate_product_topics(
             )
             break
         else:
-            raise ValidationError(
-                message="PROMPT_3 generation failed after text normalization",
-                details={
-                    "product_name": entry.product_name,
-                    "target_length_tier": profile.target_length_tier,
-                    "last_error": last_error,
-                },
+            logger.warning(
+                "product_topic_fallback_synthesized",
+                product_name=entry.product_name,
+                target_length_tier=profile.target_length_tier,
+                reason=last_error or "provider_retry_exhausted",
+            )
+            results.append(
+                _build_product_fallback_topic(
+                    entry,
+                    target_length_tier=profile.target_length_tier,
+                    reason=last_error or "provider_retry_exhausted",
+                )
             )
 
     return results

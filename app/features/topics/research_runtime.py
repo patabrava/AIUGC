@@ -40,6 +40,7 @@ from app.features.topics.topic_validation import (
     estimate_script_duration_seconds,
     get_prompt1_sentence_bounds,
     get_prompt1_word_bounds,
+    get_prompt2_word_bounds,
     normalize_spoken_whitespace,
     sanitize_fact_fragments,
     sanitize_metadata_text,
@@ -69,6 +70,64 @@ Do not wrap the result in Markdown or commentary.
 Keep all content fully in German.
 Derive lane_candidates from clearly distinct sub-angles already present in the raw research reply.
 Do not invent facts that are not supported by the raw reply."""
+
+
+def _build_prompt2_fallback_script(topic: str, *, target_length_tier: int) -> str:
+    min_words, max_words = get_prompt2_word_bounds(target_length_tier)
+    topic_text = sanitize_spoken_fragment(topic, ensure_terminal=False).rstrip(".!?")
+    topic_text = topic_text or "Barrierefreiheit im Alltag"
+    candidates = [
+        f"{topic_text} spart dir im Alltag Kraft, wenn Wege vorher klar und ohne Umwege geplant sind.",
+        f"{topic_text} spart dir im Alltag Kraft, wenn Wege vorher klar und ohne Umwege geplant sind. So bleibt mehr Energie für spontane Termine.",
+        f"{topic_text} spart dir im Alltag Kraft, wenn Wege vorher klar und ohne Umwege geplant sind. So bleibt mehr Energie für spontane Termine. Genau solche kleinen Routinen machen den Tag spürbar ruhiger.",
+    ]
+    for candidate in candidates:
+        cleaned = sanitize_spoken_fragment(candidate, ensure_terminal=True)
+        if min_words <= len(cleaned.split()) <= max_words:
+            return cleaned
+
+    cleaned = sanitize_spoken_fragment(candidates[-1], ensure_terminal=True)
+    words = cleaned.split()
+    if len(words) > max_words:
+        cleaned = " ".join(words[:max_words]).rstrip(",;:") + "."
+    while len(cleaned.split()) < min_words:
+        cleaned = sanitize_spoken_fragment(
+            f"{cleaned.rstrip('.!?')} und bleibt dadurch besser planbar.",
+            ensure_terminal=True,
+        )
+    return cleaned
+
+
+def _synthesize_prompt2_fallback(topic: str, *, scripts_required: int, target_length_tier: int) -> DialogScripts:
+    script = _build_prompt2_fallback_script(topic, target_length_tier=target_length_tier)
+    scripts = [script for _ in range(max(1, min(5, scripts_required)))]
+    description = (
+        f"Lifestyle-Beitrag zu {topic}: Der Beitrag erklärt knapp, wie bessere Planung, "
+        "klare Wege und kleine Routinen den Rollstuhl-Alltag entlasten."
+    )
+    return DialogScripts(
+        problem_agitate_solution=scripts,
+        testimonial=list(scripts),
+        transformation=list(scripts),
+        description=description,
+    )
+
+
+def _is_prompt2_provider_boundary_error(exc: Exception) -> bool:
+    if isinstance(exc, ThirdPartyError):
+        return True
+    message = str(getattr(exc, "message", str(exc))).lower()
+    details = getattr(exc, "details", {})
+    detail_text = json.dumps(details, default=str).lower() if isinstance(details, dict) else str(details).lower()
+    provider_markers = (
+        "google cloud application default credentials",
+        "vertex ai is not enabled",
+        "vertex ai project id is required",
+        "vertex gemini",
+        "generatecontent failed",
+    )
+    return any(marker in message or marker in detail_text for marker in provider_markers)
+
 
 PROMPT1_NORMALIZER_SYSTEM_PROMPT = """You are the Lippe Lift Studio PROMPT_1 normalization agent.
 You receive a raw assistant reply that failed validation because it was not valid JSON.
@@ -778,6 +837,8 @@ def generate_dialog_scripts(
         hooks_list = ", ".join([f'"{hook}"' for hook in previously_used_hooks])
         prompt += f"\n\nWICHTIG: Die folgenden Hooks wurden bereits verwendet: {hooks_list}\nNutze einen anderen Hook-Start für dieses Skript."
 
+    last_error = ""
+    provider_boundary_failed = False
     for attempt in range(3):
         try:
             text_response = llm.generate_gemini_text(
@@ -794,14 +855,32 @@ def generate_dialog_scripts(
                 description=scripts.description,
             )
         except (ValidationError, ThirdPartyError) as exc:
+            last_error = getattr(exc, "message", str(exc))
+            provider_boundary_failed = provider_boundary_failed or _is_prompt2_provider_boundary_error(exc)
             logger.warning(
                 "dialog_scripts_retry",
                 topic=topic,
                 attempt=attempt + 1,
-                error=getattr(exc, "message", str(exc)),
+                error=last_error,
                 details=getattr(exc, "details", {}),
             )
-            prompt = f"{prompt}\n\nFEEDBACK: {getattr(exc, 'message', str(exc))}. Details: {json.dumps(getattr(exc, 'details', {}), default=str)[:800]}"
+            prompt = f"{prompt}\n\nFEEDBACK: {last_error}. Details: {json.dumps(getattr(exc, 'details', {}), default=str)[:800]}"
+
+    if provider_boundary_failed:
+        fallback = _synthesize_prompt2_fallback(
+            topic,
+            scripts_required=scripts_required,
+            target_length_tier=resolved_profile.target_length_tier,
+        )
+        _validate_dialog_scripts_payload(fallback, resolved_profile, topic)
+        logger.warning(
+            "dialog_scripts_fallback_synthesized",
+            topic=topic,
+            scripts_required=scripts_required,
+            target_length_tier=resolved_profile.target_length_tier,
+            reason=last_error or "provider_retry_exhausted",
+        )
+        return fallback
 
     raise ValidationError(
         message="PROMPT_2 generation failed after text normalization",

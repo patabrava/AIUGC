@@ -797,6 +797,32 @@ def test_generate_topic_script_candidate_synthesizes_fallback_on_provider_failur
     assert 26 <= len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", item.script)) <= 36
 
 
+@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
+def test_generate_dialog_scripts_synthesizes_tier_fallback_on_vertex_credential_failure(monkeypatch, target_length_tier):
+    class FakeUnavailablePrompt2LLM:
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            raise topic_agents.ValidationError(
+                message="No Google Cloud Application Default Credentials found.",
+                details={"provider": "vertex"},
+            )
+
+    profile = topic_agents.get_duration_profile(target_length_tier)
+    monkeypatch.setattr(topic_agents, "get_llm_client", lambda: FakeUnavailablePrompt2LLM())
+
+    scripts = topic_agents.generate_dialog_scripts(
+        topic="Barrierefreiheit im Alltag erleben",
+        scripts_required=1,
+        profile=profile,
+    )
+
+    min_words, max_words = topic_agents._dialog_word_bounds(profile)
+    for bucket_name in ("problem_agitate_solution", "testimonial", "transformation"):
+        script = getattr(scripts, bucket_name)[0]
+        word_count = len(script.split())
+        assert min_words <= word_count <= max_words, (bucket_name, script)
+    assert scripts.description
+
+
 def test_generate_topic_script_candidate_rebuilds_when_raw_draft_bleeds_metadata(monkeypatch):
     class FakeMetadataBleedLLM:
         def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):

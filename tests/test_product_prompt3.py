@@ -351,6 +351,52 @@ Fakten:
     assert len(flaky_llm.text_prompts) == 2
 
 
+@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
+def test_generate_product_topics_synthesizes_tier_fallback_on_vertex_credential_failure(monkeypatch, target_length_tier):
+    monkeypatch.setattr(
+        "app.features.topics.prompt3_runtime.get_product_knowledge_base",
+        lambda: [
+            ProductKnowledgeEntry(
+                product_name="VARIO PLUS",
+                source_label="PLATTFORMTREPPENLIFT T80",
+                aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+                summary="Plattform oder Sitzlift auf derselben Schiene.",
+                facts=["Plattform oder Sitzlift auf derselben Schiene", "Tragfaehigkeit bis 300 kg"],
+                support_facts=["100% Made in Germany"],
+            )
+        ],
+    )
+
+    class FakeUnavailableProductLLM:
+        def __init__(self):
+            self.text_prompts = []
+
+        def generate_gemini_text(self, prompt, system_prompt=None, **kwargs):
+            self.text_prompts.append((prompt, system_prompt, kwargs))
+            raise ValidationError(
+                message="No Google Cloud Application Default Credentials found.",
+                details={"provider": "vertex"},
+            )
+
+    fake_llm = FakeUnavailableProductLLM()
+
+    generated = generate_product_topics(
+        count=1,
+        target_length_tier=target_length_tier,
+        llm_factory=lambda: fake_llm,
+    )
+
+    min_words, max_words = {
+        8: (16, 20),
+        16: (24, 34),
+        32: (32, 66),
+    }[target_length_tier]
+    assert generated[0]["product_name"] == "VARIO PLUS"
+    assert min_words <= len(generated[0]["script"].split()) <= max_words
+    assert generated[0]["cta"]
+    assert len(fake_llm.text_prompts) == 3
+
+
 def test_generate_product_topics_trims_overlong_prompt3_response(monkeypatch):
     monkeypatch.setattr(
         "app.features.topics.prompt3_runtime.get_product_knowledge_base",
