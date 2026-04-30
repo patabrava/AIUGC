@@ -355,6 +355,8 @@ def _create_post_from_suggestion(
     topic_rotation = str(suggestion.get("rotation") or suggestion.get("script") or topic_title).strip()
     topic_cta = str(suggestion.get("cta") or topic_rotation).strip()
     seed_payload = dict(suggestion.get("seed_payload") or {"facts": [topic_rotation]})
+    if not str(seed_payload.get("script") or seed_payload.get("dialog_script") or "").strip():
+        seed_payload["script"] = topic_rotation
     canonical_topic = str(
         seed_payload.get("canonical_topic")
         or suggestion.get("canonical_topic")

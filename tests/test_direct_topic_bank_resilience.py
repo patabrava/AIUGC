@@ -89,3 +89,34 @@ def test_direct_generated_posts_survive_topic_bank_persistence_failure(monkeypat
     assert result["state"] == "S2_SEEDED"
     assert [post["post_type"] for post in created_posts] == [post_type]
     assert created_posts[0]["target_length_tier"] == 32
+
+
+def test_reused_topic_suggestion_persists_spoken_script_in_seed_payload(monkeypatch):
+    captured = {}
+    suggestion = {
+        "title": "Gedraenge sicher einordnen",
+        "rotation": "Wenn Menschen draengeln, hilft dir ein klarer Blickpunkt und ein ruhiger Fahrweg.",
+        "cta": "Bleib sichtbar.",
+        "spoken_duration": 8,
+        "seed_payload": {"facts": ["Bank row without script field"]},
+    }
+
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption="Caption"))
+    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", lambda **kwargs: {"id": "topic-1"})
+    monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id=None: None)
+
+    def fake_create_post_for_batch(**kwargs):
+        captured.update(kwargs)
+        return {"id": "post-1", **kwargs}
+
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
+
+    topic_handlers._create_post_from_suggestion(
+        batch_id="batch-1",
+        post_type="value",
+        suggestion=suggestion,
+        target_length_tier=16,
+    )
+
+    assert captured["seed_data"]["script"] == suggestion["rotation"]
+    assert captured["target_length_tier"] == 16
