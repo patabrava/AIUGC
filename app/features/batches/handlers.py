@@ -53,6 +53,7 @@ from app.features.publish.handlers import (
     _sanitize_meta_connection as _publish_sanitize_meta_connection,
 )
 from app.features.blog.schemas import normalize_blog_content
+from app.features.topics.captions import resolve_display_caption
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -378,13 +379,37 @@ def _sanitize_meta_connection(meta_connection: Any) -> Dict[str, Any]:
 
 def _resolve_review_caption(post: Dict[str, Any]) -> str:
     seed_data = post.get("seed_data") or {}
-    caption_bundle = seed_data.get("caption_bundle") or {}
-    return (
-        str(post.get("publish_caption") or "").strip()
-        or str(caption_bundle.get("selected_body") or "").strip()
-        or str(seed_data.get("caption") or "").strip()
-        or str(seed_data.get("description") or "").strip()
+    return resolve_display_caption(
+        seed_data,
+        publish_caption=str(post.get("publish_caption") or ""),
+        post_type=str(post.get("post_type") or ""),
+        topic_title=str(post.get("topic_title") or ""),
     )
+
+
+def _resolve_caption_source_links(post: Dict[str, Any]) -> list[Dict[str, str]]:
+    seed_data = post.get("seed_data") or {}
+    caption_bundle = seed_data.get("caption_bundle") or {}
+    raw_urls = list(caption_bundle.get("source_urls") or seed_data.get("source_urls") or [])
+    raw_labels = list(caption_bundle.get("source_labels") or [])
+    links: list[Dict[str, str]] = []
+    seen = set()
+    for index, item in enumerate(raw_urls):
+        if isinstance(item, dict):
+            url = str(item.get("url") or "").strip()
+            label = str(item.get("title") or item.get("label") or "").strip()
+        else:
+            url = str(item or "").strip()
+            label = ""
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        if not label and index < len(raw_labels):
+            label = str(raw_labels[index] or "").strip()
+        links.append({"url": url, "label": label or f"Quelle {len(links) + 1}"})
+        if len(links) >= 3:
+            break
+    return links
 
 
 def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: list[Dict[str, Any]]) -> Dict[str, Any]:
@@ -440,6 +465,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         is_removed = review_status == "removed" or seed_data.get("video_excluded") is True
         post_view = dict(post)
         post_view["review_caption"] = _resolve_review_caption(post)
+        post_view["caption_source_links"] = _resolve_caption_source_links(post)
 
         if batch_state == BatchState.S2_SEEDED.value or not is_removed:
             visible_posts.append(post_view)
@@ -501,7 +527,8 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
                 "title": post.get("topic_title"),
                 "canonicalTopic": (post.get("seed_data") or {}).get("canonical_topic") or "",
                 "researchTitle": (post.get("seed_data") or {}).get("research_title") or "",
-                "caption": post.get("publish_caption") or "",
+                "caption": _resolve_review_caption(post),
+                "captionSourceLinks": _resolve_caption_source_links(post),
                 "captionOptions": [
                     {
                         "key": variant.get("key"),

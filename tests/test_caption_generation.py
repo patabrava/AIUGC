@@ -1,6 +1,7 @@
 import pytest
 
 from app.core.errors import ValidationError
+from app.features.batches import handlers as batch_handlers
 from app.features.publish import handlers as publish_handlers
 from app.features.topics import captions
 from app.features.topics.response_parsers import parse_topic_research_response
@@ -456,6 +457,106 @@ def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
         "caption_depth_reason",
         "source_urls",
     }
+
+
+def test_extended_value_caption_uses_complete_lines_without_ellipsis_fragments():
+    bundle = captions.generate_caption_bundle(
+        topic_title="Ergotherapie und Physiotherapie",
+        post_type="value",
+        script="Ein anderes Skript fuer den Caption-Test.",
+        research_facts=[],
+        seed_payload={
+            "strict_seed": {
+                "facts": [
+                    "Die Physiotherapie fokussiert sich auf die Wiederherstellung und den Erhalt von Beweglichkeit, Kraft und koerperlicher Funktion.",
+                    "Das Alltagstraining ist ein wichtiges Therapieinstrument, um Patienten nach Krankheit oder Unfall wieder handlungsfaehig zu machen.",
+                    "Die Finanzierung beider Therapieformen erfolgt bei aerztlicher Verordnung primaer ueber die gesetzliche Krankenversicherung.",
+                    "Mit der Blankoverordnung koennen Therapeutinnen bei bestimmten Diagnosen mehr Verantwortung fuer Behandlungsumfang und Frequenz uebernehmen.",
+                    "Die Heilmittel-Richtlinie beschreibt Fristen fuer den Behandlungsbeginn und Vorgaben fuer Verordnungen.",
+                    "Training von Routinetätigkeiten wie Waschen, Zaehneputzen und Anziehen gehoert besonders in der Ergotherapie zum praktischen Alltagstraining.",
+                ]
+            },
+            "source_urls": [{"title": "Heilmittel-Richtlinie", "url": "https://source-a.example/reha"}],
+        },
+    )
+
+    assert bundle["caption_profile"] == "extended"
+    assert "..." not in bundle["selected_body"]
+    assert "Die Physiotherapie fokussiert sich auf die Wiederherstellung und den Erhalt" in bundle["selected_body"]
+    assert bundle["source_urls"] == ["https://source-a.example/reha"]
+
+
+def test_batch_detail_view_exposes_caption_source_links_for_review_and_publish():
+    batch_view = batch_handlers._build_batch_detail_view(
+        {
+            "state": "S6_QA",
+            "posts": [
+                {
+                    "id": "post-1",
+                    "post_type": "value",
+                    "topic_title": "Thema",
+                    "seed_data": {
+                        "caption_bundle": {
+                            "selected_body": "Caption.",
+                            "source_urls": ["https://source-a.example/reha"],
+                            "source_labels": ["Heilmittel-Richtlinie"],
+                        }
+                    },
+                }
+            ],
+        }
+    )
+
+    assert batch_view["visible_posts"][0]["caption_source_links"] == [
+        {"url": "https://source-a.example/reha", "label": "Heilmittel-Richtlinie"}
+    ]
+    assert batch_view["publish_posts_json"][0]["captionSourceLinks"] == [
+        {"url": "https://source-a.example/reha", "label": "Heilmittel-Richtlinie"}
+    ]
+
+
+def test_batch_detail_view_repairs_persisted_damaged_value_caption():
+    damaged = "Wichtiger Punkt: Die Physiotherapie fokussiert sich auf die Wiederherstellung und den E..."
+    seed_data = {
+        "script": "Ein anderes Skript.",
+        "caption": damaged,
+        "caption_bundle": {
+            "selected_body": damaged,
+            "caption_profile": "extended",
+            "source_urls": ["https://source-a.example/reha"],
+            "source_labels": ["Heilmittel-Richtlinie"],
+        },
+        "strict_seed": {
+            "facts": [
+                "Die Physiotherapie fokussiert sich auf die Wiederherstellung und den Erhalt von Beweglichkeit, Kraft und koerperlicher Funktion.",
+                "Das Alltagstraining ist ein wichtiges Therapieinstrument, um Patienten nach Krankheit oder Unfall wieder handlungsfaehig zu machen.",
+                "Die Finanzierung beider Therapieformen erfolgt bei aerztlicher Verordnung primaer ueber die gesetzliche Krankenversicherung.",
+                "Mit der Blankoverordnung koennen Therapeutinnen bei bestimmten Diagnosen mehr Verantwortung fuer Behandlungsumfang und Frequenz uebernehmen.",
+                "Die Heilmittel-Richtlinie beschreibt Fristen fuer den Behandlungsbeginn und Vorgaben fuer Verordnungen.",
+                "Training von Routinetätigkeiten wie Waschen, Zaehneputzen und Anziehen gehoert besonders in der Ergotherapie zum praktischen Alltagstraining.",
+            ]
+        },
+    }
+
+    batch_view = batch_handlers._build_batch_detail_view(
+        {
+            "state": "S6_QA",
+            "posts": [
+                {
+                    "id": "post-1",
+                    "post_type": "value",
+                    "topic_title": "Ergotherapie und Physiotherapie",
+                    "publish_caption": damaged,
+                    "seed_data": seed_data,
+                }
+            ],
+        }
+    )
+
+    repaired = batch_view["visible_posts"][0]["review_caption"]
+    assert "..." not in repaired
+    assert "Die Physiotherapie fokussiert sich auf die Wiederherstellung und den Erhalt" in repaired
+    assert batch_view["publish_posts_json"][0]["caption"] == repaired
 
 
 def test_thin_payload_keeps_standard_path_and_bundle_shape():

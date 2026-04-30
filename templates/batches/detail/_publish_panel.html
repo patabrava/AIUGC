@@ -110,6 +110,14 @@
                                 <span class="text-[10px] text-gray-400">Pre-filled from generated caption</span>
                                 <span class="text-[10px] text-gray-400" x-text="(post.caption || '').length + '/2200'"></span>
                             </div>
+                            <div x-show="(post.captionSourceLinks || []).length" class="mt-2 flex flex-wrap gap-2">
+                                <template x-for="link in post.captionSourceLinks" :key="link.url">
+                                    <a :href="link.url" target="_blank" rel="noopener noreferrer"
+                                       class="inline-flex max-w-full items-center rounded-full border border-[#006AAB]/20 bg-white px-2.5 py-1 text-[11px] font-medium text-[#006AAB] hover:border-[#006AAB]/40 hover:bg-[#006AAB]/5">
+                                        <span class="truncate" x-text="link.label || 'Quelle'"></span>
+                                    </a>
+                                </template>
+                            </div>
                         </div>
                         <div x-show="(post.captionOptions || []).length > 1" class="space-y-2">
                             <label class="block text-xs font-medium text-gray-700">Choose generated caption</label>

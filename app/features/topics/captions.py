@@ -24,7 +24,7 @@ VARIANT_KEYS = ("curiosity", "personal", "provocative")
 CAPTION_MIN_CHARS = 80
 CAPTION_MAX_CHARS = 400
 EXTENDED_CAPTION_MIN_CHARS = 450
-EXTENDED_CAPTION_MAX_CHARS = 1000
+EXTENDED_CAPTION_MAX_CHARS = 2200
 EXTENDED_CAPTION_KEY = "extended"
 VALUE_CAPTION_KEY = "informative"
 VALUE_CAPTION_MIN_CHARS = 200
@@ -174,9 +174,7 @@ def _clean_caption_fact(fact: str) -> str:
         return ""
     if re.search(r"\b(?:community|forschung|dossier|source_context|recherche)\b", cleaned, flags=re.IGNORECASE):
         return ""
-    cleaned = re.sub(r"\s+", " ", cleaned).strip().rstrip(" .")
-    if len(cleaned) > 120:
-        cleaned = cleaned[:117].rstrip(" ,;:") + "..."
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
 
@@ -439,12 +437,13 @@ def _compact_source_label(value: Any) -> str:
     if not label:
         return ""
     if len(label) > 48:
-        label = label[:45].rstrip(" -–—,:;") + "..."
+        label = " ".join(tokens[:3]).strip(" -–—,:;")
     return label
 
 
 def _collect_caption_source_urls(seed_payload: Optional[Dict[str, Any]]) -> List[str]:
     payload = dict(seed_payload or {})
+    caption_bundle = payload.get("caption_bundle") or {}
     candidates: List[str] = []
 
     source = payload.get("source")
@@ -459,6 +458,11 @@ def _collect_caption_source_urls(seed_payload: Optional[Dict[str, Any]]) -> List
                 candidates.append(item.get("url") or "")
             else:
                 candidates.append(item)
+    for item in list(caption_bundle.get("source_urls") or []):
+        if isinstance(item, dict):
+            candidates.append(item.get("url") or "")
+        else:
+            candidates.append(item)
 
     urls: List[str] = []
     seen = set()
@@ -475,6 +479,7 @@ def _collect_caption_source_labels(
     research_facts: Optional[List[str]] = None,
 ) -> List[str]:
     payload = dict(seed_payload or {})
+    caption_bundle = payload.get("caption_bundle") or {}
     facts = sanitize_fact_fragments(list(research_facts or []))
     candidates: List[str] = []
 
@@ -504,6 +509,18 @@ def _collect_caption_source_labels(
                 ])
             else:
                 candidates.append(item)
+
+    candidates.extend(list(caption_bundle.get("source_labels") or []))
+    for item in list(caption_bundle.get("source_urls") or []):
+        if isinstance(item, dict):
+            candidates.extend([
+                item.get("title") or "",
+                item.get("label") or "",
+                item.get("summary") or "",
+                item.get("url") or "",
+            ])
+        else:
+            candidates.append(item)
 
     labels: List[str] = []
     seen = set()
@@ -603,6 +620,30 @@ def _clip_sentence(text: str, limit: int) -> str:
         clipped = _ensure_terminal_punctuation(clipped)
 
 
+def _complete_caption_sentence(text: str, limit: int) -> str:
+    """Return a complete caption sentence without visual truncation markers."""
+    normalized = re.sub(r"\s+", " ", _normalize_line_breaks(text)).strip()
+    if not normalized:
+        return ""
+    if len(normalized) <= limit:
+        return _ensure_terminal_punctuation(normalized)
+
+    sentence_matches = list(re.finditer(r"[^.!?]+[.!?]", normalized))
+    complete = ""
+    for match in sentence_matches:
+        candidate = normalized[: match.end()].strip()
+        if len(candidate) <= limit:
+            complete = candidate
+            continue
+        break
+    if complete:
+        return _ensure_terminal_punctuation(complete)
+
+    clipped = normalized[:limit].rstrip(" ,;:-")
+    clipped = re.sub(r"\s+[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+$", "", clipped).rstrip(" ,;:-")
+    return _ensure_terminal_punctuation(clipped or normalized[:limit].rstrip(" ,;:-"))
+
+
 def _extended_caption_hashtags(topic_title: str, post_type: str) -> List[str]:
     base = _fallback_caption_hashtags(topic_title, post_type, "curiosity")
     if post_type == "value":
@@ -637,27 +678,27 @@ def _build_extended_caption(
     if len(source_labels) < 1:
         return None
 
-    headline_fact = _clip_sentence(facts[0], 70)
-    why_it_matters = _clip_sentence(
+    headline_fact = _complete_caption_sentence(facts[0], 420)
+    why_it_matters = _complete_caption_sentence(
         f"Warum das wichtig ist: {facts[1] if len(facts) > 1 else facts[0]}",
-        160,
+        420,
     )
-    what_it_changes = _clip_sentence(
+    what_it_changes = _complete_caption_sentence(
         f"Was das konkret bedeutet: {facts[2] if len(facts) > 2 else facts[1] if len(facts) > 1 else facts[0]}",
-        180,
+        460,
     )
     evidence_lines = [
-        f"- {_clip_sentence(fact, 70)}"
+        f"- {_complete_caption_sentence(fact, 360)}"
         for fact in facts[3:6]
         if fact
     ]
     if len(evidence_lines) < 2:
         return None
 
-    hook = _clip_sentence(f"Wichtiger Punkt: {headline_fact}", 100)
-    quick_takeaway = _clip_sentence(
+    hook = _complete_caption_sentence(f"Wichtiger Punkt: {headline_fact}", 460)
+    quick_takeaway = _complete_caption_sentence(
         "Kurz gesagt: " + " ".join(part for part in [why_it_matters, what_it_changes] if part),
-        260,
+        700,
     )
     sources_block = "Basierend auf: " + " · ".join(source_labels[:3])
     hashtags = " ".join(_extended_caption_hashtags(topic_title, post_type))
@@ -901,6 +942,49 @@ def resolve_selected_caption(seed_data: Dict[str, Any]) -> str:
     if description:
         return description
     return ""
+
+
+def resolve_display_caption(
+    seed_data: Dict[str, Any],
+    *,
+    publish_caption: str = "",
+    post_type: str = "",
+    topic_title: str = "",
+) -> str:
+    caption = str(publish_caption or "").strip() or resolve_selected_caption(seed_data)
+    if post_type != "value" or "..." not in caption:
+        return caption
+
+    payload = dict(seed_data or {})
+    bundle = dict(payload.get("caption_bundle") or {})
+    if bundle.get("caption_profile") != EXTENDED_CAPTION_KEY:
+        return caption
+
+    script = str(payload.get("dialog_script") or payload.get("script") or "").strip()
+    canonical_topic = _resolve_canonical_topic(
+        topic_title=topic_title or str(payload.get("canonical_topic") or ""),
+        payload=payload,
+    )
+    repaired = _build_extended_caption(
+        topic_title=canonical_topic,
+        post_type=post_type,
+        script=script,
+        seed_payload=payload,
+        research_facts=list((payload.get("strict_seed") or {}).get("facts") or []),
+    )
+    if not repaired:
+        return caption
+    try:
+        _validate_extended_caption(
+            repaired["body"],
+            script=script,
+            source_urls=repaired["source_urls"],
+            source_labels=repaired["source_labels"],
+            fact_count=len(repaired["facts"]),
+        )
+    except ValidationError:
+        return caption
+    return repaired["body"]
 
 
 def _select_best_variant(

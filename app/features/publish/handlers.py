@@ -55,7 +55,7 @@ from app.features.publish.schemas import (
     PostNowRequest,
     UpdatePostScheduleRequest,
 )
-from app.features.topics.captions import resolve_selected_caption
+from app.features.topics.captions import resolve_display_caption
 try:
     from app.features.publish.tiktok import (
         get_tiktok_public_account,
@@ -700,12 +700,13 @@ def _ensure_instagram_video_url(post: Dict[str, Any]) -> str:
 
 def _default_publish_caption(post: Dict[str, Any]) -> str:
     """Use stored caption when available, otherwise fall back to the generated seed bundle."""
-    caption = (post.get("publish_caption") or "").strip()
-    if caption:
-        return caption
-
     seed_data = _load_json_object(post.get("seed_data"))
-    return resolve_selected_caption(seed_data)
+    return resolve_display_caption(
+        seed_data,
+        publish_caption=str(post.get("publish_caption") or ""),
+        post_type=str(post.get("post_type") or ""),
+        topic_title=str(post.get("topic_title") or ""),
+    )
 
 
 def _value_caption_publish_guard_enabled() -> bool:

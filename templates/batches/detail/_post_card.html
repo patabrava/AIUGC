@@ -5,6 +5,7 @@
 {% set primary_script = seed.get('script') or post.topic_rotation %}
 {% set caption = post.review_caption or post.publish_caption or ((seed.get('caption_bundle') or {}).get('selected_body')) or seed.get('caption') or seed.get('description') %}
 {% set caption_bundle = seed.get('caption_bundle') or {} %}
+{% set caption_source_links = post.caption_source_links or [] %}
 {% set caption_generation_mode = caption_bundle.get('generation_mode') or 'standard_legacy' %}
 {% set caption_review_required = seed.get('caption_review_required') == True or caption_bundle.get('caption_review_required') == True %}
 {% set canonical_topic = seed.get('canonical_topic') or post.topic_title %}
@@ -175,6 +176,19 @@
             {% endif %}
         </div>
         <p class="mt-1 text-sm text-gray-700 whitespace-pre-line">{{ caption }}</p>
+        {% if caption_source_links %}
+        <div class="mt-3 border-t border-gray-200 pt-2">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Caption Links</p>
+            <div class="mt-1 flex flex-wrap gap-2">
+                {% for link in caption_source_links %}
+                <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer"
+                   class="inline-flex max-w-full items-center rounded-full border border-[#006AAB]/20 bg-white px-2.5 py-1 text-xs font-medium text-[#006AAB] hover:border-[#006AAB]/40 hover:bg-[#006AAB]/5">
+                    <span class="truncate">{{ link.label }}</span>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 
