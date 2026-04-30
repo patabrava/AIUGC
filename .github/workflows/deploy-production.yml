@@ -15,6 +15,7 @@ jobs:
       PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY != '' && secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
       PROD_SSH_PASSWORD: ${{ secrets.PROD_SSH_PASSWORD != '' && secrets.PROD_SSH_PASSWORD || vars.PROD_SSH_PASSWORD }}
       PROD_ENV_FILE_B64: ${{ secrets.PROD_ENV_FILE_B64 }}
+      PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64: ${{ secrets.PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 }}
       PROD_APP_ROOT: ${{ secrets.PROD_APP_ROOT != '' && secrets.PROD_APP_ROOT || vars.PROD_APP_ROOT }}
     steps:
       - name: Checkout
@@ -36,7 +37,7 @@ jobs:
           host: ${{ env.PROD_SSH_HOST }}
           username: ${{ env.PROD_SSH_USER }}
           password: ${{ env.PROD_SSH_PASSWORD }}
-          envs: PROD_ENV_FILE_B64
+          envs: PROD_ENV_FILE_B64,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
           script: |
             export APP_ROOT="${{ env.PROD_APP_ROOT }}"
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
@@ -57,6 +58,38 @@ jobs:
             git checkout -B main origin/main
             git reset --hard origin/main
             git clean -fd
+            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" <<'PY'
+            import base64
+            import json
+            import sys
+            from pathlib import Path
+
+            env_path = Path(sys.argv[1])
+            adc_b64 = sys.argv[2].strip()
+            overrides = {
+                "GEMINI_PROVIDER": "vertex",
+                "GEMINI_DEEP_RESEARCH_PROVIDER": "vertex_grounded",
+                "GEMINI_API_FALLBACK_ENABLED": "false",
+                "VERTEX_AI_PROJECT_ID": "project-89aac146-ec35-4755-b83",
+                "VERTEX_AI_LOCATION": "us-central1",
+                "VERTEX_AI_ENABLED": "true",
+                "VERTEX_GEMINI_MODEL": "gemini-2.5-flash",
+                "VERTEX_GEMINI_IMAGE_MODEL": "gemini-2.5-flash-image",
+                "VERTEX_GROUNDED_RESEARCH_MODEL": "gemini-2.5-pro",
+                "VERTEX_GROUNDED_RESEARCH_LOCATION": "global",
+                "GOOGLE_APPLICATION_CREDENTIALS": "",
+            }
+            if adc_b64:
+                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = base64.b64decode(adc_b64).decode()
+
+            lines = env_path.read_text().splitlines() if env_path.exists() else []
+            keys = set(overrides)
+            kept = [line for line in lines if "=" not in line or line.split("=", 1)[0] not in keys]
+            for key, value in overrides.items():
+                kept.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
+            env_path.write_text("\n".join(kept) + "\n")
+            env_path.chmod(0o600)
+            PY
             bash scripts/deploy/production.sh
 
       - name: Deploy over SSH with key
@@ -66,7 +99,7 @@ jobs:
           host: ${{ env.PROD_SSH_HOST }}
           username: ${{ env.PROD_SSH_USER }}
           key: ${{ env.PROD_SSH_PRIVATE_KEY }}
-          envs: PROD_ENV_FILE_B64
+          envs: PROD_ENV_FILE_B64,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
           script: |
             export APP_ROOT="${{ env.PROD_APP_ROOT }}"
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
@@ -87,4 +120,36 @@ jobs:
             git checkout -B main origin/main
             git reset --hard origin/main
             git clean -fd
+            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" <<'PY'
+            import base64
+            import json
+            import sys
+            from pathlib import Path
+
+            env_path = Path(sys.argv[1])
+            adc_b64 = sys.argv[2].strip()
+            overrides = {
+                "GEMINI_PROVIDER": "vertex",
+                "GEMINI_DEEP_RESEARCH_PROVIDER": "vertex_grounded",
+                "GEMINI_API_FALLBACK_ENABLED": "false",
+                "VERTEX_AI_PROJECT_ID": "project-89aac146-ec35-4755-b83",
+                "VERTEX_AI_LOCATION": "us-central1",
+                "VERTEX_AI_ENABLED": "true",
+                "VERTEX_GEMINI_MODEL": "gemini-2.5-flash",
+                "VERTEX_GEMINI_IMAGE_MODEL": "gemini-2.5-flash-image",
+                "VERTEX_GROUNDED_RESEARCH_MODEL": "gemini-2.5-pro",
+                "VERTEX_GROUNDED_RESEARCH_LOCATION": "global",
+                "GOOGLE_APPLICATION_CREDENTIALS": "",
+            }
+            if adc_b64:
+                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = base64.b64decode(adc_b64).decode()
+
+            lines = env_path.read_text().splitlines() if env_path.exists() else []
+            keys = set(overrides)
+            kept = [line for line in lines if "=" not in line or line.split("=", 1)[0] not in keys]
+            for key, value in overrides.items():
+                kept.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
+            env_path.write_text("\n".join(kept) + "\n")
+            env_path.chmod(0o600)
+            PY
             bash scripts/deploy/production.sh
