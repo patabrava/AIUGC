@@ -89,6 +89,8 @@ class _FakeRpc:
 
     def execute(self):
         if self.name == "get_tiktok_connected_account_secret":
+            if self.storage.get("tiktok_secret"):
+                return _FakeResponse([deepcopy(self.storage["tiktok_secret"])])
             return _FakeResponse(
                 [
                     {
@@ -108,6 +110,25 @@ class _FakeRpc:
                     }
                 ]
             )
+        if self.name == "upsert_tiktok_connected_account":
+            self.storage.setdefault("rpc_calls", []).append((self.name, deepcopy(self.params)))
+            existing = deepcopy(self.storage.get("tiktok_secret") or {})
+            row = {
+                **existing,
+                "id": existing.get("id", "account-1"),
+                "platform": "tiktok",
+                "open_id": self.params["p_open_id"],
+                "display_name": self.params["p_display_name"],
+                "avatar_url": self.params["p_avatar_url"],
+                "access_token_plain": self.params["p_access_token_plain"],
+                "refresh_token_plain": self.params["p_refresh_token_plain"],
+                "access_token_expires_at": self.params["p_access_token_expires_at"],
+                "refresh_token_expires_at": self.params["p_refresh_token_expires_at"],
+                "scope": self.params["p_scope"],
+                "environment": self.params["p_environment"],
+            }
+            self.storage["tiktok_secret"] = row
+            return _FakeResponse([deepcopy(row)])
         raise AssertionError(f"Unexpected RPC {self.name}")
 
 
@@ -244,6 +265,55 @@ def test_tiktok_status_refresh_derives_networks_from_results_when_selection_miss
     )
 
     assert status == "publishing"
+
+
+def test_tiktok_token_expiry_parser_accepts_supabase_fractional_timestamp():
+    parsed = tiktok._parse_tiktok_token_expiry("2027-04-29T16:11:35.5637+00:00")
+
+    assert parsed.isoformat() == "2027-04-29T16:11:35.563700+00:00"
+
+
+def test_load_tiktok_secret_refreshes_expired_access_token(monkeypatch):
+    storage = {
+        "tiktok_secret": {
+            "id": "account-1",
+            "platform": "tiktok",
+            "open_id": "open-123",
+            "display_name": "Sandbox Creator",
+            "avatar_url": "",
+            "access_token_plain": "expired-access-token",
+            "refresh_token_plain": "valid-refresh-token",
+            "access_token_expires_at": "2026-04-02T16:44:03+00:00",
+            "refresh_token_expires_at": "2099-04-01T16:44:03+00:00",
+            "scope": "user.info.basic,video.upload,video.publish",
+            "environment": "sandbox",
+        },
+        "rpc_calls": [],
+    }
+
+    async def _refresh_stub(method, path, *, headers=None, params=None, data=None, json_body=None):
+        assert method == "POST"
+        assert path == "/v2/oauth/token/"
+        assert data["grant_type"] == "refresh_token"
+        assert data["refresh_token"] == "valid-refresh-token"
+        return {
+            "access_token": "fresh-access-token",
+            "refresh_token": "rotated-refresh-token",
+            "expires_in": 86400,
+            "refresh_expires_in": 31536000,
+            "scope": "user.info.basic,video.upload,video.publish",
+        }
+
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok, "_tiktok_request", _refresh_stub)
+
+    account = asyncio.run(tiktok._load_tiktok_account_secret())
+
+    assert account["access_token_plain"] == "fresh-access-token"
+    assert account["refresh_token_plain"] == "rotated-refresh-token"
+    assert storage["tiktok_secret"]["access_token_plain"] == "fresh-access-token"
+    assert storage["rpc_calls"][0][0] == "upsert_tiktok_connected_account"
 
 
 def test_upload_tiktok_draft_persists_job_and_post_result(monkeypatch):

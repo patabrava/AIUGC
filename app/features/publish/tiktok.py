@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urlparse
@@ -58,6 +59,7 @@ MIN_CHUNK_BYTES = 5 * 1024 * 1024
 MAX_FINAL_CHUNK_BYTES = 128 * 1024 * 1024
 TIKTOK_STATUS_POLL_ATTEMPTS = 15
 TIKTOK_STATUS_POLL_SECONDS = 2.0
+TIKTOK_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 300
 
 
 def _load_json_object(value: Any) -> Dict[str, Any]:
@@ -82,6 +84,30 @@ def _coerce_supabase_rows(value: Any) -> List[Dict[str, Any]]:
     if isinstance(value, dict):
         return [dict(value)]
     return []
+
+
+def _parse_tiktok_token_expiry(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    normalized = str(value).replace("Z", "+00:00")
+    try:
+        expires_dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        match = re.match(r"^(?P<prefix>.+\.)(?P<fraction>\d+)(?P<tz>[+-]\d{2}:\d{2})$", normalized)
+        if not match:
+            raise
+        fraction = (match.group("fraction") + "000000")[:6]
+        expires_dt = datetime.fromisoformat(f"{match.group('prefix')}{fraction}{match.group('tz')}")
+    if expires_dt.tzinfo is None:
+        expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+    return expires_dt
+
+
+def _tiktok_token_expired(value: Any, *, skew_seconds: int = 0) -> bool:
+    expires_dt = _parse_tiktok_token_expiry(value)
+    if expires_dt is None:
+        return False
+    return expires_dt <= datetime.now(timezone.utc) + timedelta(seconds=skew_seconds)
 
 
 def _state_secret() -> str:
@@ -244,7 +270,7 @@ async def get_tiktok_publish_state() -> Dict[str, Any]:
         return _derive_tiktok_readiness(account)
 
     try:
-        secret_account = _load_tiktok_account_secret()
+        secret_account = await _load_tiktok_account_secret()
     except AuthenticationError as exc:
         return _derive_tiktok_readiness(
             {**account, "status": "reconnect_required"},
@@ -265,7 +291,7 @@ async def get_tiktok_publish_state() -> Dict[str, Any]:
         return _derive_tiktok_readiness(account, creator_error=exc.message)
 
 
-def _load_tiktok_account_secret() -> Dict[str, Any]:
+async def _load_tiktok_account_secret() -> Dict[str, Any]:
     settings = _require_tiktok_settings()
     response = get_supabase().client.rpc(
         "get_tiktok_connected_account_secret",
@@ -279,13 +305,11 @@ def _load_tiktok_account_secret() -> Dict[str, Any]:
         raise AuthenticationError("No TikTok sandbox account is connected.")
 
     account = dict(rows[0])
-    expires_at = account.get("access_token_expires_at")
-    if expires_at:
-        expires_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
-        if expires_dt.tzinfo is None:
-            expires_dt = expires_dt.replace(tzinfo=timezone.utc)
-        if expires_dt <= datetime.now(timezone.utc):
-            raise AuthenticationError("TikTok access token expired. Reconnect the sandbox account.")
+    if _tiktok_token_expired(
+        account.get("access_token_expires_at"),
+        skew_seconds=TIKTOK_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    ):
+        return await _refresh_tiktok_access_token(account)
     return account
 
 
@@ -386,6 +410,57 @@ async def _exchange_code_for_tokens(code: str, code_verifier: str) -> Dict[str, 
         },
     )
     return payload.get("data") if isinstance(payload.get("data"), dict) else payload
+
+
+async def _refresh_tiktok_access_token(account: Dict[str, Any]) -> Dict[str, Any]:
+    settings = _require_tiktok_settings()
+    refresh_token = str(account.get("refresh_token_plain") or "").strip()
+    if not refresh_token:
+        raise AuthenticationError("TikTok refresh token is missing. Reconnect the TikTok account.")
+    if _tiktok_token_expired(account.get("refresh_token_expires_at")):
+        raise AuthenticationError("TikTok refresh token expired. Reconnect the TikTok account.")
+
+    payload = await _tiktok_request(
+        "POST",
+        "/v2/oauth/token/",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "client_key": settings.tiktok_client_key,
+            "client_secret": settings.tiktok_client_secret,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+    )
+    token_payload = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    access_token = str(token_payload.get("access_token") or "").strip()
+    if not access_token:
+        raise ThirdPartyError("TikTok token refresh did not return an access token.", details=redact_secret_payload(token_payload))
+
+    now = datetime.now(timezone.utc)
+    expires_in = int(token_payload.get("expires_in") or 0)
+    refresh_expires_in = int(token_payload.get("refresh_expires_in") or 0)
+    refreshed = {
+        **account,
+        "access_token_plain": access_token,
+        "refresh_token_plain": str(token_payload.get("refresh_token") or refresh_token),
+        "access_token_expires_at": (now + timedelta(seconds=expires_in)).isoformat() if expires_in > 0 else account.get("access_token_expires_at"),
+        "refresh_token_expires_at": (now + timedelta(seconds=refresh_expires_in)).isoformat() if refresh_expires_in > 0 else account.get("refresh_token_expires_at"),
+        "scope": str(token_payload.get("scope") or account.get("scope") or DEFAULT_SCOPE),
+    }
+    persisted = _upsert_connected_account(
+        open_id=str(account.get("open_id") or token_payload.get("open_id") or ""),
+        display_name=str(account.get("display_name") or "TikTok Account"),
+        avatar_url=str(account.get("avatar_url") or ""),
+        access_token=refreshed["access_token_plain"],
+        refresh_token=refreshed["refresh_token_plain"],
+        access_token_expires_at=refreshed.get("access_token_expires_at"),
+        refresh_token_expires_at=refreshed.get("refresh_token_expires_at"),
+        scope=str(refreshed.get("scope") or DEFAULT_SCOPE),
+    )
+    if persisted.get("id"):
+        refreshed["id"] = persisted["id"]
+    logger.info("tiktok_access_token_refreshed", account_id=refreshed.get("id"), environment=settings.tiktok_environment)
+    return refreshed
 
 
 async def _fetch_user_profile(access_token: str) -> Dict[str, Any]:
@@ -1082,7 +1157,7 @@ async def _publish_tiktok_post(
     disable_stitch: bool,
 ) -> Dict[str, Any]:
     post = _load_post_for_tiktok(post_id, mode=mode)
-    account = _load_tiktok_account_secret()
+    account = await _load_tiktok_account_secret()
     video_url = str(post["video_url"])
     video_bytes: Optional[bytes] = None
     content_type = "video/mp4"
@@ -1307,7 +1382,7 @@ async def refresh_tiktok_post_status(post_id: str) -> Optional[Dict[str, Any]]:
     if not publish_id:
         return None
 
-    account = _load_tiktok_account_secret()
+    account = await _load_tiktok_account_secret()
     response = get_supabase().client.table("publish_jobs").select("*").eq("tiktok_publish_id", publish_id).limit(1).execute()
     rows = response.data or []
     if not rows:
