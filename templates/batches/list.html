@@ -350,7 +350,7 @@
                         <p class="mt-1 text-xs text-gray-500">Manual batches create blank draft posts that you will edit by hand.</p>
                     </div>
 
-                    <div>
+                    <div x-show="creationMode !== 'manual'">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Video Duration</label>
                         <select
                             name="target_length_tier"
@@ -361,6 +361,10 @@
                             <option value="32">32 seconds</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500">Choose the batch duration once. The pipeline is selected automatically.</p>
+                    </div>
+                    <div x-show="creationMode === 'manual'" x-cloak class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3 text-sm text-[#006AAB]">
+                        Manual batches resolve video duration automatically from each approved script. Short scripts submit as short clips; longer scripts upgrade to extended routes when the dialogue supports it.
+                        <input type="hidden" name="target_length_tier" value="8">
                     </div>
                 </div>
                 

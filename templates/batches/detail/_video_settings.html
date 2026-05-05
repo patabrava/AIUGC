@@ -95,14 +95,22 @@
                 <div>
                     <p class="text-sm font-semibold text-[#006AAB]">Duration-routed batch</p>
                     <p class="mt-1 text-sm text-[#006AAB]">
+                        {% if batch.creation_mode == 'manual' %}
+                        Manual drafts resolve duration from each approved script at submit time. Short scripts stay short, and longer scripts upgrade automatically when they have enough dialogue structure.
+                        {% else %}
                         <span x-text="`${targetLengthTier}s selected at batch setup.`"></span>
                         <span x-show="pipelineRoute === 'short'"> This stays on the short Veo path.</span>
                         <span x-show="pipelineRoute === 'veo_extended'"> This batch uses the Veo extended chain automatically.</span>
+                        {% endif %}
                     </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-text="modelLabel"></span>
+                    {% if batch.creation_mode == 'manual' %}
+                    <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30">Per-post auto duration</span>
+                    {% else %}
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-text="`${targetLengthTier}s target`"></span>
+                    {% endif %}
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-show="pipelineRoute === 'veo_extended'">720p chain</span>
                 </div>
             </div>

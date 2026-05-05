@@ -61,6 +61,31 @@ def test_resolve_video_submission_plan_routes_duration_tier_to_veo_extended():
     assert plan["profile"].route == "veo_extended"
 
 
+def test_manual_short_script_routes_to_8s_even_when_batch_was_created_as_16s():
+    batch = {"id": "manual-batch", "creation_mode": "manual", "target_length_tier": 16}
+    seed_data = {
+        "manual_draft": True,
+        "script": "Ich bin sehr gluecklich dass die App wieder funktioniert. Lets gooooo hahahahha",
+    }
+
+    plan = video_handlers._resolve_video_submission_plan(
+        batch=batch,
+        requested_provider="vertex_ai",
+        requested_seconds=16,
+        aspect_ratio="9:16",
+        resolution="720p",
+        size=None,
+        seed_data=seed_data,
+    )
+
+    assert plan["duration_routed"] is True
+    assert plan["manual_duration_auto_resolved"] is True
+    assert plan["manual_requested_target_length_tier"] == 16
+    assert plan["profile"].target_length_tier == 8
+    assert plan["profile"].route != VEO_EXTENDED_VIDEO_ROUTE
+    assert plan["seconds"] == 8
+
+
 def test_resolve_video_submission_plan_preserves_vertex_provider_for_duration_routed_batches():
     batch = {"id": "vertex-batch", "target_length_tier": 32, "video_pipeline_route": "veo_extended"}
 

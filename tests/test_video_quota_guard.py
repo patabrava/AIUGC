@@ -323,6 +323,47 @@ def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
     assert captured["provider"] == "vertex_ai"
 
 
+def test_generate_video_auto_resolves_manual_short_script_to_8s(monkeypatch):
+    post = {
+        "id": "post-1",
+        "batch_id": "batch-1",
+        "video_prompt_json": {"veo_prompt": "Prompt"},
+        "seed_data": {
+            "manual_draft": True,
+            "script_review_status": "approved",
+            "script": "Ich bin sehr gluecklich dass die App wieder funktioniert. Lets gooooo hahahahha",
+        },
+        "video_metadata": {},
+    }
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient([post]))
+    captured = {}
+
+    def _fake_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "operation_id": "operations/test-single",
+            "status": "submitted",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": "operations/test-single"},
+        }
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr(
+        "app.features.videos.handlers.get_batch_by_id",
+        lambda batch_id: {"id": batch_id, "creation_mode": "manual", "target_length_tier": 16},
+    )
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
+
+    request = VideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=16)
+    asyncio.run(generate_video("post-1", request))
+
+    assert captured["seconds"] == 8
+    assert captured["provider_duration_seconds"] == 8
+
+
 def test_generate_video_skips_quota_ledger_calls_when_bypass_enabled(monkeypatch):
     post = {
         "id": "post-1",
