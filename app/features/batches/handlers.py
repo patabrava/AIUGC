@@ -72,6 +72,20 @@ templates = Jinja2Templates(directory="templates")
 DETAIL_JS_VERSION = str(Path("static/js/batches/detail.js").stat().st_mtime_ns)
 _COVERAGE_RECOVERY_COOLDOWN_SECONDS = 300
 _COVERAGE_RECOVERY_LAST_SCHEDULED_AT: Dict[str, float] = {}
+_VEO_BATCH_PRICING_BY_MODEL = {
+    "veo-3.1-generate-001": {
+        "720p": 0.40,
+        "1080p": 0.40,
+    },
+    "veo-3.1-fast-generate-001": {
+        "720p": 0.10,
+        "1080p": 0.12,
+    },
+    "veo-3.1-lite-generate-001": {
+        "720p": 0.05,
+        "1080p": 0.08,
+    },
+}
 
 
 def _wants_html(request: Request) -> bool:
@@ -433,6 +447,7 @@ def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: 
         "initial_model": initial_model,
         "target_length_tier": batch_detail.get("target_length_tier"),
         "pipeline_route": batch_detail.get("video_pipeline_route"),
+        "pricing_by_model": _VEO_BATCH_PRICING_BY_MODEL,
     }
 
 
@@ -453,11 +468,19 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     active_posts_count = 0
     active_video_poll_count = 0
     prompt_ready_count = 0
+    video_submission_ready_count = 0
     qa_passed_count = 0
     scheduled_count = 0
     approved_scripts_count = 0
     removed_scripts_count = 0
     pending_scripts_count = 0
+    non_submit_statuses = {
+        "submitted",
+        "processing",
+        "completed",
+        "extended_submitted",
+        "extended_processing",
+    }
 
     for post in posts:
         seed_data = post.get("seed_data") or {}
@@ -485,6 +508,8 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
             active_video_poll_count += 1
         if post.get("video_prompt_json"):
             prompt_ready_count += 1
+            if post.get("video_status") not in non_submit_statuses:
+                video_submission_ready_count += 1
         if post.get("qa_pass"):
             qa_passed_count += 1
         if post.get("scheduled_at"):
@@ -512,6 +537,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         "visible_posts": visible_posts,
         "active_posts_count": active_posts_count,
         "prompt_ready_count": prompt_ready_count,
+        "video_submission_ready_count": video_submission_ready_count,
         "qa_passed_count": qa_passed_count,
         "scheduled_count": scheduled_count,
         "review_summary": {

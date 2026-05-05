@@ -182,18 +182,36 @@
             'veo-3.1-fast-generate-001': 'Veo 3.1 Fast',
             'veo-3.1-lite-generate-001': 'Veo 3.1 Lite',
         };
+        const defaultPricingTable = {
+            'veo-3.1-generate-001': { '720p': 0.40, '1080p': 0.40 },
+            'veo-3.1-fast-generate-001': { '720p': 0.10, '1080p': 0.12 },
+            'veo-3.1-lite-generate-001': { '720p': 0.05, '1080p': 0.08 },
+        };
         const storageKey = options.batchId ? `batch-video-settings:${options.batchId}` : null;
+        const numberFormatter = new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
 
         return {
             batchId: options.batchId || null,
             targetLengthTier: options.targetLengthTier || null,
             pipelineRoute: options.pipelineRoute || null,
+            videoSubmissionReadyCount: Number(options.videoSubmissionReadyCount || 0),
             provider: 'vertex_ai',
             model: DEFAULT_MODEL,
             aspectRatio: '9:16',
             duration: String(options.targetLengthTier || 8),
             resolution: '720p',
             modelLabels: supportedModels,
+            pricingTable: options.pricingTable || defaultPricingTable,
+            pricingModelOrder: [
+                'veo-3.1-generate-001',
+                'veo-3.1-fast-generate-001',
+                'veo-3.1-lite-generate-001',
+            ],
             supportedSizes: {
                 veo_3_1: {
                     '9:16': { '720p': '720x1280', '1080p': '1080x1920' },
@@ -218,6 +236,32 @@
             },
             get modelLabel() {
                 return this.modelLabels[this.model] || this.model;
+            },
+            get selectedPricePerSecond() {
+                const rates = this.pricingTable[this.model] || {};
+                return Number(rates[this.resolution] || 0);
+            },
+            get selectedPriceLabel() {
+                return this.formatCurrency(this.selectedPricePerSecond);
+            },
+            get estimatedBatchTotal() {
+                return this.selectedPricePerSecond * Number(this.duration || 0) * this.videoSubmissionReadyCount;
+            },
+            get pricingRows() {
+                return this.pricingModelOrder.map((model) => {
+                    const rates = this.pricingTable[model] || {};
+                    return {
+                        model,
+                        label: this.modelLabels[model] || model,
+                        rates: {
+                            '720p': this.formatCurrency(rates['720p'] || 0),
+                            '1080p': this.formatCurrency(rates['1080p'] || 0),
+                        },
+                    };
+                });
+            },
+            formatCurrency(value) {
+                return numberFormatter.format(Number(value || 0));
             },
             restorePersistedSettings() {
                 if (!storageKey) {
