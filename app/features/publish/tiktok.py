@@ -150,15 +150,22 @@ def _sanitize_connected_account(row: Optional[Dict[str, Any]]) -> Dict[str, Any]
     expires_at = sanitized.get("access_token_expires_at")
     if expires_at:
         try:
-            expires_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
-            if expires_dt.tzinfo is None:
-                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+            expires_dt = _parse_tiktok_token_expiry(expires_at)
             if expires_dt <= datetime.now(timezone.utc):
                 status = "reconnect_required"
         except ValueError:
             status = "reconnect_required"
     sanitized["status"] = status
     return sanitized
+
+
+def _public_account_from_secret(row: Dict[str, Any]) -> Dict[str, Any]:
+    public_row = {
+        key: value
+        for key, value in dict(row).items()
+        if key not in {"access_token", "refresh_token", "access_token_plain", "refresh_token_plain"}
+    }
+    return _sanitize_connected_account(public_row)
 
 
 def _scope_set(scope: str) -> set[str]:
@@ -238,7 +245,7 @@ def get_tiktok_public_account() -> Dict[str, Any]:
             .select("*")
             .eq("platform", "tiktok")
             .eq("environment", settings.tiktok_environment)
-            .order("updated_at")
+            .order("updated_at", desc=True)
             .limit(1)
             .execute()
         )
@@ -247,7 +254,7 @@ def get_tiktok_public_account() -> Dict[str, Any]:
         return {"status": "disconnected"}
     if not rows:
         return {"status": "disconnected"}
-    return _sanitize_connected_account(rows[-1])
+    return _sanitize_connected_account(rows[0])
 
 
 async def _query_creator_info(access_token: str) -> Dict[str, Any]:
@@ -266,11 +273,12 @@ async def _query_creator_info(access_token: str) -> Dict[str, Any]:
 
 async def get_tiktok_publish_state() -> Dict[str, Any]:
     account = get_tiktok_public_account()
-    if account.get("status") != "connected":
+    if account.get("status") not in {"connected", "reconnect_required"}:
         return _derive_tiktok_readiness(account)
 
     try:
         secret_account = await _load_tiktok_account_secret()
+        account = {**account, **_public_account_from_secret(secret_account)}
     except AuthenticationError as exc:
         return _derive_tiktok_readiness(
             {**account, "status": "reconnect_required"},

@@ -42,9 +42,50 @@ class _FakeRpc:
         raise AssertionError(f"Unexpected RPC {self.name}")
 
 
+class _FakeTable:
+    def __init__(self, storage, table_name):
+        self.storage = storage
+        self.table_name = table_name
+        self.filters = []
+        self.order_key = None
+        self.order_desc = False
+        self.limit_value = None
+
+    def select(self, _fields):
+        return self
+
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+
+    def order(self, key, desc=False):
+        self.order_key = key
+        self.order_desc = desc
+        return self
+
+    def limit(self, value):
+        self.limit_value = value
+        return self
+
+    def execute(self):
+        rows = [
+            dict(row)
+            for row in self.storage.get(self.table_name, [])
+            if all(row.get(key) == value for key, value in self.filters)
+        ]
+        if self.order_key:
+            rows = sorted(rows, key=lambda row: row.get(self.order_key) or "", reverse=self.order_desc)
+        if self.limit_value is not None:
+            rows = rows[: self.limit_value]
+        return _FakeResponse(rows)
+
+
 class _FakeClient:
     def __init__(self, storage):
         self.storage = storage
+
+    def table(self, table_name):
+        return _FakeTable(self.storage, table_name)
 
     def rpc(self, name, params):
         return _FakeRpc(self.storage, name, params)
@@ -206,6 +247,93 @@ def test_tiktok_callback_accepts_single_row_rpc_payload(monkeypatch):
 
     assert response.headers["location"] == "/batches/batch-1"
     assert storage["connected_accounts"][0]["open_id"] == "open-123"
+
+
+def test_tiktok_public_account_uses_latest_reconnect_row(monkeypatch):
+    storage = {
+        "connected_accounts": [
+            {
+                "id": "expired-account",
+                "platform": "tiktok",
+                "open_id": "old-open",
+                "display_name": "Expired Login",
+                "environment": "sandbox",
+                "scope": "user.info.basic,video.upload,video.publish",
+                "access_token_expires_at": "2026-04-02T16:44:03+00:00",
+                "refresh_token_expires_at": "2027-04-01T16:44:03+00:00",
+                "updated_at": "2026-04-01T16:44:03+00:00",
+            },
+            {
+                "id": "fresh-account",
+                "platform": "tiktok",
+                "open_id": "fresh-open",
+                "display_name": "Fresh Login",
+                "environment": "sandbox",
+                "scope": "user.info.basic,video.upload,video.publish",
+                "access_token_expires_at": "2099-05-06T11:45:02.37894+00:00",
+                "refresh_token_expires_at": "2099-05-05T11:45:02.378959+00:00",
+                "updated_at": "2026-05-05T11:45:02+00:00",
+            },
+        ]
+    }
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+
+    account = tiktok.get_tiktok_public_account()
+
+    assert account["id"] == "fresh-account"
+    assert account["status"] == "connected"
+
+
+def test_tiktok_publish_state_refreshes_expired_public_access_token(monkeypatch):
+    import asyncio
+
+    storage = {
+        "connected_accounts": [
+            {
+                "id": "account-1",
+                "platform": "tiktok",
+                "open_id": "open-123",
+                "display_name": "Sandbox Creator",
+                "environment": "sandbox",
+                "scope": "user.info.basic,video.upload,video.publish",
+                "access_token_expires_at": "2026-04-02T16:44:03+00:00",
+                "refresh_token_expires_at": "2099-04-01T16:44:03+00:00",
+                "updated_at": "2026-04-01T16:44:03+00:00",
+            }
+        ]
+    }
+
+    async def _load_refreshed_secret():
+        return {
+            "id": "account-1",
+            "platform": "tiktok",
+            "open_id": "open-123",
+            "display_name": "Sandbox Creator",
+            "environment": "sandbox",
+            "scope": "user.info.basic,video.upload,video.publish",
+            "access_token_plain": "fresh-access-token",
+            "refresh_token_plain": "refresh-token",
+            "access_token_expires_at": "2099-04-02T16:44:03+00:00",
+            "refresh_token_expires_at": "2099-04-01T16:44:03+00:00",
+            "updated_at": "2026-04-01T16:44:03+00:00",
+        }
+
+    async def _creator_info(access_token):
+        assert access_token == "fresh-access-token"
+        return {"privacy_level_options": ["SELF_ONLY"], "max_video_post_duration_sec": 60}
+
+    monkeypatch.setattr(tiktok, "get_settings", _settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok, "_load_tiktok_account_secret", _load_refreshed_secret)
+    monkeypatch.setattr(tiktok, "_query_creator_info", _creator_info)
+
+    state = asyncio.run(tiktok.get_tiktok_publish_state())
+
+    assert state["status"] == "connected"
+    assert state["draft_ready"] is True
+    assert "access_token_plain" not in state
+    assert "refresh_token_plain" not in state
 
 
 def test_tiktok_readiness_marks_sandbox_as_draft_only():
