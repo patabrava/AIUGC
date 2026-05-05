@@ -467,6 +467,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     visible_posts = []
     active_posts_count = 0
     active_video_poll_count = 0
+    active_publish_poll_count = 0
     prompt_ready_count = 0
     video_submission_ready_count = 0
     qa_passed_count = 0
@@ -506,6 +507,8 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         active_posts_count += 1
         if post.get("video_status") in polling_video_statuses:
             active_video_poll_count += 1
+        if str(post.get("publish_status") or "") == "publishing":
+            active_publish_poll_count += 1
         if post.get("video_prompt_json"):
             prompt_ready_count += 1
             if post.get("video_status") not in non_submit_statuses:
@@ -525,6 +528,10 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
             BatchState.S5_PROMPTS_BUILT.value,
             BatchState.S6_QA.value,
         } and active_video_poll_count > 0,
+        "should_poll_publish": (
+            batch_state == BatchState.S7_PUBLISH_PLAN.value
+            and active_publish_poll_count > 0
+        ),
         "progress_states": [
             {"code": BatchState.S1_SETUP.value, "label": "Setup"},
             {"code": BatchState.S2_SEEDED.value, "label": "Seeded"},

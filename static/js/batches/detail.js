@@ -671,6 +671,7 @@
                         : tiktokStatus === 'published'
                             ? 'TikTok published successfully!'
                             : 'Post published successfully!';
+                    setTimeout(() => window.location.reload(), 750);
                     setTimeout(() => this.successMessage = '', 5000);
                 } catch (err) {
                     this.postNowError = err.message || 'Network error';

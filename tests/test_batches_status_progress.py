@@ -632,6 +632,33 @@ def test_build_batch_detail_view_polls_while_video_is_submitted():
     assert view["should_poll_videos"] is True
 
 
+def test_build_batch_detail_view_polls_while_publish_is_in_flight():
+    batch_payload = {
+        "state": "S7_PUBLISH_PLAN",
+        "meta_connection": {},
+        "tiktok_connection": {},
+        "posts": [
+            {
+                "id": "post-1",
+                "post_type": "product",
+                "topic_title": "Beispielthema",
+                "publish_caption": "Caption",
+                "publish_status": "publishing",
+                "social_networks": ["instagram", "facebook", "tiktok"],
+                "video_url": "https://example.test/video.mp4",
+                "seed_data": {
+                    "description": "Ein generischer Abschnitt.",
+                    "script_review_status": "approved",
+                },
+            }
+        ],
+    }
+
+    view = batch_handlers._build_batch_detail_view(batch_payload)
+
+    assert view["should_poll_publish"] is True
+
+
 def test_batch_detail_template_uses_slower_refresh_interval():
     from pathlib import Path
 
