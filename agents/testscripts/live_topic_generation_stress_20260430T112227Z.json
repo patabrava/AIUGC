@@ -1,0 +1,106 @@
+{
+  "base": "https://lippelift.xyz",
+  "run_id": "20260430T112227Z",
+  "rounds": 1,
+  "results": [
+    {
+      "tier": 8,
+      "round": 1,
+      "batch_id": "aa3517b1-437f-4565-97a1-bb40e1eb450c",
+      "create_status": 201,
+      "status_samples": [
+        {
+          "t": "2026-04-30T11:22:33+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "failed",
+          "current_post_type": "product",
+          "detail": "No Google Cloud Application Default Credentials found. Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS."
+        }
+      ],
+      "detail_status": 200,
+      "batch_state": "S1_SETUP",
+      "posts": [
+        {
+          "post_id": "29d7163f-0a35-4c0a-ac70-266d40daddcc",
+          "post_type": "value",
+          "state": null,
+          "tier": 8,
+          "title": "Diskrepanz Norm Realität Vorgaben DIN - Das \"barrierefreie\" WC-Fiasko Warum oft nur der Rollstuhl reinpasst, aber sonst nichts",
+          "spoken_duration": 5.0,
+          "script_chars": 79,
+          "has_seed": true,
+          "has_caption": true
+        }
+      ],
+      "ok": false
+    },
+    {
+      "tier": 16,
+      "round": 1,
+      "batch_id": "d9f5ed67-03cf-4ddf-8d67-d2c5f2dd6335",
+      "create_status": 201,
+      "status_samples": [
+        {
+          "t": "2026-04-30T11:22:39+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "failed",
+          "current_post_type": "product",
+          "detail": "No Google Cloud Application Default Credentials found. Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS."
+        }
+      ],
+      "detail_status": 200,
+      "batch_state": "S1_SETUP",
+      "posts": [
+        {
+          "post_id": "930709d3-65e2-4119-81d8-ab98fc3c3c28",
+          "post_type": "value",
+          "state": null,
+          "tier": 16,
+          "title": "Mit dem richtigen Reifendruck rollst du mühelos über jedes Terrain",
+          "spoken_duration": 10.0,
+          "script_chars": 97,
+          "has_seed": true,
+          "has_caption": true
+        }
+      ],
+      "ok": false
+    },
+    {
+      "tier": 32,
+      "round": 1,
+      "batch_id": "8156874b-5ac6-47c7-8fb1-416444dba136",
+      "create_status": 201,
+      "status_samples": [
+        {
+          "t": "2026-04-30T11:22:45+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "failed",
+          "current_post_type": "product",
+          "detail": "No Google Cloud Application Default Credentials found. Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS."
+        }
+      ],
+      "detail_status": 200,
+      "batch_state": "S1_SETUP",
+      "posts": [
+        {
+          "post_id": "9601e36e-e774-4d2d-8a11-2969f8aa421f",
+          "post_type": "value",
+          "state": null,
+          "tier": 32,
+          "title": "Rechtliche normative Rahmenbedingungen Stand April - Drehkreuze & enge Kurven Urbane Fallen für Rollstuhlnutzende",
+          "spoken_duration": 24.0,
+          "script_chars": 420,
+          "has_seed": true,
+          "has_caption": true
+        }
+      ],
+      "ok": false
+    }
+  ]
+}

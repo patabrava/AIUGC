@@ -1,0 +1,175 @@
+{
+  "base": "https://lippelift.xyz",
+  "run_id": "20260430T115638Z",
+  "commit": "d16c979",
+  "results": [
+    {
+      "tier": 8,
+      "batch_id": "bc9caabc-f249-4736-88d9-08c0693260e3",
+      "create_status": 201,
+      "terminal_observed": true,
+      "samples": [
+        {
+          "second": 1,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "second": 2,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "failed",
+          "current_post_type": "lifestyle",
+          "detail": "Script failed tier envelope for 8s."
+        }
+      ],
+      "detail_status": 200,
+      "state": "S1_SETUP",
+      "posts_count": 2,
+      "posts": [
+        {
+          "post_id": "96c2d83f-0949-4170-af24-b0b6d1eff997",
+          "post_type": "value",
+          "tier": null,
+          "script_words": 18,
+          "script_chars": 154,
+          "title": "Bauliche Barrieren DIN 18040-1 Einzelhandel - Einkaufen mit Rollstuhl Die unsichtbaren Herausforderungen im Supermarkt",
+          "caption": true
+        },
+        {
+          "post_id": "f0466655-6d30-4131-a2cc-400d20fe664e",
+          "post_type": "product",
+          "tier": null,
+          "script_words": 18,
+          "script_chars": 121,
+          "title": "VARIO PLUS: verlässliche Lösung für zuhause",
+          "caption": true
+        }
+      ],
+      "ok": false
+    },
+    {
+      "tier": 16,
+      "batch_id": "5c6ce572-ea51-4cf5-9f6a-e115eb1f7d95",
+      "create_status": 201,
+      "terminal_observed": true,
+      "samples": [
+        {
+          "second": 1,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "second": 2,
+          "http": 200,
+          "state": "S2_SEEDED",
+          "posts_count": 3,
+          "stage": "completed",
+          "current_post_type": null,
+          "detail": "3 posts are ready. Opening script review next."
+        }
+      ],
+      "detail_status": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 3,
+      "posts": [
+        {
+          "post_id": "8cf4e82c-078a-462b-b3aa-cd20beb91d01",
+          "post_type": "value",
+          "tier": null,
+          "script_words": 15,
+          "script_chars": 102,
+          "title": "Licht, Türen & mehr per Sprachbefehl steuern",
+          "caption": true
+        },
+        {
+          "post_id": "d2486846-b4fb-4c45-801d-9bc0bdef20e0",
+          "post_type": "product",
+          "tier": null,
+          "script_words": 26,
+          "script_chars": 176,
+          "title": "VARIO PLUS: verlässliche Lösung für zuhause",
+          "caption": true
+        },
+        {
+          "post_id": "d2063cdd-5eca-4e31-8dd8-bc18fa252d73",
+          "post_type": "lifestyle",
+          "tier": null,
+          "script_words": 24,
+          "script_chars": 157,
+          "title": "Spontane Freizeit braucht oft mehr Planung als man denkt 18",
+          "caption": true
+        }
+      ],
+      "ok": true
+    },
+    {
+      "tier": 32,
+      "batch_id": "259a0393-e6f7-42ff-bfe7-fb65023d5079",
+      "create_status": 201,
+      "terminal_observed": true,
+      "samples": [
+        {
+          "second": 1,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "second": 2,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "failed",
+          "current_post_type": "product",
+          "detail": "The seeding run failed before script review could start."
+        }
+      ],
+      "detail_status": 200,
+      "state": "S1_SETUP",
+      "posts_count": 1,
+      "posts": [
+        {
+          "post_id": "92ebc38e-788a-4e75-8c0f-3988e0281552",
+          "post_type": "value",
+          "tier": null,
+          "script_words": 60,
+          "script_chars": 418,
+          "title": "Haftung durch Materialphysik Antirutsch-Technologien - Hilfsmittel und Strategien zur Sicherung von Smartphones und Schlüsseln im Rollstuhl-Alltag",
+          "caption": true
+        }
+      ],
+      "ok": false
+    }
+  ],
+  "archives": [
+    {
+      "batch_id": "bc9caabc-f249-4736-88d9-08c0693260e3",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "batch_id": "5c6ce572-ea51-4cf5-9f6a-e115eb1f7d95",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "batch_id": "259a0393-e6f7-42ff-bfe7-fb65023d5079",
+      "status": 200,
+      "ok": true
+    }
+  ],
+  "all_ok": false
+}

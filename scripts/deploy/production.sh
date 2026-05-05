@@ -40,11 +40,11 @@ git fetch origin main
 git checkout main
 git merge --ff-only origin/main
 
-if ! "${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT_NAME" -f docker-compose.production.yml --env-file "$ENV_FILE" down --remove-orphans; then
+if ! "${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" down --remove-orphans; then
   echo "Compose teardown reported a non-fatal failure; continuing with a fresh deploy." >&2
 fi
 
-"${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT_NAME" -f docker-compose.production.yml --env-file "$ENV_FILE" up -d --build --remove-orphans
+"${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" up -d --build --remove-orphans
 
 for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
   if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL" >/dev/null; then
@@ -55,5 +55,5 @@ for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
 done
 
 echo "Healthcheck failed after $MAX_HEALTH_RETRIES attempts: $HEALTHCHECK_URL" >&2
-"${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT_NAME" -f docker-compose.production.yml --env-file "$ENV_FILE" ps || true
+"${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" ps || true
 exit 1

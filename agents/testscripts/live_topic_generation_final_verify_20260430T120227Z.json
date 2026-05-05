@@ -1,0 +1,199 @@
+{
+  "base": "https://lippelift.xyz",
+  "run_id": "20260430T120227Z",
+  "commit": "93d16d6",
+  "results": [
+    {
+      "tier": 8,
+      "batch_id": "48adfa9e-d23b-4873-a8f8-d1d4e132c30f",
+      "create_status": 201,
+      "samples": [
+        {
+          "second": 1,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "booting",
+          "current_post_type": null,
+          "detail": "Opening the research run and reading the batch mix before generating any posts."
+        },
+        {
+          "second": 3,
+          "http": 200,
+          "state": "S2_SEEDED",
+          "posts_count": 3,
+          "stage": "completed",
+          "current_post_type": null,
+          "detail": "3 posts are ready. Opening script review next."
+        }
+      ],
+      "detail_status": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 3,
+      "posts": [
+        {
+          "post_id": "b1ce5503-b7b0-4955-9645-064b7786c080",
+          "post_type": "value",
+          "tier": null,
+          "script_words": 16,
+          "script_chars": 115,
+          "title": "Technologische Grundlagen Evolution automatischen Spracherkennung - Spracherkennung und Barrierefreiheit Die Herausforderung atypischer Stimmen im von KI und EU-Regulierung",
+          "caption": true
+        },
+        {
+          "post_id": "cf3e528e-5321-40cf-8752-5dc343ef74ef",
+          "post_type": "product",
+          "tier": null,
+          "script_words": 18,
+          "script_chars": 121,
+          "title": "VARIO PLUS: verlässliche Lösung für zuhause",
+          "caption": true
+        },
+        {
+          "post_id": "3979d69c-a4c6-4844-b063-5658c246a0c5",
+          "post_type": "lifestyle",
+          "tier": null,
+          "script_words": 17,
+          "script_chars": 108,
+          "title": "Spontane Freizeit braucht oft mehr Planung als man denkt 20",
+          "caption": true
+        }
+      ],
+      "ok": true
+    },
+    {
+      "tier": 16,
+      "batch_id": "88e20b41-e5ef-4d1c-b747-9852ba71c46f",
+      "create_status": 201,
+      "samples": [
+        {
+          "second": 1,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "second": 2,
+          "http": 200,
+          "state": "S2_SEEDED",
+          "posts_count": 3,
+          "stage": "completed",
+          "current_post_type": null,
+          "detail": "3 posts are ready. Opening script review next."
+        }
+      ],
+      "detail_status": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 3,
+      "posts": [
+        {
+          "post_id": "e2f0cb35-adc2-4d4d-bc45-d4f07bb3dbf9",
+          "post_type": "value",
+          "tier": null,
+          "script_words": 17,
+          "script_chars": 107,
+          "title": "Unerwünschte Hilfe",
+          "caption": true
+        },
+        {
+          "post_id": "fba6772c-5f8d-49d9-8f3f-672fd97cca96",
+          "post_type": "product",
+          "tier": null,
+          "script_words": 26,
+          "script_chars": 176,
+          "title": "VARIO PLUS: verlässliche Lösung für zuhause",
+          "caption": true
+        },
+        {
+          "post_id": "71a074e5-ce75-4ca2-b2c1-01d2f1caae82",
+          "post_type": "lifestyle",
+          "tier": null,
+          "script_words": 24,
+          "script_chars": 157,
+          "title": "Spontane Freizeit braucht oft mehr Planung als man denkt 21",
+          "caption": true
+        }
+      ],
+      "ok": true
+    },
+    {
+      "tier": 32,
+      "batch_id": "9ba72a15-0dea-4e61-ba78-929a74d09222",
+      "create_status": 201,
+      "samples": [
+        {
+          "second": 1,
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "second": 3,
+          "http": 200,
+          "state": "S2_SEEDED",
+          "posts_count": 3,
+          "stage": "completed",
+          "current_post_type": null,
+          "detail": "3 posts are ready. Opening script review next."
+        }
+      ],
+      "detail_status": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 3,
+      "posts": [
+        {
+          "post_id": "00aa4675-9f33-4a9c-830d-c8a2cd4f7b2f",
+          "post_type": "value",
+          "tier": null,
+          "script_words": 55,
+          "script_chars": 408,
+          "title": "Einführung unsichtbare Architektur Kassenschalters - Versteckte Höhen Der Kassenschalter-Check, den niemand zeigt",
+          "caption": true
+        },
+        {
+          "post_id": "5472fa26-5ba7-4197-9c4c-613a3989054e",
+          "post_type": "product",
+          "tier": null,
+          "script_words": 40,
+          "script_chars": 261,
+          "title": "VARIO PLUS: verlässliche Lösung für zuhause",
+          "caption": true
+        },
+        {
+          "post_id": "abe5a8e5-0a6f-4bd8-bba0-5e1b9d3cc93b",
+          "post_type": "lifestyle",
+          "tier": null,
+          "script_words": 24,
+          "script_chars": 157,
+          "title": "Spontane Freizeit braucht oft mehr Planung als man denkt 22",
+          "caption": true
+        }
+      ],
+      "ok": true
+    }
+  ],
+  "archives": [
+    {
+      "batch_id": "48adfa9e-d23b-4873-a8f8-d1d4e132c30f",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "batch_id": "88e20b41-e5ef-4d1c-b747-9852ba71c46f",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "batch_id": "9ba72a15-0dea-4e61-ba78-929a74d09222",
+      "status": 200,
+      "ok": true
+    }
+  ],
+  "all_ok": true
+}

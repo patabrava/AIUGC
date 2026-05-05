@@ -66,7 +66,7 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     assert "TRAEFIK_HOST_RULE" in compose_text
     assert "TRAEFIK_ENTRYPOINTS" in compose_text
     assert "TRAEFIK_CERTRESOLVER" in compose_text
-    assert "traefik.http.routers.lippelift-web.rule" in compose_text
+    assert "traefik.http.routers.lippelift-prod-web-v3.rule" in compose_text
     assert "TRAEFIK_NETWORK" not in compose_text
     assert "external: true" not in compose_text
 
@@ -91,7 +91,7 @@ def test_legacy_compose_files_follow_production_build_contract():
         assert "git clone" not in compose_text
         assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
         assert "TRAEFIK_NETWORK" not in compose_text
-        assert "traefik.http.routers.lippelift-web.rule" in compose_text
+        assert "traefik.http.routers.lippelift-prod-web-v3.rule" in compose_text
 
 
 def test_production_deploy_script_contract():
@@ -116,7 +116,7 @@ def test_hostinger_runtime_checkout_tracks_remote_main():
     compose_text = (Path(__file__).resolve().parents[1] / "docker-compose.hostinger-runtime.yaml").read_text(encoding="utf-8")
     assert 'git checkout -f -B "$$repo_ref" "origin/$$repo_ref"' in compose_text
     assert 'git reset --hard "origin/$$repo_ref"' in compose_text
-    assert "traefik.http.routers.lippelift-web.rule" in compose_text
+    assert "traefik.http.routers.lippelift-prod-web-v3.rule" in compose_text
     assert "TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-production}" in compose_text
     assert "external: true" not in compose_text
 

@@ -640,9 +640,8 @@ def test_upsert_topic_script_variants_skips_high_confidence_suffix_pattern(mock_
         ],
     )
 
-    assert len(stored) == 1
-    assert len(fake_table.rows) == 2
-    assert stored[0]["script"].endswith(", ganz konkret.")
+    assert stored == []
+    assert len(fake_table.rows) == 1
 
 
 @patch("app.features.topics.queries.get_supabase")
@@ -802,10 +801,10 @@ def test_upsert_topic_script_variants_rehabilitates_exact_synthetic_fallback_dup
         ],
     )
 
-    assert stored == []
+    assert len(stored) == 1
     assert len(fake_table.rows) == 1
-    assert fake_table.rows[0]["origin_kind"] == "synthetic_fallback"
-    assert fake_table.rows[0]["topic_research_dossier_id"] == "dossier-fallback"
+    assert fake_table.rows[0]["origin_kind"] == "provider"
+    assert fake_table.rows[0]["topic_research_dossier_id"] == "dossier-provider"
 
 
 @patch("app.features.topics.queries.get_supabase")
@@ -904,7 +903,7 @@ def test_upsert_topic_script_variants_replaces_fallback_owned_variant_slot(mock_
 
     assert len(stored) == 1
     assert len(fake_table.rows) == 1
-    assert fake_table.rows[0]["script"] == "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg oft komplett, ganz konkret."
+    assert fake_table.rows[0]["script"] == "Wenn du die Hilfe zu spät anmeldest, scheitert der Ersatzverkehr schon am Einstieg oft komplett."
     assert fake_table.rows[0]["origin_kind"] == "provider"
     assert fake_table.rows[0]["topic_research_dossier_id"] == "dossier-provider"
     assert fake_table.rows[0]["lane_key"] == "lane-provider"
@@ -1078,6 +1077,23 @@ def test_list_topic_suggestions_only_returns_active_pass_audited_families(monkey
     assert [row["topic_registry_id"] for row in result] == ["topic-active"]
 
 
+def test_list_topic_suggestions_falls_back_to_active_registry_rows_without_scripts(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {"id": "topic-active-1", "title": "Aktiv 1", "script": "A", "post_type": "value", "status": "active", "family_fingerprint": "aktiv-1"},
+        {"id": "topic-active-2", "title": "Aktiv 2", "script": "B", "post_type": "value", "status": "active", "family_fingerprint": "aktiv-2"},
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: [])
+
+    result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
+
+    assert [row["topic_registry_id"] for row in result] == ["topic-active-1", "topic-active-2"]
+    assert all(row["family_status"] == "active" for row in result)
+
+
 def test_list_topic_suggestions_includes_used_scripts_but_prefers_unused(monkeypatch):
     from app.features.topics import queries as topic_queries
 
@@ -1096,6 +1112,23 @@ def test_list_topic_suggestions_includes_used_scripts_but_prefers_unused(monkeyp
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
 
     assert [row["topic_registry_id"] for row in result] == ["topic-unused", "topic-used"]
+
+
+def test_count_selectable_topic_families_uses_full_limit(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    captured = {}
+
+    def fake_list_topic_suggestions(*, target_length_tier=None, limit=None, post_type=None):
+        captured["limit"] = limit
+        return [object()] * 1300
+
+    monkeypatch.setattr(topic_queries, "list_topic_suggestions", fake_list_topic_suggestions)
+
+    count = topic_queries.count_selectable_topic_families(post_type="value", target_length_tier=8)
+
+    assert count == 1300
+    assert captured["limit"] == 10_000
 
 
 @patch("app.features.topics.queries.get_supabase")

@@ -1,0 +1,127 @@
+{
+  "batch_id": "21e300d4-4377-42b0-9463-72dd5107f62e",
+  "samples": [
+    {
+      "http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 0,
+      "progress": {
+        "brand": "AIUGC isolate 32 lifestyle 20260430T114612Z",
+        "expected_posts": 1,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "failed",
+        "stage_label": "Topic generation stopped",
+        "detail_message": "The seeding run failed before script review could start.",
+        "retry_message": null,
+        "is_retrying": false,
+        "interaction_id": "seed_6c8137f21118",
+        "status": "failed",
+        "last_updated_at": "2026-04-30T11:46:14.099935+00:00",
+        "current_post_type": "lifestyle",
+        "attempt": null,
+        "max_attempts": null
+      }
+    }
+  ],
+  "detail": {
+    "ok": true,
+    "data": {
+      "id": "21e300d4-4377-42b0-9463-72dd5107f62e",
+      "brand": "AIUGC isolate 32 lifestyle 20260430T114612Z",
+      "state": "S1_SETUP",
+      "creation_mode": "automated",
+      "post_type_counts": {
+        "value": 0,
+        "product": 0,
+        "lifestyle": 1
+      },
+      "manual_post_count": null,
+      "target_length_tier": 32,
+      "video_pipeline_route": null,
+      "created_at": "2026-04-30T11:46:12.554508Z",
+      "updated_at": "2026-04-30T11:46:12.554508Z",
+      "archived": false,
+      "meta_connection": {
+        "user": {
+          "id": "122097069872950790",
+          "name": "Camilo Echeverri"
+        },
+        "status": "connected",
+        "updated_at": "2026-04-01T16:43:56.750493",
+        "oauth_debug": {
+          "expires_in": null,
+          "token_type": "bearer"
+        },
+        "connected_at": "2026-04-01T16:43:56.750489",
+        "selected_page": {
+          "id": "1079780855211396",
+          "name": "Lippe Lift",
+          "tasks": [
+            "ADVERTISE",
+            "ANALYZE",
+            "CREATE_CONTENT",
+            "MESSAGING",
+            "MODERATE",
+            "MANAGE"
+          ],
+          "instagram_business_account": {
+            "id": "17841440635909751",
+            "username": "lippe_sarah"
+          },
+          "connected_instagram_account": {
+            "id": "17841440635909751",
+            "username": "lippe_sarah"
+          }
+        },
+        "available_pages": [
+          {
+            "id": "1079780855211396",
+            "name": "Lippe Lift",
+            "tasks": [
+              "ADVERTISE",
+              "ANALYZE",
+              "CREATE_CONTENT",
+              "MESSAGING",
+              "MODERATE",
+              "MANAGE"
+            ],
+            "instagram_business_account": {
+              "id": "17841440635909751",
+              "username": "lippe_sarah"
+            },
+            "connected_instagram_account": {
+              "id": "17841440635909751",
+              "username": "lippe_sarah"
+            }
+          }
+        ],
+        "token_expires_at": null,
+        "selected_instagram": {
+          "id": "17841440635909751",
+          "username": "lippe_sarah"
+        },
+        "token_scope_source": "instagram_login",
+        "publish_ready": true,
+        "readiness_status": "publish_ready",
+        "readiness_reason": "Facebook and Instagram are ready to publish from this workspace.",
+        "publishable_page_count": 1
+      },
+      "tiktok_connection": {
+        "status": "disconnected",
+        "scope_flags": {
+          "video_upload": false,
+          "video_publish": false
+        },
+        "creator_info": {},
+        "draft_ready": false,
+        "publish_ready": false,
+        "readiness_status": "disconnected",
+        "readiness_reason": "Connect TikTok before posting."
+      },
+      "posts_count": 0,
+      "posts_by_state": {},
+      "posts": []
+    }
+  }
+}

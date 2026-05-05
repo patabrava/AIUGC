@@ -673,6 +673,26 @@ def update_seeding_progress(batch_id: str, **progress: Any) -> Dict[str, Any]:
             )
         )
         if progress_changed:
+            terminal_stage = current.get("stage")
+            if terminal_stage in {"completed", "failed"} and previous.get("stage") != terminal_stage:
+                _append_event_locked(
+                    batch_id,
+                    "interaction.complete" if terminal_stage == "completed" else "interaction.failed",
+                    {
+                        "interaction": {
+                            "id": current["interaction_id"],
+                            "status": "completed" if terminal_stage == "completed" else "failed",
+                        },
+                        "summary": (
+                            "Research complete"
+                            if terminal_stage == "completed"
+                            else (current.get("detail_message") or "Research failed")
+                        ),
+                        "progress": dict(current),
+                    },
+                )
+                return dict(current)
+
             _append_event_locked(
                 batch_id,
                 "progress.update",
@@ -714,34 +734,6 @@ def update_seeding_progress(batch_id: str, **progress: Any) -> Dict[str, Any]:
                         "summary": (
                             f"{current['posts_created']} of {current.get('expected_posts', 0)} posts ready for review."
                         ),
-                        "progress": dict(current),
-                    },
-                )
-
-            if current.get("stage") == "completed" and previous.get("stage") != "completed":
-                _append_event_locked(
-                    batch_id,
-                    "interaction.complete",
-                    {
-                        "interaction": {
-                            "id": current["interaction_id"],
-                            "status": "completed",
-                        },
-                        "summary": "Research complete",
-                        "progress": dict(current),
-                    },
-                )
-
-            if current.get("stage") == "failed" and previous.get("stage") != "failed":
-                _append_event_locked(
-                    batch_id,
-                    "interaction.failed",
-                    {
-                        "interaction": {
-                            "id": current["interaction_id"],
-                            "status": "failed",
-                        },
-                        "summary": current.get("detail_message") or "Research failed",
                         "progress": dict(current),
                     },
                 )

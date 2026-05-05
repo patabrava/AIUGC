@@ -1,0 +1,49 @@
+{
+  "base": "https://lippelift.xyz",
+  "run_id": "20260430T121739Z",
+  "commit": "bbd6026",
+  "login_status": 404,
+  "health_status": 200,
+  "health_body": {
+    "status": "healthy",
+    "version": "1.0.0",
+    "environment": "production",
+    "checks": {
+      "database": "ok"
+    }
+  },
+  "results": [
+    {
+      "tier": 8,
+      "brand": "Vertex Live Stress 8s 20260430T121739Z",
+      "create_status": 200,
+      "batch_id": null,
+      "samples": [],
+      "posts": [],
+      "ok": false,
+      "error": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Sign In — Lippe Lift Studio</title>\n    <link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23006AAB'/%3E%3Cpath d='M14 44V20h8v16h16v8H14zm18 0V20h8v16h10v8H32z' fill='white'/%3E%3C/svg%3E\">\n    <script src=\"https://cdn.tailwindcss.com\"></script>\n    <script defer src=\"https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js\"></script>\n    <script src=\"https://unpkg.com/htmx.org@1.9.10\"></script>\n    <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n    <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n    <link href=\"https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap\" rel=\"stylesheet\">\n    <link rel=\"stylesheet\" href=\"/"
+    },
+    {
+      "tier": 16,
+      "brand": "Vertex Live Stress 16s 20260430T121739Z",
+      "create_status": 200,
+      "batch_id": null,
+      "samples": [],
+      "posts": [],
+      "ok": false,
+      "error": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Sign In — Lippe Lift Studio</title>\n    <link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23006AAB'/%3E%3Cpath d='M14 44V20h8v16h16v8H14zm18 0V20h8v16h10v8H32z' fill='white'/%3E%3C/svg%3E\">\n    <script src=\"https://cdn.tailwindcss.com\"></script>\n    <script defer src=\"https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js\"></script>\n    <script src=\"https://unpkg.com/htmx.org@1.9.10\"></script>\n    <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n    <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n    <link href=\"https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap\" rel=\"stylesheet\">\n    <link rel=\"stylesheet\" href=\"/"
+    },
+    {
+      "tier": 32,
+      "brand": "Vertex Live Stress 32s 20260430T121739Z",
+      "create_status": 200,
+      "batch_id": null,
+      "samples": [],
+      "posts": [],
+      "ok": false,
+      "error": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Sign In — Lippe Lift Studio</title>\n    <link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23006AAB'/%3E%3Cpath d='M14 44V20h8v16h16v8H14zm18 0V20h8v16h10v8H32z' fill='white'/%3E%3C/svg%3E\">\n    <script src=\"https://cdn.tailwindcss.com\"></script>\n    <script defer src=\"https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js\"></script>\n    <script src=\"https://unpkg.com/htmx.org@1.9.10\"></script>\n    <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n    <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n    <link href=\"https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap\" rel=\"stylesheet\">\n    <link rel=\"stylesheet\" href=\"/"
+    }
+  ],
+  "archives": [],
+  "all_ok": false
+}

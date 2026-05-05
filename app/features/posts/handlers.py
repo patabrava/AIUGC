@@ -82,6 +82,26 @@ def _build_edited_veo_prompt(
     )
 
 
+def _load_or_bootstrap_video_prompt(post: dict) -> dict:
+    existing_prompt = _parse_json_document(post.get("video_prompt_json"))
+    if existing_prompt:
+        return existing_prompt
+
+    seed_data = _parse_json_document(post.get("seed_data"))
+    if not seed_data:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Post missing video_prompt_json and seed_data. Build the prompt before editing it.",
+            details={"post_id": post.get("id")},
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+    return build_video_prompt_from_seed(
+        seed_data,
+        legacy_32_visuals=_should_use_legacy_32_visuals(post),
+    )
+
+
 def _load_post_seed_data(post_id: str, supabase_client):
     """Fetch post plus normalized seed data for localized S2 review updates."""
     response = (
@@ -416,6 +436,57 @@ async def build_post_prompt(post_id: str):
         )
 
 
+@router.get("/{post_id}/prompt", response_model=SuccessResponse)
+async def get_post_prompt(post_id: str):
+    """Return the current editable prompt payload for a post."""
+    correlation_id = f"get_prompt_{post_id}"
+
+    try:
+        supabase = get_supabase().client
+        response = supabase.table("posts").select("id, batch_id, video_prompt_json, seed_data").eq("id", post_id).execute()
+        if not response.data:
+            raise FlowForgeException(
+                code=ErrorCode.NOT_FOUND,
+                message=f"Post {post_id} not found",
+                details={"post_id": post_id},
+            )
+
+        post = response.data[0]
+        video_prompt = _load_or_bootstrap_video_prompt(post)
+
+        logger.info(
+            "video_prompt_loaded",
+            post_id=post_id,
+            batch_id=post.get("batch_id"),
+            correlation_id=correlation_id,
+            prompt_source="stored" if post.get("video_prompt_json") else "seed_data",
+        )
+
+        return SuccessResponse(
+            data={
+                "id": post_id,
+                "video_prompt": video_prompt,
+                "state_ready": "S5_PROMPTS_BUILT" if post.get("video_prompt_json") else "S4_SCRIPTED",
+            }
+        )
+
+    except FlowForgeException:
+        raise
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "get_prompt_failed",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load video prompt",
+        )
+
+
 @router.patch("/{post_id}/prompt", response_model=SuccessResponse)
 async def update_post_prompt(post_id: str, request: Request):
     """Update editable prompt sections and rebuild the stored prompt text."""
@@ -451,20 +522,7 @@ async def update_post_prompt(post_id: str, request: Request):
             )
 
         post = response.data[0]
-        existing_prompt = _parse_json_document(post.get("video_prompt_json"))
-        if not existing_prompt:
-            seed_data = _parse_json_document(post.get("seed_data"))
-            if not seed_data:
-                raise FlowForgeException(
-                    code=ErrorCode.VALIDATION_ERROR,
-                    message="Post missing video_prompt_json and seed_data. Build the prompt before editing it.",
-                    details={"post_id": post_id},
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                )
-            existing_prompt = build_video_prompt_from_seed(
-                seed_data,
-                legacy_32_visuals=_should_use_legacy_32_visuals(post),
-            )
+        existing_prompt = _load_or_bootstrap_video_prompt(post)
 
         updated_prompt = {
             **existing_prompt,

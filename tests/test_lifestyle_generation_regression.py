@@ -810,6 +810,118 @@ def test_discover_topics_returns_coverage_pending_for_value_shortage(monkeypatch
     ]
 
 
+@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
+def test_discover_topics_uses_registry_fallback_when_script_rows_are_missing(monkeypatch, target_length_tier):
+    batch = {
+        "id": f"batch-registry-fallback-{target_length_tier}",
+        "brand": "Registry Fallback Fixture",
+        "state": "S1_SETUP",
+        "post_type_counts": {"value": 7, "lifestyle": 0, "product": 0},
+        "target_length_tier": target_length_tier,
+    }
+    created_posts = []
+    registry_rows = [
+        {
+            "id": "topic-registry-1",
+            "title": "Begleitperson im Nahverkehr",
+            "script": "Begleitperson im Nahverkehr entlastet dich bei Wegen, Umstiegen und Tickets.",
+            "rotation": "Begleitperson im Nahverkehr entlastet dich bei Wegen, Umstiegen und Tickets.",
+            "cta": "Pruef deine Nachweise rechtzeitig.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "begleitperson im nahverkehr",
+            "use_count": 1,
+        },
+        {
+            "id": "topic-registry-2",
+            "title": "Pflegegrad Antrag",
+            "script": "Ein sauberer Pflegegrad-Antrag spart dir spaeter Rueckfragen und Zeit.",
+            "rotation": "Ein sauberer Pflegegrad-Antrag spart dir spaeter Rueckfragen und Zeit.",
+            "cta": "Plane den Antrag frueh genug.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "pflegegrad antrag",
+            "use_count": 2,
+        },
+        {
+            "id": "topic-registry-3",
+            "title": "Barrierefreier Wohnungswechsel",
+            "script": "Beim Wohnungswechsel zaehlt oft jedes Detail, von der Tuerbreite bis zum Badzugang.",
+            "rotation": "Beim Wohnungswechsel zaehlt oft jedes Detail, von der Tuerbreite bis zum Badzugang.",
+            "cta": "Miss die kritischen Stellen vorher aus.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "barrierefreier wohnungswechsel",
+            "use_count": 3,
+        },
+        {
+            "id": "topic-registry-4",
+            "title": "Hilfsmittel Rezept",
+            "script": "Ein gutes Hilfsmittel-Rezept verhindert spaetere Stopps im Alltag.",
+            "rotation": "Ein gutes Hilfsmittel-Rezept verhindert spaetere Stopps im Alltag.",
+            "cta": "Lass dir alles direkt bescheinigen.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "hilfsmittel rezept",
+            "use_count": 4,
+        },
+        {
+            "id": "topic-registry-5",
+            "title": "Pflegedienst Wechsel",
+            "script": "Ein Wechsel beim Pflegedienst klappt leichter, wenn du deine Ablaufe sauber dokumentierst.",
+            "rotation": "Ein Wechsel beim Pflegedienst klappt leichter, wenn du deine Ablaufe sauber dokumentierst.",
+            "cta": "Mach dir vorab eine kurze Liste.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "pflegedienst wechsel",
+            "use_count": 5,
+        },
+        {
+            "id": "topic-registry-6",
+            "title": "Assistenz Budget",
+            "script": "Dein Assistenz-Budget wirkt erst dann planbar, wenn du echte Wochenkosten aufschreibst.",
+            "rotation": "Dein Assistenz-Budget wirkt erst dann planbar, wenn du echte Wochenkosten aufschreibst.",
+            "cta": "Rechne die Wochenkosten durch.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "assistenz budget",
+            "use_count": 6,
+        },
+        {
+            "id": "topic-registry-7",
+            "title": "Nahverkehr Ticket",
+            "script": "Im Nahverkehr spart ein klar geregeltes Ticket dir oft den laestigen Stress vor Ort.",
+            "rotation": "Im Nahverkehr spart ein klar geregeltes Ticket dir oft den laestigen Stress vor Ort.",
+            "cta": "Pruef die Regelung vor der Fahrt.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "nahverkehr ticket",
+            "use_count": 7,
+        },
+    ]
+
+    from app.features.topics import queries as topic_queries
+
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", lambda batch_id: dict(batch))
+    monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: [])
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", lambda **kwargs: created_posts.append(kwargs) or {"id": f"post-{len(created_posts)}", **kwargs})
+    monkeypatch.setattr(topic_handlers, "update_batch_state", lambda batch_id, target_state: {"id": batch_id, "state": getattr(target_state, "value", target_state)})
+    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", lambda **kwargs: {"id": kwargs.get("canonical_topic", "topic-registry"), **kwargs})
+    monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id: None)
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption="Caption"))
+    topic_handlers.clear_seeding_progress(batch["id"])
+
+    result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert result["posts_created"] == 7
+    assert result.get("coverage_pending") is None
+    assert len(created_posts) == 7
+    assert {post["target_length_tier"] for post in created_posts} == {target_length_tier}
+    assert {post["topic_title"] for post in created_posts} == {row["title"] for row in registry_rows}
+
+
 def test_discover_topics_reuses_bank_suggestions_without_self_deduping(monkeypatch):
     batch = {
         "id": "batch-bank-reuse",

@@ -1,0 +1,2030 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "run_id": "20260430T141356Z",
+  "started_at": "20260430T141356Z",
+  "completed_at": "2026-04-30T14:20:19+00:00",
+  "login": {
+    "http": 200,
+    "url": "http://127.0.0.1:8000/batches"
+  },
+  "health": {
+    "http": 200,
+    "body": {
+      "status": "healthy",
+      "version": "1.0.0",
+      "environment": "development",
+      "checks": {
+        "database": "ok"
+      }
+    }
+  },
+  "matrix": [
+    {
+      "mode": "balanced",
+      "tier": 8,
+      "scripts_per_batch": 7
+    },
+    {
+      "mode": "balanced",
+      "tier": 16,
+      "scripts_per_batch": 7
+    },
+    {
+      "mode": "balanced",
+      "tier": 32,
+      "scripts_per_batch": 7
+    }
+  ],
+  "results": [
+    {
+      "mode": "balanced",
+      "tier": 8,
+      "brand": "Live Topic Stress balanced 8s 20260430T141356Z",
+      "expected_posts": 7,
+      "samples": [
+        {
+          "at": "2026-04-30T14:13:57+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "booting",
+          "current_post_type": null,
+          "detail": "Opening the batch and starting the research session."
+        },
+        {
+          "at": "2026-04-30T14:14:00+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:14:02+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:14:04+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:14:06+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:14:09+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:14:11+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:13+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:15+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:18+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:20+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:22+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:24+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:27+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:29+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:31+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:33+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:36+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:38+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:14:40+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Generating 2 product posts from the static product knowledge base."
+        },
+        {
+          "at": "2026-04-30T14:14:42+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Generating 2 product posts from the static product knowledge base."
+        },
+        {
+          "at": "2026-04-30T14:14:45+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Generating 2 product posts from the static product knowledge base."
+        },
+        {
+          "at": "2026-04-30T14:14:47+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:14:49+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:14:51+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:14:53+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:14:56+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:14:58+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:00+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:02+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:05+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:07+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:09+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:11+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:14+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:16+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:18+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:20+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:23+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:25+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:27+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:29+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:31+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:34+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:36+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:38+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:40+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:43+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:45+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:47+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:15:49+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:51+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:54+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:56+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:15:58+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:00+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:03+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:05+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:07+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:09+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:12+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:14+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:16+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:18+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:21+00:00",
+          "http": 200,
+          "state": "S2_SEEDED",
+          "posts_count": 7,
+          "stage": "completed",
+          "current_post_type": null,
+          "detail": "7 posts are ready. Opening script review next."
+        }
+      ],
+      "posts": [
+        {
+          "id": "d10dc976-bf03-40eb-bf0d-436bf7df34cc",
+          "post_type": "value",
+          "title": "Grundlagen rechtlicher Anspruch - Unentgeltliche Beförderung und Wertmarke im ÖPNV für Menschen mit Schwerbehinderung",
+          "tier": 8,
+          "script_words": 13,
+          "script_chars": 121,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              14,
+              18
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "b2617131-b030-44aa-a8bf-cea2b7f1889d",
+          "post_type": "value",
+          "title": "Gesetzliche normative Grundlagen Barrierefreiheit - Barrierefreie Kreuzfahrten und Bootsreisen",
+          "tier": 8,
+          "script_words": 12,
+          "script_chars": 84,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              14,
+              18
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "a3761439-b3b6-4a18-a16b-c48e9d53c9c5",
+          "post_type": "value",
+          "title": "Grundlagen Anerkennung Nachteilsausgleiche - Research Dossier: Schwerbehindertenausweis nutzen Merkzeichen, Nachteilsausgleiche und gesetzliche Neuerungen 2026 bis 2028",
+          "tier": 8,
+          "script_words": 15,
+          "script_chars": 139,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              14,
+              18
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "d8001247-3afb-4795-9723-05d3a3d97652",
+          "post_type": "product",
+          "title": "VARIO PLUS: Der einzige Treppenlift, der sich an all Deine Bedürfnisse anpasst.",
+          "tier": 8,
+          "script_words": 18,
+          "script_chars": 112,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              16,
+              20
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "c608c47a-5eb7-46b7-8457-f9e381822c63",
+          "post_type": "product",
+          "title": "LEVEL: Ein barrierefreies Leben ohne Kompromisse.",
+          "tier": 8,
+          "script_words": 20,
+          "script_chars": 146,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              16,
+              20
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "80177c53-feeb-4fa8-b41e-9ddc2ce93522",
+          "post_type": "lifestyle",
+          "title": "Niemand redet darüber aber kaputte Aufzüge kosten uns",
+          "tier": 8,
+          "script_words": 16,
+          "script_chars": 104,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              16,
+              20
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "855ef890-feb3-4ace-ac1f-71455378e240",
+          "post_type": "lifestyle",
+          "title": "Spontane Freizeit braucht oft mehr Planung als man denkt 32",
+          "tier": 8,
+          "script_words": 17,
+          "script_chars": 108,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              16,
+              20
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        }
+      ],
+      "ok": true,
+      "create_http": 201,
+      "batch_id": "5fe72220-6f2b-474f-9412-90885c2ec428",
+      "detail_http": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 7,
+      "observed_types": {
+        "value": 3,
+        "product": 2,
+        "lifestyle": 2
+      },
+      "quality": {
+        "average_score": 88.57,
+        "min_score": 60,
+        "max_score": 100,
+        "all_posts_in_bounds": false
+      },
+      "archive_http": 200
+    },
+    {
+      "mode": "balanced",
+      "tier": 16,
+      "brand": "Live Topic Stress balanced 16s 20260430T141356Z",
+      "expected_posts": 7,
+      "samples": [
+        {
+          "at": "2026-04-30T14:16:22+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "booting",
+          "current_post_type": null,
+          "detail": "Opening the batch and starting the research session."
+        },
+        {
+          "at": "2026-04-30T14:16:25+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:16:27+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Generating 2 product posts from the static product knowledge base."
+        },
+        {
+          "at": "2026-04-30T14:16:29+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Generating 2 product posts from the static product knowledge base."
+        },
+        {
+          "at": "2026-04-30T14:16:31+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:33+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:36+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:38+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:40+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:42+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:45+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:47+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:50+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:52+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:54+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:57+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:16:59+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:01+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:03+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:06+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:08+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:10+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:12+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:14+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:17+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:17:19+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:17:21+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:17:23+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:17:26+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:17:28+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:17:30+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:17:32+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:35+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:37+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:39+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:41+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:44+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:46+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:49+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:51+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:53+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:55+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:17:58+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:18:00+00:00",
+          "http": 200,
+          "state": "S2_SEEDED",
+          "posts_count": 7,
+          "stage": "completed",
+          "current_post_type": null,
+          "detail": "7 posts are ready. Opening script review next."
+        }
+      ],
+      "posts": [
+        {
+          "id": "5e967d17-baa2-4d01-98c4-0f21cf8365ca",
+          "post_type": "lifestyle",
+          "title": "Niemand redet darüber aber dein Rollstuhl muss regelmäßig",
+          "tier": 16,
+          "script_words": 26,
+          "script_chars": 176,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              20,
+              34
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "9933f4f9-e808-4755-bece-94edd26aa56f",
+          "post_type": "lifestyle",
+          "title": "Was dir bei spontanen Wegen niemand klar sagt",
+          "tier": 16,
+          "script_words": 23,
+          "script_chars": 139,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              20,
+              34
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "4682347e-e95d-4b00-928b-8611805df00c",
+          "post_type": "value",
+          "title": "Zertifizierungssysteme planerische Standards - Barrierefreie Naturreisen – Nationalparks, Wanderwege und Aussichtspunkte mit Rollstuhlzugang",
+          "tier": 16,
+          "script_words": 11,
+          "script_chars": 72,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              26,
+              36
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "76729541-d6a2-48a6-b399-26e88d6d0835",
+          "post_type": "value",
+          "title": "Dimensionen Barrierefreiheit - Barrierefreiheit im ÖPNV-Alltag",
+          "tier": 16,
+          "script_words": 13,
+          "script_chars": 91,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              26,
+              36
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "3b038ba5-5d95-4ffb-bb38-810854069659",
+          "post_type": "value",
+          "title": "Rechtliche Rahmenbedingungen finanzielle Förderung KfzHV - Fahrzeuganpassung für Menschen mit Behinderung – Handbedienung, Hebebühnen und Kostenübernahme",
+          "tier": 16,
+          "script_words": 15,
+          "script_chars": 111,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              26,
+              36
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "0a038d4b-89f9-43b5-a6e2-d97fb3cc5dbd",
+          "post_type": "product",
+          "title": "VARIO PLUS: Der einzige Lift für jede Treppe.",
+          "tier": 16,
+          "script_words": 29,
+          "script_chars": 178,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              24,
+              34
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "e06dc242-ff40-425a-9360-a6efe9dc9ae5",
+          "post_type": "product",
+          "title": "LEVEL: Flexibel, platzsparend und barrierefrei",
+          "tier": 16,
+          "script_words": 33,
+          "script_chars": 217,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              24,
+              34
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        }
+      ],
+      "ok": true,
+      "create_http": 201,
+      "batch_id": "f3f05396-48a6-41f1-b30c-5fb40b05a461",
+      "detail_http": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 7,
+      "observed_types": {
+        "lifestyle": 2,
+        "value": 3,
+        "product": 2
+      },
+      "quality": {
+        "average_score": 82.86,
+        "min_score": 60,
+        "max_score": 100,
+        "all_posts_in_bounds": false
+      },
+      "archive_http": 200
+    },
+    {
+      "mode": "balanced",
+      "tier": 32,
+      "brand": "Live Topic Stress balanced 32s 20260430T141356Z",
+      "expected_posts": 7,
+      "samples": [
+        {
+          "at": "2026-04-30T14:18:01+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "booting",
+          "current_post_type": null,
+          "detail": "Opening the batch and starting the research session."
+        },
+        {
+          "at": "2026-04-30T14:18:03+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:05+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:07+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:10+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:12+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:14+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:16+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:19+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 0,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "Using audited value family coverage from the topic bank without running live research."
+        },
+        {
+          "at": "2026-04-30T14:18:21+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:23+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:25+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:27+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:30+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:32+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 1,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "1 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:34+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:36+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:38+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:41+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:43+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:45+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 2,
+          "stage": "writing_posts",
+          "current_post_type": "value",
+          "detail": "2 of 7 posts are now ready for script review."
+        },
+        {
+          "at": "2026-04-30T14:18:48+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Generating 2 product posts from the static product knowledge base."
+        },
+        {
+          "at": "2026-04-30T14:18:50+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:18:52+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:18:54+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:18:56+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:18:59+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:01+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:03+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 3,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:05+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:07+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:10+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:12+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:14+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:16+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:18+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 4,
+          "stage": "writing_posts",
+          "current_post_type": "product",
+          "detail": "Turning product concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:21+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:23+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:25+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:27+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:30+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:32+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:34+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:36+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:38+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:41+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "collecting",
+          "current_post_type": "lifestyle",
+          "detail": "Generating 2 lifestyle candidates and comparing them against the registry and current batch."
+        },
+        {
+          "at": "2026-04-30T14:19:43+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:45+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:48+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:50+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:52+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:54+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:56+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:19:59+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:01+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 5,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:03+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:05+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:08+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:10+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:12+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:14+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:16+00:00",
+          "http": 200,
+          "state": "S1_SETUP",
+          "posts_count": 6,
+          "stage": "writing_posts",
+          "current_post_type": "lifestyle",
+          "detail": "Turning lifestyle concepts into post records and seed payloads."
+        },
+        {
+          "at": "2026-04-30T14:20:19+00:00",
+          "http": 200,
+          "state": "S2_SEEDED",
+          "posts_count": 7,
+          "stage": "completed",
+          "current_post_type": null,
+          "detail": "7 posts are ready. Opening script review next."
+        }
+      ],
+      "posts": [
+        {
+          "id": "ffe86f12-07e2-4103-a7a8-8b8d5d8617a6",
+          "post_type": "value",
+          "title": "Grundlegende Versorgungsmodelle Detail - Research Dossier: Assistenzmodelle im Vergleich (Pflegedienst vs. Assistenzteam vs. Familie)",
+          "tier": 32,
+          "script_words": 12,
+          "script_chars": 86,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              54,
+              74
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "242d2a8a-8aa6-41cd-bd1a-acde5c0e7e26",
+          "post_type": "product",
+          "title": "VARIO PLUS: Der einzige Treppenlift, der sich an all deine Bedürfnisse anpasst.",
+          "tier": 32,
+          "script_words": 54,
+          "script_chars": 321,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              32,
+              66
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "e89cd3d9-c233-47ab-a2a1-1b71731b12a1",
+          "post_type": "product",
+          "title": "LEVEL: Dein Zuhause barrierefrei gestalten, ohne Platz zu verlieren.",
+          "tier": 32,
+          "script_words": 52,
+          "script_chars": 356,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              32,
+              66
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "97a6c106-4b92-4025-bbf7-152877180bff",
+          "post_type": "value",
+          "title": "Medikamentenversorgung Reisen Reisebedarf - Medikamentenversorgung Wechselwirkungen, Spezialapotheken und Reisebedarf",
+          "tier": 32,
+          "script_words": 12,
+          "script_chars": 86,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              54,
+              74
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "a1f0f224-2cc3-4da2-ba90-363438567938",
+          "post_type": "value",
+          "title": "Assistenzteam vs",
+          "tier": 32,
+          "script_words": 16,
+          "script_chars": 98,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              54,
+              74
+            ],
+            "within_bounds": false,
+            "score": 60
+          }
+        },
+        {
+          "id": "f621cc4f-6409-4fca-83d0-9e0beb6a052a",
+          "post_type": "lifestyle",
+          "title": "Als Rollstuhlnutzer in kennst du das Der Aufzug",
+          "tier": 32,
+          "script_words": 30,
+          "script_chars": 204,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              8,
+              66
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        },
+        {
+          "id": "2872901e-593e-4ade-ba80-94ca82d7f281",
+          "post_type": "lifestyle",
+          "title": "Was passiert wenn die Rampe am Bus fehlt",
+          "tier": 32,
+          "script_words": 38,
+          "script_chars": 212,
+          "caption": true,
+          "quality": {
+            "word_bounds": [
+              8,
+              66
+            ],
+            "within_bounds": true,
+            "score": 100
+          }
+        }
+      ],
+      "ok": true,
+      "create_http": 201,
+      "batch_id": "e9fd5db4-112e-457c-8ddb-234fb2bab2e8",
+      "detail_http": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 7,
+      "observed_types": {
+        "value": 3,
+        "product": 2,
+        "lifestyle": 2
+      },
+      "quality": {
+        "average_score": 82.86,
+        "min_score": 60,
+        "max_score": 100,
+        "all_posts_in_bounds": false
+      },
+      "archive_http": 200
+    }
+  ],
+  "all_ok": true
+}

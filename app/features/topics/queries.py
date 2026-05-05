@@ -541,11 +541,13 @@ def list_topic_suggestions(
         )
         suggestions: List[Dict[str, Any]] = []
         seen_families: set[str] = set()
+        script_registry_ids: set[str] = set()
         for row in rows:
             topic_registry_id = str(row.get("topic_registry_id") or "")
             registry_row = registry_by_id.get(topic_registry_id)
             if not topic_registry_id or not registry_row:
                 continue
+            script_registry_ids.add(topic_registry_id)
             normalized_registry = _normalize_registry_row(registry_row)
             if normalized_registry.get("status") != "active":
                 continue
@@ -559,6 +561,41 @@ def list_topic_suggestions(
                 continue
             seen_families.add(family_fingerprint)
             suggestions.append(_hydrate_script_suggestion(normalized_script, normalized_registry))
+
+        if len(suggestions) < limit:
+            fallback_rows: List[Dict[str, Any]] = []
+            for registry_row in registry_rows:
+                normalized_registry = _normalize_registry_row(registry_row)
+                if normalized_registry.get("status") != "active":
+                    continue
+                registry_post_type = str(normalized_registry.get("post_type") or "").strip()
+                if post_type and registry_post_type and registry_post_type != post_type:
+                    continue
+                topic_registry_id = str(normalized_registry.get("id") or "")
+                if not topic_registry_id or topic_registry_id in script_registry_ids:
+                    continue
+                family_fingerprint = str(normalized_registry.get("family_fingerprint") or topic_registry_id)
+                if family_fingerprint in seen_families:
+                    continue
+                fallback_rows.append(normalized_registry)
+
+            fallback_rows.sort(
+                key=lambda row: (
+                    int(row.get("use_count") or 0),
+                    str(row.get("last_used_at") or row.get("created_at") or ""),
+                    str(row.get("created_at") or ""),
+                    str(row.get("family_fingerprint") or ""),
+                ),
+            )
+            for registry_row in fallback_rows:
+                family_fingerprint = str(registry_row.get("family_fingerprint") or registry_row.get("id") or "")
+                if not family_fingerprint or family_fingerprint in seen_families:
+                    continue
+                suggestions.append(_registry_row_to_topic_suggestion(registry_row))
+                seen_families.add(family_fingerprint)
+                if len(suggestions) >= limit:
+                    break
+
         suggestions.sort(
             key=lambda row: (
                 int(row.get("use_count") or 0),
@@ -578,7 +615,7 @@ def count_selectable_topic_families(
     post_type: str,
     target_length_tier: int,
 ) -> int:
-    return len(list_topic_suggestions(target_length_tier=target_length_tier, limit=500, post_type=post_type))
+    return len(list_topic_suggestions(target_length_tier=target_length_tier, limit=10_000, post_type=post_type))
 
 
 def list_topic_research_runs(

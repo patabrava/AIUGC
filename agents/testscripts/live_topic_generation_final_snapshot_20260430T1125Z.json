@@ -1,0 +1,282 @@
+{
+  "base": "https://lippelift.xyz",
+  "captured_at": "2026-04-30T11:25:10.194032+00:00",
+  "results": [
+    {
+      "mode": "mixed",
+      "tier": 8,
+      "requested_type": "all",
+      "batch_id": "aa3517b1-437f-4565-97a1-bb40e1eb450c",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 1,
+      "progress": null,
+      "posts": [
+        {
+          "id": "29d7163f-0a35-4c0a-ac70-266d40daddcc",
+          "post_type": "value",
+          "tier": 8,
+          "script_chars": 79,
+          "title": "Diskrepanz Norm Realität Vorgaben DIN - Das \"barrierefreie\" WC-Fiasko Warum oft nur der Rollstuhl reinpasst, aber sonst nichts"
+        }
+      ]
+    },
+    {
+      "mode": "mixed",
+      "tier": 16,
+      "requested_type": "all",
+      "batch_id": "d9f5ed67-03cf-4ddf-8d67-d2c5f2dd6335",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 1,
+      "progress": null,
+      "posts": [
+        {
+          "id": "930709d3-65e2-4119-81d8-ab98fc3c3c28",
+          "post_type": "value",
+          "tier": 16,
+          "script_chars": 97,
+          "title": "Mit dem richtigen Reifendruck rollst du mühelos über jedes Terrain"
+        }
+      ]
+    },
+    {
+      "mode": "mixed",
+      "tier": 32,
+      "requested_type": "all",
+      "batch_id": "8156874b-5ac6-47c7-8fb1-416444dba136",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 1,
+      "progress": null,
+      "posts": [
+        {
+          "id": "9601e36e-e774-4d2d-8a11-2969f8aa421f",
+          "post_type": "value",
+          "tier": 32,
+          "script_chars": 420,
+          "title": "Rechtliche normative Rahmenbedingungen Stand April - Drehkreuze & enge Kurven Urbane Fallen für Rollstuhlnutzende"
+        }
+      ]
+    },
+    {
+      "mode": "isolated",
+      "tier": 8,
+      "requested_type": "value",
+      "batch_id": "774c13d9-ba48-495e-ae78-198b25e8958e",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 1,
+      "progress": null,
+      "posts": [
+        {
+          "id": "9fd97795-b90f-4869-9e43-03e2b2f22d35",
+          "post_type": "value",
+          "tier": 8,
+          "script_chars": 115,
+          "title": "Einleitung Problemstellung Barrierefreiheit Stand April - Methoden, Alltagshacks und Hilfsmittel zum Aufheben von Gegenständen aus dem Rollstuhl"
+        }
+      ]
+    },
+    {
+      "mode": "isolated",
+      "tier": 8,
+      "requested_type": "lifestyle",
+      "batch_id": "5a256781-421e-4c64-909e-721b4835c445",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 0,
+      "progress": {
+        "brand": "AIUGC isolate 20260430T112329Z lifestyle 8s",
+        "expected_posts": 1,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "booting",
+        "stage_label": "Preparing topic generation",
+        "detail_message": "Opening the batch and starting the research session.",
+        "retry_message": null,
+        "is_retrying": false,
+        "interaction_id": "seed_7e92734f82ec",
+        "status": "in_progress",
+        "last_updated_at": "2026-04-30T11:25:03.856591+00:00"
+      },
+      "posts": [],
+      "observed_terminal_error_after_repoll": "PROMPT_2 generation failed after text normalization"
+    },
+    {
+      "mode": "isolated",
+      "tier": 8,
+      "requested_type": "product",
+      "batch_id": "230bd68f-2787-423b-9e9a-fd6df85e4d86",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 0,
+      "progress": {
+        "brand": "AIUGC isolate 20260430T112329Z product 8s",
+        "expected_posts": 1,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "booting",
+        "stage_label": "Preparing topic generation",
+        "detail_message": "Opening the batch and starting the research session.",
+        "retry_message": null,
+        "is_retrying": false,
+        "interaction_id": "seed_d2b295e41539",
+        "status": "in_progress",
+        "last_updated_at": "2026-04-30T11:25:05.039573+00:00"
+      },
+      "posts": [],
+      "observed_terminal_error_after_repoll": "No Google Cloud Application Default Credentials found. Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS."
+    },
+    {
+      "mode": "isolated",
+      "tier": 16,
+      "requested_type": "value",
+      "batch_id": "fd78689e-3be3-4256-8970-f521012bcbf0",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 1,
+      "progress": null,
+      "posts": [
+        {
+          "id": "fa0c5403-6c5b-486a-947c-2ded3064d526",
+          "post_type": "value",
+          "tier": 16,
+          "script_chars": 107,
+          "title": "Warum 'barrierefrei' nicht immer barrierefrei ist: Die frustrierende Wahrheit über versteckte Hürden"
+        }
+      ]
+    },
+    {
+      "mode": "isolated",
+      "tier": 16,
+      "requested_type": "lifestyle",
+      "batch_id": "029053bb-dc66-42f7-b4d2-a5fcc0ede22f",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 0,
+      "progress": {
+        "brand": "AIUGC isolate 20260430T112329Z lifestyle 16s",
+        "expected_posts": 1,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "booting",
+        "stage_label": "Preparing topic generation",
+        "detail_message": "Opening the batch and starting the research session.",
+        "retry_message": null,
+        "is_retrying": false,
+        "interaction_id": "seed_05d35b3c397d",
+        "status": "in_progress",
+        "last_updated_at": "2026-04-30T11:25:06.501491+00:00"
+      },
+      "posts": [],
+      "observed_terminal_error_after_repoll": "PROMPT_2 generation failed after text normalization"
+    },
+    {
+      "mode": "isolated",
+      "tier": 16,
+      "requested_type": "product",
+      "batch_id": "807a19c7-1ada-4fb8-8600-8208ec886cd3",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 0,
+      "progress": {
+        "brand": "AIUGC isolate 20260430T112329Z product 16s",
+        "expected_posts": 1,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "booting",
+        "stage_label": "Preparing topic generation",
+        "detail_message": "Opening the batch and starting the research session.",
+        "retry_message": null,
+        "is_retrying": false,
+        "interaction_id": "seed_bffc8f0e3ae1",
+        "status": "in_progress",
+        "last_updated_at": "2026-04-30T11:25:07.450863+00:00"
+      },
+      "posts": [],
+      "observed_terminal_error_after_repoll": "No Google Cloud Application Default Credentials found. Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS."
+    },
+    {
+      "mode": "isolated",
+      "tier": 32,
+      "requested_type": "value",
+      "batch_id": "7a99c810-382c-4a8a-9c08-1071b068bfe6",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S2_SEEDED",
+      "posts_count": 1,
+      "progress": null,
+      "posts": [
+        {
+          "id": "dccf2988-0fec-4773-b5d2-29c0a8b63dea",
+          "post_type": "value",
+          "tier": 32,
+          "script_chars": 405,
+          "title": "Physische Barrieren normative Vorgaben DIN 18040-1 - Inkonsistenzen der physischen und digitalen Barrierefreiheit im öffentlichen Raum sowie Lösungsstrategien im Alltag"
+        }
+      ]
+    },
+    {
+      "mode": "isolated",
+      "tier": 32,
+      "requested_type": "lifestyle",
+      "batch_id": "91b3ef43-d748-4660-b842-660f741c2c71",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 0,
+      "progress": {
+        "brand": "AIUGC isolate 20260430T112329Z lifestyle 32s",
+        "expected_posts": 1,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "booting",
+        "stage_label": "Preparing topic generation",
+        "detail_message": "Opening the batch and starting the research session.",
+        "retry_message": null,
+        "is_retrying": false,
+        "interaction_id": "seed_fc6b9c29d703",
+        "status": "in_progress",
+        "last_updated_at": "2026-04-30T11:25:08.823314+00:00"
+      },
+      "posts": [],
+      "observed_terminal_error_after_repoll": "PROMPT_2 generation failed after text normalization"
+    },
+    {
+      "mode": "isolated",
+      "tier": 32,
+      "requested_type": "product",
+      "batch_id": "18084b90-5b2b-468b-bc7e-d312fc7b31c7",
+      "status_http": 200,
+      "detail_http": 200,
+      "state": "S1_SETUP",
+      "posts_count": 0,
+      "progress": {
+        "brand": "AIUGC isolate 20260430T112329Z product 32s",
+        "expected_posts": 1,
+        "posts_created": 0,
+        "state": "S1_SETUP",
+        "stage": "booting",
+        "stage_label": "Preparing topic generation",
+        "detail_message": "Opening the batch and starting the research session.",
+        "retry_message": null,
+        "is_retrying": false,
+        "interaction_id": "seed_e8367d63852e",
+        "status": "in_progress",
+        "last_updated_at": "2026-04-30T11:25:09.647487+00:00"
+      },
+      "posts": [],
+      "observed_terminal_error_after_repoll": "No Google Cloud Application Default Credentials found. Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS."
+    }
+  ]
+}

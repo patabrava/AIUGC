@@ -142,6 +142,34 @@ def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch)
     assert stored_prompt["veo_prompt"] == "Character:\nEdited character\n\nDialogue:\n\"Edited dialogue.\""
 
 
+def test_get_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "seed_data": {
+                    "script": "Original script sentence.",
+                    "script_review_status": "approved",
+                },
+                "video_prompt_json": None,
+            }
+        ]
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.get("/posts/post-1/prompt")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["data"]["id"] == "post-1"
+    assert payload["data"]["video_prompt"]["audio"]["dialogue"]
+    assert payload["data"]["video_prompt"]["veo_prompt"]
+
+
 def test_update_script_accepts_long_edits_within_generated_script_bounds(monkeypatch):
     long_script = " ".join(["Das ist eine sehr lange bearbeitbare Skriptzeile."] * 16)
     assert len(long_script) > 500
