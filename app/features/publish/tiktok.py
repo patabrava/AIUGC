@@ -805,6 +805,12 @@ def _build_tiktok_post_info(
     }
 
 
+def _resolve_tiktok_video_url(post: Dict[str, Any]) -> str:
+    """Use the burned-caption asset for TikTok whenever captioning has completed."""
+    metadata = _load_json_object(post.get("video_metadata"))
+    return str(metadata.get("caption_video_url") or post.get("video_url") or "")
+
+
 async def _initialize_direct_post(
     access_token: str,
     *,
@@ -933,7 +939,7 @@ async def _upload_video_chunks(upload_url: str, video_bytes: bytes, content_type
 def _load_post_for_tiktok(post_id: str, *, mode: str) -> Dict[str, Any]:
     post_id = _normalize_tiktok_post_id(post_id)
     response = get_supabase().client.table("posts").select(
-        "id,batch_id,topic_title,seed_data,video_url,video_metadata,publish_caption,publish_results,platform_ids,social_networks,publish_status"
+        "id,batch_id,post_type,topic_title,seed_data,video_url,video_metadata,publish_caption,publish_results,platform_ids,social_networks,publish_status"
     ).eq("id", post_id).execute()
     rows = response.data or []
     if not rows:
@@ -944,6 +950,8 @@ def _load_post_for_tiktok(post_id: str, *, mode: str) -> Dict[str, Any]:
         raise ValidationError("Removed posts cannot be uploaded to TikTok.", details={"post_id": post_id})
     if not post.get("video_url"):
         raise ValidationError("Post has no generated video for TikTok upload.", details={"post_id": post_id})
+    post["raw_video_url"] = str(post.get("video_url") or "")
+    post["video_url"] = _resolve_tiktok_video_url(post)
 
     batch = get_supabase().client.table("batches").select("id,state").eq("id", post["batch_id"]).execute().data or []
     if not batch:

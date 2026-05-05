@@ -389,6 +389,44 @@ def test_tiktok_draft_proxy_route_serves_video_from_public_domain(monkeypatch):
     assert response.media_type == "video/mp4"
 
 
+def test_tiktok_draft_proxy_prefers_captioned_video(monkeypatch):
+    post_id = "123e4567-e89b-12d3-a456-426614174000"
+    storage = {
+        "posts": [
+            {
+                "id": post_id,
+                "batch_id": "batch-1",
+                "topic_title": "Topic",
+                "seed_data": {"script_review_status": "approved"},
+                "video_url": "https://cdn.example.com/raw.mp4",
+                "video_metadata": {"caption_video_url": "https://cdn.example.com/captioned.mp4"},
+                "publish_caption": "Local caption",
+                "publish_results": {},
+                "platform_ids": {},
+            }
+        ],
+        "batches": [{"id": "batch-1", "state": "S7_PUBLISH_PLAN"}],
+        "media_assets": [],
+        "publish_jobs": [],
+        "connected_accounts": [],
+    }
+    requested_urls = []
+
+    class CaptionedProxyClient(_ProxyClient):
+        async def get(self, url):
+            requested_urls.append(url)
+            return self.response
+
+    monkeypatch.setattr(tiktok, "get_settings", _production_settings)
+    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(tiktok.httpx, "AsyncClient", lambda *args, **kwargs: CaptionedProxyClient(_ProxyResponse()))
+
+    response = asyncio.run(tiktok.serve_tiktok_draft_video(f"post-{post_id}"))
+
+    assert response.media_type == "video/mp4"
+    assert requested_urls == ["https://cdn.example.com/captioned.mp4"]
+
+
 def test_upload_tiktok_draft_allows_s8_complete_after_meta_publish(monkeypatch):
     storage = {
         "posts": [
