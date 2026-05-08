@@ -296,11 +296,6 @@ def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
     fake_supabase = SimpleNamespace(client=_MutableSupabaseClient([post]))
     captured = {}
 
-    monkeypatch.setattr(
-        "app.features.videos.handlers._resolve_global_veo_anchor_image",
-        lambda correlation_id: (_ for _ in ()).throw(AssertionError("anchor image path must stay disabled")),
-    )
-
     def _fake_submit(**kwargs):
         captured.update(kwargs)
         return {
@@ -420,11 +415,6 @@ def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypat
     fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
     captured_calls = []
 
-    monkeypatch.setattr(
-        "app.features.videos.handlers._resolve_global_veo_anchor_image",
-        lambda correlation_id: (_ for _ in ()).throw(AssertionError("anchor image path must stay disabled")),
-    )
-
     def _fake_submit(**kwargs):
         captured_calls.append(kwargs)
         return {
@@ -524,11 +514,6 @@ def test_generate_all_videos_backfills_missing_prompts_from_seed_data(monkeypatc
     ]
     fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
     captured_calls = []
-
-    monkeypatch.setattr(
-        "app.features.videos.handlers._resolve_global_veo_anchor_image",
-        lambda correlation_id: (_ for _ in ()).throw(AssertionError("anchor image path must stay disabled")),
-    )
 
     def _fake_submit(**kwargs):
         captured_calls.append(kwargs)

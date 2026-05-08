@@ -21,7 +21,6 @@ from pydantic import ValidationError as PydanticValidationError
 import httpx
 
 from app.adapters.supabase_client import get_supabase
-from app.adapters.storage_client import get_storage_client
 from app.adapters.veo_client import get_veo_client
 from app.adapters.vertex_ai_client import get_vertex_ai_client
 from app.core.config import get_settings
@@ -76,13 +75,6 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 _WORDS_PER_SECOND = 2.5
-
-
-_GLOBAL_VEO_ANCHOR_RELATIVE_PATH = "static/images/sarah.jpg"
-_GLOBAL_VEO_ANCHOR_PATH = Path(__file__).resolve().parents[3] / _GLOBAL_VEO_ANCHOR_RELATIVE_PATH
-_GLOBAL_VEO_ANCHOR_OBJECT_KEY = "Lippe Lift Studio/images/anchors/sarah.jpg"
-# Keep the live preview path text-only until the API explicitly supports image.inlineData.
-_GLOBAL_VEO_ANCHOR_ENABLED = False
 
 
 def _configured_veo_reference_image_paths(settings: Any) -> list[str]:
@@ -194,105 +186,6 @@ def _load_global_veo_reference_assets(
             "reference_image_count": len(reference_images),
             "reference_image_assets": metadata_items,
         },
-    }
-
-
-def _load_global_veo_anchor_asset(
-    *,
-    correlation_id: str,
-    strict: bool,
-) -> Optional[Dict[str, Any]]:
-    """Load the global Sarah anchor image, optionally raising on failure."""
-    if not _GLOBAL_VEO_ANCHOR_PATH.exists():
-        if strict:
-            raise ValidationError(
-                "Global Veo anchor image is missing.",
-                {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
-            )
-        logger.warning(
-            "veo_anchor_image_missing_text_only_fallback",
-            correlation_id=correlation_id,
-            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
-        )
-        return None
-
-    try:
-        image_bytes = _GLOBAL_VEO_ANCHOR_PATH.read_bytes()
-    except OSError as exc:
-        if strict:
-            raise ValidationError(
-                "Global Veo anchor image could not be read.",
-                {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH, "error": str(exc)},
-            ) from exc
-        logger.warning(
-            "veo_anchor_image_unreadable_text_only_fallback",
-            correlation_id=correlation_id,
-            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
-            error=str(exc),
-        )
-        return None
-
-    if not image_bytes:
-        if strict:
-            raise ValidationError(
-                "Global Veo anchor image is empty.",
-                {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
-            )
-        logger.warning(
-            "veo_anchor_image_empty_text_only_fallback",
-            correlation_id=correlation_id,
-            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
-        )
-        return None
-
-    mime_type = mimetypes.guess_type(_GLOBAL_VEO_ANCHOR_PATH.name)[0] or "image/jpeg"
-    return {
-        "image_bytes": image_bytes,
-        "mime_type": mime_type,
-        "first_frame_image": {
-            "mime_type": mime_type,
-            "data_base64": base64.b64encode(image_bytes).decode("ascii"),
-        },
-    }
-
-
-def _resolve_global_veo_anchor_image(correlation_id: str) -> Dict[str, Any]:
-    """Load the global Sarah portrait and mirror it to a fixed Cloudflare R2 key."""
-    anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=True)
-    if anchor_asset is None:
-        raise ValidationError(
-            "Global Veo anchor image is missing.",
-            {"anchor_image_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH},
-        )
-    image_bytes = anchor_asset["image_bytes"]
-    mime_type = anchor_asset["mime_type"]
-    metadata = {
-        "anchor_image_enabled": True,
-        "anchor_image_source_path": _GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
-        "anchor_image_mime_type": mime_type,
-        "anchor_image_size_bytes": len(image_bytes),
-    }
-
-    try:
-        mirrored = get_storage_client().ensure_image(
-            image_bytes=image_bytes,
-            object_key=_GLOBAL_VEO_ANCHOR_OBJECT_KEY,
-            correlation_id=correlation_id,
-            content_type=mime_type,
-        )
-        metadata["anchor_image_storage_key"] = mirrored["storage_key"]
-        metadata["anchor_image_url"] = mirrored["url"]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "veo_anchor_image_mirror_failed",
-            correlation_id=correlation_id,
-            anchor_image_path=_GLOBAL_VEO_ANCHOR_RELATIVE_PATH,
-            error=str(exc),
-        )
-
-    return {
-        "first_frame_image": anchor_asset["first_frame_image"],
-        "metadata": metadata,
     }
 
 
@@ -1967,33 +1860,17 @@ def _submit_video_request(
     if provider == "vertex_ai":
         vertex_client = get_vertex_ai_client()
         settings = get_settings()
-        use_reference_image = bool(getattr(settings, "veo_use_reference_image", True))
         vertex_duration = provider_duration_seconds or seconds
         output_gcs_uri = settings.vertex_ai_output_gcs_uri or None
-        anchor_asset = None
-        if use_reference_image:
-            anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=False)
         try:
-            if anchor_asset is not None:
-                result = vertex_client.submit_image_video(
-                    prompt=prompt_text,
-                    image_bytes=anchor_asset["image_bytes"],
-                    mime_type=anchor_asset["mime_type"],
-                    correlation_id=correlation_id,
-                    aspect_ratio=aspect_ratio,
-                    duration_seconds=vertex_duration,
-                    output_gcs_uri=output_gcs_uri,
-                    model=model,
-                )
-            else:
-                result = vertex_client.submit_text_video(
-                    prompt=prompt_text,
-                    correlation_id=correlation_id,
-                    aspect_ratio=aspect_ratio,
-                    duration_seconds=vertex_duration,
-                    output_gcs_uri=output_gcs_uri,
-                    model=model,
-                )
+            result = vertex_client.submit_text_video(
+                prompt=prompt_text,
+                correlation_id=correlation_id,
+                aspect_ratio=aspect_ratio,
+                duration_seconds=vertex_duration,
+                output_gcs_uri=output_gcs_uri,
+                model=model,
+            )
         except ValidationError as exc:
             raise FlowForgeException(
                 code=ErrorCode.THIRD_PARTY_FAIL,

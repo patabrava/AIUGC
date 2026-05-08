@@ -141,11 +141,11 @@ def test_submit_video_request_threads_selected_veo_model(monkeypatch):
     assert result["provider_model"] == "veo-3.1-fast-generate-001"
 
 
-def test_submit_video_request_threads_selected_vertex_model(monkeypatch, tmp_path):
+def test_submit_video_request_threads_selected_vertex_model(monkeypatch):
     captured = {}
 
     class FakeVertexClient:
-        def submit_image_video(self, **kwargs):
+        def submit_text_video(self, **kwargs):
             captured.update(kwargs)
             return {
                 "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-lite-generate-001/operations/op-123",
@@ -155,9 +155,6 @@ def test_submit_video_request_threads_selected_vertex_model(monkeypatch, tmp_pat
 
     monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
     monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": ""})())
-    image_path = tmp_path / "sarah.jpg"
-    image_path.write_bytes(b"fake-jpeg")
-    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", image_path)
 
     result = video_handlers._submit_video_request(
         provider="vertex_ai",
@@ -174,7 +171,7 @@ def test_submit_video_request_threads_selected_vertex_model(monkeypatch, tmp_pat
     )
 
     assert captured["model"] == "veo-3.1-lite-generate-001"
-    assert captured["image_bytes"] == b"fake-jpeg"
+    assert captured["prompt"] == "Hallo Welt"
     assert result["provider_model"] == "veo-3.1-lite-generate-001"
     assert result["requested_model"] == "veo-3.1-lite-generate-001"
 
@@ -967,194 +964,3 @@ def test_veo_extension_request_uses_video_without_reference_images(monkeypatch):
     assert "referenceImages" not in instance
     assert "image" not in instance
     assert "lastFrame" not in instance
-
-
-def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
-    class FakeStorageClient:
-        def ensure_image(self, **kwargs):
-            return {
-                "storage_key": kwargs["object_key"],
-                "url": f"https://example.r2.dev/{kwargs['object_key']}",
-            }
-
-    monkeypatch.setattr(video_handlers, "get_storage_client", lambda: FakeStorageClient())
-
-    anchor_bundle = video_handlers._resolve_global_veo_anchor_image("corr-anchor")
-    expected_bytes = Path(video_handlers._GLOBAL_VEO_ANCHOR_PATH).read_bytes()
-
-    assert Path(video_handlers._GLOBAL_VEO_ANCHOR_PATH).name == "sarah.jpg"
-    assert base64.b64decode(anchor_bundle["first_frame_image"]["data_base64"]) == expected_bytes
-    assert anchor_bundle["metadata"]["anchor_image_enabled"] is True
-    assert anchor_bundle["metadata"]["anchor_image_source_path"] == "static/images/sarah.jpg"
-    assert anchor_bundle["metadata"]["anchor_image_storage_key"] == "Lippe Lift Studio/images/anchors/sarah.jpg"
-
-
-def test_submit_video_request_passes_anchor_image_to_veo_client(monkeypatch):
-    captured = {}
-    first_frame_image = {"mime_type": "image/jpeg", "data_base64": "YWJj"}
-
-    class FakeVeoClient:
-        def submit_video_generation(self, **kwargs):
-            captured.update(kwargs)
-            return {"operation_id": "operations/test", "status": "submitted"}
-
-    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
-
-    result = video_handlers._submit_video_request(
-        provider="veo_3_1",
-        prompt_text="Prompt",
-        negative_prompt=None,
-        aspect_ratio="9:16",
-        provider_aspect_ratio="9:16",
-        requested_aspect_ratio="9:16",
-        resolution="720p",
-        seconds=8,
-        size=None,
-        correlation_id="corr",
-        first_frame_image=first_frame_image,
-        provider_duration_seconds=8,
-    )
-
-    assert captured["first_frame_image"] == first_frame_image
-    assert result["operation_id"] == "operations/test"
-
-
-def test_submit_video_request_auto_attaches_anchor_image_to_veo_client(monkeypatch, tmp_path):
-    captured = {}
-    image_path = tmp_path / "sarah.jpg"
-    image_path.write_bytes(b"veo-anchor")
-
-    class FakeVeoClient:
-        def submit_video_generation(self, **kwargs):
-            captured.update(kwargs)
-            return {"operation_id": "operations/test", "status": "submitted"}
-
-    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
-    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", image_path)
-    monkeypatch.setattr(
-        video_handlers,
-        "get_settings",
-        lambda: type("S", (), {"veo_use_reference_image": True})(),
-    )
-
-    result = video_handlers._submit_video_request(
-        provider="veo_3_1",
-        prompt_text="Prompt",
-        negative_prompt=None,
-        aspect_ratio="9:16",
-        provider_aspect_ratio="9:16",
-        requested_aspect_ratio="9:16",
-        resolution="720p",
-        seconds=8,
-        size=None,
-        correlation_id="corr",
-        provider_duration_seconds=8,
-    )
-
-    assert base64.b64decode(captured["first_frame_image"]["data_base64"]) == b"veo-anchor"
-    assert captured["first_frame_image"]["mime_type"] == "image/jpeg"
-    assert result["operation_id"] == "operations/test"
-
-
-def test_submit_video_request_skips_anchor_image_when_toggle_disabled(monkeypatch, tmp_path):
-    captured = {}
-    image_path = tmp_path / "sarah.jpg"
-    image_path.write_bytes(b"veo-anchor")
-
-    class FakeVeoClient:
-        def submit_video_generation(self, **kwargs):
-            captured.update(kwargs)
-            return {"operation_id": "operations/test", "status": "submitted"}
-
-    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
-    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", image_path)
-    monkeypatch.setattr(
-        video_handlers,
-        "get_settings",
-        lambda: type("S", (), {"veo_use_reference_image": False})(),
-    )
-
-    result = video_handlers._submit_video_request(
-        provider="veo_3_1",
-        prompt_text="Prompt",
-        negative_prompt=None,
-        aspect_ratio="9:16",
-        provider_aspect_ratio="9:16",
-        requested_aspect_ratio="9:16",
-        resolution="720p",
-        seconds=8,
-        size=None,
-        correlation_id="corr",
-        provider_duration_seconds=8,
-    )
-
-    assert captured["first_frame_image"] is None
-    assert result["operation_id"] == "operations/test"
-
-
-def test_submit_video_request_falls_back_when_anchor_unreadable(monkeypatch):
-    captured = {"veo_first_frame_image": "unset", "vertex_mode": None}
-
-    class UnreadableAnchorPath:
-        name = "sarah.jpg"
-
-        @staticmethod
-        def exists() -> bool:
-            return True
-
-        @staticmethod
-        def read_bytes() -> bytes:
-            raise OSError("permission denied")
-
-    class FakeVeoClient:
-        def submit_video_generation(self, **kwargs):
-            captured["veo_first_frame_image"] = kwargs.get("first_frame_image")
-            return {"operation_id": "operations/veo", "status": "submitted"}
-
-    class FakeVertexClient:
-        def submit_image_video(self, **kwargs):
-            captured["vertex_mode"] = "image"
-            return {"operation_id": "operations/image", "status": "submitted", "provider_model": kwargs.get("model")}
-
-        def submit_text_video(self, **kwargs):
-            captured["vertex_mode"] = "text"
-            return {"operation_id": "operations/text", "status": "submitted", "provider_model": kwargs.get("model")}
-
-    monkeypatch.setattr(video_handlers, "_GLOBAL_VEO_ANCHOR_PATH", UnreadableAnchorPath())
-    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
-    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
-    monkeypatch.setattr(
-        video_handlers,
-        "get_settings",
-        lambda: type("S", (), {"veo_use_reference_image": True, "vertex_ai_output_gcs_uri": ""})(),
-    )
-
-    _ = video_handlers._submit_video_request(
-        provider="veo_3_1",
-        prompt_text="Prompt",
-        negative_prompt=None,
-        aspect_ratio="9:16",
-        provider_aspect_ratio="9:16",
-        requested_aspect_ratio="9:16",
-        resolution="720p",
-        seconds=8,
-        size=None,
-        correlation_id="corr-veo-fallback",
-        provider_duration_seconds=8,
-    )
-    _ = video_handlers._submit_video_request(
-        provider="vertex_ai",
-        model="veo-3.1-lite-generate-001",
-        prompt_text="Prompt",
-        negative_prompt=None,
-        aspect_ratio="9:16",
-        provider_aspect_ratio="9:16",
-        requested_aspect_ratio="9:16",
-        resolution="720p",
-        seconds=8,
-        size="720x1280",
-        correlation_id="corr-vertex-fallback",
-    )
-
-    assert captured["veo_first_frame_image"] is None
-    assert captured["vertex_mode"] == "text"
