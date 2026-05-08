@@ -126,8 +126,18 @@ class VeoClient:
                 },
             }
 
-            if negative_prompt:
-                payload["parameters"]["negativePrompt"] = negative_prompt
+            effective_negative_prompt = negative_prompt
+            if reference_images and effective_negative_prompt:
+                logger.warning(
+                    "veo_reference_images_negative_prompt_omitted",
+                    correlation_id=correlation_id,
+                    negative_prompt_length=len(effective_negative_prompt),
+                    message="Gemini Developer API rejects negativePrompt when referenceImages are present.",
+                )
+                effective_negative_prompt = None
+
+            if effective_negative_prompt:
+                payload["parameters"]["negativePrompt"] = effective_negative_prompt
 
             if seed is not None:
                 payload["parameters"]["seed"] = seed
@@ -140,12 +150,13 @@ class VeoClient:
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
                 duration_seconds=duration_seconds,
-                negative_prompt_length=len(negative_prompt) if negative_prompt else 0,
+                negative_prompt_length=len(effective_negative_prompt) if effective_negative_prompt else 0,
+                negative_prompt_omitted_for_reference_images=bool(reference_images and negative_prompt and not effective_negative_prompt),
                 has_first_frame_image=bool(first_frame_image),
                 request_payload=logged_payload,
                 prompt_length=len(prompt),
                 prompt_preview=prompt[:400],
-                negative_prompt_preview=negative_prompt[:200] if negative_prompt else None,
+                negative_prompt_preview=effective_negative_prompt[:200] if effective_negative_prompt else None,
             )
 
             response = self._http_client.post(

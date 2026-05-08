@@ -767,7 +767,7 @@ def test_veo_client_payload_includes_asset_reference_images(monkeypatch):
 
     result = client.submit_video_generation(
         prompt="Prompt",
-        negative_prompt=None,
+        negative_prompt="subtitles, watermark",
         correlation_id="corr",
         aspect_ratio="9:16",
         resolution="720p",
@@ -780,6 +780,7 @@ def test_veo_client_payload_includes_asset_reference_images(monkeypatch):
     )
 
     assert result["operation_id"] == "operations/reference-test"
+    assert "negativePrompt" not in captured["json"]["parameters"]
     assert captured["json"]["instances"][0]["referenceImages"] == [
         {
             "image": {
