@@ -14,7 +14,7 @@ from app.core.video_profiles import (
     get_submission_video_status,
 )
 from app.features.videos import handlers as video_handlers
-from app.features.videos.schemas import BatchVideoGenerationRequest
+from app.features.videos.schemas import BatchVideoGenerationRequest, VideoGenerationRequest
 
 
 def test_resolve_video_submission_plan_preserves_legacy_batch_inputs():
@@ -477,10 +477,28 @@ def test_batch_video_generation_request_accepts_duration_tier_seconds():
     assert req.target_length_tier == 16
 
 
+def test_video_generation_requests_accept_veo_provider_for_reference_image_path():
+    single_request = VideoGenerationRequest(
+        provider="veo_3_1",
+        aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+    )
+    batch_request = BatchVideoGenerationRequest(
+        provider="veo_3_1",
+        aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+    )
+
+    assert single_request.provider == "veo_3_1"
+    assert batch_request.provider == "veo_3_1"
+
+
 def test_batch_video_generation_request_rejects_gemini_provider():
     with pytest.raises(Exception):
         BatchVideoGenerationRequest(
-            provider="veo_3_1",
+            provider="gemini",
             seconds=16,
             target_length_tier=16,
         )

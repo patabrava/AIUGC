@@ -14,9 +14,9 @@ class VideoGenerationRequest(BaseModel):
     Request to generate video for a post.
     Per Canon § 3.2: S5_PROMPTS_BUILT → S6_QA transition
     """
-    provider: Literal["vertex_ai"] = Field(
+    provider: Literal["vertex_ai", "veo_3_1"] = Field(
         ..., 
-        description="Video generation provider (vertex_ai)"
+        description="Video generation provider"
     )
     model: Optional[Literal[
         "veo-3.1-generate-001",
@@ -50,7 +50,7 @@ class VideoGenerationRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "provider": "vertex_ai",
+                "provider": "veo_3_1",
                 "aspect_ratio": "9:16",
                 "resolution": "1080p",
                 "seconds": 8,
@@ -162,7 +162,7 @@ class VertexVideoGenerationResponse(BaseModel):
 
 class BatchVideoGenerationRequest(BaseModel):
     """Request to generate videos for all posts in a batch."""
-    provider: Literal["vertex_ai"] = Field(
+    provider: Literal["vertex_ai", "veo_3_1"] = Field(
         ...,
         description="Video generation provider for all posts"
     )
