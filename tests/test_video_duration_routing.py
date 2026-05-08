@@ -704,6 +704,17 @@ def test_load_global_veo_reference_assets_rejects_more_than_three(monkeypatch, t
     assert "at most three" in exc.value.message
 
 
+def test_default_reference_image_assets_exist_and_load(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_use_reference_images", True, raising=False)
+
+    bundle = video_handlers._load_global_veo_reference_assets(correlation_id="corr-default-ref", strict=True)
+
+    assert bundle is not None
+    assert bundle["metadata"]["reference_image_count"] == 3
+    assert [item["mime_type"] for item in bundle["reference_images"]] == ["image/png", "image/png", "image/png"]
+
+
 def test_veo_client_payload_includes_asset_reference_images(monkeypatch):
     from app.adapters import veo_client as veo_adapter
     from app.adapters.veo_client import VeoClient
