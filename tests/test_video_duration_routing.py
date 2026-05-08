@@ -707,6 +707,139 @@ def test_load_global_veo_reference_assets_rejects_more_than_three(monkeypatch, t
     assert "at most three" in exc.value.message
 
 
+def test_veo_client_payload_includes_asset_reference_images(monkeypatch):
+    from app.adapters import veo_client as veo_adapter
+    from app.adapters.veo_client import VeoClient
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"name":"operations/reference-test"}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"name": "operations/reference-test"}
+
+    class FakeHttpClient:
+        def post(self, url, headers, json):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(veo_adapter, "get_settings", lambda: type("S", (), {"gemini_api_key": "test-key"})())
+    VeoClient._instance = None
+    client = VeoClient()
+    client._http_client = FakeHttpClient()
+
+    result = client.submit_video_generation(
+        prompt="Prompt",
+        negative_prompt=None,
+        correlation_id="corr",
+        aspect_ratio="9:16",
+        resolution="720p",
+        duration_seconds=8,
+        reference_images=[
+            {"mime_type": "image/png", "data_base64": "Zmlyc3Q="},
+            {"mime_type": "image/png", "data_base64": "c2Vjb25k"},
+        ],
+        model="veo-3.1-generate-001",
+    )
+
+    assert result["operation_id"] == "operations/reference-test"
+    assert captured["json"]["instances"][0]["referenceImages"] == [
+        {
+            "image": {
+                "bytesBase64Encoded": "Zmlyc3Q=",
+                "mimeType": "image/png",
+            },
+            "referenceType": "asset",
+        },
+        {
+            "image": {
+                "bytesBase64Encoded": "c2Vjb25k",
+                "mimeType": "image/png",
+            },
+            "referenceType": "asset",
+        },
+    ]
+
+
+def test_veo_client_rejects_first_frame_and_reference_images_together(monkeypatch):
+    from app.adapters import veo_client as veo_adapter
+    from app.adapters.veo_client import VeoClient
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"name":"operations/illegal-test"}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"name": "operations/illegal-test"}
+
+    class FakeHttpClient:
+        def post(self, url, headers, json):
+            return FakeResponse()
+
+    monkeypatch.setattr(veo_adapter, "get_settings", lambda: type("S", (), {"gemini_api_key": "test-key"})())
+    VeoClient._instance = None
+    client = VeoClient()
+    client._http_client = FakeHttpClient()
+
+    with pytest.raises(ValueError) as exc:
+        client.submit_video_generation(
+            prompt="Prompt",
+            negative_prompt=None,
+            correlation_id="corr",
+            aspect_ratio="9:16",
+            resolution="720p",
+            duration_seconds=8,
+            first_frame_image={"mime_type": "image/png", "data_base64": "aW1hZ2U="},
+            reference_images=[{"mime_type": "image/png", "data_base64": "cmVm"}],
+            model="veo-3.1-generate-001",
+        )
+
+    assert "referenceImages cannot be combined" in str(exc.value)
+
+
+def test_veo_client_payload_logging_redacts_reference_image_base64(monkeypatch):
+    from app.adapters import veo_client as veo_adapter
+    from app.adapters.veo_client import VeoClient
+
+    monkeypatch.setattr(veo_adapter, "get_settings", lambda: type("S", (), {"gemini_api_key": "test-key"})())
+    VeoClient._instance = None
+    client = VeoClient()
+
+    logged_payload = client._payload_for_logging(
+        {
+            "instances": [
+                {
+                    "prompt": "Prompt",
+                    "referenceImages": [
+                        {
+                            "image": {
+                                "bytesBase64Encoded": "Zmlyc3Q=",
+                                "mimeType": "image/png",
+                            },
+                            "referenceType": "asset",
+                        }
+                    ],
+                }
+            ],
+            "parameters": {"aspectRatio": "9:16"},
+        }
+    )
+
+    assert logged_payload["instances"][0]["referenceImages"][0]["image"]["bytesBase64Encoded"] == (
+        "<redacted_base64:8_chars>"
+    )
+
+
 def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
     class FakeStorageClient:
         def ensure_image(self, **kwargs):

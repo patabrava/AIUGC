@@ -84,6 +84,9 @@ class VeoClient:
             Exception: If submission fails
         """
         try:
+            if first_frame_image and reference_images:
+                raise ValueError("referenceImages cannot be combined with image/video/lastFrame inputs")
+
             instance: Dict[str, Any] = {
                 "prompt": prompt,
             }
@@ -94,6 +97,17 @@ class VeoClient:
                         "data": first_frame_image["data_base64"],
                     }
                 }
+            if reference_images:
+                instance["referenceImages"] = [
+                    {
+                        "image": {
+                            "bytesBase64Encoded": item["data_base64"],
+                            "mimeType": item["mime_type"],
+                        },
+                        "referenceType": "asset",
+                    }
+                    for item in reference_images
+                ]
 
             payload: Dict[str, Any] = {
                 "instances": [instance],
@@ -109,12 +123,6 @@ class VeoClient:
 
             if seed is not None:
                 payload["parameters"]["seed"] = seed
-
-            if reference_images:
-                logger.warning(
-                    "veo_reference_images_not_supported_rest",
-                    correlation_id=correlation_id
-                )
 
             logged_payload = self._payload_for_logging(payload)
 
@@ -578,6 +586,15 @@ class VeoClient:
                 continue
             if "data" in inline_data:
                 inline_data["data"] = f"<redacted_base64:{len(str(inline_data['data']))}_chars>"
+            for reference_image in instance.get("referenceImages", []) or []:
+                if not isinstance(reference_image, dict):
+                    continue
+                reference_payload = reference_image.get("image") or {}
+                if not isinstance(reference_payload, dict):
+                    continue
+                if "bytesBase64Encoded" in reference_payload:
+                    raw_value = str(reference_payload["bytesBase64Encoded"])
+                    reference_payload["bytesBase64Encoded"] = f"<redacted_base64:{len(raw_value)}_chars>"
         return safe_payload
 
 
