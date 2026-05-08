@@ -90,6 +90,113 @@ def _configured_veo_reference_image_paths(settings: Any) -> list[str]:
     return [path.strip() for path in raw_paths.split(",") if path.strip()]
 
 
+def _load_global_veo_reference_assets(
+    *,
+    correlation_id: str,
+    strict: bool,
+) -> Optional[Dict[str, Any]]:
+    settings = get_settings()
+    if not bool(getattr(settings, "veo_use_reference_images", False)):
+        return None
+
+    configured_paths = _configured_veo_reference_image_paths(settings)
+    if not configured_paths:
+        if strict:
+            raise ValidationError(
+                "Veo reference images are enabled but no image paths are configured.",
+                {"reference_image_paths": configured_paths},
+            )
+        logger.warning("veo_reference_images_missing_paths", correlation_id=correlation_id)
+        return None
+
+    if len(configured_paths) > 3:
+        raise ValidationError(
+            "Veo reference image generation supports at most three subject images.",
+            {"reference_image_count": len(configured_paths), "reference_image_paths": configured_paths},
+        )
+
+    root_dir = Path(__file__).resolve().parents[3]
+    reference_images: list[Dict[str, str]] = []
+    metadata_items: list[Dict[str, Any]] = []
+
+    for configured_path in configured_paths:
+        image_path = Path(configured_path)
+        if not image_path.is_absolute():
+            image_path = root_dir / configured_path
+
+        if not image_path.exists():
+            if strict:
+                raise ValidationError(
+                    "Configured Veo reference image is missing.",
+                    {"reference_image_path": configured_path},
+                )
+            logger.warning(
+                "veo_reference_image_missing_text_only_fallback",
+                correlation_id=correlation_id,
+                reference_image_path=configured_path,
+            )
+            return None
+
+        try:
+            image_bytes = image_path.read_bytes()
+        except OSError as exc:
+            if strict:
+                raise ValidationError(
+                    "Configured Veo reference image could not be read.",
+                    {"reference_image_path": configured_path, "error": str(exc)},
+                ) from exc
+            logger.warning(
+                "veo_reference_image_unreadable_text_only_fallback",
+                correlation_id=correlation_id,
+                reference_image_path=configured_path,
+                error=str(exc),
+            )
+            return None
+
+        if not image_bytes:
+            if strict:
+                raise ValidationError(
+                    "Configured Veo reference image is empty.",
+                    {"reference_image_path": configured_path},
+                )
+            logger.warning(
+                "veo_reference_image_empty_text_only_fallback",
+                correlation_id=correlation_id,
+                reference_image_path=configured_path,
+            )
+            return None
+
+        mime_type = mimetypes.guess_type(image_path.name)[0] or ""
+        if mime_type not in {"image/png", "image/jpeg"}:
+            raise ValidationError(
+                "Configured Veo reference image must be PNG or JPEG.",
+                {"reference_image_path": configured_path, "mime_type": mime_type},
+            )
+
+        reference_images.append(
+            {
+                "mime_type": mime_type,
+                "data_base64": base64.b64encode(image_bytes).decode("ascii"),
+            }
+        )
+        metadata_items.append(
+            {
+                "path": configured_path,
+                "mime_type": mime_type,
+                "size_bytes": len(image_bytes),
+            }
+        )
+
+    return {
+        "reference_images": reference_images,
+        "metadata": {
+            "reference_images_enabled": True,
+            "reference_image_count": len(reference_images),
+            "reference_image_assets": metadata_items,
+        },
+    }
+
+
 def _load_global_veo_anchor_asset(
     *,
     correlation_id: str,

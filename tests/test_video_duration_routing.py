@@ -651,6 +651,62 @@ def test_reference_image_paths_parse_comma_separated_settings(monkeypatch):
     ]
 
 
+def test_load_global_veo_reference_assets_reads_three_pngs(monkeypatch, tmp_path):
+    paths = []
+    for name, content in [
+        ("front.png", b"front-image"),
+        ("profile.png", b"profile-image"),
+        ("full-body.png", b"full-body-image"),
+    ]:
+        image_path = tmp_path / name
+        image_path.write_bytes(content)
+        paths.append(str(image_path))
+
+    settings = type(
+        "S",
+        (),
+        {
+            "veo_use_reference_images": True,
+            "veo_reference_image_paths": ",".join(paths),
+        },
+    )()
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: settings)
+
+    bundle = video_handlers._load_global_veo_reference_assets(correlation_id="corr-ref", strict=True)
+
+    assert [item["mime_type"] for item in bundle["reference_images"]] == ["image/png", "image/png", "image/png"]
+    assert [base64.b64decode(item["data_base64"]) for item in bundle["reference_images"]] == [
+        b"front-image",
+        b"profile-image",
+        b"full-body-image",
+    ]
+    assert bundle["metadata"]["reference_images_enabled"] is True
+    assert bundle["metadata"]["reference_image_count"] == 3
+
+
+def test_load_global_veo_reference_assets_rejects_more_than_three(monkeypatch, tmp_path):
+    paths = []
+    for index in range(4):
+        image_path = tmp_path / f"ref-{index}.png"
+        image_path.write_bytes(b"image")
+        paths.append(str(image_path))
+
+    settings = type(
+        "S",
+        (),
+        {
+            "veo_use_reference_images": True,
+            "veo_reference_image_paths": ",".join(paths),
+        },
+    )()
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: settings)
+
+    with pytest.raises(ValidationError) as exc:
+        video_handlers._load_global_veo_reference_assets(correlation_id="corr-ref", strict=True)
+
+    assert "at most three" in exc.value.message
+
+
 def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
     class FakeStorageClient:
         def ensure_image(self, **kwargs):
