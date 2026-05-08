@@ -135,9 +135,10 @@ def test_generate_video_blocks_before_submit_when_quota_reservation_fails(monkey
             message="Blocked before submission",
             details={"blocked_before_submit": True},
             status_code=429,
-        )
+    )
 
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: {"id": batch_id, "target_length_tier": None})
     monkeypatch.setattr("app.features.videos.handlers.quota_controls_bypassed", lambda: False)
     monkeypatch.setattr("app.features.videos.handlers.reserve_quota", _reject_reservation)
     monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
@@ -306,6 +307,7 @@ def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
         }
 
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: {"id": batch_id, "target_length_tier": None})
     monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
     monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
     monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
@@ -372,6 +374,7 @@ def test_generate_video_skips_quota_ledger_calls_when_bypass_enabled(monkeypatch
     consume_mock = MagicMock()
 
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: {"id": batch_id, "target_length_tier": None})
     monkeypatch.setattr("app.features.videos.handlers.quota_controls_bypassed", lambda: True)
     monkeypatch.setattr("app.features.videos.handlers.reserve_quota", reserve_mock)
     monkeypatch.setattr("app.features.videos.handlers.consume_quota", consume_mock)
