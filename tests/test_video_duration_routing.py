@@ -840,6 +840,91 @@ def test_veo_client_payload_logging_redacts_reference_image_base64(monkeypatch):
     )
 
 
+def test_submit_video_request_attaches_reference_images_to_veo_base(monkeypatch, tmp_path):
+    captured = {}
+    image_path = tmp_path / "front.png"
+    image_path.write_bytes(b"front-image")
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "operation_id": "operations/ref-base",
+                "status": "submitted",
+                "provider_model": kwargs.get("model"),
+            }
+
+    settings = type(
+        "S",
+        (),
+        {
+            "veo_use_reference_images": True,
+            "veo_reference_image_paths": str(image_path),
+        },
+    )()
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: settings)
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr-ref-base",
+        provider_duration_seconds=8,
+    )
+
+    assert captured["first_frame_image"] is None
+    assert len(captured["reference_images"]) == 1
+    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"front-image"
+    assert result["provider_metadata"]["reference_image_count"] == 1
+    assert result["provider_metadata"]["reference_images_enabled"] is True
+
+
+def test_submit_video_request_skips_reference_images_when_disabled(monkeypatch, tmp_path):
+    captured = {}
+    image_path = tmp_path / "front.png"
+    image_path.write_bytes(b"front-image")
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured.update(kwargs)
+            return {"operation_id": "operations/text-base", "status": "submitted"}
+
+    settings = type(
+        "S",
+        (),
+        {
+            "veo_use_reference_images": False,
+            "veo_reference_image_paths": str(image_path),
+        },
+    )()
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: settings)
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+
+    video_handlers._submit_video_request(
+        provider="veo_3_1",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr-text-base",
+        provider_duration_seconds=8,
+    )
+
+    assert captured["reference_images"] is None
+    assert captured["first_frame_image"] is None
+
+
 def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
     class FakeStorageClient:
         def ensure_image(self, **kwargs):

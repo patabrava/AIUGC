@@ -1456,7 +1456,6 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     )
                 raise
 
-        anchor_image_bundle = _resolve_global_veo_anchor_image(correlation_id) if _GLOBAL_VEO_ANCHOR_ENABLED and veo_submissions else None
         for index, item in enumerate(prepared_submissions):
             post = item["post"]
             post_id = item["post_id"]
@@ -1489,11 +1488,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         if submission_plan["provider"] in {VEO_PROVIDER, "vertex_ai"}
                         else None
                     ),
-                    first_frame_image=(
-                        anchor_image_bundle["first_frame_image"]
-                        if submission_plan["provider"] == VEO_PROVIDER and anchor_image_bundle
-                        else None
-                    ),
+                    first_frame_image=None,
                     seed=batch_veo_seed,
                 )
                 operation_id = submission_result["operation_id"]
@@ -1542,9 +1537,6 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     submission_metadata["quota_consume_error"] = quota_consume_error
                 if submission_plan.get("profile_config"):
                     submission_metadata["veo_efficient_long_route_enabled"] = batch_uses_efficient_long_route
-                if submission_plan["provider"] == VEO_PROVIDER and anchor_image_bundle:
-                    submission_metadata.update(anchor_image_bundle["metadata"])
-
                 route = profile.route if profile else None
                 provider_status = submission_result.get("status", "submitted")
                 db_status = get_submission_video_status(route, provider_status)
@@ -1906,17 +1898,12 @@ def _submit_video_request(
 
     if provider == "veo_3_1":
         veo_client = get_veo_client()
-        settings = get_settings()
-        use_reference_image = bool(getattr(settings, "veo_use_reference_image", True))
         provider_aspect = provider_aspect_ratio or aspect_ratio
         requested_aspect = requested_aspect_ratio or aspect_ratio
         veo_duration_seconds = provider_duration_seconds or seconds
         model_name = model or "veo-3.1-generate-001"
-        resolved_first_frame_image = first_frame_image
-        if use_reference_image and resolved_first_frame_image is None:
-            anchor_asset = _load_global_veo_anchor_asset(correlation_id=correlation_id, strict=False)
-            if anchor_asset is not None:
-                resolved_first_frame_image = anchor_asset["first_frame_image"]
+        reference_bundle = _load_global_veo_reference_assets(correlation_id=correlation_id, strict=False)
+        reference_images = reference_bundle["reference_images"] if reference_bundle else None
         if veo_duration_seconds not in {4, 6, 8}:
             veo_duration_seconds = 8
         try:
@@ -1927,7 +1914,8 @@ def _submit_video_request(
                 aspect_ratio=provider_aspect,
                 resolution=resolution,
                 duration_seconds=veo_duration_seconds,
-                first_frame_image=resolved_first_frame_image,
+                first_frame_image=None,
+                reference_images=reference_images,
                 seed=seed,
                 model=model_name,
             )
@@ -1963,6 +1951,9 @@ def _submit_video_request(
             ) from exc
         requested_size = _map_size_from_aspect_ratio(requested_aspect, resolution)
         provider_requested_size = _map_size_from_aspect_ratio(provider_aspect, resolution)
+        provider_metadata = dict(result)
+        if reference_bundle:
+            provider_metadata.update(reference_bundle["metadata"])
         return {
             "operation_id": result["operation_id"],
             "status": result.get("status", "submitted"),
@@ -1970,7 +1961,7 @@ def _submit_video_request(
             "requested_size": requested_size,
             "provider_requested_size": provider_requested_size,
             "estimated_duration_seconds": 180,
-            "provider_metadata": result,
+            "provider_metadata": provider_metadata,
         }
 
     if provider == "vertex_ai":
