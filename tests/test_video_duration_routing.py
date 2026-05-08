@@ -925,6 +925,50 @@ def test_submit_video_request_skips_reference_images_when_disabled(monkeypatch, 
     assert captured["first_frame_image"] is None
 
 
+def test_veo_extension_request_uses_video_without_reference_images(monkeypatch):
+    from app.adapters import veo_client as veo_adapter
+    from app.adapters.veo_client import VeoClient
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"name":"operations/extension-test"}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"name": "operations/extension-test"}
+
+    class FakeHttpClient:
+        def post(self, url, headers, json):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(veo_adapter, "get_settings", lambda: type("S", (), {"gemini_api_key": "test-key"})())
+    VeoClient._instance = None
+    client = VeoClient()
+    client._http_client = FakeHttpClient()
+
+    result = client.submit_video_extension(
+        prompt="Continue the same presenter.",
+        video_uri="gs://bucket/base.mp4",
+        correlation_id="corr-extension",
+        aspect_ratio="9:16",
+        resolution="720p",
+        duration_seconds=7,
+        negative_prompt=None,
+    )
+
+    assert result["operation_id"] == "operations/extension-test"
+    instance = captured["json"]["instances"][0]
+    assert instance["video"]["uri"] == "gs://bucket/base.mp4"
+    assert "referenceImages" not in instance
+    assert "image" not in instance
+    assert "lastFrame" not in instance
+
+
 def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
     class FakeStorageClient:
         def ensure_image(self, **kwargs):
