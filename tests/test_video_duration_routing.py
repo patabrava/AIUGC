@@ -993,6 +993,7 @@ def test_veo_extension_request_uses_video_without_reference_images(monkeypatch):
     )
 
     assert result["operation_id"] == "operations/extension-test"
+    assert "durationSeconds" not in captured["json"]["parameters"]
     instance = captured["json"]["instances"][0]
     assert instance["video"]["uri"] == "gs://bucket/base.mp4"
     assert "referenceImages" not in instance

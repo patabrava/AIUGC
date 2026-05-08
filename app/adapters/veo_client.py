@@ -511,7 +511,6 @@ class VeoClient:
             "parameters": {
                 "aspectRatio": aspect_ratio,
                 "resolution": resolution,
-                "durationSeconds": duration_seconds,
             },
         }
 
@@ -526,7 +525,7 @@ class VeoClient:
             correlation_id=correlation_id,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
-            duration_seconds=duration_seconds,
+            fixed_extension_seconds=duration_seconds,
             negative_prompt_length=len(negative_prompt) if negative_prompt else 0,
             video_uri=video_uri,
             prompt_length=len(prompt),
