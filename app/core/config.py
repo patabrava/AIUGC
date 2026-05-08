@@ -194,10 +194,19 @@ class Settings(BaseSettings):
         default=False,
         description="Bypass all Veo quota guards, freezes, and reservations for controlled testing",
     )
-    veo_use_reference_image: bool = Field(
+    veo_use_reference_images: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VEO_USE_REFERENCE_IMAGE"),
-        description="Attach the global first-frame reference image for Veo and Vertex video submissions",
+        validation_alias=AliasChoices("VEO_USE_REFERENCE_IMAGES"),
+        description="Attach global Veo subject reference images to base video submissions",
+    )
+    veo_reference_image_paths: str = Field(
+        default=(
+            "static/images/video-references/front.png,"
+            "static/images/video-references/profile.png,"
+            "static/images/video-references/full-body.png"
+        ),
+        validation_alias=AliasChoices("VEO_REFERENCE_IMAGE_PATHS"),
+        description="Comma-separated local paths for up to three Veo subject reference images",
     )
     veo_quota_project_scope: str = Field(
         default="default-gemini-project",

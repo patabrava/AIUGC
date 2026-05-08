@@ -85,6 +85,11 @@ _GLOBAL_VEO_ANCHOR_OBJECT_KEY = "Lippe Lift Studio/images/anchors/sarah.jpg"
 _GLOBAL_VEO_ANCHOR_ENABLED = False
 
 
+def _configured_veo_reference_image_paths(settings: Any) -> list[str]:
+    raw_paths = str(getattr(settings, "veo_reference_image_paths", "") or "")
+    return [path.strip() for path in raw_paths.split(",") if path.strip()]
+
+
 def _load_global_veo_anchor_asset(
     *,
     correlation_id: str,

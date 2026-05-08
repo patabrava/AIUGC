@@ -632,6 +632,25 @@ def test_prompt3_32s_template_uses_current_sentence_budget_language():
     assert "40-66 Wörter und fünf bis sechs natürliche Sätze" in prompt_text
 
 
+def test_reference_image_paths_parse_comma_separated_settings(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "veo_use_reference_images", True, raising=False)
+    monkeypatch.setattr(
+        settings,
+        "veo_reference_image_paths",
+        "static/images/video-references/front.png, static/images/video-references/profile.png,static/images/video-references/full-body.png",
+        raising=False,
+    )
+
+    paths = video_handlers._configured_veo_reference_image_paths(settings)
+
+    assert paths == [
+        "static/images/video-references/front.png",
+        "static/images/video-references/profile.png",
+        "static/images/video-references/full-body.png",
+    ]
+
+
 def test_resolve_global_veo_anchor_image_reads_repo_asset(monkeypatch):
     class FakeStorageClient:
         def ensure_image(self, **kwargs):
