@@ -19,6 +19,9 @@ class VideoGenerationRequest(BaseModel):
         description="Video generation provider"
     )
     model: Optional[Literal[
+        "veo-3.1-generate-preview",
+        "veo-3.1-fast-generate-preview",
+        "veo-3.1-lite-generate-preview",
         "veo-3.1-generate-001",
         "veo-3.1-fast-generate-001",
         "veo-3.1-lite-generate-001",
@@ -167,6 +170,9 @@ class BatchVideoGenerationRequest(BaseModel):
         description="Video generation provider for all posts"
     )
     model: Optional[Literal[
+        "veo-3.1-generate-preview",
+        "veo-3.1-fast-generate-preview",
+        "veo-3.1-lite-generate-preview",
         "veo-3.1-generate-001",
         "veo-3.1-fast-generate-001",
         "veo-3.1-lite-generate-001",

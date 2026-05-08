@@ -83,6 +83,32 @@ def test_veo_submission_uses_gemini_api_key(monkeypatch):
     veo_module.VeoClient._instance = None
 
 
+def test_veo_submission_defaults_to_current_preview_model(monkeypatch):
+    monkeypatch.setattr(
+        veo_module,
+        "get_settings",
+        lambda: SimpleNamespace(gemini_api_key="test-key"),
+    )
+    fake_http_client = FakeHttpClient()
+    veo_module.VeoClient._instance = None
+    client = veo_module.VeoClient()
+    client._http_client = fake_http_client
+
+    submission = client.submit_video_generation(
+        prompt="portrait product demo",
+        negative_prompt=None,
+        correlation_id="test-correlation",
+        aspect_ratio="9:16",
+        resolution="720p",
+        duration_seconds=8,
+    )
+
+    assert "models/veo-3.1-generate-preview:predictLongRunning" in fake_http_client.post_calls[0]["url"]
+    assert submission["provider_model"] == "veo-3.1-generate-preview"
+
+    veo_module.VeoClient._instance = None
+
+
 def test_veo_extension_uses_rest_video_uri_payload(monkeypatch):
     monkeypatch.setattr(
         veo_module,

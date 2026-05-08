@@ -480,19 +480,23 @@ def test_batch_video_generation_request_accepts_duration_tier_seconds():
 def test_video_generation_requests_accept_veo_provider_for_reference_image_path():
     single_request = VideoGenerationRequest(
         provider="veo_3_1",
+        model="veo-3.1-generate-preview",
         aspect_ratio="9:16",
         resolution="720p",
         seconds=8,
     )
     batch_request = BatchVideoGenerationRequest(
         provider="veo_3_1",
+        model="veo-3.1-fast-generate-preview",
         aspect_ratio="9:16",
         resolution="720p",
         seconds=8,
     )
 
     assert single_request.provider == "veo_3_1"
+    assert single_request.model == "veo-3.1-generate-preview"
     assert batch_request.provider == "veo_3_1"
+    assert batch_request.model == "veo-3.1-fast-generate-preview"
 
 
 def test_batch_video_generation_request_rejects_gemini_provider():

@@ -1794,7 +1794,7 @@ def _submit_video_request(
         provider_aspect = provider_aspect_ratio or aspect_ratio
         requested_aspect = requested_aspect_ratio or aspect_ratio
         veo_duration_seconds = provider_duration_seconds or seconds
-        model_name = model or "veo-3.1-generate-001"
+        model_name = model or "veo-3.1-generate-preview"
         reference_bundle = _load_global_veo_reference_assets(correlation_id=correlation_id, strict=False)
         reference_images = reference_bundle["reference_images"] if reference_bundle else None
         if veo_duration_seconds not in {4, 6, 8}:

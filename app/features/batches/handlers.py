@@ -73,6 +73,18 @@ DETAIL_JS_VERSION = str(Path("static/js/batches/detail.js").stat().st_mtime_ns)
 _COVERAGE_RECOVERY_COOLDOWN_SECONDS = 300
 _COVERAGE_RECOVERY_LAST_SCHEDULED_AT: Dict[str, float] = {}
 _VEO_BATCH_PRICING_BY_MODEL = {
+    "veo-3.1-generate-preview": {
+        "720p": 0.40,
+        "1080p": 0.40,
+    },
+    "veo-3.1-fast-generate-preview": {
+        "720p": 0.10,
+        "1080p": 0.12,
+    },
+    "veo-3.1-lite-generate-preview": {
+        "720p": 0.05,
+        "1080p": 0.08,
+    },
     "veo-3.1-generate-001": {
         "720p": 0.40,
         "1080p": 0.40,
@@ -440,7 +452,7 @@ def _resolve_caption_source_links(post: Dict[str, Any]) -> list[Dict[str, str]]:
 
 def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: list[Dict[str, Any]]) -> Dict[str, Any]:
     """Derive batch-level video settings so the UI can rehydrate across HTMX rerenders."""
-    initial_model = "veo-3.1-generate-001"
+    initial_model = "veo-3.1-generate-preview"
 
     for post in reversed(posts):
         video_metadata = post.get("video_metadata") or {}

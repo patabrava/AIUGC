@@ -17,9 +17,17 @@ logger = get_logger(__name__)
 
 
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-_VEO_MODEL_ID = "veo-3.1-generate-001"
-_VEO_MODEL_FAST_ID = "veo-3.1-fast-generate-001"
-_VEO_MODEL_LITE_ID = "veo-3.1-lite-generate-001"
+_VEO_MODEL_ID = "veo-3.1-generate-preview"
+_VEO_MODEL_FAST_ID = "veo-3.1-fast-generate-preview"
+_VEO_MODEL_LITE_ID = "veo-3.1-lite-generate-preview"
+_SUPPORTED_VEO_MODEL_IDS = {
+    _VEO_MODEL_ID,
+    _VEO_MODEL_FAST_ID,
+    _VEO_MODEL_LITE_ID,
+    "veo-3.1-generate-001",
+    "veo-3.1-fast-generate-001",
+    "veo-3.1-lite-generate-001",
+}
 
 
 class VeoClient:
@@ -568,7 +576,7 @@ class VeoClient:
         requested = (model or "").strip()
         if not requested:
             return _VEO_MODEL_ID
-        if requested in {_VEO_MODEL_ID, _VEO_MODEL_FAST_ID, _VEO_MODEL_LITE_ID}:
+        if requested in _SUPPORTED_VEO_MODEL_IDS:
             return requested
         raise ValueError(f"Unsupported Veo model: {requested}")
 
