@@ -88,6 +88,18 @@ _VEO_BATCH_PRICING_BY_MODEL = {
 }
 
 
+def _resolve_form_target_length_tier(form, creation_mode: str) -> int:
+    values = []
+    if hasattr(form, "getlist"):
+        values = [value for value in form.getlist("target_length_tier") if str(value or "").strip()]
+    if not values:
+        value = form.get("target_length_tier", 8)
+        values = [value] if str(value or "").strip() else [8]
+
+    selected_value = values[-1] if creation_mode == "manual" else values[0]
+    return int(selected_value or 8)
+
+
 def _wants_html(request: Request) -> bool:
     """Determine if client expects HTML response."""
     hx_header = request.headers.get("HX-Request")
@@ -175,7 +187,7 @@ async def create_batch_endpoint(request: Request):
                     "creation_mode": creation_mode,
                     "post_type_counts": post_type_counts,
                     "manual_post_count": int(manual_post_count) if manual_post_count not in {None, ""} else None,
-                    "target_length_tier": int(form.get("target_length_tier", 8) or 8),
+                    "target_length_tier": _resolve_form_target_length_tier(form, creation_mode),
                 }
             )
 

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 from postgrest.exceptions import APIError
+from starlette.datastructures import FormData
 
 from app.features.batches import queries as batch_queries
 from app.features.batches.schemas import BatchDetailResponse, BatchResponse, CreateBatchRequest, PostDetail
@@ -338,6 +339,66 @@ async def test_create_batch_endpoint_manual_mode_creates_drafts_and_skips_discov
     assert response.data.state.value == "S2_SEEDED"
     assert draft_calls == [("batch-1", 3, 16)]
     assert scheduled_calls == []
+
+
+@pytest.mark.anyio
+async def test_create_batch_endpoint_form_keeps_automated_duration_when_hidden_manual_field_submits(monkeypatch):
+    os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+    os.environ.setdefault("SUPABASE_KEY", "test-key")
+    os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+    os.environ.setdefault("GEMINI_API_KEY", "test-google-key")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
+    os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
+    os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
+    os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
+    os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+
+    from app.features.batches import handlers as batch_handlers
+
+    created = {}
+    scheduled_calls = []
+
+    class _FakeRequest:
+        headers = {"content-type": "application/x-www-form-urlencoded"}
+
+        async def form(self):
+            return FormData(
+                [
+                    ("brand", "ACME"),
+                    ("creation_mode", "automated"),
+                    ("post_type_counts.value", "1"),
+                    ("post_type_counts.lifestyle", "0"),
+                    ("post_type_counts.product", "0"),
+                    ("target_length_tier", "32"),
+                    ("target_length_tier", "8"),
+                ]
+            )
+
+    def fake_create_batch(**kwargs):
+        created.update(kwargs)
+        return {
+            "id": "batch-1",
+            "brand": kwargs["brand"],
+            "state": "S1_SETUP",
+            "creation_mode": kwargs["creation_mode"],
+            "post_type_counts": kwargs["post_type_counts"],
+            "manual_post_count": kwargs["manual_post_count"],
+            "target_length_tier": kwargs["target_length_tier"],
+            "created_at": "2026-04-12T00:00:00Z",
+            "updated_at": "2026-04-12T00:00:00Z",
+            "archived": False,
+        }
+
+    monkeypatch.setattr(batch_handlers, "create_batch", fake_create_batch)
+    monkeypatch.setattr(batch_handlers, "start_seeding_interaction", lambda *args, **kwargs: scheduled_calls.append(("start", args, kwargs)))
+    monkeypatch.setattr(batch_handlers, "schedule_batch_discovery", lambda *args, **kwargs: scheduled_calls.append(("schedule", args, kwargs)))
+    monkeypatch.setattr(batch_handlers, "list_batches", lambda *args, **kwargs: ([], 0))
+
+    await batch_handlers.create_batch_endpoint(_FakeRequest())
+
+    assert created["target_length_tier"] == 32
+    assert scheduled_calls[-1][0] == "schedule"
 
 
 @pytest.mark.anyio
