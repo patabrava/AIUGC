@@ -1506,6 +1506,14 @@ def _store_completed_video(
     )
 
     supabase = get_supabase().client
+    existing_provider_metadata = existing_metadata.get("provider_metadata")
+    if not isinstance(existing_provider_metadata, dict):
+        existing_provider_metadata = {}
+    merged_provider_metadata = {
+        **existing_provider_metadata,
+        **provider_metadata,
+    }
+
     merged_metadata = {
         **existing_metadata,
         "storage_provider": upload_result["storage_provider"],
@@ -1514,7 +1522,7 @@ def _store_completed_video(
         "provider": provider,
         "file_path": upload_result["file_path"],
         "thumbnail_url": upload_result.get("thumbnail_url"),
-        "provider_metadata": provider_metadata,
+        "provider_metadata": merged_provider_metadata,
         "upload_method": upload_method,
         "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         **postprocess_metadata,

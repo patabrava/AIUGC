@@ -162,3 +162,51 @@ class TestPollerCaptionHandoff:
                 assert "veo_extension_last_retryable_error" not in metadata
                 assert "veo_extension_input_retry_count" not in metadata
         assert found, "No update call set terminal caption_pending cleanup"
+
+    @patch("workers.video_poller._trim_tail", return_value=(b"fake_video_bytes", {}))
+    @patch("workers.video_poller.get_storage_client")
+    @patch("workers.video_poller.get_supabase")
+    def test_store_completed_video_preserves_submission_provider_metadata(
+        self,
+        mock_sb_factory,
+        mock_storage,
+        mock_trim,
+    ):
+        from workers.video_poller import _store_completed_video
+
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.upload_video.return_value = {
+            "storage_provider": "cloudflare_r2",
+            "storage_key": "test/key.mp4",
+            "url": "https://cdn.example.com/test/key.mp4",
+            "size": 1024,
+            "file_path": "test/key.mp4",
+            "file_type": "video/mp4",
+            "thumbnail_url": None,
+        }
+        mock_storage.return_value = mock_storage_instance
+
+        mock_client = MagicMock()
+        mock_sb_factory.return_value.client = mock_client
+        mock_table = mock_client.table.return_value
+        mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+        _store_completed_video(
+            post_id="post_123",
+            provider="veo_3_1",
+            video_source=b"fake_video_bytes",
+            correlation_id="test_corr",
+            provider_metadata={"video_uri": "https://provider.example.com/video.mp4"},
+            existing_metadata={
+                "provider_metadata": {
+                    "reference_images_enabled": True,
+                    "reference_image_count": 3,
+                },
+            },
+        )
+
+        update_payload = mock_table.update.call_args[0][0]
+        provider_metadata = update_payload["video_metadata"]["provider_metadata"]
+        assert provider_metadata["reference_images_enabled"] is True
+        assert provider_metadata["reference_image_count"] == 3
+        assert provider_metadata["video_uri"] == "https://provider.example.com/video.mp4"
