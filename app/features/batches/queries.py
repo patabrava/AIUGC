@@ -103,6 +103,7 @@ def create_batch(
     legacy_batch_data = {
         "brand": brand,
         "state": BatchState.S1_SETUP.value,
+        "creation_mode": creation_mode,
         "post_type_counts": post_type_counts or {},
         "target_length_tier": target_length_tier,
         "archived": False,
