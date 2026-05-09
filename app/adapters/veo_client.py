@@ -30,6 +30,20 @@ _SUPPORTED_VEO_MODEL_IDS = {
 }
 
 
+def _resolve_default_veo_model() -> str:
+    settings = get_settings()
+    requested = str(getattr(settings, "veo_default_model", "") or "").strip()
+    if requested in _SUPPORTED_VEO_MODEL_IDS:
+        return requested
+    return _VEO_MODEL_FAST_ID
+
+
+def select_veo_model_id(*, creation_mode: str) -> str:
+    if creation_mode == "character_consistency":
+        return _VEO_MODEL_ID
+    return _resolve_default_veo_model()
+
+
 class VeoClient:
     """
     Singleton adapter for Google VEO 3.1 API.

@@ -123,6 +123,51 @@ def test_submit_image_video_accepts_image_bytes():
     assert call_kwargs["json"]["instances"][0]["image"]["mimeType"] == "image/jpeg"
 
 
+def test_submit_text_video_accepts_reference_images():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"name": "operation-reference-images"}
+    mock_response.raise_for_status.return_value = None
+
+    mock_credentials = SimpleNamespace(token="token", expired=False)
+    mock_http = MagicMock()
+    mock_http.post.return_value = mock_response
+
+    with patch("app.adapters.vertex_ai_client.VertexSettings", return_value=_settings()), \
+        patch("app.adapters.vertex_ai_client.google.auth.default", return_value=(mock_credentials, None)), \
+        patch("app.adapters.vertex_ai_client.Request"), \
+        patch("app.adapters.vertex_ai_client.httpx.Client", return_value=mock_http):
+        client = _fresh_client()
+        result = client.submit_text_video(
+            prompt="The same actor speaks in a kitchen.",
+            correlation_id="corr-ref",
+            aspect_ratio="9:16",
+            duration_seconds=8,
+            reference_images=[
+                {"mime_type": "image/png", "data_base64": "ZnJvbnQ="},
+                {"mime_type": "image/jpeg", "data_base64": "cHJvZmlsZQ=="},
+            ],
+        )
+
+    assert result["operation_id"] == "operation-reference-images"
+    call_kwargs = mock_http.post.call_args.kwargs
+    assert call_kwargs["json"]["instances"][0]["referenceImages"] == [
+        {
+            "image": {
+                "bytesBase64Encoded": "ZnJvbnQ=",
+                "mimeType": "image/png",
+            },
+            "referenceType": "asset",
+        },
+        {
+            "image": {
+                "bytesBase64Encoded": "cHJvZmlsZQ==",
+                "mimeType": "image/jpeg",
+            },
+            "referenceType": "asset",
+        },
+    ]
+
+
 def test_submit_video_extension_uses_gcs_uri_and_storage_uri():
     mock_response = MagicMock()
     mock_response.json.return_value = {"name": "operation-vertex-ext"}

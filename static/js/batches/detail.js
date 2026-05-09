@@ -7,7 +7,7 @@
         });
     };
 
-    window.promptModalComponent = function (postId, initialPrompt = {}) {
+    window.promptModalComponent = function (postId, initialPrompt = {}, options = {}) {
         const toText = (value) => (typeof value === 'string' ? value : '');
         const buildDraft = (prompt) => {
             const audio = prompt?.audio || {};
@@ -33,6 +33,8 @@
             error: null,
             postId,
             prompt: initialPrompt || {},
+            batchScenePlan: options.batchScenePlan || null,
+            postType: options.postType || '',
             draft: buildDraft(initialPrompt || {}),
             open() {
                 this.expanded = true;

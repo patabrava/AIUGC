@@ -294,11 +294,16 @@
                         >
                             <option value="automated">Automated</option>
                             <option value="manual">Manual</option>
+                            <option value="character_consistency">Character Consistency</option>
                         </select>
-                        <p class="mt-1 text-xs text-gray-500">Automated uses the research agent. Manual lets you define each draft yourself.</p>
+                        <p class="mt-1 text-xs text-gray-500">
+                            Automated uses the research agent. Manual lets you define each draft yourself.
+                            Character Consistency uses the saved reference character and full Veo 3.1.
+                            <a href="/settings/character" class="text-[#E58434] underline">Manage character</a>
+                        </p>
                     </div>
                     
-                    <div x-show="creationMode === 'automated'" x-cloak>
+                    <div x-show="creationMode !== 'manual'" x-cloak>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Post Type Counts</label>
                         <div class="space-y-2">
                             <div class="flex items-center justify-between">
@@ -335,6 +340,9 @@
                                 >
                             </div>
                         </div>
+                        <p x-show="creationMode === 'character_consistency'" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            Uses the active character snapshot from Settings. Scenes are varied per post type during prompt generation.
+                        </p>
                     </div>
 
                     <div x-show="creationMode === 'manual'" x-cloak>

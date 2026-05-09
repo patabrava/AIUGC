@@ -85,6 +85,7 @@ class VertexAIClient:
         output_gcs_uri: Optional[str] = None,
         model: Optional[str] = None,
         use_fast_model: bool = False,
+        reference_images: Optional[list[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         model_name = model or (_DEFAULT_VERTEX_FAST_MODEL if use_fast_model else _DEFAULT_VERTEX_MODEL)
@@ -94,6 +95,7 @@ class VertexAIClient:
             aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
             output_gcs_uri=output_gcs_uri,
+            reference_images=reference_images,
         )
 
         self._log_request(
@@ -103,6 +105,7 @@ class VertexAIClient:
             aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
             has_image=False,
+            reference_image_count=len(reference_images or []),
         )
 
         return self._submit_to_vertex(
@@ -301,13 +304,30 @@ class VertexAIClient:
         output_gcs_uri: Optional[str] = None,
         image_base64: Optional[str] = None,
         image_mime_type: Optional[str] = None,
+        reference_images: Optional[list[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         instance: Dict[str, Any] = {"prompt": prompt}
+        if reference_images and (image_base64 or image_mime_type):
+            raise ValidationError(
+                "Vertex reference images cannot be combined with first-frame image input.",
+                {"reference_image_count": len(reference_images)},
+            )
         if image_base64 and image_mime_type:
             instance["image"] = {
                 "bytesBase64Encoded": image_base64,
                 "mimeType": image_mime_type,
             }
+        if reference_images:
+            instance["referenceImages"] = [
+                {
+                    "image": {
+                        "bytesBase64Encoded": item["data_base64"],
+                        "mimeType": item["mime_type"],
+                    },
+                    "referenceType": "asset",
+                }
+                for item in reference_images
+            ]
 
         parameters: Dict[str, Any] = {
             "aspectRatio": aspect_ratio,
@@ -431,11 +451,19 @@ class VertexAIClient:
             if not isinstance(instance, dict):
                 continue
             image_payload = instance.get("image") or {}
-            if not isinstance(image_payload, dict):
-                continue
-            inline_data = image_payload.get("bytesBase64Encoded")
-            if inline_data:
-                instance["image"]["bytesBase64Encoded"] = f"<redacted_base64:{len(str(inline_data))}_chars>"
+            if isinstance(image_payload, dict):
+                inline_data = image_payload.get("bytesBase64Encoded")
+                if inline_data:
+                    instance["image"]["bytesBase64Encoded"] = f"<redacted_base64:{len(str(inline_data))}_chars>"
+            for reference in instance.get("referenceImages", []) or []:
+                if not isinstance(reference, dict):
+                    continue
+                reference_image = reference.get("image") or {}
+                if not isinstance(reference_image, dict):
+                    continue
+                inline_data = reference_image.get("bytesBase64Encoded")
+                if inline_data:
+                    reference_image["bytesBase64Encoded"] = f"<redacted_base64:{len(str(inline_data))}_chars>"
         return safe_payload
 
     def _extract_video_uri(self, data: Dict[str, Any]) -> Optional[str]:
@@ -487,6 +515,7 @@ class VertexAIClient:
         image_bytes_len: Optional[int] = None,
         image_mime_type: Optional[str] = None,
         source_video_uri: Optional[str] = None,
+        reference_image_count: int = 0,
     ) -> None:
         logger.info(
             "vertex_ai_video_submission",
@@ -500,6 +529,7 @@ class VertexAIClient:
             image_bytes_len=image_bytes_len,
             image_mime_type=image_mime_type,
             source_video_uri=source_video_uri,
+            reference_image_count=reference_image_count,
         )
 
     def _load_vertex_settings(self) -> VertexSettings:

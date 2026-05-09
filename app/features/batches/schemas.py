@@ -33,9 +33,9 @@ class PostTypeCounts(BaseModel):
 class CreateBatchRequest(BaseModel):
     """Request to create a new batch."""
     brand: str = Field(..., min_length=1, max_length=100, description="Brand name")
-    creation_mode: Literal["automated", "manual"] = Field(
+    creation_mode: Literal["automated", "manual", "character_consistency"] = Field(
         default="automated",
-        description="Batch creation mode",
+        description="Batch creation mode: automated, manual, or character_consistency.",
     )
     post_type_counts: Optional[PostTypeCounts] = Field(
         default=None,
@@ -79,8 +79,8 @@ class CreateBatchRequest(BaseModel):
     @validator('post_type_counts', always=True)
     def validate_creation_mode_contract(cls, v, values):
         creation_mode = values.get("creation_mode") or "automated"
-        if creation_mode == "automated" and v is None:
-            raise ValueError("Post type counts are required for automated batches")
+        if creation_mode in {"automated", "character_consistency"} and v is None:
+            raise ValueError("Post type counts are required for automated and character consistency batches")
         return v
 
     @validator('target_length_tier')
@@ -96,6 +96,8 @@ class BatchResponse(BaseModel):
     brand: str
     state: BatchState
     creation_mode: str = "automated"
+    character_snapshot: Optional[Dict[str, Any]] = None
+    scene_plan: Optional[Dict[str, str]] = None
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None
     target_length_tier: Optional[int] = None
@@ -154,6 +156,8 @@ class BatchDetailResponse(BaseModel):
     brand: str
     state: BatchState
     creation_mode: str = "automated"
+    character_snapshot: Optional[Dict[str, Any]] = None
+    scene_plan: Optional[Dict[str, str]] = None
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None
     target_length_tier: Optional[int] = None

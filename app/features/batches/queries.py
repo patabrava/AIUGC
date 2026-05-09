@@ -11,8 +11,9 @@ import httpx
 from postgrest.exceptions import APIError
 from app.adapters.supabase_client import get_supabase
 from app.core.states import BatchState, validate_state_transition
-from app.core.errors import NotFoundError, StateTransitionError, ThirdPartyError
+from app.core.errors import NotFoundError, StateTransitionError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
+from app.features.characters.queries import get_active_character, snapshot_for_batch
 from app.features.topics.queries import create_post_for_batch
 
 logger = get_logger(__name__)
@@ -45,6 +46,27 @@ def _execute_with_retry(operation_name: str, callback):
     )
 
 
+def _insert_batch_row(payload: Dict[str, Any], legacy_payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    supabase = get_supabase()
+    try:
+        response = supabase.client.table("batches").insert(payload).execute()
+    except APIError as exc:
+        error_text = str(exc)
+        if exc.code == "PGRST204" and legacy_payload is not None:
+            logger.warning(
+                "batch_insert_schema_missing_fallback",
+                error=error_text,
+                omitted_fields=sorted(set(payload) - set(legacy_payload)),
+            )
+            response = supabase.client.table("batches").insert(legacy_payload).execute()
+        else:
+            raise
+
+    if not response.data:
+        raise Exception("Failed to create batch")
+    return response.data[0]
+
+
 def create_batch(
     brand: str,
     post_type_counts: Optional[Dict[str, int]],
@@ -57,8 +79,6 @@ def create_batch(
     Create a new batch in S1_SETUP state.
     Per Canon § 3.2: S1_SETUP is initial state.
     """
-    supabase = get_supabase()
-    
     batch_data = {
         "brand": brand,
         "state": BatchState.S1_SETUP.value,
@@ -69,6 +89,17 @@ def create_batch(
         "archived": False
     }
 
+    if creation_mode == "character_consistency":
+        character = get_active_character()
+        if character is None:
+            raise ValidationError(
+                "Cannot create a Character Consistency batch: no active character configured. "
+                "Upload a character at /settings/character first.",
+                {"creation_mode": "character_consistency"},
+            )
+        batch_data["character_snapshot"] = snapshot_for_batch(character).model_dump(mode="json")
+        batch_data["scene_plan"] = None
+
     legacy_batch_data = {
         "brand": brand,
         "state": BatchState.S1_SETUP.value,
@@ -77,30 +108,16 @@ def create_batch(
         "archived": False,
     }
 
-    try:
-        response = supabase.client.table("batches").insert(batch_data).execute()
-    except APIError as exc:
-        error_text = str(exc)
-        if exc.code == "PGRST204" and "creation_mode" in error_text:
-            logger.warning(
-                "batch_creation_mode_column_missing_fallback",
-                error=error_text,
-                batch_brand=brand,
-            )
-            response = supabase.client.table("batches").insert(legacy_batch_data).execute()
-        else:
-            raise
-
-    if not response.data:
-        raise Exception("Failed to create batch")
-
-    batch = response.data[0]
+    batch = _insert_batch_row(batch_data, legacy_batch_data)
     if creation_mode:
         batch = {
             **batch,
             "creation_mode": creation_mode,
             "manual_post_count": manual_post_count,
         }
+        if "character_snapshot" in batch_data:
+            batch["character_snapshot"] = batch_data["character_snapshot"]
+            batch["scene_plan"] = batch_data["scene_plan"]
     
     logger.info(
         "batch_created",
@@ -111,6 +128,11 @@ def create_batch(
     )
     
     return batch
+
+
+def update_batch_scene_plan(*, batch_id: str, scene_plan: Dict[str, str]) -> None:
+    supabase = get_supabase()
+    supabase.client.table("batches").update({"scene_plan": scene_plan}).eq("id", batch_id).execute()
 
 
 def create_manual_draft_posts(

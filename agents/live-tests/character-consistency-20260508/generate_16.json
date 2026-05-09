@@ -1,0 +1,1 @@
+{"ok":false,"status":422,"code":"validation_error","message":"Veo extended chains need one complete dialogue segment per hop plus a base segment.","details":{"target_length_tier":16,"planned_extension_hops":1,"segments_available":1,"segments_required":2}}

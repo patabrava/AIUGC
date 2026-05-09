@@ -37,7 +37,7 @@ def test_resolve_video_submission_plan_preserves_legacy_batch_inputs():
     assert plan["profile"] is None
 
 
-def test_resolve_video_submission_plan_routes_duration_tier_to_veo_extended():
+def test_resolve_video_submission_plan_routes_duration_tier_to_vertex_extended():
     batch = {"id": "new-batch", "target_length_tier": 16, "video_pipeline_route": "veo_extended"}
 
     plan = video_handlers._resolve_video_submission_plan(
@@ -49,7 +49,7 @@ def test_resolve_video_submission_plan_routes_duration_tier_to_veo_extended():
         size=None,
     )
 
-    assert plan["provider"] == "veo_3_1"
+    assert plan["provider"] == "vertex_ai"
     assert plan["seconds"] == 16
     assert plan["provider_target_seconds"] == 15
     assert plan["resolution"] == "720p"
@@ -521,8 +521,9 @@ def test_resolve_plan_for_32s_batch_initializes_full_chain_metadata():
     )
 
     assert plan["duration_routed"] is True
-    assert plan["provider"] == "veo_3_1"
+    assert plan["provider"] == "vertex_ai"
     assert plan["profile"].veo_extension_hops == 3
+    assert plan["profile"].veo_base_seconds == 8
     assert plan["resolution"] == "720p"
 
     metadata = video_handlers._build_submission_metadata(

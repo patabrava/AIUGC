@@ -14,7 +14,12 @@ from app.adapters.supabase_client import get_supabase
 from postgrest.exceptions import APIError
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
-from app.features.posts.prompt_builder import build_video_prompt_from_seed, validate_video_prompt, build_optimized_prompt
+from app.features.posts.prompt_builder import (
+    build_video_prompt_from_seed,
+    ensure_scene_plan,
+    validate_video_prompt,
+    build_optimized_prompt,
+)
 from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.states import BatchState
@@ -138,6 +143,29 @@ def _load_batch_creation_mode(batch_id: str, supabase_client) -> str:
     if not response.data:
         return "automated"
     return str(response.data[0].get("creation_mode") or "automated")
+
+
+def _load_batch_for_prompt(batch_id: str, supabase_client) -> dict:
+    response = (
+        supabase_client.table("batches")
+        .select("id, brand, creation_mode, scene_plan")
+        .eq("id", batch_id)
+        .execute()
+    )
+    return response.data[0] if response.data else {"id": batch_id, "creation_mode": "automated"}
+
+
+def _load_batch_topic_titles(batch_id: str, supabase_client) -> list[str]:
+    try:
+        response = (
+            supabase_client.table("posts")
+            .select("topic_title")
+            .eq("batch_id", batch_id)
+            .execute()
+        )
+    except Exception:
+        return []
+    return [str(row.get("topic_title") or "").strip() for row in response.data or [] if row.get("topic_title")]
 
 
 @router.put("/{post_id}/script", response_model=SuccessResponse)
@@ -348,9 +376,18 @@ async def build_post_prompt(post_id: str):
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
             )
 
+        batch = _load_batch_for_prompt(post["batch_id"], supabase)
+        scene_plan = ensure_scene_plan(
+            batch,
+            topic_titles=_load_batch_topic_titles(post["batch_id"], supabase),
+            correlation_id=correlation_id,
+        )
+
         # Build video prompt by inserting dialogue into template
         video_prompt = build_video_prompt_from_seed(
             seed_data,
+            post_type=str(post.get("post_type") or "value"),
+            scene_plan=scene_plan,
             legacy_32_visuals=_should_use_legacy_32_visuals(post),
         )
 

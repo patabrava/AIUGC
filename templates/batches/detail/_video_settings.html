@@ -25,6 +25,14 @@
             </label>
             <label class="mt-4 flex flex-col text-sm max-w-xs" for="model-select-routed">
                 <span class="text-gray-700 font-medium">Veo Model</span>
+                {% if batch.creation_mode == 'character_consistency' %}
+                <div
+                    class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
+                    title="Character Consistency mode requires Veo 3.1 for reference image support"
+                >
+                    Veo 3.1 only
+                </div>
+                {% else %}
                 <select
                     id="model-select-routed"
                     name="model"
@@ -35,6 +43,7 @@
                     <option value="veo-3.1-fast-generate-001">Veo 3.1 Fast</option>
                     <option value="veo-3.1-lite-generate-001">Veo 3.1 Lite</option>
                 </select>
+                {% endif %}
             </label>
         </div>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4" x-show="!isDurationRouted">
@@ -52,6 +61,14 @@
             </label>
             <label class="flex flex-col text-sm" for="model-select">
                 <span class="text-gray-700 font-medium">Veo Model</span>
+                {% if batch.creation_mode == 'character_consistency' %}
+                <div
+                    class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
+                    title="Character Consistency mode requires Veo 3.1 for reference image support"
+                >
+                    Veo 3.1 only
+                </div>
+                {% else %}
                 <select
                     id="model-select"
                     name="model"
@@ -62,6 +79,7 @@
                     <option value="veo-3.1-fast-generate-001">Veo 3.1 Fast</option>
                     <option value="veo-3.1-lite-generate-001">Veo 3.1 Lite</option>
                 </select>
+                {% endif %}
             </label>
             <label class="flex flex-col text-sm" for="aspect-select">
                 <span class="text-gray-700 font-medium">Aspect Ratio</span>

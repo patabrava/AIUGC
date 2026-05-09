@@ -21,7 +21,7 @@ from pydantic import ValidationError as PydanticValidationError
 import httpx
 
 from app.adapters.supabase_client import get_supabase
-from app.adapters.veo_client import get_veo_client
+from app.adapters.veo_client import get_veo_client, select_veo_model_id
 from app.adapters.vertex_ai_client import get_vertex_ai_client
 from app.core.config import get_settings
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
@@ -45,6 +45,8 @@ from app.features.posts.prompt_builder import (
     LEGACY_32_STYLE,
     LEGACY_SHORT_CHARACTER,
     build_video_prompt_from_seed,
+    build_negative_prompt,
+    ensure_scene_plan,
     build_veo_prompt_segment,
     split_dialogue_sentences,
     sync_video_prompt_with_seed_data,
@@ -75,6 +77,12 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 _WORDS_PER_SECOND = 2.5
+
+
+def _resolve_non_duration_provider(requested_provider: Optional[str]) -> str:
+    if requested_provider in {None, VEO_PROVIDER, "vertex_ai"}:
+        return "vertex_ai"
+    return requested_provider
 
 
 def _configured_veo_reference_image_paths(settings: Any) -> list[str]:
@@ -189,6 +197,58 @@ def _load_global_veo_reference_assets(
     }
 
 
+def _download_image_bytes(url: str) -> bytes:
+    response = httpx.get(
+        url,
+        timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=None),
+    )
+    response.raise_for_status()
+    return response.content
+
+
+def _load_character_snapshot_assets(
+    *,
+    snapshot: Optional[Dict[str, Any]],
+    correlation_id: str,
+) -> Optional[Dict[str, Any]]:
+    if not snapshot:
+        return None
+
+    urls = [
+        snapshot["front_image_url"],
+        snapshot["three_quarter_image_url"],
+        snapshot["profile_image_url"],
+    ]
+    reference_images: list[Dict[str, str]] = []
+    for url in urls:
+        mime_type = mimetypes.guess_type(urlparse(url).path)[0] or "image/png"
+        if mime_type not in {"image/png", "image/jpeg"}:
+            mime_type = "image/png"
+        reference_images.append(
+            {
+                "mime_type": mime_type,
+                "data_base64": base64.b64encode(_download_image_bytes(url)).decode("ascii"),
+            }
+        )
+
+    logger.info(
+        "veo_character_snapshot_loaded",
+        correlation_id=correlation_id,
+        character_id=snapshot.get("character_id"),
+        image_count=len(reference_images),
+    )
+    return {
+        "reference_images": reference_images,
+        "metadata": {
+            "reference_images_enabled": True,
+            "reference_image_count": len(reference_images),
+            "character_id": snapshot.get("character_id"),
+            "character_name": snapshot.get("name"),
+            "source": "batch_character_snapshot",
+        },
+    }
+
+
 def _resolve_extended_provider_aspect_ratio(route: Optional[str], requested_aspect_ratio: str) -> str:
     """Extended runs keep the requested aspect ratio when the REST path is used."""
     return requested_aspect_ratio
@@ -248,9 +308,8 @@ def _resolve_video_submission_plan(
         resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
         provider_aspect_ratio = _resolve_extended_provider_aspect_ratio(profile.route, aspect_ratio)
         requested_size = size or _map_size_from_aspect_ratio(aspect_ratio, resolved_resolution)
-        provider = "vertex_ai" if requested_provider == "vertex_ai" else VEO_PROVIDER
         return {
-            "provider": provider,
+            "provider": "vertex_ai",
             "seconds": profile.requested_seconds,
             "provider_target_seconds": profile.provider_target_seconds,
             "aspect_ratio": aspect_ratio,
@@ -269,7 +328,7 @@ def _resolve_video_submission_plan(
             "manual_requested_target_length_tier": requested_target_length_tier if manual_auto_resolved else None,
         }
 
-    provider = requested_provider or VEO_PROVIDER
+    provider = _resolve_non_duration_provider(requested_provider)
     seconds = requested_seconds or 8
     return {
         "provider": provider,
@@ -304,6 +363,7 @@ def _load_or_build_video_prompt(
     post: Dict[str, Any],
     supabase_client,
     correlation_id: str,
+    batch: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     video_prompt = post.get("video_prompt_json")
     if isinstance(video_prompt, str):
@@ -356,7 +416,19 @@ def _load_or_build_video_prompt(
         )
 
     try:
-        built_prompt = build_video_prompt_from_seed(seed_data, legacy_32_visuals=False)
+        scene_plan = None
+        if batch:
+            scene_plan = ensure_scene_plan(
+                batch,
+                topic_titles=[str(post.get("topic_title") or "").strip()],
+                correlation_id=correlation_id,
+            )
+        built_prompt = build_video_prompt_from_seed(
+            seed_data,
+            legacy_32_visuals=False,
+            post_type=str(post.get("post_type") or "value"),
+            scene_plan=scene_plan,
+        )
         validate_video_prompt(built_prompt)
     except ValidationError as exc:
         raise FlowForgeException(
@@ -912,6 +984,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             post=post,
             supabase_client=supabase,
             correlation_id=correlation_id,
+            batch=batch,
         )
 
         submission_plan = _resolve_video_submission_plan(
@@ -939,7 +1012,12 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 "prompt_path": "veo_extended_base_prompt",
             }
         else:
-            prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
+            prompt_request = _build_provider_prompt_request(
+                video_prompt,
+                submission_plan["provider"],
+                creation_mode=str(batch.get("creation_mode") or "automated"),
+                is_extension=False,
+            )
             segment_metadata = None
 
         requested_units = 0
@@ -966,6 +1044,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             ),
             first_frame_image=None,
             seed=veo_seed,
+            creation_mode=str(batch.get("creation_mode") or "automated"),
+            character_snapshot=batch.get("character_snapshot"),
         )
 
         operation_id = submission_result["operation_id"]
@@ -1229,9 +1309,10 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         submitted_post_ids = []
         prepared_submissions = []
         last_provider_model: Optional[str] = None
+        batch_submission_provider = "vertex_ai" if uses_duration_routing(batch) else _resolve_non_duration_provider(request.provider)
         batch_veo_seed = (
             random.randint(0, 2**32 - 1)
-            if _should_assign_veo_seed(provider=request.provider, profile=batch_profile)
+            if _should_assign_veo_seed(provider=batch_submission_provider, profile=batch_profile)
             else None
         )
 
@@ -1277,6 +1358,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     post=post,
                     supabase_client=supabase,
                     correlation_id=f"{correlation_id}_{post_id}",
+                    batch=batch,
                 )
             except FlowForgeException as exc:
                 logger.warning(
@@ -1295,9 +1377,18 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     planned_extension_hops=profile.veo_extension_hops,
                     target_length_tier=profile.target_length_tier,
                 )
-                negative_prompt = _build_veo_negative_prompt(video_prompt)
+                negative_prompt = (
+                    build_negative_prompt(creation_mode="character_consistency", is_extension=True)
+                    if str(batch.get("creation_mode") or "") == "character_consistency"
+                    else _build_veo_negative_prompt(video_prompt)
+                )
             else:
-                prompt_request = _build_provider_prompt_request(video_prompt, submission_plan["provider"])
+                prompt_request = _build_provider_prompt_request(
+                    video_prompt,
+                    submission_plan["provider"],
+                    creation_mode=str(batch.get("creation_mode") or "automated"),
+                    is_extension=False,
+                )
                 prompt_text = prompt_request["prompt_text"] or ""
                 negative_prompt = prompt_request.get("negative_prompt")
                 segment_metadata = None
@@ -1383,6 +1474,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     ),
                     first_frame_image=None,
                     seed=batch_veo_seed,
+                    creation_mode=str(batch.get("creation_mode") or "automated"),
+                    character_snapshot=batch.get("character_snapshot"),
                 )
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
@@ -1752,17 +1845,26 @@ def _consume_quota_after_acceptance(
 
 def _build_provider_prompt_text(video_prompt: Dict[str, Any], provider: str) -> tuple[str, str]:
     """Build provider-specific prompt text. Returns (text, path)."""
-    if provider == "veo_3_1":
+    if provider in {VEO_PROVIDER, "vertex_ai"}:
         return _build_veo_prompt_text(video_prompt)
 
     # Fallback to canonical composition
     return build_full_prompt_text(video_prompt), "full_prompt_text_fallback"
 
 
-def _build_provider_prompt_request(video_prompt: Dict[str, Any], provider: str) -> Dict[str, Any]:
+def _build_provider_prompt_request(
+    video_prompt: Dict[str, Any],
+    provider: str,
+    *,
+    creation_mode: str = "automated",
+    is_extension: bool = False,
+) -> Dict[str, Any]:
     """Build provider-specific prompt payload pieces."""
     prompt_text, prompt_path = _build_provider_prompt_text(video_prompt, provider)
-    negative_prompt = _build_veo_negative_prompt(video_prompt) if provider == "veo_3_1" else None
+    if provider in {VEO_PROVIDER, "vertex_ai"} and creation_mode == "character_consistency":
+        negative_prompt = build_negative_prompt(creation_mode=creation_mode, is_extension=is_extension)
+    else:
+        negative_prompt = _build_veo_negative_prompt(video_prompt) if provider in {VEO_PROVIDER, "vertex_ai"} else None
     return {
         "prompt_text": prompt_text,
         "negative_prompt": negative_prompt,
@@ -1786,6 +1888,8 @@ def _submit_video_request(
     provider_duration_seconds: Optional[int] = None,
     first_frame_image: Optional[Dict[str, str]] = None,
     seed: Optional[int] = None,
+    creation_mode: str = "automated",
+    character_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Submit a video generation request to the selected provider."""
 
@@ -1794,8 +1898,15 @@ def _submit_video_request(
         provider_aspect = provider_aspect_ratio or aspect_ratio
         requested_aspect = requested_aspect_ratio or aspect_ratio
         veo_duration_seconds = provider_duration_seconds or seconds
-        model_name = model or "veo-3.1-generate-preview"
-        reference_bundle = _load_global_veo_reference_assets(correlation_id=correlation_id, strict=False)
+        mode = str(creation_mode or "automated").strip()
+        model_name = select_veo_model_id(creation_mode=mode) if mode == "character_consistency" else (model or select_veo_model_id(creation_mode=mode))
+        if mode == "character_consistency":
+            reference_bundle = _load_character_snapshot_assets(
+                snapshot=character_snapshot,
+                correlation_id=correlation_id,
+            )
+        else:
+            reference_bundle = _load_global_veo_reference_assets(correlation_id=correlation_id, strict=False)
         reference_images = reference_bundle["reference_images"] if reference_bundle else None
         if veo_duration_seconds not in {4, 6, 8}:
             veo_duration_seconds = 8
@@ -1862,6 +1973,30 @@ def _submit_video_request(
         settings = get_settings()
         vertex_duration = provider_duration_seconds or seconds
         output_gcs_uri = settings.vertex_ai_output_gcs_uri or None
+        mode = str(creation_mode or "automated").strip()
+        reference_bundle = None
+        reference_skip_metadata: Dict[str, Any] = {}
+        if mode == "character_consistency":
+            if vertex_duration == 8:
+                reference_bundle = _load_character_snapshot_assets(
+                    snapshot=character_snapshot,
+                    correlation_id=correlation_id,
+                )
+            else:
+                reference_skip_metadata = {
+                    "reference_images_enabled": False,
+                    "reference_images_skipped_reason": "vertex_reference_images_support_only_8s_base",
+                    "character_id": character_snapshot.get("character_id") if character_snapshot else None,
+                    "character_name": character_snapshot.get("name") if character_snapshot else None,
+                    "source": "batch_character_snapshot",
+                }
+                logger.info(
+                    "vertex_character_snapshot_references_skipped_for_legacy_duration",
+                    correlation_id=correlation_id,
+                    character_id=reference_skip_metadata.get("character_id"),
+                    duration_seconds=vertex_duration,
+                )
+        reference_images = reference_bundle["reference_images"] if reference_bundle else None
         try:
             result = vertex_client.submit_text_video(
                 prompt=prompt_text,
@@ -1870,6 +2005,7 @@ def _submit_video_request(
                 duration_seconds=vertex_duration,
                 output_gcs_uri=output_gcs_uri,
                 model=model,
+                reference_images=reference_images,
             )
         except ValidationError as exc:
             raise FlowForgeException(
@@ -1882,6 +2018,13 @@ def _submit_video_request(
                 status_code=503,
             ) from exc
         requested_size = _map_size_from_aspect_ratio(aspect_ratio, resolution)
+        provider_metadata = dict(result)
+        if reference_bundle:
+            provider_metadata.update(reference_bundle["metadata"])
+        if reference_skip_metadata:
+            provider_metadata.update(reference_skip_metadata)
+        if output_gcs_uri:
+            provider_metadata["vertex_output_gcs_uri"] = output_gcs_uri
         return {
             "operation_id": result["operation_id"],
             "status": result.get("status", "submitted"),
@@ -1890,7 +2033,7 @@ def _submit_video_request(
             "requested_size": requested_size,
             "provider_requested_size": requested_size,
             "estimated_duration_seconds": 180,
-            "provider_metadata": result,
+            "provider_metadata": provider_metadata,
             "vertex_output_gcs_uri": output_gcs_uri,
         }
 

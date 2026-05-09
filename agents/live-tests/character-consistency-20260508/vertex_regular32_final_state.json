@@ -1,0 +1,57 @@
+2026-05-08 13:11:10 [info     ] supabase_client_initialized    api_key_source=service url=https://qnvgiihzbihkedakggth.supabase.co
+{
+  "post_id": "9d64f54b-1330-4751-b08c-d6b5d9f44429",
+  "video_status": "caption_completed",
+  "video_provider": "vertex_ai",
+  "video_operation_id": "projects/project-89aac146-ec35-4755-b83/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/8b160c95-393d-49b6-a5c5-cd68fe81c013",
+  "video_url": "https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/flow-forge/videos/20260508T110954Z_post_9d64f54b-1330-4751-b08c-d6b5d9f44429.mp4",
+  "chain": {
+    "target_length_tier": 32,
+    "provider_target_seconds": 29,
+    "veo_base_seconds": 8,
+    "veo_segments_total": 4,
+    "veo_extension_hops_target": 3,
+    "veo_extension_hops_completed": 3,
+    "veo_segments": [
+      "Auf dem Papier hast du das Recht. Theoretisch barrierefreie Konzepte scheitern oft an defekten Aufzügen oder",
+      "Personalmangel. Während Wien und Barcelona im ÖPNV punkten, kämpft Paris mit historischer Infrastruktur.",
+      "Kopfsteinpflaster schränkt deine Mobilität ein und kann Spastiken oder Übelkeit auslösen. Selbst Busfahrten",
+      "bleiben oft ein Glücksspiel, weil Rampen kaputt sind oder Fahrer keine Schulung haben."
+    ],
+    "veo_segment_time_windows": [
+      {
+        "end_seconds": 8.0,
+        "segment_index": 0,
+        "start_seconds": 0.0,
+        "budget_seconds": 8
+      },
+      {
+        "end_seconds": 15.0,
+        "segment_index": 1,
+        "start_seconds": 8.0,
+        "budget_seconds": 7
+      },
+      {
+        "end_seconds": 22.0,
+        "segment_index": 2,
+        "start_seconds": 15.0,
+        "budget_seconds": 7
+      },
+      {
+        "end_seconds": 29.0,
+        "segment_index": 3,
+        "start_seconds": 22.0,
+        "budget_seconds": 7
+      }
+    ],
+    "operation_ids": [
+      "projects/project-89aac146-ec35-4755-b83/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/8dd8add3-3604-4779-ac20-e05ea74da9cc",
+      "projects/project-89aac146-ec35-4755-b83/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/229dc02f-1fba-44f5-9437-e1e50bea9f47",
+      "projects/project-89aac146-ec35-4755-b83/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/f70988ec-7cc0-4dfc-9934-7eb844165916",
+      "projects/project-89aac146-ec35-4755-b83/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/8b160c95-393d-49b6-a5c5-cd68fe81c013"
+    ],
+    "chain_status": "caption_pending",
+    "generated_seconds": 21
+  },
+  "caption_status": null
+}

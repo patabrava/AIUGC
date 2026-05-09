@@ -5,7 +5,7 @@ Per Canon Phase 3: S4_SCRIPTED → S5_PROMPTS_BUILT
 """
 
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Iterable, Optional
 
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE_BODY
 from app.features.posts.schemas import VideoPrompt, AudioSection
@@ -17,6 +17,7 @@ __all__ = [
     "STANDARD_FINAL_AUDIO_BLOCK",
     "SORA_NEGATIVE_CONSTRAINTS",
     "VEO_NEGATIVE_PROMPT",
+    "build_negative_prompt",
     "build_video_prompt_from_seed",
     "sync_video_prompt_with_seed_data",
     "validate_video_prompt",
@@ -24,6 +25,9 @@ __all__ = [
     "split_dialogue_sentences",
     "build_veo_prompt_segment",
     "build_lean_veo_continuation_prompt",
+    "propose_scene_plan",
+    "ensure_scene_plan",
+    "resolve_scene_for_post",
 ]
 
 
@@ -75,6 +79,25 @@ VEO_NEGATIVE_PROMPT = (
     "mirror appearing or disappearing, layout changes, background drift, new furniture, extra plants, wall color change, "
     "bedding color change, different room, lighting shift"
 )
+
+_VEO_SCENE_LOCK_CLAUSE = (
+    ", mirror appearing or disappearing, layout changes, background drift, new furniture, extra plants, "
+    "wall color change, bedding color change, different room, lighting shift"
+)
+
+_VEO_BASE_NEGATIVES = (
+    "subtitles, captions, watermark, text overlays, words on screen, logos, branding, poor lighting, "
+    "blurry footage, low resolution, unwanted objects, character inconsistency, lip-sync drift, "
+    "cartoon styling, unrealistic proportions, distorted hands, artificial lighting, oversaturation, "
+    "excessive camera shake, background voices, music bed, audio hiss, static, clipping, abrupt cuts, angle changes"
+)
+
+
+def build_negative_prompt(*, creation_mode: str, is_extension: bool) -> str:
+    """Build mode-aware Veo negativePrompt text."""
+    if creation_mode == "character_consistency" and not is_extension:
+        return _VEO_BASE_NEGATIVES
+    return _VEO_BASE_NEGATIVES + _VEO_SCENE_LOCK_CLAUSE
 
 OPTIMIZED_PROMPT_TEMPLATE = (
     "Character:\n"
@@ -199,6 +222,82 @@ CHARACTER_SOURCE_KEYS = (
 
 logger = get_logger(__name__)
 
+_SCENE_PROPOSAL_SYSTEM_PROMPT = (
+    "You are a UGC video director. Given a brand and post topics, produce three concise, "
+    "visually distinct scene descriptions for the same single character. Return one scene for "
+    "value, one for lifestyle, and one for product posts. Each scene must describe location, "
+    "lighting, and a few set details in one sentence."
+)
+
+_SCENE_PROPOSAL_USER_TEMPLATE = (
+    "Brand: {brand}\n\n"
+    "Topics:\n{topics_block}\n\n"
+    "Return JSON with exactly these keys: value, lifestyle, product."
+)
+
+
+def _get_llm_client():
+    from app.adapters.llm_client import get_llm_client
+
+    return get_llm_client()
+
+
+def propose_scene_plan(*, brand: str, topic_titles: Iterable[str], correlation_id: str) -> dict[str, str]:
+    topics = [str(title).strip() for title in topic_titles if str(title).strip()][:8]
+    prompt = _SCENE_PROPOSAL_USER_TEMPLATE.format(
+        brand=brand,
+        topics_block="\n".join(f"- {title}" for title in topics) or "- (none yet)",
+    )
+    fallback = {"value": DEFAULT_SCENE, "lifestyle": DEFAULT_SCENE, "product": DEFAULT_SCENE}
+    try:
+        response = _get_llm_client().generate_json(prompt, system_prompt=_SCENE_PROPOSAL_SYSTEM_PROMPT)
+    except Exception as exc:  # noqa: BLE001 - LLM fallback must be non-blocking here.
+        logger.warning("scene_plan_llm_failed_fallback_to_default", correlation_id=correlation_id, error=str(exc))
+        return fallback
+
+    return {
+        "value": str(response.get("value") or DEFAULT_SCENE).strip() or DEFAULT_SCENE,
+        "lifestyle": str(response.get("lifestyle") or DEFAULT_SCENE).strip() or DEFAULT_SCENE,
+        "product": str(response.get("product") or DEFAULT_SCENE).strip() or DEFAULT_SCENE,
+    }
+
+
+def _update_batch_scene_plan(batch_id: str, payload: dict) -> None:
+    from app.features.batches.queries import update_batch_scene_plan
+
+    update_batch_scene_plan(batch_id=batch_id, scene_plan=payload["scene_plan"])
+
+
+def ensure_scene_plan(batch: dict, *, topic_titles: list[str], correlation_id: str) -> Optional[dict[str, str]]:
+    if str(batch.get("creation_mode") or "automated").strip() != "character_consistency":
+        return None
+    existing = batch.get("scene_plan")
+    if isinstance(existing, dict) and all(existing.get(key) for key in ("value", "lifestyle", "product")):
+        return {
+            "value": str(existing["value"]),
+            "lifestyle": str(existing["lifestyle"]),
+            "product": str(existing["product"]),
+        }
+    plan = propose_scene_plan(
+        brand=str(batch.get("brand") or ""),
+        topic_titles=topic_titles,
+        correlation_id=correlation_id,
+    )
+    _update_batch_scene_plan(str(batch["id"]), {"scene_plan": plan})
+    batch["scene_plan"] = plan
+    return plan
+
+
+def resolve_scene_for_post(*, post_type: str, scene_plan: Optional[dict], override: Optional[str]) -> str:
+    cleaned_override = (override or "").strip()
+    if cleaned_override:
+        return cleaned_override
+    if isinstance(scene_plan, dict):
+        planned_scene = str(scene_plan.get(post_type) or "").strip()
+        if planned_scene:
+            return planned_scene
+    return DEFAULT_SCENE
+
 
 def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
     if prompt_mode == "extended_base_or_continuation":
@@ -296,7 +395,21 @@ def sync_video_prompt_with_seed_data(
     return updated_prompt
 
 
-def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals: bool = False) -> Dict[str, Any]:
+def _scene_for_template(scene: str, *, legacy_32_visuals: bool) -> str:
+    if legacy_32_visuals:
+        return LEGACY_SCENE_BODY
+    cleaned = scene.strip()
+    return cleaned[len("Scene: "):].strip() if cleaned.startswith("Scene: ") else cleaned
+
+
+def build_video_prompt_from_seed(
+    seed_data: Dict[str, Any],
+    *,
+    legacy_32_visuals: bool = False,
+    post_type: str = "value",
+    scene_plan: Optional[dict] = None,
+    scene_override: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Assemble video generation prompt by inserting dialogue from Phase 2 seed data.
     
@@ -344,7 +457,10 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals
     # Assemble complete prompt using template defaults
     character_value = _resolve_character_value(seed_data, legacy_32_visuals)
     style_value = LEGACY_32_STYLE if legacy_32_visuals else DEFAULT_STYLE
-    scene_value = LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY
+    scene_value = LEGACY_SCENE_BODY if legacy_32_visuals else _scene_for_template(
+        resolve_scene_for_post(post_type=post_type, scene_plan=scene_plan, override=scene_override),
+        legacy_32_visuals=False,
+    )
     cinematography_value = LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY
 
     optimized_prompt = build_optimized_prompt(
@@ -374,7 +490,7 @@ def build_video_prompt_from_seed(seed_data: Dict[str, Any], *, legacy_32_visuals
     base_prompt = VideoPrompt(
         character=character_value,
         style=style_value,
-        scene=(f"Scene: {scene_value}" if legacy_32_visuals else DEFAULT_SCENE),
+        scene=f"Scene: {scene_value}",
         cinematography=(f"Cinematography: {cinematography_value}" if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY),
         audio=audio_section,
         universal_negatives=SORA_NEGATIVE_CONSTRAINTS,

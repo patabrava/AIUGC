@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Lippe Lift Studio{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-3xl px-4 py-8">
+  <nav class="mb-6 flex gap-4 border-b pb-3 text-sm">
+    <a href="/settings/character" class="font-medium text-[#E58434]">Character</a>
+  </nav>
+  {% block settings_content %}{% endblock %}
+</div>
+{% endblock %}

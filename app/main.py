@@ -6,6 +6,7 @@ Per Constitution § I: Canon Supremacy
 
 import uuid
 import time
+import os
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -30,6 +31,7 @@ from app.features.publish.handlers import router as publish_router, run_schedule
 from app.features.blog.handlers import router as blog_router, run_scheduled_blog_publish_job
 from app.features.auth.handlers import router as auth_router
 from app.features.auth.middleware import require_auth, is_public_path
+from app.features.characters.handlers import router as characters_router
 
 try:
     from app.features.publish.tiktok import router as tiktok_router
@@ -82,28 +84,32 @@ async def lifespan(app: FastAPI):
     # A bad deployment secret should not prevent the web process from booting.
     logger.info("supabase_client_initialization_deferred")
 
-    scheduler.add_job(
-        run_scheduled_publish_job,
-        "interval",
-        minutes=1,
-        id="meta_publish_dispatch",
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=30,
-    )
-    scheduler.start()
-    logger.info("publish_scheduler_started", interval_minutes=1)
+    schedulers_disabled = os.getenv("DISABLE_BACKGROUND_SCHEDULERS", "").lower() in {"1", "true", "yes"}
+    if schedulers_disabled:
+        logger.info("background_schedulers_disabled")
+    else:
+        scheduler.add_job(
+            run_scheduled_publish_job,
+            "interval",
+            minutes=1,
+            id="meta_publish_dispatch",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=30,
+        )
+        scheduler.start()
+        logger.info("publish_scheduler_started", interval_minutes=1)
 
-    scheduler.add_job(
-        run_scheduled_blog_publish_job,
-        "interval",
-        minutes=1,
-        id="blog_publish_dispatch",
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=30,
-    )
-    logger.info("blog_publish_scheduler_started", interval_minutes=1)
+        scheduler.add_job(
+            run_scheduled_blog_publish_job,
+            "interval",
+            minutes=1,
+            id="blog_publish_dispatch",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=30,
+        )
+        logger.info("blog_publish_scheduler_started", interval_minutes=1)
 
     try:
         recovered_batches = recover_stalled_batches(limit=1, max_age_hours=6)
@@ -130,9 +136,10 @@ async def lifespan(app: FastAPI):
     
     yield
 
-    scheduler.shutdown(wait=False)
-    logger.info("publish_scheduler_stopped")
-    logger.info("blog_publish_scheduler_stopped")
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("publish_scheduler_stopped")
+        logger.info("blog_publish_scheduler_stopped")
     logger.info("application_shutdown")
 
 
@@ -312,6 +319,7 @@ async def health_check():
 
 # Register routers
 app.include_router(auth_router)
+app.include_router(characters_router)
 app.include_router(batches_router)
 app.include_router(topics_router)
 app.include_router(posts_router)
