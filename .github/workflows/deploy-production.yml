@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST != '' && secrets.PROD_SSH_HOST || vars.PROD_SSH_HOST }}
+      PROD_SSH_HOST: srv1498567.hstgr.cloud
       PROD_SSH_USER: ${{ secrets.PROD_SSH_USER != '' && secrets.PROD_SSH_USER || vars.PROD_SSH_USER }}
       PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY != '' && secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
       PROD_SSH_PASSWORD: ${{ secrets.PROD_SSH_PASSWORD != '' && secrets.PROD_SSH_PASSWORD || vars.PROD_SSH_PASSWORD }}
@@ -29,6 +29,29 @@ jobs:
             echo "Missing PROD_SSH_PRIVATE_KEY or PROD_SSH_PASSWORD GitHub secret."
             exit 1
           fi
+
+      - name: Preflight SSH TCP reachability
+        run: |
+          python3 - <<'PY'
+          import os
+          import socket
+          import sys
+
+          host = os.environ["PROD_SSH_HOST"]
+          timeout_seconds = 10
+
+          try:
+              with socket.create_connection((host, 22), timeout=timeout_seconds):
+                  pass
+          except OSError as exc:
+              print(
+                  f"GitHub runner could not open TCP to {host}:22 within {timeout_seconds}s: {exc}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          print(f"TCP reachability verified for {host}:22")
+          PY
 
       - name: Deploy over SSH with password
         if: env.PROD_SSH_PASSWORD != ''
