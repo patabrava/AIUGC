@@ -1000,3 +1000,74 @@ def test_veo_extension_request_uses_video_without_reference_images(monkeypatch):
     assert "referenceImages" not in instance
     assert "image" not in instance
     assert "lastFrame" not in instance
+
+
+
+# --- Manual auto-derive (word-count -> tier) tests --------------------------
+# These cover the bug where two-sentence long scripts were silently capped at
+# tier 16 (~14.5s) and where >32s was unreachable.
+
+@pytest.mark.parametrize(
+    "word_count, expected_tier",
+    [
+        (1, 8),     # tiny script -> tier 8
+        (20, 8),    # 8s of speech -> tier 8 (provider_target=8)
+        (21, 16),   # ~8.4s of speech -> tier 16 (provider_target=15)
+        (37, 16),   # ~14.8s of speech -> still tier 16 (15s)
+        (38, 32),   # ~15.2s of speech -> tier 32 (29s)
+        (72, 32),   # ~28.8s of speech -> tier 32
+        (73, 48),   # ~29.2s of speech -> tier 48 (43s)
+        (107, 48),  # ~42.8s of speech -> tier 48
+        (108, 64),  # ~43.2s of speech -> tier 64 (57s)
+        (142, 64),  # ~56.8s of speech -> tier 64
+        (200, 64),  # overflow -> capped at tier 64 (max)
+    ],
+)
+def test_manual_auto_derive_picks_tier_from_word_count(word_count, expected_tier):
+    script = " ".join(["wort"] * word_count)
+    seed_data = {"manual_draft": True, "script": script}
+    tier = video_handlers._resolve_manual_target_length_tier(seed_data)
+    assert tier == expected_tier, f"word_count={word_count}: expected {expected_tier}, got {tier}"
+
+
+def test_manual_long_two_sentence_script_no_longer_caps_at_tier_16():
+    """Regression: 60-word, two-sentence script was capped at tier 16 (~14.5s).
+    With auto-derive it now picks tier 32 (~28.5s)."""
+    script = (
+        "Hallo Leute heute zeige ich euch wie ich in dreissig Tagen mein "
+        "Leben komplett auf den Kopf gestellt habe und richtig krasse "
+        "Ergebnisse erzielt habe in nur kurzer Zeit. Wenn ihr wirklich "
+        "Erfolg haben wollt dann passt jetzt sehr gut auf weil ich euch "
+        "alles erklaere was ihr wissen muesst um anzufangen heute."
+    )
+    seed_data = {"manual_draft": True, "script": script}
+    tier = video_handlers._resolve_manual_target_length_tier(seed_data)
+    assert tier == 32  # was 16 before the fix
+
+
+def test_manual_long_single_sentence_script_picks_a_real_tier():
+    """Regression: long script with no periods was capped at tier 8 by the
+    old sentence-counter heuristic."""
+    script = " ".join(["wort"] * 80)  # ~32s of speech, no periods
+    seed_data = {"manual_draft": True, "script": script}
+    tier = video_handlers._resolve_manual_target_length_tier(seed_data)
+    assert tier == 48  # was 8 before the fix
+
+
+def test_manual_empty_or_missing_script_returns_default_tier():
+    assert video_handlers._resolve_manual_target_length_tier(None) == 8
+    assert video_handlers._resolve_manual_target_length_tier({}) == 8
+    assert video_handlers._resolve_manual_target_length_tier({"script": ""}) == 8
+    assert video_handlers._resolve_manual_target_length_tier({"script": "   "}) == 8
+
+
+def test_new_tier_profiles_are_resolvable():
+    """Tier 48 and 64 must be valid duration profiles."""
+    p48 = get_duration_profile(48)
+    assert p48.target_length_tier == 48
+    assert p48.veo_extension_hops == 5
+    assert p48.provider_target_seconds == 43
+    p64 = get_duration_profile(64)
+    assert p64.target_length_tier == 64
+    assert p64.veo_extension_hops == 7
+    assert p64.provider_target_seconds == 57

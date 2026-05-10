@@ -13,7 +13,9 @@ from app.core.config import get_settings
 SHORT_VIDEO_ROUTE = "short"
 VEO_EXTENDED_VIDEO_ROUTE = "veo_extended"
 DEFAULT_TARGET_LENGTH_TIER = 8
-SUPPORTED_TARGET_LENGTH_TIERS = (8, 16, 32)
+# 48 and 64 added for manual auto-derive of long scripts. Topic-based batches
+# continue to use 8/16/32 (CANON unchanged for the topic flow).
+SUPPORTED_TARGET_LENGTH_TIERS = (8, 16, 32, 48, 64)
 VEO_PROVIDER = "veo_3_1"
 VIDEO_STATUS_SUBMITTED = "submitted"
 VIDEO_STATUS_PROCESSING = "processing"
@@ -103,6 +105,46 @@ _BASE_PROFILES = {
         prompt2_max_words=66,
         prompt2_sentence_guidance="4 Sprechbloecke",
     ),
+    # Tier 48 & 64 are MANUAL-ONLY: auto-resolved from script word count.
+    # Topic-based batches still use only 8/16/32. The prompt1_*/prompt2_*
+    # fields are only consumed by the topic-flow LLM script generator, so they
+    # are kept consistent for completeness but not actually used for manual.
+    48: DurationProfile(
+        target_length_tier=48,
+        route=VEO_EXTENDED_VIDEO_ROUTE,
+        requested_seconds=48,
+        provider_target_seconds=43,
+        veo_base_seconds=8,
+        veo_extension_seconds=7,
+        veo_extension_hops=5,
+        prompt1_min_words=88,
+        prompt1_max_words=108,
+        prompt1_min_seconds=36,
+        prompt1_max_seconds=42,
+        prompt1_max_chars_no_spaces=620,
+        prompt1_sentence_guidance="SECHS natuerliche Sprechbloecke",
+        prompt2_min_words=66,
+        prompt2_max_words=98,
+        prompt2_sentence_guidance="6 Sprechbloecke",
+    ),
+    64: DurationProfile(
+        target_length_tier=64,
+        route=VEO_EXTENDED_VIDEO_ROUTE,
+        requested_seconds=64,
+        provider_target_seconds=57,
+        veo_base_seconds=8,
+        veo_extension_seconds=7,
+        veo_extension_hops=7,
+        prompt1_min_words=120,
+        prompt1_max_words=144,
+        prompt1_min_seconds=48,
+        prompt1_max_seconds=56,
+        prompt1_max_chars_no_spaces=820,
+        prompt1_sentence_guidance="ACHT natuerliche Sprechbloecke",
+        prompt2_min_words=98,
+        prompt2_max_words=130,
+        prompt2_sentence_guidance="8 Sprechbloecke",
+    ),
 }
 
 _EFFICIENT_LONG_ROUTE_PROFILES = {
@@ -152,6 +194,10 @@ def _profiles() -> dict[int, DurationProfile]:
             8: _BASE_PROFILES[8],
             16: _EFFICIENT_LONG_ROUTE_PROFILES[16],
             32: _BASE_PROFILES[32],
+            # 48 and 64 already use the efficient pattern (8s base + 7s ext)
+            # in _BASE_PROFILES, so we surface them directly here.
+            48: _BASE_PROFILES[48],
+            64: _BASE_PROFILES[64],
         }
     return _BASE_PROFILES
 

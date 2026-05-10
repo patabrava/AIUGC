@@ -114,7 +114,7 @@
                     <p class="text-sm font-semibold text-[#006AAB]">Duration-routed batch</p>
                     <p class="mt-1 text-sm text-[#006AAB]">
                         {% if batch.creation_mode == 'manual' %}
-                        Manual drafts resolve duration from each approved script at submit time. Short scripts stay short, and longer scripts upgrade automatically when they have enough dialogue structure.
+                        Manual drafts auto-pick the duration tier from each script's word count at submit time (≈2.5 words/sec). Short scripts stay short; longer scripts upgrade up to ~57s. Each post shows its estimated video length live in the editor.
                         {% else %}
                         <span x-text="`${targetLengthTier}s selected at batch setup.`"></span>
                         <span x-show="pipelineRoute === 'short'"> This stays on the short Veo path.</span>

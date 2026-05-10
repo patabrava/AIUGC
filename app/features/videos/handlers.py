@@ -27,6 +27,8 @@ from app.core.config import get_settings
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
 from app.core.video_profiles import (
+    DEFAULT_TARGET_LENGTH_TIER,
+    SUPPORTED_TARGET_LENGTH_TIERS,
     VEO_EXTENDED_VIDEO_ROUTE,
     VEO_PROVIDER,
     get_duration_profile,
@@ -264,25 +266,50 @@ def _count_script_words(script: str) -> int:
     return len(re.findall(r"\b[\w'-]+\b", script))
 
 
+def _estimate_speech_seconds_for_script(script: str) -> float:
+    """Estimate spoken duration in seconds for a script using the project's
+    canonical 2.5 words-per-second cadence (matches `_estimate_spoken_seconds`
+    used elsewhere)."""
+    word_count = _count_script_words(script)
+    if word_count <= 0:
+        return 0.0
+    return word_count / _WORDS_PER_SECOND
+
+
 def _resolve_manual_target_length_tier(seed_data: Optional[Dict[str, Any]]) -> int:
+    """Auto-derive the target tier for a MANUAL post from script word count.
+
+    Replaces the old sentence-count heuristic that silently capped:
+      - long single-sentence scripts at tier 8 (~7.5s),
+      - long two/three-sentence scripts at tier 16 (~14.5s).
+
+    Algorithm:
+      estimated_speech_seconds = word_count / _WORDS_PER_SECOND
+      pick the smallest tier whose `provider_target_seconds` >= estimate
+      fall back to the highest supported tier when the script overflows.
+
+    Topic-based batches keep using the explicit tier on the batch row; this
+    function is only invoked when `_is_manual_video_post(...)` is True.
+    """
     if not isinstance(seed_data, dict):
-        return 8
+        return DEFAULT_TARGET_LENGTH_TIER
 
     script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
     if not script:
-        return 8
+        return DEFAULT_TARGET_LENGTH_TIER
 
-    segments = split_dialogue_sentences(script)
-    if not segments:
-        segments = [script]
-    word_count = _count_script_words(script)
+    estimated_seconds = _estimate_speech_seconds_for_script(script)
+    if estimated_seconds <= 0:
+        return DEFAULT_TARGET_LENGTH_TIER
 
-    for tier in (32, 16):
+    sorted_tiers = sorted(SUPPORTED_TARGET_LENGTH_TIERS)
+    for tier in sorted_tiers:
         profile = get_duration_profile(tier)
-        required_segments = _required_veo_segments_for_profile_hops(profile.veo_extension_hops)
-        if len(segments) >= required_segments and word_count >= profile.prompt2_min_words:
+        if profile.provider_target_seconds >= estimated_seconds:
             return tier
-    return 8
+    # Script overflows our biggest supported tier — return the max and let
+    # the partitioner pack the surplus words (Veo will speed-talk slightly).
+    return sorted_tiers[-1]
 
 
 def _resolve_video_submission_plan(
@@ -820,12 +847,29 @@ def _pack_veo_segments_for_profile(
 
     profile = get_duration_profile(target_length_tier)
     required_segments = _required_veo_segments_for_profile_hops(planned_extension_hops)
-    if profile.route != VEO_EXTENDED_VIDEO_ROUTE or len(segments) < required_segments:
+    if profile.route != VEO_EXTENDED_VIDEO_ROUTE:
         return segments
 
     words: list[str] = []
     for segment in segments:
         words.extend(word for word in segment.split() if word)
+
+    # Permit partition when EITHER:
+    #   - we have at least one sentence per chain hop (the original gate;
+    #     keeps topic-flow tests passing), OR
+    #   - the total word count is large enough to fill the chain meaningfully
+    #     (~5 words / segment ~= 2s of speech). This second branch unblocks
+    #     long manual scripts that arrive as one big paragraph with few
+    #     sentence terminators.
+    # Otherwise leave the original segmentation alone so the budget validator
+    # downstream can surface the misconfiguration with a clear error
+    # (e.g., a 6-word script targeted at the 32s chain).
+    minimum_total_words_for_word_partition = required_segments * 5
+    if (
+        len(segments) < required_segments
+        and len(words) < minimum_total_words_for_word_partition
+    ):
+        return segments
 
     return _partition_words_for_profile(
         words,

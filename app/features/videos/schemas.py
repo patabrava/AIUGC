@@ -41,9 +41,9 @@ class VideoGenerationRequest(BaseModel):
         default=8,
         description="Target duration in seconds for the generated clip."
     )
-    target_length_tier: Optional[Literal[8, 16, 32]] = Field(
+    target_length_tier: Optional[Literal[8, 16, 32, 48, 64]] = Field(
         default=None,
-        description="Duration tier for duration-routed batches"
+        description="Duration tier for duration-routed batches (8/16/32 for topic batches; 48/64 reserved for manual auto-derived long videos)"
     )
     size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
         default=None,
@@ -192,9 +192,9 @@ class BatchVideoGenerationRequest(BaseModel):
         default=8,
         description="Target duration in seconds for generated clips."
     )
-    target_length_tier: Optional[Literal[8, 16, 32]] = Field(
+    target_length_tier: Optional[Literal[8, 16, 32, 48, 64]] = Field(
         default=None,
-        description="Duration tier for duration-routed batches"
+        description="Duration tier for duration-routed batches (8/16/32 for topic batches; 48/64 reserved for manual auto-derived long videos)"
     )
     size: Optional[Literal["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1792", "1792x1024"]] = Field(
         default=None,
