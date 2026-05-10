@@ -59,6 +59,8 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     assert web["build"]["context"] == "."
     assert worker["build"]["context"] == "."
     assert any(".env.production" in entry for entry in web["env_file"])
+    assert web["environment"]["DISABLE_BACKGROUND_SCHEDULERS"] == "${DISABLE_BACKGROUND_SCHEDULERS:-true}"
+    assert web["environment"]["DISABLE_STARTUP_RECOVERY_CHECKS"] == "${DISABLE_STARTUP_RECOVERY_CHECKS:-true}"
     assert "DOCKER_BUILD_CONTEXT" not in compose_text
     assert "/opt/aiugc-prod/.env.production" not in compose_text
     assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
@@ -66,7 +68,7 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     assert "TRAEFIK_HOST_RULE" in compose_text
     assert "TRAEFIK_ENTRYPOINTS" in compose_text
     assert "TRAEFIK_CERTRESOLVER" in compose_text
-    assert "traefik.http.routers.lippelift-prod-web-v3.rule" in compose_text
+    assert "traefik.http.routers.lippelift-prod-web-v4.rule" in compose_text
     assert "TRAEFIK_NETWORK" not in compose_text
     assert "external: true" not in compose_text
 
@@ -86,11 +88,13 @@ def test_legacy_compose_files_follow_production_build_contract():
         assert web["build"]["context"] == "."
         assert worker["build"]["context"] == "."
         assert any(".env.production" in entry for entry in web["env_file"])
+        assert web["environment"]["DISABLE_BACKGROUND_SCHEDULERS"] == "${DISABLE_BACKGROUND_SCHEDULERS:-true}"
+        assert web["environment"]["DISABLE_STARTUP_RECOVERY_CHECKS"] == "${DISABLE_STARTUP_RECOVERY_CHECKS:-true}"
         assert "DOCKER_BUILD_CONTEXT" not in compose_text
         assert "git clone" not in compose_text
         assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
         assert "TRAEFIK_NETWORK" not in compose_text
-        assert "traefik.http.routers.lippelift-prod-web-v3.rule" in compose_text
+        assert "traefik.http.routers.lippelift-prod-web-v4.rule" in compose_text
 
 
 def test_production_deploy_script_contract():

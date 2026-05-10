@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, HTMLResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -46,6 +46,7 @@ logger = get_logger(__name__)
 
 _HEALTH_DB_CACHE_SECONDS = 60
 _HEALTH_DB_TIMEOUT_SECONDS = 5
+_TRUE_ENV_VALUES = {"1", "true", "yes"}
 _health_db_cache = {
     "checked_at": 0.0,
     "healthy": True,
@@ -87,7 +88,7 @@ async def lifespan(app: FastAPI):
     # A bad deployment secret should not prevent the web process from booting.
     logger.info("supabase_client_initialization_deferred")
 
-    schedulers_disabled = os.getenv("DISABLE_BACKGROUND_SCHEDULERS", "").lower() in {"1", "true", "yes"}
+    schedulers_disabled = _env_flag_enabled("DISABLE_BACKGROUND_SCHEDULERS")
     if schedulers_disabled:
         logger.info("background_schedulers_disabled")
     else:
@@ -114,7 +115,10 @@ async def lifespan(app: FastAPI):
         )
         logger.info("blog_publish_scheduler_started", interval_minutes=1)
 
-    startup_recovery_task = asyncio.create_task(_run_startup_recovery_checks())
+    if _env_flag_enabled("DISABLE_STARTUP_RECOVERY_CHECKS"):
+        logger.info("startup_recovery_checks_disabled")
+    else:
+        startup_recovery_task = asyncio.create_task(_run_startup_recovery_checks())
 
     yield
 
@@ -165,6 +169,65 @@ def _probe_database_health() -> bool:
     return supabase.health_check()
 
 
+def _env_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in _TRUE_ENV_VALUES
+
+
+def _request_prefers_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return request.method.upper() == "GET" and "text/html" in accept
+
+
+def _looks_like_database_dependency_error(error_text: str) -> bool:
+    normalized = error_text.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "supabase",
+            "postgrest",
+            "database",
+            "connection timed out",
+            "read operation timed out",
+            "connection terminated due to connection timeout",
+            "522",
+            "503",
+            "504",
+        )
+    )
+
+
+def _database_unavailable_response(request: Request, error_text: str) -> HTMLResponse:
+    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("X-Correlation-ID", "")
+    safe_error = "The database API is temporarily unavailable. Please retry in a few minutes."
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lippe Lift Studio - Database unavailable</title>
+  <style>
+    :root {{ color-scheme: light; --ink:#17211b; --muted:#5d6b61; --bg:#f4efe5; --card:#fffaf0; --accent:#bb4a2c; }}
+    body {{ margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 20% 10%, #ffe0b7, transparent 32%), var(--bg); color:var(--ink); font:16px/1.5 Georgia, 'Times New Roman', serif; }}
+    main {{ max-width:680px; margin:32px; padding:36px; background:var(--card); border:1px solid #e5d7bd; box-shadow:0 24px 80px rgba(45,35,20,.12); }}
+    h1 {{ margin:0 0 12px; font-size:clamp(32px, 6vw, 58px); line-height:.95; letter-spacing:-.04em; }}
+    p {{ margin:0 0 16px; color:var(--muted); }}
+    a {{ color:var(--accent); font-weight:700; }}
+    code {{ background:#efe3cf; padding:2px 6px; border-radius:4px; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Studio database is recovering.</h1>
+    <p>{safe_error}</p>
+    <p>The web service is online, but Supabase is currently returning timeout/gateway errors for data requests. Browser routes are being held on this page instead of showing a raw internal error.</p>
+    <p><a href="/health">Check readiness</a> or try reloading shortly.</p>
+    <p><small>Correlation: <code>{correlation_id or "unavailable"}</code></small></p>
+  </main>
+</body>
+</html>"""
+    return HTMLResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=html)
+
+
 def _run_meta_publish_scheduler_job_sync() -> None:
     """Run the async publish scheduler in APScheduler's thread executor."""
     asyncio.run(run_scheduled_publish_job())
@@ -198,6 +261,7 @@ async def correlation_id_middleware(request: Request, call_next):
     """Add correlation ID to each request."""
     correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
     set_correlation_id(correlation_id)
+    request.state.correlation_id = correlation_id
 
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
@@ -267,6 +331,15 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         message = str(detail or "Request failed")
         details = None
 
+    if exc.status_code >= 500 and _request_prefers_html(request) and _looks_like_database_dependency_error(message):
+        logger.warning(
+            "database_dependency_error_rendered_as_html",
+            path=request.url.path,
+            status_code=exc.status_code,
+            error=message,
+        )
+        return _database_unavailable_response(request, message)
+
     error_response = ErrorResponse(
         status=exc.status_code,
         code=error_code_for_status(exc.status_code),
@@ -284,6 +357,10 @@ async def general_exception_handler(request: Request, exc: Exception):
         error=str(exc),
         path=request.url.path
     )
+
+    error_text = str(exc)
+    if _request_prefers_html(request) and _looks_like_database_dependency_error(error_text):
+        return _database_unavailable_response(request, error_text)
     
     error_response = ErrorResponse(
         status=status.HTTP_500_INTERNAL_SERVER_ERROR,

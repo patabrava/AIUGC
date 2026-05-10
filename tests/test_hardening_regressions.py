@@ -81,6 +81,46 @@ def test_app_lifespan_does_not_eagerly_create_supabase_client(monkeypatch):
     assert calls["count"] == 0
 
 
+def test_app_lifespan_can_disable_startup_database_recovery(monkeypatch):
+    calls = {"batch_recovery": 0, "topic_recovery": 0, "cron_monitoring": 0}
+
+    def _called(name):
+        calls[name] += 1
+        raise AssertionError(f"{name} should be disabled")
+
+    monkeypatch.setenv("DISABLE_STARTUP_RECOVERY_CHECKS", "true")
+    monkeypatch.setenv("DISABLE_BACKGROUND_SCHEDULERS", "true")
+    monkeypatch.setattr(main_module, "recover_stalled_batches", lambda **kwargs: _called("batch_recovery"))
+    monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: _called("topic_recovery"))
+    monkeypatch.setattr(main_module, "get_topic_research_cron_monitoring", lambda: _called("cron_monitoring"))
+
+    async def _run():
+        async with main_module.lifespan(app):
+            return True
+
+    import asyncio
+
+    assert asyncio.run(_run()) is True
+    assert calls == {"batch_recovery": 0, "topic_recovery": 0, "cron_monitoring": 0}
+
+
+def test_database_dependency_errors_render_html_for_browser_gets():
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/batches",
+        "headers": [(b"accept", b"text/html")],
+    }
+    request = Request(scope)
+
+    response = main_module._database_unavailable_response(request, "supabase.co 522")
+
+    assert response.status_code == 503
+    assert "Studio database is recovering" in response.body.decode()
+
+
 def test_health_check_caches_database_probe(monkeypatch):
     calls = {"count": 0}
 
