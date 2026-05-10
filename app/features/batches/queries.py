@@ -32,6 +32,17 @@ def _execute_with_retry(operation_name: str, callback):
             time.sleep(delay)
         try:
             return callback()
+        except httpx.TimeoutException as exc:
+            logger.warning(
+                "batch_query_timeout",
+                operation=operation_name,
+                attempt=attempt,
+                error=str(exc),
+            )
+            raise ThirdPartyError(
+                message=f"Database unavailable while loading batch data for {operation_name}",
+                details={"operation": operation_name, "error": str(exc)},
+            ) from exc
         except httpx.RequestError as exc:
             last_error = exc
             logger.warning(
@@ -41,7 +52,7 @@ def _execute_with_retry(operation_name: str, callback):
                 error=str(exc),
             )
     raise ThirdPartyError(
-        message=f"Failed to load batch data for {operation_name}",
+        message=f"Database unavailable while loading batch data for {operation_name}",
         details={"operation": operation_name, "error": str(last_error) if last_error else "unknown"},
     )
 

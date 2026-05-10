@@ -236,3 +236,4 @@ END_LLM_FRIENDLY_PLAN_TEST_DEBUG
 - Prompt editor access must keep `GET /posts/{post_id}/prompt` and `PATCH /posts/{post_id}/prompt` in parity; stale clients may read the route before saving it, so return a bootstrap prompt payload instead of leaving the batch view to 404.
 - Production web containers must run with in-process schedulers and startup DB recovery scans disabled by default; those loops belong in workers/cron, or a Supabase outage can keep browser routes returning opaque 500s while the database is trying to recover.
 - Supabase/PostGREST clients must use a bounded `postgrest_client_timeout` in production; the SDK default of 120s lets browser requests hang behind database outages instead of reaching the app's degraded HTML/503 path.
+- Batch list/detail queries must fail fast on `httpx.TimeoutException` without retrying the same Supabase outage; retry loops turn one dead PostgREST call into long browser hangs.

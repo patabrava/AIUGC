@@ -311,6 +311,10 @@ async def flowforge_exception_handler(request: Request, exc: FlowForgeException)
         details=exc.details,
         path=request.url.path
     )
+
+    error_text = f"{exc.message} {exc.details or ''}"
+    if exc.status_code >= 500 and _request_prefers_html(request) and _looks_like_database_dependency_error(error_text):
+        return _database_unavailable_response(request, error_text)
     
     return JSONResponse(
         status_code=exc.status_code,
