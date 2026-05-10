@@ -4,7 +4,8 @@ set -euo pipefail
 APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
 REPO_DIR="${REPO_DIR:-$APP_ROOT/repo}"
 ENV_FILE="${ENV_FILE:-$APP_ROOT/.env.production}"
-HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/health}"
+HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/livez}"
+READINESSCHECK_URL="${READINESSCHECK_URL:-https://lippelift.xyz/health}"
 MAX_HEALTH_RETRIES="${MAX_HEALTH_RETRIES:-40}"
 HEALTHCHECK_INTERVAL_SECONDS="${HEALTHCHECK_INTERVAL_SECONDS:-5}"
 REPO_REMOTE="${REPO_REMOTE:-https://github.com/patabrava/AIUGC.git}"
@@ -48,7 +49,10 @@ fi
 
 for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
   if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL" >/dev/null; then
-    echo "Deploy healthy: $HEALTHCHECK_URL"
+    echo "Deploy live: $HEALTHCHECK_URL"
+    if ! curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$READINESSCHECK_URL" >/dev/null; then
+      echo "Readiness probe is degraded after deploy: $READINESSCHECK_URL" >&2
+    fi
     exit 0
   fi
   sleep "$HEALTHCHECK_INTERVAL_SECONDS"

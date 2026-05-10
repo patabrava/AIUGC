@@ -20,8 +20,8 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 # Paths that do not require authentication
-PUBLIC_PATH_PREFIXES = ("/auth/", "/health", "/static/", "/tiktok", "/topics/cron")
-PUBLIC_PATHS_EXACT = ("/health", "/terms", "/privacy")
+PUBLIC_PATH_PREFIXES = ("/auth/", "/health", "/livez", "/static/", "/tiktok", "/topics/cron")
+PUBLIC_PATHS_EXACT = ("/health", "/livez", "/terms", "/privacy")
 
 
 def _is_local_request(request: Request) -> bool:

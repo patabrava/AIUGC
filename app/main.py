@@ -266,7 +266,19 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Health endpoint
+# Liveness endpoint
+@app.get("/livez")
+async def live_check():
+    """Lightweight process liveness endpoint for container/router health checks."""
+    settings = get_settings()
+    return {
+        "status": "alive",
+        "version": "1.0.0",
+        "environment": settings.environment,
+    }
+
+
+# Readiness endpoint
 @app.get("/health")
 async def health_check():
     """

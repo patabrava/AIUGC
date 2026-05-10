@@ -67,7 +67,8 @@ jobs:
             export REPO_DIR="${APP_ROOT}/repo"
             export ENV_FILE="${APP_ROOT}/.env.production"
             export APP_ENV_FILE="$ENV_FILE"
-            export HEALTHCHECK_URL="https://lippelift.xyz/health"
+            export HEALTHCHECK_URL="https://lippelift.xyz/livez"
+            export READINESSCHECK_URL="https://lippelift.xyz/health"
             mkdir -p "$APP_ROOT"
             if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
               printf '%s' "$PROD_ENV_FILE_B64" | base64 -d > "$ENV_FILE"
@@ -129,7 +130,8 @@ jobs:
             export REPO_DIR="${APP_ROOT}/repo"
             export ENV_FILE="${APP_ROOT}/.env.production"
             export APP_ENV_FILE="$ENV_FILE"
-            export HEALTHCHECK_URL="https://lippelift.xyz/health"
+            export HEALTHCHECK_URL="https://lippelift.xyz/livez"
+            export READINESSCHECK_URL="https://lippelift.xyz/health"
             mkdir -p "$APP_ROOT"
             if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
               printf '%s' "$PROD_ENV_FILE_B64" | base64 -d > "$ENV_FILE"
