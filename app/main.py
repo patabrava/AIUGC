@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
         logger.info("background_schedulers_disabled")
     else:
         scheduler.add_job(
-            run_scheduled_publish_job,
+            _run_meta_publish_scheduler_job_sync,
             "interval",
             minutes=1,
             id="meta_publish_dispatch",
@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
         logger.info("publish_scheduler_started", interval_minutes=1)
 
         scheduler.add_job(
-            run_scheduled_blog_publish_job,
+            _run_blog_publish_scheduler_job_sync,
             "interval",
             minutes=1,
             id="blog_publish_dispatch",
@@ -163,6 +163,16 @@ async def _run_startup_recovery_checks() -> None:
 def _probe_database_health() -> bool:
     supabase = get_supabase()
     return supabase.health_check()
+
+
+def _run_meta_publish_scheduler_job_sync() -> None:
+    """Run the async publish scheduler in APScheduler's thread executor."""
+    asyncio.run(run_scheduled_publish_job())
+
+
+def _run_blog_publish_scheduler_job_sync() -> None:
+    """Run the async blog scheduler in APScheduler's thread executor."""
+    asyncio.run(run_scheduled_blog_publish_job())
 
 
 # Create FastAPI application
