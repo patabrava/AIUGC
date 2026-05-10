@@ -5,6 +5,7 @@ APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
 REPO_DIR="${REPO_DIR:-$APP_ROOT/repo}"
 ENV_FILE="${ENV_FILE:-$APP_ROOT/.env.production}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/livez}"
+LOCAL_HEALTHCHECK_URL="${LOCAL_HEALTHCHECK_URL:-http://127.0.0.1:8000/livez}"
 READINESSCHECK_URL="${READINESSCHECK_URL:-https://lippelift.xyz/health}"
 MAX_HEALTH_RETRIES="${MAX_HEALTH_RETRIES:-40}"
 HEALTHCHECK_INTERVAL_SECONDS="${HEALTHCHECK_INTERVAL_SECONDS:-5}"
@@ -48,6 +49,20 @@ fi
 "${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" up -d --build --remove-orphans
 
 for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
+  if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "$LOCAL_HEALTHCHECK_URL" >/dev/null; then
+    echo "App live on VPS: $LOCAL_HEALTHCHECK_URL"
+    break
+  fi
+  if [[ "$attempt" -eq "$MAX_HEALTH_RETRIES" ]]; then
+    echo "Local app healthcheck failed after $MAX_HEALTH_RETRIES attempts: $LOCAL_HEALTHCHECK_URL" >&2
+    "${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" ps || true
+    "${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" logs --tail=160 web || true
+    exit 1
+  fi
+  sleep "$HEALTHCHECK_INTERVAL_SECONDS"
+done
+
+for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
   if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL" >/dev/null; then
     echo "Deploy live: $HEALTHCHECK_URL"
     if ! curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$READINESSCHECK_URL" >/dev/null; then
@@ -60,4 +75,10 @@ done
 
 echo "Healthcheck failed after $MAX_HEALTH_RETRIES attempts: $HEALTHCHECK_URL" >&2
 "${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" ps || true
+"${COMPOSE_CMD[@]}" -f docker-compose.production.yml -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" logs --tail=160 web || true
+if command -v docker >/dev/null 2>&1; then
+  docker inspect "${COMPOSE_PROJECT_NAME}-web-1" --format '{{json .Config.Labels}}' || true
+  docker inspect "${COMPOSE_PROJECT_NAME}-web-1" --format '{{json .NetworkSettings.Networks}}' || true
+  docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+fi
 exit 1
