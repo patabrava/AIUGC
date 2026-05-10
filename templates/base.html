@@ -82,6 +82,7 @@
                     <a href="/topics" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">Topics</a>
                     <a href="/batches" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">Batches</a>
                     <a href="/docs" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">API Docs</a>
+                    <a href="/settings/character" class="brand-nav__link brand-focus rounded-full px-4 py-2 text-sm">Settings</a>
                     <form method="post" action="/auth/logout" class="inline">
                         <button type="submit" class="text-gray-400 hover:text-[var(--lippe-orange)] px-3 py-2 rounded-md text-sm font-medium transition" title="Log out">
                             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -134,6 +135,13 @@
                     @click="mobileMenuOpen = false"
                 >
                     API Docs
+                </a>
+                <a
+                    href="/settings/character"
+                    class="block text-[var(--lippe-deep-blue)] hover:text-[#006AAB] hover:bg-[#006AAB]/5 px-3 py-2 rounded-md text-base font-medium transition"
+                    @click="mobileMenuOpen = false"
+                >
+                    Settings
                 </a>
                 <button
                     type="button"
