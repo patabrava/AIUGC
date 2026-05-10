@@ -45,6 +45,7 @@ configure_logging()
 logger = get_logger(__name__)
 
 _HEALTH_DB_CACHE_SECONDS = 60
+_HEALTH_DB_TIMEOUT_SECONDS = 5
 _health_db_cache = {
     "checked_at": 0.0,
     "healthy": True,
@@ -157,6 +158,11 @@ async def _run_startup_recovery_checks() -> None:
         logger.warning("startup_topic_cron_monitoring_failed", error=str(exc))
     else:
         logger.info("startup_topic_cron_monitoring", **cron_monitoring)
+
+
+def _probe_database_health() -> bool:
+    supabase = get_supabase()
+    return supabase.health_check()
 
 
 # Create FastAPI application
@@ -309,9 +315,14 @@ async def health_check():
     checked_at = float(_health_db_cache["checked_at"])
     if checked_at <= 0 or now - checked_at >= _HEALTH_DB_CACHE_SECONDS:
         try:
-            supabase = get_supabase()
-            db_healthy = supabase.health_check()
+            db_healthy = await asyncio.wait_for(
+                asyncio.to_thread(_probe_database_health),
+                timeout=_HEALTH_DB_TIMEOUT_SECONDS,
+            )
             db_error = None
+        except asyncio.TimeoutError:
+            db_healthy = False
+            db_error = f"database readiness probe timed out after {_HEALTH_DB_TIMEOUT_SECONDS}s"
         except Exception as exc:
             db_healthy = False
             db_error = str(exc)

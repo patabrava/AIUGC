@@ -102,6 +102,25 @@ def test_health_check_caches_database_probe(monkeypatch):
     assert calls["count"] == 1
 
 
+def test_health_check_times_out_blocking_database_probe(monkeypatch):
+    import asyncio
+    import time
+
+    class SlowSupabase:
+        def health_check(self):
+            time.sleep(0.2)
+            return True
+
+    monkeypatch.setattr(main_module, "get_supabase", lambda: SlowSupabase())
+    monkeypatch.setattr(main_module, "_HEALTH_DB_TIMEOUT_SECONDS", 0.01)
+    main_module._health_db_cache.update({"checked_at": 0.0, "healthy": True, "error": None})
+
+    response = asyncio.run(main_module.health_check())
+
+    assert response.status_code == 503
+    assert "timed out" in response.body.decode()
+
+
 def test_app_lifespan_logs_google_ai_context_fingerprint(monkeypatch):
     from app.core.config import fingerprint_secret
 
