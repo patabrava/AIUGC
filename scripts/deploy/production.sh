@@ -65,9 +65,8 @@ done
 for ((attempt=1; attempt<=MAX_HEALTH_RETRIES; attempt+=1)); do
   if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL" >/dev/null; then
     echo "Deploy live: $HEALTHCHECK_URL"
-    if ! curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$READINESSCHECK_URL" >/dev/null; then
-      echo "Readiness probe is degraded after deploy: $READINESSCHECK_URL" >&2
-    fi
+    curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$READINESSCHECK_URL" >/dev/null
+    echo "Deploy ready: $READINESSCHECK_URL"
     exit 0
   fi
   sleep "$HEALTHCHECK_INTERVAL_SECONDS"

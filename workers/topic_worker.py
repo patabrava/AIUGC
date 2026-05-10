@@ -36,6 +36,7 @@ RESEARCH_INTERVAL_SECONDS = int(
 POLL_INTERVAL_SECONDS = int(
     os.getenv("TOPIC_WORKER_POLL_INTERVAL_SECONDS", str(DEFAULT_POLL_INTERVAL_SECONDS))
 )
+ERROR_BACKOFF_SECONDS = int(os.getenv("TOPIC_WORKER_ERROR_BACKOFF_SECONDS", "300"))
 
 
 def _resolve_startup_research_timestamp() -> float:
@@ -117,7 +118,11 @@ def run_topic_worker_tick(
 
 def main() -> None:
     settings = get_settings()
-    last_research_run = _resolve_startup_research_timestamp()
+    try:
+        last_research_run = _resolve_startup_research_timestamp()
+    except Exception:
+        logger.exception("topic_worker_startup_research_timestamp_failed")
+        last_research_run = 0.0
     last_audit_run = 0.0
 
     logger.info(
@@ -140,6 +145,16 @@ def main() -> None:
             break
         except Exception:
             logger.exception("topic_worker_error")
+            logger.info(
+                "topic_worker_sleeping_after_error",
+                next_run_in_seconds=ERROR_BACKOFF_SECONDS,
+            )
+            try:
+                time.sleep(ERROR_BACKOFF_SECONDS)
+            except KeyboardInterrupt:
+                logger.info("topic_worker_stopped_by_user")
+                break
+            continue
 
         logger.info(
             "topic_worker_sleeping",

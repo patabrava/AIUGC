@@ -211,9 +211,7 @@ jobs:
           sleep 70
           curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/livez
           curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/auth/login >/dev/null
-          if ! curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/health; then
-            echo "Production readiness is degraded, but deploy liveness is healthy: https://lippelift.xyz/health" >&2
-          fi
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/health >/dev/null
 
       - name: Diagnose production route with password
         if: failure() && env.PROD_SSH_PASSWORD != ''

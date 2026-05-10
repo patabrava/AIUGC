@@ -71,10 +71,9 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     assert "external: true" not in compose_text
 
 
-def test_production_compose_has_live_healthcheck():
+def test_production_compose_does_not_include_web_healthcheck():
     data = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
-    health = data["services"]["web"]["healthcheck"]
-    assert health["test"][-1] == "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+    assert "healthcheck" not in data["services"]["web"]
 
 
 def test_legacy_compose_files_follow_production_build_contract():
@@ -105,11 +104,13 @@ def test_production_deploy_script_contract():
         '--env-file "$ENV_FILE"',
         'up -d --build --remove-orphans',
         '"${COMPOSE_CMD[@]}" -f docker-compose.production.yml',
-        'curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$HEALTHCHECK_URL"',
+        'curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "$LOCAL_HEALTHCHECK_URL"',
+        'curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$READINESSCHECK_URL"',
     ]
     for item in required:
         assert item in script_text
-    assert 'HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/health}"' in script_text
+    assert 'HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://lippelift.xyz/livez}"' in script_text
+    assert 'READINESSCHECK_URL="${READINESSCHECK_URL:-https://lippelift.xyz/health}"' in script_text
 
 
 def test_hostinger_runtime_checkout_tracks_remote_main():
@@ -138,6 +139,8 @@ def test_github_action_deploys_on_push_to_main():
     assert "appleboy/ssh-action" in step_text
     assert "scripts/deploy/production.sh" in step_text
     assert "mkdir -p \"$APP_ROOT\"" in step_text
+    assert "https://lippelift.xyz/health >/dev/null" in step_text
+    assert "Production readiness is degraded" not in step_text
     assert "git clone https://github.com/patabrava/AIUGC.git \"$REPO_DIR\"" in step_text
     assert "git fetch origin main" in step_text
     assert "git checkout -B main origin/main" in step_text

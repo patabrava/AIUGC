@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 RESEARCH_INTERVAL_SECONDS = int(os.getenv("TOPIC_RESEARCH_INTERVAL_SECONDS", str(24 * 60 * 60)))
 MAX_TOPICS_PER_RUN = 5
 POLL_INTERVAL_SECONDS = int(os.getenv("TOPIC_WORKER_POLL_INTERVAL_SECONDS", "60"))
+ERROR_BACKOFF_SECONDS = int(os.getenv("TOPIC_WORKER_ERROR_BACKOFF_SECONDS", "300"))
 TARGET_TIERS = [8, 16, 32]
 POST_TYPE = "value"
 NICHE = os.environ.get("CRON_RESEARCH_NICHE", "Schwerbehinderung, Treppenlifte, Barrierefreiheit")
@@ -378,8 +379,13 @@ if __name__ == "__main__":
         tiers=TARGET_TIERS,
     )
 
-    _last_run = _get_last_run_timestamp()
-    _active_run = _get_active_cron_timestamp()
+    try:
+        _last_run = _get_last_run_timestamp()
+        _active_run = _get_active_cron_timestamp()
+    except Exception:
+        logger.exception("topic_researcher_last_run_recovery_failed")
+        _last_run = 0.0
+        _active_run = 0.0
     if _active_run > _last_run:
         _last_run = _active_run
     logger.info("topic_researcher_last_run_recovered", last_run=_last_run)
@@ -397,5 +403,7 @@ if __name__ == "__main__":
             break
         except Exception as exc:
             logger.exception("topic_research_cron_failed", error=str(exc))
+            time.sleep(ERROR_BACKOFF_SECONDS)
+            continue
 
         time.sleep(POLL_INTERVAL_SECONDS)

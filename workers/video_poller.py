@@ -98,6 +98,7 @@ if not _veo_available:
     )
 
 POLL_INTERVAL_SECONDS = 10
+POLL_ERROR_BACKOFF_SECONDS = int(os.getenv("VIDEO_POLLER_ERROR_BACKOFF_SECONDS", "300"))
 MAX_RETRIES = 3
 RAI_MAX_RETRIES = 3
 IDLE_RECONCILE_INTERVAL_SECONDS = int(os.getenv("VIDEO_POLLER_IDLE_RECONCILE_INTERVAL_SECONDS", "900"))
@@ -788,7 +789,7 @@ def _maybe_postprocess_video_bytes(
     }
 
 
-def poll_pending_videos():
+def poll_pending_videos() -> bool:
     """
     Poll all posts with submitted/processing video status.
     Per Constitution § VIII: Test end-to-end in real environment.
@@ -808,9 +809,11 @@ def poll_pending_videos():
             process_video_operation(post)
 
         _maybe_reconcile_batches_ready_for_qa(active_post_count=len(posts))
+        return True
     
     except Exception as e:
         logger.exception("poll_cycle_failed", error=str(e))
+        return False
 
 
 def process_video_operation(post: Dict[str, Any]):
@@ -2036,11 +2039,12 @@ if __name__ == "__main__":
 
     while True:
         try:
-            poll_pending_videos()
+            poll_succeeded = poll_pending_videos()
         except KeyboardInterrupt:
             logger.info("video_poller_stopped_by_user")
             break
         except Exception as e:
             logger.exception("video_poller_unexpected_error", error=str(e))
+            poll_succeeded = False
 
-        time.sleep(POLL_INTERVAL_SECONDS)
+        time.sleep(POLL_INTERVAL_SECONDS if poll_succeeded else POLL_ERROR_BACKOFF_SECONDS)

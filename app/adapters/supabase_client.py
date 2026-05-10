@@ -4,13 +4,20 @@ Singleton client for Supabase database and storage.
 Per Constitution § VI: Vanilla-First Implementation
 """
 
+import os
 import re
 from typing import Optional
+import httpx
 from supabase import create_client, Client
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+_SUPABASE_KEY_PROBE_TIMEOUT_SECONDS = float(os.getenv("SUPABASE_KEY_PROBE_TIMEOUT_SECONDS", "4"))
+
+
+class _SupabaseProbeTransientError(RuntimeError):
+    """Raised when Supabase cannot prove key validity because the API is degraded."""
 
 
 def _looks_like_jwt(value: str) -> bool:
@@ -47,8 +54,29 @@ def _is_invalid_api_key_error(exc: Exception) -> bool:
     return "invalid api key" in message or "double check your supabase" in message
 
 
-def _probe_supabase_client(client: Client) -> None:
-    client.table("batches").select("id").limit(1).execute()
+def _probe_supabase_api_key(*, supabase_url: str, candidate: str) -> bool:
+    """Return True for accepted keys and False for invalid keys.
+
+    Transient Supabase/PostgREST failures must not block client construction.
+    They are surfaced later by the actual database operation or /health.
+    """
+    url = f"{supabase_url.rstrip('/')}/rest/v1/"
+    headers = {
+        "apikey": candidate,
+        "Authorization": f"Bearer {candidate}",
+    }
+    try:
+        response = httpx.get(url, headers=headers, timeout=_SUPABASE_KEY_PROBE_TIMEOUT_SECONDS)
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        raise _SupabaseProbeTransientError(str(exc)) from exc
+
+    if response.status_code in {401, 403}:
+        return False
+    if response.status_code >= 500:
+        raise _SupabaseProbeTransientError(
+            f"Supabase key probe returned HTTP {response.status_code}"
+        )
+    return True
 
 
 class SupabaseAdapter:
@@ -77,11 +105,26 @@ class SupabaseAdapter:
             last_error: Optional[Exception] = None
             for candidate in candidates:
                 try:
+                    try:
+                        key_accepted = _probe_supabase_api_key(
+                            supabase_url=settings.supabase_url,
+                            candidate=candidate,
+                        )
+                    except _SupabaseProbeTransientError as probe_error:
+                        logger.warning(
+                            "supabase_client_probe_degraded_using_candidate",
+                            api_key_source="service" if candidate == service_key else "public",
+                            error=str(probe_error),
+                        )
+                        key_accepted = True
+
+                    if not key_accepted:
+                        raise RuntimeError("Invalid API key")
+
                     client = create_client(
                         supabase_url=settings.supabase_url,
                         supabase_key=candidate,
                     )
-                    _probe_supabase_client(client)
                     self._client = client
                     logger.info(
                         "supabase_client_initialized",

@@ -32,6 +32,7 @@ logger = get_logger(__name__)
 
 POLL_INTERVAL_SECONDS = 10
 CAPTION_IDLE_BACKOFF_SECONDS = int(os.getenv("CAPTION_IDLE_BACKOFF_SECONDS", "45"))
+CAPTION_ERROR_BACKOFF_SECONDS = int(os.getenv("CAPTION_ERROR_BACKOFF_SECONDS", "300"))
 MAX_CAPTION_RETRIES = 3
 CAPTION_BATCH_LIMIT = 5
 CAPTION_POLL_SELECT_FIELDS = "id,batch_id,video_url,video_metadata,seed_data"
@@ -218,7 +219,8 @@ def main():
             break
         except Exception:
             logger.exception("caption_worker_poll_error")
-            rows_seen_count = 1
+            time.sleep(CAPTION_ERROR_BACKOFF_SECONDS)
+            continue
         time.sleep(_caption_worker_sleep_seconds(rows_seen_count))
 
 
