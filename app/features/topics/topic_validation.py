@@ -546,45 +546,33 @@ def validate_pre_persistence_topic_payload(
     word_count = _script_word_count(script)
 
     # One repair attempt for short scripts by appending a safe clause.
+    # Only safe generic suffixes are used; appending source_summary/caption/title
+    # text caused metadata-bleed regressions (script echoing the topic title).
+    # Suffixes are ordered shortest-first so the minimum addition that lands the
+    # script inside [min_words, max_words] wins. The longer combo clauses at the
+    # end are needed for 32s where the LLM occasionally undershoots by ≥8 words.
     if word_count < min_words:
-        addon_source = normalized.get("source_summary") or normalized.get("caption") or ""
-        addon = sanitize_spoken_fragment(addon_source, ensure_terminal=False)
-        addon = addon.rstrip(".!?").strip()
-        repair_suffixes: List[str] = []
-        if addon:
-            addon_words = addon.split()
-            addon_variants: List[str] = []
-            for limit in (6, 5, 4, 3):
-                clause = " ".join(addon_words[:limit]).strip()
-                if clause and clause not in addon_variants:
-                    addon_variants.append(clause)
-            if addon not in addon_variants:
-                addon_variants.insert(0, addon)
-            for clause in addon_variants:
-                if clause not in repair_suffixes:
-                    repair_suffixes.append(clause)
-                for generic in (
-                    "ganz konkret",
-                    "im Alltag",
-                    "für dich",
-                    "ganz konkret im Alltag",
-                    "ganz konkret im Alltag für dich",
-                ):
-                    combined = f"{clause} {generic}".strip()
-                    if combined not in repair_suffixes:
-                        repair_suffixes.append(combined)
-        repair_suffixes.extend(
-            [
-                "ganz konkret",
-                "im Alltag",
-                "für dich",
-                "ganz konkret im Alltag",
-                "ganz konkret im Alltag für dich",
-                "und sparst dir so unnötigen Stress",
-                "und genau das entlastet dich im Alltag",
-                "und damit wird der Alltag spürbar leichter",
-            ]
-        )
+        repair_suffixes: List[str] = [
+            # 2 words
+            "ganz konkret",
+            "im Alltag",
+            "für dich",
+            # 4 words
+            "ganz konkret im Alltag",
+            # 6 words
+            "ganz konkret im Alltag für dich",
+            "und sparst dir so unnötigen Stress",
+            # 7 words
+            "und genau das entlastet dich im Alltag",
+            "und damit wird der Alltag spürbar leichter",
+            # 11–13 words (combo clauses for 32s big-gap repair)
+            "und genau das entlastet dich im Alltag, ganz konkret für dich",
+            "und damit wird der Alltag spürbar leichter, ganz konkret für dich",
+            "und sparst dir so unnötigen Stress, ganz konkret im Alltag für dich",
+            "und genau das entlastet dich im Alltag, damit der Alltag spürbar leichter wird",
+            # 16+ words (for 32s scripts undershooting by ≥14)
+            "und genau das entlastet dich im Alltag, damit der Alltag spürbar leichter wird, ganz konkret für dich",
+        ]
         for clause in repair_suffixes:
             separators = (", ", " ") if int(target_length_tier or 8) == 8 else (" ", ". ")
             for separator in separators:

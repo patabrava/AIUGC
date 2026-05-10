@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
+import time
 from copy import deepcopy
 from typing import Any, Dict, Optional
 
@@ -18,6 +20,12 @@ from app.core.errors import ThirdPartyError, ValidationError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Cap on simultaneous in-flight Vertex requests across the process.
+# Prevents HTTP/2 stream collisions that crash the shared connection
+# under bursts (observed as RemoteProtocolError / LocalProtocolError).
+_VERTEX_INFLIGHT_LIMIT = int(os.environ.get("VERTEX_INFLIGHT_LIMIT", "4"))
+_VERTEX_REQUEST_SEMAPHORE = threading.Semaphore(_VERTEX_INFLIGHT_LIMIT)
 
 
 class VertexGeminiClient:
@@ -35,13 +43,46 @@ class VertexGeminiClient:
         if self._initialized:
             return
         self._settings = get_settings()
-        self._http_client = httpx.Client(
-            timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=None),
-            follow_redirects=True,
-        )
+        self._http_client_lock = threading.Lock()
+        self._http_client = self._build_http_client()
+        self._http_client_generation = 0
         self._credentials = None
         self._initialized = True
         logger.info("vertex_gemini_client_initialized")
+
+    @staticmethod
+    def _build_http_client() -> "httpx.Client":
+        # Force HTTP/1.1: HTTP/2 stream-state corruption (StreamIDTooLowError,
+        # last_stream_id, KeyError on stream tracker) was the dominant
+        # concurrency failure under bursts. HTTP/1.1 has no shared-stream
+        # state, only a connection pool, which httpx handles cleanly.
+        return httpx.Client(
+            http2=False,
+            timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=None),
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
+        )
+
+    def _recycle_http_client(self, observed_generation: int) -> None:
+        """Drop the shared httpx.Client after a connection-level error.
+
+        Vertex's HTTP/2 server caps streams per connection (~30) and tears
+        the connection down once that's hit. All in-flight requests on the
+        dying connection fail with RemoteProtocolError. Rebuilding the
+        client forces a fresh TCP handshake on the next call.
+        """
+        with self._http_client_lock:
+            if observed_generation != self._http_client_generation:
+                # Another thread already recycled — reuse its new client.
+                return
+            old = self._http_client
+            self._http_client = self._build_http_client()
+            self._http_client_generation += 1
+        try:
+            old.close()
+        except Exception:  # noqa: BLE001
+            pass
+        logger.info("vertex_gemini_http_client_recycled", generation=self._http_client_generation)
 
     def generate_text(
         self,
@@ -186,7 +227,47 @@ class VertexGeminiClient:
     ) -> Dict[str, Any]:
         self._ensure_configured()
         url = self._build_generate_content_url(model=model, location=location)
-        response = self._http_client.post(url, headers=self._build_headers(include_json=True), json=payload)
+        last_exc: Optional[Exception] = None
+        max_attempts = 4
+        for attempt in range(max_attempts):
+            with _VERTEX_REQUEST_SEMAPHORE:
+                client = self._http_client
+                client_generation = self._http_client_generation
+                try:
+                    response = client.post(
+                        url,
+                        headers=self._build_headers(include_json=True),
+                        json=payload,
+                    )
+                    break
+                # Catch every transport-layer error (HTTP/2 stream errors,
+                # connection drops, socket-level ReadError, h2's KeyError on
+                # its stream tracker) and trigger a recycle + retry.
+                except (httpx.HTTPError, KeyError, ConnectionError, OSError) as exc:
+                    last_exc = exc
+                    logger.warning(
+                        f"{log_event}_transport_error",
+                        attempt=attempt,
+                        error_class=type(exc).__name__,
+                        error=str(exc)[:200],
+                        model=model,
+                    )
+            # Outside the semaphore: rebuild the client (one thread wins;
+            # others piggy-back on the rebuilt instance), then back off.
+            self._recycle_http_client(client_generation)
+            if attempt < max_attempts - 1:
+                time.sleep(0.5 * (2 ** attempt))  # 0.5, 1.0, 2.0 s
+                continue
+            raise ThirdPartyError(
+                message="Vertex Gemini generateContent failed (transport)",
+                details={
+                    "error_class": type(last_exc).__name__,
+                    "error": str(last_exc)[:300],
+                    "model": model,
+                    "location": location,
+                    "attempts": max_attempts,
+                },
+            ) from last_exc
         if response.status_code >= 400:
             logger.error(
                 f"{log_event}_http_error",
