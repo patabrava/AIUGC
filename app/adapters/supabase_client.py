@@ -9,11 +9,13 @@ import re
 from typing import Optional
 import httpx
 from supabase import create_client, Client
+from supabase.lib.client_options import SyncClientOptions
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 _SUPABASE_KEY_PROBE_TIMEOUT_SECONDS = float(os.getenv("SUPABASE_KEY_PROBE_TIMEOUT_SECONDS", "4"))
+_SUPABASE_POSTGREST_TIMEOUT_SECONDS = float(os.getenv("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "8"))
 
 
 class _SupabaseProbeTransientError(RuntimeError):
@@ -124,6 +126,9 @@ class SupabaseAdapter:
                     client = create_client(
                         supabase_url=settings.supabase_url,
                         supabase_key=candidate,
+                        options=SyncClientOptions(
+                            postgrest_client_timeout=_SUPABASE_POSTGREST_TIMEOUT_SECONDS,
+                        ),
                     )
                     self._client = client
                     logger.info(

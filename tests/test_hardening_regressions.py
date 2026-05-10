@@ -236,9 +236,10 @@ def test_supabase_adapter_uses_valid_service_key(monkeypatch):
         def table(self, *_args, **_kwargs):
             return _FakeQuery()
 
-    def _fake_create_client(*, supabase_url, supabase_key):
+    def _fake_create_client(*, supabase_url, supabase_key, **_kwargs):
         captured["url"] = supabase_url
         captured["key"] = supabase_key
+        captured["postgrest_timeout"] = _kwargs["options"].postgrest_client_timeout
         return _FakeClient()
 
     monkeypatch.setattr(supabase_client_module, "get_settings", lambda: DummySettings())
@@ -253,6 +254,7 @@ def test_supabase_adapter_uses_valid_service_key(monkeypatch):
     assert captured == {
         "url": "https://example.supabase.co",
         "key": "ey.service.payload",
+        "postgrest_timeout": supabase_client_module._SUPABASE_POSTGREST_TIMEOUT_SECONDS,
     }
 
 
@@ -278,7 +280,7 @@ def test_supabase_adapter_falls_back_when_service_key_is_malformed(monkeypatch):
         def table(self, *_args, **_kwargs):
             return _FakeQuery()
 
-    def _fake_create_client(*, supabase_url, supabase_key):
+    def _fake_create_client(*, supabase_url, supabase_key, **_kwargs):
         captured["url"] = supabase_url
         captured["key"] = supabase_key
         return _FakeClient()
@@ -310,7 +312,7 @@ def test_supabase_adapter_falls_back_to_public_key_after_auth_probe_failure(monk
         def __init__(self, key: str):
             captured["created_keys"].append(key)
 
-    def _fake_create_client(*, supabase_url, supabase_key):
+    def _fake_create_client(*, supabase_url, supabase_key, **_kwargs):
         captured["url"] = supabase_url
         return _FakeClient(supabase_key)
 
@@ -343,7 +345,7 @@ def test_supabase_adapter_does_not_block_client_creation_on_transient_probe_fail
     class _FakeClient:
         pass
 
-    def _fake_create_client(*, supabase_url, supabase_key):
+    def _fake_create_client(*, supabase_url, supabase_key, **_kwargs):
         captured["url"] = supabase_url
         captured["key"] = supabase_key
         return _FakeClient()
@@ -388,7 +390,7 @@ def test_supabase_adapter_normalizes_wrapped_supabase_keys(monkeypatch):
         def table(self, *_args, **_kwargs):
             return _FakeQuery()
 
-    def _fake_create_client(*, supabase_url, supabase_key):
+    def _fake_create_client(*, supabase_url, supabase_key, **_kwargs):
         captured["url"] = supabase_url
         captured["key"] = supabase_key
         return _FakeClient()
