@@ -210,3 +210,57 @@ jobs:
           if ! curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/health; then
             echo "Production readiness is degraded, but deploy liveness is healthy: https://lippelift.xyz/health" >&2
           fi
+
+      - name: Diagnose production route with password
+        if: failure() && env.PROD_SSH_PASSWORD != ''
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ env.PROD_SSH_HOST }}
+          timeout: 60s
+          username: ${{ env.PROD_SSH_USER }}
+          password: ${{ env.PROD_SSH_PASSWORD }}
+          script: |
+            cd /opt/aiugc-prod/repo
+            echo "== local app =="
+            curl -i --connect-timeout 3 --max-time 10 http://127.0.0.1:8000/livez || true
+            echo "== local traefik https =="
+            curl -k -i --resolve lippelift.xyz:443:127.0.0.1 --connect-timeout 3 --max-time 10 https://lippelift.xyz/livez || true
+            echo "== compose ps =="
+            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production ps || true
+            echo "== web labels =="
+            docker inspect aiugc-prod-web-1 --format '{{json .Config.Labels}}' || true
+            echo "== web networks =="
+            docker inspect aiugc-prod-web-1 --format '{{json .NetworkSettings.Networks}}' || true
+            echo "== listeners =="
+            ss -ltnp | grep -E ':80|:443|:8000' || true
+            echo "== web logs =="
+            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production logs --tail=160 web || true
+            echo "== traefik logs =="
+            docker logs traefik-traefik-1 --tail=240 2>&1 | grep -Ei 'lippelift|aiugc|error|timeout|502|504|bad gateway' || true
+
+      - name: Diagnose production route with key
+        if: failure() && env.PROD_SSH_PASSWORD == ''
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ env.PROD_SSH_HOST }}
+          timeout: 60s
+          username: ${{ env.PROD_SSH_USER }}
+          key: ${{ env.PROD_SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/aiugc-prod/repo
+            echo "== local app =="
+            curl -i --connect-timeout 3 --max-time 10 http://127.0.0.1:8000/livez || true
+            echo "== local traefik https =="
+            curl -k -i --resolve lippelift.xyz:443:127.0.0.1 --connect-timeout 3 --max-time 10 https://lippelift.xyz/livez || true
+            echo "== compose ps =="
+            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production ps || true
+            echo "== web labels =="
+            docker inspect aiugc-prod-web-1 --format '{{json .Config.Labels}}' || true
+            echo "== web networks =="
+            docker inspect aiugc-prod-web-1 --format '{{json .NetworkSettings.Networks}}' || true
+            echo "== listeners =="
+            ss -ltnp | grep -E ':80|:443|:8000' || true
+            echo "== web logs =="
+            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production logs --tail=160 web || true
+            echo "== traefik logs =="
+            docker logs traefik-traefik-1 --tail=240 2>&1 | grep -Ei 'lippelift|aiugc|error|timeout|502|504|bad gateway' || true
