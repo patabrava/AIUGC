@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      PROD_SSH_HOST: srv1498567.hstgr.cloud
+      PROD_SSH_HOST: 187.124.16.6
       PROD_SSH_USER: ${{ secrets.PROD_SSH_USER != '' && secrets.PROD_SSH_USER || vars.PROD_SSH_USER }}
       PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY != '' && secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
       PROD_SSH_PASSWORD: ${{ secrets.PROD_SSH_PASSWORD != '' && secrets.PROD_SSH_PASSWORD || vars.PROD_SSH_PASSWORD }}
@@ -35,22 +35,40 @@ jobs:
           python3 - <<'PY'
           import os
           import socket
+          import time
           import sys
 
           host = os.environ["PROD_SSH_HOST"]
-          timeout_seconds = 10
+          timeout_seconds = 15
+          attempts = 5
+          last_error = None
 
-          try:
-              with socket.create_connection((host, 22), timeout=timeout_seconds):
-                  pass
-          except OSError as exc:
-              print(
-                  f"GitHub runner could not open TCP to {host}:22 within {timeout_seconds}s: {exc}",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
+          for attempt in range(1, attempts + 1):
+              sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+              sock.settimeout(timeout_seconds)
+              try:
+                  sock.connect((host, 22))
+                  sock.close()
+                  print(f"TCP reachability verified for {host}:22 on attempt {attempt}/{attempts}")
+                  sys.exit(0)
+              except OSError as exc:
+                  last_error = exc
+                  print(
+                      f"Attempt {attempt}/{attempts} could not open TCP to {host}:22 within {timeout_seconds}s: {exc}",
+                      file=sys.stderr,
+                  )
+                  time.sleep(5)
+              finally:
+                  try:
+                      sock.close()
+                  except OSError:
+                      pass
 
-          print(f"TCP reachability verified for {host}:22")
+          print(
+              f"GitHub runner could not open IPv4 TCP to {host}:22 after {attempts} attempts: {last_error}",
+              file=sys.stderr,
+          )
+          sys.exit(1)
           PY
 
       - name: Deploy over SSH with password
@@ -58,6 +76,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ env.PROD_SSH_HOST }}
+          timeout: 60s
           username: ${{ env.PROD_SSH_USER }}
           password: ${{ env.PROD_SSH_PASSWORD }}
           envs: PROD_ENV_FILE_B64,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
@@ -121,6 +140,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ env.PROD_SSH_HOST }}
+          timeout: 60s
           username: ${{ env.PROD_SSH_USER }}
           key: ${{ env.PROD_SSH_PRIVATE_KEY }}
           envs: PROD_ENV_FILE_B64,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
