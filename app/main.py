@@ -4,10 +4,11 @@ FastAPI application with error handling and middleware.
 Per Constitution § I: Canon Supremacy
 """
 
+import asyncio
 import uuid
 import time
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request, status
@@ -67,6 +68,7 @@ def _trusted_hosts_from_settings() -> list[str]:
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     scheduler = AsyncIOScheduler(timezone="UTC")
+    startup_recovery_task = None
     logger.info(
         "application_startup",
         environment=settings.environment,
@@ -111,8 +113,26 @@ async def lifespan(app: FastAPI):
         )
         logger.info("blog_publish_scheduler_started", interval_minutes=1)
 
+    startup_recovery_task = asyncio.create_task(_run_startup_recovery_checks())
+
+    yield
+
+    if startup_recovery_task and not startup_recovery_task.done():
+        startup_recovery_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await startup_recovery_task
+
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("publish_scheduler_stopped")
+        logger.info("blog_publish_scheduler_stopped")
+    logger.info("application_shutdown")
+
+
+async def _run_startup_recovery_checks() -> None:
+    """Run optional recovery scans without blocking ASGI startup/liveness."""
     try:
-        recovered_batches = recover_stalled_batches(limit=1, max_age_hours=6)
+        recovered_batches = await asyncio.to_thread(recover_stalled_batches, limit=1, max_age_hours=6)
     except Exception as exc:
         recovered_batches = []
         logger.warning("startup_batch_recovery_failed", error=str(exc))
@@ -120,7 +140,11 @@ async def lifespan(app: FastAPI):
         logger.info("startup_batch_recovery_scheduled", batch_ids=recovered_batches)
 
     try:
-        recovered_topic_runs = recover_stalled_topic_research_runs(limit=1, max_age_hours=6)
+        recovered_topic_runs = await asyncio.to_thread(
+            recover_stalled_topic_research_runs,
+            limit=1,
+            max_age_hours=6,
+        )
     except Exception as exc:
         recovered_topic_runs = []
         logger.warning("startup_topic_research_recovery_failed", error=str(exc))
@@ -128,19 +152,11 @@ async def lifespan(app: FastAPI):
         logger.info("startup_topic_research_recovery_scheduled", run_ids=recovered_topic_runs)
 
     try:
-        cron_monitoring = get_topic_research_cron_monitoring()
+        cron_monitoring = await asyncio.to_thread(get_topic_research_cron_monitoring)
     except Exception as exc:
         logger.warning("startup_topic_cron_monitoring_failed", error=str(exc))
     else:
         logger.info("startup_topic_cron_monitoring", **cron_monitoring)
-    
-    yield
-
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
-        logger.info("publish_scheduler_stopped")
-        logger.info("blog_publish_scheduler_stopped")
-    logger.info("application_shutdown")
 
 
 # Create FastAPI application
