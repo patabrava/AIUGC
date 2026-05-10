@@ -80,12 +80,86 @@
                     <p class="mt-1 text-xs text-gray-500">Use any freeform post type you want for this manual draft.</p>
                 </div>
                 {% endif %}
+                {% if batch.creation_mode == 'manual' %}
+                <div
+                    x-data="{
+                        text: {{ primary_script | tojson }},
+                        // Same tier table as app/core/video_profiles.py — keep in sync.
+                        // provider_target_seconds = veo_base + ext * hops
+                        // calls = 1 + hops
+                        tiers: [
+                            {tier: 8,  providerSeconds: 8,  calls: 1},
+                            {tier: 16, providerSeconds: 15, calls: 2},
+                            {tier: 32, providerSeconds: 29, calls: 4},
+                            {tier: 48, providerSeconds: 43, calls: 6},
+                            {tier: 64, providerSeconds: 57, calls: 8}
+                        ],
+                        get wordCount() {
+                            const matches = (this.text || '').match(/\b[\w'-]+\b/g);
+                            return matches ? matches.length : 0;
+                        },
+                        get speechSeconds() { return this.wordCount / 2.5; },
+                        get pickedTier() {
+                            for (const t of this.tiers) {
+                                if (t.providerSeconds >= this.speechSeconds) return t;
+                            }
+                            return this.tiers[this.tiers.length - 1];
+                        },
+                        get finalSeconds() {
+                            return Math.max(0, this.pickedTier.providerSeconds - 0.5);
+                        },
+                        get overflow() {
+                            return this.speechSeconds > this.tiers[this.tiers.length - 1].providerSeconds;
+                        }
+                    }"
+                    class="space-y-2"
+                >
+                    <textarea
+                        class="w-full px-3 py-2 text-sm text-gray-800 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent"
+                        rows="{{ script_rows }}"
+                        maxlength="900"
+                        name="script_text"
+                        x-on:input="text = $event.target.value"
+                    >{{ primary_script }}</textarea>
+                    <div
+                        class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-2 text-xs text-[#006AAB]"
+                        x-show="wordCount > 0"
+                        x-cloak
+                    >
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span>
+                                <span class="font-semibold" x-text="wordCount"></span> words
+                                · ~<span x-text="speechSeconds.toFixed(1)"></span>s of speech
+                            </span>
+                            <span class="text-[#006AAB]/40">|</span>
+                            <span>
+                                Estimated video:
+                                <span class="font-semibold" x-text="'~' + finalSeconds.toFixed(1) + 's'"></span>
+                            </span>
+                            <span class="text-[#006AAB]/40">|</span>
+                            <span>
+                                <span class="font-semibold" x-text="pickedTier.calls"></span>
+                                Veo call<span x-show="pickedTier.calls !== 1">s</span>
+                            </span>
+                        </div>
+                        <p
+                            class="mt-1 text-[11px] text-amber-700"
+                            x-show="overflow"
+                            x-cloak
+                        >
+                            Script is longer than our max video length (~57s).
+                            Veo will speed-talk to fit; consider shortening for natural cadence.
+                        </p>
+                    </div>
+                </div>
+                {% else %}
                 <textarea
                     class="w-full px-3 py-2 text-sm text-gray-800 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent"
                     rows="{{ script_rows }}"
                     maxlength="900"
                     name="script_text"
                 >{{ primary_script }}</textarea>
+                {% endif %}
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <p class="text-xs text-gray-500">Edit the script, then save the change.</p>
                     <button
