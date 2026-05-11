@@ -280,6 +280,11 @@ async def update_post_script_review(post_id: str, request: Request):
         post, seed_data = _load_post_seed_data(post_id, supabase)
 
         if action == "approved":
+            if not (seed_data.get("script") or "").strip():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Cannot approve an empty script. Add script content first.",
+                )
             seed_data["script_review_status"] = "approved"
             seed_data.pop("video_excluded", None)
         elif action == "removed":
