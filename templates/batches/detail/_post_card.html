@@ -83,7 +83,7 @@
                 {% if batch.creation_mode == 'manual' %}
                 <div
                     x-data="{
-                        text: {{ primary_script | tojson }},
+                        text: {{ primary_script | tojson | forceescape }},
                         // Same tier table as app/core/video_profiles.py — keep in sync.
                         // provider_target_seconds = veo_base + ext * hops
                         // calls = 1 + hops
