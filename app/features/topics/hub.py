@@ -125,46 +125,26 @@ def fuzzy_match_topic(query: str, threshold: float = 0.35) -> Optional[Dict[str,
     return {**best_topic, "script_count": len(scripts), "similarity_score": best_score}
 
 
-def _fetch_all_script_counts() -> Dict[str, int]:
-    """Fetch script counts for all topics in a single query."""
+def _fetch_topic_script_count_maps() -> tuple[Dict[str, int], Dict[str, int]]:
+    """Fetch all resolved topic scripts once and derive total + used counts per topic."""
     from app.features.topics.queries import _fetch_topic_script_rows
     try:
         all_scripts = _fetch_topic_script_rows()
     except Exception as exc:
         logger.warning("topic_script_counts_unavailable", error=str(exc))
-        return {}
-    counts: Dict[str, int] = {}
+        return {}, {}
+    total_counts: Dict[str, int] = {}
+    used_counts: Dict[str, int] = {}
     for script in all_scripts:
         rid = str(script.get("topic_registry_id") or "")
-        counts[rid] = counts.get(rid, 0) + 1
-    return counts
-
-
-def _fetch_used_script_counts() -> Dict[str, int]:
-    """Fetch usage counts for all scripts in a single query."""
-    from app.features.topics.queries import _fetch_topic_script_rows
-    try:
-        all_scripts = _fetch_topic_script_rows()
-    except Exception as exc:
-        logger.warning("topic_script_usage_counts_unavailable", error=str(exc))
-        return {}
-    counts: Dict[str, int] = {}
-    for script in all_scripts:
-        if int(script.get("use_count") or 0) <= 0:
-            continue
-        rid = str(script.get("topic_registry_id") or "")
-        counts[rid] = counts.get(rid, 0) + 1
-    return counts
+        total_counts[rid] = total_counts.get(rid, 0) + 1
+        if int(script.get("use_count") or 0) > 0:
+            used_counts[rid] = used_counts.get(rid, 0) + 1
+    return total_counts, used_counts
 
 
 def _count_topic_scripts(topic_id: str, bulk_counts: Dict[str, int]) -> int:
-    count = int(bulk_counts.get(topic_id, 0) or 0)
-    if count > 0 or not _UUID_LIKE_RE.match(topic_id or ""):
-        return count
-    try:
-        return len(get_topic_scripts_for_registry(topic_id))
-    except Exception:
-        return count
+    return int(bulk_counts.get(topic_id, 0) or 0)
 
 
 def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
@@ -421,7 +401,7 @@ def build_launch_hub_payload(request) -> Dict[str, Any]:
     ]
     generated_topics.sort(key=lambda row: str(row.get("last_harvested_at") or row.get("created_at") or ""), reverse=True)
 
-    script_counts = _fetch_all_script_counts()
+    script_counts, _ = _fetch_topic_script_count_maps()
     generated_topics = [{**topic, "script_count": _count_topic_scripts(str(topic["id"]), script_counts)} for topic in generated_topics]
     if filters.get("only_with_scripts"):
         generated_topics = [t for t in generated_topics if t["script_count"] > 0]
@@ -593,8 +573,7 @@ def build_topic_hub_payload(request) -> Dict[str, Any]:
     ]
     fresh_cutoff = datetime.now(timezone.utc) - _TOPIC_NEW_WINDOW
     generated_topics.sort(key=lambda row: _generated_topic_sort_key(row, fresh_cutoff))
-    script_counts = _fetch_all_script_counts()
-    used_script_counts = _fetch_used_script_counts()
+    script_counts, used_script_counts = _fetch_topic_script_count_maps()
     generated_topics = [
         {
             **topic,

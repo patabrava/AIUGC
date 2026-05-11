@@ -164,6 +164,9 @@ def _should_rehabilitate_family_status(existing_status: Any, resolved_status: An
     return False
 
 
+_TOPIC_SCRIPT_PAGE_SIZE = 1000
+
+
 def _fetch_topic_script_rows(
     *,
     target_length_tier: Optional[int] = None,
@@ -175,17 +178,26 @@ def _fetch_topic_script_rows(
     last_error: Optional[Exception] = None
     for relation in ("v_topic_scripts_resolved", "topic_scripts"):
         try:
-            query = supabase.client.table(relation).select("*")
-            if topic_registry_id is not None:
-                query = query.eq("topic_registry_id", topic_registry_id)
-            if topic_research_dossier_id is not None:
-                query = query.eq("topic_research_dossier_id", topic_research_dossier_id)
-            if target_length_tier is not None:
-                query = query.eq("target_length_tier", target_length_tier)
-            if post_type:
-                query = query.eq("post_type", post_type)
-            response = query.execute()
-            return [_normalize_script_row(row) for row in (response.data or [])]
+            rows: List[Dict[str, Any]] = []
+            start = 0
+            while True:
+                query = supabase.client.table(relation).select("*")
+                if topic_registry_id is not None:
+                    query = query.eq("topic_registry_id", topic_registry_id)
+                if topic_research_dossier_id is not None:
+                    query = query.eq("topic_research_dossier_id", topic_research_dossier_id)
+                if target_length_tier is not None:
+                    query = query.eq("target_length_tier", target_length_tier)
+                if post_type:
+                    query = query.eq("post_type", post_type)
+                end = start + _TOPIC_SCRIPT_PAGE_SIZE - 1
+                response = query.range(start, end).execute()
+                batch = response.data or []
+                rows.extend(batch)
+                if len(batch) < _TOPIC_SCRIPT_PAGE_SIZE:
+                    break
+                start += _TOPIC_SCRIPT_PAGE_SIZE
+            return [_normalize_script_row(row) for row in rows]
         except Exception as exc:
             last_error = exc
             logger.warning("topic_scripts_relation_fallback", relation=relation, error=str(exc))

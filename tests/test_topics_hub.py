@@ -448,11 +448,11 @@ def test_topics_hub_marks_fresh_generated_topics_new_and_sorts_them_first(monkey
             {"id": "topic-fresh-1", "title": "Fresh topic A", "post_type": "value", "last_harvested_at": (now - timedelta(hours=1)).isoformat()},
         ],
     )
-    monkeypatch.setattr(topic_hub, "_fetch_all_script_counts", lambda: {
+    monkeypatch.setattr(topic_hub, "_fetch_topic_script_count_maps", lambda: ({
         "topic-older": 1,
         "topic-fresh-1": 3,
         "topic-fresh-2": 2,
-    })
+    }, {}))
     monkeypatch.setattr(topic_hub, "get_topic_scripts_for_registry", lambda *args, **kwargs: [])
     monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=12, status=None: [])
     monkeypatch.setattr(topic_hub, "list_topic_suggestions", lambda **kwargs: [])
@@ -770,7 +770,7 @@ def test_build_launch_hub_payload_sorts_by_script_count(monkeypatch):
             {"id": "t2", "title": "B", "post_type": "value", "rotation": "r", "cta": "c", "created_at": "2026-01-02"},
         ],
     )
-    monkeypatch.setattr(topic_hub, "_fetch_all_script_counts", lambda: {"t1": 3, "t2": 0})
+    monkeypatch.setattr(topic_hub, "_fetch_topic_script_count_maps", lambda: ({"t1": 3, "t2": 0}, {}))
     monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=20, status=None, topic_registry_id=None: [])
 
     class FakeRequest:
@@ -799,7 +799,7 @@ def test_build_launch_hub_payload_generated_mode(monkeypatch):
             {"id": "t1", "title": "Generated A", "post_type": "value", "rotation": "r", "cta": "c", "created_at": "2026-01-01"},
         ],
     )
-    monkeypatch.setattr(topic_hub, "_fetch_all_script_counts", lambda: {"t1": 2})
+    monkeypatch.setattr(topic_hub, "_fetch_topic_script_count_maps", lambda: ({"t1": 2}, {}))
     monkeypatch.setattr(topic_hub, "list_topic_research_runs", lambda limit=20, status=None, topic_registry_id=None: [])
 
     class FakeRequest:
