@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
+from app.adapters.grounding_url_resolver import is_grounding_redirect_url
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
 from app.features.topics.schemas import DialogScripts, ProductPromptCandidate, ResearchAgentBatch, ResearchDossier
@@ -706,6 +707,8 @@ def _normalize_research_dossier_payload(payload: Dict[str, Any]) -> Dict[str, An
         normalized_url = str(url or "").strip()
         if not normalized_url:
             return
+        if is_grounding_redirect_url(normalized_url):
+            return
         normalized_title = _clip_text(title, 400) or normalized.get("topic") or normalized.get("seed_topic") or "Quelle"
         canonical_sources.append({"title": normalized_title, "url": normalized_url})
 
@@ -763,12 +766,18 @@ def _extract_urls_from_text(text: str) -> List[str]:
     urls: List[str] = []
     for _label, url in re.findall(r"\[([^\]]+)\]\((https?://[^\s)>\"]+)\)", text or ""):
         normalized = url.strip().rstrip(".,;)")
-        if normalized and normalized not in urls:
-            urls.append(normalized)
+        if not normalized or normalized in urls:
+            continue
+        if is_grounding_redirect_url(normalized):
+            continue
+        urls.append(normalized)
     for match in re.findall(r"https?://[^\s)>\"]+", text or ""):
         url = match.strip().rstrip(".,;)")
-        if url and url not in urls:
-            urls.append(url)
+        if not url or url in urls:
+            continue
+        if is_grounding_redirect_url(url):
+            continue
+        urls.append(url)
     return urls[:8]
 
 
