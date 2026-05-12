@@ -58,14 +58,14 @@
                             {% if script.source_urls %}
                                 <span>
                                     {% for src in script.source_urls %}
-                                        {% if src is mapping and src.url %}
-                                            <a href="{{ src.url }}" target="_blank" rel="noopener" class="text-blue-500 hover:text-[#006AAB] hover:underline">{{ src.title or src.url }}</a>{% if not loop.last %} · {% endif %}
-                                        {% elif src is string %}
-                                            <a href="{{ src }}" target="_blank" rel="noopener" class="text-blue-500 hover:text-[#006AAB] hover:underline">{{ src }}</a>{% if not loop.last %} · {% endif %}
+                                        {% set src_url = src.url if src is mapping else src %}
+                                        {% set src_title = src.title if (src is mapping and src.title) else src_url %}
+                                        {% if src_url and "vertexaisearch.cloud.google.com" not in src_url %}
+                                            <a href="{{ src_url }}" target="_blank" rel="noopener" class="text-blue-500 hover:text-[#006AAB] hover:underline">{{ src_title }}</a>{% if not loop.last %} · {% endif %}
                                         {% endif %}
                                     {% endfor %}
                                 </span>
-                            {% elif script.primary_source_url %}
+                            {% elif script.primary_source_url and "vertexaisearch.cloud.google.com" not in script.primary_source_url %}
                                 <a href="{{ script.primary_source_url }}" target="_blank" rel="noopener" class="text-blue-500 hover:text-[#006AAB] hover:underline">{{ script.primary_source_title or script.primary_source_url }}</a>
                             {% endif %}
                             {% if script.use_count|default(0) > 0 %}
