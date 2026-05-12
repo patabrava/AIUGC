@@ -1642,3 +1642,56 @@ def test_generate_topic_script_candidate_applies_shared_quality_gate():
     assert "Ab 2025" not in item.script
     assert "Seit 2025" in item.script
     assert 14 <= len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", item.script)) <= 18
+
+
+def test_generate_gemini_deep_research_resolves_grounding_redirects(monkeypatch):
+    """llm_client must resolve vertexaisearch redirects and rewrite the body text."""
+    from app.adapters.llm_client import LLMClient
+
+    redirect_a = (
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA"
+    )
+    redirect_b = (
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/BBB"
+    )
+
+    grounded_payload = {
+        "text": (
+            "Forschungsdossier: Test\n\n"
+            f"- Tagesschau: [Tagesschau]({redirect_a})\n"
+            f"- BMAS: {redirect_b}\n"
+        ),
+        "grounding_chunks": [
+            {"uri": redirect_a, "title": "Tagesschau"},
+            {"uri": redirect_b, "title": "BMAS"},
+        ],
+    }
+
+    class _FakeVertex:
+        def generate_grounded_research(self, **kwargs):
+            return grounded_payload
+
+    monkeypatch.setattr(
+        "app.adapters.llm_client.get_vertex_gemini_client",
+        lambda: _FakeVertex(),
+    )
+
+    def fake_resolve(urls, *, http_client=None):
+        return {
+            redirect_a: "https://www.tagesschau.de/artikel",
+            redirect_b: "https://www.bmas.de/seite",
+        }
+
+    monkeypatch.setattr(
+        "app.adapters.llm_client.resolve_grounding_urls",
+        fake_resolve,
+    )
+
+    client = LLMClient.__new__(LLMClient)
+    client.gemini_deep_research_provider = "vertex_grounded"
+
+    text = client.generate_gemini_deep_research(prompt="topic")
+
+    assert "vertexaisearch.cloud.google.com" not in text
+    assert "https://www.tagesschau.de/artikel" in text
+    assert "https://www.bmas.de/seite" in text

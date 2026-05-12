@@ -7,6 +7,7 @@ Per Constitution § VI: Adapterize Specialists
 from typing import Optional, Dict, Any, List, Iterator, Tuple
 import httpx
 import json
+import re
 import time
 from copy import deepcopy
 
@@ -14,6 +15,10 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.errors import ThirdPartyError, ValidationError
 from app.adapters.vertex_gemini_client import get_vertex_gemini_client
+from app.adapters.grounding_url_resolver import (
+    is_grounding_redirect_url,
+    resolve_grounding_urls,
+)
 
 logger = get_logger(__name__)
 
@@ -799,11 +804,42 @@ class LLMClient:
                         "retry_message": None,
                     }
                 )
-            result = get_vertex_gemini_client().generate_grounded_research(
+            grounded = get_vertex_gemini_client().generate_grounded_research(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=1.0,
             )
+            text = grounded["text"]
+            chunks = grounded.get("grounding_chunks") or []
+
+            redirect_urls = []
+            for match in re.findall(r"https?://[^\s)>\"']+", text or ""):
+                cleaned = match.rstrip(".,;)\"")
+                if is_grounding_redirect_url(cleaned):
+                    redirect_urls.append(cleaned)
+            for chunk in chunks:
+                uri = chunk.get("uri")
+                if is_grounding_redirect_url(uri):
+                    redirect_urls.append(uri)
+
+            if redirect_urls:
+                resolved = resolve_grounding_urls(redirect_urls)
+                if resolved:
+                    # Replace longest URLs first so shorter prefixes don't truncate
+                    # a longer redirect URL mid-string.
+                    for original in sorted(resolved.keys(), key=len, reverse=True):
+                        text = text.replace(original, resolved[original])
+                    logger.info(
+                        "vertex_grounded_redirects_resolved",
+                        total=len(redirect_urls),
+                        resolved=len(resolved),
+                    )
+                else:
+                    logger.warning(
+                        "vertex_grounded_redirects_unresolved",
+                        total=len(redirect_urls),
+                    )
+
             if progress_callback:
                 progress_callback(
                     {
@@ -813,7 +849,7 @@ class LLMClient:
                         "retry_message": None,
                     }
                 )
-            return result
+            return text
 
         if not self.gemini_api_fallback_enabled:
             raise ThirdPartyError(
