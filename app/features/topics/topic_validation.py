@@ -183,6 +183,7 @@ _CITATION_PATTERN = re.compile(r"\[cite:\s*\d+(?:\s*,\s*\d+)*\]", flags=re.IGNOR
 _URL_PATTERN = re.compile(r"https?://\S+")
 _BULLET_PREFIX_PATTERN = re.compile(r"(?m)^\s*[-*•]+\s*")
 _MULTISPACE_PATTERN = re.compile(r"\s+")
+_SPACE_BEFORE_PUNCT_PATTERN = re.compile(r" +(?=[.,;:!?])")
 _SCRIPT_ARTIFACT_PATTERN = re.compile(r"[\u200d\uFE0E\uFE0F]")
 _RESEARCH_LABEL_PATTERN = re.compile(
     r"(?i)(?:^|[\s(\\[\"'])"
@@ -262,7 +263,8 @@ def count_spoken_sentences(text: Any) -> int:
 
 
 def normalize_spoken_whitespace(text: Any) -> str:
-    return _MULTISPACE_PATTERN.sub(" ", str(text or "")).strip()
+    collapsed = _MULTISPACE_PATTERN.sub(" ", str(text or ""))
+    return _SPACE_BEFORE_PUNCT_PATTERN.sub("", collapsed).strip()
 
 
 def _strip_research_labels(text: Any) -> str:

@@ -1,6 +1,34 @@
 """Tests for script contamination hardening."""
 
-from app.features.topics.topic_validation import _clean_fact_pool
+from app.features.topics.topic_validation import (
+    _clean_fact_pool,
+    normalize_spoken_whitespace,
+    sanitize_fact_fragments,
+    sanitize_spoken_fragment,
+)
+
+
+def test_normalize_spoken_whitespace_strips_space_before_punctuation():
+    assert normalize_spoken_whitespace("Wort  .") == "Wort."
+    assert normalize_spoken_whitespace("a ,b") == "a,b"
+    assert normalize_spoken_whitespace("ende !") == "ende!"
+
+
+def test_sanitize_spoken_fragment_removes_citation_space_before_period():
+    text = "Die Interessenvertretung (Betriebsrat oder Personalrat) [cite: 2, 13]."
+    cleaned = sanitize_spoken_fragment(text)
+    assert " ." not in cleaned
+    assert cleaned.endswith(").")
+
+
+def test_sanitize_fact_fragments_no_space_before_terminal_punctuation():
+    facts = sanitize_fact_fragments([
+        "Barrierefreie Wohnungen [cite: 1].",
+        "Visit https://example.com for details.",
+    ])
+    for fact in facts:
+        assert " ." not in fact
+        assert " ," not in fact
 
 
 def test_clean_fact_pool_strips_label_fragments():
