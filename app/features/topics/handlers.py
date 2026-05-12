@@ -115,7 +115,7 @@ _LIFESTYLE_FALLBACK_CANDIDATES: List[Dict[str, str]] = [
         "cta": "Speicher dir das für später.",
     },
     {
-        "title": "Kleine Wege werden ohne Barrierefreiheit schnell gross",
+        "title": "Kleine Wege werden ohne Barrierefreiheit schnell groß",
         "rotation": "Kleine Wege werden ohne Barrierefreiheit schnell zu echter Zusatzarbeit im Alltag.",
         "cta": "Schick das an jemanden, der das kennt.",
     },

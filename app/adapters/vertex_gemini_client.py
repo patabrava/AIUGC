@@ -17,6 +17,7 @@ from google.auth.transport.requests import Request
 
 from app.core.config import get_settings, resolve_google_application_credentials_path
 from app.core.errors import ThirdPartyError, ValidationError
+from app.core.german import restore_german_umlauts, restore_german_umlauts_in_json
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -108,7 +109,7 @@ class VertexGeminiClient:
             payload=payload,
             log_event="vertex_gemini_generate_text",
         )
-        return self._extract_candidate_text(data)
+        return restore_german_umlauts(self._extract_candidate_text(data))
 
     def generate_json(
         self,
@@ -140,7 +141,7 @@ class VertexGeminiClient:
         )
         content = self._extract_candidate_text(data)
         try:
-            return json.loads(content)
+            return restore_german_umlauts_in_json(json.loads(content))
         except json.JSONDecodeError as exc:
             raise ValidationError(
                 message="Vertex Gemini structured output produced invalid JSON",

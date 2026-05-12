@@ -88,7 +88,7 @@ def _build_blog_image_prompt(blog_content: Dict[str, Any], dossier_payload: Dict
     summary = _limit_text(blog_content.get("preview_text") or blog_content.get("merksatz") or "", 90)
     return _limit_text(
         (
-            f"Quadratisches Coverbild fuer einen deutschen Blogartikel ueber {topic}. "
+            f"Quadratisches Coverbild für einen deutschen Blogartikel über {topic}. "
             f"Kontext: {cluster_summary}. "
             f"Teaser: {summary}. "
             "Freundliche realistische Editorial-Illustration, hell, professionell, ohne Text, Logo oder Wasserzeichen."

@@ -370,7 +370,7 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
             logger.warning("description_replaced_from_script", message="Beschreibung too short, using script as fallback description")
 
     if description_text and len(description_text.strip()) < 35:
-        padded = f"{description_text.strip()} Damit ist das Thema fuer den Alltag klarer einzuordnen."
+        padded = f"{description_text.strip()} Damit ist das Thema für den Alltag klarer einzuordnen."
         description_text = padded.strip()
 
     payload = {**buckets, "description": description_text}

@@ -158,7 +158,7 @@ def _build_caption_prompt(
 ) -> str:
     facts_text = "\n".join(
         f"{i + 1}. {fact}" for i, fact in enumerate(research_facts)
-    ) if research_facts else "Keine Recherche-Fakten verfuegbar — nutze das Skript als Quelle."
+    ) if research_facts else "Keine Recherche-Fakten verfügbar — nutze das Skript als Quelle."
     return _load_caption_prompt_template().format(
         topic_title=topic_title,
         post_type=post_type,
@@ -658,8 +658,8 @@ def _extended_caption_hashtags(topic_title: str, post_type: str) -> List[str]:
 
 def _extended_caption_cta(post_type: str) -> str:
     if post_type == "product":
-        return "Speicher dir den Post fuer spaeter und schick ihn weiter."
-    return "Speicher dir den Post fuer spaeter und teil ihn weiter."
+        return "Speicher dir den Post für später und schick ihn weiter."
+    return "Speicher dir den Post für später und teil ihn weiter."
 
 
 def _build_extended_caption(
@@ -769,7 +769,7 @@ def _fallback_caption_hashtags(topic_title: str, post_type: str, key: str) -> Li
     if "öpnv" in title or "opnv" in title:
         base = ["#BarriereFreiheit", "#ÖPNV", "#Selbstbestimmt"]
     elif post_type == "product":
-        base = ["#BarriereFreiheit", "#Mobilitaet", "#Alltagshilfe"]
+        base = ["#BarriereFreiheit", "#Mobilität", "#Alltagshilfe"]
     elif "rollstuhl" in title:
         base = ["#RollstuhlAlltag", "#BarriereFreiheit", "#Selbstbestimmt"]
     else:
@@ -798,14 +798,14 @@ def _build_fallback_caption_variants(
         if fact:
             break
 
-    fact_sentence = fact or "Kleine Huerden kosten im Alltag oft mehr Kraft, als man zuerst denkt"
+    fact_sentence = fact or "Kleine Hürden kosten im Alltag oft mehr Kraft, als man zuerst denkt"
     lead_map = {
-        "curiosity": "Viele merken erst spaet, wie schnell kleine Huerden Energie fressen.",
-        "personal": "Wenn du unterwegs bist, zaehlt am Ende jede gesparte Kraft.",
+        "curiosity": "Viele merken erst spät, wie schnell kleine Hürden Energie fressen.",
+        "personal": "Wenn du unterwegs bist, zählt am Ende jede gesparte Kraft.",
         "provocative": "Barrierefreiheit darf nicht erst wichtig werden, wenn es schon unbequem ist.",
     }
     cta_map = {
-        "curiosity": "Speicher dir das fuer spaeter.",
+        "curiosity": "Speicher dir das für später.",
         "personal": "Schick das an jemanden, der das kennt.",
         "provocative": "Kommentier, wenn du das auch so siehst.",
     }
@@ -1033,9 +1033,10 @@ def _generate_standard_caption_bundle(
             raw_text = llm.generate_gemini_text(
                 prompt=prompt,
                 system_prompt=(
-                    "Du bist ein Social-Media-Texter fuer barrierefreie Inhalte. "
-                    "Antworte ausschliesslich im Markerformat mit [curiosity], [personal] und [provocative]. "
-                    "Keine Erklaerungen, kein JSON, kein Markdown."
+                    "Du bist ein Social-Media-Texter für barrierefreie Inhalte. "
+                    "Antworte ausschließlich im Markerformat mit [curiosity], [personal] und [provocative]. "
+                    "Keine Erklärungen, kein JSON, kein Markdown. "
+                    "Verwende konsequent deutsche Umlaute (ä, ö, ü, ß) – niemals ae/oe/ue/ss-Ersatz."
                 ),
                 max_tokens=2500,
                 temperature=0.8,

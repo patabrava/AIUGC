@@ -173,16 +173,16 @@ def generate_product_topics(
                 last_error = f"PROMPT_3 script too short: {normalized_word_count} words"
                 prompt = (
                     f"{prompt}\n\nFEEDBACK: Der Scripttext ist noch zu kurz. "
-                    f"Halte dich fuer {entry.product_name} an etwa {min_words}-{max_words} Woerter "
+                    f"Halte dich für {entry.product_name} an etwa {min_words}-{max_words} Wörter "
                     "und gib dem Produkt mehr Substanz."
                 )
                 continue
             if sentence_count < min_sentences or sentence_count > max_sentences:
                 last_error = f"PROMPT_3 sentence count out of range: {sentence_count}"
                 prompt = (
-                    f"{prompt}\n\nFEEDBACK: Der Scripttext braucht fuer {entry.product_name} "
-                    f"etwa {min_sentences}-{max_sentences} Saetze. "
-                    "Schreibe jeden Satz klar und vollstaendig, ohne die Antwort abzukuerzen."
+                    f"{prompt}\n\nFEEDBACK: Der Scripttext braucht für {entry.product_name} "
+                    f"etwa {min_sentences}-{max_sentences} Sätze. "
+                    "Schreibe jeden Satz klar und vollständig, ohne die Antwort abzukürzen."
                 )
                 continue
             if normalized_word_count > max_words:
@@ -196,7 +196,7 @@ def generate_product_topics(
                     last_error = f"PROMPT_3 trim fell below minimum length: {normalized_word_count} words"
                     prompt = (
                         f"{prompt}\n\nFEEDBACK: Der Scripttext ist noch zu lang oder zu kurz. "
-                        f"Halte dich fuer {entry.product_name} an etwa {min_words}-{max_words} Woerter."
+                        f"Halte dich für {entry.product_name} an etwa {min_words}-{max_words} Wörter."
                     )
                     continue
                 candidate.script = normalized_script

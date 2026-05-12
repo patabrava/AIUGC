@@ -13,6 +13,7 @@ from copy import deepcopy
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.errors import ThirdPartyError, ValidationError
+from app.core.german import restore_german_umlauts, restore_german_umlauts_in_json
 from app.adapters.vertex_gemini_client import get_vertex_gemini_client
 
 logger = get_logger(__name__)
@@ -585,6 +586,7 @@ class LLMClient:
 
             data = response.json()
             content = self._extract_gemini_candidate_text(data)
+            content = restore_german_umlauts(content)
             logger.info(
                 "gemini_generate_text_success",
                 model=target_model,
@@ -668,6 +670,7 @@ class LLMClient:
             data = response.json()
             content = self._extract_gemini_candidate_text(data)
             parsed = json.loads(content)
+            parsed = restore_german_umlauts_in_json(parsed)
             logger.info(
                 "gemini_generate_json_success",
                 model=target_model,
