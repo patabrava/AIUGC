@@ -148,6 +148,7 @@ class PostDetail(BaseModel):
     blog_published_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    tiktok_settings: Optional[Dict[str, Any]] = None
 
 
 class BatchDetailResponse(BaseModel):
@@ -170,7 +171,8 @@ class BatchDetailResponse(BaseModel):
     posts_count: int
     posts_by_state: Dict[str, int]
     posts: List[PostDetail]
-    
+    tiktok_defaults: Optional[Dict[str, Any]] = None
+
     class Config:
         from_attributes = True
 

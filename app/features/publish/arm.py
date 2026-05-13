@@ -1,7 +1,7 @@
 """Batch-level arm dispatch handler for S7_PUBLISH_PLAN."""
 
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Request
 from zoneinfo import ZoneInfo
@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
-from app.features.publish.schemas import BatchArmRequest
+from app.features.publish.schemas import BatchArmRequest, TikTokPostSettings
 
 log = get_logger(__name__)
 
@@ -17,6 +17,28 @@ BERLIN_TZ = ZoneInfo("Europe/Berlin")
 DAY_OFFSETS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 router = APIRouter()
+
+
+def _validate_tiktok_settings_present(posts: List[Dict[str, Any]]) -> None:
+    """Reject arming when any TikTok-targeted post lacks complete TikTok settings."""
+    missing: List[str] = []
+    for post in posts:
+        networks = post.get("social_networks") or []
+        if "tiktok" not in networks:
+            continue
+        settings = post.get("tiktok_settings") or {}
+        if not settings:
+            missing.append(str(post.get("id")))
+            continue
+        try:
+            TikTokPostSettings(**settings)
+        except Exception:
+            missing.append(str(post.get("id")))
+    if missing:
+        raise ValidationError(
+            "TikTok settings are required for every post that targets TikTok before arming the batch.",
+            details={"posts_missing_tiktok_settings": missing},
+        )
 
 
 def _compute_scheduled_at(week_start: str, day: str, time: str) -> str:
@@ -47,12 +69,34 @@ async def arm_batch_dispatch(
         raise ValidationError(f"Batch must be in S7_PUBLISH_PLAN state, got {batch['state']}")
 
     # 2. Fetch posts for this batch
-    posts_resp = db.table("posts").select("id,video_url,batch_id").eq("batch_id", batch_id).execute()
+    posts_resp = (
+        db.table("posts")
+        .select("id,video_url,batch_id,social_networks,tiktok_settings")
+        .eq("batch_id", batch_id)
+        .execute()
+    )
     posts_by_id = {p["id"]: p for p in posts_resp.data}
 
     # 3. Validate and schedule each post
     user_tz = ZoneInfo(request.timezone) if request.timezone else BERLIN_TZ
     scheduled_posts = []
+
+    # Pre-validate TikTok settings for every post that will target TikTok after arming.
+    posts_for_tiktok_check: List[Dict[str, Any]] = []
+    for post_spec in request.posts:
+        db_post = posts_by_id.get(post_spec.post_id)
+        if not db_post:
+            continue
+        effective_networks = post_spec.networks_override or request.default_networks
+        posts_for_tiktok_check.append(
+            {
+                "id": post_spec.post_id,
+                "social_networks": effective_networks,
+                "tiktok_settings": db_post.get("tiktok_settings") or {},
+            }
+        )
+    _validate_tiktok_settings_present(posts_for_tiktok_check)
+
     for i, post_spec in enumerate(request.posts):
         db_post = posts_by_id.get(post_spec.post_id)
         if not db_post:

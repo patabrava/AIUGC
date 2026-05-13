@@ -53,7 +53,6 @@ TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TIKTOK_API_BASE = "https://open.tiktokapis.com"
 TIKTOK_TIMEOUT_SECONDS = 60.0
 DEFAULT_SCOPE = "user.info.basic,video.upload,video.publish"
-DEFAULT_PRIVACY_LEVEL = "SELF_ONLY"
 MAX_SINGLE_CHUNK_BYTES = 64 * 1024 * 1024
 MIN_CHUNK_BYTES = 5 * 1024 * 1024
 MAX_FINAL_CHUNK_BYTES = 128 * 1024 * 1024
@@ -179,6 +178,7 @@ def _sanitize_creator_info(value: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "creator_username": value.get("creator_username"),
         "creator_nickname": value.get("creator_nickname"),
+        "creator_avatar_url": value.get("creator_avatar_url"),
         "privacy_level_options": privacy_options,
         "comment_disabled": bool(value.get("comment_disabled")),
         "duet_disabled": bool(value.get("duet_disabled")),
@@ -788,20 +788,28 @@ def _normalize_tiktok_post_id(post_id: str) -> str:
 
 def _build_tiktok_post_info(
     *,
-    caption: str,
+    title: str,
     privacy_level: str,
     disable_comment: bool,
     disable_duet: bool,
     disable_stitch: bool,
+    brand_content_toggle: bool,
+    brand_organic_toggle: bool,
 ) -> Dict[str, Any]:
-    title = " ".join(str(caption or "").split())[:150].strip() or "Posted from Lippe Lift Studio"
+    cleaned_title = " ".join(str(title or "").split())[:90].strip()
+    if not cleaned_title:
+        raise ValidationError("TikTok post title is required.")
+    if not privacy_level:
+        raise ValidationError("TikTok privacy level is required.")
     return {
-        "title": title,
+        "title": cleaned_title,
         "privacy_level": privacy_level,
         "disable_comment": disable_comment,
         "disable_duet": disable_duet,
         "disable_stitch": disable_stitch,
         "video_cover_timestamp_ms": 1000,
+        "brand_content_toggle": brand_content_toggle,
+        "brand_organic_toggle": brand_organic_toggle,
     }
 
 
@@ -815,11 +823,13 @@ async def _initialize_direct_post(
     access_token: str,
     *,
     video_size: int,
-    caption: str,
+    title: str,
     privacy_level: str,
     disable_comment: bool,
     disable_duet: bool,
     disable_stitch: bool,
+    brand_content_toggle: bool,
+    brand_organic_toggle: bool,
 ) -> Dict[str, Any]:
     chunk_size, total_chunk_count = _calculate_upload_plan(video_size)
     payload = await _tiktok_request(
@@ -831,11 +841,13 @@ async def _initialize_direct_post(
         },
         json_body={
             "post_info": _build_tiktok_post_info(
-                caption=caption,
+                title=title,
                 privacy_level=privacy_level,
                 disable_comment=disable_comment,
                 disable_duet=disable_duet,
                 disable_stitch=disable_stitch,
+                brand_content_toggle=brand_content_toggle,
+                brand_organic_toggle=brand_organic_toggle,
             ),
             "source_info": {
                 "source": "FILE_UPLOAD",
@@ -847,7 +859,10 @@ async def _initialize_direct_post(
     )
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     if not data.get("upload_url") or not data.get("publish_id"):
-        raise ThirdPartyError("TikTok direct post init did not return publish_id and upload_url.", details=redact_secret_payload(data))
+        raise ThirdPartyError(
+            "TikTok direct post init did not return publish_id and upload_url.",
+            details=redact_secret_payload(data),
+        )
     data["chunk_size"] = chunk_size
     data["total_chunk_count"] = total_chunk_count
     return data
@@ -1090,14 +1105,17 @@ async def upload_tiktok_draft(request: TikTokUploadDraftRequest):
 
 @router.post("/api/tiktok/publish", response_model=SuccessResponse)
 async def publish_tiktok_direct(request: TikTokPublishRequest):
-    """Direct-post a generated Lippe Lift Studio video to TikTok."""
+    """Direct-post a generated video to TikTok with all required UX fields."""
     job = await publish_tiktok_direct_for_post(
         request.post_id,
         caption=request.caption,
+        title=request.title,
         privacy_level=request.privacy_level,
-        disable_comment=request.disable_comment,
-        disable_duet=request.disable_duet,
-        disable_stitch=request.disable_stitch,
+        allow_comment=request.allow_comment,
+        allow_duet=request.allow_duet,
+        allow_stitch=request.allow_stitch,
+        your_brand=request.your_brand,
+        branded_content=request.branded_content,
     )
     return SuccessResponse(data=TikTokPublishJobResponse(**_sanitize_publish_job(job)).model_dump())
 
@@ -1108,10 +1126,6 @@ async def upload_tiktok_draft_for_post(post_id: str, caption: Optional[str] = No
         post_id,
         caption=caption,
         mode="draft",
-        privacy_level=None,
-        disable_comment=False,
-        disable_duet=False,
-        disable_stitch=False,
     )
 
 
@@ -1139,26 +1153,27 @@ async def publish_tiktok_direct_for_post(
     post_id: str,
     *,
     caption: Optional[str] = None,
+    title: str,
     privacy_level: str,
-    disable_comment: bool,
-    disable_duet: bool,
-    disable_stitch: bool,
+    allow_comment: bool,
+    allow_duet: bool,
+    allow_stitch: bool,
+    your_brand: bool,
+    branded_content: bool,
 ) -> Dict[str, Any]:
-    """Direct-post a generated Lippe Lift Studio video to TikTok."""
-    settings = _require_tiktok_settings()
-    if settings.tiktok_environment == "sandbox":
-        raise ValidationError(
-            "TikTok sandbox mode is draft-only. Use Upload Draft to TikTok for testing, or switch to a production TikTok app for direct posting.",
-            details={"post_id": post_id, "environment": settings.tiktok_environment, "mode": "direct"},
-        )
+    """Direct-post a generated video to TikTok with all required UX fields."""
+    _require_tiktok_settings()
     return await _publish_tiktok_post(
         post_id,
         caption=caption,
         mode="direct",
+        title=title,
         privacy_level=privacy_level,
-        disable_comment=disable_comment,
-        disable_duet=disable_duet,
-        disable_stitch=disable_stitch,
+        disable_comment=not allow_comment,
+        disable_duet=not allow_duet,
+        disable_stitch=not allow_stitch,
+        brand_content_toggle=branded_content,
+        brand_organic_toggle=your_brand,
     )
 
 
@@ -1167,10 +1182,13 @@ async def _publish_tiktok_post(
     *,
     caption: Optional[str],
     mode: str,
-    privacy_level: Optional[str],
-    disable_comment: bool,
-    disable_duet: bool,
-    disable_stitch: bool,
+    title: Optional[str] = None,
+    privacy_level: Optional[str] = None,
+    disable_comment: bool = False,
+    disable_duet: bool = False,
+    disable_stitch: bool = False,
+    brand_content_toggle: bool = False,
+    brand_organic_toggle: bool = False,
 ) -> Dict[str, Any]:
     post = _load_post_for_tiktok(post_id, mode=mode)
     account = await _load_tiktok_account_secret()
@@ -1233,7 +1251,11 @@ async def _publish_tiktok_post(
                 account["access_token_plain"],
                 _build_tiktok_draft_proxy_url(post["id"]),
             )
-        if mode == "direct":
+        else:
+            if not title:
+                raise ValidationError("TikTok title is required for direct post.")
+            if not privacy_level:
+                raise ValidationError("TikTok privacy level is required for direct post.")
             video_bytes, content_type = await _download_video_bytes(video_url)
             video_size = len(video_bytes)
             media_asset = _upsert_media_asset(
@@ -1247,26 +1269,30 @@ async def _publish_tiktok_post(
             creator_info = await _query_creator_info(account["access_token_plain"])
             _validate_creator_info_for_direct_post(
                 creator_info,
-                privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
+                privacy_level=privacy_level,
                 duration_seconds=float(duration_seconds) if duration_seconds is not None else None,
             )
             init_payload = await _initialize_direct_post(
                 account["access_token_plain"],
                 video_size=video_size,
-                caption=resolved_caption,
-                privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
+                title=title,
+                privacy_level=privacy_level,
                 disable_comment=disable_comment,
                 disable_duet=disable_duet,
                 disable_stitch=disable_stitch,
+                brand_content_toggle=brand_content_toggle,
+                brand_organic_toggle=brand_organic_toggle,
             )
             request_payload = {
                 **request_payload,
                 "post_info": _build_tiktok_post_info(
-                    caption=resolved_caption,
-                    privacy_level=str(privacy_level or DEFAULT_PRIVACY_LEVEL),
+                    title=title,
+                    privacy_level=privacy_level,
                     disable_comment=disable_comment,
                     disable_duet=disable_duet,
                     disable_stitch=disable_stitch,
+                    brand_content_toggle=brand_content_toggle,
+                    brand_organic_toggle=brand_organic_toggle,
                 ),
                 "creator_info": creator_info,
                 "source_info": {
@@ -1276,7 +1302,6 @@ async def _publish_tiktok_post(
                     "total_chunk_count": init_payload["total_chunk_count"],
                 },
             }
-        if mode == "direct":
             _update_publish_job(
                 str(job["id"]),
                 {"request_payload_json": redact_secret_payload(request_payload)},

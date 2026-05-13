@@ -1454,7 +1454,7 @@ POSTS_BY_BATCH_FIELDS = (
     "seed_data,video_prompt_json,video_status,video_url,video_metadata,video_operation_id,"
     "video_provider,qa_pass,qa_notes,qa_auto_checks,scheduled_at,social_networks,"
     "publish_caption,publish_status,platform_ids,publish_results,blog_enabled,blog_status,"
-    "blog_content,blog_webflow_item_id,blog_scheduled_at,blog_published_at,created_at,updated_at"
+    "blog_content,blog_webflow_item_id,blog_scheduled_at,blog_published_at,tiktok_settings,created_at,updated_at"
 )
 
 
