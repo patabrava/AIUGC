@@ -859,13 +859,17 @@ async def _run_batch_discovery_task(batch_id: str) -> None:
             batch_id,
             stage="failed",
             stage_label="Topic generation stopped",
-            detail_message="The seeding run failed before script review could start.",
+            detail_message=(
+                f"The seeding run failed before script review could start "
+                f"({type(exc).__name__})."
+            ),
             is_retrying=False,
             retry_message=None,
         )
         logger.exception(
             "batch_autoseed_unexpected_error",
             batch_id=batch_id,
+            error_class=type(exc).__name__,
             error=str(exc),
         )
     finally:
@@ -1549,12 +1553,23 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             required_topics = count
             unique_stored_suggestions = preselected_suggestions.get(post_type, [])
             for suggestion in unique_stored_suggestions[:required_topics]:
-                post = _create_post_from_suggestion(
-                    batch_id=batch_id,
-                    post_type=post_type,
-                    suggestion=suggestion,
-                    target_length_tier=resolved_target_tier,
-                )
+                try:
+                    post = _create_post_from_suggestion(
+                        batch_id=batch_id,
+                        post_type=post_type,
+                        suggestion=suggestion,
+                        target_length_tier=resolved_target_tier,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "value_suggestion_post_creation_failed",
+                        batch_id=batch_id,
+                        post_type=post_type,
+                        title=str(suggestion.get("title") or "")[:120],
+                        error_class=type(exc).__name__,
+                        error=str(exc),
+                    )
+                    continue
                 created_posts.append(post)
                 update_seeding_progress(
                     batch_id,

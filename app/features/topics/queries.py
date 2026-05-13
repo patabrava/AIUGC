@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import re
+import time
 from typing import Any, Dict, List, Optional
+
+import httpx
 
 from app.adapters.supabase_client import get_supabase, SupabaseAdapter
 
 # Module-level singleton placeholder used by patchable test seams; initialize lazily.
 supabase: Optional[SupabaseAdapter] = None
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ThirdPartyError
 from app.core.logging import get_logger
+
+_POSTS_INSERT_RETRY_DELAYS = (0.15, 0.35, 0.75, 1.5)
 from app.features.topics.captions import resolve_selected_caption
 from app.features.topics.topic_validation import (
     classify_script_overlap,
@@ -456,9 +461,41 @@ def create_post_for_batch(
         "seed_data": resolved_seed_data,
         "publish_caption": resolve_selected_caption(resolved_seed_data) or topic_rotation or topic_cta or topic_title,
     }
-    
-    response = supabase.client.table("posts").insert(post_data).execute()
-    
+
+    response = None
+    last_error: Optional[Exception] = None
+    for attempt, delay in enumerate((0.0, *_POSTS_INSERT_RETRY_DELAYS), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            response = supabase.client.table("posts").insert(post_data).execute()
+            break
+        except httpx.TimeoutException as exc:
+            raise ThirdPartyError(
+                message="Supabase timed out while creating post",
+                details={"batch_id": batch_id, "post_type": post_type, "error": str(exc)},
+            ) from exc
+        except httpx.RequestError as exc:
+            last_error = exc
+            logger.warning(
+                "create_post_retryable_request_error",
+                batch_id=batch_id,
+                post_type=post_type,
+                attempt=attempt,
+                error_class=type(exc).__name__,
+                error=str(exc),
+            )
+    if response is None:
+        raise ThirdPartyError(
+            message="Supabase unavailable while creating post",
+            details={
+                "batch_id": batch_id,
+                "post_type": post_type,
+                "error_class": type(last_error).__name__ if last_error else "unknown",
+                "error": str(last_error) if last_error else "unknown",
+            },
+        ) from last_error
+
     if not response.data:
         raise Exception("Failed to create post")
     

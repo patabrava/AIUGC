@@ -293,14 +293,18 @@ async def _run_discover_topics(batch_id: str) -> None:
             batch_id,
             stage="failed",
             stage_label="Topic generation stopped",
-            detail_message="The seeding run failed before script review could start.",
+            detail_message=(
+                f"The seeding run failed before script review could start "
+                f"({type(exc).__name__})."
+            ),
             is_retrying=False,
             retry_message=None,
         )
         logger.exception(
             "batch_autoseed_unexpected_error",
             batch_id=batch_id,
-            error=str(exc)
+            error_class=type(exc).__name__,
+            error=str(exc),
         )
 
 
