@@ -432,6 +432,18 @@
             showPostNowModal: false,
             postNowSaving: false,
             postNowError: null,
+            tiktokModalReady: false,
+            get canPostNow() {
+                if (!this.postNowTarget) return false;
+                if (!this.networks.length) return false;
+                if (!this.networks.includes('tiktok')) return true;
+                const s = this.postNowTarget.tiktokSettings || {};
+                if (!s.title || !s.title.trim()) return false;
+                if (!s.privacy_level) return false;
+                if (s.commercial_disclosure && !s.your_brand && !s.branded_content) return false;
+                if (s.branded_content && s.privacy_level === 'SELF_ONLY') return false;
+                return true;
+            },
 
             _buildSlots(count) {
                 const total = Math.max(1, count || 0);
@@ -640,27 +652,31 @@
 
             async postNow() {
                 if (!this.postNowTarget) return;
+                if (!this.canPostNow) return;
                 this.postNowSaving = true;
                 this.postNowError = null;
                 try {
+                    const body = {
+                        post_id: this.postNowTarget.id,
+                        publish_caption: this.postNowTarget.caption,
+                        social_networks: this.networks,
+                    };
+                    if (this.networks.includes('tiktok')) {
+                        body.tiktok_settings = this.postNowTarget.tiktokSettings || null;
+                    }
                     const resp = await fetch(`/publish/posts/${this.postNowTarget.id}/now`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'X-Correlation-ID': `post_now_${this.postNowTarget.id}`,
                         },
-                        body: JSON.stringify({
-                            post_id: this.postNowTarget.id,
-                            publish_caption: this.postNowTarget.caption,
-                            social_networks: this.networks,
-                        }),
+                        body: JSON.stringify(body),
                     });
                     if (!resp.ok) {
                         throw new Error(await window.extractApiError(resp));
                     }
                     const data = await resp.json();
-                    // Update local post state
-                    const idx = this.posts.findIndex(p => p.id === this.postNowTarget.id);
+                    const idx = this.posts.findIndex((p) => p.id === this.postNowTarget.id);
                     if (idx !== -1) {
                         this.posts[idx].publishStatus = data.data?.publish_status || 'published';
                         this.posts[idx].publishResults = data.data?.publish_results || this.posts[idx].publishResults || {};
@@ -668,13 +684,12 @@
                     }
                     this.showPostNowModal = false;
                     const tiktokStatus = data.data?.publish_results?.tiktok?.status;
-                    this.successMessage = tiktokStatus === 'awaiting_user_action'
-                        ? 'TikTok draft uploaded successfully!'
-                        : tiktokStatus === 'published'
-                            ? 'TikTok published successfully!'
-                            : 'Post published successfully!';
-                    setTimeout(() => window.location.reload(), 750);
-                    setTimeout(() => this.successMessage = '', 5000);
+                    this.successMessage = tiktokStatus === 'published'
+                        ? 'TikTok published successfully — content may take a few minutes to appear on your profile.'
+                        : tiktokStatus === 'awaiting_user_action'
+                            ? 'TikTok draft uploaded.'
+                            : 'Post published successfully.';
+                    setTimeout(() => window.location.reload(), 1500);
                 } catch (err) {
                     this.postNowError = err.message || 'Network error';
                 } finally {
