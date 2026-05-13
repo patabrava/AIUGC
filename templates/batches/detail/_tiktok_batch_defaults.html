@@ -1,0 +1,28 @@
+{# Batch-level TikTok defaults editor. #}
+<div x-data='tiktokPostSettings({
+        scope: "batch",
+        batchId: {{ batch.id | tojson }},
+        readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
+        creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
+        accountAvatarUrl: {{ (batch_view.tiktok_publish_state or {}).get("avatar_url") | tojson }},
+        initial: {
+            title: {{ (batch_view.tiktok_defaults or {}).get("title_template", "") | tojson }},
+            privacyLevel: {{ (batch_view.tiktok_defaults or {}).get("privacy_level") | tojson }},
+            allowComment: {{ (batch_view.tiktok_defaults or {}).get("allow_comment", false) | tojson }},
+            allowDuet: {{ (batch_view.tiktok_defaults or {}).get("allow_duet", false) | tojson }},
+            allowStitch: {{ (batch_view.tiktok_defaults or {}).get("allow_stitch", false) | tojson }},
+            commercialDisclosure: {{ (batch_view.tiktok_defaults or {}).get("commercial_disclosure", false) | tojson }},
+            yourBrand: {{ (batch_view.tiktok_defaults or {}).get("your_brand", false) | tojson }},
+            brandedContent: {{ (batch_view.tiktok_defaults or {}).get("branded_content", false) | tojson }},
+            consentAcknowledged: false
+        }
+     })'
+     class="mb-6">
+    <div class="mb-3 flex items-start justify-between">
+        <div>
+            <h3 class="text-base font-semibold text-gray-900">TikTok defaults for this batch</h3>
+            <p class="mt-1 text-xs text-gray-500">These values apply to every TikTok post in the batch. You can override per post below.</p>
+        </div>
+    </div>
+    {% include "batches/detail/_tiktok_post_settings.html" %}
+</div>
