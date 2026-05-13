@@ -53,7 +53,6 @@ TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TIKTOK_API_BASE = "https://open.tiktokapis.com"
 TIKTOK_TIMEOUT_SECONDS = 60.0
 DEFAULT_SCOPE = "user.info.basic,video.upload,video.publish"
-DEFAULT_PRIVACY_LEVEL = "SELF_ONLY"
 MAX_SINGLE_CHUNK_BYTES = 64 * 1024 * 1024
 MIN_CHUNK_BYTES = 5 * 1024 * 1024
 MAX_FINAL_CHUNK_BYTES = 128 * 1024 * 1024
@@ -788,20 +787,28 @@ def _normalize_tiktok_post_id(post_id: str) -> str:
 
 def _build_tiktok_post_info(
     *,
-    caption: str,
+    title: str,
     privacy_level: str,
     disable_comment: bool,
     disable_duet: bool,
     disable_stitch: bool,
+    brand_content_toggle: bool,
+    brand_organic_toggle: bool,
 ) -> Dict[str, Any]:
-    title = " ".join(str(caption or "").split())[:150].strip() or "Posted from Lippe Lift Studio"
+    cleaned_title = " ".join(str(title or "").split())[:90].strip()
+    if not cleaned_title:
+        raise ValidationError("TikTok post title is required.")
+    if not privacy_level:
+        raise ValidationError("TikTok privacy level is required.")
     return {
-        "title": title,
+        "title": cleaned_title,
         "privacy_level": privacy_level,
         "disable_comment": disable_comment,
         "disable_duet": disable_duet,
         "disable_stitch": disable_stitch,
         "video_cover_timestamp_ms": 1000,
+        "brand_content_toggle": brand_content_toggle,
+        "brand_organic_toggle": brand_organic_toggle,
     }
 
 
