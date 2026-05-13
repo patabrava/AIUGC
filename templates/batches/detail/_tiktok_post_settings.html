@@ -1,0 +1,166 @@
+{# Reusable TikTok required-UX panel. Mounted under x-data="tiktokPostSettings(...)".
+   Implements TikTok Content Sharing Guidelines §1–§5: creator info, mandatory metadata,
+   commercial disclosure, compliance declarations, and user control & awareness. #}
+<div class="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
+
+    {# §1 Creator strip #}
+    <div class="flex items-center justify-between border-b border-gray-100 pb-3">
+        <div class="flex items-center gap-3">
+            <img :src="creatorInfo.avatar_url || '/static/img/tiktok-avatar-placeholder.svg'"
+                 alt=""
+                 class="h-9 w-9 rounded-full border border-gray-200 object-cover">
+            <div>
+                <div class="text-xs uppercase tracking-wide text-gray-500">Posting to</div>
+                <div class="text-sm font-semibold text-gray-900">
+                    <span x-text="creatorInfo.creator_username ? '@' + creatorInfo.creator_username : 'TikTok account'"></span>
+                    <span class="text-gray-500" x-show="creatorInfo.creator_nickname"
+                          x-text="' · ' + (creatorInfo.creator_nickname || '')"></span>
+                </div>
+            </div>
+        </div>
+        <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+              :class="readinessStatus === 'publish_ready' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
+              x-text="readinessStatus === 'publish_ready' ? 'Direct post ready' : (readinessStatus === 'draft_ready' ? 'Sandbox draft mode' : 'Reconnect required')"></span>
+    </div>
+
+    {# Blocking state #}
+    <div x-show="isBlocked" class="rounded-md bg-red-50 border border-red-200 p-3 text-xs text-red-800">
+        TikTok account is not ready. Reconnect TikTok before configuring this post.
+    </div>
+
+    <template x-if="!isBlocked">
+        <div class="space-y-4">
+
+            {# §1 Video duration check #}
+            <div x-show="isOverDuration" class="rounded-md bg-red-50 border border-red-200 p-3 text-xs text-red-800">
+                This video is <span x-text="durationSec"></span>s — longer than TikTok allows for this account (<span x-text="maxDurationSec"></span>s max).
+            </div>
+
+            {# §2 Title #}
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wide text-gray-700 mb-1">TikTok title</label>
+                <input type="text" x-model="settings.title" maxlength="90"
+                       class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-[#006AAB] focus:outline-none focus:ring-1 focus:ring-[#006AAB]"
+                       placeholder="Title shown above the video">
+                <div class="mt-1 flex justify-between text-[10px] text-gray-400">
+                    <span>Required · separate from caption</span>
+                    <span x-text="settings.title.length + '/90'"></span>
+                </div>
+            </div>
+
+            {# §2 Privacy Status — no default #}
+            <fieldset>
+                <legend class="block text-xs font-semibold uppercase tracking-wide text-gray-700 mb-2">Who can view this video <span class="text-red-500">*</span></legend>
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <template x-for="option in privacyOptions" :key="option">
+                        <button type="button"
+                                @click="togglePrivacy(option)"
+                                :disabled="privateDisabledByBranded && option === 'SELF_ONLY'"
+                                :class="settings.privacyLevel === option
+                                        ? 'border-[#006AAB] bg-[#006AAB]/5 text-[#006AAB]'
+                                        : 'border-gray-200 hover:border-[#006AAB]/40'"
+                                class="flex items-start gap-2 rounded-md border p-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+                                :title="privateDisabledByBranded && option === 'SELF_ONLY' ? 'Branded content visibility cannot be set to private' : ''">
+                            <span class="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full border"
+                                  :class="settings.privacyLevel === option ? 'border-[#006AAB] bg-[#006AAB]' : 'border-gray-300'">
+                                <span x-show="settings.privacyLevel === option" class="h-1.5 w-1.5 rounded-full bg-white"></span>
+                            </span>
+                            <span x-text="privacyLabel(option)"></span>
+                        </button>
+                    </template>
+                </div>
+                <p x-show="!settings.privacyLevel" class="mt-2 text-[11px] text-gray-500">Pick a privacy level to enable posting.</p>
+            </fieldset>
+
+            {# §2 Interaction permissions — unchecked by default #}
+            <fieldset>
+                <legend class="block text-xs font-semibold uppercase tracking-wide text-gray-700 mb-2">Allow users to</legend>
+                <div class="space-y-2">
+                    <label class="flex items-center gap-2 text-sm" :class="commentDisabled ? 'opacity-50' : ''">
+                        <input type="checkbox" x-model="settings.allowComment" :disabled="commentDisabled"
+                               class="h-4 w-4 rounded border-gray-300 text-[#006AAB] focus:ring-[#006AAB]">
+                        <span>Comment</span>
+                        <span x-show="commentDisabled" class="text-[11px] text-gray-500">(disabled by creator settings)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm" :class="duetDisabled ? 'opacity-50' : ''">
+                        <input type="checkbox" x-model="settings.allowDuet" :disabled="duetDisabled"
+                               class="h-4 w-4 rounded border-gray-300 text-[#006AAB] focus:ring-[#006AAB]">
+                        <span>Duet</span>
+                        <span x-show="duetDisabled" class="text-[11px] text-gray-500">(disabled by creator settings)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm" :class="stitchDisabled ? 'opacity-50' : ''">
+                        <input type="checkbox" x-model="settings.allowStitch" :disabled="stitchDisabled"
+                               class="h-4 w-4 rounded border-gray-300 text-[#006AAB] focus:ring-[#006AAB]">
+                        <span>Stitch</span>
+                        <span x-show="stitchDisabled" class="text-[11px] text-gray-500">(disabled by creator settings)</span>
+                    </label>
+                </div>
+            </fieldset>
+
+            {# §3 Commercial Content Disclosure #}
+            <div class="rounded-md border border-gray-200 p-3">
+                <label class="flex items-start gap-2">
+                    <input type="checkbox" x-model="settings.commercialDisclosure"
+                           class="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#006AAB] focus:ring-[#006AAB]">
+                    <span class="text-sm">
+                        <span class="font-medium">Disclose video content</span>
+                        <span class="block text-[11px] text-gray-500">Turn on to disclose that this video promotes goods or services.</span>
+                    </span>
+                </label>
+
+                <div x-show="settings.commercialDisclosure" x-transition class="mt-3 space-y-2 pl-6">
+                    <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" x-model="settings.yourBrand"
+                               class="h-4 w-4 rounded border-gray-300 text-[#006AAB] focus:ring-[#006AAB]">
+                        <span>Your Brand</span>
+                        <span class="text-[11px] text-gray-500">Promoting goods or services you yourself sell.</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" x-model="settings.brandedContent"
+                               class="h-4 w-4 rounded border-gray-300 text-[#006AAB] focus:ring-[#006AAB]">
+                        <span>Branded Content</span>
+                        <span class="text-[11px] text-gray-500">Paid partnership with a third-party brand.</span>
+                    </label>
+
+                    <div x-show="disclosureChipLabel" class="pt-1">
+                        <span class="text-[11px] text-gray-500">This post will be labelled as</span>
+                        <span class="ml-1 inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                              :class="disclosureChipColor"
+                              x-text="disclosureChipLabel"></span>
+                    </div>
+                    <p x-show="disclosureRequiresSubtype" class="text-[11px] text-red-600">Select at least one of Your Brand or Branded Content to continue.</p>
+                </div>
+            </div>
+
+            {# §4 Compliance declarations #}
+            <div class="rounded-md bg-gray-50 p-3 text-[11px] text-gray-600 leading-relaxed">
+                <template x-if="!settings.commercialDisclosure || (settings.yourBrand && !settings.brandedContent)">
+                    <span>
+                        By posting, you agree to TikTok's
+                        <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer" class="text-[#006AAB] underline">Music Usage Confirmation</a>.
+                    </span>
+                </template>
+                <template x-if="settings.commercialDisclosure && settings.brandedContent">
+                    <span>
+                        By posting, you agree to TikTok's
+                        <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener noreferrer" class="text-[#006AAB] underline">Branded Content Policy</a>
+                        and
+                        <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer" class="text-[#006AAB] underline">Music Usage Confirmation</a>.
+                    </span>
+                </template>
+            </div>
+
+            {# Save / status #}
+            <div class="flex items-center justify-between">
+                <p class="text-[11px] text-gray-500">Content may take a few minutes to appear on your profile.</p>
+                <button type="button" @click="save()" :disabled="!isValid || saving"
+                        class="rounded-md px-4 py-2 text-xs font-semibold text-white shadow-sm transition disabled:cursor-not-allowed"
+                        :class="isValid && !saving ? 'bg-[#006AAB] hover:bg-[#005a90]' : 'bg-gray-300'">
+                    <span x-text="saving ? 'Saving…' : 'Save TikTok settings'"></span>
+                </button>
+            </div>
+            <div x-show="errorMessage" class="rounded-md bg-red-50 border border-red-200 p-2 text-[11px] text-red-700" x-text="errorMessage"></div>
+            <div x-show="successMessage" class="rounded-md bg-green-50 border border-green-200 p-2 text-[11px] text-green-700" x-text="successMessage"></div>
+        </div>
+    </template>
+</div>
