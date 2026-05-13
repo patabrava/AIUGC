@@ -454,6 +454,7 @@ def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
     """Project a post row into the publish-view dict consumed by the batch UI."""
     seed_data = post.get("seed_data") or {}
     caption_bundle = seed_data.get("caption_bundle") or {}
+    video_metadata = _load_json_object(post.get("video_metadata"))
     return {
         "id": post.get("id"),
         "type": post.get("post_type"),
@@ -473,6 +474,8 @@ def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
         ],
         "selectedCaptionKey": caption_bundle.get("selected_key") or "",
         "videoUrl": post.get("video_url"),
+        "videoMetadata": video_metadata,
+        "captionVideoUrl": video_metadata.get("caption_video_url"),
         "publishStatus": post.get("publish_status") or "pending",
         "publishResults": _load_json_object(post.get("publish_results")),
         "platformIds": _load_json_object(post.get("platform_ids")),
