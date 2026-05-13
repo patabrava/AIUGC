@@ -40,3 +40,37 @@ def test_build_post_info_passes_brand_toggles():
     assert info["disable_comment"] is True
     assert info["brand_content_toggle"] is True
     assert info["brand_organic_toggle"] is False
+
+
+from fastapi.testclient import TestClient
+
+
+def test_save_post_tiktok_settings_round_trip(monkeypatch):
+    from app.main import app
+    from app.features.publish import handlers
+
+    captured = {}
+
+    def fake_update(post_id, payload):
+        captured["payload"] = payload
+        captured["post_id"] = post_id
+        return {"id": post_id, "tiktok_settings": payload["tiktok_settings"]}
+
+    monkeypatch.setattr(handlers, "_update_post_tiktok_settings_row", fake_update)
+    client = TestClient(app)
+    response = client.put(
+        "/publish/posts/post-1/tiktok-settings",
+        json={
+            "title": "Hello",
+            "privacy_level": "PUBLIC_TO_EVERYONE",
+            "allow_comment": True,
+            "allow_duet": False,
+            "allow_stitch": False,
+            "commercial_disclosure": True,
+            "your_brand": True,
+            "branded_content": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert captured["payload"]["tiktok_settings"]["privacy_level"] == "PUBLIC_TO_EVERYONE"
+    assert captured["payload"]["tiktok_settings"]["your_brand"] is True

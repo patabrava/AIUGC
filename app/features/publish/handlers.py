@@ -53,6 +53,7 @@ from app.features.publish.schemas import (
     SuggestedTime,
     SuggestTimesResponse,
     PostNowRequest,
+    TikTokPostSettings,
     UpdatePostScheduleRequest,
 )
 from app.features.topics.captions import resolve_display_caption
@@ -1066,6 +1067,30 @@ async def update_schedule(post_id: str, request: UpdatePostScheduleRequest):
         publish_caption=request.publish_caption,
     )
     return SuccessResponse(data={"post": updated_post})
+
+
+def _update_post_tiktok_settings_row(post_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    response = (
+        get_supabase()
+        .client.table("posts")
+        .update(payload)
+        .eq("id", post_id)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        raise NotFoundError("Post not found.", details={"post_id": post_id})
+    return dict(rows[0])
+
+
+@router.put("/posts/{post_id}/tiktok-settings", response_model=SuccessResponse)
+async def save_post_tiktok_settings(post_id: str, settings: TikTokPostSettings):
+    """Persist TikTok required-field settings for one post."""
+    row = _update_post_tiktok_settings_row(
+        post_id,
+        {"tiktok_settings": settings.model_dump()},
+    )
+    return SuccessResponse(data={"post_id": row["id"], "tiktok_settings": row["tiktok_settings"]})
 
 
 @router.post("/batches/{batch_id}/plan", response_model=SuccessResponse)
