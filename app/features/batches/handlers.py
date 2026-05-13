@@ -450,6 +450,38 @@ def _resolve_caption_source_links(post: Dict[str, Any]) -> list[Dict[str, str]]:
     return links
 
 
+def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a post row into the publish-view dict consumed by the batch UI."""
+    seed_data = post.get("seed_data") or {}
+    caption_bundle = seed_data.get("caption_bundle") or {}
+    return {
+        "id": post.get("id"),
+        "type": post.get("post_type"),
+        "title": post.get("topic_title"),
+        "canonicalTopic": seed_data.get("canonical_topic") or "",
+        "researchTitle": seed_data.get("research_title") or "",
+        "caption": _resolve_review_caption(post),
+        "captionSourceLinks": _resolve_caption_source_links(post),
+        "captionOptions": [
+            {
+                "key": variant.get("key"),
+                "label": variant.get("key").replace("_", " ").title() if variant.get("key") else "",
+                "body": variant.get("body"),
+            }
+            for variant in (caption_bundle.get("variants") or [])
+            if isinstance(variant, dict) and variant.get("body")
+        ],
+        "selectedCaptionKey": caption_bundle.get("selected_key") or "",
+        "videoUrl": post.get("video_url"),
+        "publishStatus": post.get("publish_status") or "pending",
+        "publishResults": _load_json_object(post.get("publish_results")),
+        "platformIds": _load_json_object(post.get("platform_ids")),
+        "scheduledAt": post.get("scheduled_at"),
+        "socialNetworks": _normalize_string_list(post.get("social_networks")),
+        "tiktokSettings": _load_json_object(post.get("tiktok_settings")),
+    }
+
+
 def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: list[Dict[str, Any]]) -> Dict[str, Any]:
     """Derive batch-level video settings so the UI can rehydrate across HTMX rerenders."""
     initial_model = "veo-3.1-generate-preview"
@@ -578,31 +610,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
             "pending_scripts_count": pending_scripts_count,
         },
         "publish_posts_json": [
-            {
-                "id": post.get("id"),
-                "type": post.get("post_type"),
-                "title": post.get("topic_title"),
-                "canonicalTopic": (post.get("seed_data") or {}).get("canonical_topic") or "",
-                "researchTitle": (post.get("seed_data") or {}).get("research_title") or "",
-                "caption": _resolve_review_caption(post),
-                "captionSourceLinks": _resolve_caption_source_links(post),
-                "captionOptions": [
-                    {
-                        "key": variant.get("key"),
-                        "label": variant.get("key").replace("_", " ").title() if variant.get("key") else "",
-                        "body": variant.get("body"),
-                    }
-                    for variant in (((post.get("seed_data") or {}).get("caption_bundle") or {}).get("variants") or [])
-                    if isinstance(variant, dict) and variant.get("body")
-                ],
-                "selectedCaptionKey": ((post.get("seed_data") or {}).get("caption_bundle") or {}).get("selected_key") or "",
-                "videoUrl": post.get("video_url"),
-                "publishStatus": post.get("publish_status") or "pending",
-                "publishResults": _load_json_object(post.get("publish_results")),
-                "platformIds": _load_json_object(post.get("platform_ids")),
-                "scheduledAt": post.get("scheduled_at"),
-                "socialNetworks": _normalize_string_list(post.get("social_networks")),
-            }
+            _build_publish_post_view(post)
             for post in posts
             if not (post.get("seed_data") or {}).get("video_excluded")
         ],
@@ -612,6 +620,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         "selected_instagram_account": meta_publish_state.get("selected_instagram") or {},
         "available_meta_pages": meta_publish_state.get("available_pages") or [],
         "video_generation_settings": _build_batch_video_generation_settings(batch_detail, posts),
+        "tiktok_defaults": _load_json_object(batch_detail.get("tiktok_defaults")),
     }
 
 
