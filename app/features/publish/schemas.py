@@ -128,6 +128,10 @@ class PostNowRequest(BaseModel):
         min_length=1,
         description="Selected social networks (Instagram, Facebook, TikTok)",
     )
+    tiktok_settings: Optional["TikTokPostSettings"] = Field(
+        default=None,
+        description="Required when TikTok is direct-post ready and TikTok is included in social_networks",
+    )
 
     @field_validator("social_networks")
     @classmethod
@@ -351,6 +355,10 @@ class TikTokPostSettings(BaseModel):
                 "your_brand/branded_content require commercial_disclosure to be true"
             )
         return self
+
+
+# Resolve forward reference now that TikTokPostSettings is defined.
+PostNowRequest.model_rebuild()
 
 
 class TikTokBatchDefaults(BaseModel):

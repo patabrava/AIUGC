@@ -292,3 +292,118 @@ class TestPostNowBatchCompletion:
         assert result["publish_status"] == "published"
         # Batch should have been advanced to S8_COMPLETE
         assert storage["batches"][0]["state"] == BatchState.S8_COMPLETE.value
+
+
+class TestPostNowTikTokRouting:
+    """When TikTok readiness is publish_ready and settings are provided, call direct-post; else draft."""
+
+    def _settings(self):
+        return {
+            "title": "Hi",
+            "privacy_level": "PUBLIC_TO_EVERYONE",
+            "allow_comment": True,
+            "allow_duet": False,
+            "allow_stitch": False,
+            "commercial_disclosure": False,
+            "your_brand": False,
+            "branded_content": False,
+        }
+
+    def test_post_now_routes_to_direct_when_publish_ready(self, monkeypatch):
+        storage = _make_storage(networks=["tiktok"])
+        monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+        monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
+        monkeypatch.setattr(publish_handlers, "_effective_meta_connection", lambda batch_id, mc: mc)
+        monkeypatch.setattr(publish_handlers, "_ensure_meta_targets_for_networks", lambda networks, mc: None)
+
+        captured = {}
+
+        async def fake_state():
+            return {"readiness_status": "publish_ready", "publish_ready": True}
+
+        async def fake_direct(post_id, **kwargs):
+            captured["called"] = "direct"
+            captured["post_id"] = post_id
+            captured["kwargs"] = kwargs
+            return {
+                "id": "job-1",
+                "status": "published",
+                "post_mode": "direct",
+                "response_payload_json": {
+                    "publicaly_available_post_id": ["123"],
+                    "provider_status": "PUBLISH_COMPLETE",
+                },
+                "tiktok_publish_id": "p1",
+                "error_message": "",
+                "post_id": post_id,
+            }
+
+        async def fake_draft(post_id, caption=None):
+            captured["called"] = "draft"
+            return {}
+
+        monkeypatch.setattr(publish_handlers, "get_tiktok_publish_state", fake_state)
+        monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", fake_direct)
+        monkeypatch.setattr(publish_handlers, "upload_tiktok_draft_for_post", fake_draft)
+
+        result = _run(
+            publish_handlers.publish_post_now(
+                "post-1",
+                ["tiktok"],
+                publish_caption="c",
+                tiktok_settings=self._settings(),
+            )
+        )
+
+        assert captured["called"] == "direct"
+        assert captured["kwargs"]["title"] == "Hi"
+        assert captured["kwargs"]["privacy_level"] == "PUBLIC_TO_EVERYONE"
+        assert result["publish_results"]["tiktok"]["post_mode"] == "direct"
+        assert result["publish_results"]["tiktok"]["status"] == "published"
+
+    def test_post_now_falls_back_to_draft_when_not_publish_ready(self, monkeypatch):
+        storage = _make_storage(networks=["tiktok"])
+        monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+        monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
+        monkeypatch.setattr(publish_handlers, "_effective_meta_connection", lambda batch_id, mc: mc)
+        monkeypatch.setattr(publish_handlers, "_ensure_meta_targets_for_networks", lambda networks, mc: None)
+
+        captured = {}
+
+        async def fake_state():
+            return {"readiness_status": "draft_ready", "publish_ready": False}
+
+        async def fake_direct(post_id, **kwargs):
+            captured["called"] = "direct"
+            return {}
+
+        async def fake_draft(post_id, caption=None):
+            captured["called"] = "draft"
+            return {
+                "id": "job-2",
+                "status": "submitted",
+                "post_mode": "draft",
+                "response_payload_json": {
+                    "publicaly_available_post_id": [],
+                    "provider_status": "SEND_TO_USER_INBOX",
+                },
+                "tiktok_publish_id": "p2",
+                "error_message": "",
+                "post_id": post_id,
+            }
+
+        monkeypatch.setattr(publish_handlers, "get_tiktok_publish_state", fake_state)
+        monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", fake_direct)
+        monkeypatch.setattr(publish_handlers, "upload_tiktok_draft_for_post", fake_draft)
+
+        result = _run(
+            publish_handlers.publish_post_now(
+                "post-1",
+                ["tiktok"],
+                publish_caption="c",
+                tiktok_settings=None,
+            )
+        )
+
+        assert captured["called"] == "draft"
+        assert result["publish_results"]["tiktok"]["post_mode"] == "draft"

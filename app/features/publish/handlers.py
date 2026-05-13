@@ -1706,7 +1706,13 @@ async def cron_dispatch_publish(request: Request):
     return SuccessResponse(data=result)
 
 
-async def publish_post_now(post_id: str, social_networks: List[str], *, publish_caption: str | None = None) -> Dict[str, Any]:
+async def publish_post_now(
+    post_id: str,
+    social_networks: List[str],
+    *,
+    publish_caption: str | None = None,
+    tiktok_settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Immediately dispatch a single post to its selected networks.
 
     Guards:
@@ -1795,15 +1801,30 @@ async def publish_post_now(post_id: str, social_networks: List[str], *, publish_
                 elif network == SocialNetwork.INSTAGRAM.value:
                     remote_id = await _publish_instagram_reel(post, meta_connection)
                 elif network == SocialNetwork.TIKTOK.value:
-                    tiktok_job = await upload_tiktok_draft_for_post(
-                        post["id"],
-                        caption=post["publish_caption"],
-                    )
+                    readiness = str(tiktok_connection.get("readiness_status") or "")
+                    if readiness == "publish_ready" and tiktok_settings:
+                        tiktok_job = await publish_tiktok_direct_for_post(
+                            post["id"],
+                            caption=post["publish_caption"],
+                            title=tiktok_settings["title"],
+                            privacy_level=tiktok_settings["privacy_level"],
+                            allow_comment=bool(tiktok_settings.get("allow_comment")),
+                            allow_duet=bool(tiktok_settings.get("allow_duet")),
+                            allow_stitch=bool(tiktok_settings.get("allow_stitch")),
+                            your_brand=bool(tiktok_settings.get("your_brand")),
+                            branded_content=bool(tiktok_settings.get("branded_content")),
+                        )
+                        post_mode = "direct"
+                    else:
+                        tiktok_job = await upload_tiktok_draft_for_post(
+                            post["id"],
+                            caption=post["publish_caption"],
+                        )
+                        post_mode = "draft"
                     tiktok_payload = _load_json_object(tiktok_job.get("response_payload_json"))
                     provider_post_ids = tiktok_payload.get("publicaly_available_post_id") or []
                     remote_id = str(provider_post_ids[0]) if provider_post_ids else str(tiktok_job.get("tiktok_publish_id") or tiktok_job.get("id"))
                     provider_status = str(tiktok_payload.get("provider_status") or tiktok_job.get("status") or "").upper()
-                    post_mode = "draft"
                     publish_results[network] = {
                         "status": _tiktok_job_result_status(tiktok_job),
                         "post_mode": post_mode,
@@ -1891,5 +1912,6 @@ async def handle_publish_post_now(post_id: str, request: PostNowRequest):
         post_id,
         [n.value for n in request.social_networks],
         publish_caption=request.publish_caption,
+        tiktok_settings=request.tiktok_settings.model_dump() if request.tiktok_settings else None,
     )
     return SuccessResponse(data=result)
