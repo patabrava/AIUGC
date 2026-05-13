@@ -3,24 +3,11 @@
    commercial disclosure, compliance declarations, and user control & awareness. #}
 <div class="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
 
-    {# §1 Creator strip #}
-    <div class="flex items-center justify-between border-b border-gray-100 pb-3">
-        <div class="flex items-center gap-3">
-            <img :src="creatorInfo.avatar_url || '/static/img/tiktok-avatar-placeholder.svg'"
-                 alt=""
-                 class="h-9 w-9 rounded-full border border-gray-200 object-cover">
-            <div>
-                <div class="text-xs uppercase tracking-wide text-gray-500">Posting to</div>
-                <div class="text-sm font-semibold text-gray-900">
-                    <span x-text="creatorInfo.creator_username ? '@' + creatorInfo.creator_username : 'TikTok account'"></span>
-                    <span class="text-gray-500" x-show="creatorInfo.creator_nickname"
-                          x-text="' · ' + (creatorInfo.creator_nickname || '')"></span>
-                </div>
-            </div>
-        </div>
-        <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-              :class="readinessStatus === 'publish_ready' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
-              x-text="readinessStatus === 'publish_ready' ? 'Direct post ready' : (readinessStatus === 'draft_ready' ? 'Sandbox draft mode' : 'Reconnect required')"></span>
+    {# §1 Creator identity: TikTok requires the upload page to show the creator nickname. #}
+    <div class="border-b border-gray-100 pb-3 text-xs text-gray-500">
+        TikTok account:
+        <span class="font-medium text-gray-900"
+              x-text="creatorInfo.creator_nickname || (creatorInfo.creator_username ? '@' + creatorInfo.creator_username : 'Connected account')"></span>
     </div>
 
     {# Blocking state #}

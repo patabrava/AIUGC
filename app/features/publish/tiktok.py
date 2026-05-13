@@ -178,6 +178,7 @@ def _sanitize_creator_info(value: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "creator_username": value.get("creator_username"),
         "creator_nickname": value.get("creator_nickname"),
+        "creator_avatar_url": value.get("creator_avatar_url"),
         "privacy_level_options": privacy_options,
         "comment_disabled": bool(value.get("comment_disabled")),
         "duet_disabled": bool(value.get("duet_disabled")),

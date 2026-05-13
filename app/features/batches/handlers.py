@@ -579,6 +579,11 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
 
     meta_publish_state = batch_detail.get("meta_connection") or {}
     tiktok_publish_state = batch_detail.get("tiktok_connection") or {}
+    creator_info = dict(tiktok_publish_state.get("creator_info") or {})
+    fresh_avatar = creator_info.get("creator_avatar_url") or tiktok_publish_state.get("avatar_url")
+    if fresh_avatar:
+        creator_info["avatar_url"] = fresh_avatar
+        tiktok_publish_state = {**tiktok_publish_state, "creator_info": creator_info}
 
     return {
         "should_poll_prompts": batch_state == BatchState.S5_PROMPTS_BUILT.value,
