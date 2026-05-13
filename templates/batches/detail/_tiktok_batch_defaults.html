@@ -5,7 +5,7 @@
         scope: "batch",
         batchId: {{ batch.id | tojson }},
         readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
-        creatorInfo: {{ (batch_view.tiktok_publish_state or {}).get("creator_info") or {} | tojson }},
+        creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
         initial: {
             title: {{ (batch_view.tiktok_defaults or {}).get("title_template", "") | tojson }},
             privacyLevel: {{ (batch_view.tiktok_defaults or {}).get("privacy_level") | tojson }},

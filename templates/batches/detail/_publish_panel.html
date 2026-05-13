@@ -145,7 +145,7 @@
                                     scope: "post",
                                     postId: post.id,
                                     readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
-                                    creatorInfo: {{ (batch_view.tiktok_publish_state or {}).get("creator_info") or {} | tojson }},
+                                    creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
                                     durationSec: (post.videoMetadata && post.videoMetadata.duration_seconds) || 0,
                                     initial: {
                                         title: (post.tiktokSettings && post.tiktokSettings.title) || (post.title || ""),
@@ -326,7 +326,7 @@
                             scope: "post",
                             postId: postNowTarget.id,
                             readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
-                            creatorInfo: {{ (batch_view.tiktok_publish_state or {}).get("creator_info") or {} | tojson }},
+                            creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
                             durationSec: (postNowTarget.videoMetadata && postNowTarget.videoMetadata.duration_seconds) || 0,
                             initial: {
                                 title: (postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.title) || (postNowTarget.title || ""),
