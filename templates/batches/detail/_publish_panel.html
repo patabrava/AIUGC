@@ -63,6 +63,11 @@
         </div>
     </div>
 
+    {# TikTok defaults — only shown if the workspace selected TikTok as a network at any layer #}
+    <div x-show="networks.includes('tiktok')" x-cloak>
+        {% include "batches/detail/_tiktok_batch_defaults.html" %}
+    </div>
+
     {# ── Post List ── #}
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center justify-between mb-4">
@@ -134,6 +139,28 @@
                             <p class="text-[10px] text-gray-400">
                                 Pick the variant you want to ship. The selected caption is copied into the publish field below.
                             </p>
+                        </div>
+                        <div x-show="networks.includes('tiktok')" x-cloak class="mt-4">
+                            <div x-data='tiktokPostSettings({
+                                    scope: "post",
+                                    postId: post.id,
+                                    readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
+                                    creatorInfo: {{ (batch_view.tiktok_publish_state or {}).get("creator_info") or {} | tojson }},
+                                    durationSec: (post.videoMetadata && post.videoMetadata.duration_seconds) || 0,
+                                    initial: {
+                                        title: (post.tiktokSettings && post.tiktokSettings.title) || (post.title || ""),
+                                        privacyLevel: (post.tiktokSettings && post.tiktokSettings.privacy_level) || null,
+                                        allowComment: !!(post.tiktokSettings && post.tiktokSettings.allow_comment),
+                                        allowDuet: !!(post.tiktokSettings && post.tiktokSettings.allow_duet),
+                                        allowStitch: !!(post.tiktokSettings && post.tiktokSettings.allow_stitch),
+                                        commercialDisclosure: !!(post.tiktokSettings && post.tiktokSettings.commercial_disclosure),
+                                        yourBrand: !!(post.tiktokSettings && post.tiktokSettings.your_brand),
+                                        brandedContent: !!(post.tiktokSettings && post.tiktokSettings.branded_content)
+                                    },
+                                    onSaved: function (payload) { post.tiktokSettings = payload; }
+                                 })'>
+                                {% include "batches/detail/_tiktok_post_settings.html" %}
+                            </div>
                         </div>
                     </div>
                 </div>
