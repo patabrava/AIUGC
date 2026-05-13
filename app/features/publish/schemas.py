@@ -305,6 +305,78 @@ class TikTokUploadDraftRequest(BaseModel):
     caption: Optional[str] = Field(default=None, max_length=2200, description="Optional TikTok draft caption")
 
 
+ALLOWED_TIKTOK_PRIVACY_LEVELS = frozenset(
+    {"PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"}
+)
+
+
+class TikTokPostSettings(BaseModel):
+    """TikTok Content Posting API required per-post fields."""
+
+    title: str = Field(..., max_length=90, description="TikTok post title, shown above the video")
+    privacy_level: str = Field(..., description="One of TikTok's privacy_level_options")
+    allow_comment: bool = Field(default=False)
+    allow_duet: bool = Field(default=False)
+    allow_stitch: bool = Field(default=False)
+    commercial_disclosure: bool = Field(default=False)
+    your_brand: bool = Field(default=False)
+    branded_content: bool = Field(default=False)
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("title must not be blank")
+        return value
+
+    @field_validator("privacy_level")
+    @classmethod
+    def privacy_level_known(cls, value: str) -> str:
+        if value not in ALLOWED_TIKTOK_PRIVACY_LEVELS:
+            raise ValueError(
+                f"privacy_level must be one of {sorted(ALLOWED_TIKTOK_PRIVACY_LEVELS)}"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_disclosure_consistency(self) -> "TikTokPostSettings":
+        if self.commercial_disclosure and not (self.your_brand or self.branded_content):
+            raise ValueError(
+                "commercial_disclosure requires at least one of your_brand or branded_content"
+            )
+        if self.branded_content and self.privacy_level == "SELF_ONLY":
+            raise ValueError("branded_content cannot use SELF_ONLY privacy level")
+        if not self.commercial_disclosure and (self.your_brand or self.branded_content):
+            raise ValueError(
+                "your_brand/branded_content require commercial_disclosure to be true"
+            )
+        return self
+
+
+class TikTokBatchDefaults(BaseModel):
+    """Optional batch-level defaults; copied into per-post settings on first edit."""
+
+    title_template: Optional[str] = Field(default=None, max_length=90)
+    privacy_level: Optional[str] = Field(default=None)
+    allow_comment: bool = Field(default=False)
+    allow_duet: bool = Field(default=False)
+    allow_stitch: bool = Field(default=False)
+    commercial_disclosure: bool = Field(default=False)
+    your_brand: bool = Field(default=False)
+    branded_content: bool = Field(default=False)
+
+    @field_validator("privacy_level")
+    @classmethod
+    def privacy_level_known(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        if value not in ALLOWED_TIKTOK_PRIVACY_LEVELS:
+            raise ValueError(
+                f"privacy_level must be one of {sorted(ALLOWED_TIKTOK_PRIVACY_LEVELS)}"
+            )
+        return value
+
+
 class TikTokPublishRequest(BaseModel):
     """Post one generated video directly to TikTok."""
     post_id: str = Field(..., min_length=1, description="Post id for the generated video")

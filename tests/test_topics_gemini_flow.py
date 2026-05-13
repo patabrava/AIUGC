@@ -9,6 +9,7 @@ import pytest
 
 from app.adapters import llm_client as llm_client_module
 from app.core.config import Settings
+from app.features.topics import bank_warmup
 from app.features.topics import agents as topic_agents
 from app.features.topics import handlers as topic_handlers
 from app.features.topics.topic_validation import detect_metadata_bleed, detect_spoken_copy_issues
@@ -1644,6 +1645,64 @@ def test_generate_topic_script_candidate_applies_shared_quality_gate():
     assert 14 <= len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", item.script)) <= 18
 
 
+def test_resolve_primary_source_info_uses_source_urls_fallback(monkeypatch):
+    calls = []
+
+    def fake_is_live_source_url(url: str) -> bool:
+        calls.append(url)
+        return url.endswith("/actual-source")
+
+    monkeypatch.setattr(bank_warmup, "_is_live_source_url", fake_is_live_source_url)
+
+    resolved = bank_warmup._resolve_primary_source_info(
+        {
+            "sources": [
+                {"title": "Dead source", "url": "https://example.com/dead-source"},
+            ],
+            "source_urls": [
+                {"title": "Fallback source", "url": "https://example.com/actual-source"},
+            ],
+        }
+    )
+
+    assert resolved == {
+        "title": "Fallback source",
+        "url": "https://example.com/actual-source",
+    }
+    assert calls == [
+        "https://example.com/dead-source",
+        "https://example.com/actual-source",
+    ]
+
+
+def test_build_seed_payload_does_not_fall_back_to_item_sources_when_source_url_missing():
+    item = topic_agents.ResearchAgentItem(
+        topic="Test topic",
+        script="Ein kurzer deutschsprachiger Skripttext.",
+        caption="Quelle fehlt bewusst.",
+        framework="PAL",
+        sources=[{"title": "Dead source", "url": "https://example.com/dead-source"}],
+        source_summary="Quelle fehlt bewusst.",
+        estimated_duration_s=8,
+        tone="direkt, freundlich, empowernd, du-Form",
+        disclaimer="Keine Rechts- oder medizinische Beratung.",
+    )
+    strict_seed = topic_agents.SeedData(facts=["Fakt 1"], source_context="Kontext")
+
+    payload = bank_warmup.build_seed_payload(
+        item,
+        strict_seed,
+        None,
+        source_title=None,
+        source_url=None,
+        source_summary="Kontext",
+        canonical_topic="Test topic",
+        research_title="Test topic",
+    )
+
+    assert "source" not in payload
+
+
 def test_generate_gemini_deep_research_resolves_grounding_redirects(monkeypatch):
     """llm_client must resolve vertexaisearch redirects and rewrite the body text."""
     from app.adapters.llm_client import LLMClient
@@ -1695,3 +1754,40 @@ def test_generate_gemini_deep_research_resolves_grounding_redirects(monkeypatch)
     assert "vertexaisearch.cloud.google.com" not in text
     assert "https://www.tagesschau.de/artikel" in text
     assert "https://www.bmas.de/seite" in text
+
+
+def test_generate_gemini_deep_research_appends_grounding_chunk_sources(monkeypatch):
+    """Vertex source metadata must reach the text parser even when prose has no URLs."""
+    from app.adapters.llm_client import LLMClient
+
+    grounded_payload = {
+        "text": "Forschungsdossier: Test\n\nAktuelle Fakten ohne inline Quellen.",
+        "grounding_chunks": [
+            {"uri": "https://www.bmas.de/DE/Service/Presse/presse.html", "title": "BMAS"},
+            {"uri": "https://www.bahn.de/service/individuelle-reise/barrierefrei", "title": "DB Barrierefrei"},
+        ],
+    }
+
+    class _FakeVertex:
+        def generate_grounded_research(self, **kwargs):
+            return grounded_payload
+
+    monkeypatch.setattr(
+        "app.adapters.llm_client.get_vertex_gemini_client",
+        lambda: _FakeVertex(),
+    )
+
+    client = LLMClient.__new__(LLMClient)
+    client.gemini_deep_research_provider = "vertex_grounded"
+
+    text = client.generate_gemini_deep_research(prompt="topic")
+    dossier = topic_agents.parse_topic_research_response(
+        text,
+        seed_topic="Test",
+        post_type="value",
+        target_length_tier=8,
+    )
+
+    urls = [str(source.url) for source in dossier.sources]
+    assert "https://www.bmas.de/DE/Service/Presse/presse.html" in urls
+    assert "https://www.bahn.de/service/individuelle-reise/barrierefrei" in urls

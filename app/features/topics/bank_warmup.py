@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from app.core.logging import get_logger
@@ -184,6 +185,63 @@ def _build_seed_scoped_fallback_script(*, seed_topic: str) -> str:
     return f"Kennst du 3 Schritte, damit {seed_hint} im Alltag klappt, ohne Stress, und du dich sicherer fuehlst?"
 
 
+def _is_live_source_url(url: str) -> bool:
+    """Best-effort liveness probe for source URLs used during warm-up."""
+    candidate = str(url or "").strip()
+    if not candidate:
+        return False
+    try:
+        proc = subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-L",
+                "--max-time",
+                "8",
+                "--connect-timeout",
+                "4",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                candidate,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+    except Exception:
+        return False
+    if proc.returncode in {6, 7}:
+        return False
+    try:
+        status = int((proc.stdout or "0").strip())
+    except ValueError:
+        return False
+    return status not in {404, 410} and status != 0
+
+
+def _resolve_primary_source_info(*payloads: Dict[str, Any]) -> Dict[str, str]:
+    """Return the first live source-like entry from the provided payloads."""
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for key in ("sources", "source_urls"):
+            for item in list(payload.get(key) or []):
+                if isinstance(item, dict):
+                    url = str(item.get("url") or "").strip()
+                    if not url or not _is_live_source_url(url):
+                        continue
+                    return {
+                        "title": str(item.get("title") or item.get("label") or "").strip(),
+                        "url": url,
+                    }
+                url = str(item or "").strip()
+                if url and _is_live_source_url(url):
+                    return {"title": "", "url": url}
+    return {}
+
+
 def _generate_research_dossier_raw(
     *,
     seed_topic: str,
@@ -335,7 +393,7 @@ def run_single_seed_topic_warmup(
                     lane_title=lane_title,
                 )
 
-            source_info = (lane_dossier.get("sources") or [{}])[0] if lane_dossier.get("sources") else {}
+            source_info = _resolve_primary_source_info(lane_dossier, research_dossier)
             tier_prompt_items: Dict[int, Any] = {8: base_prompt1_item}
             for tier in _CANONICAL_TIERS:
                 if tier == 8:
@@ -467,6 +525,7 @@ def run_single_seed_topic_warmup(
             fallback_dossier = dict(research_dossier)
             fallback_dossier["lane_candidate"] = fallback_lane_candidate
             fallback_dossier["lane_candidates"] = [fallback_lane_candidate]
+            fallback_source_info = _resolve_primary_source_info(fallback_dossier, research_dossier)
             fallback_caption = sanitize_metadata_text(
                 str(fallback_dossier.get("source_summary") or fallback_dossier.get("cluster_summary") or seed_topic).strip(),
                 max_chars=500,
@@ -482,8 +541,12 @@ def run_single_seed_topic_warmup(
                 framework="PAL",
                 sources=[
                     {
-                        "title": str((fallback_dossier.get("sources") or [{}])[0].get("title") or seed_topic).strip(),
-                        "url": str((fallback_dossier.get("sources") or [{}])[0].get("url") or "https://example.com").strip(),
+                        "title": str(
+                            fallback_source_info.get("title")
+                            or fallback_lane_candidate.get("title")
+                            or seed_topic
+                        ).strip(),
+                        "url": str(fallback_source_info.get("url") or "https://example.com").strip(),
                     }
                 ],
                 source_summary=fallback_source_summary,
@@ -507,8 +570,8 @@ def run_single_seed_topic_warmup(
                     topic_title=fallback_lane_title,
                 ),
                 None,
-                source_title=str((fallback_dossier.get("sources") or [{}])[0].get("title") or fallback_lane_title).strip() or None,
-                source_url=str((fallback_dossier.get("sources") or [{}])[0].get("url") or "").strip() or None,
+                source_title=str(fallback_source_info.get("title") or fallback_lane_title).strip() or None,
+                source_url=str(fallback_source_info.get("url") or "").strip() or None,
                 source_summary=sanitize_metadata_text(
                     fallback_dossier.get("source_summary") or fallback_prompt1_item.caption or fallback_prompt1_item.source_summary or "",
                     max_chars=500,
@@ -535,8 +598,8 @@ def run_single_seed_topic_warmup(
                                 topic_title=fallback_lane_title,
                             ),
                             None,
-                            source_title=str((fallback_dossier.get("sources") or [{}])[0].get("title") or fallback_lane_title).strip() or None,
-                            source_url=str((fallback_dossier.get("sources") or [{}])[0].get("url") or "").strip() or None,
+                            source_title=str(fallback_source_info.get("title") or fallback_lane_title).strip() or None,
+                            source_url=str(fallback_source_info.get("url") or "").strip() or None,
                             source_summary=sanitize_metadata_text(
                                 fallback_dossier.get("source_summary") or fallback_prompt1_item.caption or fallback_prompt1_item.source_summary or "",
                                 max_chars=500,

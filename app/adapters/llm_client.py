@@ -842,6 +842,37 @@ class LLMClient:
                         "vertex_grounded_redirects_unresolved",
                         total=len(redirect_urls),
                     )
+            else:
+                resolved = {}
+
+            chunk_sources: List[Dict[str, str]] = []
+            seen_source_urls = set(re.findall(r"https?://[^\s)>\"']+", text or ""))
+            for chunk in chunks:
+                if not isinstance(chunk, dict):
+                    continue
+                uri = str(chunk.get("uri") or "").strip()
+                if not uri:
+                    continue
+                source_url = resolved.get(uri, uri)
+                if is_grounding_redirect_url(source_url):
+                    continue
+                if source_url in seen_source_urls:
+                    continue
+                seen_source_urls.add(source_url)
+                title = str(chunk.get("title") or "").strip() or source_url
+                chunk_sources.append({"title": title, "url": source_url})
+                if len(chunk_sources) >= 8:
+                    break
+
+            if chunk_sources:
+                source_lines = "\n".join(
+                    f"- {source['title']}: {source['url']}" for source in chunk_sources
+                )
+                text = f"{text.rstrip()}\n\nQuellen:\n{source_lines}"
+                logger.info(
+                    "vertex_grounded_sources_appended",
+                    total=len(chunk_sources),
+                )
 
             if progress_callback:
                 progress_callback(

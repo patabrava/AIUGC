@@ -6,6 +6,7 @@ import pytest
 from app.features.posts.prompt_builder import build_video_prompt_from_seed, split_dialogue_sentences, build_optimized_prompt, build_veo_prompt_segment, sync_video_prompt_with_seed_data
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE
 from app.features.posts.schemas import AudioSection, UpdatePromptRequest, VideoPrompt
+from app.features.videos import handlers as video_handlers
 
 
 def test_veo_prompt_requires_exact_german_dialogue():
@@ -132,6 +133,34 @@ def test_video_prompt_prefers_character_text_from_seed_data():
     assert prompt["character"] == character
     assert character in prompt["optimized_prompt"]
     assert character in prompt["veo_prompt"]
+
+
+def test_veo_prompt_text_prefers_edited_veo_prompt_over_fallbacks():
+    edited_prompt = {
+        "veo_prompt": "Character:\nEdited character with black sunglasses.\n\nDialogue:\nHallo Welt.",
+        "optimized_prompt": "Character:\nSeed character.\n\nDialogue:\nSeed dialogue.",
+        "character": "Seed character",
+    }
+
+    prompt_text, prompt_path = video_handlers._build_veo_prompt_text(edited_prompt)
+
+    assert prompt_path == "veo_prompt"
+    assert "Edited character with black sunglasses" in prompt_text
+    assert "Seed character" not in prompt_text
+
+
+def test_provider_prompt_request_uses_edited_veo_prompt_for_short_tiers():
+    edited_prompt = {
+        "veo_prompt": "Character:\nEdited character with black sunglasses.\n\nDialogue:\nHallo Welt.",
+        "optimized_prompt": "Character:\nSeed character.\n\nDialogue:\nSeed dialogue.",
+        "character": "Seed character",
+    }
+
+    request = video_handlers._build_provider_prompt_request(edited_prompt, "veo_3_1")
+
+    assert request["prompt_path"] == "veo_prompt"
+    assert "Edited character with black sunglasses" in request["prompt_text"]
+    assert "Seed character" not in request["prompt_text"]
 
 
 def test_sync_video_prompt_with_seed_data_repairs_stale_default_character():

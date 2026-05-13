@@ -358,9 +358,9 @@ def test_build_veo_extended_base_prompt_packs_to_two_segments_for_efficient_16s(
     ]
 
 
-def test_build_veo_extended_base_prompt_uses_canonical_segment_visual_contract():
+def test_build_veo_extended_base_prompt_preserves_edited_visual_contract():
     seed_data = {
-        "script": "Erster Satz. Zweiter Satz. Dritter Satz.",
+        "script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
         "estimated_duration_s": 29,
     }
 
@@ -369,12 +369,12 @@ def test_build_veo_extended_base_prompt_uses_canonical_segment_visual_contract()
         video_prompt={
             "character": "Edited character with novelty accessory",
             "style": "Style: Edited style",
-            "action": "She says: Erster Satz. Zweiter Satz. Dritter Satz.",
+            "action": "She says: Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
             "scene": "Scene: Edited scene",
             "cinematography": "Cinematography: Edited cinematography",
             "audio_block": "After the final word, the audio gently settles into a quiet room tone.",
             "audio": {
-                "dialogue": "Erster Satz. Zweiter Satz. Dritter Satz.",
+                "dialogue": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
                 "capture": "After the final word, the audio gently settles into a quiet room tone.",
             },
         },
@@ -383,18 +383,51 @@ def test_build_veo_extended_base_prompt_uses_canonical_segment_visual_contract()
     )
 
     assert "Erster Satz." in prompt
-    assert "Edited character with novelty accessory" not in prompt
-    assert "Edited style" not in prompt
-    assert "Edited scene" not in prompt
-    assert "Edited cinematography" not in prompt
-    assert "Style:\nStyle:" not in prompt
-    assert "Scene:\nScene:" not in prompt
-    assert "Cinematography:\nCinematography:" not in prompt
-    assert "She says: Erster Satz. Zweiter Satz. Dritter Satz." not in prompt
-    assert "After the final word, the audio gently settles into a quiet room tone." not in prompt
-    assert "no settling room tone" in prompt
+    assert "Edited character with novelty accessory" in prompt
+    assert "Edited style" in prompt
+    assert "Edited scene" in prompt
+    assert "Edited cinematography" in prompt
+    assert "Style:\nStyle: Edited style" in prompt
+    assert "Scene:\nScene: Edited scene" in prompt
+    assert "Cinematography:\nCinematography: Edited cinematography" in prompt
+    assert "She says: Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz." in prompt
+    assert "After the final word, the audio gently settles into a quiet room tone." in prompt
     assert "subtitles, captions, watermark" not in prompt
-    assert seg_meta["veo_segments"] == ["Erster Satz. Zweiter", "Satz. Dritter Satz."]
+    assert seg_meta["veo_segments"] == ["Erster Satz. Zweiter Satz.", "Dritter Satz. Vierter Satz."]
+
+
+def test_build_veo_extended_base_prompt_keeps_edited_visual_fields():
+    seed_data = {
+        "script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz. Fuenfter Satz. Sechster Satz.",
+        "estimated_duration_s": 29,
+    }
+
+    prompt, _seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        video_prompt={
+            "character": "Character: 38-year-old German woman with black sunglasses.",
+            "style": "Style: Edited style",
+            "action": "Action: She keeps the black sunglasses on while speaking.",
+            "scene": "Scene: Edited scene",
+            "cinematography": "Cinematography: Edited cinematography",
+            "audio_block": "Audio: Edited audio block.",
+            "audio": {
+                "dialogue": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
+                "capture": "Audio: Edited audio block.",
+            },
+            "ending_directive": "Edited ending",
+        },
+        planned_extension_hops=3,
+        target_length_tier=32,
+    )
+
+    assert "black sunglasses" in prompt
+    assert "Edited style" in prompt
+    assert "Edited scene" in prompt
+    assert "Edited cinematography" in prompt
+    assert "Edited audio block" in prompt
+    assert "Edited ending" in prompt
+    assert "black sunglasses" not in " ".join(seed_data["script"].split())
 
 
 def test_build_veo_extended_base_prompt_uses_time_budgeted_packing_for_efficient_32s():
@@ -446,18 +479,10 @@ def test_build_veo_extended_base_prompt_uses_efficient_32s_visual_contract():
         target_length_tier=32,
     )
 
-    assert (
-        "38-year-old German woman with shoulder-length light brown hair with subtle blonde "
-        "highlights, hazel eyes, and a warm light-medium skin tone. Friendly oval face and natural "
-        "expression."
-    ) in prompt
-    assert (
-        "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
-        "soft flattering indoor light, and natural skin texture."
-    ) in prompt
-    assert "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie distance." in prompt
-    assert "Edited character with novelty accessory" not in prompt
-    assert "Edited scene" not in prompt
+    assert "Edited character with novelty accessory" in prompt
+    assert "Edited style" in prompt
+    assert "Edited scene" in prompt
+    assert "Edited cinematography" in prompt
     assert seg_meta["veo_segments"] == [
         "Erster Satz. Zweiter Satz.",
         "Dritter Satz.",

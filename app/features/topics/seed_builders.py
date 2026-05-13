@@ -91,7 +91,6 @@ def build_seed_payload(
     canonical_topic: Optional[str] = None,
     research_title: Optional[str] = None,
 ) -> Dict[str, Any]:
-    primary_source = item.sources[0] if item.sources else None
     framework_map = {
         "PAL": "problem",
         "Testimonial": "testimonial",
@@ -133,10 +132,10 @@ def build_seed_payload(
         "description": build_social_description(item.script, resolved_source_summary),
         "disclaimer": item.disclaimer,
     }
-    if primary_source or source_url or source_title:
+    if source_url or source_title:
         payload["source"] = {
-            "title": source_title or (primary_source.title if primary_source else None),
-            "url": source_url or (str(primary_source.url) if primary_source else None),
+            "title": source_title,
+            "url": source_url,
             "summary": resolved_source_summary,
         }
     else:
