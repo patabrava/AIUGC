@@ -226,14 +226,27 @@ async def _init_url_stub(access_token: str, video_url: str):
     }
 
 
-async def _direct_init_stub(access_token: str, *, video_size: int, caption: str, privacy_level: str, disable_comment: bool, disable_duet: bool, disable_stitch: bool):
+async def _direct_init_stub(
+    access_token: str,
+    *,
+    video_size: int,
+    title: str,
+    privacy_level: str,
+    disable_comment: bool,
+    disable_duet: bool,
+    disable_stitch: bool,
+    brand_content_toggle: bool,
+    brand_organic_toggle: bool,
+):
     assert access_token == "access-token"
     assert video_size == len(b"video-bytes")
-    assert caption == "TikTok caption"
+    assert title == "Topic"
     assert privacy_level == "SELF_ONLY"
     assert disable_comment is False
     assert disable_duet is False
     assert disable_stitch is True
+    assert brand_content_toggle is False
+    assert brand_organic_toggle is False
     return {
         "publish_id": "publish-direct-1",
         "upload_url": "https://upload.example.com/direct",
@@ -526,10 +539,11 @@ def test_publish_tiktok_direct_persists_published_post_result(monkeypatch):
             TikTokPublishRequest(
                 post_id="post-1",
                 caption="TikTok caption",
+                title="Topic",
                 privacy_level="SELF_ONLY",
-                disable_comment=False,
-                disable_duet=False,
-                disable_stitch=True,
+                allow_comment=True,
+                allow_duet=True,
+                allow_stitch=False,
             )
         )
     )
@@ -605,10 +619,11 @@ def test_publish_tiktok_direct_allows_s8_complete_after_meta_publish(monkeypatch
             TikTokPublishRequest(
                 post_id="post-1",
                 caption="TikTok caption",
+                title="Topic",
                 privacy_level="SELF_ONLY",
-                disable_comment=False,
-                disable_duet=False,
-                disable_stitch=True,
+                allow_comment=True,
+                allow_duet=True,
+                allow_stitch=False,
             )
         )
     )
@@ -681,10 +696,11 @@ def test_publish_tiktok_direct_surfaces_private_account_restriction(monkeypatch)
                 TikTokPublishRequest(
                     post_id="post-1",
                     caption="TikTok caption",
+                    title="Topic",
                     privacy_level="SELF_ONLY",
-                    disable_comment=False,
-                    disable_duet=False,
-                    disable_stitch=True,
+                    allow_comment=True,
+                    allow_duet=True,
+                    allow_stitch=False,
                 )
             )
         )
@@ -695,47 +711,10 @@ def test_publish_tiktok_direct_surfaces_private_account_restriction(monkeypatch)
         assert storage["posts"][0]["publish_results"]["tiktok"]["status"] == "failed"
 
 
-def test_publish_tiktok_direct_blocks_sandbox_environment(monkeypatch):
-    storage = {
-        "posts": [
-            {
-                "id": "post-1",
-                "batch_id": "batch-1",
-                "topic_title": "Topic",
-                "seed_data": {"script_review_status": "approved", "description": "Fallback caption"},
-                "video_url": "https://cdn.example.com/video.mp4",
-                "video_metadata": {"requested_seconds": 8},
-                "publish_caption": "Local caption",
-                "publish_results": {},
-                "platform_ids": {},
-                "social_networks": ["tiktok"],
-                "publish_status": "pending",
-            }
-        ],
-        "batches": [{"id": "batch-1", "state": "S8_COMPLETE"}],
-        "media_assets": [],
-        "publish_jobs": [],
-        "connected_accounts": [],
-    }
-
-    monkeypatch.setattr(tiktok, "get_settings", _settings)
-    monkeypatch.setattr(tiktok, "get_supabase", lambda: _FakeSupabase(storage))
-    monkeypatch.setattr(tiktok, "_download_video_bytes", _download_stub)
-
-    try:
-        asyncio.run(
-            tiktok.publish_tiktok_direct(
-                TikTokPublishRequest(
-                    post_id="post-1",
-                    caption="TikTok caption",
-                    privacy_level="SELF_ONLY",
-                    disable_comment=False,
-                    disable_duet=False,
-                    disable_stitch=True,
-                )
-            )
-        )
-        raise AssertionError("Expected ValidationError")
-    except ValidationError as exc:
-        assert "draft-only" in str(exc)
-        assert storage["publish_jobs"] == []
+# NOTE: The sandbox-environment block previously enforced in
+# publish_tiktok_direct_for_post has been intentionally removed. Per the
+# TikTok direct-post UX compliance plan, sandbox runtime continues to use
+# draft mode, but the routing decision now lives in the handler layer (see
+# publish_post_now), not in this adapter. The previous test
+# `test_publish_tiktok_direct_blocks_sandbox_environment` was removed
+# because it covered behavior that no longer exists at this seam.
