@@ -284,6 +284,17 @@ class TestBatchArmHandler:
 
     def test_arm_respects_networks_override(self):
         storage = _make_storage(num_posts=1)
+        # Provide complete TikTok settings so arm validation passes for the override.
+        storage["posts"][0]["tiktok_settings"] = {
+            "title": "x",
+            "privacy_level": "PUBLIC_TO_EVERYONE",
+            "allow_comment": False,
+            "allow_duet": False,
+            "allow_stitch": False,
+            "commercial_disclosure": False,
+            "your_brand": False,
+            "branded_content": False,
+        }
         client = _FakeClient(storage)
 
         from app.features.publish.arm import arm_batch_dispatch
@@ -300,3 +311,42 @@ class TestBatchArmHandler:
             )
         )
         assert storage["posts"][0]["social_networks"] == ["tiktok"]
+
+
+def test_arm_rejects_tiktok_post_without_settings(monkeypatch):
+    """Arm must fail if any TikTok-targeted post is missing required TikTok settings."""
+    from app.features.publish import arm
+
+    posts = [
+        {
+            "id": "p-1",
+            "social_networks": ["tiktok"],
+            "tiktok_settings": {},
+        },
+    ]
+    monkeypatch.setattr(arm, "_load_batch_posts_for_arm", lambda batch_id: posts, raising=False)
+    with pytest.raises(Exception) as excinfo:
+        arm._validate_tiktok_settings_present(posts)
+    assert "TikTok settings" in str(excinfo.value)
+
+
+def test_arm_accepts_tiktok_post_with_complete_settings(monkeypatch):
+    from app.features.publish import arm
+
+    posts = [
+        {
+            "id": "p-1",
+            "social_networks": ["tiktok"],
+            "tiktok_settings": {
+                "title": "x",
+                "privacy_level": "PUBLIC_TO_EVERYONE",
+                "allow_comment": False,
+                "allow_duet": False,
+                "allow_stitch": False,
+                "commercial_disclosure": False,
+                "your_brand": False,
+                "branded_content": False,
+            },
+        },
+    ]
+    arm._validate_tiktok_settings_present(posts)  # must not raise

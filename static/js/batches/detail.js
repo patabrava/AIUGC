@@ -606,6 +606,19 @@
 
             async armDispatch() {
                 if (!this.canArm) return;
+                if (this.networks.includes('tiktok')) {
+                    const incomplete = this.posts.filter((p) => {
+                        const s = p.tiktokSettings || {};
+                        if (!s.title || !s.privacy_level) return true;
+                        if (s.commercial_disclosure && !s.your_brand && !s.branded_content) return true;
+                        if (s.branded_content && s.privacy_level === 'SELF_ONLY') return true;
+                        return false;
+                    });
+                    if (incomplete.length > 0) {
+                        this.errorMessage = `Complete TikTok settings for ${incomplete.length} post(s) before arming.`;
+                        return;
+                    }
+                }
                 this.saving = true;
                 this.errorMessage = '';
                 this.successMessage = '';
