@@ -227,7 +227,7 @@
                     <div>
                         <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Sources (from dossier)</label>
                         <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed">
-                            <template x-for="src in (post.blog_content.sources || [])" :key="src.url">
+                            <template x-for="src in (post.blog_content.sources || []).filter(s => s && s.url && !s.url.includes('vertexaisearch.cloud.google.com'))" :key="src.url">
                                 <a :href="src.url" target="_blank" rel="noopener noreferrer"
                                    class="block text-[var(--lippe-blue)] hover:text-[#006AAB]/80 hover:underline cursor-pointer"
                                    x-text="'• ' + src.title"></a>

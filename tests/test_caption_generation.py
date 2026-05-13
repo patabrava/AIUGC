@@ -688,3 +688,29 @@ def test_default_publish_caption_prefers_caption_bundle():
         },
     }
     assert publish_handlers._default_publish_caption(post) == CURIOSITY_BODY
+
+
+def test_parse_topic_research_response_drops_vertexaisearch_redirect_urls():
+    """Unresolved grounding redirect URLs must never be persisted as sources."""
+    raw = """
+    # Forschungsdossier: Test
+
+    Inhalt mit echter Quelle und einer Resolver-Fehlschlag-Quelle.
+
+    Quellen:
+    - Tagesschau: [Tagesschau](https://www.tagesschau.de/)
+    - Vertex: [Quelle](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA)
+    - BMAS: [BMAS](https://www.bmas.de/)
+    """
+
+    dossier = parse_topic_research_response(
+        raw,
+        seed_topic="Test",
+        post_type="value",
+        target_length_tier=8,
+    )
+    payload = dossier.model_dump(mode="json")
+    urls = [source["url"] for source in payload["sources"]]
+    assert all("vertexaisearch.cloud.google.com" not in url for url in urls), urls
+    assert "https://www.tagesschau.de/" in urls
+    assert "https://www.bmas.de/" in urls

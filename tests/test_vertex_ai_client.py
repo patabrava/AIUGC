@@ -259,3 +259,78 @@ def test_vertex_client_loads_vertex_settings_from_shared_env(monkeypatch):
     client = _fresh_client()
     assert client._settings.vertex_ai_project_id == "shared-project"
     assert client._settings.vertex_ai_location == "europe-west4"
+
+
+def test_generate_grounded_research_returns_text_and_chunks(monkeypatch):
+    """Grounded research must surface groundingMetadata so callers can resolve redirects."""
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    fake_response_payload = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": (
+                                "Forschungsdossier: Test\n\n"
+                                "Quelle: https://vertexaisearch.cloud.google.com/"
+                                "grounding-api-redirect/AAA"
+                            )
+                        }
+                    ]
+                },
+                "groundingMetadata": {
+                    "groundingChunks": [
+                        {
+                            "web": {
+                                "uri": "https://vertexaisearch.cloud.google.com/"
+                                       "grounding-api-redirect/AAA",
+                                "title": "Tagesschau",
+                            }
+                        },
+                        {
+                            "web": {
+                                "uri": "https://vertexaisearch.cloud.google.com/"
+                                       "grounding-api-redirect/BBB",
+                                "title": "BMAS",
+                            }
+                        },
+                    ]
+                },
+            }
+        ]
+    }
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return fake_response_payload
+
+        @property
+        def text(self):
+            return ""
+
+    class _FakeHttpClient:
+        def post(self, *args, **kwargs):
+            return _FakeResponse()
+
+    client = VertexGeminiClient()
+    client._initialized = True
+    client._http_client = _FakeHttpClient()
+    monkeypatch.setattr(client, "_ensure_configured", lambda: None)
+    monkeypatch.setattr(client, "_build_headers", lambda include_json=False: {})
+
+    result = client.generate_grounded_research(prompt="topic")
+
+    assert isinstance(result, dict)
+    assert result["text"].startswith("Forschungsdossier:")
+    assert len(result["grounding_chunks"]) == 2
+    assert result["grounding_chunks"][0] == {
+        "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA",
+        "title": "Tagesschau",
+    }
+    assert result["grounding_chunks"][1] == {
+        "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/BBB",
+        "title": "BMAS",
+    }

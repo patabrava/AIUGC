@@ -189,7 +189,14 @@ class VertexGeminiClient:
         model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
-    ) -> str:
+    ) -> Dict[str, Any]:
+        """Run grounded research via Google Search tool.
+
+        Returns a dict with:
+          - ``text``: concatenated text parts from the response.
+          - ``grounding_chunks``: list of ``{"uri", "title"}`` extracted from
+            ``candidates[0].groundingMetadata.groundingChunks[].web``. May be empty.
+        """
         target_model = model or self._settings.vertex_grounded_research_model
         research_prompt = self._merge_prompts(
             system_prompt,
@@ -216,7 +223,32 @@ class VertexGeminiClient:
             payload=payload,
             log_event="vertex_gemini_grounded_research",
         )
-        return self._extract_candidate_text(data)
+        return {
+            "text": self._extract_candidate_text(data),
+            "grounding_chunks": self._extract_grounding_chunks(data),
+        }
+
+    def _extract_grounding_chunks(self, data: Dict[str, Any]) -> list:
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return []
+        metadata = (candidates[0] or {}).get("groundingMetadata") or {}
+        chunks = metadata.get("groundingChunks") or []
+        results = []
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            web = chunk.get("web") or {}
+            uri = str(web.get("uri") or "").strip()
+            if not uri:
+                continue
+            results.append(
+                {
+                    "uri": uri,
+                    "title": str(web.get("title") or "").strip(),
+                }
+            )
+        return results
 
     def _post_generate_content(
         self,
