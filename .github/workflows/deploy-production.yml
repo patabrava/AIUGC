@@ -124,7 +124,13 @@ jobs:
                 "GOOGLE_APPLICATION_CREDENTIALS": "",
             }
             if adc_b64:
-                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = base64.b64decode(adc_b64).decode()
+                # Always compact the JSON before stuffing into env file so docker-compose's
+                # env_file parser doesn't choke on embedded newlines / escapes.
+                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = json.dumps(
+                    json.loads(base64.b64decode(adc_b64).decode()),
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
 
             lines = env_path.read_text().splitlines() if env_path.exists() else []
             keys = set(overrides)
@@ -189,7 +195,13 @@ jobs:
                 "GOOGLE_APPLICATION_CREDENTIALS": "",
             }
             if adc_b64:
-                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = base64.b64decode(adc_b64).decode()
+                # Always compact the JSON before stuffing into env file so docker-compose's
+                # env_file parser doesn't choke on embedded newlines / escapes.
+                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = json.dumps(
+                    json.loads(base64.b64decode(adc_b64).decode()),
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
 
             lines = env_path.read_text().splitlines() if env_path.exists() else []
             keys = set(overrides)
