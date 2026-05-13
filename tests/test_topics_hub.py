@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.features.topics import handlers as topic_handlers
 from app.features.topics import hub as topic_hub
 from app.features.topics.prompts import build_prompt1, build_prompt2
-from app.features.topics.seed_builders import build_research_seed_data
+from app.features.topics.seed_builders import build_research_seed_data, select_relevant_sources
 from app.features.topics.schemas import (
     ResearchAgentItem,
     ResearchAgentSource,
@@ -17,6 +17,118 @@ from app.features.topics.schemas import (
 )
 from app.core.errors import ThirdPartyError
 from app.core.video_profiles import get_duration_profile
+
+
+def test_build_lane_dossier_selects_sources_relevant_to_lane_context():
+    research_dossier = {
+        "cluster_id": "cluster-1",
+        "topic": "Barrierefreie Alltagshilfen",
+        "anchor_topic": "Barrierefreie Alltagshilfen",
+        "seed_topic": "Barrierefreie Alltagshilfen",
+        "framework_candidates": ["PAL"],
+        "sources": [
+            {
+                "title": "DiGA bei psychischen Erkrankungen",
+                "url": "https://www.gesund.bund.de/s/diga-psychische-erkrankungen-psyche",
+            },
+            {
+                "title": "Fluggastrechte bei eingeschränkter Mobilität",
+                "url": "https://europa.eu/youreurope/citizens/travel/transport-disability/reduced-mobility/index_de.htm",
+            },
+        ],
+        "source_urls": [
+            {
+                "title": "Bahn Mobilitätsservice",
+                "url": "https://www.bahn.de/service/individuelle-reise/barrierefrei",
+            }
+        ],
+        "facts": ["Kassenleistungen und digitale Gesundheitsanwendungen sind andere Themen."],
+        "source_summary": "Allgemeines Dossier zu Hilfen.",
+    }
+    lane_candidate = {
+        "lane_key": "rollstuhl-transport",
+        "lane_family": "mobility",
+        "title": "Rollstuhltransport im Zug und Flugzeug",
+        "angle": "Mobilitätshilfe, Bahnreise, Flugreise und Rollstuhlschaden",
+        "facts": [
+            "Bei Flugreisen gelten Rechte fuer Fahrgaeste mit eingeschraenkter Mobilitaet.",
+            "Bei Bahnreisen helfen Mobilitaetsservice und barrierefreie Reiseplanung.",
+        ],
+        "source_summary": "Rollstuhltransport, Bahnreise, Flugreise und Mobilitaetshilfe.",
+        "framework_candidates": ["PAL"],
+    }
+
+    lane_dossier = topic_hub._build_lane_dossier(research_dossier, lane_candidate)
+
+    selected_urls = [source["url"] for source in lane_dossier["sources"]]
+    assert selected_urls
+    assert "psychische-erkrankungen" not in selected_urls[0]
+    assert any("transport-disability" in url or "bahn.de/service" in url for url in selected_urls)
+    assert lane_dossier["source_urls"] == lane_dossier["sources"]
+
+
+def test_source_relevance_ignores_generic_accessibility_words():
+    selected = select_relevant_sources(
+        sources=[
+            {
+                "title": "Barrierefreie Küche 2025: Planung, Kosten & Förderung",
+                "url": "https://pflegeheimat24.de/ratgeber/barrierefreies-wohnen/barrierefreie-kueche/",
+            }
+        ],
+        context_parts=[
+            "Hört auf zu behaupten, dass Barrierefreiheit einfach ist, 2026 fehlen klare finanzielle Rahmenbedingungen.",
+            "Gute Terminwege und barrierefreie Arzttermine",
+        ],
+        max_sources=1,
+        min_score=3,
+    )
+
+    assert selected == []
+
+
+def test_source_relevance_strips_trailing_llm_url_punctuation():
+    selected = select_relevant_sources(
+        sources=[
+            {
+                "title": "Digitale Treppe geprüft",
+                "url": "https://example.org/digitale-treppe/%60",
+            },
+            {
+                "title": "Digitale Treppe geprüft",
+                "url": "https://example.org/digitale-treppe/",
+            },
+        ],
+        context_parts=["Digitale Treppe blockiert Websites."],
+        max_sources=3,
+        min_score=3,
+    )
+
+    assert selected == [{"title": "Digitale Treppe geprüft", "url": "https://example.org/digitale-treppe/"}]
+
+
+def test_source_relevance_counts_specific_compound_word_matches():
+    selected = select_relevant_sources(
+        sources=[
+            {
+                "title": "Harnwegsinfektionen bei Querschnittlähmung",
+                "url": "https://example.org/harnwegsinfektionen",
+            },
+            {
+                "title": "Schadstoffe in Konservendosen",
+                "url": "https://example.org/bisphenol-konservendosen",
+            },
+        ],
+        context_parts=["Wasser hilft gegen Infektionen und unterstützt Blasenmanagement."],
+        max_sources=1,
+        min_score=3,
+    )
+
+    assert selected == [
+        {
+            "title": "Harnwegsinfektionen bei Querschnittlähmung",
+            "url": "https://example.org/harnwegsinfektionen",
+        }
+    ]
 
 
 def _build_test_client() -> TestClient:

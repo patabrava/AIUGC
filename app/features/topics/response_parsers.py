@@ -890,9 +890,6 @@ def _synthesize_research_dossier_from_text(
     for index, url in enumerate(urls, start=1):
         domain = re.sub(r"^https?://", "", url).split("/")[0]
         sources.append({"title": f"Quelle {index}: {domain}", "url": url})
-    if not sources:
-        sources.append({"title": topic, "url": f"https://example.com/{_slugify_research_label(topic)}"})
-
     payload: Dict[str, Any] = {
         "cluster_id": f"{_slugify_research_label(topic)}-{secrets.token_hex(4)}",
         "topic": topic,
@@ -935,8 +932,8 @@ def _synthesize_research_dossier_from_seed(
         "seed_topic": seed_topic or topic,
         "cluster_summary": cluster_summary,
         "framework_candidates": ["PAL"],
-        "sources": [{"title": topic, "url": f"https://example.com/{_slugify_research_label(topic)}"}],
-        "source_urls": [{"title": topic, "url": f"https://example.com/{_slugify_research_label(topic)}"}],
+        "sources": [],
+        "source_urls": [],
         "source_summary": source_summary,
         "facts": [topic],
         "angle_options": [topic],

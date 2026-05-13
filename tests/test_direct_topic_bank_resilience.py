@@ -120,3 +120,47 @@ def test_reused_topic_suggestion_persists_spoken_script_in_seed_payload(monkeypa
 
     assert captured["seed_data"]["script"] == suggestion["rotation"]
     assert captured["target_length_tier"] == 16
+
+
+def test_reused_topic_suggestion_overwrites_stale_seed_source(monkeypatch):
+    captured = {}
+    suggestion = {
+        "title": "Rollstuhlreise Flugschaden",
+        "rotation": "Rollstuhlreise Flugschaden richtig dokumentieren.",
+        "cta": "Speicher dir das.",
+        "spoken_duration": 8,
+        "source_summary": "Flugschaden und Mobilitätshilfen.",
+        "source_urls": [
+            {
+                "title": "Artikel 12 VO 1107/2006",
+                "url": "https://gesetze.legal/eu/vo_eg_2006_1107/12",
+            }
+        ],
+        "seed_payload": {
+            "facts": ["Alter Seed"],
+            "source": {
+                "title": "Alter Platzhalter",
+                "url": "https://example.com/old",
+            },
+        },
+    }
+
+    monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption="Caption"))
+    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", lambda **kwargs: {"id": "topic-1"})
+    monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id=None: None)
+
+    def fake_create_post_for_batch(**kwargs):
+        captured.update(kwargs)
+        return {"id": "post-1", **kwargs}
+
+    monkeypatch.setattr(topic_handlers, "create_post_for_batch", fake_create_post_for_batch)
+
+    topic_handlers._create_post_from_suggestion(
+        batch_id="batch-1",
+        post_type="value",
+        suggestion=suggestion,
+        target_length_tier=8,
+    )
+
+    assert captured["seed_data"]["source"]["url"] == "https://gesetze.legal/eu/vo_eg_2006_1107/12"
+    assert captured["seed_data"]["caption_bundle"]["source_urls"][0]["url"] == "https://gesetze.legal/eu/vo_eg_2006_1107/12"

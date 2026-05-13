@@ -33,7 +33,7 @@ from app.features.topics.queries import (
     update_topic_research_run,
     upsert_topic_script_variants,
 )
-from app.features.topics.seed_builders import build_research_seed_data
+from app.features.topics.seed_builders import build_research_seed_data, select_relevant_sources
 from app.features.topics.topic_validation import sanitize_metadata_text, sanitize_spoken_fragment, validate_pre_persistence_topic_payload
 
 logger = get_logger(__name__)
@@ -654,11 +654,6 @@ def _build_script_variants(
     dialog_scripts,
     seed_payload: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    source_urls = [
-        {"title": source.get("title"), "url": source.get("url")}
-        for source in list(research_dossier.get("sources") or [])
-        if isinstance(source, dict) and source.get("url")
-    ]
     categories = [
         ("problem_agitate_solution", dialog_scripts.problem_agitate_solution),
         ("testimonial", dialog_scripts.testimonial),
@@ -669,6 +664,20 @@ def _build_script_variants(
         script = next((str(script).strip() for script in list(scripts or []) if str(script).strip()), "")
         if not script:
             continue
+        source_urls = select_relevant_sources(
+            sources=list(research_dossier.get("sources") or []) + list(research_dossier.get("source_urls") or []),
+            context_parts=[
+                topic_title,
+                script,
+                getattr(prompt1_item, "caption", ""),
+                getattr(prompt1_item, "source_summary", ""),
+                research_dossier.get("source_summary"),
+                research_dossier.get("facts"),
+                (research_dossier.get("lane_candidate") or {}).get("title"),
+                (research_dossier.get("lane_candidate") or {}).get("angle"),
+            ],
+            max_sources=3,
+        )
         variants.append(
             {
                 "bucket": bucket_name,
@@ -798,11 +807,21 @@ def _build_canonical_script_variant(
     post_type: str,
     seed_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    source_urls = [
-        {"title": source.get("title"), "url": source.get("url")}
-        for source in list(research_dossier.get("sources") or [])
-        if isinstance(source, dict) and source.get("url")
-    ]
+    source_urls = select_relevant_sources(
+        sources=list(research_dossier.get("sources") or []) + list(research_dossier.get("source_urls") or []),
+        context_parts=[
+            lane_candidate.get("title"),
+            lane_candidate.get("angle"),
+            lane_candidate.get("source_summary"),
+            lane_candidate.get("facts"),
+            prompt1_item.script,
+            getattr(prompt1_item, "caption", ""),
+            getattr(prompt1_item, "source_summary", ""),
+            research_dossier.get("source_summary"),
+            research_dossier.get("facts"),
+        ],
+        max_sources=3,
+    )
     return {
         "bucket": "canonical",
         "target_length_tier": tier,
@@ -832,6 +851,21 @@ def _build_canonical_script_variant(
 
 def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[str, Any]) -> Dict[str, Any]:
     lane = dict(lane_candidate or {})
+    lane_sources = select_relevant_sources(
+        sources=(
+            list(lane.get("sources") or [])
+            + list(lane.get("source_urls") or [])
+            + list(research_dossier.get("sources") or [])
+            + list(research_dossier.get("source_urls") or [])
+        ),
+        context_parts=[
+            lane.get("title"),
+            lane.get("angle"),
+            lane.get("source_summary"),
+            lane.get("facts"),
+        ],
+        max_sources=3,
+    )
     return {
         "cluster_id": research_dossier.get("cluster_id"),
         "topic": str(lane.get("title") or research_dossier.get("topic") or "").strip(),
@@ -839,7 +873,8 @@ def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[s
         "seed_topic": research_dossier.get("seed_topic") or research_dossier.get("topic"),
         "cluster_summary": research_dossier.get("cluster_summary"),
         "framework_candidates": list(lane.get("framework_candidates") or research_dossier.get("framework_candidates") or []),
-        "sources": list(research_dossier.get("sources") or []),
+        "sources": lane_sources,
+        "source_urls": lane_sources,
         "source_summary": sanitize_metadata_text(
             lane.get("source_summary") or research_dossier.get("source_summary") or "",
             max_chars=500,

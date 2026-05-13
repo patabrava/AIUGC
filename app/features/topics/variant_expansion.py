@@ -27,6 +27,7 @@ from app.features.topics.queries import (
 )
 from app.features.topics.response_parsers import parse_prompt1_response, parse_prompt2_response, _coerce_prompt2_payload, _validate_dialog_scripts_payload
 from app.features.topics.schemas import DialogScripts, ResearchAgentItem
+from app.features.topics.seed_builders import select_relevant_sources
 from app.features.topics.topic_validation import (
     estimate_script_duration_seconds,
     validate_pre_persistence_topic_payload,
@@ -283,9 +284,6 @@ def expand_topic_variants(
         try:
             if post_type == "value":
                 lane = _pick_lane_for_framework(lane_candidates, framework, existing_pairs)
-                source_info = (dossier_payload.get("sources") or [{}])[0] if dossier_payload.get("sources") else {}
-                source_title = str(source_info.get("title") or "").strip() or None
-                source_url = str(source_info.get("url") or "").strip() or None
                 lane_fact_texts = [
                     str(fact).strip()
                     for fact in list((lane or {}).get("facts") or []) + list(dossier_payload.get("facts") or [])
@@ -312,6 +310,25 @@ def expand_topic_variants(
                 if not script_text:
                     logger.warning("variant_expansion_parse_failed", framework=framework, hook_style=hook_style)
                     continue
+                selected_sources = select_relevant_sources(
+                    sources=(
+                        list((lane or {}).get("sources") or [])
+                        + list((lane or {}).get("source_urls") or [])
+                        + list(dossier_payload.get("sources") or [])
+                        + list(dossier_payload.get("source_urls") or [])
+                    ),
+                    context_parts=[
+                        (lane or {}).get("title"),
+                        (lane or {}).get("angle"),
+                        (lane or {}).get("source_summary"),
+                        (lane or {}).get("facts"),
+                        script_text,
+                    ],
+                    max_sources=3,
+                )
+                source_info = selected_sources[0] if selected_sources else {}
+                source_title = str(source_info.get("title") or "").strip() or None
+                source_url = str(source_info.get("url") or "").strip() or None
                 prompt1_item = ResearchAgentItem(
                     topic=str((lane or {}).get("title") or dossier_payload.get("topic") or title or "").strip() or "Thema",
                     script=script_text,
@@ -362,6 +379,9 @@ def expand_topic_variants(
                     "caption": str(normalized_variant.get("caption") or getattr(prompt1_item, "caption", "") or "").strip(),
                     "source_summary": str(normalized_variant.get("source_summary") or getattr(prompt1_item, "source_summary", "") or "").strip(),
                     "disclaimer": str(normalized_variant.get("disclaimer") or getattr(prompt1_item, "disclaimer", "") or "").strip(),
+                    "primary_source_url": source_url,
+                    "primary_source_title": source_title,
+                    "source_urls": selected_sources,
                 }
             else:
                 dialog_scripts = generate_dialog_scripts_variant(

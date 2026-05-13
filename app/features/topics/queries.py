@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 
 _POSTS_INSERT_RETRY_DELAYS = (0.15, 0.35, 0.75, 1.5)
 from app.features.topics.captions import resolve_selected_caption
+from app.features.topics.seed_builders import clean_source_url, select_relevant_sources
 from app.features.topics.topic_validation import (
     classify_script_overlap,
     detect_metadata_bleed,
@@ -32,6 +33,8 @@ from app.features.topics.topic_validation import (
 )
 
 logger = get_logger(__name__)
+
+_VALUE_SOURCE_ACCESSIBILITY_CACHE: Dict[str, bool] = {}
 
 
 def _get_supabase_adapter() -> SupabaseAdapter:
@@ -87,6 +90,18 @@ def _normalize_registry_row(row: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(row or {})
     normalized["source_urls"] = list(normalized.get("source_urls") or [])
+    primary_source_url = clean_source_url(normalized.get("primary_source_url"))
+    if primary_source_url and not any(
+        (item.get("url") if isinstance(item, dict) else str(item)) == primary_source_url
+        for item in normalized["source_urls"]
+    ):
+        normalized["source_urls"].insert(
+            0,
+            {
+                "title": str(normalized.get("primary_source_title") or "").strip(),
+                "url": primary_source_url,
+            },
+        )
     normalized["use_count"] = int(normalized.get("use_count") or 0)
     normalized["script_fingerprint"] = str(
         normalized.get("script_fingerprint") or _normalize_script_text(normalized.get("script"))
@@ -106,6 +121,34 @@ def _normalize_script_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized["audit_attempts"] = int(normalized.get("audit_attempts") or 0)
     normalized["origin_kind"] = str(normalized.get("origin_kind") or "provider").strip() or "provider"
     return normalized
+
+
+def _is_value_source_url_accessible(url: Any, timeout: float = 6.0) -> bool:
+    normalized_url = clean_source_url(url)
+    if not normalized_url.lower().startswith(("http://", "https://")):
+        return False
+    if "example.com" in normalized_url or "vertexaisearch.cloud.google.com" in normalized_url:
+        return False
+    cache_key = normalized_url.rstrip("/")
+    if cache_key in _VALUE_SOURCE_ACCESSIBILITY_CACHE:
+        return _VALUE_SOURCE_ACCESSIBILITY_CACHE[cache_key]
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        client_timeout = httpx.Timeout(connect=3.0, read=timeout, write=3.0, pool=3.0)
+        with httpx.Client(timeout=client_timeout, follow_redirects=True, headers=headers) as client:
+            response = client.head(normalized_url)
+            if response.status_code < 400:
+                _VALUE_SOURCE_ACCESSIBILITY_CACHE[cache_key] = True
+                return True
+            if response.status_code in {403, 405}:
+                response = client.get(normalized_url)
+                accessible = response.status_code < 400
+                _VALUE_SOURCE_ACCESSIBILITY_CACHE[cache_key] = accessible
+                return accessible
+    except httpx.HTTPError as exc:
+        logger.debug("value_source_url_accessibility_failed", url=normalized_url, error=str(exc))
+    _VALUE_SOURCE_ACCESSIBILITY_CACHE[cache_key] = False
+    return False
 
 
 def _script_is_selectable(script_row: Dict[str, Any]) -> bool:
@@ -580,6 +623,7 @@ def list_topic_suggestions(
     target_length_tier: Optional[int] = None,
     limit: int = 50,
     post_type: Optional[str] = None,
+    check_accessibility: bool = True,
 ) -> List[Dict[str, Any]]:
     registry_rows = get_all_topics_from_registry()
     registry_by_id = {str(row.get("id")): row for row in registry_rows}
@@ -603,6 +647,21 @@ def list_topic_suggestions(
             normalized_script = _normalize_script_row(row)
             if normalized_script.get("audit_status") != "pass":
                 continue
+            if post_type == "value":
+                selected_sources = select_relevant_sources(
+                    sources=normalized_script.get("source_urls") or [],
+                    context_parts=[
+                        normalized_script.get("title"),
+                        normalized_script.get("script"),
+                    ],
+                    max_sources=3,
+                    min_score=3,
+                )
+                if not selected_sources:
+                    continue
+                normalized_script["source_urls"] = selected_sources
+                normalized_script["primary_source_url"] = selected_sources[0]["url"]
+                normalized_script["primary_source_title"] = selected_sources[0]["title"]
             if normalized_script.get("origin_kind") == "synthetic_fallback":
                 continue
             family_fingerprint = str(normalized_registry.get("family_fingerprint") or topic_registry_id)
@@ -611,7 +670,7 @@ def list_topic_suggestions(
             seen_families.add(family_fingerprint)
             suggestions.append(_hydrate_script_suggestion(normalized_script, normalized_registry))
 
-        if len(suggestions) < limit:
+        if len(suggestions) < limit and post_type != "value":
             fallback_rows: List[Dict[str, Any]] = []
             for registry_row in registry_rows:
                 normalized_registry = _normalize_registry_row(registry_row)
@@ -653,6 +712,24 @@ def list_topic_suggestions(
                 str(row.get("family_fingerprint") or ""),
             ),
         )
+        if post_type == "value" and check_accessibility:
+            accessible_suggestions: List[Dict[str, Any]] = []
+            for suggestion in suggestions:
+                selected_sources = [
+                    source
+                    for source in list(suggestion.get("source_urls") or [])
+                    if _is_value_source_url_accessible(source.get("url") if isinstance(source, dict) else source)
+                ]
+                if not selected_sources:
+                    continue
+                suggestion = dict(suggestion)
+                suggestion["source_urls"] = selected_sources
+                suggestion["primary_source_url"] = selected_sources[0]["url"]
+                suggestion["primary_source_title"] = selected_sources[0]["title"]
+                accessible_suggestions.append(suggestion)
+                if len(accessible_suggestions) >= limit:
+                    break
+            return accessible_suggestions
         return suggestions[:limit]
     except Exception as exc:
         logger.warning("topic_scripts_query_failed", error=str(exc))
@@ -664,7 +741,14 @@ def count_selectable_topic_families(
     post_type: str,
     target_length_tier: int,
 ) -> int:
-    return len(list_topic_suggestions(target_length_tier=target_length_tier, limit=10_000, post_type=post_type))
+    return len(
+        list_topic_suggestions(
+            target_length_tier=target_length_tier,
+            limit=10_000,
+            post_type=post_type,
+            check_accessibility=False,
+        )
+    )
 
 
 def list_topic_research_runs(

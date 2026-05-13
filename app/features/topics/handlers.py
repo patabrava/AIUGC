@@ -357,6 +357,38 @@ def _create_post_from_suggestion(
     seed_payload = dict(suggestion.get("seed_payload") or {"facts": [topic_rotation]})
     if not str(seed_payload.get("script") or seed_payload.get("dialog_script") or "").strip():
         seed_payload["script"] = topic_rotation
+    suggestion_sources = list(suggestion.get("source_urls") or [])
+    primary_source_url = str(suggestion.get("primary_source_url") or "").strip()
+    if primary_source_url and not any(
+        isinstance(item, dict) and str(item.get("url") or "").strip() == primary_source_url
+        for item in suggestion_sources
+    ):
+        suggestion_sources.insert(
+            0,
+            {
+                "title": str(suggestion.get("primary_source_title") or "").strip(),
+                "url": primary_source_url,
+            },
+        )
+    if suggestion_sources:
+        first_source = suggestion_sources[0]
+        if isinstance(first_source, dict):
+            source_url = str(first_source.get("url") or "").strip()
+            source_title = str(first_source.get("title") or first_source.get("label") or "").strip()
+        else:
+            source_url = str(first_source or "").strip()
+            source_title = ""
+        if source_url:
+            seed_payload["source"] = {
+                "title": source_title or source_url,
+                "url": source_url,
+                "summary": str(suggestion.get("source_summary") or "").strip() or None,
+            }
+            seed_payload["sources"] = suggestion_sources
+            seed_payload["source_urls"] = suggestion_sources
+            caption_bundle = dict(seed_payload.get("caption_bundle") or {})
+            caption_bundle["source_urls"] = suggestion_sources
+            seed_payload["caption_bundle"] = caption_bundle
     canonical_topic = str(
         seed_payload.get("canonical_topic")
         or suggestion.get("canonical_topic")

@@ -1394,6 +1394,20 @@ def test_normalize_topic_research_dossier_rejects_topic_list_contamination():
     assert len(dossier.lane_candidates) >= 1
 
 
+def test_parse_topic_research_response_does_not_create_placeholder_sources():
+    dossier = topic_agents.parse_topic_research_response(
+        "Forschungsdossier ohne verwertbare URL. Der Text beschreibt nur den Seed und keine echte Quelle.",
+        seed_topic="Rollstuhlquelle ohne URL",
+        post_type="value",
+        target_length_tier=8,
+    )
+
+    dumped = dossier.model_dump(mode="json")
+    assert dumped["sources"] == []
+    assert dumped["source_urls"] == []
+    assert "example.com" not in json.dumps(dumped, ensure_ascii=False)
+
+
 def test_discover_topics_for_batch_runs_off_event_loop(monkeypatch):
     calls = []
 

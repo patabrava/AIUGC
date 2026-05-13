@@ -1018,13 +1018,14 @@ def test_list_topic_suggestions_prefers_low_use_count_and_older_last_used(monkey
         {"id": "topic-3", "title": "ÖPNV Hilfe", "script": "C", "use_count": 1, "last_used_at": "2026-03-29T10:00:00+00:00", "post_type": "value", "status": "active", "family_fingerprint": "öpnv hilfe"},
     ]
     script_rows = [
-        {"id": "script-1", "topic_registry_id": "topic-1", "title": "Pflegegrad Tipps", "script": "A", "audit_status": "pass"},
-        {"id": "script-2", "topic_registry_id": "topic-2", "title": "Rollstuhl Rampen", "script": "B", "audit_status": "pass"},
-        {"id": "script-3", "topic_registry_id": "topic-3", "title": "ÖPNV Hilfe", "script": "C", "audit_status": "pass"},
+        {"id": "script-1", "topic_registry_id": "topic-1", "title": "Pflegegrad Tipps", "script": "A", "audit_status": "pass", "source_urls": [{"url": "https://source.example/pflegegrad"}]},
+        {"id": "script-2", "topic_registry_id": "topic-2", "title": "Rollstuhl Rampen", "script": "B", "audit_status": "pass", "source_urls": [{"url": "https://source.example/rampen"}]},
+        {"id": "script-3", "topic_registry_id": "topic-3", "title": "ÖPNV Hilfe", "script": "C", "audit_status": "pass", "source_urls": [{"url": "https://source.example/oepnv"}]},
     ]
 
     monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
     monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: True)
 
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=3, post_type="value")
 
@@ -1037,21 +1038,22 @@ def test_list_topic_suggestions_deduplicates_same_topic_family_title(monkeypatch
     registry_rows = [
         {"id": "topic-1", "title": "Pflegegrad: Schnell-Check!", "script": "A", "use_count": 0, "last_used_at": "2026-03-20T10:00:00+00:00", "post_type": "value", "status": "active", "family_fingerprint": "pflegegrad schnell check"},
         {"id": "topic-2", "title": "Pflegegrad Schnell Check", "script": "B", "use_count": 0, "last_used_at": "2026-03-21T10:00:00+00:00", "post_type": "value", "status": "active", "family_fingerprint": "pflegegrad schnell check"},
-        {"id": "topic-3", "title": "Barrierefreiheit im Alltag", "script": "C", "use_count": 0, "last_used_at": "2026-03-22T10:00:00+00:00", "post_type": "value", "status": "active", "family_fingerprint": "barrierefreiheit im alltag"},
+        {"id": "topic-3", "title": "Rollstuhl im Alltag", "script": "C", "use_count": 0, "last_used_at": "2026-03-22T10:00:00+00:00", "post_type": "value", "status": "active", "family_fingerprint": "rollstuhl im alltag"},
     ]
     script_rows = [
-        {"id": "script-1", "topic_registry_id": "topic-1", "title": "Pflegegrad: Schnell-Check!", "script": "A", "audit_status": "pass"},
-        {"id": "script-2", "topic_registry_id": "topic-2", "title": "Pflegegrad Schnell Check", "script": "B", "audit_status": "pass"},
-        {"id": "script-3", "topic_registry_id": "topic-3", "title": "Barrierefreiheit im Alltag", "script": "C", "audit_status": "pass"},
+        {"id": "script-1", "topic_registry_id": "topic-1", "title": "Pflegegrad: Schnell-Check!", "script": "A", "audit_status": "pass", "source_urls": [{"url": "https://source.example/pflegegrad-a"}]},
+        {"id": "script-2", "topic_registry_id": "topic-2", "title": "Pflegegrad Schnell Check", "script": "B", "audit_status": "pass", "source_urls": [{"url": "https://source.example/pflegegrad-b"}]},
+        {"id": "script-3", "topic_registry_id": "topic-3", "title": "Rollstuhl im Alltag", "script": "C", "audit_status": "pass", "source_urls": [{"url": "https://source.example/rollstuhl"}]},
     ]
 
     monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
     monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: True)
 
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=5, post_type="value")
 
     titles = [row["title"] for row in result]
-    assert "Barrierefreiheit im Alltag" in titles
+    assert "Rollstuhl im Alltag" in titles
     assert len([title for title in titles if "Pflegegrad" in title]) == 1
 
 
@@ -1064,20 +1066,21 @@ def test_list_topic_suggestions_only_returns_active_pass_audited_families(monkey
         {"id": "topic-quarantined", "title": "Quarantäne", "script": "C", "post_type": "value", "status": "quarantined", "family_fingerprint": "quarantaene"},
     ]
     script_rows = [
-        {"id": "script-pass", "topic_registry_id": "topic-active", "title": "Aktiv", "script": "A", "audit_status": "pass"},
-        {"id": "script-pending", "topic_registry_id": "topic-provisional", "title": "Vorläufig", "script": "B", "audit_status": "pending"},
-        {"id": "script-reject", "topic_registry_id": "topic-quarantined", "title": "Quarantäne", "script": "C", "audit_status": "pass"},
+        {"id": "script-pass", "topic_registry_id": "topic-active", "title": "Aktiv", "script": "A", "audit_status": "pass", "source_urls": [{"url": "https://source.example/aktiv"}]},
+        {"id": "script-pending", "topic_registry_id": "topic-provisional", "title": "Vorläufig", "script": "B", "audit_status": "pending", "source_urls": [{"url": "https://source.example/provisional"}]},
+        {"id": "script-reject", "topic_registry_id": "topic-quarantined", "title": "Quarantäne", "script": "C", "audit_status": "pass", "source_urls": [{"url": "https://source.example/quarantined"}]},
     ]
 
     monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
     monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: True)
 
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
 
     assert [row["topic_registry_id"] for row in result] == ["topic-active"]
 
 
-def test_list_topic_suggestions_falls_back_to_active_registry_rows_without_scripts(monkeypatch):
+def test_list_topic_suggestions_does_not_fall_back_to_source_less_value_rows(monkeypatch):
     from app.features.topics import queries as topic_queries
 
     registry_rows = [
@@ -1087,11 +1090,43 @@ def test_list_topic_suggestions_falls_back_to_active_registry_rows_without_scrip
 
     monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
     monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: [])
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: True)
 
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
 
-    assert [row["topic_registry_id"] for row in result] == ["topic-active-1", "topic-active-2"]
-    assert all(row["family_status"] == "active" for row in result)
+    assert result == []
+
+
+def test_list_topic_suggestions_skips_inaccessible_value_source_urls(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {"id": "topic-1", "title": "Digitale Treppe", "script": "A", "post_type": "value", "status": "active", "family_fingerprint": "digitale treppe"},
+    ]
+    script_rows = [
+        {
+            "id": "script-1",
+            "topic_registry_id": "topic-1",
+            "title": "Digitale Treppe",
+            "script": "Digitale Treppen blockieren Websites.",
+            "audit_status": "pass",
+            "source_urls": [
+                {"title": "Digitale Treppe defekt", "url": "https://bad.example/digitale-treppe/%60"},
+                {"title": "Digitale Treppe geprüft", "url": "https://good.example/digitale-treppe/"},
+            ],
+        },
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: "good.example" in url)
+
+    result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
+
+    assert len(result) == 1
+    assert result[0]["source_urls"] == [
+        {"title": "Digitale Treppe geprüft", "url": "https://good.example/digitale-treppe/"}
+    ]
 
 
 def test_list_topic_suggestions_includes_used_scripts_but_prefers_unused(monkeypatch):
@@ -1102,12 +1137,13 @@ def test_list_topic_suggestions_includes_used_scripts_but_prefers_unused(monkeyp
         {"id": "topic-unused", "title": "Frei", "script": "B", "post_type": "value", "status": "active", "family_fingerprint": "frei"},
     ]
     script_rows = [
-        {"id": "script-used", "topic_registry_id": "topic-used", "title": "Verbraucht", "script": "A", "audit_status": "pass", "use_count": 2, "last_used_at": "2026-03-31T10:00:00+00:00"},
-        {"id": "script-unused", "topic_registry_id": "topic-unused", "title": "Frei", "script": "B", "audit_status": "pass", "use_count": 0},
+        {"id": "script-used", "topic_registry_id": "topic-used", "title": "Verbraucht", "script": "A", "audit_status": "pass", "use_count": 2, "last_used_at": "2026-03-31T10:00:00+00:00", "source_urls": [{"url": "https://source.example/verbraucht"}]},
+        {"id": "script-unused", "topic_registry_id": "topic-unused", "title": "Frei", "script": "B", "audit_status": "pass", "use_count": 0, "source_urls": [{"url": "https://source.example/frei"}]},
     ]
 
     monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
     monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: True)
 
     result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
 

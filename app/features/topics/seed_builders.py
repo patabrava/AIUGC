@@ -4,13 +4,159 @@ Pure mappers for turning validated topic outputs into seed payloads.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 from app.core.logging import get_logger
 from app.features.topics.content_utils import build_social_description, extract_soft_cta, strip_cta_from_script
 from app.features.topics.schemas import DialogScripts, ResearchAgentItem, SeedData, TopicData
 
 logger = get_logger(__name__)
+
+_SOURCE_RELEVANCE_STOPWORDS = {
+    "http",
+    "https",
+    "www",
+    "com",
+    "de",
+    "org",
+    "net",
+    "html",
+    "php",
+    "quelle",
+    "source",
+    "und",
+    "oder",
+    "der",
+    "die",
+    "das",
+    "den",
+    "dem",
+    "ein",
+    "eine",
+    "einer",
+    "eines",
+    "mit",
+    "für",
+    "fuer",
+    "zur",
+    "zum",
+    "bei",
+    "von",
+    "im",
+    "am",
+    "an",
+    "auf",
+    "barrierefrei",
+    "barrierefreie",
+    "barrierefreien",
+    "barrierefreier",
+    "barrierefreies",
+    "barrierefreiheit",
+    "behindert",
+    "behinderung",
+    "inklusion",
+    "inklusiv",
+    "alltag",
+}
+
+
+def clean_source_url(value: Any) -> str:
+    """Normalize common LLM/source-list URL punctuation before persistence."""
+    url = str(value or "").strip().strip("<>\"'`")
+    while url.lower().endswith(("%60", "%27", "%22")):
+        url = url[:-3].rstrip()
+    return url.rstrip("`\"'.,;:!?)>]}")
+
+
+def _normalize_source_relevance_text(value: Any) -> str:
+    text = str(value or "").lower()
+    return (
+        text.replace("ä", "ae")
+        .replace("ö", "oe")
+        .replace("ü", "ue")
+        .replace("ß", "ss")
+    )
+
+
+def _source_relevance_tokens(value: Any) -> set[str]:
+    text = _normalize_source_relevance_text(value)
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", text)
+        if token not in _SOURCE_RELEVANCE_STOPWORDS and not token.isdigit()
+    }
+    return tokens
+
+
+def _source_tokens(source: Dict[str, Any]) -> set[str]:
+    tokens = _source_relevance_tokens(source.get("title") or source.get("label") or "")
+    url = str(source.get("url") or "")
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        parsed = None
+    if parsed:
+        tokens.update(_source_relevance_tokens(parsed.netloc.replace(".", " ")))
+        tokens.update(_source_relevance_tokens(parsed.path.replace("-", " ").replace("_", " ")))
+    else:
+        tokens.update(_source_relevance_tokens(url))
+    return tokens
+
+
+def _source_relevance_score(context_tokens: set[str], source_tokens: set[str]) -> int:
+    score = len(context_tokens & source_tokens) * 3
+    for context_token in context_tokens:
+        if len(context_token) < 5:
+            continue
+        for source_token in source_tokens:
+            if len(source_token) < 5:
+                continue
+            if context_token == source_token:
+                continue
+            if context_token in source_token or source_token in context_token:
+                score += 3
+    return score
+
+
+def select_relevant_sources(
+    *,
+    sources: list[Any],
+    context_parts: list[Any],
+    max_sources: int = 3,
+    min_score: int = 1,
+) -> list[Dict[str, str]]:
+    """Rank source URLs by lexical evidence against the lane/script context."""
+    context_tokens: set[str] = set()
+    for part in context_parts:
+        if isinstance(part, list):
+            for item in part:
+                context_tokens.update(_source_relevance_tokens(item))
+        else:
+            context_tokens.update(_source_relevance_tokens(part))
+
+    ranked: list[tuple[int, int, Dict[str, str]]] = []
+    seen_urls: set[str] = set()
+    for index, item in enumerate(list(sources or [])):
+        if isinstance(item, dict):
+            url = clean_source_url(item.get("url"))
+            title = str(item.get("title") or item.get("label") or "").strip()
+        else:
+            url = clean_source_url(item)
+            title = ""
+        seen_url_key = url.rstrip("/")
+        if not url or seen_url_key in seen_urls:
+            continue
+        seen_urls.add(seen_url_key)
+        source = {"title": title or url, "url": url}
+        score = _source_relevance_score(context_tokens, _source_tokens(source))
+        if score < min_score:
+            continue
+        ranked.append((score, -index, source))
+
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [source for _, _, source in ranked[:max_sources]]
 
 
 def convert_research_item_to_topic(item: ResearchAgentItem) -> TopicData:

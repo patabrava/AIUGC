@@ -393,7 +393,7 @@ def run_single_seed_topic_warmup(
                     lane_title=lane_title,
                 )
 
-            source_info = _resolve_primary_source_info(lane_dossier, research_dossier)
+            source_info = _resolve_primary_source_info(lane_dossier)
             tier_prompt_items: Dict[int, Any] = {8: base_prompt1_item}
             for tier in _CANONICAL_TIERS:
                 if tier == 8:
@@ -436,7 +436,7 @@ def run_single_seed_topic_warmup(
                     _build_canonical_script_variant(
                         prompt1_item=tier_prompt_item,
                         lane_candidate=lane_candidate,
-                        research_dossier=research_dossier,
+                        research_dossier=lane_dossier,
                         tier=tier,
                         post_type=post_type,
                         seed_payload=build_seed_payload(
@@ -522,10 +522,8 @@ def run_single_seed_topic_warmup(
             research_source=research_source,
         )
         try:
-            fallback_dossier = dict(research_dossier)
-            fallback_dossier["lane_candidate"] = fallback_lane_candidate
-            fallback_dossier["lane_candidates"] = [fallback_lane_candidate]
-            fallback_source_info = _resolve_primary_source_info(fallback_dossier, research_dossier)
+            fallback_dossier = _build_lane_dossier(research_dossier, fallback_lane_candidate)
+            fallback_source_info = _resolve_primary_source_info(fallback_dossier)
             fallback_caption = sanitize_metadata_text(
                 str(fallback_dossier.get("source_summary") or fallback_dossier.get("cluster_summary") or seed_topic).strip(),
                 max_chars=500,
@@ -534,21 +532,22 @@ def run_single_seed_topic_warmup(
                 str(fallback_dossier.get("source_summary") or fallback_dossier.get("cluster_summary") or seed_topic).strip(),
                 max_chars=500,
             )
+            fallback_item_sources = [
+                {
+                    "title": str(
+                        fallback_source_info.get("title")
+                        or fallback_lane_candidate.get("title")
+                        or seed_topic
+                    ).strip(),
+                    "url": str(fallback_source_info.get("url") or "").strip(),
+                }
+            ] if fallback_source_info.get("url") else []
             fallback_prompt1_item = ResearchAgentItem(
                 topic=str(fallback_lane_candidate.get("title") or seed_topic).strip() or seed_topic,
                 script=_build_seed_scoped_fallback_script(seed_topic=seed_topic),
                 caption=fallback_caption,
                 framework="PAL",
-                sources=[
-                    {
-                        "title": str(
-                            fallback_source_info.get("title")
-                            or fallback_lane_candidate.get("title")
-                            or seed_topic
-                        ).strip(),
-                        "url": str(fallback_source_info.get("url") or "https://example.com").strip(),
-                    }
-                ],
+                sources=fallback_item_sources,
                 source_summary=fallback_source_summary,
                 estimated_duration_s=8,
                 tone="direkt, freundlich, empowernd, du-Form",
@@ -586,7 +585,7 @@ def run_single_seed_topic_warmup(
                     _build_canonical_script_variant(
                         prompt1_item=fallback_prompt1_item,
                         lane_candidate=fallback_lane_candidate,
-                        research_dossier=research_dossier,
+                        research_dossier=fallback_dossier,
                         tier=tier,
                         post_type=post_type,
                         seed_payload=build_seed_payload(
