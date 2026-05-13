@@ -74,3 +74,33 @@ def test_save_post_tiktok_settings_round_trip(monkeypatch):
     assert response.status_code == 200, response.text
     assert captured["payload"]["tiktok_settings"]["privacy_level"] == "PUBLIC_TO_EVERYONE"
     assert captured["payload"]["tiktok_settings"]["your_brand"] is True
+
+
+def test_save_batch_tiktok_defaults_round_trip(monkeypatch):
+    from app.main import app
+    from app.features.publish import handlers
+
+    captured = {}
+
+    def fake_update(batch_id, payload):
+        captured["payload"] = payload
+        captured["batch_id"] = batch_id
+        return {"id": batch_id, "tiktok_defaults": payload["tiktok_defaults"]}
+
+    monkeypatch.setattr(handlers, "_update_batch_tiktok_defaults_row", fake_update)
+    client = TestClient(app)
+    response = client.put(
+        "/publish/batches/batch-1/tiktok-defaults",
+        json={
+            "title_template": "Lippe Lift · {topic}",
+            "privacy_level": "PUBLIC_TO_EVERYONE",
+            "allow_comment": True,
+            "allow_duet": True,
+            "allow_stitch": True,
+            "commercial_disclosure": False,
+            "your_brand": False,
+            "branded_content": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert captured["payload"]["tiktok_defaults"]["privacy_level"] == "PUBLIC_TO_EVERYONE"
