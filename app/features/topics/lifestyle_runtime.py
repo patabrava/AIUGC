@@ -12,9 +12,11 @@ from typing import Callable, Dict, List, Optional
 
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
-from app.core.video_profiles import get_duration_profile
+from app.core.video_profiles import get_duration_profile, get_script_duration_bounds, script_word_count
 from app.features.topics.content_utils import extract_soft_cta, strip_cta_from_script
-from app.features.topics.topic_validation import classify_script_overlap, normalize_similarity_text
+from app.features.topics.schemas import DialogScripts
+from app.features.topics.topic_validation import classify_script_overlap, normalize_similarity_text, trim_spoken_script_to_word_bounds
+from app.features.topics.topic_validation import sanitize_spoken_fragment
 
 logger = get_logger(__name__)
 
@@ -57,6 +59,65 @@ def _request_level_overlap_reason(script: str, existing_scripts: List[str]) -> s
         if suffix and suffix == _script_suffix_signature(existing):
             return "duplicate_request_suffix"
     return ""
+
+
+def _fit_lifestyle_script_to_tier(script: str, *, target_length_tier: Optional[int]) -> str:
+    cleaned = sanitize_spoken_fragment(script, ensure_terminal=True)
+    if not target_length_tier:
+        return cleaned
+    min_words, max_words = get_script_duration_bounds("lifestyle", target_length_tier)
+    if script_word_count(cleaned) > max_words:
+        cleaned = trim_spoken_script_to_word_bounds(cleaned, min_words=min_words, max_words=max_words)
+
+    suffixes = [
+        "fuer dich",
+        "im Alltag",
+        "ganz konkret im Alltag",
+        "und macht den naechsten Schritt leichter",
+        "und bleibt dadurch im Alltag besser planbar",
+    ]
+    suffix_index = 0
+    while script_word_count(cleaned) < min_words and suffix_index < len(suffixes) * 2:
+        suffix = suffixes[suffix_index % len(suffixes)]
+        candidate = sanitize_spoken_fragment(f"{cleaned.rstrip('.!?')} {suffix}.", ensure_terminal=True)
+        if script_word_count(candidate) <= max_words:
+            cleaned = candidate
+        suffix_index += 1
+
+    return cleaned
+
+
+def _topic_hint(topic_template: str) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", str(topic_template or ""))
+    if not words:
+        return "dein Alltag"
+    return " ".join(words[:3])
+
+
+def _synthesize_lifestyle_dialog_scripts(
+    topic_template: str,
+    *,
+    target_length_tier: Optional[int],
+) -> DialogScripts:
+    hint = _topic_hint(topic_template)
+    script = _fit_lifestyle_script_to_tier(
+        (
+            f"Wenn {hint} im Alltag mehr Kraft kostet, hilft ein klarer Schritt. "
+            "Pruefe den Weg vorher und plane genug Ruhe ein."
+        ),
+        target_length_tier=target_length_tier,
+    )
+    description = (
+        "Dieser Lifestyle Beitrag zeigt einen konkreten Alltagsschritt, "
+        "der Rollstuhlnutzerinnen und Rollstuhlnutzern Planung, Kraft und "
+        "Orientierung im Tagesablauf erleichtert."
+    )
+    return DialogScripts(
+        problem_agitate_solution=[script],
+        testimonial=[script],
+        transformation=[script],
+        description=description,
+    )
 
 
 def generate_lifestyle_topics(
@@ -109,7 +170,11 @@ def generate_lifestyle_topics(
                 retry_hooks.append(topic_template[:24])
                 topic_data = None
                 continue
-            main_script = dialog_scripts.problem_agitate_solution[0]
+            main_script = _fit_lifestyle_script_to_tier(
+                dialog_scripts.problem_agitate_solution[0],
+                target_length_tier=target_length_tier,
+            )
+            dialog_scripts.problem_agitate_solution[0] = main_script
             overlap_reason = _request_level_overlap_reason(main_script, accepted_scripts)
             if overlap_reason:
                 retry_hooks.append(" ".join(main_script.split()[:4]))
@@ -146,13 +211,29 @@ def generate_lifestyle_topics(
 
         if topic_data is None:
             topic_template = shuffled_templates[index % len(shuffled_templates)]
-            dialog_scripts = generate_dialog_scripts_fn(
-                topic=topic_template,
-                scripts_required=1,
-                previously_used_hooks=used_hooks if used_hooks else None,
-                profile=resolved_profile,
+            try:
+                dialog_scripts = generate_dialog_scripts_fn(
+                    topic=topic_template,
+                    scripts_required=1,
+                    previously_used_hooks=used_hooks if used_hooks else None,
+                    profile=resolved_profile,
+                )
+            except ValidationError as exc:
+                logger.warning(
+                    "lifestyle_topic_provider_exhausted_synthesizing_fallback",
+                    template_title=topic_template,
+                    error=getattr(exc, "message", str(exc)),
+                    details=getattr(exc, "details", {}),
+                )
+                dialog_scripts = _synthesize_lifestyle_dialog_scripts(
+                    topic_template,
+                    target_length_tier=target_length_tier,
+                )
+            main_script = _fit_lifestyle_script_to_tier(
+                dialog_scripts.problem_agitate_solution[0],
+                target_length_tier=target_length_tier,
             )
-            main_script = dialog_scripts.problem_agitate_solution[0]
+            dialog_scripts.problem_agitate_solution[0] = main_script
             cta = extract_soft_cta(main_script)
             rotation = strip_cta_from_script(main_script, cta) or main_script.strip()
             if not cta:

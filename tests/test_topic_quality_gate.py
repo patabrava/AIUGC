@@ -87,7 +87,7 @@ def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifest
         {
             "topic": "Rollstuhl-Alltag",
             "title": "Rollstuhl-Alltag",
-            "script": "Schon wieder ein unnötiger Umweg, aber heute planst du ihn bewusst anders und sparst dir Kraft im Alltag.",
+            "script": "Schon wieder ein unnötiger Umweg, aber heute planst du ihn bewusst anders und sparst dir Kraft im Alltag, weil gute Vorbereitung den spontanen Stress senkt, deine Wege planbarer macht und dir hilft, Energie für die wirklich wichtigen Momente des Tages zu behalten.",
             "caption": "Alltag mit Rollstuhl braucht kluge Planung.",
             "source_summary": "Alltag mit Rollstuhl braucht kluge Planung.",
             "disclaimer": "Keine Rechts- oder medizinische Beratung.",
@@ -96,7 +96,7 @@ def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifest
         post_type="lifestyle",
         current_year=2026,
     )
-    assert 8 <= len(payload["script"].split()) <= 66
+    assert 40 <= len(payload["script"].split()) <= 66
 
 
 def test_validate_pre_persistence_topic_payload_repairs_short_16s_lifestyle_script():

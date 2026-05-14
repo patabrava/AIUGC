@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
 from app.core.logging import get_logger
-from app.core.video_profiles import get_duration_profile
+from app.core.video_profiles import get_duration_profile, get_script_duration_bounds
 from app.features.topics.prompts import build_prompt1_variant, build_prompt2, get_hook_bank
 from app.features.topics.queries import (
     get_all_topics_from_registry,
@@ -29,6 +29,7 @@ from app.features.topics.response_parsers import parse_prompt1_response, parse_p
 from app.features.topics.schemas import DialogScripts, ResearchAgentItem
 from app.features.topics.seed_builders import select_relevant_sources
 from app.features.topics.topic_validation import (
+    detect_metadata_bleed,
     estimate_script_duration_seconds,
     validate_pre_persistence_topic_payload,
 )
@@ -64,8 +65,7 @@ def _ensure_terminal_punctuation(text: str) -> str:
 
 
 def _enforce_prompt1_word_envelope(prompt1_item, profile, lane_fact_texts: List[str]):
-    min_words = int(getattr(profile, "prompt1_min_words", 12))
-    max_words = int(getattr(profile, "prompt1_max_words", 15))
+    min_words, max_words = get_script_duration_bounds("value", getattr(profile, "target_length_tier", 8))
     script = _ensure_terminal_punctuation(getattr(prompt1_item, "script", ""))
     words = script.split()
 
@@ -100,6 +100,40 @@ def _enforce_prompt1_word_envelope(prompt1_item, profile, lane_fact_texts: List[
         max(1, estimate_script_duration_seconds(script)),
     )
     return prompt1_item
+
+
+def _is_provider_boundary_error(exc: Exception) -> bool:
+    if isinstance(exc, ThirdPartyError):
+        return True
+    text = f"{getattr(exc, 'message', str(exc))} {getattr(exc, 'details', '')}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "application default credentials",
+            "default credentials",
+            "vertex ai",
+            "generatecontent failed",
+            "google cloud",
+        )
+    )
+
+
+def _build_value_provider_fallback_script(title: str, *, target_length_tier: int) -> str:
+    hint_words = re.findall(r"[A-Za-z0-9ÄÖÜäöüß-]+", title or "")[:2]
+    hint = " ".join(hint_words) or "diesem Thema"
+    first = (
+        f"Bei {hint} pruefst du Anspruch und Nachweise frueh, "
+        "damit Fristen klar bleiben und Alltag planbar wird."
+    )
+    if target_length_tier <= 8:
+        return first
+    second = "Notiere offene Fragen, bevor du Antrag oder Beratung startest, damit du wirklich gut vorbereitet bist."
+    if target_length_tier <= 16:
+        return f"{first} {second}"
+    third = "So erkennst du schneller, welche Unterlagen fehlen, welche Stelle zustaendig ist und wann du nachhaken solltest."
+    fourth = "Das spart Rueckfragen, reduziert Stress und macht den naechsten Schritt fuer dich konkreter."
+    fifth = "Eine kurze Vorbereitung gibt dir mehr Sicherheit und verhindert hektische Entscheidungen."
+    return f"{first} {second} {third} {fourth} {fifth}"
 
 
 def pick_next_variant(
@@ -329,17 +363,20 @@ def expand_topic_variants(
                 source_info = selected_sources[0] if selected_sources else {}
                 source_title = str(source_info.get("title") or "").strip() or None
                 source_url = str(source_info.get("url") or "").strip() or None
+                source_summary_text = str((lane or {}).get("source_summary") or dossier_payload.get("source_summary") or "").strip()
+                if detect_metadata_bleed(script_text, source_summary=source_summary_text):
+                    source_summary_text = ""
                 prompt1_item = ResearchAgentItem(
                     topic=str((lane or {}).get("title") or dossier_payload.get("topic") or title or "").strip() or "Thema",
                     script=script_text,
-                    caption=str((lane or {}).get("source_summary") or dossier_payload.get("source_summary") or "").strip() or script_text,
+                    caption=source_summary_text,
                     framework=framework if framework in {"PAL", "Testimonial", "Transformation"} else "PAL",
                     sources=(
                         [{"title": source_title or str((lane or {}).get("title") or title or "Quelle"), "url": source_url}]
                         if source_url
                         else []
                     ),
-                    source_summary=str((lane or {}).get("source_summary") or dossier_payload.get("source_summary") or "").strip() or script_text,
+                    source_summary=source_summary_text,
                     estimated_duration_s=max(1, min(get_duration_profile(target_length_tier).target_length_tier, estimate_script_duration_seconds(script_text))),
                     tone="direkt, freundlich, empowernd, du-Form",
                     disclaimer=str((lane or {}).get("disclaimer") or dossier_payload.get("disclaimer") or "Keine Rechts- oder medizinische Beratung.").strip(),
@@ -363,6 +400,9 @@ def expand_topic_variants(
                 )
                 script_text = str(normalized_variant.get("script") or script_text).strip()
                 normalized_title = str(normalized_variant.get("title") or title or "").strip() or title
+                normalized_source_summary = str(normalized_variant.get("source_summary") or getattr(prompt1_item, "source_summary", "") or "").strip()
+                if detect_metadata_bleed(script_text, source_summary=normalized_source_summary):
+                    normalized_source_summary = ""
                 variant_data: Dict[str, Any] = {
                     "script": script_text,
                     "framework": framework,
@@ -377,7 +417,7 @@ def expand_topic_variants(
                     "topic": str(normalized_variant.get("topic") or getattr(prompt1_item, "topic", title) or title or "").strip(),
                     "title": normalized_title,
                     "caption": str(normalized_variant.get("caption") or getattr(prompt1_item, "caption", "") or "").strip(),
-                    "source_summary": str(normalized_variant.get("source_summary") or getattr(prompt1_item, "source_summary", "") or "").strip(),
+                    "source_summary": normalized_source_summary,
                     "disclaimer": str(normalized_variant.get("disclaimer") or getattr(prompt1_item, "disclaimer", "") or "").strip(),
                     "primary_source_url": source_url,
                     "primary_source_title": source_title,
@@ -441,6 +481,62 @@ def expand_topic_variants(
             )
 
         except Exception as exc:
+            if post_type == "value":
+                try:
+                    script_text = _build_value_provider_fallback_script(title, target_length_tier=target_length_tier)
+                    normalized_variant = validate_pre_persistence_topic_payload(
+                        {
+                            "topic": str(title or "").strip(),
+                            "title": str(title or "").strip(),
+                            "script": script_text,
+                            "caption": "",
+                            "source_summary": "",
+                            "disclaimer": "",
+                        },
+                        target_length_tier=target_length_tier,
+                        post_type="value",
+                    )
+                    script_text = str(normalized_variant.get("script") or script_text).strip()
+                    variant_data = {
+                        "script": script_text,
+                        "framework": framework,
+                        "hook_style": hook_style,
+                        "bucket": framework.lower(),
+                        "seed_payload": {},
+                        "topic": str(normalized_variant.get("topic") or title or "").strip(),
+                        "title": str(normalized_variant.get("title") or title or "").strip() or title,
+                        "origin_kind": "provider_boundary_fallback",
+                        "quality_notes": f"Synthesized fallback after provider boundary: {str(exc)[:160]}",
+                    }
+                    upsert_topic_script_variants(
+                        topic_registry_id=topic_registry_id,
+                        title=str(variant_data.get("title") or title or "").strip(),
+                        post_type=post_type,
+                        target_length_tier=target_length_tier,
+                        topic_research_dossier_id=dossiers[0].get("id") if dossiers else None,
+                        variants=[variant_data],
+                    )
+                    existing_pairs.append(variant)
+                    generated += 1
+                    details.append({"framework": framework, "hook_style": hook_style, "script": script_text[:80]})
+                    logger.warning(
+                        "variant_expansion_value_fallback_synthesized",
+                        topic_registry_id=topic_registry_id,
+                        framework=framework,
+                        hook_style=hook_style,
+                        target_length_tier=target_length_tier,
+                        provider_boundary=_is_provider_boundary_error(exc),
+                        reason=str(exc),
+                    )
+                    continue
+                except Exception as fallback_exc:
+                    logger.warning(
+                        "variant_expansion_provider_fallback_failed",
+                        topic_registry_id=topic_registry_id,
+                        framework=framework,
+                        hook_style=hook_style,
+                        error=str(fallback_exc),
+                    )
             logger.warning(
                 "variant_expansion_failed",
                 topic_registry_id=topic_registry_id,

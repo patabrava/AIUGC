@@ -445,6 +445,44 @@ Fakten:
     assert len(fake_llm.text_prompts) == 2
 
 
+def test_generate_product_topics_returns_sanitized_script_when_cleaned_copy_is_in_bounds(monkeypatch):
+    monkeypatch.setattr(
+        "app.features.topics.prompt3_runtime.get_product_knowledge_base",
+        lambda: [
+            ProductKnowledgeEntry(
+                product_name="VARIO PLUS",
+                source_label="PLATTFORMTREPPENLIFT T80",
+                aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+                summary="Plattform oder Sitzlift auf derselben Schiene.",
+                facts=["Plattform oder Sitzlift auf derselben Schiene", "Tragfaehigkeit bis 300 kg"],
+                support_facts=["100% Made in Germany"],
+            )
+        ],
+    )
+    live_shape_script = (
+        "Dein Alltag wird einfacher mit dem VARIO PLUS! "
+        "Ob steile Treppe oder enge Kurve, der VARIO PLUS meistert jede Herausforderung. "
+        "Und das Beste: Er passt sich jederzeit deinen Bedürfnissen an, auch nachträglich als Sitz- oder Plattformlift."
+    )
+    fake_llm = _FakeProductLLM(
+        [
+            f"""Produkt: VARIO PLUS
+Angle: Der einzige Lift, der mit dir und deinem Leben mitwächst.
+Script: {live_shape_script}
+CTA: Frag nach VARIO PLUS fuer dein Zuhause.
+Fakten:
+- Plattform oder Sitzlift auf derselben Schiene
+- Tragfaehigkeit bis 300 kg
+"""
+        ]
+    )
+
+    generated = generate_product_topics(count=1, target_length_tier=16, llm_factory=lambda: fake_llm)
+
+    assert "Und das Beste:" not in generated[0]["script"]
+    assert 24 <= len(generated[0]["script"].split()) <= 34
+
+
 def test_generate_product_topics_accepts_decimal_product_copy(monkeypatch):
     monkeypatch.setattr(
         "app.features.topics.prompt3_runtime.get_product_knowledge_base",

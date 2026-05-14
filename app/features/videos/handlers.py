@@ -54,6 +54,10 @@ from app.features.posts.prompt_builder import (
     sync_video_prompt_with_seed_data,
     validate_video_prompt,
 )
+from app.features.topics.topic_validation import (
+    resolve_effective_script_text,
+    validate_script_duration_contract,
+)
 from app.features.videos.prompt_audit import record_prompt_audit
 from app.features.videos.quota_guard import (
     build_reservation_key,
@@ -383,6 +387,46 @@ def _normalize_seed_data(value: Any) -> Dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _validate_post_duration_contract_for_video(
+    *,
+    post: Dict[str, Any],
+    batch: Dict[str, Any],
+    video_prompt: Dict[str, Any],
+) -> Dict[str, Any]:
+    seed_data = _normalize_seed_data(post.get("seed_data"))
+    batch_tier = batch.get("target_length_tier")
+    seed_tier = seed_data.get("target_length_tier")
+    if batch_tier is None and seed_tier is None:
+        return {
+            "status": "skipped_no_declared_tier",
+            "post_id": post.get("id"),
+            "target_length_tier": None,
+        }
+    target_tier = int(batch_tier or seed_tier or DEFAULT_TARGET_LENGTH_TIER)
+
+    if _is_manual_video_post(batch, seed_data) or target_tier not in {8, 16, 32}:
+        return {
+            "status": "skipped_manual_or_unsupported_tier",
+            "post_id": post.get("id"),
+            "target_length_tier": target_tier,
+        }
+
+    if batch_tier is not None and seed_tier is not None and int(seed_tier) != int(batch_tier):
+        raise ValidationError(
+            f"Post {post.get('id')} target tier mismatch: seed_data.target_length_tier={seed_tier}, batch.target_length_tier={batch_tier}.",
+            {"post_id": post.get("id"), "seed_target_length_tier": seed_tier, "batch_target_length_tier": batch_tier},
+        )
+
+    script = resolve_effective_script_text(seed_data, video_prompt)
+    return validate_script_duration_contract(
+        script=script,
+        post_type=post.get("post_type"),
+        target_length_tier=target_tier,
+        row_id=post.get("id"),
+        table="posts",
+    )
 
 
 def _load_or_build_video_prompt(
@@ -935,12 +979,11 @@ def _build_veo_extended_base_prompt(
     profile = get_duration_profile(target_length_tier) if target_length_tier is not None else None
     base_segment = segments[0] if segments else ""
     if profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE:
-        prompt_character = LEGACY_SHORT_CHARACTER if target_length_tier == 32 else DEFAULT_CHARACTER
-        prompt_style = LEGACY_32_STYLE if target_length_tier == 32 else DEFAULT_STYLE
-        prompt_cinematography = LEGACY_32_CINEMATOGRAPHY if target_length_tier == 32 else DEFAULT_CINEMATOGRAPHY
-        prompt_scene = None
-        prompt_action = None
-        prompt_audio_block = None
+        prompt_character = prompt_character or (LEGACY_SHORT_CHARACTER if target_length_tier == 32 else DEFAULT_CHARACTER)
+        prompt_style = prompt_style or (LEGACY_32_STYLE if target_length_tier == 32 else DEFAULT_STYLE)
+        prompt_cinematography = prompt_cinematography or (
+            LEGACY_32_CINEMATOGRAPHY if target_length_tier == 32 else DEFAULT_CINEMATOGRAPHY
+        )
     segment_metadata = {
         "veo_segments": segments,
         "veo_segments_total": len(segments),
@@ -1029,6 +1072,11 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             supabase_client=supabase,
             correlation_id=correlation_id,
             batch=batch,
+        )
+        script_contract = _validate_post_duration_contract_for_video(
+            post=post,
+            batch=batch,
+            video_prompt=video_prompt,
         )
 
         submission_plan = _resolve_video_submission_plan(
@@ -1142,6 +1190,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             submission_metadata["provider_metadata"] = submission_result["provider_metadata"]
         if anchor_image_bundle:
             submission_metadata.update(anchor_image_bundle["metadata"])
+        submission_metadata["script_duration_contract"] = script_contract
 
         # Normalize provider status to DB-compatible values
         provider_status = submission_result.get("status", "submitted")
@@ -1414,6 +1463,12 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 skipped_count += 1
                 continue
 
+            script_contract = _validate_post_duration_contract_for_video(
+                post=post,
+                batch=batch,
+                video_prompt=video_prompt,
+            )
+
             if is_extended:
                 prompt_text, segment_metadata = _build_veo_extended_base_prompt(
                     seed_data,
@@ -1449,6 +1504,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     "prompt_text": prompt_text,
                     "negative_prompt": negative_prompt,
                     "segment_metadata": segment_metadata,
+                    "script_contract": script_contract,
                     "quota_requested_units": chain_cost_units(profile, provider=submission_plan["provider"]),
                 }
             )
@@ -1493,6 +1549,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             prompt_text = item["prompt_text"]
             negative_prompt = item["negative_prompt"]
             segment_metadata = item["segment_metadata"]
+            script_contract = item["script_contract"]
             quota_reservation_key = item.get("quota_reservation_key")
             quota_consumed = False
 
@@ -1567,6 +1624,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     submission_metadata["quota_consume_error"] = quota_consume_error
                 if submission_plan.get("profile_config"):
                     submission_metadata["veo_efficient_long_route_enabled"] = batch_uses_efficient_long_route
+                submission_metadata["script_duration_contract"] = script_contract
                 route = profile.route if profile else None
                 provider_status = submission_result.get("status", "submitted")
                 db_status = get_submission_video_status(route, provider_status)

@@ -1155,7 +1155,7 @@ def test_count_selectable_topic_families_uses_full_limit(monkeypatch):
 
     captured = {}
 
-    def fake_list_topic_suggestions(*, target_length_tier=None, limit=None, post_type=None):
+    def fake_list_topic_suggestions(*, target_length_tier=None, limit=None, post_type=None, **_kwargs):
         captured["limit"] = limit
         return [object()] * 1300
 
@@ -1374,7 +1374,11 @@ def test_upsert_topic_script_variants_skips_live_fingerprint_conflict(mock_get_s
         variants=[
             {
                 "bucket": "problem_agitate_solution",
-                "script": "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter.",
+                "script": (
+                    "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+                    "Mit einer klaren Routine pruefst du Wege, Pausen, Wetter und Hilfe vorher. "
+                    "So bleibt der Alltag leichter, ohne dass jede Einladung sofort nach Stress oder Absage klingt."
+                ),
                 "hook_style": "problem-agitate-solution",
                 "target_length_tier": 32,
             }
@@ -1490,7 +1494,10 @@ def test_create_post_for_batch_injects_target_tier_into_seed_data(mock_get_sb):
         topic_rotation="Rotation",
         topic_cta="CTA",
         spoken_duration=16,
-        seed_data={"script": "Script", "dialog_script": "Dialog"},
+        seed_data={
+            "script": " ".join(f"wort{i}" for i in range(26)) + ".",
+            "dialog_script": " ".join(f"wort{i}" for i in range(26)) + ".",
+        },
         target_length_tier=16,
     )
 

@@ -7,6 +7,8 @@ import pytest
 import app.features.topics.agents as topic_agents
 import app.features.topics.handlers as topic_handlers
 from app.core.errors import ValidationError
+from app.core.video_profiles import get_script_duration_bounds, script_word_count
+import app.features.topics.lifestyle_runtime as lifestyle_runtime
 from app.features.topics.schemas import DialogScripts
 from app.features.topics.topic_validation import get_prompt2_word_bounds
 
@@ -106,6 +108,29 @@ def test_generate_lifestyle_topics_skips_validation_errors_and_continues(monkeyp
 
     assert len(generated) == 2, generated
     assert call_state["value"] >= 3, call_state
+
+
+def test_generate_lifestyle_topics_synthesizes_tier_valid_fallback_after_prompt2_exhaustion():
+    calls = []
+
+    def failing_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
+        calls.append(topic)
+        raise ValidationError(
+            message="PROMPT_2 generation failed after text normalization",
+            details={"topic": topic},
+        )
+
+    generated = lifestyle_runtime.generate_lifestyle_topics(
+        count=1,
+        seed=20260514,
+        target_length_tier=32,
+        generate_dialog_scripts_fn=failing_generate_dialog_scripts,
+    )
+
+    script = generated[0]["dialog_scripts"].problem_agitate_solution[0]
+    min_words, max_words = get_script_duration_bounds("lifestyle", 32)
+    assert min_words <= script_word_count(script) <= max_words, script
+    assert len(calls) == 4
 
 
 def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_template_titles(monkeypatch):
@@ -811,7 +836,7 @@ def test_discover_topics_returns_coverage_pending_for_value_shortage(monkeypatch
 
 
 @pytest.mark.parametrize("target_length_tier", [8, 16, 32])
-def test_discover_topics_uses_registry_fallback_when_script_rows_are_missing(monkeypatch, target_length_tier):
+def test_discover_topics_returns_coverage_pending_when_value_script_rows_are_missing(monkeypatch, target_length_tier):
     batch = {
         "id": f"batch-registry-fallback-{target_length_tier}",
         "brand": "Registry Fallback Fixture",
@@ -911,15 +936,14 @@ def test_discover_topics_uses_registry_fallback_when_script_rows_are_missing(mon
     monkeypatch.setattr(topic_handlers, "add_topic_to_registry", lambda **kwargs: {"id": kwargs.get("canonical_topic", "topic-registry"), **kwargs})
     monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id: None)
     monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption="Caption"))
+    monkeypatch.setattr(topic_handlers, "_schedule_coverage_warmup", lambda **_kwargs: None)
     topic_handlers.clear_seeding_progress(batch["id"])
 
     result = topic_handlers._discover_topics_for_batch_sync(batch["id"])
 
-    assert result["posts_created"] == 7
-    assert result.get("coverage_pending") is None
-    assert len(created_posts) == 7
-    assert {post["target_length_tier"] for post in created_posts} == {target_length_tier}
-    assert {post["topic_title"] for post in created_posts} == {row["title"] for row in registry_rows}
+    assert result["posts_created"] == 0
+    assert result.get("coverage_pending") is True
+    assert created_posts == []
 
 
 def test_discover_topics_reuses_bank_suggestions_without_self_deduping(monkeypatch):

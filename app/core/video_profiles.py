@@ -5,9 +5,11 @@ Shared duration-tier profiles for batch routing, scripts, and Veo chaining.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+import re
+from typing import Any, Dict, Optional
 
 from app.core.config import get_settings
+from app.core.errors import ValidationError
 
 
 SHORT_VIDEO_ROUTE = "short"
@@ -16,6 +18,23 @@ DEFAULT_TARGET_LENGTH_TIER = 8
 # 48 and 64 added for manual auto-derive of long scripts. Topic-based batches
 # continue to use 8/16/32 (CANON unchanged for the topic flow).
 SUPPORTED_TARGET_LENGTH_TIERS = (8, 16, 32, 48, 64)
+SCRIPT_WORD_BOUNDS = {
+    "value": {
+        8: (14, 18),
+        16: (26, 36),
+        32: (54, 74),
+    },
+    "lifestyle": {
+        8: (16, 20),
+        16: (20, 34),
+        32: (40, 66),
+    },
+    "product": {
+        8: (16, 20),
+        16: (24, 34),
+        32: (32, 66),
+    },
+}
 VEO_PROVIDER = "veo_3_1"
 VIDEO_STATUS_SUBMITTED = "submitted"
 VIDEO_STATUS_PROCESSING = "processing"
@@ -211,6 +230,73 @@ def normalize_target_length_tier(value: Optional[int]) -> int:
     if tier not in SUPPORTED_TARGET_LENGTH_TIERS:
         raise ValueError(f"Unsupported target length tier: {tier}")
     return tier
+
+
+def normalize_post_type(value: Optional[str]) -> str:
+    post_type = str(value or "value").strip().lower()
+    if post_type not in SCRIPT_WORD_BOUNDS:
+        return "value"
+    return post_type
+
+
+def get_script_duration_bounds(post_type: Optional[str], target_length_tier: Optional[int]) -> tuple[int, int]:
+    resolved_post_type = normalize_post_type(post_type)
+    tier = normalize_target_length_tier(target_length_tier)
+    try:
+        return SCRIPT_WORD_BOUNDS[resolved_post_type][tier]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported script duration contract: {resolved_post_type} {tier}s") from exc
+
+
+def script_word_count(text: Any) -> int:
+    return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
+
+
+def estimate_duration_from_word_count(word_count: int) -> int:
+    if word_count <= 0:
+        return 0
+    return max(1, int(round(word_count / 2.6)))
+
+
+def validate_script_duration_contract(
+    *,
+    script: Any,
+    post_type: Optional[str],
+    target_length_tier: Optional[int],
+    row_id: Optional[str] = None,
+    table: Optional[str] = None,
+) -> Dict[str, Any]:
+    resolved_tier = normalize_target_length_tier(target_length_tier)
+    min_words, max_words = get_script_duration_bounds(post_type, resolved_tier)
+    text = str(script or "").strip()
+    word_count = script_word_count(text)
+    estimated_duration_s = estimate_duration_from_word_count(word_count)
+    if not text:
+        status = "missing_script"
+    elif word_count < min_words:
+        status = "underlength"
+    elif word_count > max_words:
+        status = "overlength"
+    else:
+        status = "valid"
+    result = {
+        "table": table,
+        "row_id": row_id,
+        "post_type": normalize_post_type(post_type),
+        "target_length_tier": resolved_tier,
+        "word_count": word_count,
+        "min_words": min_words,
+        "max_words": max_words,
+        "estimated_duration_s": estimated_duration_s,
+        "status": status,
+    }
+    if status != "valid":
+        raise ValidationError(
+            f"{table or 'row'} {row_id or '<unknown>'} {result['post_type']} {resolved_tier}s script has "
+            f"{word_count} words; expected {min_words}-{max_words}.",
+            details=result,
+        )
+    return result
 
 
 def get_duration_profile(value: Optional[int]) -> DurationProfile:

@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, Optional
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
 from app.core.logging import get_logger
-from app.core.video_profiles import get_duration_profile
+from app.core.video_profiles import get_duration_profile, script_word_count
 from app.features.topics.content_utils import strip_cta_from_script
 from app.features.topics.product_knowledge import get_product_knowledge_base, plan_product_mix
 from app.features.topics.prompts import build_prompt3
@@ -71,14 +71,14 @@ def _build_product_fallback_script(entry, *, target_length_tier: int) -> str:
         )
     min_words, max_words = get_prompt3_word_bounds(target_length_tier)
     cleaned = sanitize_spoken_fragment(script, ensure_terminal=True)
-    if len(cleaned.split()) > max_words:
+    if script_word_count(cleaned) > max_words:
         cleaned = trim_spoken_script_to_word_bounds(cleaned, min_words=min_words, max_words=max_words)
-    while len(cleaned.split()) < min_words:
+    while script_word_count(cleaned) < min_words:
         cleaned = sanitize_spoken_fragment(
             f"{cleaned.rstrip('.!?')} und bleibt dadurch im Alltag besser nutzbar.",
             ensure_terminal=True,
         )
-        if len(cleaned.split()) > max_words:
+        if script_word_count(cleaned) > max_words:
             cleaned = trim_spoken_script_to_word_bounds(cleaned, min_words=min_words, max_words=max_words)
             break
     return cleaned
@@ -166,7 +166,7 @@ def generate_product_topics(
                 continue
 
             normalized_script = sanitize_spoken_fragment(candidate.script, ensure_terminal=True)
-            normalized_word_count = len(normalized_script.split())
+            normalized_word_count = script_word_count(normalized_script)
             min_sentences, max_sentences = get_prompt3_sentence_bounds(profile.target_length_tier)
             sentence_count = count_spoken_sentences(normalized_script)
             if normalized_word_count < min_words:
@@ -191,7 +191,7 @@ def generate_product_topics(
                     min_words=min_words,
                     max_words=max_words,
                 )
-                normalized_word_count = len(normalized_script.split())
+                normalized_word_count = script_word_count(normalized_script)
                 if normalized_word_count < min_words:
                     last_error = f"PROMPT_3 trim fell below minimum length: {normalized_word_count} words"
                     prompt = (
@@ -199,8 +199,8 @@ def generate_product_topics(
                         f"Halte dich für {entry.product_name} an etwa {min_words}-{max_words} Wörter."
                     )
                     continue
-                candidate.script = normalized_script
                 candidate.estimated_duration_s = estimate_script_duration_seconds(normalized_script)
+            candidate.script = normalized_script
 
             rotation = strip_cta_from_script(candidate.script, candidate.cta) or candidate.script.strip()
             results.append(

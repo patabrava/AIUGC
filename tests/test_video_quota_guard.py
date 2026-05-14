@@ -15,6 +15,10 @@ from app.features.videos.handlers import (
 )
 
 
+def _word_script(count):
+    return " ".join(f"wort{i}" for i in range(count)) + "."
+
+
 class _FakeQuery:
     def __init__(self, data):
         self._data = data
@@ -218,7 +222,7 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
             "id": "post-1",
             "batch_id": "batch-1",
             "video_prompt_json": {"optimized_prompt": "Prompt 1"},
-            "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+            "seed_data": {"script": _word_script(26)},
             "video_status": "pending",
             "video_metadata": {},
         },
@@ -226,7 +230,7 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
             "id": "post-2",
             "batch_id": "batch-1",
             "video_prompt_json": {"optimized_prompt": "Prompt 2"},
-            "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+            "seed_data": {"script": _word_script(26)},
             "video_status": "pending",
             "video_metadata": {},
         },
@@ -452,7 +456,7 @@ def test_generate_all_videos_routes_32s_vertex_submission_through_duration_profi
             "id": "post-32",
             "batch_id": "batch-32",
             "video_prompt_json": {"veo_prompt": "Prompt 32"},
-            "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz."},
+            "seed_data": {"script": _word_script(54)},
             "video_status": "pending",
             "video_metadata": {},
         },
@@ -544,3 +548,46 @@ def test_generate_all_videos_backfills_missing_prompts_from_seed_data(monkeypatc
     assert posts[0]["video_prompt_json"] is not None
     assert "optimized_prompt" in posts[0]["video_prompt_json"]
     assert posts[1]["video_prompt_json"] is None
+
+
+def test_generate_all_videos_aborts_before_provider_for_underlength_32s_lifestyle(monkeypatch):
+    posts = [
+        {
+            "id": "bad-lifestyle",
+            "batch_id": "batch-32",
+            "post_type": "lifestyle",
+            "video_prompt_json": {"audio": {"dialogue": " ".join(["wort"] * 24) + "."}},
+            "seed_data": {
+                "script": " ".join(["wort"] * 24) + ".",
+                "target_length_tier": 32,
+                "script_review_status": "approved",
+            },
+            "video_status": "pending",
+            "video_metadata": {},
+        }
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+    captured_calls = []
+
+    def _fake_submit(**kwargs):
+        captured_calls.append(kwargs)
+        return {"operation_id": "operations/should-not-run", "status": "submitted"}
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr(
+        "app.features.videos.handlers.get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "target_length_tier": 32,
+            "post_type_counts": {"value": 0, "lifestyle": 1, "product": 0},
+        },
+    )
+    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
+
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=32)
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(generate_all_videos("batch-32", request))
+
+    assert "lifestyle 32s script has 24 words" in str(exc.value)
+    assert captured_calls == []

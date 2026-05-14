@@ -12,6 +12,7 @@ import httpx
 
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
+from app.core.video_profiles import get_script_duration_bounds, script_word_count, validate_script_duration_contract
 from app.features.topics.content_utils import extract_soft_cta
 from app.features.topics.schemas import ResearchAgentItem
 
@@ -25,15 +26,15 @@ MAX_SCRIPT_CHARS_NO_SPACES = 90
 CHARS_PER_SECOND_ESTIMATE = 17.0
 
 PROMPT2_DIALOG_WORD_BOUNDS = {
-    8: (16, 20),
-    16: (20, 34),
-    32: (8, 66),
+    8: get_script_duration_bounds("lifestyle", 8),
+    16: get_script_duration_bounds("lifestyle", 16),
+    32: get_script_duration_bounds("lifestyle", 32),
 }
 
 PROMPT3_PRODUCT_WORD_BOUNDS = {
-    8: (16, 20),
-    16: (24, 34),
-    32: (32, 66),
+    8: get_script_duration_bounds("product", 8),
+    16: get_script_duration_bounds("product", 16),
+    32: get_script_duration_bounds("product", 32),
 }
 
 PROMPT3_PRODUCT_SENTENCE_BOUNDS = {
@@ -43,9 +44,9 @@ PROMPT3_PRODUCT_SENTENCE_BOUNDS = {
 }
 
 PROMPT1_WORD_BOUNDS = {
-    8: (14, 18),
-    16: (26, 36),
-    32: (54, 74),
+    8: get_script_duration_bounds("value", 8),
+    16: get_script_duration_bounds("value", 16),
+    32: get_script_duration_bounds("value", 32),
 }
 
 # Pre-persistence gate can be stricter than prompt guidance. We keep it isolated
@@ -170,6 +171,7 @@ INCOMPLETE_TRAILING_TOKENS = {
 _ALLOWED_PARTICLE_ENDINGS = (
     re.compile(r"(?i)\b(?:ruf(?:e|st|t|en)?|meld(?:e|est|et|en)?|frag(?:e|st|t|en)?|sprich|sprecht|sprechen)\b.*\ban[.!?]$"),
     re.compile(r"(?i)\b(?:fahr(?:e|st|t|en)?|fährt|fahren|komm(?:e|st|t|en)?|kommen|nimm(?:st|t)?|nehmt|nehmen)\b.*\bmit[.!?]$"),
+    re.compile(r"(?i)\b(?:probier(?:e|st|t|en)?|test(?:e|est|et|en)?)\b.*\baus[.!?]$"),
 )
 _DEFINITION_RESIDUE_PATTERNS = (
     re.compile(r"(?i)\bmaßnahmen zur feststellung und beurteilung\b"),
@@ -286,6 +288,8 @@ def sanitize_spoken_fragment(text: Any, *, ensure_terminal: bool = True) -> str:
     cleaned = cleaned.replace("**", " ").replace("__", " ").replace("`", " ")
     cleaned = _BULLET_PREFIX_PATTERN.sub("", cleaned)
     cleaned = _SCRIPT_ARTIFACT_PATTERN.sub("", cleaned)
+    cleaned = re.sub(r"[\u200d\uFE0E\uFE0F]", " ", cleaned)
+    cleaned = re.sub(r"[\U00010000-\U0010ffff]", " ", cleaned)
     cleaned = _strip_research_labels(cleaned)
     cleaned = re.sub(r"[|]+", " ", cleaned)
     cleaned = re.sub(r"(\w):\s+in(nen)?\b", r"\1:in\2", cleaned)
@@ -365,7 +369,7 @@ def trim_spoken_script_to_word_bounds(text: Any, min_words: int, max_words: int)
         if trimmed and trimmed[-1] not in ".!?":
             trimmed = trimmed.rstrip(",;:") + "."
 
-    if len(trimmed.split()) < min_words:
+    if script_word_count(trimmed) < min_words:
         fallback = " ".join(words[:max_words]).strip()
         if fallback and fallback[-1] not in ".!?":
             fallback = fallback.rstrip(",;:") + "."
@@ -446,6 +450,8 @@ def _detect_incomplete_clause_issue(value: str) -> Dict[str, Any] | None:
     if stripped.endswith((",", ";", ":")):
         return {"kind": "incomplete_clause", "tail": stripped[-24:]}
     trailing_tokens = _tokenize_language_words(compact_without_punct)
+    if trailing_tokens and trailing_tokens[-1] == "seit" and re.search(r"(?i)\bseit\s+\d{4}$", compact_without_punct):
+        return None
     if trailing_tokens and trailing_tokens[-1] in INCOMPLETE_TRAILING_TOKENS:
         return {"kind": "incomplete_clause", "tail_token": trailing_tokens[-1]}
     return None
@@ -497,6 +503,20 @@ def normalize_temporal_reference(text: Any, *, current_year: int = CURRENT_TOPIC
 
 def _script_word_count(text: str) -> int:
     return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
+
+
+def resolve_effective_script_text(seed_data: Dict[str, Any], video_prompt: Optional[Dict[str, Any]] = None) -> str:
+    prompt_audio = {}
+    if isinstance(video_prompt, dict):
+        prompt_audio = video_prompt.get("audio") or {}
+        if not isinstance(prompt_audio, dict):
+            prompt_audio = {}
+    return str(
+        prompt_audio.get("dialogue")
+        or (seed_data or {}).get("script")
+        or (seed_data or {}).get("dialog_script")
+        or ""
+    ).strip()
 
 
 def _get_pre_persistence_prompt1_word_bounds(tier: int | None) -> tuple[int, int]:
@@ -553,7 +573,7 @@ def validate_pre_persistence_topic_payload(
     # Suffixes are ordered shortest-first so the minimum addition that lands the
     # script inside [min_words, max_words] wins. The longer combo clauses at the
     # end are needed for 32s where the LLM occasionally undershoots by ≥8 words.
-    if word_count < min_words:
+    if word_count < min_words and word_count >= 5 and int(target_length_tier or 8) != 32:
         repair_suffixes: List[str] = [
             # 2 words
             "ganz konkret",

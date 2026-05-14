@@ -1,0 +1,3954 @@
+{
+  "updates": [
+    {
+      "table": "posts",
+      "row_id": "99a7a575-d5cb-4f9e-8786-cc669c0725b3",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "6d96c877-809f-42a8-8ce8-261cf3ff12ad",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "dd66b27e-6568-4523-92ca-8ff1db6077cb",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7b528598-0041-45e4-85b4-37daa5e9a93c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "5b3303da-76c9-4b88-8472-4b0f871525e1",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "c70b4ae6-675c-4f60-98ef-14d05b2c28ae",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "6dccecf2-3918-42dc-885c-e7d47c96c546",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "9ab5efa1-b1e4-46d4-8675-cdd376353c85",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "889f44a1-e106-4b06-8681-d0907e0bb4d5",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "31f3e5ce-a4f6-4f2b-8413-7f615acd35d0",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2e505612-f6c4-41f5-a715-02806408aba3",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "86697096-e406-42f1-8247-5b3481e02cab",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "4952545d-be82-4b66-bb36-6367bffdc595",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 27 words; expected 14-18; status=overlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 27 words; expected 14-18; status=overlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0420fef0-f9cf-47d8-be90-afd07496abe9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e23e3983-2d89-4135-b2f5-461dd8a8b426",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d433cc1c-f6d8-46c4-9c47-506059bec1a6",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "c854fdb3-dfd7-4ae7-a3fb-b394acfe8a79",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "ebba3561-8f4a-4361-aa77-5bf30890688f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "c14c57a4-e9e5-4bec-bec0-a8ff5e15c51b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7fd5f315-2366-411b-a413-cd26596c1625",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 36 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 36 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "4822291f-34b9-46c4-b55d-b001e87fd7be",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 27 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 27 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "af0e6ee9-2fce-442c-9e0c-b15be0afd07b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "bd169531-c9a7-45a3-812a-8dac7c1285ee",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "4cc7ea48-6c3a-41c1-943b-9d7a5664f369",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "8a90863b-cbb6-41a0-b7b5-6169b7737511",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b1a05981-9d7d-48e0-8e75-5fb626c2b0cd",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "21633c17-9ffc-4133-b8fa-6e47b3613014",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "723bf627-852a-4b2f-a059-2f06dcc1f9a2",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "9f3d5c3f-446a-4335-8ea2-5b20f7135af9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "11e5ba29-e593-4fae-a245-2c2a79b242aa",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "218e6c4f-9ec8-4a65-bb6f-02ac5e4e5a00",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e905d0af-b14d-4e50-8741-1e56f654b34f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "8821babb-2797-49d3-bee6-ab9ca30dff99",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "35a9bcb1-196a-4173-975d-0689fde20fc9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 27 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 27 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "a83e219b-0c12-4be9-a13e-1a61bd6316da",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2522d9b5-d12b-4473-a398-612e76e690c1",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 35 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 35 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "02099ed1-9c5e-4fda-9910-841572af562f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "9ee380ce-45ea-480a-8df4-b6a656950c9a",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "1e57f040-36c7-4498-bcf2-b3227d0137fc",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "410c3e50-7e97-4ea5-a043-fa22521c3df0",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "f50b922b-7d3e-4fd3-877a-b6f33d9317b0",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7c3dd8c8-d117-404a-8be2-858e7c9e6105",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "89841911-be3a-412b-9326-dc35c952ed8c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 14 words; expected 16-20; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 14 words; expected 16-20; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "f08b08d8-c410-4d3a-aa31-10f4dffb4c30",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "559531b9-836f-4359-9c0b-aef265fd2060",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "3fe0abb3-2c02-4570-959d-e0681156e8e2",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: live_test_16s 8s has 31 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: live_test_16s 8s has 31 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "397cd484-5053-430d-9004-31464f95c6c6",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 8s has 15 words; expected 16-20; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 8s has 15 words; expected 16-20; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "19720671-da93-48be-bae1-15a835727d1d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 14 words; expected 16-20; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 14 words; expected 16-20; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "41c564da-6bb2-4239-93de-9ed8083ca617",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0dcc0fa8-68c5-468b-ac25-6fd47a84f997",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "f89c1faa-56a2-40af-b704-700de8e07bf6",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 16 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 16 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "34342bfd-593d-4796-9ea6-54127ce8355f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "21f23f56-62c8-4dc9-a562-7c8ac8face5c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "a06cdba6-203b-4496-bfee-cb7f4d74162c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "fc9837b8-e6bf-44d2-b480-95caa9879d90",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "73f02c10-a6a7-46c3-9d72-f5cfa98b6938",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "dff83f31-30bf-4f6e-9811-6d3be542a199",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "ff460030-f7d6-4483-af96-b799e96cd3b4",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "f2ba405f-89f8-4e86-b5de-9b955c88edc6",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "900b808e-5154-4019-8678-b8817ccbaa66",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2b13e7f1-bf29-4b28-be12-13dc129fcb3f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "de03da4e-ba1b-4cbf-8bc3-3ccd24e661af",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7218622e-47bd-4c76-88e9-eb102ae1b4b8",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b5c51e1b-e227-49cb-86ce-9f687dd893e4",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e7208aa0-2035-47d2-b1da-a85526648a14",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "806da81f-765b-4eec-9ea5-0f4f04bc2c5d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 33 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 33 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "efa5f624-7ae3-4844-b324-f3e4a1d6e94a",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "538e74bf-f051-427b-8c31-674890e15576",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "a85cd49b-7c74-4c77-8ff4-c63ad3734f3a",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "de7db0ba-6ad4-4683-82b6-82616d1fce6c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2ef82668-7711-40bf-a101-cf3896af0902",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d9e94e62-2aee-490d-b653-38d6f470d320",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "bfe9621e-270c-46cb-9621-0a3a854011f6",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "273c84fc-9c3b-4a7a-8ff1-b30b4b4cf7e1",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "73d6d65a-063d-49b7-bd07-c38d0e0366c1",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "ae5f839f-98be-4360-8a2a-2cb3e01c88e7",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "653602ad-8e65-4711-9cf6-d69e6fb954e5",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "930709d3-65e2-4119-81d8-ab98fc3c3c28",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b5638cb8-5b11-4f62-a7bb-7b07c40dd1ff",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "20de5428-a057-40bd-8081-3bbb9c9eae10",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "07408cab-6309-47a8-9cc2-4cd2f0c1fe6e",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 5 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 5 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "4b820ec3-55a6-4cac-afd1-74786d7dfc0e",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "3b7d1f21-54a5-4ab3-97c6-154e47dbf5cb",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "fa0c5403-6c5b-486a-947c-2ded3064d526",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d10dc976-bf03-40eb-bf0d-436bf7df34cc",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "309356fa-e5d3-44a0-818b-1035705c04b4",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "276ecbd1-b56a-4e78-a0fe-43cc29e32026",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7a143c6f-a9df-488f-9587-e5e77f849223",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "91079784-d7e4-4948-ae20-c4d1854e0734",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b1d0fe97-3f54-480f-92ca-5f3e1e572d0e",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d059df93-adbf-4704-8eca-0d3da0e8f463",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "75165533-8f18-4256-9374-84367aef1655",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0cf4ba3a-bbd9-410f-bd55-e66ed4217cd9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2b593278-94fb-4f6d-b45b-8072930b9b57",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "06d42cea-3d9b-476e-ad65-25799c8296c5",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "80d47f4e-29ed-4786-8c89-a4e01480e1f8",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "8cf4e82c-078a-462b-b3aa-cd20beb91d01",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0569f07a-22f9-4f9a-9732-0be45260a70f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "effe9a04-381d-4343-8209-6f6a48608a4f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e2f0cb35-adc2-4d4d-bc45-d4f07bb3dbf9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "9e78b398-a03d-479a-8407-0e3186817ea6",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "430f9375-f956-47b0-9d4f-f6499b5df534",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "6fd6bd38-93be-4508-8ef5-bafefd05e5c5",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "905eca74-70ee-47e4-9894-82f686f9524e",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "3c759bb6-fcc0-40bd-8dd7-367b1e57eb27",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 16s has 36 words; expected 24-34; status=overlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 16s has 36 words; expected 24-34; status=overlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "c5704c36-0504-4f6c-b08d-435b8bb4e170",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "92181ecc-abf9-40fd-b869-5a83a89036f2",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "888bc339-c337-4ae8-85b4-b6a32422f16d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0a2bd183-ed31-47ef-8351-cac4e1f94f43",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "46bbb384-84ad-41e1-8616-25d0b9a138ed",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "730dca2d-9886-4aef-9362-60222d146dca",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "172b3d14-4782-4a0e-ac3f-c2080fc2e07e",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "36ea355e-0cb4-428f-b106-7e5d6739c8cc",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 15 words; expected 16-20; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 15 words; expected 16-20; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "4e7cc4e0-783d-4d06-aa5b-d99bb992ad7b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "5eb471c6-8b90-4060-a238-7bde0d96482d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "a4bceb79-b42f-4189-a853-b6052428bc9d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "add1818a-5c68-48f3-8944-e0633c0c8862",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "88564e36-1575-4ca2-9c8b-df9ad0be0462",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "325c2062-4ece-42bd-b05b-d35de36d6441",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "709dc373-c03c-4f3e-9f2a-8fc73b53095b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 35 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 35 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "5253740e-ae51-4d08-be1a-4166b118d38c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "9e83b08c-092b-481d-8636-57603ce46a6c",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: demo 8s has 56 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: demo 8s has 56 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "71d926eb-0c5e-4761-8559-5c66534de2c9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 29 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 29 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "77882f5f-53fb-4e64-b231-3aabd2429778",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 0 words; expected 26-36; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d2e341c2-931d-4084-9fe1-c5c176c62a57",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e9f871b4-c7ac-480d-bd7f-72f45bd15ca3",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e04f5166-6fb0-4e6f-b948-d64729c0c9a8",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 31 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 31 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "97a6c106-4b92-4025-bbf7-152877180bff",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 12 words; expected 54-74; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 12 words; expected 54-74; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "a1f0f224-2cc3-4da2-ba90-363438567938",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 16 words; expected 54-74; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 16 words; expected 54-74; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "a5ab71cf-baac-42c4-b9e1-c80b68f9b1fd",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "edc8e22e-0713-4639-b2c6-932b27c4a354",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 22 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 22 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "f621cc4f-6409-4fca-83d0-9e0beb6a052a",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 31 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 31 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2872901e-593e-4ade-ba80-94ca82d7f281",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 38 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 38 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "62f95b24-2b7b-46c5-b297-84982a33899b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 16 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 16 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "4a8b9e0c-f2ef-43cf-a7d1-18d674262271",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7d3551e4-1314-4c02-b21f-254f0d9cbd4b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "00509213-22b1-4d5d-95d5-3dc5c0349930",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0f168d73-a444-42d1-b551-b914ada9aa43",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 13 words; expected 54-74; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 13 words; expected 54-74; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "de062575-c445-4f97-9d68-2cf5a7235490",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "41f44e84-7a2a-4352-b182-7a25c32eddb9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 11 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 11 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "abba1944-0412-4580-86b4-05df6cb513e8",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 60 words; expected 26-36; status=overlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 60 words; expected 26-36; status=overlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "409a5b0b-93fa-4559-a1c4-05c094919ab1",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b08050e5-0593-4724-8734-5369dfae7556",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 21 words; expected 16-20; status=overlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 21 words; expected 16-20; status=overlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "9cc83480-d1cc-4d3e-a152-35e203f7d82a",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 22 words; expected 40-66; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 22 words; expected 40-66; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d21bc9ce-79ab-4563-a242-0c5c4a4e5c45",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e61ec631-2ea3-4a68-83fe-57c69b28354a",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "1ed0786a-0d5f-4df5-84c2-16883478f31e",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "3c1545a6-52ca-4f65-a75f-65f8ef1e5d51",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: test 3 8s has 52 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: test 3 8s has 52 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2f2782c6-90bc-407a-9586-f291eab182dd",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b29e3214-31b4-49e9-90ed-658f2763fbc3",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 8 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 8 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "5506cd5b-c5db-4fa7-adcb-a92d997753da",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: Test 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: Test 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "32abdef8-530b-4462-9b27-60cb5e354e9f",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: test1 8s has 21 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: test1 8s has 21 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "1a9acab0-2776-4d52-baa4-8f307efd0450",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7518d8a0-8ef5-411a-847a-bde6bd138c3f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 0 words; expected 14-18; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0b6c9053-7c82-46f6-8945-74cd0589710c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "299be132-5e8a-4c57-9d2d-35d9856f038a",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "5d910e7d-d465-4397-87f8-88a82009173b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "5c7880e3-1d8c-4579-ad8a-07cf8c290bd5",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: test 16s 8s has 30 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: test 16s 8s has 30 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "41a1840c-eedf-4a50-be87-270bd91d1d90",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "53e71cca-fa24-41ac-8bc0-d4607d6bb64b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "62f94ad9-8eb5-40c2-b822-8cba32853377",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "52c3cc31-f5ff-4368-9661-da4d9b0b5bf4",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "abe5a8e5-0a6f-4bd8-bba0-5e1b9d3cc93b",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "5a1c7d81-a2b1-4b37-b451-cdb79aa03d7c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 18 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d178e225-6707-45f5-8302-2d69650deed5",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e5b7eb48-75e0-453d-bfd5-591ae144cb33",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 0 words; expected 54-74; status=missing_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b2617131-b030-44aa-a8bf-cea2b7f1889d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "59fae781-e47a-475d-8cae-27120c3c3175",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b526d791-ab12-45af-a1ce-0e69d8738e03",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "cbc324e4-17ef-4c34-8e9b-b87eb67da51f",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "48693085-db55-4076-8a82-bfa30daf2f66",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e23f4500-bb02-49f3-ab64-4222a8d27494",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "bd31334a-4216-4548-8ade-e36f64932eb6",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "a9d38159-a8f4-4620-85ad-c9e5894757ec",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 13 words; expected 16-20; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: product 8s has 13 words; expected 16-20; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "ab91c0e4-24bc-4a33-83a3-9dbb7bc49912",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "20e91668-965b-4b74-8960-43d4e7a99466",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "71bbbdae-e7c4-49ae-a3c6-9def9ed7c629",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "ca3f9774-e229-4686-85de-5d3652b103e8",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0b6e3264-685c-4390-a67d-7dbbab9f9772",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b42477d8-ba7e-44f5-b91f-3457547d36d9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "de475372-ab70-4356-b2c4-e74999a0f795",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "0e9de9b2-2965-480e-b637-0fe3cbdba881",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "73f76462-7edb-4f23-b854-a0602c9fecfe",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "1715c5b3-dd14-44ee-9d82-3adb82dcb66e",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "82b94f93-08ef-4660-b2d1-75477d4f4841",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "4b5c0370-8887-48ae-8072-c7a57fb07aa6",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "d3eb2303-a891-40c7-8e59-f7779aaf3deb",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 15 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "1515b57b-55bd-4542-a5d9-0eb7ddaeecb9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "3071080e-fdeb-4336-b21f-2487aab509a7",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "dc1a40bf-80ea-4647-9d0f-1468ec1bd963",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2ec91046-3252-41f1-bece-c98ed57a34aa",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 13 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "85139583-5b3f-4ec4-bc64-f7fc90204a6d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "db198f64-dd0e-4fd8-8d43-1482a91a2354",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 17 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "aadc921f-2559-4f57-9e3a-3a4c68d16c5c",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "cfdcb346-a0c2-4645-b8e4-0ff22ce131aa",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "19272c3e-9e01-4295-bffa-ebd36c7274d4",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "f63506c5-d777-4fed-915b-f141252baf19",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 16 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 16 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "790bea08-460a-43d7-b5a3-454e3aa553e9",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "db6fedbf-4ab1-4705-a7fd-7cf453c902df",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "f0fae2a0-8c39-40c0-ae6a-5fdef3eda45d",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "7100902c-f104-4855-832c-70f635af347a",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 12 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "e661d81b-2f26-4d93-a41d-4113dcbf13f0",
+      "payload": {
+        "video_prompt_json": null
+      },
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 16s has 14 words; expected 26-36; status=underlength",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "2afba228-6a84-4ad1-b9ed-d0933c1682dd",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "1571af3b-351d-4db1-84cc-dac5131805bd",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "b88073ec-82a9-4d31-b947-4d85a654d39f",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 25 words; expected 54-74; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 32s has 25 words; expected 54-74; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "posts",
+      "row_id": "813438aa-c9fb-4e6a-837f-5a5f49603376",
+      "payload": {},
+      "seed_patch": {
+        "script_review_status": "pending",
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script"
+      },
+      "metadata_patch": {
+        "duration_contract_status": "needs_repair",
+        "duration_contract_note": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=video_generated_from_bad_script",
+        "duration_contract_checked_at": "2026-05-14T18:34:42.082965+00:00"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "a1fd805b-1a3f-463c-aa29-86806ede7ff2",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: product 8s has 15 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "1f2a5de3-863a-46b3-85e7-9296b33ba0b7",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "d228012e-2947-45f5-b235-c5669cfa1fd8",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "5f3d7e29-90e4-4519-a192-73de5c64a208",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "2c039caf-8817-4c2c-9bdf-309827dedefc",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 16s has 25 words; expected 26-36; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "9b5f4ff8-4864-48f8-89b7-c238e0bd14a9",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "80ee0fd8-9cfc-4f00-8e30-f1e355f05905",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 16s has 21 words; expected 26-36; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "d0a144a0-9970-4c31-b817-f40640273638",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "14b1868c-6ae3-4851-aa47-614408db9268",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 29 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "bc0d6cd3-d9f3-484e-a6dc-d7c24c0d342a",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "8dddc706-b6ad-4236-a423-296c82ec3a93",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "b5331e57-fb39-42f7-9b5b-07bdc549c7aa",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "47629220-cbaa-4793-bd3f-865004c7ef46",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 25 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "4cf580b3-769f-445b-ba5e-16070f28abc5",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 38 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "c9f35fdb-4207-4a01-aa56-abdaccb8c280",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: product 16s has 23 words; expected 24-34; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "268e7e9c-068f-411a-9df4-97ea098a2adf",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "743b585b-f1ca-46f7-94d4-2a660ed6b196",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 36 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "45382f14-8cd8-4e8f-9761-73a32dce57fa",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 22 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "9c92c497-267d-4778-a091-afc628f4a8fd",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 31 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "dcfed0dc-082f-4573-a8a4-fa63c236754f",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "cbf76b09-948c-4a0b-ac5b-e15ee6d584c0",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "e6f556aa-9e92-4214-9cfb-dc621ad12e26",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 8s has 15 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "840fb051-75dd-48d0-b2a4-2b8d526d7416",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 23 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "cd37df1c-a53d-4c53-9ae3-e7ef4432b3ec",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 11 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "2cad0227-0e42-41a1-9d17-2ddf0c0421e1",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 8s has 14 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "d38c8ecf-c809-4f3b-a459-c463dbd0c405",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: product 8s has 13 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "e8cca8a5-3c85-4139-add9-f575beb9f72e",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "efb3f2db-167d-4f85-be4a-ee40ff2c6399",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 32s has 52 words; expected 54-74; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "9b9646a2-3565-4784-905d-57fad5f9df73",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "b2ef2af4-a583-47f6-8387-7ea37d62955f",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "9c360fb6-fd0d-493f-9bde-e0abb88623c6",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "a43e8e51-7f05-46ef-a448-3b6b98938fce",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: product 16s has 21 words; expected 24-34; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "5db344cd-8c25-4c1c-b899-9f041ad06c14",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "750bfce0-c212-42cb-a9a0-934ef19859dc",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "4453444f-2eb2-4a67-8c8e-9ef1630b1678",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "1c4f7343-2bad-4870-b4c2-c2071be4b109",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: product 8s has 14 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "ac723b6e-53de-4307-869e-943b21b8c8fd",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "1ba9b211-fbf3-4645-947b-cfa1ce0e2036",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "2762ff15-dc8f-47b9-8023-5bd32a545615",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "594e81e1-00ec-47e5-a02f-69fae8950254",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 33 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "9e2d9576-fda0-43d3-b607-24cb6467645e",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 24 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "d40b499b-ef74-46f6-8568-3ea865bae0f8",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 35 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "e6adbce4-c7b0-4a4b-b8c6-9242ab35e228",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 32s has 27 words; expected 40-66; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "7c84e32d-1992-48a2-9d89-aa14c5f10f68",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "f1b7f43b-9be6-4bf9-8e26-d335b2f87021",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "a1fb73c5-f1be-44a2-9cd5-5a975df7e28d",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 32s has 42 words; expected 54-74; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "b32fd2dc-ef0a-4511-9d37-e51519262462",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "50cb0761-fa7d-4de9-84c2-a64de95bd035",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "d92aee94-6084-4c51-a206-9434e0174339",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "20df44eb-d1b9-4dcf-be28-ee4e82716f1d",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "e00f3aa3-a88b-4e42-890a-68eda8ff66ae",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "4a50cb9b-06de-4a41-a5cc-2dcd1635b755",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "d54d6939-4894-41b6-b47e-cb3073541f5a",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 8s has 13 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "bb428ca4-6d27-49dd-bf98-675c6429d877",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: lifestyle 8s has 12 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "a7dba93b-a610-4194-bebc-321559a35df2",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: product 8s has 14 words; expected 16-20; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "fd5c9789-f928-45fe-80c7-b82cf790ed52",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 13 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "dc09884f-2a54-4ff5-92b3-2bb6b24d1b72",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "48cb6816-d0d9-4ba3-a47c-d0c6cc24890c",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 16s has 22 words; expected 26-36; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "b230cf78-64e3-44f1-a236-fca2ab8b285f",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "55ff5ef3-d9a1-43c2-8eee-46c61f04c610",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 12 words; expected 14-18; status=underlength"
+      }
+    },
+    {
+      "table": "topic_scripts",
+      "row_id": "a0d60102-61d3-4f13-87d7-6f6a5cc79bb9",
+      "payload": {
+        "audit_status": "needs_repair",
+        "quality_notes": "duration_contract_failure: value 8s has 9 words; expected 14-18; status=underlength"
+      }
+    }
+  ]
+}

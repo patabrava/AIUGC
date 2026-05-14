@@ -29,7 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.core.video_profiles import get_duration_profile  # noqa: E402
+from app.core.video_profiles import get_duration_profile, get_script_duration_bounds  # noqa: E402
+from app.features.topics.agents import generate_lifestyle_topics, generate_product_topics  # noqa: E402
 from app.features.topics.queries import (  # noqa: E402
     get_all_topics_from_registry,
     get_topic_research_dossiers,
@@ -41,7 +42,6 @@ from app.features.topics.topic_validation import (  # noqa: E402
     detect_metadata_bleed,
     detect_spoken_copy_issues,
     get_prompt1_sentence_bounds,
-    get_prompt1_word_bounds,
 )
 from app.features.topics.variant_expansion import expand_topic_variants  # noqa: E402
 
@@ -77,7 +77,7 @@ class ShotResult:
     started_at: float
     duration_s: float
     success: bool  # blocking-issue-free (production-usable)
-    strict_pass: bool = False  # also passes every spec bound
+    strict_pass: bool = False  # passes canonical post-type word bounds with no blocking issues
     error: Optional[str] = None
     script_text: Optional[str] = None
     word_count: int = 0
@@ -93,7 +93,10 @@ CHAR_OVERSHOOT_HARD_LIMIT = 1.5
 
 
 def validate_script(
-    script_text: str, tier: int, source_summary: str = ""
+    script_text: str,
+    tier: int,
+    post_type: str,
+    source_summary: str = "",
 ) -> Tuple[List[str], List[str]]:
     """Return (blocking_issues, soft_issues).
 
@@ -136,11 +139,11 @@ def validate_script(
             f"char_count_slightly_over ({char_count_no_spaces}>{profile.prompt1_max_chars_no_spaces})"
         )
 
-    min_w, max_w = get_prompt1_word_bounds(tier)
+    min_w, max_w = get_script_duration_bounds(post_type, tier)
     if word_count < min_w:
-        soft.append(f"word_count_low ({word_count}<{min_w})")
+        blocking.append(f"word_count_low ({word_count}<{min_w})")
     elif word_count > max_w:
-        soft.append(f"word_count_high ({word_count}>{max_w})")
+        blocking.append(f"word_count_high ({word_count}>{max_w})")
 
     min_s, max_s = get_prompt1_sentence_bounds(tier)
     if sentence_count < min_s:
@@ -228,47 +231,81 @@ def run_one_shot(
     post_type: str,
     topics: List[Dict[str, Any]],
 ) -> ShotResult:
-    topic = random.choice(topics)
-    topic_id = topic["id"]
-    title = topic.get("title") or ""
-    shot_id = f"{phase}_t{tier}_{post_type}_{topic_id[:8]}_{random.randint(1000, 9999)}"
     started_at = time.time()
+    topic_id = f"{post_type}-generated"
+    title = post_type
+    shot_id = f"{phase}_t{tier}_{post_type}_{random.randint(1000, 9999)}"
 
     _capture_box.variants = []
     try:
-        result = _call_expand_with_transport_retry(
-            topic_registry_id=topic_id,
-            title=title,
-            post_type=post_type,
-            target_length_tier=tier,
-        )
-        duration = time.time() - started_at
-        captured = list(getattr(_capture_box, "variants", []) or [])
-
-        if not captured:
-            return ShotResult(
-                shot_id=shot_id,
-                phase=phase,
-                tier=tier,
+        if post_type == "lifestyle":
+            generated = generate_lifestyle_topics(count=1, target_length_tier=tier)
+            if not generated:
+                raise RuntimeError("lifestyle generator emitted no topics")
+            item = generated[0]
+            title = str(item.get("title") or item.get("topic") or "Lifestyle")
+            topic_id = str(item.get("id") or title or "lifestyle")
+            shot_id = f"{phase}_t{tier}_{post_type}_{topic_id[:8]}_{random.randint(1000, 9999)}"
+            dialog_scripts = item.get("dialog_scripts")
+            if hasattr(dialog_scripts, "problem_agitate_solution") and dialog_scripts.problem_agitate_solution:
+                script_text = str(dialog_scripts.problem_agitate_solution[0] or "")
+            elif isinstance(dialog_scripts, dict) and dialog_scripts.get("problem_agitate_solution"):
+                script_text = str((dialog_scripts.get("problem_agitate_solution") or [""])[0] or "")
+            else:
+                script_text = str(item.get("script") or item.get("rotation") or "")
+            framework = str(item.get("framework") or "PAL")
+            hook_style = "live_lifestyle"
+            source_summary = str(item.get("description") or item.get("source_summary") or "")
+        elif post_type == "product":
+            generated = generate_product_topics(count=1, target_length_tier=tier)
+            if not generated:
+                raise RuntimeError("product generator emitted no topics")
+            item = generated[0]
+            title = str(item.get("title") or item.get("topic") or item.get("product_name") or "Product")
+            topic_id = str(item.get("id") or title or "product")
+            shot_id = f"{phase}_t{tier}_{post_type}_{topic_id[:8]}_{random.randint(1000, 9999)}"
+            script_text = str(item.get("script") or item.get("rotation") or "")
+            framework = str(item.get("framework") or "PAL")
+            hook_style = "live_product"
+            source_summary = str(item.get("source_summary") or item.get("description") or "")
+        else:
+            topic = random.choice(topics)
+            topic_id = topic["id"]
+            title = topic.get("title") or ""
+            shot_id = f"{phase}_t{tier}_{post_type}_{topic_id[:8]}_{random.randint(1000, 9999)}"
+            result = _call_expand_with_transport_retry(
+                topic_registry_id=topic_id,
+                title=title,
                 post_type=post_type,
-                topic_id=topic_id,
-                topic_title=title[:80],
-                framework="",
-                hook_style="",
-                started_at=started_at,
-                duration_s=duration,
-                success=False,
-                strict_pass=False,
-                error=f"no_variant_emitted (generated={result.get('generated', 0)})",
+                target_length_tier=tier,
             )
+            captured = list(getattr(_capture_box, "variants", []) or [])
 
-        v = captured[-1]
-        script_text = str(v.get("script") or "")
-        framework = str(v.get("framework") or "")
-        hook_style = str(v.get("hook_style") or "")
-        source_summary = str(v.get("source_summary") or "")
+            if not captured:
+                return ShotResult(
+                    shot_id=shot_id,
+                    phase=phase,
+                    tier=tier,
+                    post_type=post_type,
+                    topic_id=topic_id,
+                    topic_title=title[:80],
+                    framework="",
+                    hook_style="",
+                    started_at=started_at,
+                    duration_s=time.time() - started_at,
+                    success=False,
+                    strict_pass=False,
+                    error=f"no_variant_emitted (generated={result.get('generated', 0)})",
+                )
 
-        blocking, soft = validate_script(script_text, tier, source_summary=source_summary)
+            v = captured[-1]
+            script_text = str(v.get("script") or "")
+            framework = str(v.get("framework") or "")
+            hook_style = str(v.get("hook_style") or "")
+            source_summary = str(v.get("source_summary") or "")
+
+        duration = time.time() - started_at
+        blocking, soft = validate_script(script_text, tier, post_type, source_summary=source_summary)
         return ShotResult(
             shot_id=shot_id,
             phase=phase,
@@ -281,7 +318,7 @@ def run_one_shot(
             started_at=started_at,
             duration_s=duration,
             success=(len(blocking) == 0),
-            strict_pass=(len(blocking) == 0 and len(soft) == 0),
+            strict_pass=(len(blocking) == 0),
             script_text=script_text,
             word_count=_script_word_count(script_text),
             char_count_no_spaces=len(script_text.replace(" ", "").replace("\n", "")),
@@ -361,7 +398,7 @@ def write_reports(
     jsonl_path = output_dir / f"stress_test_{timestamp}.jsonl"
     md_path = output_dir / f"stress_test_{timestamp}.md"
 
-    with jsonl_path.open("w") as f:
+    with jsonl_path.open("w", encoding="utf-8") as f:
         for r in results:
             f.write(json.dumps(asdict(r), default=str, ensure_ascii=False) + "\n")
 
@@ -395,7 +432,7 @@ def write_reports(
     lines.append("")
     lines.append(f"- Total shots: **{total}**")
     lines.append(f"- Production-usable (no blocking issues): **{clean} ({pct:.1f}%)**")
-    lines.append(f"- Strict-spec pass (also matches every DurationProfile bound): **{strict} ({strict_pct:.1f}%)**")
+    lines.append(f"- Strict contract pass (canonical word bounds, no blocking issues): **{strict} ({strict_pct:.1f}%)**")
     lines.append(f"- Duplicate pairs (Jaccard ≥ 0.58, same tier): **{len(duplicate_pairs)}**")
     lines.append("")
 
@@ -524,6 +561,9 @@ def main() -> int:
     parser.add_argument("--topic-pool-size", type=int, default=60)
     parser.add_argument("--output-dir", default="tasks")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--post-types", default="value,lifestyle,product")
+    parser.add_argument("--min-usable-pct", type=float, default=100.0)
+    parser.add_argument("--min-strict-pct", type=float, default=100.0)
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -549,6 +589,7 @@ def main() -> int:
 
     phases_to_run = [p.strip() for p in args.phases.split(",") if p.strip()]
     smoke_tiers = [int(x) for x in args.smoke_tiers.split(",")]
+    post_types = [p.strip() for p in args.post_types.split(",") if p.strip()]
 
     results: List[ShotResult] = []
     total_started_at = time.time()
@@ -557,16 +598,18 @@ def main() -> int:
         if "smoke" in phases_to_run:
             print("\n[PHASE 1] smoke — 1 sequential per tier", flush=True)
             for tier in smoke_tiers:
-                r = run_one_shot(phase="smoke", tier=tier, post_type="value", topics=topic_pool)
-                results.append(r)
-                _print_shot_line(r)
+                for post_type in post_types:
+                    r = run_one_shot(phase="smoke", tier=tier, post_type=post_type, topics=topic_pool)
+                    results.append(r)
+                    _print_shot_line(r)
 
         if "concurrency" in phases_to_run:
             n = args.concurrency_parallel
             print(f"\n[PHASE 2] concurrency — {n} parallel × 3 tiers in one batch", flush=True)
             jobs: List[Tuple[int, str]] = []
             for tier in (8, 16, 32):
-                jobs.extend([(tier, "value")] * n)
+                for post_type in post_types:
+                    jobs.extend([(tier, post_type)] * n)
             random.shuffle(jobs)
             with ThreadPoolExecutor(max_workers=n * 3) as pool:
                 futures = [
@@ -581,13 +624,14 @@ def main() -> int:
         if "heavy" in phases_to_run:
             n = args.heavy_parallel
             rounds = args.heavy_rounds
-            total = n * rounds * 3
+            total = n * rounds * 3 * max(len(post_types), 1)
             print(f"\n[PHASE 3] heavy — {n} parallel × {rounds} rounds × 3 tiers ({total} calls)", flush=True)
             for round_n in range(rounds):
                 print(f"  -- round {round_n + 1}/{rounds} --", flush=True)
                 jobs = []
                 for tier in (8, 16, 32):
-                    jobs.extend([(tier, "value")] * n)
+                    for post_type in post_types:
+                        jobs.extend([(tier, post_type)] * n)
                 random.shuffle(jobs)
                 with ThreadPoolExecutor(max_workers=n * 3) as pool:
                     futures = [
@@ -622,7 +666,7 @@ def main() -> int:
             if jac >= 0.58:
                 duplicate_pairs.append((i, j, jac))
     duplicate_pairs.sort(key=lambda x: -x[2])
-    print(f"  duplicate pairs ≥0.58: {len(duplicate_pairs)}", flush=True)
+    print(f"  duplicate pairs >=0.58: {len(duplicate_pairs)}", flush=True)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -634,6 +678,7 @@ def main() -> int:
         "concurrency_parallel": args.concurrency_parallel,
         "heavy_parallel": args.heavy_parallel,
         "heavy_rounds": args.heavy_rounds,
+        "post_types": post_types,
         "topic_pool_size": len(topic_pool),
         "seed": args.seed,
     }
@@ -656,7 +701,7 @@ def main() -> int:
     )
     print("=" * 80, flush=True)
 
-    return 0 if pct >= 90.0 else 2
+    return 0 if pct >= args.min_usable_pct and strict_pct >= args.min_strict_pct else 2
 
 
 if __name__ == "__main__":

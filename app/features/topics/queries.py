@@ -13,7 +13,7 @@ from app.adapters.supabase_client import get_supabase, SupabaseAdapter
 
 # Module-level singleton placeholder used by patchable test seams; initialize lazily.
 supabase: Optional[SupabaseAdapter] = None
-from app.core.errors import NotFoundError, ThirdPartyError
+from app.core.errors import NotFoundError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
 
 _POSTS_INSERT_RETRY_DELAYS = (0.15, 0.35, 0.75, 1.5)
@@ -27,8 +27,10 @@ from app.features.topics.topic_validation import (
     get_prompt1_word_bounds,
     get_prompt3_sentence_bounds,
     get_prompt3_word_bounds,
+    resolve_effective_script_text,
     sanitize_metadata_text,
     sanitize_spoken_fragment,
+    validate_script_duration_contract,
     validate_pre_persistence_topic_payload,
 )
 
@@ -493,6 +495,25 @@ def create_post_for_batch(
     resolved_seed_data = dict(seed_data or {})
     if target_length_tier is not None and "target_length_tier" not in resolved_seed_data:
         resolved_seed_data["target_length_tier"] = target_length_tier
+
+    if target_length_tier is not None:
+        effective_script = resolve_effective_script_text(resolved_seed_data)
+        if not effective_script:
+            effective_script = topic_rotation
+        is_empty_manual_draft = (
+            resolved_seed_data.get("manual_draft") is True
+            and not effective_script
+            and str(resolved_seed_data.get("script_review_status") or "").strip().lower() != "approved"
+        )
+        if not is_empty_manual_draft:
+            contract = validate_script_duration_contract(
+                script=effective_script,
+                post_type=post_type,
+                target_length_tier=target_length_tier,
+                row_id=None,
+                table="posts",
+            )
+            resolved_seed_data["script_duration_contract"] = contract
     
     post_data = {
         "batch_id": batch_id,
@@ -647,6 +668,25 @@ def list_topic_suggestions(
             normalized_script = _normalize_script_row(row)
             if normalized_script.get("audit_status") != "pass":
                 continue
+            if normalized_script.get("target_length_tier") is not None:
+                try:
+                    validate_script_duration_contract(
+                        script=normalized_script.get("script"),
+                        post_type=normalized_script.get("post_type") or post_type,
+                        target_length_tier=normalized_script.get("target_length_tier"),
+                        row_id=normalized_script.get("id"),
+                        table="topic_scripts",
+                    )
+                except (ValidationError, ValueError) as exc:
+                    logger.warning(
+                        "topic_script_duration_contract_rejected_at_selection",
+                        script_id=normalized_script.get("id"),
+                        topic_registry_id=topic_registry_id,
+                        post_type=normalized_script.get("post_type") or post_type,
+                        target_length_tier=normalized_script.get("target_length_tier"),
+                        details=getattr(exc, "details", {}),
+                    )
+                    continue
             if post_type == "value":
                 selected_sources = select_relevant_sources(
                     sources=normalized_script.get("source_urls") or [],
