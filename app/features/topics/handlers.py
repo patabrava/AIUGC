@@ -60,6 +60,7 @@ from app.core.states import BatchState
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.config import get_settings
+from app.core.video_profiles import script_word_count
 from app.features.topics.hub import (
     _build_script_variants,
     _wants_html,
@@ -246,7 +247,7 @@ def _build_tier_valid_lifestyle_script(
         ]
         for variant in compact_variants:
             cleaned = sanitize_spoken_fragment(variant, ensure_terminal=True)
-            if min_words <= len(cleaned.split()) <= max_words:
+            if min_words <= script_word_count(cleaned) <= max_words:
                 return cleaned
         single_sentence_variants = [
             f"{base.rstrip('.!?')}, und mit einer klaren Routine sparst du dir im Alltag oft unnötigen Stress.",
@@ -254,10 +255,10 @@ def _build_tier_valid_lifestyle_script(
         ]
         for variant in single_sentence_variants:
             cleaned = sanitize_spoken_fragment(variant, ensure_terminal=True)
-            if min_words <= len(cleaned.split()) <= max_words:
+            if min_words <= script_word_count(cleaned) <= max_words:
                 return cleaned
         trimmed = trim_spoken_script_to_word_bounds(single_sentence_variants[0], min_words=min_words, max_words=max_words)
-        if min_words <= len(trimmed.split()) <= max_words:
+        if min_words <= script_word_count(trimmed) <= max_words:
             return trimmed
         return sanitize_spoken_fragment(compact_variants[0], ensure_terminal=True)
 
@@ -266,11 +267,12 @@ def _build_tier_valid_lifestyle_script(
         "Genau solche Kleinigkeiten entscheiden oft darüber, ob sich ein Weg leicht oder unnötig anstrengend anfühlt.",
         "Darüber wird selten gesprochen, obwohl es im Rollstuhl-Alltag ständig wieder passiert.",
         "Wenn du das einmal sauber gelöst hast, sparst du dir später Zeit, Kraft und Nerven.",
+        "So bleibt dein Tag klarer und planbarer.",
     ]
     script = base
     for sentence in supporting_sentences:
         cleaned = sanitize_spoken_fragment(f"{script} {sentence}", ensure_terminal=True)
-        word_count = len(cleaned.split())
+        word_count = script_word_count(cleaned)
         if word_count > max_words:
             continue
         script = cleaned

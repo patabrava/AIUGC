@@ -133,6 +133,18 @@ def test_generate_lifestyle_topics_synthesizes_tier_valid_fallback_after_prompt2
     assert len(calls) == 4
 
 
+@pytest.mark.parametrize("fallback", topic_handlers._LIFESTYLE_FALLBACK_CANDIDATES)
+def test_build_tier_valid_lifestyle_script_pads_32s_fallback_to_minimum_words(fallback):
+    script = topic_handlers._build_tier_valid_lifestyle_script(
+        rotation=fallback["rotation"],
+        title=fallback["title"],
+        target_length_tier=32,
+    )
+
+    min_words, max_words = get_script_duration_bounds("lifestyle", 32)
+    assert min_words <= script_word_count(script) <= max_words, script
+
+
 def test_discover_topics_creates_lifestyle_posts_even_when_registry_contains_template_titles(monkeypatch):
     created_posts = []
     registry_rows = []
