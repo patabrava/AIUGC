@@ -14,6 +14,7 @@ from app.adapters.supabase_client import get_supabase
 from postgrest.exceptions import APIError
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
+from app.core.video_profiles import validate_script_duration_contract
 from app.features.posts.prompt_builder import (
     build_video_prompt_from_seed,
     ensure_scene_plan,
@@ -129,20 +130,23 @@ def _load_post_seed_data(post_id: str, supabase_client):
     return post, seed_data
 
 
-def _load_batch_creation_mode(batch_id: str, supabase_client) -> str:
+def _load_batch_script_settings(batch_id: str, supabase_client) -> dict:
     try:
         response = (
             supabase_client.table("batches")
-            .select("id, creation_mode")
+            .select("id, creation_mode, target_length_tier")
             .eq("id", batch_id)
             .execute()
         )
     except Exception:
-        # Batch lookup should never block script edits; default to automated behavior.
-        return "automated"
+        return {"creation_mode": "automated", "target_length_tier": None}
     if not response.data:
-        return "automated"
-    return str(response.data[0].get("creation_mode") or "automated")
+        return {"creation_mode": "automated", "target_length_tier": None}
+    row = response.data[0] or {}
+    return {
+        "creation_mode": str(row.get("creation_mode") or "automated"),
+        "target_length_tier": row.get("target_length_tier"),
+    }
 
 
 def _load_batch_for_prompt(batch_id: str, supabase_client) -> dict:
@@ -196,7 +200,8 @@ async def update_post_script(post_id: str, request: Request):
         supabase = get_supabase().client
         
         post, current_seed = _load_post_seed_data(post_id, supabase)
-        batch_creation_mode = _load_batch_creation_mode(post["batch_id"], supabase)
+        batch_settings = _load_batch_script_settings(post["batch_id"], supabase)
+        batch_creation_mode = batch_settings["creation_mode"]
         current_seed["script"] = script_text
         current_seed["script_review_status"] = "pending"
         current_seed.pop("video_excluded", None)
@@ -211,6 +216,17 @@ async def update_post_script(post_id: str, request: Request):
         if resolved_post_type:
             current_seed["post_type"] = resolved_post_type
             current_seed["manual_post_type"] = resolved_post_type
+        target_length_tier = batch_settings.get("target_length_tier") or current_seed.get("target_length_tier")
+        if target_length_tier and resolved_post_type:
+            contract = validate_script_duration_contract(
+                script=script_text,
+                post_type=resolved_post_type,
+                target_length_tier=target_length_tier,
+                row_id=post_id,
+                table="posts",
+            )
+            current_seed["target_length_tier"] = int(target_length_tier)
+            current_seed["script_duration_contract"] = contract
 
         update_payload = {
             "seed_data": current_seed,
@@ -244,6 +260,11 @@ async def update_post_script(post_id: str, request: Request):
             response_payload["post_type"] = resolved_post_type
         return SuccessResponse(data=response_payload)
     
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.message or str(exc),
+        ) from exc
     except FlowForgeException:
         raise
     except HTTPException:

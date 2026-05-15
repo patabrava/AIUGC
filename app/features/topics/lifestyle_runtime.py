@@ -69,20 +69,14 @@ def _fit_lifestyle_script_to_tier(script: str, *, target_length_tier: Optional[i
     if script_word_count(cleaned) > max_words:
         cleaned = trim_spoken_script_to_word_bounds(cleaned, min_words=min_words, max_words=max_words)
 
-    suffixes = [
-        "fuer dich",
-        "im Alltag",
-        "ganz konkret im Alltag",
-        "und macht den naechsten Schritt leichter",
-        "und bleibt dadurch im Alltag besser planbar",
-    ]
-    suffix_index = 0
-    while script_word_count(cleaned) < min_words and suffix_index < len(suffixes) * 2:
-        suffix = suffixes[suffix_index % len(suffixes)]
-        candidate = sanitize_spoken_fragment(f"{cleaned.rstrip('.!?')} {suffix}.", ensure_terminal=True)
-        if script_word_count(candidate) <= max_words:
-            cleaned = candidate
-        suffix_index += 1
+    topic_hint = _topic_hint(cleaned)
+    for sentence in _lifestyle_padding_sentences(topic_hint):
+        if script_word_count(cleaned) >= min_words:
+            break
+        candidate = sanitize_spoken_fragment(f"{cleaned} {sentence}", ensure_terminal=True)
+        if script_word_count(candidate) > max_words:
+            candidate = trim_spoken_script_to_word_bounds(candidate, min_words=min_words, max_words=max_words)
+        cleaned = candidate
 
     return cleaned
 
@@ -94,6 +88,17 @@ def _topic_hint(topic_template: str) -> str:
     return " ".join(words[:3])
 
 
+def _lifestyle_padding_sentences(topic_hint: str) -> List[str]:
+    hint = topic_hint or "dein Alltag"
+    return [
+        f"Gerade bei {hint} summieren sich kleine Umwege schneller, als viele von aussen erwarten.",
+        "Wenn du den Weg vorher kurz pruefst, sparst du dir spaeter hektische Stopps und unnoetiges Zuruecksetzen.",
+        "So bleibt der naechste Schritt klar, auch wenn unterwegs wieder etwas nicht sofort passt.",
+        "Diese paar Minuten Planung klingen klein, machen im Rollstuhl-Alltag aber oft den groessten Unterschied.",
+        "Am Ende bleibt mehr Energie fuer den eigentlichen Termin, statt schon auf dem Hinweg verloren zu gehen.",
+    ]
+
+
 def _synthesize_lifestyle_dialog_scripts(
     topic_template: str,
     *,
@@ -101,9 +106,14 @@ def _synthesize_lifestyle_dialog_scripts(
 ) -> DialogScripts:
     hint = _topic_hint(topic_template)
     script = _fit_lifestyle_script_to_tier(
-        (
-            f"Wenn {hint} im Alltag mehr Kraft kostet, hilft ein klarer Schritt. "
-            "Pruefe den Weg vorher und plane genug Ruhe ein."
+        " ".join(
+            [
+                f"Wenn {hint} im Alltag mehr Kraft kostet, merkst du das oft erst nach mehreren kleinen Umwegen.",
+                "Pruefe den Weg vorher kurz und plane einen einfachen Ausweichschritt ein.",
+                "Damit musst du unterwegs weniger improvisieren und bleibst im Kopf deutlich ruhiger.",
+                "Genau solche Routinen nehmen Druck raus, wenn der Alltag sowieso schon genug Energie kostet.",
+                "So bleibt mehr Kraft fuer das, was du eigentlich vorhast, statt fuer zusaetzliche Barrieren draufzugehen.",
+            ]
         ),
         target_length_tier=target_length_tier,
     )

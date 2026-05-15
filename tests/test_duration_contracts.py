@@ -31,7 +31,7 @@ def _words(count: int) -> str:
         ("value", 32, (54, 74)),
         ("lifestyle", 8, (16, 20)),
         ("lifestyle", 16, (20, 34)),
-        ("lifestyle", 32, (40, 66)),
+        ("lifestyle", 32, (64, 84)),
         ("product", 8, (16, 20)),
         ("product", 16, (24, 34)),
         ("product", 32, (32, 66)),
@@ -42,8 +42,8 @@ def test_canonical_script_duration_bounds(post_type, tier, expected):
 
 
 def test_legacy_prompt_bound_wrappers_use_canonical_contract():
-    assert get_prompt1_word_bounds(32) == (54, 74)
-    assert get_prompt2_word_bounds(32) == (40, 66)
+    assert get_prompt1_word_bounds(32) == (68, 88)
+    assert get_prompt2_word_bounds(32) == (64, 84)
     assert get_prompt3_word_bounds(32) == (32, 66)
 
 
@@ -57,20 +57,34 @@ def test_32s_lifestyle_24_word_script_is_rejected_by_contract():
             table="posts",
         )
     assert "24 words" in str(exc.value)
-    assert exc.value.details["min_words"] == 40
-    assert exc.value.details["max_words"] == 66
+    assert exc.value.details["min_words"] == 64
+    assert exc.value.details["max_words"] == 84
 
 
-def test_32s_lifestyle_40_word_script_passes_contract():
+def test_32s_lifestyle_40_word_script_is_rejected_by_contract():
+    with pytest.raises(ValidationError) as exc:
+        validate_script_duration_contract(
+            script=_words(40),
+            post_type="lifestyle",
+            target_length_tier=32,
+            row_id="post-underlength",
+            table="posts",
+        )
+
+    assert "40 words" in str(exc.value)
+    assert exc.value.details["min_words"] == 64
+
+
+def test_32s_lifestyle_64_word_script_passes_contract():
     result = validate_script_duration_contract(
-        script=_words(40),
+        script=_words(64),
         post_type="lifestyle",
         target_length_tier=32,
         row_id="post-valid",
         table="posts",
     )
     assert result["status"] == "valid"
-    assert result["word_count"] == 40
+    assert result["word_count"] == 64
 
 
 def test_spoken_copy_detector_allows_valid_particle_and_year_endings():
@@ -203,7 +217,7 @@ def test_pre_persistence_lifestyle_uses_32s_floor_without_padding():
             post_type="lifestyle",
         )
     assert exc.value.details["word_count"] == 24
-    assert exc.value.details["min_words"] == 40
+    assert exc.value.details["min_words"] == 64
 
 
 @patch("app.features.topics.queries.get_supabase")
@@ -308,7 +322,7 @@ def test_audit_classifies_generated_video_from_bad_script():
 
     assert result["status"] == "video_generated_from_bad_script"
     assert result["word_count"] == 24
-    assert result["min_words"] == 40
+    assert result["min_words"] == 64
 
 
 def test_audit_treats_repaired_post_as_nonblocking():
@@ -332,7 +346,7 @@ def test_audit_treats_repaired_post_as_nonblocking():
 
     assert result["status"] == "needs_repair"
     assert result["word_count"] == 24
-    assert result["min_words"] == 40
+    assert result["min_words"] == 64
 
 
 def test_audit_treats_repaired_topic_script_as_nonblocking():
@@ -350,7 +364,7 @@ def test_audit_treats_repaired_topic_script_as_nonblocking():
 
     assert result["status"] == "needs_repair"
     assert result["word_count"] == 24
-    assert result["min_words"] == 40
+    assert result["min_words"] == 64
 
 
 def test_repair_tool_builds_safe_updates_without_apply():

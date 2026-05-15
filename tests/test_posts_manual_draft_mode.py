@@ -135,3 +135,29 @@ async def test_automated_save_does_not_override_post_type_with_submitted_value(m
     assert storage["posts"][0]["seed_data"]["script"] == "New script"
     assert storage["posts"][0]["video_prompt_json"] is None
 
+
+@pytest.mark.anyio
+async def test_automated_save_rejects_underlength_32s_lifestyle_script(monkeypatch):
+    storage = {
+        "batches": [{"id": "batch-1", "creation_mode": "automated", "target_length_tier": 32}],
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "post_type": "lifestyle",
+                "seed_data": {"script_review_status": "pending", "script": "Old valid script."},
+                "video_prompt_json": {"stale": True},
+            }
+        ],
+    }
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    with pytest.raises(posts_handlers.HTTPException) as excinfo:
+        await posts_handlers.update_post_script(
+            "post-1",
+            _FakeRequest({"script_text": "Viel zu kurz fuer zweiunddreissig Sekunden."}),
+        )
+
+    assert excinfo.value.status_code == 422
+    assert storage["posts"][0]["seed_data"]["script"] == "Old valid script."
+    assert storage["posts"][0]["video_prompt_json"] == {"stale": True}

@@ -127,13 +127,21 @@ def _build_value_provider_fallback_script(title: str, *, target_length_tier: int
     )
     if target_length_tier <= 8:
         return first
-    second = "Notiere offene Fragen, bevor du Antrag oder Beratung startest, damit du wirklich gut vorbereitet bist."
+    second = (
+        "Viele verlieren Zeit, weil Unterlagen erst spaet sortiert werden "
+        "oder die zustaendige Stelle nicht sofort klar ist."
+    )
     if target_length_tier <= 16:
         return f"{first} {second}"
-    third = "So erkennst du schneller, welche Unterlagen fehlen, welche Stelle zustaendig ist und wann du nachhaken solltest."
-    fourth = "Das spart Rueckfragen, reduziert Stress und macht den naechsten Schritt fuer dich konkreter."
-    fifth = "Eine kurze Vorbereitung gibt dir mehr Sicherheit und verhindert hektische Entscheidungen."
-    return f"{first} {second} {third} {fourth} {fifth}"
+    third = (
+        "Wenn die offenen Punkte vorher geordnet sind, erkennst du schneller, "
+        "was noch fehlt und wen du wirklich ansprechen musst."
+    )
+    fourth = (
+        "So werden Rueckfragen kuerzer, Entscheidungen klarer und der naechste "
+        "Schritt fuer dich spuerbar und deutlich konkreter."
+    )
+    return f"{first} {second} {third} {fourth}"
 
 
 def pick_next_variant(
