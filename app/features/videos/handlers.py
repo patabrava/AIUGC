@@ -648,8 +648,8 @@ def _uses_actual_efficient_long_route(profile: Optional[Any]) -> bool:
 
 
 def _should_assign_veo_seed(*, provider: str, profile: Optional[Any]) -> bool:
-    """Legacy 32s chains must stay unseeded to mirror the last stable contract."""
-    return provider == VEO_PROVIDER and _uses_actual_efficient_long_route(profile)
+    """Use one seed across an extended chain when the provider accepts it."""
+    return provider in {VEO_PROVIDER, "vertex_ai"} and _uses_actual_efficient_long_route(profile)
 
 
 def _required_veo_segments_for_profile_hops(hops_target: int) -> int:
@@ -661,6 +661,103 @@ def _estimate_spoken_seconds(text: str) -> float:
     if not words:
         return 0.0
     return len(words) / _WORDS_PER_SECOND
+
+
+def _minimum_words_for_veo_window(*, budget_seconds: int, is_final_segment: bool) -> int:
+    if budget_seconds >= 8:
+        return 16
+    return 12 if is_final_segment else 14
+
+
+def _segment_word_count(segment: str) -> int:
+    return len([word for word in str(segment).split() if word])
+
+
+def _build_veo_segment_spoken_budgets(
+    *,
+    segments: list[str],
+    profile: Any,
+) -> list[dict[str, Any]]:
+    budgets: list[dict[str, Any]] = []
+    for index, segment in enumerate(segments):
+        budget_seconds = _segment_time_budget_seconds(profile=profile, segment_index=index)
+        is_final = index == len(segments) - 1
+        minimum_words = _minimum_words_for_veo_window(
+            budget_seconds=budget_seconds,
+            is_final_segment=is_final,
+        )
+        word_count = _segment_word_count(segment)
+        budgets.append(
+            {
+                "segment_index": index,
+                "budget_seconds": budget_seconds,
+                "word_count": word_count,
+                "minimum_words": minimum_words,
+            }
+        )
+    return budgets
+
+
+def _validate_veo_segment_spoken_budget(
+    *,
+    segments: list[str],
+    profile: Any,
+    target_length_tier: Optional[int],
+    planned_extension_hops: Optional[int],
+) -> None:
+    if profile.route != VEO_EXTENDED_VIDEO_ROUTE:
+        return
+
+    required_segments = _required_veo_segments_for_profile_hops(
+        planned_extension_hops if planned_extension_hops is not None else profile.veo_extension_hops
+    )
+    budgets = _build_veo_segment_spoken_budgets(segments=segments, profile=profile)
+    if len(segments) < required_segments:
+        raise ValidationError(
+            "Veo extended chain does not have enough distinct spoken segments.",
+            details={
+                "target_length_tier": target_length_tier,
+                "veo_required_segments": required_segments,
+                "veo_segments_total": len(segments),
+                "veo_planned_extension_hops_target": planned_extension_hops,
+                "veo_segment_spoken_budgets": budgets,
+            },
+        )
+
+    failures = [item for item in budgets[:required_segments] if item["word_count"] < item["minimum_words"]]
+    if not failures:
+        return
+    worst = max(failures, key=lambda item: item["minimum_words"] - item["word_count"])
+    segment_index = int(worst["segment_index"])
+    raise ValidationError(
+        "Veo extended segment is too short for its assigned duration window.",
+        details={
+            "target_length_tier": target_length_tier,
+            "segment_index": segment_index,
+            "budget_seconds": worst["budget_seconds"],
+            "word_count": worst["word_count"],
+            "minimum_words": worst["minimum_words"],
+            "segment_preview": str(segments[segment_index])[:180],
+            "veo_required_segments": required_segments,
+            "veo_planned_extension_hops_target": planned_extension_hops,
+            "veo_segment_spoken_budgets": budgets,
+        },
+    )
+
+
+def _extended_action_without_embedded_dialogue(action: Optional[str], script: str) -> Optional[str]:
+    cleaned = str(action or "").strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if "she says" in lowered or "dialogue:" in lowered:
+        return None
+    script_words = [word for word in str(script or "").split() if word]
+    if len(script_words) >= 8:
+        snippet = " ".join(script_words[:8]).lower()
+        if snippet and snippet in lowered:
+            return None
+    return cleaned
 
 
 def _split_dialogue_units_for_time_balance(segments: list[str], *, target_base_words: float) -> list[str]:
@@ -693,6 +790,62 @@ def _split_dialogue_units_for_time_balance(segments: list[str], *, target_base_w
     return units
 
 
+def _split_dialogue_text_by_word_budget(
+    text: str,
+    *,
+    target_words: list[float],
+    required_segments: int,
+) -> list[str]:
+    words = [word for word in str(text).split() if word]
+    if required_segments <= 0 or len(words) < required_segments:
+        return [text.strip()] if str(text).strip() else []
+
+    chunks: list[str] = []
+    cursor = 0
+    total_words = len(words)
+    for index in range(required_segments):
+        remaining_segments = required_segments - index
+        remaining_words = total_words - cursor
+        if remaining_segments <= 1:
+            end = total_words
+        else:
+            remaining_target_words = sum(target_words[index:required_segments])
+            if remaining_target_words > 0:
+                desired_take = round(remaining_words * (target_words[index] / remaining_target_words))
+            else:
+                desired_take = round(remaining_words / remaining_segments)
+            max_take = remaining_words - (remaining_segments - 1)
+            take = min(max(int(desired_take), 1), max_take)
+            end = cursor + take
+        chunks.append(" ".join(words[cursor:end]).strip())
+        cursor = end
+    return [chunk for chunk in chunks if chunk]
+
+
+def _expand_dialogue_units_for_required_segments(
+    units: list[str],
+    *,
+    target_words: list[float],
+    required_segments: int,
+) -> list[str]:
+    if len(units) >= required_segments:
+        return units
+
+    target_base_words = target_words[0] if target_words else 0
+    clause_units = _split_dialogue_units_for_time_balance(
+        units,
+        target_base_words=target_base_words,
+    )
+    if len(clause_units) >= required_segments:
+        return clause_units
+
+    return _split_dialogue_text_by_word_budget(
+        " ".join(units),
+        target_words=target_words,
+        required_segments=required_segments,
+    )
+
+
 def _partition_dialogue_units_for_profile(
     units: list[str],
     *,
@@ -701,113 +854,49 @@ def _partition_dialogue_units_for_profile(
 ) -> list[str]:
     if required_segments <= 0 or not units:
         return units
+
+    target_budgets = [
+        _segment_time_budget_seconds(profile=profile, segment_index=index)
+        for index in range(required_segments)
+    ]
+    target_words = [budget * _WORDS_PER_SECOND for budget in target_budgets]
+    units = _expand_dialogue_units_for_required_segments(
+        units,
+        target_words=target_words,
+        required_segments=required_segments,
+    )
     if len(units) < required_segments:
         return units
 
-    target_budgets = [
-        _segment_time_budget_seconds(profile=profile, segment_index=index)
-        for index in range(required_segments)
-    ]
-    target_words = [budget * _WORDS_PER_SECOND for budget in target_budgets]
-    packed_segments: list[str] = []
-    cursor = 0
-
-    for segment_index in range(required_segments):
-        if segment_index == required_segments - 1:
-            packed_segments.append(" ".join(units[cursor:]).strip())
-            break
-
-        remaining_segments = required_segments - segment_index
-        remaining_units = len(units) - cursor
-        target = target_words[segment_index]
-        min_units_needed_after_current = remaining_segments - 1
-        current_units: list[str] = []
-        current_words = 0.0
-
-        while cursor < len(units):
-            next_unit = units[cursor]
-            next_words = _estimate_spoken_seconds(next_unit) * _WORDS_PER_SECOND
-            units_left_after_next = len(units) - (cursor + 1)
-            if current_units and units_left_after_next < min_units_needed_after_current:
-                break
-
-            current_units.append(next_unit)
-            current_words += next_words
-            cursor += 1
-
-            if current_words >= target and units_left_after_next >= min_units_needed_after_current:
-                break
-
-        if not current_units and cursor < len(units):
-            current_units.append(units[cursor])
-            cursor += 1
-
-        packed_segments.append(" ".join(current_units).strip())
-
-    return [segment for segment in packed_segments if segment]
-
-
-def _partition_words_for_profile(
-    words: list[str],
-    *,
-    profile: Any,
-    required_segments: int,
-) -> list[str]:
-    if required_segments <= 0 or not words:
-        return [" ".join(words).strip()] if words else []
-    if len(words) < required_segments:
-        return [" ".join(words).strip()]
-
-    target_budgets = [
-        _segment_time_budget_seconds(profile=profile, segment_index=index)
-        for index in range(required_segments)
-    ]
-    target_words = [budget * _WORDS_PER_SECOND for budget in target_budgets]
-    minimum_words = [max(6, int(round(target * 0.6))) for target in target_words]
-    minimum_total = sum(minimum_words)
-    if minimum_total > len(words):
-        scale = len(words) / float(minimum_total)
-        minimum_words = [max(1, int(round(value * scale))) for value in minimum_words]
-        while sum(minimum_words) > len(words):
-            for index in range(len(minimum_words) - 1, -1, -1):
-                if sum(minimum_words) <= len(words):
-                    break
-                if minimum_words[index] > 1:
-                    minimum_words[index] -= 1
-
+    unit_word_counts = [len(unit.split()) for unit in units]
     prefix_counts = [0]
-    for word in words:
-        prefix_counts.append(prefix_counts[-1] + 1)
-
-    min_suffix = [0] * (required_segments + 1)
-    for index in range(required_segments - 1, -1, -1):
-        min_suffix[index] = min_suffix[index + 1] + minimum_words[index]
+    for count in unit_word_counts:
+        prefix_counts.append(prefix_counts[-1] + count)
 
     from functools import lru_cache
 
     @lru_cache(maxsize=None)
     def _best_cuts(segment_index: int, start_index: int) -> tuple[float, tuple[int, ...]]:
         if segment_index == required_segments - 1:
-            remaining = len(words) - start_index
-            if remaining < minimum_words[segment_index]:
+            remaining = len(units) - start_index
+            if remaining < 1:
                 return float("inf"), ()
-            target = target_words[segment_index]
-            cost = (remaining - target) ** 2
-            return cost, (len(words),)
+            words_in_segment = prefix_counts[len(units)] - prefix_counts[start_index]
+            cost = (words_in_segment - target_words[segment_index]) ** 2
+            return cost, (len(units),)
 
         best_cost = float("inf")
         best_path: tuple[int, ...] = ()
-        min_end = start_index + minimum_words[segment_index]
-        max_end = len(words) - min_suffix[segment_index + 1]
-        if max_end < min_end:
-            max_end = min_end
+        remaining_segments_after_current = required_segments - segment_index - 1
+        min_end = start_index + 1
+        max_end = len(units) - remaining_segments_after_current
 
         for end_index in range(min_end, max_end + 1):
-            current_len = prefix_counts[end_index] - prefix_counts[start_index]
+            words_in_segment = prefix_counts[end_index] - prefix_counts[start_index]
             next_cost, next_path = _best_cuts(segment_index + 1, end_index)
             if next_cost == float("inf"):
                 continue
-            current_cost = (current_len - target_words[segment_index]) ** 2 + next_cost
+            current_cost = (words_in_segment - target_words[segment_index]) ** 2 + next_cost
             if current_cost < best_cost:
                 best_cost = current_cost
                 best_path = (end_index,) + next_path
@@ -816,14 +905,14 @@ def _partition_words_for_profile(
 
     _cost, cut_points = _best_cuts(0, 0)
     if not cut_points:
-        return [" ".join(words).strip()]
+        return units
 
-    segments: list[str] = []
+    packed_segments: list[str] = []
     cursor = 0
     for end_index in cut_points:
-        segments.append(" ".join(words[cursor:end_index]).strip())
+        packed_segments.append(" ".join(units[cursor:end_index]).strip())
         cursor = end_index
-    return [segment for segment in segments if segment]
+    return [segment for segment in packed_segments if segment]
 
 
 def _segment_time_budget_seconds(*, profile: Any, segment_index: int) -> int:
@@ -854,30 +943,38 @@ def _build_time_windows_for_profile(
     return windows
 
 
-def _resolve_veo_extension_hops_target(*, segment_count: int, planned_hops: int) -> int:
-    if segment_count <= 0:
-        return 0
-    return max(int(planned_hops or 0), 0)
-
-
-def _validate_veo_extension_segment_budget(
+def _resolve_veo_extension_hops_target(
     *,
-    segment_count: int,
-    planned_extension_hops: int,
-    target_length_tier: Optional[int],
-) -> None:
-    required_segments = _required_veo_segments_for_profile_hops(planned_extension_hops)
-    if segment_count >= required_segments:
-        return
-    raise ValidationError(
-        "Veo extended chains need one complete dialogue segment per hop plus a base segment.",
-        {
-            "target_length_tier": target_length_tier,
-            "planned_extension_hops": planned_extension_hops,
-            "segments_available": segment_count,
-            "segments_required": required_segments,
-        },
-    )
+    segments: list[str],
+    planned_hops: int,
+    profile: Any,
+    estimated_duration_s: Optional[float] = None,
+) -> int:
+    planned_hops = max(int(planned_hops or 0), 0)
+    if not segments:
+        return 0
+    if profile.route != VEO_EXTENDED_VIDEO_ROUTE:
+        return planned_hops
+
+    for candidate_hops in range(planned_hops, -1, -1):
+        if estimated_duration_s is not None:
+            candidate_seconds = (
+                _segment_time_budget_seconds(profile=profile, segment_index=0)
+                + candidate_hops * _segment_time_budget_seconds(profile=profile, segment_index=1)
+            )
+            if candidate_seconds > estimated_duration_s + 0.5:
+                continue
+
+        packed_segments = _pack_veo_segments_for_profile(
+            segments,
+            planned_extension_hops=candidate_hops,
+            target_length_tier=profile.target_length_tier,
+        )
+        required_segments = _required_veo_segments_for_profile_hops(candidate_hops)
+        if len(packed_segments) >= required_segments:
+            return candidate_hops
+
+    return 0
 
 
 def _pack_veo_segments_for_profile(
@@ -894,29 +991,8 @@ def _pack_veo_segments_for_profile(
     if profile.route != VEO_EXTENDED_VIDEO_ROUTE:
         return segments
 
-    words: list[str] = []
-    for segment in segments:
-        words.extend(word for word in segment.split() if word)
-
-    # Permit partition when EITHER:
-    #   - we have at least one sentence per chain hop (the original gate;
-    #     keeps topic-flow tests passing), OR
-    #   - the total word count is large enough to fill the chain meaningfully
-    #     (~5 words / segment ~= 2s of speech). This second branch unblocks
-    #     long manual scripts that arrive as one big paragraph with few
-    #     sentence terminators.
-    # Otherwise leave the original segmentation alone so the budget validator
-    # downstream can surface the misconfiguration with a clear error
-    # (e.g., a 6-word script targeted at the 32s chain).
-    minimum_total_words_for_word_partition = required_segments * 5
-    if (
-        len(segments) < required_segments
-        and len(words) < minimum_total_words_for_word_partition
-    ):
-        return segments
-
-    return _partition_words_for_profile(
-        words,
+    return _partition_dialogue_units_for_profile(
+        segments,
         profile=profile,
         required_segments=required_segments,
     )
@@ -955,34 +1031,48 @@ def _build_veo_extended_base_prompt(
         or seed_data.get("dialog_script")
         or ""
     ).strip()
-    segments = split_dialogue_sentences(script) if script else []
-    if not segments and script:
-        segments = [script]
-    segments = _pack_veo_segments_for_profile(
-        segments,
-        planned_extension_hops=planned_extension_hops,
-        target_length_tier=target_length_tier,
-    )
+    raw_segments = split_dialogue_sentences(script) if script else []
+    if not raw_segments and script:
+        raw_segments = [script]
+
+    segments = raw_segments
+    profile = get_duration_profile(target_length_tier) if target_length_tier is not None else None
+    estimated_duration_s: Optional[float] = None
+    try:
+        if seed_data.get("estimated_duration_s") is not None:
+            estimated_duration_s = float(seed_data["estimated_duration_s"])
+    except (TypeError, ValueError):
+        estimated_duration_s = None
 
     effective_hops: Optional[int] = None
     if planned_extension_hops is not None:
-        _validate_veo_extension_segment_budget(
-            segment_count=len(segments),
-            planned_extension_hops=planned_extension_hops,
+        effective_hops = max(int(planned_extension_hops or 0), 0)
+        segments = _pack_veo_segments_for_profile(
+            raw_segments,
+            planned_extension_hops=effective_hops,
             target_length_tier=target_length_tier,
         )
-        effective_hops = _resolve_veo_extension_hops_target(
-            segment_count=len(segments),
-            planned_hops=planned_extension_hops,
-        )
 
-    profile = get_duration_profile(target_length_tier) if target_length_tier is not None else None
     base_segment = segments[0] if segments else ""
     if profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE:
-        prompt_character = prompt_character or (LEGACY_SHORT_CHARACTER if target_length_tier == 32 else DEFAULT_CHARACTER)
-        prompt_style = prompt_style or (LEGACY_32_STYLE if target_length_tier == 32 else DEFAULT_STYLE)
-        prompt_cinematography = prompt_cinematography or (
-            LEGACY_32_CINEMATOGRAPHY if target_length_tier == 32 else DEFAULT_CINEMATOGRAPHY
+        if target_length_tier == 32:
+            prompt_character = LEGACY_SHORT_CHARACTER
+            prompt_style = LEGACY_32_STYLE
+            prompt_cinematography = LEGACY_32_CINEMATOGRAPHY
+            prompt_scene = None
+            prompt_action = None
+        else:
+            prompt_character = prompt_character or DEFAULT_CHARACTER
+            prompt_style = prompt_style or DEFAULT_STYLE
+            prompt_cinematography = prompt_cinematography or DEFAULT_CINEMATOGRAPHY
+            prompt_action = _extended_action_without_embedded_dialogue(prompt_action, script)
+        prompt_ending = None
+        prompt_audio_block = None
+        _validate_veo_segment_spoken_budget(
+            segments=segments,
+            profile=profile,
+            target_length_tier=target_length_tier,
+            planned_extension_hops=effective_hops,
         )
     segment_metadata = {
         "veo_segments": segments,
@@ -993,14 +1083,23 @@ def _build_veo_extended_base_prompt(
             if profile is not None
             else []
         ),
+        "veo_segment_spoken_budgets": (
+            _build_veo_segment_spoken_budgets(segments=segments, profile=profile)
+            if profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
+            else []
+        ),
     }
     if planned_extension_hops is not None:
+        planned_required_segments = _required_veo_segments_for_profile_hops(planned_extension_hops)
+        effective_required_segments = _required_veo_segments_for_profile_hops(effective_hops or 0)
         segment_metadata.update(
             {
-                "veo_required_segments": _required_veo_segments_for_profile_hops(planned_extension_hops),
+                "veo_required_segments": planned_required_segments,
+                "veo_planned_required_segments": planned_required_segments,
+                "veo_effective_required_segments": effective_required_segments,
                 "veo_planned_extension_hops_target": planned_extension_hops,
                 "veo_extension_hops_target": effective_hops,
-                "veo_chain_shortened_to_available_segments": False,
+                "veo_chain_shortened_to_available_segments": effective_hops < planned_extension_hops,
             }
         )
     return build_veo_prompt_segment(
@@ -1114,7 +1213,19 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
 
         requested_units = 0
         anchor_image_bundle = None
-        veo_seed = None
+        veo_seed = (
+            random.randint(0, 2**32 - 1)
+            if _should_assign_veo_seed(provider=submission_plan["provider"], profile=profile)
+            else None
+        )
+        if is_extended:
+            logger.info(
+                "veo_extended_preflight_passed",
+                post_id=post_id,
+                batch_id=post.get("batch_id"),
+                target_length_tier=profile.target_length_tier if profile else None,
+                segments=segment_metadata.get("veo_segment_spoken_budgets") if segment_metadata else None,
+            )
         submission_result = _submit_video_request(
             provider=submission_plan["provider"],
             model=request.model,
@@ -1508,6 +1619,14 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     "quota_requested_units": chain_cost_units(profile, provider=submission_plan["provider"]),
                 }
             )
+            if is_extended:
+                logger.info(
+                    "veo_extended_preflight_passed",
+                    post_id=post_id,
+                    batch_id=batch_id,
+                    target_length_tier=profile.target_length_tier if profile else None,
+                    segments=segment_metadata.get("veo_segment_spoken_budgets") if segment_metadata else None,
+                )
 
         veo_submissions = [item for item in prepared_submissions if item["submission_plan"]["provider"] == VEO_PROVIDER]
         reserved_keys = []
@@ -2108,6 +2227,8 @@ def _submit_video_request(
                 output_gcs_uri=output_gcs_uri,
                 model=model,
                 reference_images=reference_images,
+                negative_prompt=negative_prompt,
+                seed=seed,
             )
         except ValidationError as exc:
             raise FlowForgeException(

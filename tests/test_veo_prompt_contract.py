@@ -27,6 +27,24 @@ def test_veo_prompt_requires_exact_german_dialogue():
     assert prompt["ending_directive"].startswith("After the final spoken word")
 
 
+def test_veo_prompt_does_not_repeat_dialogue_in_action_and_dialogue():
+    script = "Das ist ein eindeutiger Testsatz für die Sprachspur."
+    prompt = build_video_prompt_from_seed({"script": script})
+    veo_prompt = prompt["veo_prompt"]
+
+    assert veo_prompt.count(script) == 1
+    assert "She says:" not in veo_prompt
+    assert "Dialogue:" in veo_prompt
+
+
+def test_full_prompt_text_keeps_dialogue_once_when_provider_prompt_exists():
+    script = "Dieser Satz darf im Fallback nicht doppelt auftauchen."
+    prompt = build_video_prompt_from_seed({"script": script})
+    full_text = video_handlers._build_provider_prompt_text(prompt, "sora")[0]
+
+    assert full_text.count(script) == 1
+
+
 def test_build_optimized_prompt_supports_custom_sections():
     result = build_optimized_prompt(
         "Test dialogue.",

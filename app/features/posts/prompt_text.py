@@ -50,7 +50,7 @@ def _compose_prompt_sections(video_prompt: Dict[str, Any]) -> List[str]:
             dialogue = getattr(audio_payload, "dialogue", None)
             capture = getattr(audio_payload, "capture", None)
 
-        if dialogue:
+        if dialogue and not any(str(dialogue).strip() in section for section in sections):
             sections.append(str(dialogue).strip())
         if capture and capture != dialogue and capture != video_prompt.get("audio_block"):
             sections.append(str(capture).strip())

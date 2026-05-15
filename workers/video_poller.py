@@ -1761,6 +1761,7 @@ def _submit_extension_hop(
     provider = post.get("video_provider", "veo_3_1")
     settings = get_settings()
     reservation_key = _quota_reservation_key(metadata)
+    requested_model = metadata.get("requested_model") or metadata.get("provider_model")
 
     video_uri = (previous_video_data or {}).get("video_uri")
     video_mime_type = (previous_video_data or {}).get("mime_type") or "video/mp4"
@@ -1805,6 +1806,9 @@ def _submit_extension_hop(
                 aspect_ratio=metadata.get("provider_aspect_ratio", metadata.get("requested_aspect_ratio", "9:16")),
                 duration_seconds=7,
                 output_gcs_uri=output_gcs_uri,
+                model=requested_model,
+                negative_prompt=negative_prompt,
+                seed=metadata.get("veo_seed"),
             )
         else:
             veo_client = get_veo_client()
@@ -1852,6 +1856,7 @@ def _submit_extension_hop(
         resolution=metadata.get("requested_resolution", "720p"),
         requested_seconds=7,
         correlation_id=f"{correlation_id}_ext_{hops_completed + 1}",
+        seed=metadata.get("veo_seed"),
     )
 
     extension_seconds = metadata.get("veo_extension_seconds", 7)
@@ -1872,6 +1877,11 @@ def _submit_extension_hop(
         "last_polled_by": poller_identity,
         "last_polled_at": _utc_now_iso(lease_refreshed_at),
     })
+    if requested_model:
+        metadata["requested_model"] = requested_model
+    provider_model = result.get("provider_model")
+    if provider_model or requested_model:
+        metadata["provider_model"] = provider_model or requested_model
     if quota_consume_error:
         metadata["quota_consume_error"] = quota_consume_error
     metadata.pop("veo_extension_retry_after", None)

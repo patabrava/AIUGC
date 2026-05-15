@@ -15,8 +15,20 @@ from app.features.videos.handlers import (
 )
 
 
-def _word_script(count):
-    return " ".join(f"wort{i}" for i in range(count)) + "."
+def _valid_16s_script() -> str:
+    return (
+        "Erster langer Satz erklärt ruhig den Einstieg und setzt den Kontext für die Zuschauerin heute klar. "
+        "Zweiter langer Satz führt die Beobachtung weiter und bleibt im gesprochenen Rhythmus."
+    )
+
+
+def _valid_32s_script() -> str:
+    return (
+        "Erster langer Satz erklärt ruhig den Einstieg und setzt den Kontext für die Zuschauerin heute klar. "
+        "Zweiter langer Satz führt die Beobachtung weiter und bleibt natürlich im gesprochenen Rhythmus stabil. "
+        "Dritter langer Satz nennt den konkreten Nutzen und verbindet ihn mit einer Alltagssituation direkt. "
+        "Vierter langer Satz schließt den Gedanken sauber ab und bleibt ohne neue Pointe."
+    )
 
 
 class _FakeQuery:
@@ -222,7 +234,7 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
             "id": "post-1",
             "batch_id": "batch-1",
             "video_prompt_json": {"optimized_prompt": "Prompt 1"},
-            "seed_data": {"script": _word_script(26)},
+            "seed_data": {"script": _valid_16s_script()},
             "video_status": "pending",
             "video_metadata": {},
         },
@@ -230,7 +242,7 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
             "id": "post-2",
             "batch_id": "batch-1",
             "video_prompt_json": {"optimized_prompt": "Prompt 2"},
-            "seed_data": {"script": _word_script(26)},
+            "seed_data": {"script": _valid_16s_script()},
             "video_status": "pending",
             "video_metadata": {},
         },
@@ -456,7 +468,7 @@ def test_generate_all_videos_routes_32s_vertex_submission_through_duration_profi
             "id": "post-32",
             "batch_id": "batch-32",
             "video_prompt_json": {"veo_prompt": "Prompt 32"},
-            "seed_data": {"script": _word_script(54)},
+            "seed_data": {"script": _valid_32s_script()},
             "video_status": "pending",
             "video_metadata": {},
         },

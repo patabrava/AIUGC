@@ -17,6 +17,28 @@ from app.features.videos import handlers as video_handlers
 from app.features.videos.schemas import BatchVideoGenerationRequest, VideoGenerationRequest
 
 
+def _valid_32s_script() -> str:
+    return (
+        "Erster langer Satz erklärt ruhig den Einstieg und setzt den Kontext für die Zuschauerin heute klar. "
+        "Zweiter langer Satz führt die Beobachtung weiter und bleibt natürlich im gesprochenen Rhythmus stabil. "
+        "Dritter langer Satz nennt den konkreten Nutzen und verbindet ihn mit einer Alltagssituation direkt. "
+        "Vierter langer Satz schließt den Gedanken sauber ab und bleibt ohne neue Pointe."
+    )
+
+
+def _valid_16s_script() -> str:
+    return (
+        "Erster langer Satz erklärt ruhig den Einstieg und setzt den Kontext für die Zuschauerin heute klar. "
+        "Zweiter langer Satz führt die Beobachtung weiter und bleibt im gesprochenen Rhythmus."
+    )
+
+
+def _assert_segment_budgets_pass(seg_meta: dict) -> None:
+    budgets = seg_meta["veo_segment_spoken_budgets"]
+    assert budgets
+    assert all(item["word_count"] >= item["minimum_words"] for item in budgets)
+
+
 def test_resolve_video_submission_plan_preserves_legacy_batch_inputs():
     batch = {"id": "legacy-batch", "target_length_tier": None, "video_pipeline_route": None}
 
@@ -275,20 +297,55 @@ def test_build_veo_extended_base_prompt_returns_first_segment():
     assert seg_meta["veo_segment_time_windows"] == []
 
 
-def test_build_veo_extended_base_prompt_rejects_under_segmented_32s_chain():
-    seed_data = {"script": "Satz eins. Satz zwei. Satz drei.", "estimated_duration_s": 22}
+def test_build_veo_extended_base_prompt_rejects_underfilled_32s_chain():
+    seed_data = {
+        "script": (
+            "Alle reden über Sport und Muskeln, wenn es um Energie im Rollstuhl geht. "
+            "Aber niemand spricht darüber, wie wichtig die richtige Sitzposition wirklich ist. "
+            "Ich dachte früher, das sei nur Komfort. "
+            "Dabei entlastet eine optimale Haltung unglaublich und spart dir Kraft."
+        ),
+        "estimated_duration_s": 16,
+    }
 
-    with pytest.raises(ValidationError, match="one complete dialogue segment per hop"):
+    with pytest.raises(ValidationError) as exc_info:
         video_handlers._build_veo_extended_base_prompt(
             seed_data,
             planned_extension_hops=3,
             target_length_tier=32,
         )
 
+    details = exc_info.value.details
+    assert details["target_length_tier"] == 32
+    assert details["budget_seconds"] == 7
+    assert details["word_count"] == 7
+    assert details["minimum_words"] >= 12
+    assert details["segment_index"] == 2
+
+
+def test_build_veo_extended_base_prompt_splits_long_unpunctuated_script_for_chain():
+    script = " ".join([f"wort{i}" for i in range(1, 71)])
+    seed_data = {
+        "script": script,
+        "estimated_duration_s": 28,
+    }
+
+    _prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        planned_extension_hops=3,
+        target_length_tier=32,
+    )
+
+    assert seg_meta["veo_extension_hops_target"] == 3
+    assert seg_meta["veo_effective_required_segments"] == 4
+    assert seg_meta["veo_segments_total"] == 4
+    assert " ".join(seg_meta["veo_segments"]).split() == script.split()
+    assert all(segment.strip() for segment in seg_meta["veo_segments"])
+
 
 def test_build_veo_extended_base_prompt_packs_to_four_segments_for_legacy_32s():
     seed_data = {
-        "script": "Satz eins. Satz zwei. Satz drei. Satz vier. Satz fuenf.",
+        "script": _valid_32s_script(),
         "estimated_duration_s": 30,
     }
 
@@ -299,20 +356,22 @@ def test_build_veo_extended_base_prompt_packs_to_four_segments_for_legacy_32s():
     )
 
     assert seg_meta["veo_required_segments"] == 4
+    assert seg_meta["veo_planned_required_segments"] == 4
+    assert seg_meta["veo_effective_required_segments"] == 4
     assert seg_meta["veo_planned_extension_hops_target"] == 3
     assert seg_meta["veo_extension_hops_target"] == 3
     assert seg_meta["veo_chain_shortened_to_available_segments"] is False
+    _assert_segment_budgets_pass(seg_meta)
 
 
 def test_build_veo_extended_base_prompt_packs_five_sentences_into_four_segments_for_efficient_32s():
     seed_data = {
         "script": (
-            "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie. "
-            "Physio fokussiert auf koerperliche Funktionen und Beweglichkeit, "
-            "waehrend Ergo handlungsorientiert deine Selbststaendigkeit im Alltag staerkt. "
-            "Durch Alltagstraining lernst du, Routinetaetigkeiten wieder selbst zu bewaeltigen. "
-            "Die Kosten uebernehmen primaer die Krankenkassen, du leistest allerdings die gesetzliche Zuzahlung. "
-            "Seit 2024 bietet die Blankoverordnung Therapeuten mehr Flexibilitaet fuer deine Behandlung."
+            "Sorry, Physiotherapie und Ergotherapie verfolgen im Alltag unterschiedliche Ziele. "
+            "Die erste hilft vor allem Bewegung, Kraft und körperliche Funktionen gezielt zu verbessern. "
+            "Ergotherapie trainiert dagegen konkrete Handlungen, damit Routinen im Bad, Haushalt und Beruf wieder leichter werden. "
+            "Die Krankenkasse übernimmt vieles, doch Zuzahlungen und Verordnungsdetails solltest du vorher genau prüfen lassen. "
+            "Seit 2024 gibt die Blankoverordnung Therapiepraxen mehr Spielraum, damit deine Behandlung besser passt."
         ),
         "estimated_duration_s": 29,
     }
@@ -323,23 +382,40 @@ def test_build_veo_extended_base_prompt_packs_five_sentences_into_four_segments_
         target_length_tier=32,
     )
 
-    assert "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie. Physio fokussiert auf koerperliche Funktionen und Beweglichkeit" in prompt
+    assert "Sorry, Physiotherapie und Ergotherapie verfolgen im Alltag unterschiedliche Ziele." in prompt
     assert len(seg_meta["veo_segments"]) == 4
     assert seg_meta["veo_segments_total"] == 4
-    assert seg_meta["veo_segments"] == [
-        "Sorry, aber Physiotherapie ist nicht gleich Ergotherapie. Physio fokussiert auf koerperliche Funktionen und Beweglichkeit, waehrend",
-        "Ergo handlungsorientiert deine Selbststaendigkeit im Alltag staerkt. Durch Alltagstraining lernst du, Routinetaetigkeiten wieder",
-        "selbst zu bewaeltigen. Die Kosten uebernehmen primaer die Krankenkassen, du leistest allerdings die",
-        "gesetzliche Zuzahlung. Seit 2024 bietet die Blankoverordnung Therapeuten mehr Flexibilitaet fuer deine Behandlung.",
-    ]
+    assert seg_meta["veo_extension_hops_target"] == 3
+    assert seg_meta["veo_effective_required_segments"] == 4
+    assert seg_meta["veo_chain_shortened_to_available_segments"] is False
+    _assert_segment_budgets_pass(seg_meta)
+
+
+def test_build_veo_extended_base_prompt_keeps_live_32s_segments_on_sentence_boundaries():
+    seed_data = {
+        "script": (
+            "Deutschland 2026. Und du suchst eine wirklich altersgerechte Wohnung. "
+            "Langfristige Planung ist dabei entscheidend, besonders für Mehrgenerationen und Pflegearrangements. "
+            "Der Zuschuss 455 B hilft zwar mit bis zu 2.500 Euro, deckt aber oft nur einen Bruchteil der Kosten ab. "
+            "Rechtliche Aspekte wie Eigentumsverhältnisse, Regelungen für den Todesfall und die Kostenaufteilung sollten vertraglich klar geregelt werden."
+        ),
+        "estimated_duration_s": 22,
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        video_handlers._build_veo_extended_base_prompt(
+            seed_data,
+            planned_extension_hops=3,
+            target_length_tier=32,
+        )
+
+    assert exc_info.value.details["veo_planned_extension_hops_target"] == 3
+    assert exc_info.value.details["veo_required_segments"] == 4
 
 
 def test_build_veo_extended_base_prompt_packs_to_two_segments_for_efficient_16s():
     seed_data = {
-        "script": (
-            "Erster kurzer Satz. Zweiter kurzer Satz. "
-            "Dritter Satz mit etwas mehr Inhalt."
-        ),
+        "script": _valid_16s_script(),
         "estimated_duration_s": 15,
     }
 
@@ -349,32 +425,30 @@ def test_build_veo_extended_base_prompt_packs_to_two_segments_for_efficient_16s(
         target_length_tier=16,
     )
 
-    assert "Erster kurzer Satz. Zweiter kurzer Satz." in prompt
+    assert "Erster langer Satz" in prompt
     assert len(seg_meta["veo_segments"]) == 2
     assert seg_meta["veo_segments_total"] == 2
-    assert seg_meta["veo_segments"] == [
-        "Erster kurzer Satz. Zweiter kurzer Satz. Dritter",
-        "Satz mit etwas mehr Inhalt.",
-    ]
+    _assert_segment_budgets_pass(seg_meta)
 
 
 def test_build_veo_extended_base_prompt_preserves_edited_visual_contract():
     seed_data = {
-        "script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
+        "script": _valid_16s_script(),
         "estimated_duration_s": 29,
     }
+    action_with_full_script = f"She says: {seed_data['script']}"
 
     prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
         seed_data,
         video_prompt={
             "character": "Edited character with novelty accessory",
             "style": "Style: Edited style",
-            "action": "She says: Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
+            "action": action_with_full_script,
             "scene": "Scene: Edited scene",
             "cinematography": "Cinematography: Edited cinematography",
             "audio_block": "After the final word, the audio gently settles into a quiet room tone.",
             "audio": {
-                "dialogue": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
+                "dialogue": seed_data["script"],
                 "capture": "After the final word, the audio gently settles into a quiet room tone.",
             },
         },
@@ -382,7 +456,7 @@ def test_build_veo_extended_base_prompt_preserves_edited_visual_contract():
         target_length_tier=16,
     )
 
-    assert "Erster Satz." in prompt
+    assert "Erster langer Satz" in prompt
     assert "Edited character with novelty accessory" in prompt
     assert "Edited style" in prompt
     assert "Edited scene" in prompt
@@ -390,15 +464,42 @@ def test_build_veo_extended_base_prompt_preserves_edited_visual_contract():
     assert "Style:\nStyle: Edited style" in prompt
     assert "Scene:\nScene: Edited scene" in prompt
     assert "Cinematography:\nCinematography: Edited cinematography" in prompt
-    assert "She says: Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz." in prompt
-    assert "After the final word, the audio gently settles into a quiet room tone." in prompt
+    assert action_with_full_script not in prompt
+    assert "After the final word, the audio gently settles into a quiet room tone." not in prompt
+    assert "Continue directly into the next segment" in prompt
     assert "subtitles, captions, watermark" not in prompt
-    assert seg_meta["veo_segments"] == ["Erster Satz. Zweiter Satz.", "Dritter Satz. Vierter Satz."]
+    assert len(seg_meta["veo_segments"]) == 2
+    _assert_segment_budgets_pass(seg_meta)
 
 
-def test_build_veo_extended_base_prompt_keeps_edited_visual_fields():
+def test_extended_base_prompt_does_not_inherit_final_stop_ending():
     seed_data = {
-        "script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz. Fuenfter Satz. Sechster Satz.",
+        "script": (
+            "Erster ausreichend langer Satz für den Start dieses Videos mit ruhigem Kontext und klarer Einordnung heute. "
+            "Zweiter ausreichend langer Satz für die erste Erweiterung mit klarer Beobachtung und natürlichem Sprechfluss. "
+            "Dritter ausreichend langer Satz für die zweite Erweiterung mit konkretem Nutzen und sauberer Verbindung. "
+            "Vierter ausreichend langer Satz für die finale Erweiterung mit sauberem Abschluss und ruhiger Landung."
+        )
+    }
+    saved_prompt = {
+        "audio": {"dialogue": seed_data["script"]},
+        "ending_directive": "After the final spoken word, speech stops completely.",
+    }
+
+    prompt, _metadata = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        saved_prompt,
+        planned_extension_hops=3,
+        target_length_tier=32,
+    )
+
+    assert "After the final spoken word, speech stops completely." not in prompt
+    assert "Continue directly into the next segment" in prompt
+
+
+def test_build_veo_extended_base_prompt_32s_uses_stable_legacy_visual_contract():
+    seed_data = {
+        "script": _valid_32s_script(),
         "estimated_duration_s": 29,
     }
 
@@ -412,7 +513,7 @@ def test_build_veo_extended_base_prompt_keeps_edited_visual_fields():
             "cinematography": "Cinematography: Edited cinematography",
             "audio_block": "Audio: Edited audio block.",
             "audio": {
-                "dialogue": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz.",
+                "dialogue": seed_data["script"],
                 "capture": "Audio: Edited audio block.",
             },
             "ending_directive": "Edited ending",
@@ -421,24 +522,20 @@ def test_build_veo_extended_base_prompt_keeps_edited_visual_fields():
         target_length_tier=32,
     )
 
-    assert "black sunglasses" in prompt
-    assert "Edited style" in prompt
-    assert "Edited scene" in prompt
-    assert "Edited cinematography" in prompt
-    assert "Edited audio block" in prompt
-    assert "Edited ending" in prompt
+    assert "38-year-old German woman with shoulder-length light brown hair" in prompt
+    assert "crow's feet at the outer corners" not in prompt
+    assert "black sunglasses" not in prompt
+    assert "Edited style" not in prompt
+    assert "Edited scene" not in prompt
+    assert "Edited cinematography" not in prompt
+    assert "Edited audio block" not in prompt
+    assert "Edited ending" not in prompt
     assert "black sunglasses" not in " ".join(seed_data["script"].split())
 
 
 def test_build_veo_extended_base_prompt_uses_time_budgeted_packing_for_efficient_32s():
     seed_data = {
-        "script": (
-            "Als Rollstuhlnutzer kennst du das: Das gesuchte Produkt steht unerreichbar hoch im Supermarktregal. "
-            "Spezielle Hubrollstühle mit stufenloser Gasdruckfederung und ergonomische Greifzangen erleichtern den Zugriff enorm. "
-            "Für enge Gänge sind ankoppelbare Rollstuhl Einkaufswagen die beste Wahl. "
-            "Seit 2025 verbessert das Barrierefreiheitsstärkungsgesetz Terminals, aber Übergangsfristen bremsen die Inklusion noch. "
-            "Mit diesen Hacks meisterst du vertikale Barrieren beim Einkaufen."
-        ),
+        "script": _valid_32s_script(),
         "estimated_duration_s": 29,
     }
 
@@ -448,23 +545,19 @@ def test_build_veo_extended_base_prompt_uses_time_budgeted_packing_for_efficient
         target_length_tier=32,
     )
 
-    assert seg_meta["veo_segments"] == [
-        "Als Rollstuhlnutzer kennst du das: Das gesuchte Produkt steht unerreichbar hoch im Supermarktregal. Spezielle Hubrollstühle mit",
-        "stufenloser Gasdruckfederung und ergonomische Greifzangen erleichtern den Zugriff enorm. Für enge Gänge sind",
-        "ankoppelbare Rollstuhl Einkaufswagen die beste Wahl. Seit 2025 verbessert das Barrierefreiheitsstärkungsgesetz Terminals, aber",
-        "Übergangsfristen bremsen die Inklusion noch. Mit diesen Hacks meisterst du vertikale Barrieren beim Einkaufen.",
-    ]
+    assert len(seg_meta["veo_segments"]) == 4
     assert seg_meta["veo_segment_time_windows"] == [
         {"segment_index": 0, "start_seconds": 0.0, "end_seconds": 8.0, "budget_seconds": 8},
         {"segment_index": 1, "start_seconds": 8.0, "end_seconds": 15.0, "budget_seconds": 7},
         {"segment_index": 2, "start_seconds": 15.0, "end_seconds": 22.0, "budget_seconds": 7},
         {"segment_index": 3, "start_seconds": 22.0, "end_seconds": 29.0, "budget_seconds": 7},
     ]
+    _assert_segment_budgets_pass(seg_meta)
 
 
 def test_build_veo_extended_base_prompt_uses_efficient_32s_visual_contract():
     seed_data = {
-        "script": "Erster Satz. Zweiter Satz. Dritter Satz. Vierter Satz. Fuenfter Satz.",
+        "script": _valid_32s_script(),
     }
 
     prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
@@ -479,16 +572,32 @@ def test_build_veo_extended_base_prompt_uses_efficient_32s_visual_contract():
         target_length_tier=32,
     )
 
-    assert "Edited character with novelty accessory" in prompt
-    assert "Edited style" in prompt
-    assert "Edited scene" in prompt
-    assert "Edited cinematography" in prompt
-    assert seg_meta["veo_segments"] == [
-        "Erster Satz. Zweiter Satz.",
-        "Dritter Satz.",
-        "Vierter Satz.",
-        "Fuenfter Satz.",
-    ]
+    assert "38-year-old German woman with shoulder-length light brown hair" in prompt
+    assert "crow's feet at the outer corners" not in prompt
+    assert "Edited character with novelty accessory" not in prompt
+    assert "Edited style" not in prompt
+    assert "Edited scene" not in prompt
+    assert "Edited cinematography" not in prompt
+    assert len(seg_meta["veo_segments"]) == 4
+    _assert_segment_budgets_pass(seg_meta)
+
+
+def test_build_veo_extended_base_prompt_uses_legacy_32s_default_visual_contract():
+    seed_data = {
+        "script": _valid_32s_script(),
+    }
+
+    prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        planned_extension_hops=3,
+        target_length_tier=32,
+    )
+
+    assert "38-year-old German woman with shoulder-length light brown hair" in prompt
+    assert "Based on the uploaded person images" not in prompt
+    assert "sunglasses" not in prompt
+    assert seg_meta["veo_extension_hops_target"] == 3
+    _assert_segment_budgets_pass(seg_meta)
 
 
 def test_batch_video_generation_request_accepts_duration_tier_seconds():
@@ -619,6 +728,10 @@ def test_efficient_long_route_applies_to_16s_and_32s(monkeypatch):
     assert profile_32.provider_target_seconds == 29
     assert profile_32.veo_base_seconds == 8
     assert profile_32.veo_extension_hops == 3
+    assert profile_32.prompt1_min_words == 68
+    assert profile_32.prompt1_max_words == 88
+    assert profile_32.prompt2_min_words == 64
+    assert profile_32.prompt2_max_words == 84
     assert profile_32.prompt1_sentence_guidance == "VIER natuerliche Sprechbloecke"
     assert profile_32.prompt2_sentence_guidance == "4 Sprechbloecke"
     assert metadata_32["veo_base_seconds"] == 8
@@ -659,6 +772,7 @@ def test_veo_seed_is_only_used_for_actual_efficient_long_route(monkeypatch):
 
     assert video_handlers._should_assign_veo_seed(provider="veo_3_1", profile=profile_16) is True
     assert video_handlers._should_assign_veo_seed(provider="veo_3_1", profile=profile_32) is True
+    assert video_handlers._should_assign_veo_seed(provider="vertex_ai", profile=profile_32) is True
     assert video_handlers._should_assign_veo_seed(provider="sora", profile=profile_16) is False
 
 

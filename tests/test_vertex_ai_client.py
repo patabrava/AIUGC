@@ -201,6 +201,40 @@ def test_submit_video_extension_uses_gcs_uri_and_storage_uri():
     assert call_kwargs["json"]["parameters"]["storageUri"] == "gs://bucket/output/"
 
 
+def test_vertex_text_payload_includes_seed_and_negative_prompt():
+    client = VertexAIClient()
+    payload = client._build_request_payload(
+        prompt="Starte das Video.",
+        aspect_ratio="9:16",
+        duration_seconds=8,
+        output_gcs_uri="gs://bucket/output/",
+        negative_prompt="music bed, background voices",
+        seed=12345,
+    )
+
+    params = payload["parameters"]
+    assert params["negativePrompt"] == "music bed, background voices"
+    assert params["seed"] == 12345
+
+
+def test_vertex_extension_payload_includes_seed_and_negative_prompt():
+    client = VertexAIClient()
+    payload = client._build_extension_request_payload(
+        prompt="Weiterer Satz.",
+        video_uri="gs://bucket/input.mp4",
+        video_mime_type="video/mp4",
+        aspect_ratio="9:16",
+        duration_seconds=7,
+        output_gcs_uri="gs://bucket/output/",
+        negative_prompt="music bed, background voices",
+        seed=12345,
+    )
+
+    params = payload["parameters"]
+    assert params["negativePrompt"] == "music bed, background voices"
+    assert params["seed"] == 12345
+
+
 def test_check_operation_status_returns_video_uri():
     mock_response = MagicMock()
     mock_response.json.return_value = {

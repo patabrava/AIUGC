@@ -51,7 +51,7 @@ def test_build_prompt1_uses_32s_text_template():
     )
 
     assert "FUENF oder SECHS vollständige Sätze" in prompt
-    assert "54-74 Wörter" in prompt
+    assert "68-88 Wörter" in prompt
     assert "Lane-Titel:" in prompt
     assert "Nur der Scripttext" in prompt
     assert "Keine Zwischenüberschriften" in prompt
@@ -85,9 +85,9 @@ def test_build_prompt2_uses_32s_text_template():
     )
 
     assert "32-Sekunden-UGC-Videos" in prompt
-    assert "40-66 Wörter" in prompt
+    assert "64-84 Wörter" in prompt
     assert "5-6 Sätze" in prompt
-    assert "ZIELWORTZAHL: 40-66 Wörter" in prompt
+    assert "ZIELWORTZAHL: 64-84 Wörter" in prompt
     assert "core:" not in prompt
 
 

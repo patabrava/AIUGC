@@ -1,0 +1,235 @@
+{
+  "started_at": "2026-05-13T11:59:23.724620+00:00",
+  "completed_at": "2026-05-13T12:02:15.902119+00:00",
+  "duration_s": 172.18,
+  "seed_topic": "Codex Live Quellen Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice",
+  "summary": {
+    "seed_topic": "Codex Live Quellen Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice",
+    "post_type": "value",
+    "requested_target_length_tier": 8,
+    "research_source": "provider",
+    "tiers_processed": [
+      8,
+      16,
+      32
+    ],
+    "dossiers_completed": 1,
+    "lanes_seen": 3,
+    "lanes_persisted": 1,
+    "scripts_persisted_by_tier": {
+      "8": 1,
+      "16": 1,
+      "32": 1
+    },
+    "duplicate_scripts_skipped": 0,
+    "stored_rows": [
+      {
+        "id": "d37da982-952f-468d-b110-04329314d11a",
+        "title": "Gesamtlage rechtlicher - Codex Live Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice",
+        "use_count": 1,
+        "first_seen_at": "2026-05-13T12:02:09.424623+00:00",
+        "last_used_at": "2026-05-13T12:02:09.353952+00:00",
+        "post_type": "value",
+        "last_harvested_at": "2026-05-13T12:02:08.656281+00:00",
+        "script": "Dein Recht auf freie Arztwahl ist 2026 leider nur theoretisch, weil nur jede dritte Praxis barrierearm ist.",
+        "canonical_topic": "Codex Live Quellen Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice",
+        "family_fingerprint": "codex live quellen smoke value 20260513t115923z barrierefreie arzttermine und rollstuhlservice",
+        "status": "provisional",
+        "merged_into_id": null,
+        "merge_reason": "",
+        "rotation": "Dein Recht auf freie Arztwahl ist 2026 leider nur theoretisch, weil nur jede dritte Praxis barrierearm ist.",
+        "cta": "Dein Recht auf freie Arztwahl ist 2026 leider nur theoretisch, weil nur jede dritte Praxis barrierearm ist.",
+        "family_id": "d37da982-952f-468d-b110-04329314d11a",
+        "research_dossier_id": "df438866-b734-435e-aa17-03f823255ca4",
+        "topic_research_dossier_id": "df438866-b734-435e-aa17-03f823255ca4"
+      }
+    ],
+    "stored_topic_ids": [
+      "d37da982-952f-468d-b110-04329314d11a"
+    ],
+    "seed_topics_used": [
+      "Codex Live Quellen Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice"
+    ]
+  },
+  "script_count": 3,
+  "checks": [
+    {
+      "id": "8b650672-81b3-4da7-a8be-50acce1a4e29",
+      "topic_registry_id": "d37da982-952f-468d-b110-04329314d11a",
+      "title": "Gesamtlage rechtlicher - Codex Live Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice",
+      "tier": 8,
+      "primary_source_url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+      "source_url_count": 8,
+      "seed_source_url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+      "url_checks": [
+        {
+          "url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://hashtagpraxis.com/2026/01/barrierefreiheit-in-aerztlichen-und-therapeutischen-praxen-rechtliche-grundlagen-in-oesterreich-und-deutschland/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://vismed.de/barrierefreiheit-arztpraxis/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://medizinio.de/blog/barrierefreie-arztpraxis",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://blog.aerzteversichert.de/faq/ist-barrierefreiheit-in-der-arztpraxis-pflicht-fuer-aer/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.virchowbund.de/praxisaerzte-blog/barrieren-abbauen-arztpraxis-fit-machen-fuer-menschen-mit-gehbehinderung",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.lbbp.nrw.de/patientinnen-patienten/barrierefreie-arztpraxen",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.bundesfachstelle-barrierefreiheit.de/SharedDocs/Kurzmeldungen/DE/informationen-barrierefreiheit-arztpraxen-bald-abrufbar",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        }
+      ]
+    },
+    {
+      "id": "83357eb4-0b9b-4d63-9da2-e16544af5079",
+      "topic_registry_id": "d37da982-952f-468d-b110-04329314d11a",
+      "title": "Gesamtlage rechtlicher - Codex Live Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice",
+      "tier": 16,
+      "primary_source_url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+      "source_url_count": 8,
+      "seed_source_url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+      "url_checks": [
+        {
+          "url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://hashtagpraxis.com/2026/01/barrierefreiheit-in-aerztlichen-und-therapeutischen-praxen-rechtliche-grundlagen-in-oesterreich-und-deutschland/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://vismed.de/barrierefreiheit-arztpraxis/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://medizinio.de/blog/barrierefreie-arztpraxis",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://blog.aerzteversichert.de/faq/ist-barrierefreiheit-in-der-arztpraxis-pflicht-fuer-aer/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.virchowbund.de/praxisaerzte-blog/barrieren-abbauen-arztpraxis-fit-machen-fuer-menschen-mit-gehbehinderung",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.lbbp.nrw.de/patientinnen-patienten/barrierefreie-arztpraxen",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.bundesfachstelle-barrierefreiheit.de/SharedDocs/Kurzmeldungen/DE/informationen-barrierefreiheit-arztpraxen-bald-abrufbar",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        }
+      ]
+    },
+    {
+      "id": "cdd5887f-6fc4-4e43-8cc2-cb3e0bc7a188",
+      "topic_registry_id": "d37da982-952f-468d-b110-04329314d11a",
+      "title": "Gesamtlage rechtlicher - Codex Live Smoke Value 20260513T115923Z: barrierefreie Arzttermine und Rollstuhlservice",
+      "tier": 32,
+      "primary_source_url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+      "source_url_count": 8,
+      "seed_source_url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+      "url_checks": [
+        {
+          "url": "https://www.getnelly.de/blog/barrierefreie-arztpraxis",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://hashtagpraxis.com/2026/01/barrierefreiheit-in-aerztlichen-und-therapeutischen-praxen-rechtliche-grundlagen-in-oesterreich-und-deutschland/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://vismed.de/barrierefreiheit-arztpraxis/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://medizinio.de/blog/barrierefreie-arztpraxis",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://blog.aerzteversichert.de/faq/ist-barrierefreiheit-in-der-arztpraxis-pflicht-fuer-aer/",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.virchowbund.de/praxisaerzte-blog/barrieren-abbauen-arztpraxis-fit-machen-fuer-menschen-mit-gehbehinderung",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.lbbp.nrw.de/patientinnen-patienten/barrierefreie-arztpraxen",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        },
+        {
+          "url": "https://www.bundesfachstelle-barrierefreiheit.de/SharedDocs/Kurzmeldungen/DE/informationen-barrierefreiheit-arztpraxen-bald-abrufbar",
+          "status": 200,
+          "curl_exit": 0,
+          "working": true
+        }
+      ]
+    }
+  ],
+  "failures": []
+}

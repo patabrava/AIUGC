@@ -26,9 +26,9 @@ MAX_SCRIPT_CHARS_NO_SPACES = 90
 CHARS_PER_SECOND_ESTIMATE = 17.0
 
 PROMPT2_DIALOG_WORD_BOUNDS = {
-    8: get_script_duration_bounds("lifestyle", 8),
-    16: get_script_duration_bounds("lifestyle", 16),
-    32: get_script_duration_bounds("lifestyle", 32),
+    8: (16, 20),
+    16: (20, 34),
+    32: (64, 84),
 }
 
 PROMPT3_PRODUCT_WORD_BOUNDS = {
@@ -44,9 +44,9 @@ PROMPT3_PRODUCT_SENTENCE_BOUNDS = {
 }
 
 PROMPT1_WORD_BOUNDS = {
-    8: get_script_duration_bounds("value", 8),
-    16: get_script_duration_bounds("value", 16),
-    32: get_script_duration_bounds("value", 32),
+    8: (14, 18),
+    16: (26, 36),
+    32: (68, 88),
 }
 
 # Pre-persistence gate can be stricter than prompt guidance. We keep it isolated
@@ -55,7 +55,7 @@ PROMPT1_WORD_BOUNDS = {
 PRE_PERSISTENCE_PROMPT1_WORD_BOUNDS = {
     8: (14, 18),
     16: (26, 36),
-    32: (54, 74),
+    32: (68, 88),
 }
 
 PROMPT1_SENTENCE_BOUNDS = {

@@ -374,6 +374,21 @@ def test_needs_extension_hop_returns_false_when_all_hops_done():
     assert _needs_extension_hop(metadata) is False
 
 
+def test_needs_extension_hop_stops_at_effective_shortened_target():
+    from workers.video_poller import _needs_extension_hop
+
+    metadata = {
+        "video_pipeline_route": "veo_extended",
+        "veo_planned_extension_hops_target": 3,
+        "veo_extension_hops_target": 2,
+        "veo_extension_hops_completed": 1,
+    }
+    assert _needs_extension_hop(metadata) is True
+
+    metadata["veo_extension_hops_completed"] = 2
+    assert _needs_extension_hop(metadata) is False
+
+
 def test_needs_extension_hop_returns_false_for_short_route():
     from workers.video_poller import _needs_extension_hop
 
@@ -478,6 +493,7 @@ def test_submit_extension_hop_uses_vertex_doc_shape(monkeypatch):
         "id": "post-vertex-doc",
         "video_provider": "vertex_ai",
         "seed_data": {"script": "Erster Satz. Zweiter Satz. Dritter Satz."},
+        "video_prompt_json": {"veo_negative_prompt": "music bed, background voices"},
         "video_metadata": {
             "video_pipeline_route": "veo_extended",
             "veo_extension_hops_target": 1,
@@ -494,6 +510,8 @@ def test_submit_extension_hop_uses_vertex_doc_shape(monkeypatch):
             "provider_aspect_ratio": "9:16",
             "requested_resolution": "720p",
             "requested_size": "720x1280",
+            "requested_model": "veo-3.1-lite-generate-001",
+            "veo_seed": 12345,
         },
     }
 
@@ -518,6 +536,9 @@ def test_submit_extension_hop_uses_vertex_doc_shape(monkeypatch):
     assert payload["video_mime_type"] == "video/mp4"
     assert payload["duration_seconds"] == 7
     assert payload["output_gcs_uri"] == "gs://bucket/output/"
+    assert payload["model"] == "veo-3.1-lite-generate-001"
+    assert payload["negative_prompt"] == "music bed, background voices"
+    assert payload["seed"] == 12345
 
 
 def test_submit_extension_hop_stages_vertex_data_uri_to_gcs(monkeypatch):

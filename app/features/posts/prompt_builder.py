@@ -447,11 +447,11 @@ def build_video_prompt_from_seed(
             normalized_dialogue = normalized_dialogue[: -len(suffix)].rstrip()
             break
 
-    script_line = f"{normalized_dialogue} ({STANDARD_FINAL_ENDING_DIRECTIVE})"
     action_value = (
         "Seated in a wheelchair in the bedroom, she speaks directly to camera in one continuous "
         "take. She speaks at a natural conversational pace, uses small natural hand gestures and "
-        f"subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly at the end of the line. She says: {script_line}"
+        "subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly "
+        "after the spoken line."
     )
 
     # Assemble complete prompt using template defaults

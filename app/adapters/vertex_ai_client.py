@@ -86,6 +86,8 @@ class VertexAIClient:
         model: Optional[str] = None,
         use_fast_model: bool = False,
         reference_images: Optional[list[Dict[str, str]]] = None,
+        negative_prompt: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         model_name = model or (_DEFAULT_VERTEX_FAST_MODEL if use_fast_model else _DEFAULT_VERTEX_MODEL)
@@ -96,6 +98,8 @@ class VertexAIClient:
             duration_seconds=duration_seconds,
             output_gcs_uri=output_gcs_uri,
             reference_images=reference_images,
+            negative_prompt=negative_prompt,
+            seed=seed,
         )
 
         self._log_request(
@@ -169,6 +173,8 @@ class VertexAIClient:
         duration_seconds: int,
         output_gcs_uri: Optional[str] = None,
         model: Optional[str] = None,
+        negative_prompt: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         model_name = model or _DEFAULT_VERTEX_MODEL
@@ -180,6 +186,8 @@ class VertexAIClient:
             aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
             output_gcs_uri=output_gcs_uri,
+            negative_prompt=negative_prompt,
+            seed=seed,
         )
 
         self._log_request(
@@ -305,6 +313,8 @@ class VertexAIClient:
         image_base64: Optional[str] = None,
         image_mime_type: Optional[str] = None,
         reference_images: Optional[list[Dict[str, str]]] = None,
+        negative_prompt: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         instance: Dict[str, Any] = {"prompt": prompt}
         if reference_images and (image_base64 or image_mime_type):
@@ -335,6 +345,10 @@ class VertexAIClient:
         }
         if output_gcs_uri:
             parameters["storageUri"] = output_gcs_uri
+        if negative_prompt:
+            parameters["negativePrompt"] = negative_prompt
+        if seed is not None:
+            parameters["seed"] = seed
 
         return {
             "instances": [instance],
@@ -350,6 +364,8 @@ class VertexAIClient:
         aspect_ratio: str,
         duration_seconds: int,
         output_gcs_uri: Optional[str] = None,
+        negative_prompt: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         video_payload: Dict[str, Any] = {"gcsUri": video_uri}
         if video_mime_type:
@@ -366,6 +382,10 @@ class VertexAIClient:
         }
         if output_gcs_uri:
             parameters["storageUri"] = output_gcs_uri
+        if negative_prompt:
+            parameters["negativePrompt"] = negative_prompt
+        if seed is not None:
+            parameters["seed"] = seed
 
         return {
             "instances": [instance],
