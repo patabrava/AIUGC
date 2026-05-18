@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from app.features.posts.prompt_builder import build_video_prompt_from_seed, split_dialogue_sentences, build_optimized_prompt, build_veo_prompt_segment, sync_video_prompt_with_seed_data
+from app.features.posts.prompt_builder import VEO_NEGATIVE_PROMPT, build_video_prompt_from_seed, split_dialogue_sentences, build_optimized_prompt, build_veo_prompt_segment, sync_video_prompt_with_seed_data
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE
 from app.features.posts.schemas import AudioSection, UpdatePromptRequest, VideoPrompt
 from app.features.videos import handlers as video_handlers
@@ -25,6 +25,20 @@ def test_veo_prompt_requires_exact_german_dialogue():
     assert prompt["audio"]["dialogue"] == script
     assert prompt["audio_block"] == prompt["audio"]["capture"]
     assert prompt["ending_directive"].startswith("After the final spoken word")
+
+
+def test_veo_negative_prompt_blocks_generated_text_overlays():
+    prompt = build_video_prompt_from_seed(
+        {"script": "Dein VARIO PLUS bringt dich mühelos über jede Treppe."}
+    )
+
+    negative_prompt = prompt["veo_negative_prompt"]
+    assert negative_prompt == VEO_NEGATIVE_PROMPT
+    assert "burned-in subtitles" in negative_prompt
+    assert "auto-generated subtitles" in negative_prompt
+    assert "lower-third captions" in negative_prompt
+    assert "speech transcription overlays" in negative_prompt
+    assert "readable typography" in negative_prompt
 
 
 def test_veo_prompt_does_not_repeat_dialogue_in_action_and_dialogue():

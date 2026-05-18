@@ -6,6 +6,7 @@ import pytest
 import app.adapters.vertex_ai_client as vertex_module
 from app.adapters.vertex_ai_client import VertexAIClient
 from app.core.errors import ValidationError
+from app.features.posts.prompt_builder import VEO_NEGATIVE_PROMPT
 
 
 def _settings(enabled: bool = True):
@@ -208,12 +209,14 @@ def test_vertex_text_payload_includes_seed_and_negative_prompt():
         aspect_ratio="9:16",
         duration_seconds=8,
         output_gcs_uri="gs://bucket/output/",
-        negative_prompt="music bed, background voices",
+        negative_prompt=VEO_NEGATIVE_PROMPT,
         seed=12345,
     )
 
     params = payload["parameters"]
-    assert params["negativePrompt"] == "music bed, background voices"
+    assert params["negativePrompt"] == VEO_NEGATIVE_PROMPT
+    assert "burned-in subtitles" in params["negativePrompt"]
+    assert "speech transcription overlays" in params["negativePrompt"]
     assert params["seed"] == 12345
 
 

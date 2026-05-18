@@ -72,10 +72,12 @@ SORA_NEGATIVE_CONSTRAINTS = (
 )
 
 VEO_NEGATIVE_PROMPT = (
-    "subtitles, captions, watermark, text overlays, words on screen, logos, branding, poor lighting, "
-    "blurry footage, low resolution, unwanted objects, character inconsistency, lip-sync drift, "
-    "cartoon styling, unrealistic proportions, distorted hands, artificial lighting, oversaturation, "
-    "excessive camera shake, background voices, music bed, audio hiss, static, clipping, abrupt cuts, angle changes, "
+    "subtitles, burned-in subtitles, auto-generated subtitles, closed captions, lower-third captions, "
+    "karaoke text, speech transcription overlays, captions, watermark, text overlays, words on screen, "
+    "readable typography, UI text, logos, branding, poor lighting, blurry footage, low resolution, "
+    "unwanted objects, character inconsistency, lip-sync drift, cartoon styling, unrealistic proportions, "
+    "distorted hands, artificial lighting, oversaturation, excessive camera shake, background voices, "
+    "music bed, audio hiss, static, clipping, abrupt cuts, angle changes, "
     "mirror appearing or disappearing, layout changes, background drift, new furniture, extra plants, wall color change, "
     "bedding color change, different room, lighting shift"
 )
@@ -86,10 +88,12 @@ _VEO_SCENE_LOCK_CLAUSE = (
 )
 
 _VEO_BASE_NEGATIVES = (
-    "subtitles, captions, watermark, text overlays, words on screen, logos, branding, poor lighting, "
-    "blurry footage, low resolution, unwanted objects, character inconsistency, lip-sync drift, "
-    "cartoon styling, unrealistic proportions, distorted hands, artificial lighting, oversaturation, "
-    "excessive camera shake, background voices, music bed, audio hiss, static, clipping, abrupt cuts, angle changes"
+    "subtitles, burned-in subtitles, auto-generated subtitles, closed captions, lower-third captions, "
+    "karaoke text, speech transcription overlays, captions, watermark, text overlays, words on screen, "
+    "readable typography, UI text, logos, branding, poor lighting, blurry footage, low resolution, "
+    "unwanted objects, character inconsistency, lip-sync drift, cartoon styling, unrealistic proportions, "
+    "distorted hands, artificial lighting, oversaturation, excessive camera shake, background voices, "
+    "music bed, audio hiss, static, clipping, abrupt cuts, angle changes"
 )
 
 
