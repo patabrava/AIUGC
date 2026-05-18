@@ -27,7 +27,7 @@ CHARS_PER_SECOND_ESTIMATE = 17.0
 
 PROMPT2_DIALOG_WORD_BOUNDS = {
     8: (16, 20),
-    16: (20, 34),
+    16: (28, 34),
     32: (64, 84),
 }
 
@@ -45,7 +45,7 @@ PROMPT3_PRODUCT_SENTENCE_BOUNDS = {
 
 PROMPT1_WORD_BOUNDS = {
     8: (14, 18),
-    16: (26, 36),
+    16: (28, 36),
     32: (68, 88),
 }
 
@@ -54,7 +54,7 @@ PROMPT1_WORD_BOUNDS = {
 # and downstream expectations are updated.
 PRE_PERSISTENCE_PROMPT1_WORD_BOUNDS = {
     8: (14, 18),
-    16: (26, 36),
+    16: (28, 36),
     32: (68, 88),
 }
 
@@ -292,7 +292,7 @@ def sanitize_spoken_fragment(text: Any, *, ensure_terminal: bool = True) -> str:
     cleaned = re.sub(r"[\U00010000-\U0010ffff]", " ", cleaned)
     cleaned = _strip_research_labels(cleaned)
     cleaned = re.sub(r"[|]+", " ", cleaned)
-    cleaned = re.sub(r"(\w):\s+in(nen)?\b", r"\1:in\2", cleaned)
+    cleaned = re.sub(r"\b([A-Za-zÄÖÜäöüß]+):\s*in(nen)?\b", r"\1in\2", cleaned)
     cleaned = normalize_spoken_whitespace(cleaned)
     if not cleaned:
         return ""
@@ -373,6 +373,7 @@ def trim_spoken_script_to_word_bounds(text: Any, min_words: int, max_words: int)
         fallback = " ".join(words[:max_words]).strip()
         if fallback and fallback[-1] not in ".!?":
             fallback = fallback.rstrip(",;:") + "."
+        fallback = sanitize_spoken_fragment(fallback, ensure_terminal=True)
         return fallback or trimmed
 
     return trimmed
@@ -502,7 +503,7 @@ def normalize_temporal_reference(text: Any, *, current_year: int = CURRENT_TOPIC
 
 
 def _script_word_count(text: str) -> int:
-    return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
+    return script_word_count(text)
 
 
 def resolve_effective_script_text(seed_data: Dict[str, Any], video_prompt: Optional[Dict[str, Any]] = None) -> str:

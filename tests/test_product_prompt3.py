@@ -388,7 +388,7 @@ def test_generate_product_topics_synthesizes_tier_fallback_on_vertex_credential_
 
     min_words, max_words = {
         8: (16, 20),
-        16: (24, 34),
+        16: (28, 34),
         32: (32, 66),
     }[target_length_tier]
     assert generated[0]["product_name"] == "VARIO PLUS"

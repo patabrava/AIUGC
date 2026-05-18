@@ -11,7 +11,7 @@ HARTE REGELN:
 - Antworte nur im exakt vorgegebenen Textformat.
 - Nenne nur dieses Produkt und keine anderen Produkte.
 - Nutze nur die Fakten aus diesem Prompt.
-- Halte den Scripttext auf 24-34 Wörter und 3-4 Sätze.
+- Halte den Scripttext auf 28-34 Wörter und 2 Sprechblöcke.
 - Im Script nur echte Umlaute schreiben: ä, ö, ü. Keine Umschreibungen mit ae, oe, ue.
 - Du-Form, endkundentauglich, direkter Hook, kein LinkedIn-Ton.
 - Wenn die Antwort leicht anders aufgebaut ist, akzeptiere sinngemäße Labels wie Produkt/Produktname, Angle/Winkel/Hook, Script/Text/Sprechtext, CTA/Call to action und Fakten/Stichpunkte.
@@ -27,7 +27,7 @@ STUETZFAKTEN:
 ANTWORTFORMAT:
 Produkt: {product_name}
 Angle: <ein klarer Produktwinkel für Endkunden>
-Script: <ein finaler 3-4-Satz-Scripttext>
+Script: <ein finaler Scripttext mit 2 Sprechblöcken>
 CTA: <ein kurzer CTA>
 Fakten:
 - <Fakt 1>

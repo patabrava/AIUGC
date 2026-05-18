@@ -33,23 +33,30 @@ class VertexGeminiClient:
     """Singleton adapter for Gemini models through Vertex AI."""
 
     _instance: Optional["VertexGeminiClient"] = None
+    _instance_lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
+        if getattr(self, "_initialized", False):
             return
-        self._settings = get_settings()
-        self._http_client_lock = threading.Lock()
-        self._http_client = self._build_http_client()
-        self._http_client_generation = 0
-        self._credentials = None
-        self._initialized = True
-        logger.info("vertex_gemini_client_initialized")
+        with self._instance_lock:
+            if getattr(self, "_initialized", False):
+                return
+            self._settings = get_settings()
+            self._http_client_lock = threading.Lock()
+            self._credentials_lock = threading.Lock()
+            self._http_client = self._build_http_client()
+            self._http_client_generation = 0
+            self._credentials = None
+            self._initialized = True
+            logger.info("vertex_gemini_client_initialized")
 
     @staticmethod
     def _build_http_client() -> "httpx.Client":
@@ -370,32 +377,33 @@ class VertexGeminiClient:
             )
 
     def _get_credentials(self):
-        if self._credentials is None:
-            adc_path = resolve_google_application_credentials_path(self._settings)
-            if adc_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
-            project_id = self._settings.vertex_ai_project_id.strip()
-            if project_id:
-                if not os.getenv("GOOGLE_CLOUD_PROJECT"):
-                    os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
-                if not os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT"):
-                    os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] = project_id
-            try:
-                self._credentials, _ = google.auth.default(
-                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                    quota_project_id=project_id or None,
-                )
-            except google.auth.exceptions.DefaultCredentialsError as exc:
-                raise ValidationError(
-                    "No Google Cloud Application Default Credentials found. "
-                    "Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.",
-                    {"error": str(exc)},
-                ) from exc
-            if project_id and hasattr(self._credentials, "with_quota_project"):
-                self._credentials = self._credentials.with_quota_project(project_id)
-        if self._credentials.expired or not self._credentials.token:
-            self._credentials.refresh(Request())
-        return self._credentials
+        with self._credentials_lock:
+            if self._credentials is None:
+                adc_path = resolve_google_application_credentials_path(self._settings)
+                if adc_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
+                project_id = self._settings.vertex_ai_project_id.strip()
+                if project_id:
+                    if not os.getenv("GOOGLE_CLOUD_PROJECT"):
+                        os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
+                    if not os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT"):
+                        os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] = project_id
+                try:
+                    self._credentials, _ = google.auth.default(
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                        quota_project_id=project_id or None,
+                    )
+                except google.auth.exceptions.DefaultCredentialsError as exc:
+                    raise ValidationError(
+                        "No Google Cloud Application Default Credentials found. "
+                        "Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.",
+                        {"error": str(exc)},
+                    ) from exc
+                if project_id and hasattr(self._credentials, "with_quota_project"):
+                    self._credentials = self._credentials.with_quota_project(project_id)
+            if self._credentials.expired or not self._credentials.token:
+                self._credentials.refresh(Request())
+            return self._credentials
 
     def _build_headers(self, include_json: bool = False) -> Dict[str, str]:
         creds = self._get_credentials()
@@ -471,11 +479,14 @@ class VertexGeminiClient:
 
 
 _vertex_gemini_client: Optional[VertexGeminiClient] = None
+_vertex_gemini_client_lock = threading.Lock()
 
 
 def get_vertex_gemini_client() -> VertexGeminiClient:
     """Get Vertex Gemini client singleton."""
     global _vertex_gemini_client
     if _vertex_gemini_client is None:
-        _vertex_gemini_client = VertexGeminiClient()
+        with _vertex_gemini_client_lock:
+            if _vertex_gemini_client is None:
+                _vertex_gemini_client = VertexGeminiClient()
     return _vertex_gemini_client

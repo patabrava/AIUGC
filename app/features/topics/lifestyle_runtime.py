@@ -70,13 +70,14 @@ def _fit_lifestyle_script_to_tier(script: str, *, target_length_tier: Optional[i
         cleaned = trim_spoken_script_to_word_bounds(cleaned, min_words=min_words, max_words=max_words)
 
     topic_hint = _topic_hint(cleaned)
-    for sentence in _lifestyle_padding_sentences(topic_hint):
+    for sentence in _lifestyle_padding_sentences(topic_hint) + _short_lifestyle_padding_sentences():
         if script_word_count(cleaned) >= min_words:
             break
         candidate = sanitize_spoken_fragment(f"{cleaned} {sentence}", ensure_terminal=True)
         if script_word_count(candidate) > max_words:
-            candidate = trim_spoken_script_to_word_bounds(candidate, min_words=min_words, max_words=max_words)
-        cleaned = candidate
+            continue
+        if script_word_count(candidate) > script_word_count(cleaned):
+            cleaned = candidate
 
     return cleaned
 
@@ -96,6 +97,18 @@ def _lifestyle_padding_sentences(topic_hint: str) -> List[str]:
         "So bleibt der naechste Schritt klar, auch wenn unterwegs wieder etwas nicht sofort passt.",
         "Diese paar Minuten Planung klingen klein, machen im Rollstuhl-Alltag aber oft den groessten Unterschied.",
         "Am Ende bleibt mehr Energie fuer den eigentlichen Termin, statt schon auf dem Hinweg verloren zu gehen.",
+    ]
+
+
+def _short_lifestyle_padding_sentences() -> List[str]:
+    return [
+        "Das hilft.",
+        "Das spart Kraft.",
+        "So bleibst du ruhiger.",
+        "Das spart dir spuerbar Kraft.",
+        "So bleibt dein Alltag planbarer.",
+        "Das macht deinen Weg spuerbar leichter.",
+        "So bleibt mehr Energie fuer deinen Termin.",
     ]
 
 

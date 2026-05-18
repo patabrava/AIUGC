@@ -72,7 +72,7 @@ def test_build_prompt1_batch_keeps_rotation_context():
     )
 
     assert "ZUFALLS-THEMEN FÜR DIESEN DURCHLAUF:" in prompt
-    assert "26-36 Wörter" in prompt
+    assert "28-36 Wörter" in prompt
     assert "ZWEI natuerliche Sprechbloecke" in prompt
     assert "Barrierefreie Bahnreisen" in prompt
 
@@ -99,9 +99,9 @@ def test_build_prompt2_uses_16s_text_template():
     )
 
     assert "16-Sekunden-UGC-Videos" in prompt
-    assert "20-34 Wörter" in prompt
+    assert "28-34 Wörter" in prompt
     assert "2 Sprechblöcke" in prompt
-    assert "ZIELWORTZAHL: 20-34 Wörter" in prompt
+    assert "ZIELWORTZAHL: 28-34 Wörter" in prompt
     assert "Beide Sprechblöcke müssen voll ausgearbeitet sein" in prompt
     assert "core:" not in prompt
 

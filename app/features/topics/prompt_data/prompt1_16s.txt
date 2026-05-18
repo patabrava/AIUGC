@@ -50,8 +50,8 @@ Scroll-Stopp ist Pflicht:
 - Wenn die ersten 3 Wörter keine Emotion auslösen: umschreiben.
 
 SCRIPT-REGELN:
-- `script` muss GENAU 26-36 Wörter haben.
-- Wenn `script` unter 26 oder über 36 Wörter liegt, ist die Antwort ungültig.
+- `script` muss GENAU 28-36 Wörter haben.
+- Wenn `script` unter 28 oder über 36 Wörter liegt, ist die Antwort ungültig.
 - `script` muss in genau ZWEI natürliche Sprechblöcke passen.
 - Der erste Satz ist der Hook. Der zweite Satz liefert konkrete Einordnung, Konsequenz oder den Nutzen.
 - `script` muss mit `.`, `!` oder `?` enden.
@@ -62,7 +62,7 @@ SCRIPT-REGELN:
 - Keine Zwischenüberschriften, keine Forschungsetiketten wie `Zentrale Erkenntnisse`, keine Zitate wie `[cite: 1]`.
 
 SELF-CHECK VOR DEM ABSCHICKEN:
-- Prüfe intern: 26-36 Wörter, 2 Sprechblöcke, kein Bindestrich, 2026-kontextuell, klarer Hook im ersten Satz.
+- Prüfe intern: 28-36 Wörter, 2 Sprechblöcke, kein Bindestrich, 2026-kontextuell, klarer Hook im ersten Satz.
 - Wenn eine Regel verletzt ist, überarbeite den Text still, bevor du antwortest.
 
 ANTWORTFORMAT:

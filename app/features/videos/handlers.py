@@ -34,6 +34,7 @@ from app.core.video_profiles import (
     get_duration_profile,
     get_profile_route_config,
     get_submission_video_status,
+    script_word_count,
     uses_duration_routing,
 )
 from app.features.batches.queries import get_batch_by_id
@@ -670,7 +671,7 @@ def _minimum_words_for_veo_window(*, budget_seconds: int, is_final_segment: bool
 
 
 def _segment_word_count(segment: str) -> int:
-    return len([word for word in str(segment).split() if word])
+    return script_word_count(segment)
 
 
 def _build_veo_segment_spoken_budgets(
@@ -696,6 +697,34 @@ def _build_veo_segment_spoken_budgets(
             }
         )
     return budgets
+
+
+def _segments_meet_veo_spoken_budget(
+    *,
+    segments: list[str],
+    profile: Any,
+    required_segments: int,
+) -> bool:
+    if len(segments) < required_segments:
+        return False
+    budgets = _build_veo_segment_spoken_budgets(segments=segments, profile=profile)
+    return all(item["word_count"] >= item["minimum_words"] for item in budgets[:required_segments])
+
+
+def _minimum_veo_segment_words(
+    *,
+    profile: Any,
+    required_segments: int,
+) -> list[float]:
+    return [
+        float(
+            _minimum_words_for_veo_window(
+                budget_seconds=_segment_time_budget_seconds(profile=profile, segment_index=index),
+                is_final_segment=index == required_segments - 1,
+            )
+        )
+        for index in range(required_segments)
+    ]
 
 
 def _validate_veo_segment_spoken_budget(
@@ -991,11 +1020,35 @@ def _pack_veo_segments_for_profile(
     if profile.route != VEO_EXTENDED_VIDEO_ROUTE:
         return segments
 
-    return _partition_dialogue_units_for_profile(
+    packed_segments = _partition_dialogue_units_for_profile(
         segments,
         profile=profile,
         required_segments=required_segments,
     )
+    if _segments_meet_veo_spoken_budget(
+        segments=packed_segments,
+        profile=profile,
+        required_segments=required_segments,
+    ):
+        return packed_segments
+
+    min_targets = _minimum_veo_segment_words(profile=profile, required_segments=required_segments)
+    total_words = sum(_segment_word_count(segment) for segment in segments)
+    if total_words < sum(min_targets):
+        return packed_segments
+
+    budget_segments = _split_dialogue_text_by_word_budget(
+        " ".join(segments),
+        target_words=min_targets,
+        required_segments=required_segments,
+    )
+    if _segments_meet_veo_spoken_budget(
+        segments=budget_segments,
+        profile=profile,
+        required_segments=required_segments,
+    ):
+        return budget_segments
+    return packed_segments
 
 
 def _build_veo_extended_base_prompt(

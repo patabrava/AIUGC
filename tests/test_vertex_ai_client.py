@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -296,6 +297,26 @@ def test_vertex_client_loads_vertex_settings_from_shared_env(monkeypatch):
     client = _fresh_client()
     assert client._settings.vertex_ai_project_id == "shared-project"
     assert client._settings.vertex_ai_location == "europe-west4"
+
+
+def test_vertex_gemini_client_singleton_is_thread_safe(monkeypatch):
+    import app.adapters.vertex_gemini_client as gemini_module
+
+    class FakeSettings:
+        vertex_ai_enabled = True
+        vertex_ai_project_id = "test-project"
+        vertex_ai_location = "us-central1"
+        vertex_gemini_model = "gemini-2.5-flash"
+        vertex_gemini_image_model = "gemini-2.5-flash-image"
+
+    monkeypatch.setattr(gemini_module, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(gemini_module.VertexGeminiClient, "_instance", None)
+    monkeypatch.setattr(gemini_module, "_vertex_gemini_client", None)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        clients = list(pool.map(lambda _: gemini_module.get_vertex_gemini_client(), range(32)))
+
+    assert len({id(client) for client in clients}) == 1
 
 
 def test_generate_grounded_research_returns_text_and_chunks(monkeypatch):

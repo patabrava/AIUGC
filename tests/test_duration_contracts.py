@@ -8,6 +8,7 @@ import pytest
 from app.core.errors import ValidationError
 from app.core.video_profiles import (
     get_script_duration_bounds,
+    script_word_count,
     validate_script_duration_contract,
 )
 from app.features.topics.topic_validation import (
@@ -15,6 +16,8 @@ from app.features.topics.topic_validation import (
     get_prompt1_word_bounds,
     get_prompt2_word_bounds,
     get_prompt3_word_bounds,
+    sanitize_spoken_fragment,
+    trim_spoken_script_to_word_bounds,
     validate_pre_persistence_topic_payload,
 )
 
@@ -27,13 +30,13 @@ def _words(count: int) -> str:
     "post_type,tier,expected",
     [
         ("value", 8, (14, 18)),
-        ("value", 16, (26, 36)),
+        ("value", 16, (28, 36)),
         ("value", 32, (54, 74)),
         ("lifestyle", 8, (16, 20)),
-        ("lifestyle", 16, (20, 34)),
+        ("lifestyle", 16, (28, 34)),
         ("lifestyle", 32, (64, 84)),
         ("product", 8, (16, 20)),
-        ("product", 16, (24, 34)),
+        ("product", 16, (28, 34)),
         ("product", 32, (32, 66)),
     ],
 )
@@ -42,9 +45,27 @@ def test_canonical_script_duration_bounds(post_type, tier, expected):
 
 
 def test_legacy_prompt_bound_wrappers_use_canonical_contract():
+    assert get_prompt1_word_bounds(16) == (28, 36)
+    assert get_prompt2_word_bounds(16) == (28, 34)
+    assert get_prompt3_word_bounds(16) == (28, 34)
     assert get_prompt1_word_bounds(32) == (68, 88)
     assert get_prompt2_word_bounds(32) == (64, 84)
     assert get_prompt3_word_bounds(32) == (32, 66)
+
+
+@pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
+def test_16s_27_word_scripts_are_rejected_before_veo_preflight(post_type):
+    with pytest.raises(ValidationError) as exc:
+        validate_script_duration_contract(
+            script=_words(27),
+            post_type=post_type,
+            target_length_tier=16,
+            row_id="post-live-short",
+            table="posts",
+        )
+
+    assert "27 words" in str(exc.value)
+    assert exc.value.details["min_words"] == 28
 
 
 def test_32s_lifestyle_24_word_script_is_rejected_by_contract():
@@ -90,6 +111,54 @@ def test_32s_lifestyle_64_word_script_passes_contract():
 def test_spoken_copy_detector_allows_valid_particle_and_year_endings():
     assert detect_spoken_copy_issues("Probier es mal aus!") == []
     assert detect_spoken_copy_issues("Mehr als 20.000 zufriedene Kunden seit 1985.") == []
+
+
+def test_script_word_count_keeps_formatted_numbers_single_spoken_tokens():
+    assert script_word_count("Ein Bad kostet 8.000 Euro, der Lift startet bei 4.000 Euro.") == 11
+    assert script_word_count("BITV 2.0 bleibt als Versionsangabe zusammen.") == 6
+
+
+def test_16s_formatted_number_script_is_rejected_as_underlength_before_veo():
+    script = (
+        "Niemand redet darüber, aber dein barrierefreies Bad kostet dich locker bis zu 8.000 Euro. "
+        "Ein Treppenlift startet bei 4.000 Euro. "
+        "Deshalb ist deine Budgetplanung jetzt so wichtig."
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        validate_script_duration_contract(
+            script=script,
+            post_type="value",
+            target_length_tier=16,
+            row_id="formatted-number-script",
+            table="topic_scripts",
+        )
+
+    assert exc.value.details["word_count"] == 27
+    assert exc.value.details["min_words"] == 28
+
+
+def test_sanitize_spoken_fragment_preserves_gender_colon_words():
+    cleaned = sanitize_spoken_fragment(
+        "Als Rollstuhlnutzer:in kennst du das Gefühl, wenn ein kurzer Weg plötzlich zur Odyssee wird."
+    )
+
+    assert cleaned.startswith("Als Rollstuhlnutzerin kennst du")
+    assert not cleaned.startswith("in kennst du")
+
+
+def test_trim_word_bounds_drops_word_clipped_incomplete_clause():
+    script = (
+        "Der Fahrstuhl ist mal wieder kaputt. "
+        "Dieses Gefühl der Machtlosigkeit, wenn du einfach nicht weiterkommst, ist echt frustrierend. "
+        "Das kostet Zeit und Nerven! "
+        "Gerade bei in kennst du summieren sich kleine Umwege schneller, als viele von aussen erwarten."
+    )
+
+    trimmed = trim_spoken_script_to_word_bounds(script, min_words=28, max_words=34)
+
+    assert not trimmed.endswith("als.")
+    assert detect_spoken_copy_issues(trimmed) == []
 
 
 def test_value_variant_expansion_synthesizes_contract_safe_fallback_after_invalid_provider_copy(monkeypatch):

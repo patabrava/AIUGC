@@ -10,7 +10,7 @@ from app.core.errors import ValidationError
 from app.core.video_profiles import get_script_duration_bounds, script_word_count
 import app.features.topics.lifestyle_runtime as lifestyle_runtime
 from app.features.topics.schemas import DialogScripts
-from app.features.topics.topic_validation import get_prompt2_word_bounds
+from app.features.topics.topic_validation import detect_spoken_copy_issues, get_prompt2_word_bounds
 
 
 LIFESTYLE_TEMPLATES = {
@@ -58,6 +58,22 @@ def test_generate_lifestyle_topics_derives_content_titles(monkeypatch):
     generated_titles = [item["title"] for item in generated]
     assert len(set(generated_titles)) == 4, generated_titles
     assert all(title not in LIFESTYLE_TEMPLATES for title in generated_titles), generated_titles
+
+
+def test_fit_lifestyle_script_pads_without_clipping_incomplete_clause():
+    script = (
+        "Der Fahrstuhl ist mal wieder kaputt. "
+        "Dieses Gefühl der Machtlosigkeit, wenn du einfach nicht weiterkommst, ist echt frustrierend. "
+        "Das kostet Zeit und Nerven!"
+    )
+
+    fitted = lifestyle_runtime._fit_lifestyle_script_to_tier(script, target_length_tier=16)
+    min_words, max_words = get_script_duration_bounds("lifestyle", 16)
+
+    assert min_words <= script_word_count(fitted) <= max_words
+    assert not fitted.endswith("als.")
+    assert "summieren sich." not in fitted
+    assert detect_spoken_copy_issues(fitted) == []
 
 
 def test_generate_lifestyle_topics_retries_when_request_level_script_shape_repeats(monkeypatch):
@@ -131,6 +147,30 @@ def test_generate_lifestyle_topics_synthesizes_tier_valid_fallback_after_prompt2
     min_words, max_words = get_script_duration_bounds("lifestyle", 32)
     assert min_words <= script_word_count(script) <= max_words, script
     assert len(calls) == 4
+
+
+def test_generate_lifestyle_topics_pads_reported_16s_underlength_script():
+    live_underlength_script = (
+        "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+        "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter."
+    )
+
+    def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
+        return _dialog_scripts(
+            live_underlength_script,
+            description=f"Ausführliche Lifestyle-Beschreibung für {topic} mit genug Kontext.",
+        )
+
+    generated = lifestyle_runtime.generate_lifestyle_topics(
+        count=1,
+        seed=20260518,
+        target_length_tier=16,
+        generate_dialog_scripts_fn=fake_generate_dialog_scripts,
+    )
+
+    script = generated[0]["dialog_scripts"].problem_agitate_solution[0]
+    min_words, max_words = get_script_duration_bounds("lifestyle", 16)
+    assert min_words <= script_word_count(script) <= max_words, script
 
 
 @pytest.mark.parametrize("fallback", topic_handlers._LIFESTYLE_FALLBACK_CANDIDATES)

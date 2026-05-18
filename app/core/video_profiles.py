@@ -21,17 +21,17 @@ SUPPORTED_TARGET_LENGTH_TIERS = (8, 16, 32, 48, 64)
 SCRIPT_WORD_BOUNDS = {
     "value": {
         8: (14, 18),
-        16: (26, 36),
+        16: (28, 36),
         32: (54, 74),
     },
     "lifestyle": {
         8: (16, 20),
-        16: (20, 34),
+        16: (28, 34),
         32: (64, 84),
     },
     "product": {
         8: (16, 20),
-        16: (24, 34),
+        16: (28, 34),
         32: (32, 66),
     },
 }
@@ -96,13 +96,13 @@ _BASE_PROFILES = {
         veo_base_seconds=4,
         veo_extension_seconds=7,
         veo_extension_hops=2,
-        prompt1_min_words=26,
+        prompt1_min_words=28,
         prompt1_max_words=36,
         prompt1_min_seconds=12,
         prompt1_max_seconds=14,
         prompt1_max_chars_no_spaces=220,
         prompt1_sentence_guidance="DREI oder VIER vollstaendige Saetze",
-        prompt2_min_words=20,
+        prompt2_min_words=28,
         prompt2_max_words=34,
         prompt2_sentence_guidance="3-4 Saetze",
     ),
@@ -175,13 +175,13 @@ _EFFICIENT_LONG_ROUTE_PROFILES = {
         veo_base_seconds=8,
         veo_extension_seconds=7,
         veo_extension_hops=1,
-        prompt1_min_words=26,
+        prompt1_min_words=28,
         prompt1_max_words=36,
         prompt1_min_seconds=12,
         prompt1_max_seconds=14,
         prompt1_max_chars_no_spaces=220,
         prompt1_sentence_guidance="ZWEI natuerliche Sprechbloecke",
-        prompt2_min_words=20,
+        prompt2_min_words=28,
         prompt2_max_words=34,
         prompt2_sentence_guidance="2 Sprechbloecke",
     ),
@@ -248,8 +248,11 @@ def get_script_duration_bounds(post_type: Optional[str], target_length_tier: Opt
         raise ValueError(f"Unsupported script duration contract: {resolved_post_type} {tier}s") from exc
 
 
+_SCRIPT_WORD_PATTERN = re.compile(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*")
+
+
 def script_word_count(text: Any) -> int:
-    return len(re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", str(text or "")))
+    return len(_SCRIPT_WORD_PATTERN.findall(str(text or "")))
 
 
 def estimate_duration_from_word_count(word_count: int) -> int:

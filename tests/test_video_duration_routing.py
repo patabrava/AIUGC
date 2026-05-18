@@ -431,6 +431,47 @@ def test_build_veo_extended_base_prompt_packs_to_two_segments_for_efficient_16s(
     _assert_segment_budgets_pass(seg_meta)
 
 
+def test_build_veo_extended_base_prompt_rebalances_16s_sentence_groups_to_budget():
+    seed_data = {
+        "script": (
+            "Niemand redet darüber, aber der Gewürzregal Trick im Supermarkt ist verboten. "
+            "Seit 2025 ist diese Auszugstechnik laut Betreibern exklusiv für Personal. "
+            "Bei falscher Nutzung riskierst du kaputte Regale."
+        ),
+        "estimated_duration_s": 11,
+    }
+
+    _prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        planned_extension_hops=1,
+        target_length_tier=16,
+    )
+
+    assert len(seg_meta["veo_segments"]) == 2
+    assert [item["word_count"] for item in seg_meta["veo_segment_spoken_budgets"]] == [16, 12]
+    _assert_segment_budgets_pass(seg_meta)
+
+
+def test_build_veo_extended_base_prompt_rejects_underlength_formatted_number_script():
+    seed_data = {
+        "script": (
+            "Niemand redet darüber, aber dein barrierefreies Bad kostet dich locker bis zu 8.000 Euro. "
+            "Ein Treppenlift startet bei 4.000 Euro. "
+            "Deshalb ist deine Budgetplanung jetzt so wichtig."
+        ),
+        "estimated_duration_s": 11,
+    }
+
+    with pytest.raises(ValidationError) as exc:
+        video_handlers._build_veo_extended_base_prompt(
+            seed_data,
+            planned_extension_hops=1,
+            target_length_tier=16,
+        )
+
+    assert exc.value.details["word_count"] < exc.value.details["minimum_words"]
+
+
 def test_build_veo_extended_base_prompt_preserves_edited_visual_contract():
     seed_data = {
         "script": _valid_16s_script(),
