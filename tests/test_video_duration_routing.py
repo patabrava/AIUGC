@@ -829,7 +829,7 @@ def test_prompt3_32s_template_uses_current_sentence_budget_language():
 
     prompt_text = prompt_path.read_text(encoding="utf-8")
 
-    assert "40-66 Wörter und fünf bis sechs natürliche Sätze" in prompt_text
+    assert "64-84 Wörter und fünf bis sechs natürliche Sätze" in prompt_text
 
 
 def test_reference_image_paths_parse_comma_separated_settings(monkeypatch):

@@ -271,7 +271,7 @@ def test_generate_product_topics_retries_on_malformed_prompt3_response(monkeypat
     assert len(fake_llm.text_prompts) == 2
 
 
-def test_generate_product_topics_accepts_four_sentence_product_scripts(monkeypatch):
+def test_generate_product_topics_accepts_32s_product_scripts_inside_current_contract(monkeypatch):
     monkeypatch.setattr(
         "app.features.topics.prompt3_runtime.get_product_knowledge_base",
         lambda: [
@@ -295,6 +295,14 @@ Fakten:
 - Fuer Hoehen bis 2.990 mm
 - Kein Aufzugsschacht erforderlich
 """,
+            """Produkt: LEVEL
+Angle: Sechs klare Schritte bis zur barrierefreien Loesung
+Script: Du brauchst einen Zugang, der nicht an einer Treppe haengen bleibt und deinen Alltag sofort ruhiger macht. LEVEL loest das mit bis zu 2.990 Millimetern Hoehe und gibt dir klare Planung. Kein Aufzugsschacht noetig macht den Umbau entspannter, besonders wenn draussen wenig Platz ist. Vor dem Termin klaerst du Flaeche, Bedienung und Sicherheitsgefuehl gemeinsam. So weisst du frueher, welche Loesung wirklich passt und dein Zuhause deutlich einfacher wird.
+CTA: Frag nach LEVEL.
+Fakten:
+- Fuer Hoehen bis 2.990 mm
+- Kein Aufzugsschacht erforderlich
+""",
         ]
     )
 
@@ -305,7 +313,8 @@ Fakten:
     )
 
     assert generated[0]["product_name"] == "LEVEL"
-    assert generated[0]["script"].count(".") >= 4
+    assert 64 <= len(generated[0]["script"].split()) <= 84
+    assert generated[0]["script"].count(".") >= 5
 
 
 def test_generate_product_topics_retries_on_retryable_provider_error(monkeypatch):
@@ -389,7 +398,7 @@ def test_generate_product_topics_synthesizes_tier_fallback_on_vertex_credential_
     min_words, max_words = {
         8: (16, 20),
         16: (28, 34),
-        32: (32, 66),
+        32: (64, 84),
     }[target_length_tier]
     assert generated[0]["product_name"] == "VARIO PLUS"
     assert min_words <= len(generated[0]["script"].split()) <= max_words
@@ -424,7 +433,7 @@ Fakten:
             """,
             """Produkt: VARIO PLUS
 Angle: Flexibilitaet fuer jede Treppe
-Script: VARIO PLUS passt sich an deine Treppe an und bleibt dabei klar und verlässlich. Du nutzt dieselbe Schiene fuer heute und spaeter. Innen und aussen bleibt die Loesung flexibel und alltagstauglich. Mit 300 Kilo Tragkraft bekommst du Sicherheit im Alltag und mehr Ruhe.
+Script: VARIO PLUS passt sich an deine Treppe an und bleibt dabei klar und verlässlich. Du nutzt dieselbe Schiene fuer heute und spaeter. Innen und aussen bleibt die Loesung flexibel und alltagstauglich. Mit 300 Kilo Tragkraft bekommst du Sicherheit im Alltag und mehr Ruhe. Vor dem Einbau klaerst du gemeinsam, welche Variante, Bedienung und Ausstattung wirklich zu deinem Zuhause passen. Das macht Entscheidungen deutlich leichter.
 CTA: Frag nach VARIO PLUS fuer dein Zuhause.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
@@ -537,7 +546,7 @@ def test_generate_product_topics_disables_thinking_budget(monkeypatch):
     )
     fake_llm = _FakeProductLLM(
         [
-            """Produkt: VARIO PLUS\nAngle: Maximale Flexibilitaet\nScript: VARIO PLUS hilft dir bei jeder Treppe und bleibt flexibel. Du nutzt dieselbe Schiene fuer heute und spaeter. Innen und aussen bleibt die Loesung ruhig, sicher und gut planbar. So passt sich dein Alltag spuerbar an und bleibt selbstbestimmt und frei.\nCTA: Frag jetzt nach VARIO PLUS.\nFakten:\n- Plattform oder Sitzlift auf derselben Schiene\n- Tragfaehigkeit bis 300 kg\n""",
+            """Produkt: VARIO PLUS\nAngle: Maximale Flexibilitaet\nScript: VARIO PLUS hilft dir bei jeder Treppe und bleibt flexibel. Du nutzt dieselbe Schiene fuer heute und spaeter. Innen und aussen bleibt die Loesung ruhig, sicher und gut planbar. Mit 300 Kilo Tragkraft bekommst du zusaetzliche Sicherheit im Alltag. Vor dem Einbau klaerst du Kurven, Bedienung, Sitzwechsel und die passende Ausstattung gemeinsam. So passt sich dein Zuhause spuerbar an und bleibt selbstbestimmt und frei.\nCTA: Frag jetzt nach VARIO PLUS.\nFakten:\n- Plattform oder Sitzlift auf derselben Schiene\n- Tragfaehigkeit bis 300 kg\n""",
         ]
     )
 

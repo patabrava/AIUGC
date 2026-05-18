@@ -140,7 +140,7 @@ def test_build_prompt3_uses_32s_text_template():
     prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(32))
 
     assert "32-Sekunden-UGC-Videos" in prompt
-    assert "40-66 Wörter" in prompt
+    assert "64-84 Wörter" in prompt
     assert "fünf bis sechs natürlichen Sätzen" in prompt
     assert "Antworte nicht in JSON" in prompt
     assert "LL12" in prompt

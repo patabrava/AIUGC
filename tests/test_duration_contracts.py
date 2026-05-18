@@ -31,13 +31,13 @@ def _words(count: int) -> str:
     [
         ("value", 8, (14, 18)),
         ("value", 16, (28, 36)),
-        ("value", 32, (54, 74)),
+        ("value", 32, (68, 88)),
         ("lifestyle", 8, (16, 20)),
         ("lifestyle", 16, (28, 34)),
         ("lifestyle", 32, (64, 84)),
         ("product", 8, (16, 20)),
         ("product", 16, (28, 34)),
-        ("product", 32, (32, 66)),
+        ("product", 32, (64, 84)),
     ],
 )
 def test_canonical_script_duration_bounds(post_type, tier, expected):
@@ -50,7 +50,7 @@ def test_legacy_prompt_bound_wrappers_use_canonical_contract():
     assert get_prompt3_word_bounds(16) == (28, 34)
     assert get_prompt1_word_bounds(32) == (68, 88)
     assert get_prompt2_word_bounds(32) == (64, 84)
-    assert get_prompt3_word_bounds(32) == (32, 66)
+    assert get_prompt3_word_bounds(32) == (64, 84)
 
 
 @pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
@@ -106,6 +106,28 @@ def test_32s_lifestyle_64_word_script_passes_contract():
     )
     assert result["status"] == "valid"
     assert result["word_count"] == 64
+
+
+def test_32s_product_script_below_veo_segment_floor_is_rejected_by_contract():
+    live_incident_shape = (
+        "Du suchst einen Treppenlift, der sich wirklich anpasst? "
+        "Dann ist der VARIO PLUS von LIPPE Lift eine starke Lösung. "
+        "Er funktioniert innen und außen, als Plattform oder Sitzlift. "
+        "Mit bis zu 300 Kilo Tragkraft bleibt er alltagstauglich. "
+        "So planst du Mobilität zuhause deutlich ruhiger."
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        validate_script_duration_contract(
+            script=live_incident_shape,
+            post_type="product",
+            target_length_tier=32,
+            row_id="live-product-underfilled",
+            table="posts",
+        )
+
+    assert exc.value.details["word_count"] < exc.value.details["min_words"]
+    assert exc.value.details["min_words"] == 64
 
 
 def test_spoken_copy_detector_allows_valid_particle_and_year_endings():

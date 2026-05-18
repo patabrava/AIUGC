@@ -66,6 +66,8 @@ def _build_product_fallback_script(entry, *, target_length_tier: int) -> str:
     else:
         script = (
             f"{product} hilft dir zuhause. {fact} bleibt der zentrale Vorteil. "
+            "Du siehst früh, welche Variante zu deiner Treppe passt, welche Bedienung sich richtig anfühlt "
+            "und welche Details du vor dem Einbau klären solltest. "
             "Das gibt dir mehr Sicherheit auf Wegen, die jeden Tag zählen. "
             "Die Planung bleibt klar und alltagstauglich. So wird dein Zuhause ohne unnötigen Umbau besser nutzbar."
         )

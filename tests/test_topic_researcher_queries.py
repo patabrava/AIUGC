@@ -441,7 +441,7 @@ def test_upsert_topic_script_variants_accepts_product_32s_midrange_script(mock_g
         target_length_tier=32,
         topic_research_dossier_id=None,
         variants=[{
-            "script": "VARIO PLUS passt sich deinem Alltag an, weil er gerade, kurvig, steil oder eng funktioniert. Du nutzt ihn innen und außen, als Plattform oder mit Sitz. Dabei bleibst du flexibel und sicher unterwegs. Mit 300 Kilo Tragkraft und nachrüstbarem Sitzwechsel wächst die Lösung mit. Made in Germany sorgt zusätzlich für Vertrauen im Alltag.",
+            "script": "VARIO PLUS passt sich deinem Alltag an, weil er gerade, kurvig, steil oder eng funktioniert. Du nutzt ihn innen und außen, als Plattform oder mit Sitz. Dabei bleibst du flexibel und sicher unterwegs. Mit 300 Kilo Tragkraft und nachrüstbarem Sitzwechsel wächst die Lösung mit. Vor dem Einbau klärst du Bedienung, Kurven und Ausstattung gemeinsam. Made in Germany sorgt zusätzlich für mehr Vertrauen im Alltag.",
             "caption": "VARIO PLUS fuer Zuhause",
             "source_summary": "Kurzer Produktkontext fuer die Speicherung.",
             "disclaimer": "Keine Rechts- oder medizinische Beratung.",
@@ -1377,7 +1377,10 @@ def test_upsert_topic_script_variants_skips_live_fingerprint_conflict(mock_get_s
                 "script": (
                     "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
                     "Mit einer klaren Routine pruefst du Wege, Pausen, Wetter und Hilfe vorher. "
-                    "So bleibt der Alltag leichter, ohne dass jede Einladung sofort nach Stress oder Absage klingt."
+                    "So bleibt der Alltag leichter, ohne dass jede Einladung sofort nach Stress oder Absage klingt. "
+                    "Du kannst früher entscheiden, was realistisch ist. "
+                    "Das spart Kraft, weil du nicht alles spontan im Kopf sortieren musst. "
+                    "Genau dadurch bleibt mehr Raum für echte Freizeit."
                 ),
                 "hook_style": "problem-agitate-solution",
                 "target_length_tier": 32,
@@ -1495,8 +1498,8 @@ def test_create_post_for_batch_injects_target_tier_into_seed_data(mock_get_sb):
         topic_cta="CTA",
         spoken_duration=16,
         seed_data={
-            "script": " ".join(f"wort{i}" for i in range(26)) + ".",
-            "dialog_script": " ".join(f"wort{i}" for i in range(26)) + ".",
+            "script": " ".join(f"wort{i}" for i in range(28)) + ".",
+            "dialog_script": " ".join(f"wort{i}" for i in range(28)) + ".",
         },
         target_length_tier=16,
     )

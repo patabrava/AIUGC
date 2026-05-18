@@ -40,7 +40,7 @@ PROMPT3_PRODUCT_WORD_BOUNDS = {
 PROMPT3_PRODUCT_SENTENCE_BOUNDS = {
     8: (1, 1),
     16: (3, 4),
-    32: (4, 5),
+    32: (5, 6),
 }
 
 PROMPT1_WORD_BOUNDS = {
