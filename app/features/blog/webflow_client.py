@@ -117,6 +117,21 @@ class WebflowClient:
         logger.info("webflow_get_item", item_id=item_id)
         return self._request("GET", f"/collections/{self.collection_id}/items/{item_id}")
 
+    def list_live_items(self, *, slug: Optional[str] = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """List published live items for this collection."""
+        path = f"/collections/{self.collection_id}/items/live?limit={limit}&offset={offset}"
+        if slug:
+            path = f"{path}&slug={quote(str(slug).strip(), safe='')}"
+        logger.info("webflow_list_live_items", collection_id=self.collection_id, slug=slug, limit=limit, offset=offset)
+        payload = self._request("GET", path)
+        items = payload.get("items")
+        if isinstance(items, list):
+            return items
+        raise ThirdPartyError(
+            message="Webflow live item list response did not include items",
+            details={"collection_id": self.collection_id, "response_keys": list(payload.keys())},
+        )
+
     def publish_item(self, item_id: str) -> bool:
         """Publish a staged item live via the collection publish endpoint."""
         logger.info("webflow_publish_item", collection_id=self.collection_id, item_id=item_id)
@@ -127,6 +142,24 @@ class WebflowClient:
         """Delete an existing CMS item from the collection."""
         logger.info("webflow_delete_item", collection_id=self.collection_id, item_id=item_id)
         self._request("DELETE", f"/collections/{self.collection_id}/items/{item_id}")
+        return True
+
+    def unpublish_live_items(self, items: Sequence[Dict[str, Any]]) -> bool:
+        """Remove published live items from the site without needing a full site publish."""
+        payload_items: List[Dict[str, Any]] = []
+        for item in items:
+            item_id = str(item.get("id") or "").strip()
+            if not item_id:
+                continue
+            payload_item: Dict[str, Any] = {"id": item_id}
+            cms_locale_id = str(item.get("cmsLocaleId") or "").strip()
+            if cms_locale_id:
+                payload_item["cmsLocaleId"] = cms_locale_id
+            payload_items.append(payload_item)
+        if not payload_items:
+            return False
+        logger.info("webflow_unpublish_live_items", collection_id=self.collection_id, item_count=len(payload_items))
+        self._request("DELETE", f"/collections/{self.collection_id}/items/live", json={"items": payload_items})
         return True
 
     def publish_site(self) -> bool:

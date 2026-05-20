@@ -277,9 +277,17 @@ def test_delete_blog_post_publishes_site_after_webflow_delete(monkeypatch):
         def __init__(self, *args, **kwargs):
             self.delete_calls = []
             self.publish_calls = 0
+            self.unpublish_calls = []
 
         def delete_item(self, item_id):
             self.delete_calls.append(item_id)
+
+        def list_live_items(self, *, slug=None, limit=100, offset=0):
+            return [{"id": "wf-1", "cmsLocaleId": "loc-1", "slug": slug}]
+
+        def unpublish_live_items(self, items):
+            self.unpublish_calls.append(items)
+            return True
 
         def publish_site(self):
             self.publish_calls += 1
@@ -300,12 +308,20 @@ def test_delete_blog_post_publishes_site_after_webflow_delete(monkeypatch):
 
     assert result["deleted_webflow_item"] is True
     assert result["site_published"] is True
+    assert fake_client.unpublish_calls == [[{"id": "wf-1", "cmsLocaleId": "loc-1", "slug": "title"}]]
     assert fake_client.delete_calls == ["wf-1"]
     assert fake_client.publish_calls == 1
 
 
 def test_delete_blog_post_skips_site_publish_errors(monkeypatch):
     class _FakeClient:
+        def list_live_items(self, *, slug=None, limit=100, offset=0):
+            return [{"id": "wf-1", "cmsLocaleId": "loc-1", "slug": slug}]
+
+        def unpublish_live_items(self, items):
+            self.unpublished = items
+            return True
+
         def delete_item(self, item_id):
             self.deleted = item_id
 
@@ -328,6 +344,22 @@ def test_delete_blog_post_skips_site_publish_errors(monkeypatch):
 
     assert result["deleted_webflow_item"] is True
     assert result["site_published"] is False
+    assert fake_client.unpublished == [{"id": "wf-1", "cmsLocaleId": "loc-1", "slug": "title"}]
+
+
+def test_webflow_client_unpublish_live_items_uses_bulk_endpoint():
+    mock_response = MagicMock()
+    mock_response.status_code = 204
+    mock_response.text = ""
+
+    with patch.object(httpx.Client, "request", return_value=mock_response) as mock_request:
+        client = WebflowClient(api_token="test-token", collection_id="col-1", site_id="site-1")
+        result = client.unpublish_live_items([{"id": "wf-item-123", "cmsLocaleId": "loc-1"}])
+
+    assert result is True
+    assert mock_request.call_args.args[0] == "DELETE"
+    assert mock_request.call_args.args[1] == "/collections/col-1/items/live"
+    assert mock_request.call_args.kwargs["json"] == {"items": [{"id": "wf-item-123", "cmsLocaleId": "loc-1"}]}
 
 
 def test_gemini_image_generation_decodes_inline_image_bytes():

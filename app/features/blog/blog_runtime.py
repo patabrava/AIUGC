@@ -565,6 +565,8 @@ def delete_blog_post(post_id: str, *, delete_webflow_item: bool = True) -> Dict[
             collection_id=settings.webflow_collection_id,
             site_id=settings.webflow_site_id,
         )
+        live_items = client.list_live_items(slug=blog_content.get("slug"))
+        client.unpublish_live_items(live_items)
         client.delete_item(str(webflow_item_id))
         try:
             client.publish_site()
