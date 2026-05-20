@@ -133,6 +133,8 @@ class PostDetail(BaseModel):
     video_metadata: Optional[Dict[str, Any]] = None
     video_operation_id: Optional[str] = None
     video_provider: Optional[str] = None
+    scene_reference_image_id: Optional[str] = None
+    identity_gate_result: Optional[Dict[str, Any]] = None
     qa_pass: Optional[bool] = None
     qa_notes: Optional[str] = None
     qa_auto_checks: Optional[Dict[str, Any]] = None

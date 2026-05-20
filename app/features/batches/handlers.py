@@ -801,6 +801,12 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     video_metadata=video_metadata,
                     video_operation_id=p.get("video_operation_id"),
                     video_provider=p.get("video_provider"),
+                    scene_reference_image_id=p.get("scene_reference_image_id"),
+                    identity_gate_result=_normalize_json_object(
+                        p.get("identity_gate_result"),
+                        field_name="identity_gate_result",
+                        post_id=p.get("id"),
+                    ),
                     qa_pass=p.get("qa_pass"),
                     qa_notes=p.get("qa_notes"),
                     qa_auto_checks=qa_auto_checks,

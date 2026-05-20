@@ -407,6 +407,62 @@
     </div>
     {% endif %}
 
+    {% if batch.creation_mode == 'character_consistency' and batch.actor_identity_id and post.video_prompt_json %}
+    <div class="mt-6 border-t border-gray-200 pt-4">
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <p class="text-sm font-semibold text-amber-900">Actor Scene Reference</p>
+                    {% if post.scene_reference_image_id %}
+                    <p class="mt-1 text-xs text-amber-800">
+                        Reference {{ post.scene_reference_image_id }}
+                        {% if post.identity_gate_result %}
+                        · gate {{ post.identity_gate_result.get('status') }}
+                        {% endif %}
+                    </p>
+                    {% if post.identity_gate_result and post.identity_gate_result.get('reason') %}
+                    <p class="mt-1 text-xs text-amber-700">{{ post.identity_gate_result.get('reason') }}</p>
+                    {% endif %}
+                    {% else %}
+                    <p class="mt-1 text-xs text-amber-800">Generate and approve a scene still before video submission.</p>
+                    {% endif %}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        hx-post="/settings/character/posts/{{ post.id }}/scene-reference/generate"
+                        hx-trigger="click"
+                        hx-swap="none"
+                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                        class="inline-flex items-center rounded-md bg-amber-700 px-3 py-2 text-xs font-medium text-white hover:bg-amber-800"
+                    >
+                        Generate Still
+                    </button>
+                    {% if post.scene_reference_image_id %}
+                    <button
+                        hx-post="/settings/character/scene-reference/{{ post.scene_reference_image_id }}/approve"
+                        hx-trigger="click"
+                        hx-swap="none"
+                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                        class="inline-flex items-center rounded-md bg-green-700 px-3 py-2 text-xs font-medium text-white hover:bg-green-800"
+                    >
+                        Approve
+                    </button>
+                    <button
+                        hx-post="/settings/character/scene-reference/{{ post.scene_reference_image_id }}/reject"
+                        hx-trigger="click"
+                        hx-swap="none"
+                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                        class="inline-flex items-center rounded-md bg-white px-3 py-2 text-xs font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
+                    >
+                        Reject
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT', 'S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_prompt_json %}
     {% set video_status = post.video_status or 'pending' %}
     {% set in_progress_statuses = ['submitted', 'processing', 'extended_submitted', 'extended_processing'] %}

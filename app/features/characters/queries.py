@@ -8,7 +8,13 @@ from postgrest.exceptions import APIError
 
 from app.adapters.supabase_client import get_supabase
 from app.core.logging import get_logger
-from app.features.characters.schemas import ActorIdentityRecord, CharacterRecord, CharacterSnapshot
+from app.features.characters.schemas import (
+    ActorIdentityRecord,
+    CharacterRecord,
+    CharacterSnapshot,
+    IdentityGateResult,
+    SceneReferenceImageRecord,
+)
 
 logger = get_logger(__name__)
 
@@ -208,3 +214,123 @@ def update_actor_training_status(
         training_phase=training_phase,
         training_progress_percent=training_progress_percent,
     )
+
+
+def create_scene_reference_candidate(
+    *,
+    actor_identity_id: str,
+    post_id: str,
+    scene_key: str,
+    wardrobe_key: str,
+    provider_task_id: Optional[str],
+    image_url: Optional[str],
+    prompt: str,
+    provider_metadata: dict[str, Any],
+    correlation_id: str,
+) -> SceneReferenceImageRecord:
+    now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "id": str(uuid4()),
+        "actor_identity_id": actor_identity_id,
+        "post_id": post_id,
+        "scene_key": scene_key,
+        "wardrobe_key": wardrobe_key,
+        "provider": "magnific",
+        "provider_task_id": provider_task_id,
+        "image_url": image_url,
+        "prompt": prompt,
+        "provider_metadata": provider_metadata,
+        "identity_gate_result": {
+            "status": "manual_required",
+            "reason": "Operator must approve the generated actor scene reference",
+            "gate_type": "manual",
+            "details": {},
+        },
+        "status": "generated" if image_url else "submitted",
+        "created_at": now,
+        "updated_at": now,
+    }
+    get_supabase().client.table("scene_reference_images").insert(payload).execute()
+    logger.info(
+        "scene_reference_candidate_created",
+        correlation_id=correlation_id,
+        post_id=post_id,
+        actor_identity_id=actor_identity_id,
+        scene_key=scene_key,
+        wardrobe_key=wardrobe_key,
+    )
+    return SceneReferenceImageRecord.model_validate(payload)
+
+
+def mark_scene_reference_generated(
+    *,
+    reference_id: str,
+    image_url: str,
+    provider_metadata: dict[str, Any],
+    correlation_id: str,
+) -> None:
+    payload = {
+        "image_url": image_url,
+        "provider_metadata": provider_metadata,
+        "status": "generated",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    get_supabase().client.table("scene_reference_images").update(payload).eq("id", reference_id).execute()
+    logger.info("scene_reference_generated", correlation_id=correlation_id, scene_reference_image_id=reference_id)
+
+
+def record_scene_reference_gate(
+    *,
+    reference_id: str,
+    gate_result: IdentityGateResult,
+    status: str,
+    correlation_id: str,
+) -> None:
+    payload = {
+        "identity_gate_result": gate_result.model_dump(mode="json"),
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    get_supabase().client.table("scene_reference_images").update(payload).eq("id", reference_id).execute()
+    logger.info(
+        "scene_reference_gate_recorded",
+        correlation_id=correlation_id,
+        scene_reference_image_id=reference_id,
+        gate_status=gate_result.status,
+        reference_status=status,
+    )
+
+
+def get_scene_reference_by_id(reference_id: str) -> Optional[dict[str, Any]]:
+    response = get_supabase().client.table("scene_reference_images").select("*").eq("id", reference_id).maybe_single().execute()
+    return getattr(response, "data", None)
+
+
+def get_approved_scene_reference_for_post(post_id: str) -> Optional[dict[str, Any]]:
+    response = (
+        get_supabase()
+        .client.table("scene_reference_images")
+        .select("*")
+        .eq("post_id", post_id)
+        .eq("status", "approved")
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(response, "data", None) or []
+    return rows[0] if rows else None
+
+
+def attach_scene_reference_to_post(
+    *,
+    post_id: str,
+    reference_id: str,
+    gate_result: IdentityGateResult,
+    correlation_id: str,
+) -> None:
+    payload = {
+        "scene_reference_image_id": reference_id,
+        "identity_gate_result": gate_result.model_dump(mode="json"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    get_supabase().client.table("posts").update(payload).eq("id", post_id).execute()
+    logger.info("post_scene_reference_attached", correlation_id=correlation_id, post_id=post_id, reference_id=reference_id)
