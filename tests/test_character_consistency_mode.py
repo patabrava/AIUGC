@@ -257,6 +257,69 @@ def test_submit_video_request_attaches_character_reference_images_to_vertex(monk
     assert result["provider_metadata"]["reference_image_count"] == 3
 
 
+def test_actor_identity_batch_blocks_video_without_approved_scene_reference():
+    from app.core.errors import FlowForgeException
+    from app.features.characters.actor_identity import ensure_video_scene_reference_ready
+
+    batch = {"id": "batch-1", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"}
+    post = {"id": "post-1", "batch_id": "batch-1", "scene_reference_image_id": None}
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_ready(batch=batch, post=post, scene_reference=None, route="short")
+    assert "approved SceneReferenceImage" in exc.value.message
+
+
+def test_submit_video_request_attaches_actor_scene_reference_to_vertex(monkeypatch):
+    from app.features.videos import handlers as video_handlers
+
+    captured = {}
+
+    class FakeVertexClient:
+        def submit_text_video(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/actor-ref",
+                "status": "submitted",
+                "provider_model": kwargs.get("model") or "veo-3.1-generate-001",
+            }
+
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(
+        video_handlers,
+        "get_settings",
+        lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})(),
+    )
+    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
+
+    result = video_handlers._submit_video_request(
+        provider="vertex_ai",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr-actor-ref",
+        provider_duration_seconds=8,
+        creation_mode="character_consistency",
+        scene_reference={
+            "id": "scene-1",
+            "actor_identity_id": "actor-1",
+            "image_url": "https://cdn/scene.png",
+            "scene_key": "bathroom_adaptation",
+            "wardrobe_key": "everyday_sweater",
+            "identity_gate_result": {"status": "passed"},
+            "status": "approved",
+        },
+    )
+
+    assert len(captured["reference_images"]) == 1
+    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn/scene.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_scene_reference"
+    assert result["provider_metadata"]["scene_reference_image_id"] == "scene-1"
+
+
 def test_submit_video_request_skips_character_reference_images_for_vertex_4s_base(monkeypatch):
     from app.features.videos import handlers as video_handlers
 
