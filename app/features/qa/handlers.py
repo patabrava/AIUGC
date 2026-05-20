@@ -36,6 +36,18 @@ def _is_removed_post(post: Dict[str, Any]) -> bool:
     return seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True
 
 
+def _json_object(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
 def _active_posts(posts: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     return [post for post in posts if not _is_removed_post(post)]
 
@@ -212,6 +224,22 @@ async def approve_qa(post_id: str, req: Request):
         
         post = response.data[0]
         batch_id = post.get("batch_id")
+        video_metadata = _json_object(post.get("video_metadata"))
+        identity_gate_result = _json_object(post.get("identity_gate_result"))
+        if (
+            qa_request.approved
+            and video_metadata.get("actor_identity_source") == "actor_identity_scene_reference"
+            and identity_gate_result.get("status") != "passed"
+        ):
+            raise FlowForgeException(
+                code=ErrorCode.VALIDATION_ERROR,
+                message="ActorIdentity video identity gate must pass before QA approval.",
+                details={
+                    "post_id": post_id,
+                    "identity_gate_result": identity_gate_result,
+                },
+                status_code=422,
+            )
         
         # Update QA fields
         update_data = {

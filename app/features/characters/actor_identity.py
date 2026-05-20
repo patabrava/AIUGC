@@ -78,3 +78,19 @@ def ensure_video_scene_reference_ready(
         "route": route,
         "scene_reference": scene_reference,
     }
+
+
+def build_video_identity_gate_result(*, video_url: Optional[str], automated_available: bool) -> IdentityGateResult:
+    if not video_url:
+        return IdentityGateResult(
+            status="failed",
+            reason="Video URL missing; cannot verify identity",
+            gate_type="unavailable",
+        )
+    if not automated_available:
+        return IdentityGateResult(
+            status="manual_required",
+            reason="Video identity requires manual review because automated face gate is not configured",
+            gate_type="manual",
+        )
+    return IdentityGateResult(status="pending", reason="Automated video identity gate queued", gate_type="automated")

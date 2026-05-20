@@ -40,3 +40,12 @@ def test_scene_reference_prompt_does_not_include_freeform_script_text():
     )
     assert "Badezimmer" not in prompt
     assert "bright accessible bathroom" in prompt
+
+
+def test_actor_identity_video_gate_defaults_to_manual_required():
+    from app.features.characters.actor_identity import build_video_identity_gate_result
+
+    result = build_video_identity_gate_result(video_url="https://cdn.example.com/video.mp4", automated_available=False)
+    assert result.status == "manual_required"
+    assert result.gate_type == "manual"
+    assert "manual review" in result.reason.lower()

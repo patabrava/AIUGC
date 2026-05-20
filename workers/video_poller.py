@@ -29,6 +29,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings, google_ai_context_fingerprint, resolve_google_application_credentials_path
 from app.core.errors import ErrorCode, FlowForgeException, ValidationError
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
+from app.features.characters.actor_identity import build_video_identity_gate_result
 from app.features.videos.prompt_audit import record_prompt_audit
 from app.features.videos.quota_guard import (
     build_reservation_key,
@@ -1530,13 +1531,23 @@ def _store_completed_video(
         "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         **postprocess_metadata,
     }
+    video_identity_gate = None
+    if existing_metadata.get("actor_identity_source") == "actor_identity_scene_reference":
+        video_identity_gate = build_video_identity_gate_result(
+            video_url=upload_result["url"],
+            automated_available=False,
+        )
+        merged_metadata["video_identity_gate_result"] = video_identity_gate.model_dump(mode="json")
     merged_metadata = _clear_terminal_polling_metadata(merged_metadata)
 
-    supabase.table("posts").update({
+    update_payload = {
         "video_status": VIDEO_STATUS_CAPTION_PENDING,
         "video_url": upload_result["url"],
         "video_metadata": merged_metadata,
-    }).eq("id", post_id).execute()
+    }
+    if video_identity_gate is not None:
+        update_payload["identity_gate_result"] = video_identity_gate.model_dump(mode="json")
+    supabase.table("posts").update(update_payload).eq("id", post_id).execute()
 
     logger.info(
         "video_completed",
