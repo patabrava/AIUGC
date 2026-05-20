@@ -16,6 +16,7 @@ from pydantic import ValidationError as PydanticValidationError
 from app.adapters.llm_client import get_llm_client
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
+from app.core.errors import ThirdPartyError
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.blog.queries import (
@@ -523,6 +524,9 @@ def publish_blog_post(post_id: str, *, publication_date: Optional[str] = None) -
     else:
         item_id = client.create_item(field_data)
 
+    if blog_content.get("preview_image_url"):
+        client.assert_item_has_images(item_id, client.get_image_field_slugs())
+
     client.publish_item(item_id)
     published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     updated_content = merge_blog_content_updates(
@@ -553,6 +557,7 @@ def delete_blog_post(post_id: str, *, delete_webflow_item: bool = True) -> Dict[
     post = _load_post_for_blog(post_id)
     blog_content = post.get("blog_content") or {}
     webflow_item_id = post.get("blog_webflow_item_id")
+    site_published = False
 
     if delete_webflow_item and webflow_item_id:
         client = WebflowClient(
@@ -561,6 +566,16 @@ def delete_blog_post(post_id: str, *, delete_webflow_item: bool = True) -> Dict[
             site_id=settings.webflow_site_id,
         )
         client.delete_item(str(webflow_item_id))
+        try:
+            client.publish_site()
+            site_published = True
+        except ThirdPartyError as exc:
+            logger.warning(
+                "blog_delete_site_publish_skipped",
+                post_id=post_id,
+                webflow_item_id=webflow_item_id,
+                error=str(exc),
+            )
 
     updated_content = merge_blog_content_updates(
         blog_content,
@@ -580,6 +595,7 @@ def delete_blog_post(post_id: str, *, delete_webflow_item: bool = True) -> Dict[
         "blog_status": "disabled",
         "webflow_item_id": webflow_item_id,
         "deleted_webflow_item": bool(delete_webflow_item and webflow_item_id),
+        "site_published": site_published,
     }
 
 

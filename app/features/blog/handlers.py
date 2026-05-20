@@ -70,7 +70,10 @@ async def toggle_blog(post_id: str, request: Request):
 async def generate_blog_draft(post_id: str):
     """Generate a blog draft from the research dossier."""
     try:
-        from app.features.blog.blog_runtime import generate_blog_draft as run_generate
+        from app.features.blog.blog_runtime import (
+            generate_blog_draft as run_generate,
+            generate_blog_image as run_generate_image,
+        )
 
         result = run_generate(post_id)
         if result.get("error"):
@@ -78,6 +81,14 @@ async def generate_blog_draft(post_id: str):
                 ok=False,
                 data=result,
             )
+        if result.get("image_prompt") and not result.get("preview_image_url"):
+            image_result = run_generate_image(post_id, image_prompt=result.get("image_prompt"))
+            result = {
+                **result,
+                "image_prompt": image_result.get("image_prompt") or result.get("image_prompt"),
+                "preview_image_url": image_result.get("preview_image_url"),
+                "image_model": image_result.get("image_model"),
+            }
         return SuccessResponse(
             data=result,
         )
@@ -120,7 +131,10 @@ async def generate_blog_image(post_id: str, request: Request):
 async def generate_all_blog_drafts(batch_id: str):
     """Generate blog drafts for all blog-enabled posts in a batch."""
     try:
-        from app.features.blog.blog_runtime import generate_blog_draft as run_generate
+        from app.features.blog.blog_runtime import (
+            generate_blog_draft as run_generate,
+            generate_blog_image as run_generate_image,
+        )
 
         posts = get_blog_enabled_posts(batch_id)
         results = []
@@ -129,12 +143,37 @@ async def generate_all_blog_drafts(batch_id: str):
             if isinstance(seed_data, str):
                 import json
                 seed_data = json.loads(seed_data)
+            blog_content = post.get("blog_content") or {}
             if seed_data.get("script_review_status") != "approved":
                 continue
-            if post.get("blog_status") in ("generating", "draft", "scheduled", "publishing", "published"):
+            if post.get("blog_status") in ("generating", "publishing", "published"):
                 continue
-            result = run_generate(post["id"])
-            results.append({"post_id": post["id"], "status": "draft" if not result.get("error") else "failed"})
+            if post.get("blog_status") == "scheduled" and blog_content.get("preview_image_url"):
+                continue
+
+            result = blog_content if blog_has_draft_content(blog_content) else run_generate(post["id"])
+            item_status = "draft"
+            image_generated = False
+
+            if result.get("error"):
+                item_status = "failed"
+            elif result.get("image_prompt") and not result.get("preview_image_url"):
+                image_result = run_generate_image(post["id"], image_prompt=result.get("image_prompt"))
+                result = {
+                    **result,
+                    "image_prompt": image_result.get("image_prompt") or result.get("image_prompt"),
+                    "preview_image_url": image_result.get("preview_image_url"),
+                    "image_model": image_result.get("image_model"),
+                }
+                image_generated = bool(result.get("preview_image_url"))
+
+            results.append(
+                {
+                    "post_id": post["id"],
+                    "status": item_status,
+                    "image_generated": image_generated,
+                }
+            )
 
         return SuccessResponse(
             data={"results": results},

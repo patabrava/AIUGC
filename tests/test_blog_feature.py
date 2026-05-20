@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import os
 from unittest.mock import MagicMock, patch
+import asyncio
 
 import base64
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError as PydanticValidationError
+
+from app.core.errors import ThirdPartyError
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -22,6 +25,7 @@ os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 
 from app.main import app
 from app.adapters.llm_client import LLMClient
+from app.features.blog import handlers as blog_handlers
 from app.features.blog import blog_runtime
 from app.features.blog import queries as blog_queries
 from app.features.blog.schemas import BlogContent, BlogSource, build_blog_content_from_llm, normalize_blog_content
@@ -202,6 +206,7 @@ def test_webflow_client_build_blog_field_data_resolves_field_slugs_and_author_op
             {"slug": "vorschautext", "displayName": "Vorschautext"},
             {"slug": "lesedauer", "displayName": "Lesedauer"},
             {"slug": "vorschaubild", "displayName": "Vorschaubild"},
+            {"slug": "hauptbild", "displayName": "Hauptbild"},
             {
                 "slug": "autor",
                 "displayName": "Autor",
@@ -222,7 +227,7 @@ def test_webflow_client_build_blog_field_data_resolves_field_slugs_and_author_op
             "body_html": "<h2>Einleitung</h2><p>Text</p>",
             "preview_text": "Vorschautext",
             "reading_time": "7-8 Minuten",
-            "preview_image_url": "https://images.example.com/thumb.jpg",
+            "preview_image_url": "https://images.example.com/Lippe Lift/thumb.jpg",
             "author_name": "Patrick Berg",
             "meta_title": "Meta Titel",
             "meta_description": "Meta Beschreibung",
@@ -236,7 +241,8 @@ def test_webflow_client_build_blog_field_data_resolves_field_slugs_and_author_op
     assert field_data["inhalt"].startswith("<h2>")
     assert field_data["veroeffentlichungsdatum"] == "2026-04-01T09:00:00Z"
     assert field_data["autor"] == "opt-1"
-    assert field_data["vorschaubild"]["url"] == "https://images.example.com/thumb.jpg"
+    assert field_data["vorschaubild"]["url"] == "https://images.example.com/Lippe%20Lift/thumb.jpg"
+    assert field_data["hauptbild"]["url"] == "https://images.example.com/Lippe%20Lift/thumb.jpg"
 
 
 def test_webflow_client_create_and_publish_payloads_are_correct():
@@ -253,8 +259,75 @@ def test_webflow_client_create_and_publish_payloads_are_correct():
     assert item_id == "wf-item-123"
     assert published is True
     assert mock_request.call_args_list[0].args[0] == "POST"
+    assert mock_request.call_args_list[0].args[1].endswith("?skipInvalidFiles=false")
     assert mock_request.call_args_list[0].kwargs["json"]["fieldData"]["name"] == "Test Blog"
     assert mock_request.call_args_list[1].kwargs["json"] == {"itemIds": ["wf-item-123"]}
+
+
+def test_webflow_client_assert_item_has_images_rejects_skipped_image_import():
+    client = WebflowClient(api_token="test-token", collection_id="col-1", site_id="site-1")
+    client.get_item = MagicMock(return_value={"fieldData": {"vorschaubild": None}})
+
+    with pytest.raises(Exception, match="missing expected image fields"):
+        client.assert_item_has_images("wf-item-123", ["vorschaubild"])
+
+
+def test_delete_blog_post_publishes_site_after_webflow_delete(monkeypatch):
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.delete_calls = []
+            self.publish_calls = 0
+
+        def delete_item(self, item_id):
+            self.delete_calls.append(item_id)
+
+        def publish_site(self):
+            self.publish_calls += 1
+
+    fake_client = _FakeClient()
+    monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _post_id: {
+        "id": "post-1",
+        "blog_enabled": True,
+        "blog_status": "published",
+        "blog_webflow_item_id": "wf-1",
+        "blog_content": {"name": "Title", "slug": "title", "preview_image_url": "https://example.com/image.png"},
+    })
+    monkeypatch.setattr(blog_runtime, "WebflowClient", lambda **_kwargs: fake_client)
+    monkeypatch.setattr(blog_runtime, "get_settings", lambda: MagicMock(webflow_api_token="t", webflow_collection_id="c", webflow_site_id="s"))
+    monkeypatch.setattr(blog_runtime, "update_blog_status", lambda *args, **kwargs: {"ok": True})
+
+    result = blog_runtime.delete_blog_post("post-1")
+
+    assert result["deleted_webflow_item"] is True
+    assert result["site_published"] is True
+    assert fake_client.delete_calls == ["wf-1"]
+    assert fake_client.publish_calls == 1
+
+
+def test_delete_blog_post_skips_site_publish_errors(monkeypatch):
+    class _FakeClient:
+        def delete_item(self, item_id):
+            self.deleted = item_id
+
+        def publish_site(self):
+            raise ThirdPartyError(message="missing scopes", details={"status": 403})
+
+    fake_client = _FakeClient()
+    monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _post_id: {
+        "id": "post-1",
+        "blog_enabled": True,
+        "blog_status": "published",
+        "blog_webflow_item_id": "wf-1",
+        "blog_content": {"name": "Title", "slug": "title", "preview_image_url": "https://example.com/image.png"},
+    })
+    monkeypatch.setattr(blog_runtime, "WebflowClient", lambda **_kwargs: fake_client)
+    monkeypatch.setattr(blog_runtime, "get_settings", lambda: MagicMock(webflow_api_token="t", webflow_collection_id="c", webflow_site_id="s"))
+    monkeypatch.setattr(blog_runtime, "update_blog_status", lambda *args, **kwargs: {"ok": True})
+
+    result = blog_runtime.delete_blog_post("post-1")
+
+    assert result["deleted_webflow_item"] is True
+    assert result["site_published"] is False
 
 
 def test_gemini_image_generation_decodes_inline_image_bytes():
@@ -302,6 +375,41 @@ def test_blog_image_generate_endpoint_is_registered():
     client = TestClient(app)
     response = client.post("/blog/posts/00000000-0000-0000-0000-000000000000/blog/image/generate", allow_redirects=False)
     assert response.status_code != 404
+
+
+def test_blog_generate_endpoint_auto_generates_preview_image(monkeypatch):
+    draft_calls = []
+    image_calls = []
+
+    def _fake_generate_blog_draft(post_id):
+        draft_calls.append(post_id)
+        return {
+            "name": "Titel",
+            "slug": "titel",
+            "body_html": "<p>Text</p>",
+            "image_prompt": "Quadratisches Coverbild",
+            "preview_image_url": None,
+        }
+
+    def _fake_generate_blog_image(post_id, *, image_prompt=None):
+        image_calls.append((post_id, image_prompt))
+        return {
+            "post_id": post_id,
+            "image_prompt": image_prompt,
+            "preview_image_url": "https://cdn.example.com/blog/titel.png",
+            "image_model": "gemini-2.5-flash-image",
+        }
+
+    monkeypatch.setattr("app.features.blog.blog_runtime.generate_blog_draft", _fake_generate_blog_draft)
+    monkeypatch.setattr("app.features.blog.blog_runtime.generate_blog_image", _fake_generate_blog_image)
+
+    response = asyncio.run(blog_handlers.generate_blog_draft("post-1"))
+
+    payload = response.model_dump()
+    assert payload["data"]["preview_image_url"] == "https://cdn.example.com/blog/titel.png"
+    assert payload["data"]["image_model"] == "gemini-2.5-flash-image"
+    assert draft_calls == ["post-1"]
+    assert image_calls == [("post-1", "Quadratisches Coverbild")]
 
 
 def test_blog_content_update_endpoint_rejects_empty():
@@ -515,3 +623,67 @@ Meta-Beschreibung: So werden Arzttermine fuer Betroffene klarer und verlaesslich
     assert len(update_calls) == 2
     assert update_calls[0][1]["status"] == "generating"
     assert update_calls[1][1]["status"] == "draft"
+
+
+def test_generate_all_blog_drafts_fills_missing_preview_images(monkeypatch):
+    generated = []
+    imaged = []
+
+    monkeypatch.setattr(
+        "app.features.blog.handlers.get_blog_enabled_posts",
+        lambda _batch_id: [
+            {
+                "id": "post-1",
+                "seed_data": {"script_review_status": "approved"},
+                "blog_status": "pending",
+                "blog_content": {},
+            },
+            {
+                "id": "post-2",
+                "seed_data": {"script_review_status": "approved"},
+                "blog_status": "draft",
+                "blog_content": {
+                    "name": "Bestehender Draft",
+                    "slug": "bestehender-draft",
+                    "body_html": "<p>Text</p>",
+                    "image_prompt": "Bild fuer bestehenden Draft",
+                    "preview_image_url": None,
+                },
+            },
+        ],
+    )
+
+    def _fake_generate_blog_draft(post_id):
+        generated.append(post_id)
+        return {
+            "name": f"Draft {post_id}",
+            "slug": f"draft-{post_id}",
+            "body_html": "<p>Text</p>",
+            "image_prompt": f"Bild fuer {post_id}",
+            "preview_image_url": None,
+        }
+
+    def _fake_generate_blog_image(post_id, *, image_prompt=None):
+        imaged.append((post_id, image_prompt))
+        return {
+            "post_id": post_id,
+            "image_prompt": image_prompt,
+            "preview_image_url": f"https://cdn.example.com/{post_id}.png",
+            "image_model": "gemini-2.5-flash-image",
+        }
+
+    monkeypatch.setattr("app.features.blog.blog_runtime.generate_blog_draft", _fake_generate_blog_draft)
+    monkeypatch.setattr("app.features.blog.blog_runtime.generate_blog_image", _fake_generate_blog_image)
+
+    response = asyncio.run(blog_handlers.generate_all_blog_drafts("batch-1"))
+
+    payload = response.model_dump()
+    assert generated == ["post-1"]
+    assert imaged == [
+        ("post-1", "Bild fuer post-1"),
+        ("post-2", "Bild fuer bestehenden Draft"),
+    ]
+    assert payload["data"]["results"] == [
+        {"post_id": "post-1", "status": "draft", "image_generated": True},
+        {"post_id": "post-2", "status": "draft", "image_generated": True},
+    ]

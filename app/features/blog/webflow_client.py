@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
@@ -28,6 +29,7 @@ _FIELD_CANDIDATES = {
     "preview_text": ("vorschautext", "previewtext", "excerpt", "summarytext"),
     "reading_time": ("lesedauer", "readingtime", "readtime"),
     "preview_image": ("vorschaubild", "previewimage", "thumbnail", "image", "mainimage"),
+    "main_image": ("hauptbild", "heroimage", "mainimage", "coverimage"),
     "author": ("autor", "author"),
     "meta_title": ("metatitel", "meta-title", "metatitle", "seotitle"),
     "meta_description": ("metabeschreibung", "meta-description", "metadescription", "seodescription"),
@@ -98,7 +100,7 @@ class WebflowClient:
         """Create a new staged CMS collection item. Returns the Webflow item ID."""
         payload = {"fieldData": field_data}
         logger.info("webflow_create_item", collection_id=self.collection_id, slug=field_data.get("slug"))
-        data = self._request("POST", f"/collections/{self.collection_id}/items", json=payload)
+        data = self._request("POST", f"/collections/{self.collection_id}/items?skipInvalidFiles=false", json=payload)
         item_id = self._extract_item_id(data)
         logger.info("webflow_item_created", item_id=item_id)
         return item_id
@@ -107,8 +109,13 @@ class WebflowClient:
         """Update an existing staged CMS item. Returns the item ID."""
         payload = {"fieldData": field_data}
         logger.info("webflow_update_item", item_id=item_id)
-        self._request("PATCH", f"/collections/{self.collection_id}/items/{item_id}", json=payload)
+        self._request("PATCH", f"/collections/{self.collection_id}/items/{item_id}?skipInvalidFiles=false", json=payload)
         return item_id
+
+    def get_item(self, item_id: str) -> Dict[str, Any]:
+        """Fetch a staged CMS item by ID."""
+        logger.info("webflow_get_item", item_id=item_id)
+        return self._request("GET", f"/collections/{self.collection_id}/items/{item_id}")
 
     def publish_item(self, item_id: str) -> bool:
         """Publish a staged item live via the collection publish endpoint."""
@@ -139,6 +146,7 @@ class WebflowClient:
             "name": blog_content.get("name", ""),
             "slug": blog_content.get("slug", ""),
         }
+        main_image_field = self._find_field(fields, "main_image")
 
         required_fields = {
             "merksatz": self._require_field(fields, "merksatz"),
@@ -166,16 +174,43 @@ class WebflowClient:
 
         preview_image_url = (blog_content.get("preview_image_url") or "").strip()
         if preview_image_url:
-            field_data[self._field_slug(required_fields["preview_image"])] = {
-                "url": preview_image_url,
-                "alt": blog_content.get("name", "Blog image"),
-            }
+            image_value = self._build_image_value(preview_image_url, blog_content.get("name", "Blog image"))
+            field_data[self._field_slug(required_fields["preview_image"])] = image_value
+            if main_image_field is not None:
+                field_data[self._field_slug(main_image_field)] = image_value
 
         author_value = self._resolve_option_value(required_fields["author"], blog_content.get("author_name"))
         if author_value:
             field_data[self._field_slug(required_fields["author"])] = author_value
 
         return field_data
+
+    def get_image_field_slugs(self) -> List[str]:
+        """Return image field slugs this adapter populates for the configured collection."""
+        fields = self.get_collection_fields()
+        image_fields = [self._require_field(fields, "preview_image")]
+        main_image_field = self._find_field(fields, "main_image")
+        if main_image_field is not None:
+            image_fields.append(main_image_field)
+        return [self._field_slug(field) for field in image_fields]
+
+    def assert_item_has_images(self, item_id: str, field_slugs: Sequence[str]) -> None:
+        """Fail fast when Webflow skipped an image field during CMS file import."""
+        item = self.get_item(item_id)
+        field_data = item.get("fieldData") or {}
+        missing = [slug for slug in field_slugs if not field_data.get(slug)]
+        if missing:
+            raise ThirdPartyError(
+                message="Webflow item is missing expected image fields after upload",
+                details={"item_id": item_id, "missing_fields": missing},
+            )
+
+    def _build_image_value(self, url: str, alt_text: Any) -> Dict[str, str]:
+        encoded_url = quote(str(url).strip(), safe=":/?&=#%")
+        return {
+            "url": encoded_url,
+            "alt": str(alt_text or "Blog image").strip() or "Blog image",
+        }
 
     def _field_slug(self, field: Dict[str, Any]) -> str:
         slug = field.get("slug")
