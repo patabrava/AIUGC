@@ -97,6 +97,8 @@ class BatchResponse(BaseModel):
     state: BatchState
     creation_mode: str = "automated"
     character_snapshot: Optional[Dict[str, Any]] = None
+    actor_identity_id: Optional[str] = None
+    actor_identity_snapshot: Optional[Dict[str, Any]] = None
     scene_plan: Optional[Dict[str, str]] = None
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None
@@ -158,6 +160,8 @@ class BatchDetailResponse(BaseModel):
     state: BatchState
     creation_mode: str = "automated"
     character_snapshot: Optional[Dict[str, Any]] = None
+    actor_identity_id: Optional[str] = None
+    actor_identity_snapshot: Optional[Dict[str, Any]] = None
     scene_plan: Optional[Dict[str, str]] = None
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None

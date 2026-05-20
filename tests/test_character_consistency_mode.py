@@ -41,26 +41,33 @@ def test_creation_mode_rejects_unknown_value():
         )
 
 
-def test_create_batch_snapshots_active_character(monkeypatch):
+def _ready_actor_identity():
+    from app.features.characters.schemas import ActorIdentityRecord
+
+    return ActorIdentityRecord(
+        id="actor-1",
+        name="AYRA",
+        is_active=True,
+        provider="magnific",
+        provider_lora_id="110",
+        provider_lora_name="ayra",
+        provider_training_task_id="train-1",
+        training_status="completed",
+        training_phase="ready",
+        training_progress_percent=100,
+        training_images=[f"https://cdn.example.com/{idx}.png" for idx in range(8)],
+        created_at="2026-05-20T00:00:00Z",
+        updated_at="2026-05-20T00:00:00Z",
+        training_completed_at="2026-05-20T00:00:00Z",
+    )
+
+
+def test_create_batch_snapshots_ready_actor_identity(monkeypatch):
     from app.features.batches import queries as batch_queries
-    from app.features.characters.schemas import CharacterRecord
 
     captured = {}
 
-    monkeypatch.setattr(
-        batch_queries,
-        "get_active_character",
-        lambda: CharacterRecord(
-            id="char-1",
-            name="Snapshot Test",
-            front_image_url="https://cdn/front.png",
-            three_quarter_image_url="https://cdn/3q.png",
-            profile_image_url="https://cdn/profile.png",
-            is_active=True,
-            created_at="2026-05-08T00:00:00Z",
-            updated_at="2026-05-08T00:00:00Z",
-        ),
-    )
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", _ready_actor_identity)
     def fake_insert(payload, legacy_payload=None):
         captured["payload"] = payload
         return {"id": "batch-1", **payload}
@@ -74,15 +81,16 @@ def test_create_batch_snapshots_active_character(monkeypatch):
     )
 
     assert captured["payload"]["creation_mode"] == "character_consistency"
-    assert captured["payload"]["character_snapshot"]["character_id"] == "char-1"
-    assert captured["payload"]["character_snapshot"]["front_image_url"] == "https://cdn/front.png"
+    assert captured["payload"]["actor_identity_id"] == "actor-1"
+    assert captured["payload"]["actor_identity_snapshot"]["provider_lora_id"] == "110"
+    assert captured["payload"]["character_snapshot"] is None
 
 
-def test_character_mode_without_active_character_raises(monkeypatch):
+def test_character_consistency_requires_ready_actor_identity_for_new_batches(monkeypatch):
     from app.core.errors import ValidationError
     from app.features.batches import queries as batch_queries
 
-    monkeypatch.setattr(batch_queries, "get_active_character", lambda: None)
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", lambda: None)
 
     with pytest.raises(ValidationError) as exc:
         batch_queries.create_batch(
@@ -91,7 +99,20 @@ def test_character_mode_without_active_character_raises(monkeypatch):
             creation_mode="character_consistency",
         )
 
-    assert "character" in exc.value.message.lower()
+    assert "actoridentity training" in exc.value.message.lower()
+
+
+def test_existing_legacy_character_snapshot_batches_remain_valid():
+    from app.features.characters.actor_identity import resolve_character_consistency_source
+
+    source = resolve_character_consistency_source(
+        batch={
+            "id": "batch-legacy",
+            "creation_mode": "character_consistency",
+            "character_snapshot": {"character_id": "char-1", "front_image_url": "https://cdn/front.png"},
+        }
+    )
+    assert source["source"] == "legacy_character_snapshot"
 
 
 def test_scene_and_negative_prompt_helpers(monkeypatch):
