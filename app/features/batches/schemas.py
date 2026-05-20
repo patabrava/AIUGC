@@ -134,6 +134,7 @@ class PostDetail(BaseModel):
     video_operation_id: Optional[str] = None
     video_provider: Optional[str] = None
     scene_reference_image_id: Optional[str] = None
+    scene_reference_candidates: List[Dict[str, Any]] = Field(default_factory=list)
     identity_gate_result: Optional[Dict[str, Any]] = None
     qa_pass: Optional[bool] = None
     qa_notes: Optional[str] = None

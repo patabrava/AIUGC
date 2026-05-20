@@ -42,6 +42,17 @@ def test_scene_reference_prompt_does_not_include_freeform_script_text():
     assert "bright accessible bathroom" in prompt
 
 
+def test_scene_reference_prompt_can_include_provider_lora_handle():
+    prompt = build_scene_reference_prompt(
+        actor_name="AYRA",
+        scene_key="bathroom_adaptation",
+        wardrobe_key="everyday_sweater",
+        post_type="value",
+        provider_lora_name="ayra_actor_codex",
+    )
+    assert "@ayra_actor_codex::100" in prompt
+
+
 def test_actor_identity_video_gate_defaults_to_manual_required():
     from app.features.characters.actor_identity import build_video_identity_gate_result
 
@@ -49,3 +60,12 @@ def test_actor_identity_video_gate_defaults_to_manual_required():
     assert result.status == "manual_required"
     assert result.gate_type == "manual"
     assert "manual review" in result.reason.lower()
+
+
+def test_mystic_generated_response_extracts_scene_reference_url():
+    from app.features.characters.handlers import _extract_mystic_image_url
+
+    assert (
+        _extract_mystic_image_url({"generated": ["https://cdn.example.com/still.png"]})
+        == "https://cdn.example.com/still.png"
+    )

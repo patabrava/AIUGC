@@ -408,6 +408,7 @@
     {% endif %}
 
     {% if batch.creation_mode == 'character_consistency' and batch.actor_identity_id and post.video_prompt_json %}
+    {% set scene_references = post.scene_reference_candidates or [] %}
     <div class="mt-6 border-t border-gray-200 pt-4">
         <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -423,6 +424,8 @@
                     {% if post.identity_gate_result and post.identity_gate_result.get('reason') %}
                     <p class="mt-1 text-xs text-amber-700">{{ post.identity_gate_result.get('reason') }}</p>
                     {% endif %}
+                    {% elif scene_references %}
+                    <p class="mt-1 text-xs text-amber-800">Review generated candidates and approve one before video submission.</p>
                     {% else %}
                     <p class="mt-1 text-xs text-amber-800">Generate and approve a scene still before video submission.</p>
                     {% endif %}
@@ -459,6 +462,63 @@
                     {% endif %}
                 </div>
             </div>
+            {% if scene_references %}
+            <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                {% for reference in scene_references %}
+                <div class="rounded-md border border-amber-200 bg-white/70 p-2">
+                    {% if reference.image_url %}
+                    <img
+                        src="{{ reference.image_url }}"
+                        alt="Actor scene reference candidate"
+                        class="h-32 w-full rounded object-cover"
+                    >
+                    {% else %}
+                    <div class="flex h-32 items-center justify-center rounded bg-amber-100 text-xs text-amber-800">
+                        {{ reference.status or 'submitted' }}
+                    </div>
+                    {% endif %}
+                    <p class="mt-2 text-[11px] text-amber-900">
+                        {{ reference.scene_key }} · {{ reference.wardrobe_key }} · {{ reference.status }}
+                    </p>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        {% if reference.image_url and reference.status != 'approved' %}
+                        <button
+                            hx-post="/settings/character/scene-reference/{{ reference.id }}/approve"
+                            hx-trigger="click"
+                            hx-swap="none"
+                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                            class="inline-flex items-center rounded-md bg-green-700 px-2 py-1 text-[11px] font-medium text-white hover:bg-green-800"
+                        >
+                            Approve
+                        </button>
+                        {% endif %}
+                        {% if reference.provider_task_id and not reference.image_url %}
+                        <button
+                            hx-post="/settings/character/scene-reference/{{ reference.id }}/poll"
+                            hx-trigger="click"
+                            hx-swap="none"
+                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                            class="inline-flex items-center rounded-md bg-amber-700 px-2 py-1 text-[11px] font-medium text-white hover:bg-amber-800"
+                        >
+                            Refresh
+                        </button>
+                        {% endif %}
+                        {% if reference.status not in ['approved', 'rejected'] %}
+                        <button
+                            hx-post="/settings/character/scene-reference/{{ reference.id }}/reject"
+                            hx-trigger="click"
+                            hx-swap="none"
+                            hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                            class="inline-flex items-center rounded-md bg-white px-2 py-1 text-[11px] font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
+                        >
+                            Reject
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
     </div>
     {% endif %}

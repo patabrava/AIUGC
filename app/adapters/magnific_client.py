@@ -18,6 +18,31 @@ class MagnificCompatibilityError(ValueError):
     pass
 
 
+def _unwrap_data_payload(data: dict[str, Any]) -> dict[str, Any]:
+    nested = data.get("data")
+    if not isinstance(nested, dict):
+        return dict(data)
+    normalized = dict(nested)
+    for key, value in data.items():
+        if key != "data" and key not in normalized:
+            normalized[key] = value
+    return normalized
+
+
+def list_lora_rows(response: dict[str, Any]) -> list[dict[str, Any]]:
+    data = response.get("data")
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)]
+    if not isinstance(data, dict):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for value in data.values():
+        if isinstance(value, list):
+            rows.extend(row for row in value if isinstance(row, dict))
+    return rows
+
+
 @dataclass(frozen=True)
 class MagnificTrainingStatus:
     raw_status: str
@@ -180,7 +205,9 @@ class MagnificClient:
             description=description,
             webhook_url=webhook_url,
         )
-        data = self._request("POST", "/v1/ai/loras/characters", correlation_id=correlation_id, json_payload=payload)
+        data = _unwrap_data_payload(
+            self._request("POST", "/v1/ai/loras/characters", correlation_id=correlation_id, json_payload=payload)
+        )
         task_id = data.get("task_id") or data.get("id") or data.get("lora_id")
         if task_id is not None:
             data["task_id"] = str(task_id)
@@ -211,14 +238,18 @@ class MagnificClient:
             webhook_url=webhook_url,
             extra_options=extra_options,
         )
-        data = self._request("POST", "/v1/ai/mystic", correlation_id=correlation_id, json_payload=payload)
+        data = _unwrap_data_payload(
+            self._request("POST", "/v1/ai/mystic", correlation_id=correlation_id, json_payload=payload)
+        )
         task_id = data.get("task_id") or data.get("id")
         if task_id is not None:
             data["task_id"] = str(task_id)
         return data
 
     def get_mystic_task(self, *, task_id: str, correlation_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/v1/ai/mystic/{task_id}", correlation_id=correlation_id)
+        return _unwrap_data_payload(
+            self._request("GET", f"/v1/ai/mystic/{task_id}", correlation_id=correlation_id)
+        )
 
 
 def get_magnific_client() -> MagnificClient:

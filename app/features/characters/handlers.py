@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.adapters.magnific_client import get_magnific_client, normalize_lora_training_status
+from app.adapters.magnific_client import get_magnific_client, list_lora_rows, normalize_lora_training_status
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
 from app.core.logging import get_logger
@@ -121,7 +121,7 @@ def _extract_mystic_image_url(task: dict) -> Optional[str]:
     for key in ("image_url", "url", "output_url"):
         if task.get(key):
             return str(task[key])
-    images = task.get("images") or task.get("outputs") or task.get("result")
+    images = task.get("generated") or task.get("images") or task.get("outputs") or task.get("result")
     if isinstance(images, list):
         for item in images:
             if isinstance(item, str):
@@ -135,6 +135,14 @@ def _extract_mystic_image_url(task: dict) -> Optional[str]:
             if images.get(key):
                 return str(images[key])
     return None
+
+
+def _post_batch_id(post_id: str) -> str:
+    post = _single_row(
+        get_supabase().client.table("posts").select("batch_id").eq("id", post_id).execute(),
+        label="Post",
+    )
+    return str(post.get("batch_id") or "")
 
 
 @router.post("/character/actor")
@@ -203,11 +211,8 @@ def poll_actor_identity_training(request: Request):
     actor_identity = character_queries.get_active_actor_identity()
     if actor_identity is not None and not actor_identity_is_ready(actor_identity):
         loras = get_magnific_client().list_loras(correlation_id=correlation_id)
-        rows = loras.get("data") if isinstance(loras.get("data"), list) else []
         match = None
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
+        for row in list_lora_rows(loras):
             if actor_identity.provider_lora_id and str(row.get("id")) == str(actor_identity.provider_lora_id):
                 match = row
                 break
@@ -266,6 +271,7 @@ def generate_scene_reference(post_id: str):
         scene_key=intent.scene_key,
         wardrobe_key=intent.wardrobe_key,
         post_type=str(post.get("post_type") or ""),
+        provider_lora_name=actor_identity.provider_lora_name,
     )
 
     client = get_magnific_client()
@@ -305,6 +311,8 @@ def approve_scene_reference(reference_id: str):
     reference = character_queries.get_scene_reference_by_id(reference_id)
     if not reference:
         raise HTTPException(status_code=404, detail="Scene reference not found")
+    if not reference.get("image_url"):
+        raise HTTPException(status_code=422, detail="Scene reference image is not generated yet")
     gate = passed_manual_gate()
     character_queries.record_scene_reference_gate(
         reference_id=reference_id,
@@ -318,7 +326,30 @@ def approve_scene_reference(reference_id: str):
         gate_result=gate,
         correlation_id=correlation_id,
     )
-    return RedirectResponse(url=f"/batches/{reference.get('batch_id') or ''}", status_code=303)
+    return RedirectResponse(url=f"/batches/{_post_batch_id(str(reference.get('post_id')))}", status_code=303)
+
+
+@router.post("/character/scene-reference/{reference_id}/poll")
+def poll_scene_reference(reference_id: str):
+    correlation_id = str(uuid4())
+    reference = character_queries.get_scene_reference_by_id(reference_id)
+    if not reference:
+        raise HTTPException(status_code=404, detail="Scene reference not found")
+    task_id = str(reference.get("provider_task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=422, detail="Scene reference has no provider task id")
+
+    task = get_magnific_client().get_mystic_task(task_id=task_id, correlation_id=correlation_id)
+    image_url = _extract_mystic_image_url(task)
+    if image_url:
+        metadata = reference.get("provider_metadata") if isinstance(reference.get("provider_metadata"), dict) else {}
+        character_queries.mark_scene_reference_generated(
+            reference_id=reference_id,
+            image_url=image_url,
+            provider_metadata={**metadata, "poll_task": task},
+            correlation_id=correlation_id,
+        )
+    return RedirectResponse(url=f"/batches/{_post_batch_id(str(reference.get('post_id')))}", status_code=303)
 
 
 @router.post("/character/scene-reference/{reference_id}/reject")
@@ -333,4 +364,4 @@ def reject_scene_reference(reference_id: str):
         status="rejected",
         correlation_id=correlation_id,
     )
-    return RedirectResponse(url=f"/settings/character", status_code=303)
+    return RedirectResponse(url=f"/batches/{_post_batch_id(str(reference.get('post_id')))}", status_code=303)

@@ -6,6 +6,7 @@ from app.adapters.magnific_client import (
     MagnificClient,
     MagnificCompatibilityError,
     build_mystic_character_payload,
+    list_lora_rows,
     normalize_lora_training_status,
 )
 
@@ -68,3 +69,64 @@ def test_normalize_training_status_maps_completed_to_ready():
     assert status.phase == "ready"
     assert status.progress_percent == 100
     assert status.provider_lora_id == "110"
+
+
+def test_list_lora_rows_flattens_grouped_provider_response():
+    rows = list_lora_rows(
+        {
+            "data": {
+                "default": [{"id": 1, "name": "stock-style"}],
+                "customs": [{"id": 110, "name": "ayra_actor", "training": {"status": "completed"}}],
+            }
+        }
+    )
+    assert [row["id"] for row in rows] == [1, 110]
+
+
+def test_submit_character_training_unwraps_data_payload(monkeypatch):
+    class _FakeHttp:
+        def request(self, *_args, **_kwargs):
+            class _Response:
+                status_code = 200
+                text = "{}"
+
+                def json(self):
+                    return {"data": {"task_id": "train-1", "status": "CREATED"}}
+
+            return _Response()
+
+    client = MagnificClient(api_key="test-key", http_client=_FakeHttp())
+    response = client.submit_character_training(
+        name="ayra_actor",
+        quality="high",
+        gender="female",
+        images=[f"https://cdn.example.com/{idx}.png" for idx in range(8)],
+        description=None,
+        webhook_url=None,
+        correlation_id="corr",
+    )
+    assert response["task_id"] == "train-1"
+
+
+def test_get_mystic_task_unwraps_data_payload():
+    class _FakeHttp:
+        def request(self, *_args, **_kwargs):
+            class _Response:
+                status_code = 200
+                text = "{}"
+
+                def json(self):
+                    return {
+                        "data": {
+                            "task_id": "mystic-1",
+                            "status": "COMPLETED",
+                            "generated": ["https://cdn.example.com/still.png"],
+                        }
+                    }
+
+            return _Response()
+
+    client = MagnificClient(api_key="test-key", http_client=_FakeHttp())
+    response = client.get_mystic_task(task_id="mystic-1", correlation_id="corr")
+    assert response["task_id"] == "mystic-1"
+    assert response["generated"] == ["https://cdn.example.com/still.png"]

@@ -44,11 +44,19 @@ def map_script_to_scene_intent(
     return ScriptIntent("neutral_home", "everyday_sweater", "default")
 
 
-def build_scene_reference_prompt(*, actor_name: str, scene_key: str, wardrobe_key: str, post_type: str) -> str:
+def build_scene_reference_prompt(
+    *,
+    actor_name: str,
+    scene_key: str,
+    wardrobe_key: str,
+    post_type: str,
+    provider_lora_name: str | None = None,
+) -> str:
     scene = SCENE_CATALOG[scene_key]
     wardrobe = WARDROBE_SET[wardrobe_key]
+    actor_ref = f"@{provider_lora_name}::100" if provider_lora_name else actor_name
     return (
-        f"Photorealistic vertical UGC still of {actor_name}, one recognizable adult person, "
+        f"Photorealistic vertical UGC still of {actor_ref}, one recognizable adult person, "
         f"wearing {wardrobe}, seated naturally in a wheelchair, in {scene}. "
         f"Medium close-up, direct-to-camera friendly expression, natural skin texture, no text, no logo."
     )
