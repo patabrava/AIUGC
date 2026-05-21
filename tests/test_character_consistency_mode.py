@@ -128,6 +128,63 @@ def test_scene_and_negative_prompt_helpers(monkeypatch):
     )
 
 
+def test_reference_image_wrapper_does_not_override_legacy_character_prompt():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {
+            "script": "Ein ruhiger Satz fuer den Test.",
+            "character": (
+                "Same person as the uploaded @ayra character reference images: "
+                "38-year-old German woman with shoulder-length light brown hair."
+            ),
+        }
+    )
+
+    assert "Same person as the uploaded" not in prompt["veo_prompt"]
+    assert prompt_builder.DEFAULT_CHARACTER in prompt["veo_prompt"]
+
+
+def test_character_consistency_prompt_uses_legacy_short_character():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {
+            "script": "Ein ruhiger Satz fuer den Test.",
+            "character": (
+                "Same person as the uploaded @ayra character reference images: "
+                "38-year-old German woman with shoulder-length light brown hair."
+            ),
+        },
+        use_legacy_short_character=True,
+    )
+
+    assert "Same person as the uploaded" not in prompt["veo_prompt"]
+    assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt["veo_prompt"]
+
+
+def test_32s_extended_base_prompt_uses_legacy_short_character():
+    from app.features.posts import prompt_builder
+    from app.features.videos import handlers as video_handlers
+
+    prompt_text, _ = video_handlers._build_veo_extended_base_prompt(
+        {
+            "script": (
+                "Heute beginnt mit einem ruhigen Blick auf das, was direkt vor dir liegt, nicht auf alles gleichzeitig. "
+                "Du wählst eine Aufgabe, machst sie sichtbar kleiner, und gibst dir genug Zeit, ohne dich innerlich zu hetzen. "
+                "Wenn etwas stockt, ist das kein Beweis gegen dich, sondern nur ein Hinweis, den Schritt anzupassen. "
+                "Genau so entsteht wieder Sicherheit: durch klare Wiederholung, freundliche Grenzen, und einen Alltag, der dich nicht permanent überfordert."
+            )
+        },
+        None,
+        planned_extension_hops=3,
+        target_length_tier=32,
+    )
+
+    assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt_text
+    assert "Same person as the uploaded" not in prompt_text
+
+
 def test_select_veo_model_for_character_consistency_uses_full_model(monkeypatch):
     from app.adapters import veo_client
 

@@ -224,6 +224,19 @@ CHARACTER_SOURCE_KEYS = (
     "prompt_character",
 )
 
+REFERENCE_IMAGE_CHARACTER_PREFIXES = (
+    "same person as the uploaded",
+    "same person as uploaded",
+)
+
+
+def _is_reference_image_character_text(value: str) -> bool:
+    normalized = " ".join(value.lower().split())
+    return any(
+        normalized.startswith(prefix) and "reference image" in normalized
+        for prefix in REFERENCE_IMAGE_CHARACTER_PREFIXES
+    )
+
 logger = get_logger(__name__)
 
 _SCENE_PROPOSAL_SYSTEM_PROMPT = (
@@ -335,11 +348,21 @@ def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
     }
 
 
-def _resolve_character_value(seed_data: Dict[str, Any], legacy_32_visuals: bool) -> str:
+def _resolve_character_value(
+    seed_data: Dict[str, Any],
+    legacy_32_visuals: bool,
+    *,
+    use_legacy_short_character: bool = False,
+) -> str:
+    if use_legacy_short_character:
+        return LEGACY_SHORT_CHARACTER
     for key in CHARACTER_SOURCE_KEYS:
         value = seed_data.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            cleaned = value.strip()
+            if _is_reference_image_character_text(cleaned):
+                continue
+            return cleaned
     return LEGACY_32_CHARACTER if legacy_32_visuals else DEFAULT_CHARACTER
 
 
@@ -348,15 +371,23 @@ def sync_video_prompt_with_seed_data(
     seed_data: Dict[str, Any],
     *,
     legacy_32_visuals: bool = False,
+    use_legacy_short_character: bool = False,
 ) -> Dict[str, Any]:
     if not isinstance(video_prompt, dict) or not isinstance(seed_data, dict):
         return video_prompt
 
-    resolved_character = _resolve_character_value(seed_data, legacy_32_visuals)
+    resolved_character = _resolve_character_value(
+        seed_data,
+        legacy_32_visuals,
+        use_legacy_short_character=use_legacy_short_character,
+    )
     current_character = str(video_prompt.get("character") or "").strip()
     if not resolved_character or current_character == resolved_character:
         return video_prompt
-    if current_character not in {DEFAULT_CHARACTER, LEGACY_SHORT_CHARACTER, LEGACY_32_CHARACTER}:
+    if (
+        current_character not in {DEFAULT_CHARACTER, LEGACY_SHORT_CHARACTER, LEGACY_32_CHARACTER}
+        and not _is_reference_image_character_text(current_character)
+    ):
         return video_prompt
 
     updated_prompt = dict(video_prompt)
@@ -410,6 +441,7 @@ def build_video_prompt_from_seed(
     seed_data: Dict[str, Any],
     *,
     legacy_32_visuals: bool = False,
+    use_legacy_short_character: bool = False,
     post_type: str = "value",
     scene_plan: Optional[dict] = None,
     scene_override: Optional[str] = None,
@@ -459,7 +491,11 @@ def build_video_prompt_from_seed(
     )
 
     # Assemble complete prompt using template defaults
-    character_value = _resolve_character_value(seed_data, legacy_32_visuals)
+    character_value = _resolve_character_value(
+        seed_data,
+        legacy_32_visuals,
+        use_legacy_short_character=use_legacy_short_character,
+    )
     style_value = LEGACY_32_STYLE if legacy_32_visuals else DEFAULT_STYLE
     scene_value = LEGACY_SCENE_BODY if legacy_32_visuals else _scene_for_template(
         resolve_scene_for_post(post_type=post_type, scene_plan=scene_plan, override=scene_override),

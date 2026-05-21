@@ -458,11 +458,13 @@ def _load_or_build_video_prompt(
                 video_metadata = {}
         if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
             legacy_32_visuals = True
+        use_legacy_short_character = str((batch or {}).get("creation_mode") or "").strip() == "character_consistency"
 
         synced_prompt = sync_video_prompt_with_seed_data(
             video_prompt,
             seed_data,
             legacy_32_visuals=legacy_32_visuals,
+            use_legacy_short_character=use_legacy_short_character,
         )
         if synced_prompt != video_prompt:
             supabase_client.table("posts").update({
@@ -498,6 +500,7 @@ def _load_or_build_video_prompt(
         built_prompt = build_video_prompt_from_seed(
             seed_data,
             legacy_32_visuals=False,
+            use_legacy_short_character=str((batch or {}).get("creation_mode") or "").strip() == "character_consistency",
             post_type=str(post.get("post_type") or "value"),
             scene_plan=scene_plan,
         )
