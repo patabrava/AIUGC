@@ -1,63 +1,152 @@
 {% extends "settings/base.html" %}
 
 {% block settings_content %}
-<h1 class="text-2xl font-semibold text-gray-900">Character</h1>
+<h1 class="text-2xl font-semibold text-gray-900">Actor Identity</h1>
 <p class="mt-2 text-sm text-gray-600">
-  Upload three reference images to lock subject identity for Character Consistency batches:
-  front, three-quarter, and profile. PNG or JPEG, up to 5 MB each.
+  Train one active Magnific character LoRA for new Character Consistency batches. Use 8-20 public training images.
+  Existing legacy batches can still use the older three-image snapshot below.
 </p>
 <p class="mt-2 text-sm text-gray-600">
   For actor training, use the <a href="/settings/actor" class="font-medium text-[#E58434] hover:underline">Actor Identity</a> tab.
 </p>
 
-{% if character %}
-<div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-  <figure>
-    <img src="{{ character.front_image_url }}" alt="Front reference" class="aspect-square w-full rounded-lg border object-cover" />
-    <figcaption class="mt-1 text-center text-xs text-gray-500">Front</figcaption>
-  </figure>
-  <figure>
-    <img src="{{ character.three_quarter_image_url }}" alt="Three-quarter reference" class="aspect-square w-full rounded-lg border object-cover" />
-    <figcaption class="mt-1 text-center text-xs text-gray-500">Three Quarter</figcaption>
-  </figure>
-  <figure>
-    <img src="{{ character.profile_image_url }}" alt="Profile reference" class="aspect-square w-full rounded-lg border object-cover" />
-    <figcaption class="mt-1 text-center text-xs text-gray-500">Profile</figcaption>
-  </figure>
-</div>
-<p class="mt-3 text-xs text-gray-500">Active character: <span class="font-medium text-gray-700">{{ character.name }}</span></p>
-{% else %}
-<p class="mt-6 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-  No character uploaded yet. Upload three images below to enable Character Consistency mode.
-</p>
-{% endif %}
+<section
+  class="mt-6 rounded-lg border border-gray-200 p-4"
+  {% if actor_identity and not actor_identity_ready %}
+  hx-post="/settings/character/actor/poll"
+  hx-trigger="every 10s"
+  hx-swap="outerHTML"
+  {% endif %}
+>
+  <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">Active LoRA Training</h2>
+      {% if actor_identity %}
+      <p class="mt-1 text-sm text-gray-700">
+        <span class="font-medium">{{ actor_identity.name }}</span>
+        · {{ actor_identity.training_images | length }} training images
+        · phase {{ actor_identity.training_phase }}
+        · {{ actor_identity.training_progress_percent }}%
+      </p>
+      {% if actor_identity.training_error %}
+      <p class="mt-2 rounded-md bg-red-50 p-2 text-sm text-red-700">{{ actor_identity.training_error }}</p>
+      {% endif %}
+      {% else %}
+      <p class="mt-1 text-sm text-gray-600">No ActorIdentity has been trained yet.</p>
+      {% endif %}
+    </div>
+    {% if actor_identity_ready %}
+    <span class="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">Character Consistency Unlocked</span>
+    {% else %}
+    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Character Consistency Blocked</span>
+    {% endif %}
+  </div>
 
-<form method="post" action="/settings/character" enctype="multipart/form-data" class="mt-8 space-y-4">
-  <label class="block">
-    <span class="text-sm font-medium text-gray-800">Name</span>
-    <input
-      type="text"
-      name="name"
-      value="{{ character.name if character else 'Default Character' }}"
-      class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-    />
-  </label>
-  <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-    <label class="block text-sm">
-      <span class="font-medium text-gray-800">Front</span>
-      <input type="file" name="front" accept="image/png,image/jpeg" required class="mt-1 w-full text-xs" />
+  {% if actor_identity %}
+  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    {% for image_url in actor_identity.training_images[:8] %}
+    <img src="{{ image_url }}" alt="Actor training image {{ loop.index }}" class="aspect-square w-full rounded-md border object-cover" />
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<form method="post" action="/settings/character/actor" enctype="multipart/form-data" class="mt-8 space-y-4 rounded-lg border border-gray-200 p-4">
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Train or Replace Active ActorIdentity</h2>
+    <p class="mt-1 text-sm text-gray-600">
+      Submitting this form replaces the active ActorIdentity and starts a new Magnific LoRA training task.
+    </p>
+  </div>
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <label class="block">
+      <span class="text-sm font-medium text-gray-800">Actor name</span>
+      <input type="text" name="name" value="{{ actor_identity.name if actor_identity else 'AYRA Actor' }}" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" />
     </label>
-    <label class="block text-sm">
-      <span class="font-medium text-gray-800">Three Quarter</span>
-      <input type="file" name="three_quarter" accept="image/png,image/jpeg" required class="mt-1 w-full text-xs" />
+    <label class="block">
+      <span class="text-sm font-medium text-gray-800">Gender</span>
+      <select name="gender" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+        <option value="other">Other</option>
+      </select>
     </label>
-    <label class="block text-sm">
-      <span class="font-medium text-gray-800">Profile</span>
-      <input type="file" name="profile" accept="image/png,image/jpeg" required class="mt-1 w-full text-xs" />
+    <label class="block">
+      <span class="text-sm font-medium text-gray-800">Quality</span>
+      <select name="quality" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
+        <option value="high">High</option>
+        <option value="standard">Standard</option>
+      </select>
+    </label>
+    <label class="block">
+      <span class="text-sm font-medium text-gray-800">Consent source</span>
+      <input type="text" name="consent_source" placeholder="Owned image set, signed consent, or internal generation run" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" />
     </label>
   </div>
+  <label class="block">
+    <span class="text-sm font-medium text-gray-800">Training images (8-20 PNG/JPEG files)</span>
+    <input type="file" name="training_images" accept="image/png,image/jpeg" multiple required class="mt-1 w-full text-xs" />
+  </label>
   <button type="submit" class="rounded-lg bg-[#E58434] px-4 py-2 text-sm font-medium text-white hover:bg-[#d27a2f]">
-    Save Character
+    Start LoRA Training
   </button>
 </form>
+
+<section class="mt-10 border-t border-gray-200 pt-8">
+  <h2 class="text-lg font-semibold text-gray-900">Legacy Three-Image Character Snapshot</h2>
+  <p class="mt-2 text-sm text-gray-600">
+    This path exists for old CharacterSnapshot batches. New no-drift batches use ActorIdentity LoRA training above.
+  </p>
+
+  {% if character %}
+  <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <figure>
+      <img src="{{ character.front_image_url }}" alt="Front reference" class="aspect-square w-full rounded-lg border object-cover" />
+      <figcaption class="mt-1 text-center text-xs text-gray-500">Front</figcaption>
+    </figure>
+    <figure>
+      <img src="{{ character.three_quarter_image_url }}" alt="Three-quarter reference" class="aspect-square w-full rounded-lg border object-cover" />
+      <figcaption class="mt-1 text-center text-xs text-gray-500">Three Quarter</figcaption>
+    </figure>
+    <figure>
+      <img src="{{ character.profile_image_url }}" alt="Profile reference" class="aspect-square w-full rounded-lg border object-cover" />
+      <figcaption class="mt-1 text-center text-xs text-gray-500">Profile</figcaption>
+    </figure>
+  </div>
+  <p class="mt-3 text-xs text-gray-500">Active legacy character: <span class="font-medium text-gray-700">{{ character.name }}</span></p>
+  {% else %}
+  <p class="mt-6 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+    No legacy character uploaded. This does not block ActorIdentity LoRA training.
+  </p>
+  {% endif %}
+
+  <form method="post" action="/settings/character" enctype="multipart/form-data" class="mt-8 space-y-4">
+    <label class="block">
+      <span class="text-sm font-medium text-gray-800">Legacy name</span>
+      <input
+        type="text"
+        name="name"
+        value="{{ character.name if character else 'Default Character' }}"
+        class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+      />
+    </label>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <label class="block text-sm">
+        <span class="font-medium text-gray-800">Front</span>
+        <input type="file" name="front" accept="image/png,image/jpeg" required class="mt-1 w-full text-xs" />
+      </label>
+      <label class="block text-sm">
+        <span class="font-medium text-gray-800">Three Quarter</span>
+        <input type="file" name="three_quarter" accept="image/png,image/jpeg" required class="mt-1 w-full text-xs" />
+      </label>
+      <label class="block text-sm">
+        <span class="font-medium text-gray-800">Profile</span>
+        <input type="file" name="profile" accept="image/png,image/jpeg" required class="mt-1 w-full text-xs" />
+      </label>
+    </div>
+    <button type="submit" class="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700">
+      Save Legacy Character
+    </button>
+  </form>
+</section>
 {% endblock %}

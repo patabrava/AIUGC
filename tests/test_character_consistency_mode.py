@@ -41,26 +41,33 @@ def test_creation_mode_rejects_unknown_value():
         )
 
 
-def test_create_batch_snapshots_active_character(monkeypatch):
+def _ready_actor_identity():
+    from app.features.characters.schemas import ActorIdentityRecord
+
+    return ActorIdentityRecord(
+        id="actor-1",
+        name="AYRA",
+        is_active=True,
+        provider="magnific",
+        provider_lora_id="110",
+        provider_lora_name="ayra",
+        provider_training_task_id="train-1",
+        training_status="completed",
+        training_phase="ready",
+        training_progress_percent=100,
+        training_images=[f"https://cdn.example.com/{idx}.png" for idx in range(8)],
+        created_at="2026-05-20T00:00:00Z",
+        updated_at="2026-05-20T00:00:00Z",
+        training_completed_at="2026-05-20T00:00:00Z",
+    )
+
+
+def test_create_batch_snapshots_ready_actor_identity(monkeypatch):
     from app.features.batches import queries as batch_queries
-    from app.features.characters.schemas import CharacterRecord
 
     captured = {}
 
-    monkeypatch.setattr(
-        batch_queries,
-        "get_active_character",
-        lambda: CharacterRecord(
-            id="char-1",
-            name="Snapshot Test",
-            front_image_url="https://cdn/front.png",
-            three_quarter_image_url="https://cdn/3q.png",
-            profile_image_url="https://cdn/profile.png",
-            is_active=True,
-            created_at="2026-05-08T00:00:00Z",
-            updated_at="2026-05-08T00:00:00Z",
-        ),
-    )
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", _ready_actor_identity)
     def fake_insert(payload, legacy_payload=None):
         captured["payload"] = payload
         return {"id": "batch-1", **payload}
@@ -74,15 +81,16 @@ def test_create_batch_snapshots_active_character(monkeypatch):
     )
 
     assert captured["payload"]["creation_mode"] == "character_consistency"
-    assert captured["payload"]["character_snapshot"]["character_id"] == "char-1"
-    assert captured["payload"]["character_snapshot"]["front_image_url"] == "https://cdn/front.png"
+    assert captured["payload"]["actor_identity_id"] == "actor-1"
+    assert captured["payload"]["actor_identity_snapshot"]["provider_lora_id"] == "110"
+    assert captured["payload"]["character_snapshot"] is None
 
 
-def test_character_mode_without_active_character_raises(monkeypatch):
+def test_character_consistency_requires_ready_actor_identity_for_new_batches(monkeypatch):
     from app.core.errors import ValidationError
     from app.features.batches import queries as batch_queries
 
-    monkeypatch.setattr(batch_queries, "get_active_character", lambda: None)
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", lambda: None)
 
     with pytest.raises(ValidationError) as exc:
         batch_queries.create_batch(
@@ -91,7 +99,20 @@ def test_character_mode_without_active_character_raises(monkeypatch):
             creation_mode="character_consistency",
         )
 
-    assert "character" in exc.value.message.lower()
+    assert "actoridentity training" in exc.value.message.lower()
+
+
+def test_existing_legacy_character_snapshot_batches_remain_valid():
+    from app.features.characters.actor_identity import resolve_character_consistency_source
+
+    source = resolve_character_consistency_source(
+        batch={
+            "id": "batch-legacy",
+            "creation_mode": "character_consistency",
+            "character_snapshot": {"character_id": "char-1", "front_image_url": "https://cdn/front.png"},
+        }
+    )
+    assert source["source"] == "legacy_character_snapshot"
 
 
 def test_scene_and_negative_prompt_helpers(monkeypatch):
@@ -291,6 +312,69 @@ def test_submit_video_request_attaches_character_reference_images_to_vertex(monk
     assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn/front.png"
     assert result["provider_metadata"]["reference_images_enabled"] is True
     assert result["provider_metadata"]["reference_image_count"] == 3
+
+
+def test_actor_identity_batch_blocks_video_without_approved_scene_reference():
+    from app.core.errors import FlowForgeException
+    from app.features.characters.actor_identity import ensure_video_scene_reference_ready
+
+    batch = {"id": "batch-1", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"}
+    post = {"id": "post-1", "batch_id": "batch-1", "scene_reference_image_id": None}
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_ready(batch=batch, post=post, scene_reference=None, route="short")
+    assert "approved SceneReferenceImage" in exc.value.message
+
+
+def test_submit_video_request_attaches_actor_scene_reference_to_vertex(monkeypatch):
+    from app.features.videos import handlers as video_handlers
+
+    captured = {}
+
+    class FakeVertexClient:
+        def submit_text_video(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/actor-ref",
+                "status": "submitted",
+                "provider_model": kwargs.get("model") or "veo-3.1-generate-001",
+            }
+
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(
+        video_handlers,
+        "get_settings",
+        lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})(),
+    )
+    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
+
+    result = video_handlers._submit_video_request(
+        provider="vertex_ai",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr-actor-ref",
+        provider_duration_seconds=8,
+        creation_mode="character_consistency",
+        scene_reference={
+            "id": "scene-1",
+            "actor_identity_id": "actor-1",
+            "image_url": "https://cdn/scene.png",
+            "scene_key": "bathroom_adaptation",
+            "wardrobe_key": "everyday_sweater",
+            "identity_gate_result": {"status": "passed"},
+            "status": "approved",
+        },
+    )
+
+    assert len(captured["reference_images"]) == 1
+    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn/scene.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_scene_reference"
+    assert result["provider_metadata"]["scene_reference_image_id"] == "scene-1"
 
 
 def test_submit_video_request_skips_character_reference_images_for_vertex_4s_base(monkeypatch):

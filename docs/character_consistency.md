@@ -1,9 +1,33 @@
 # VEO 3.1 Character Consistency Research
 
 **Date:** 2026-04-01
-**Status:** Research complete, implementation pending
+**Status:** ActorIdentity MVP implemented on `codex/ayra-character-consistency-plan` (2026-05-20); older VEO-only research below is retained for context.
 
 ---
+
+## ActorIdentity LoRA MVP (2026-05-20)
+
+New `character_consistency` batches now fail closed unless one active `ActorIdentity` has completed Magnific character LoRA training and has a persisted provider LoRA id.
+
+Runtime contract:
+- Training requires 8-20 public image URLs. The helper `agents/testscripts/generate_actor_training_refs.py` can generate eight NanoBanana/Gemini references and upload them to R2.
+- Magnific character LoRA training is isolated in `app/adapters/magnific_client.py`; Mystic still generation rejects options known to make LoRAs silently ignored.
+- Existing batches with `character_snapshot` continue through the legacy three-image route.
+- New ActorIdentity-backed posts must generate and approve a controlled `SceneReferenceImage` before video submission.
+- Scene and wardrobe choices come only from `SCENE_CATALOG` and `WARDROBE_SET`; raw script text is not sent as scene/wardrobe provider prompt text.
+- The first video identity gate is manual-only. Completed ActorIdentity videos get `identity_gate_result.status=manual_required` until an operator marks the post-video identity gate passed.
+
+Verification:
+```bash
+python3 -m pytest -q tests/test_actor_identity_training.py tests/test_magnific_actor_identity.py tests/test_actor_identity_scene_reference.py
+python3 -m pytest -q tests/test_characters_feature.py tests/test_character_consistency_mode.py tests/test_video_duration_routing.py tests/test_veo_prompt_contract.py
+AIUGC_LIVE_MAGNIFIC_SMOKE=1 python3 -m pytest -q tests/live/test_magnific_actor_identity_smoke.py
+```
+
+For local browser checks against a shared Supabase project, start the app with background schedulers disabled:
+```bash
+DISABLE_BACKGROUND_SCHEDULERS=1 DISABLE_STARTUP_RECOVERY_CHECKS=1 uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
 ## Current State Analysis
 

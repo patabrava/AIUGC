@@ -69,7 +69,7 @@ def test_upload_video_to_cloudflare_r2(monkeypatch):
     assert uploaded["ContentType"] == "video/mp4"
     assert result["storage_provider"] == "cloudflare_r2"
     assert result["storage_key"].startswith("Lippe Lift Studio/videos/")
-    assert result["url"].startswith("https://cdn.example.com/Lippe Lift Studio/videos/")
+    assert result["url"].startswith("https://cdn.example.com/Lippe%20Lift%20Studio/videos/")
 
 
 def test_ingest_video_from_public_url(monkeypatch):
@@ -105,4 +105,4 @@ def test_upload_image_to_cloudflare_r2(monkeypatch):
     assert uploaded["ContentType"] == "image/png"
     assert result["storage_provider"] == "cloudflare_r2"
     assert result["storage_key"].startswith("Lippe Lift Studio/images/")
-    assert result["url"].startswith("https://cdn.example.com/Lippe Lift Studio/images/")
+    assert result["url"].startswith("https://cdn.example.com/Lippe%20Lift%20Studio/images/")

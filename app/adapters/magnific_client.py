@@ -1,7 +1,3 @@
-"""
-Magnific API adapter for actor LoRA training and status polling.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,55 +6,232 @@ from typing import Any, Optional
 import httpx
 
 from app.core.config import get_settings
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_TRAINING_ENDPOINT = "/ai/loras/characters"
-_LORA_LIST_ENDPOINT = "/ai/loras"
-
-_STATUS_TO_PROGRESS = {
-    "queued": 10,
-    "pending": 10,
-    "training": 55,
-    "processing": 55,
-    "ready": 100,
-    "completed": 100,
-    "failed": 0,
-    "error": 0,
-}
+INCOMPATIBLE_MYSTIC_MODELS = {"fluid", "flexible", "super_real", "editorial_portraits"}
 
 
-@dataclass(frozen=True)
+class MagnificCompatibilityError(ValueError):
+    pass
+
+
+def _unwrap_data_payload(data: dict[str, Any]) -> dict[str, Any]:
+    nested = data.get("data")
+    if not isinstance(nested, dict):
+        return dict(data)
+    normalized = dict(nested)
+    for key, value in data.items():
+        if key != "data" and key not in normalized:
+            normalized[key] = value
+    return normalized
+
+
+def list_lora_rows(response: dict[str, Any]) -> list[dict[str, Any]]:
+    data = response.get("data")
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)]
+    if not isinstance(data, dict):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for value in data.values():
+        if isinstance(value, list):
+            rows.extend(row for row in value if isinstance(row, dict))
+    return rows
+
+
+@dataclass
 class MagnificTrainingStatus:
-    provider_training_task_id: Optional[str]
-    provider_lora_id: Optional[str]
-    provider_lora_name: Optional[str]
-    training_status: str
-    training_phase: str
-    training_progress_percent: int
+    raw_status: Optional[str] = None
+    phase: Optional[str] = None
+    progress_percent: Optional[int] = None
+    provider_lora_id: Optional[str] = None
+    provider_lora_name: Optional[str] = None
+    default_scale: Optional[float] = None
+    provider_training_task_id: Optional[str] = None
+    training_status: Optional[str] = None
+    training_phase: Optional[str] = None
+    training_progress_percent: Optional[int] = None
     training_error: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        status = self.raw_status or self.training_status or "unknown"
+        phase = self.phase or self.training_phase or status
+        progress = self.progress_percent
+        if progress is None:
+            progress = self.training_progress_percent if self.training_progress_percent is not None else 0
+        self.raw_status = status
+        self.training_status = self.training_status or status
+        self.phase = phase
+        self.training_phase = self.training_phase or phase
+        self.progress_percent = int(progress)
+        self.training_progress_percent = self.training_progress_percent if self.training_progress_percent is not None else int(progress)
+
+
+def normalize_lora_training_status(row: dict[str, Any]) -> MagnificTrainingStatus:
+    training = row.get("training") if isinstance(row.get("training"), dict) else {}
+    raw = str(training.get("status") or row.get("status") or "unknown").lower()
+    phase_map = {
+        "created": ("queued", 10),
+        "queued": ("queued", 10),
+        "in_progress": ("training", 50),
+        "processing": ("training", 50),
+        "training": ("training", 50),
+        "completed": ("ready", 100),
+        "succeeded": ("ready", 100),
+        "ready": ("ready", 100),
+        "failed": ("failed", 0),
+        "error": ("failed", 0),
+    }
+    phase, percent = phase_map.get(raw, ("training", 35))
+    return MagnificTrainingStatus(
+        raw_status=raw,
+        phase=phase,
+        progress_percent=percent,
+        provider_training_task_id=str(row.get("task_id") or row.get("training_task_id") or "") or None,
+        provider_lora_id=str(row.get("id")) if row.get("id") is not None else None,
+        provider_lora_name=str(row.get("name")) if row.get("name") else None,
+        default_scale=training.get("defaultScale"),
+    )
+
+
+def build_mystic_character_payload(
+    *,
+    prompt: str,
+    lora_id: str,
+    strength: int,
+    aspect_ratio: str = "social_story_9_16",
+    resolution: str = "2k",
+    webhook_url: Optional[str] = None,
+    extra_options: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    options = dict(extra_options or {})
+    if options.get("structure_reference") or options.get("style_reference"):
+        raise MagnificCompatibilityError("Mystic LoRA payload cannot include structure_reference or style_reference")
+    model = str(options.get("model") or "").strip()
+    if model in INCOMPATIBLE_MYSTIC_MODELS:
+        raise MagnificCompatibilityError(f"Mystic model {model} silently ignores LoRAs")
+    payload: dict[str, Any] = {
+        "prompt": prompt,
+        "resolution": resolution,
+        "aspect_ratio": aspect_ratio,
+        "styling": {"characters": [{"id": str(lora_id), "strength": int(strength)}]},
+    }
+    if webhook_url:
+        payload["webhook_url"] = webhook_url
+    payload.update(options)
+    return payload
 
 
 class MagnificClient:
-    def __init__(self) -> None:
-        self._settings = get_settings()
-        self._http = httpx.Client(timeout=60.0, follow_redirects=True)
-
-    def _ensure_configured(self) -> None:
-        if not str(self._settings.magnific_api_key or "").strip():
-            raise ValidationError(
-                "MAGNIFIC_API_KEY is required to train Actor Identity LoRAs.",
-                {"provider": "magnific"},
-            )
+    def __init__(
+        self,
+        *,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+        http_client: Optional[httpx.Client] = None,
+    ) -> None:
+        settings = get_settings() if api_key is None else None
+        self.api_key = api_key if api_key is not None else settings.magnific_api_key
+        self.base_url = (base_url or (settings.magnific_base_url if settings else "https://api.magnific.com")).rstrip("/")
+        timeout = timeout_seconds if timeout_seconds is not None else (settings.magnific_timeout_seconds if settings else 60)
+        self.http_client = http_client or httpx.Client(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(connect=15.0, read=float(timeout), write=30.0, pool=None),
+            follow_redirects=True,
+        )
 
     def _headers(self) -> dict[str, str]:
+        if not self.api_key:
+            raise ThirdPartyError(message="Magnific API key not configured", details={"provider": "magnific"})
         return {
-            "x-magnific-api-key": self._settings.magnific_api_key.strip(),
-            "accept": "application/json",
-            "content-type": "application/json",
+            "x-magnific-api-key": self.api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         }
+
+    def _request(self, method: str, path: str, *, correlation_id: str, json_payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        try:
+            response = self.http_client.request(method, path, headers=self._headers(), json=json_payload)
+            if response.status_code >= 400:
+                raise ThirdPartyError(
+                    message="Magnific API request failed",
+                    details={
+                        "provider": "magnific",
+                        "path": path,
+                        "status_code": response.status_code,
+                        "body": response.text[:1000],
+                        "correlation_id": correlation_id,
+                    },
+                )
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ThirdPartyError(
+                    message="Magnific API returned a non-object response",
+                    details={"provider": "magnific", "path": path, "correlation_id": correlation_id},
+                )
+            return data
+        except ThirdPartyError:
+            raise
+        except httpx.HTTPError as exc:
+            raise ThirdPartyError(
+                message="Magnific API transport failed",
+                details={"provider": "magnific", "path": path, "error": str(exc), "correlation_id": correlation_id},
+            ) from exc
+
+    def build_character_training_payload(
+        self,
+        *,
+        name: str,
+        quality: str,
+        gender: str,
+        images: list[str],
+        description: Optional[str] = None,
+        webhook_url: Optional[str] = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "name": name,
+            "quality": quality,
+            "gender": gender,
+            "images": images,
+        }
+        if description:
+            payload["description"] = description
+        if webhook_url:
+            payload["webhook_url"] = webhook_url
+        return payload
+
+    def submit_character_training(
+        self,
+        *,
+        name: str,
+        quality: str,
+        gender: str,
+        images: list[str],
+        description: Optional[str],
+        webhook_url: Optional[str],
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        payload = self.build_character_training_payload(
+            name=name,
+            quality=quality,
+            gender=gender,
+            images=images,
+            description=description,
+            webhook_url=webhook_url,
+        )
+        data = _unwrap_data_payload(
+            self._request("POST", "/v1/ai/loras/characters", correlation_id=correlation_id, json_payload=payload)
+        )
+        task_id = data.get("task_id") or data.get("id") or data.get("lora_id")
+        if task_id is not None:
+            data["task_id"] = str(task_id)
+        logger.info("magnific_character_training_submitted", correlation_id=correlation_id, task_id=data.get("task_id"))
+        return data
 
     def train_character_lora(
         self,
@@ -71,34 +244,41 @@ class MagnificClient:
         description: Optional[str] = None,
         webhook_url: Optional[str] = None,
     ) -> MagnificTrainingStatus:
-        self._ensure_configured()
-        payload: dict[str, Any] = {
-            "name": name.strip(),
-            "quality": quality.strip(),
-            "gender": gender.strip(),
-            "images": [url.strip() for url in image_urls if str(url or "").strip()],
-        }
-        if description and description.strip():
-            payload["description"] = description.strip()
-        if webhook_url and webhook_url.strip():
-            payload["webhook_url"] = webhook_url.strip()
-
-        response = self._http.post(
-            f"{self._settings.magnific_base_url.rstrip('/')}{_TRAINING_ENDPOINT}",
-            headers=self._headers(),
-            json=payload,
-        )
-        response.raise_for_status()
-        data = response.json() if response.content else {}
-        status = _normalize_training_status(data)
-        logger.info(
-            "magnific_character_lora_training_submitted",
+        data = self.submit_character_training(
+            name=name,
+            quality=quality,
+            gender=gender,
+            images=[url.strip() for url in image_urls if str(url or "").strip()],
+            description=description,
+            webhook_url=webhook_url,
             correlation_id=correlation_id,
-            provider_training_task_id=status.provider_training_task_id,
-            provider_lora_id=status.provider_lora_id,
-            training_status=status.training_status,
         )
-        return status
+        raw_status = str(data.get("status") or "queued").lower()
+        phase, percent = {
+            "created": ("queued", 10),
+            "queued": ("queued", 10),
+            "pending": ("queued", 10),
+            "in_progress": ("training", 50),
+            "processing": ("training", 50),
+            "training": ("training", 50),
+            "completed": ("ready", 100),
+            "succeeded": ("ready", 100),
+            "ready": ("ready", 100),
+            "failed": ("failed", 0),
+            "error": ("failed", 0),
+        }.get(raw_status, ("training", 35))
+        return MagnificTrainingStatus(
+            raw_status=raw_status,
+            phase=phase,
+            progress_percent=percent,
+            provider_training_task_id=str(data.get("task_id") or data.get("training_task_id") or "") or None,
+            provider_lora_id=str(data.get("lora_id") or data.get("id") or "") or None,
+            provider_lora_name=str(data.get("name") or "") or None,
+            training_error=str(data.get("error") or "") or None,
+        )
+
+    def list_loras(self, *, correlation_id: str) -> dict[str, Any]:
+        return self._request("GET", "/v1/ai/loras", correlation_id=correlation_id)
 
     def poll_character_lora_status(
         self,
@@ -107,101 +287,48 @@ class MagnificClient:
         provider_lora_id: Optional[str] = None,
         correlation_id: str,
     ) -> Optional[MagnificTrainingStatus]:
-        self._ensure_configured()
-        response = self._http.get(
-            f"{self._settings.magnific_base_url.rstrip('/')}{_LORA_LIST_ENDPOINT}",
-            headers=self._headers(),
+        for row in list_lora_rows(self.list_loras(correlation_id=correlation_id)):
+            row_task_id = str(row.get("task_id") or row.get("training_task_id") or "")
+            row_lora_id = str(row.get("id") or row.get("lora_id") or "")
+            if provider_training_task_id and row_task_id == provider_training_task_id:
+                return normalize_lora_training_status(row)
+            if provider_lora_id and row_lora_id == provider_lora_id:
+                return normalize_lora_training_status(row)
+        return None
+
+    def create_mystic_scene_reference(
+        self,
+        *,
+        prompt: str,
+        lora_id: str,
+        strength: int,
+        correlation_id: str,
+        aspect_ratio: str = "social_story_9_16",
+        resolution: str = "2k",
+        webhook_url: Optional[str] = None,
+        extra_options: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        payload = build_mystic_character_payload(
+            prompt=prompt,
+            lora_id=lora_id,
+            strength=strength,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            webhook_url=webhook_url,
+            extra_options=extra_options,
         )
-        response.raise_for_status()
-        data = response.json() if response.content else {}
-        items = _extract_lora_items(data)
-        match = None
-        for item in items:
-            if provider_training_task_id and str(item.get("training_task_id") or item.get("provider_training_task_id") or "").strip() == provider_training_task_id:
-                match = item
-                break
-            if provider_lora_id and str(item.get("id") or item.get("lora_id") or "").strip() == provider_lora_id:
-                match = item
-                break
-        if match is None:
-            return None
-
-        status = _normalize_training_status(match)
-        logger.info(
-            "magnific_character_lora_status_polled",
-            correlation_id=correlation_id,
-            provider_training_task_id=status.provider_training_task_id,
-            provider_lora_id=status.provider_lora_id,
-            training_status=status.training_status,
-            training_progress_percent=status.training_progress_percent,
+        data = _unwrap_data_payload(
+            self._request("POST", "/v1/ai/mystic", correlation_id=correlation_id, json_payload=payload)
         )
-        return status
+        task_id = data.get("task_id") or data.get("id")
+        if task_id is not None:
+            data["task_id"] = str(task_id)
+        return data
 
-
-def _extract_lora_items(data: Any) -> list[dict[str, Any]]:
-    if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
-    if isinstance(data, dict):
-        for key in ("data", "loras", "items", "results"):
-            value = data.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-    return []
-
-
-def _normalize_training_status(payload: Any) -> MagnificTrainingStatus:
-    if not isinstance(payload, dict):
-        return MagnificTrainingStatus(
-            provider_training_task_id=None,
-            provider_lora_id=None,
-            provider_lora_name=None,
-            training_status="queued",
-            training_phase="queued",
-            training_progress_percent=10,
+    def get_mystic_task(self, *, task_id: str, correlation_id: str) -> dict[str, Any]:
+        return _unwrap_data_payload(
+            self._request("GET", f"/v1/ai/mystic/{task_id}", correlation_id=correlation_id)
         )
-
-    training = payload.get("training") if isinstance(payload.get("training"), dict) else {}
-    provider_training_task_id = str(
-        payload.get("training_task_id")
-        or payload.get("provider_training_task_id")
-        or training.get("task_id")
-        or training.get("id")
-        or payload.get("task_id")
-        or ""
-    ).strip() or None
-    provider_lora_id = str(payload.get("id") or payload.get("lora_id") or training.get("lora_id") or "").strip() or None
-    provider_lora_name = str(payload.get("name") or payload.get("lora_name") or "").strip() or None
-    raw_status = str(
-        training.get("status")
-        or payload.get("training_status")
-        or payload.get("status")
-        or "queued"
-    ).strip().lower()
-    training_status = raw_status or "queued"
-    training_phase = str(payload.get("training_phase") or training_status or "queued").strip() or "queued"
-    progress = payload.get("training_progress_percent")
-    if progress is None:
-        progress = payload.get("progress_percent")
-    if progress is None:
-        progress = _STATUS_TO_PROGRESS.get(training_status, 0)
-    try:
-        training_progress_percent = max(0, min(100, int(progress)))
-    except (TypeError, ValueError):
-        training_progress_percent = _STATUS_TO_PROGRESS.get(training_status, 0)
-    training_error = payload.get("training_error") or payload.get("error")
-    if isinstance(training_error, dict):
-        training_error = training_error.get("message") or training_error.get("error")
-    training_error = str(training_error).strip() if training_error else None
-
-    return MagnificTrainingStatus(
-        provider_training_task_id=provider_training_task_id,
-        provider_lora_id=provider_lora_id,
-        provider_lora_name=provider_lora_name,
-        training_status=training_status,
-        training_phase=training_phase,
-        training_progress_percent=training_progress_percent,
-        training_error=training_error,
-    )
 
 
 def get_magnific_client() -> MagnificClient:

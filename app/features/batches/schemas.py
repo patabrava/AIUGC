@@ -97,6 +97,8 @@ class BatchResponse(BaseModel):
     state: BatchState
     creation_mode: str = "automated"
     character_snapshot: Optional[Dict[str, Any]] = None
+    actor_identity_id: Optional[str] = None
+    actor_identity_snapshot: Optional[Dict[str, Any]] = None
     scene_plan: Optional[Dict[str, str]] = None
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None
@@ -131,6 +133,9 @@ class PostDetail(BaseModel):
     video_metadata: Optional[Dict[str, Any]] = None
     video_operation_id: Optional[str] = None
     video_provider: Optional[str] = None
+    scene_reference_image_id: Optional[str] = None
+    scene_reference_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    identity_gate_result: Optional[Dict[str, Any]] = None
     qa_pass: Optional[bool] = None
     qa_notes: Optional[str] = None
     qa_auto_checks: Optional[Dict[str, Any]] = None
@@ -158,6 +163,8 @@ class BatchDetailResponse(BaseModel):
     state: BatchState
     creation_mode: str = "automated"
     character_snapshot: Optional[Dict[str, Any]] = None
+    actor_identity_id: Optional[str] = None
+    actor_identity_snapshot: Optional[Dict[str, Any]] = None
     scene_plan: Optional[Dict[str, str]] = None
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None

@@ -54,6 +54,7 @@ from app.features.publish.handlers import (
 )
 from app.features.blog.schemas import normalize_blog_content
 from app.features.topics.captions import resolve_display_caption
+from app.features.characters import queries as character_queries
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -686,6 +687,9 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
         posts_data = get_posts_by_batch(batch_id)
+        scene_references_by_post = character_queries.list_scene_references_for_posts(
+            [str(p.get("id")) for p in posts_data if p.get("id")]
+        )
         batch_creation_mode = str(batch.get("creation_mode") or "").strip()
         
         posts_list = []
@@ -801,6 +805,13 @@ async def get_batch_endpoint(request: Request, batch_id: str):
                     video_metadata=video_metadata,
                     video_operation_id=p.get("video_operation_id"),
                     video_provider=p.get("video_provider"),
+                    scene_reference_image_id=p.get("scene_reference_image_id"),
+                    scene_reference_candidates=scene_references_by_post.get(str(p.get("id")), []),
+                    identity_gate_result=_normalize_json_object(
+                        p.get("identity_gate_result"),
+                        field_name="identity_gate_result",
+                        post_id=p.get("id"),
+                    ),
                     qa_pass=p.get("qa_pass"),
                     qa_notes=p.get("qa_notes"),
                     qa_auto_checks=qa_auto_checks,

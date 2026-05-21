@@ -94,6 +94,40 @@ Ctrl+C
 
 The API will be available at `http://127.0.0.1:8000` while the server is running.
 
+## ActorIdentity LoRA Verification
+
+New `character_consistency` batches require a ready Magnific-backed ActorIdentity. Legacy batches that already have `character_snapshot` continue to use the old three-image route.
+
+Focused local regression:
+```bash
+python3 -m pytest -q tests/test_actor_identity_training.py tests/test_magnific_actor_identity.py tests/test_actor_identity_scene_reference.py
+python3 -m pytest -q tests/test_characters_feature.py tests/test_character_consistency_mode.py tests/test_video_duration_routing.py tests/test_veo_prompt_contract.py
+```
+
+Generate the eight public training references with Gemini/NanoBanana, upload them to R2, and write a manifest:
+```bash
+AIUGC_LIVE_NANOBANANA_REFS=1 python3 agents/testscripts/generate_actor_training_refs.py
+```
+
+Paid provider smoke checks are opt-in:
+```bash
+AIUGC_LIVE_MAGNIFIC_SMOKE=1 python3 -m pytest -q tests/live/test_magnific_actor_identity_smoke.py
+```
+
+When using a shared Supabase project for local browser checks, disable background schedulers so a UI smoke does not refresh publish jobs:
+```bash
+DISABLE_BACKGROUND_SCHEDULERS=1 DISABLE_STARTUP_RECOVERY_CHECKS=1 uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Manual runtime acceptance path:
+1. Open `/settings/character`.
+2. Confirm a seven-image ActorTrainingSet is rejected with `422`.
+3. Submit the eight NanoBanana/R2 image URLs through the ActorIdentity training form.
+4. Poll until Magnific training stores a ready LoRA id.
+5. Create a new `character_consistency` batch.
+6. Build prompts, generate a scene still, approve the scene reference, then submit video.
+7. Confirm QA approval stays blocked until the post-video identity gate is manually passed.
+
 ### Environment Variables
 
 See `.env.example` for all required variables:
@@ -107,6 +141,8 @@ See `.env.example` for all required variables:
 - `VERTEX_AI_LOCATION`: Vertex location for standard Gemini calls, default `us-central1`
 - `VERTEX_GROUNDED_RESEARCH_LOCATION`: Vertex location for grounded research, default `global`
 - `GEMINI_API_KEY`: Legacy fallback only when `GEMINI_API_FALLBACK_ENABLED=true`
+- `MAGNIFIC_API_KEY`: Magnific API key for ActorIdentity character LoRA training and Mystic scene references
+- `ACTOR_IDENTITY_GATE_MODE=manual`: first implementation gate mode; automated face similarity is not enabled in this MVP
 - `ANTHROPIC_API_KEY`: Anthropic API key
 - Additional keys for video providers, Cloudflare R2, and social platforms
 - TikTok sandbox requires:

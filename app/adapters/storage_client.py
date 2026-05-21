@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import boto3
 import httpx
@@ -312,7 +313,7 @@ class StorageClient:
         return f"{key_prefix}{timestamp}_{safe_name}"
 
     def _build_public_url(self, object_key: str) -> str:
-        return f"{self.public_base_url}/{object_key}"
+        return f"{self.public_base_url}/{quote(object_key, safe='/')}"
 
 
 def get_storage_client() -> StorageClient:

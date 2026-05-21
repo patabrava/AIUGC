@@ -13,7 +13,8 @@ from app.adapters.supabase_client import get_supabase
 from app.core.states import BatchState, validate_state_transition
 from app.core.errors import NotFoundError, StateTransitionError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
-from app.features.characters.queries import get_active_character, snapshot_for_batch
+from app.features.characters.actor_identity import actor_identity_is_ready
+from app.features.characters.queries import get_active_actor_identity
 from app.features.topics.queries import create_post_for_batch
 
 logger = get_logger(__name__)
@@ -101,14 +102,23 @@ def create_batch(
     }
 
     if creation_mode == "character_consistency":
-        character = get_active_character()
-        if character is None:
+        actor_identity = get_active_actor_identity()
+        if not actor_identity_is_ready(actor_identity):
             raise ValidationError(
-                "Cannot create a Character Consistency batch: no active character configured. "
-                "Upload a character at /settings/character first.",
+                "Cannot create a Character Consistency batch: ActorIdentity training is not complete. "
+                "Upload 8-20 training images and wait for training at /settings/character.",
                 {"creation_mode": "character_consistency"},
             )
-        batch_data["character_snapshot"] = snapshot_for_batch(character).model_dump(mode="json")
+        batch_data["actor_identity_id"] = actor_identity.id
+        batch_data["actor_identity_snapshot"] = {
+            "actor_identity_id": actor_identity.id,
+            "name": actor_identity.name,
+            "provider": actor_identity.provider,
+            "provider_lora_id": actor_identity.provider_lora_id,
+            "provider_lora_name": actor_identity.provider_lora_name,
+            "training_completed_at": actor_identity.training_completed_at.isoformat() if actor_identity.training_completed_at else None,
+        }
+        batch_data["character_snapshot"] = None
         batch_data["scene_plan"] = None
 
     legacy_batch_data = {
@@ -126,9 +136,9 @@ def create_batch(
             "creation_mode": creation_mode,
             "manual_post_count": manual_post_count,
         }
-        if "character_snapshot" in batch_data:
-            batch["character_snapshot"] = batch_data["character_snapshot"]
-            batch["scene_plan"] = batch_data["scene_plan"]
+        for key in ("actor_identity_id", "actor_identity_snapshot", "character_snapshot", "scene_plan"):
+            if key in batch_data:
+                batch[key] = batch_data[key]
     
     logger.info(
         "batch_created",

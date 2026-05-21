@@ -120,6 +120,35 @@ class Settings(BaseSettings):
         le=30,
         description="Polling interval for Gemini Deep Research interactions",
     )
+    magnific_api_key: str = Field(
+        "",
+        validation_alias=AliasChoices("MAGNIFIC_API_KEY"),
+        description="Magnific API key for ActorIdentity LoRA and Mystic still generation",
+    )
+    magnific_base_url: str = Field(
+        "https://api.magnific.com",
+        validation_alias=AliasChoices("MAGNIFIC_BASE_URL"),
+    )
+    magnific_timeout_seconds: int = Field(
+        60,
+        ge=5,
+        le=300,
+        validation_alias=AliasChoices("MAGNIFIC_TIMEOUT_SECONDS"),
+    )
+    magnific_poll_seconds: int = Field(
+        10,
+        ge=2,
+        le=60,
+        validation_alias=AliasChoices("MAGNIFIC_POLL_SECONDS"),
+    )
+    magnific_webhook_secret: str = Field(
+        "",
+        validation_alias=AliasChoices("MAGNIFIC_WEBHOOK_SECRET"),
+    )
+    actor_identity_gate_mode: Literal["manual", "disabled"] = Field(
+        "manual",
+        validation_alias=AliasChoices("ACTOR_IDENTITY_GATE_MODE"),
+    )
     
     # Video Providers
     google_ai_project_id: Optional[str] = Field(None, description="Google Cloud project ID")
