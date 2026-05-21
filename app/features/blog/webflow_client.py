@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from html import escape
 from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -30,6 +31,7 @@ _FIELD_CANDIDATES = {
     "reading_time": ("lesedauer", "readingtime", "readtime"),
     "preview_image": ("vorschaubild", "previewimage", "thumbnail", "image", "mainimage"),
     "main_image": ("hauptbild", "heroimage", "mainimage", "coverimage"),
+    "sources": ("quellen", "sources", "source", "sourceurls", "source-links", "sourcelinks"),
     "author": ("autor", "author"),
     "meta_title": ("metatitel", "meta-title", "metatitle", "seotitle"),
     "meta_description": ("metabeschreibung", "meta-description", "metadescription", "seodescription"),
@@ -180,6 +182,7 @@ class WebflowClient:
             "slug": blog_content.get("slug", ""),
         }
         main_image_field = self._find_field(fields, "main_image")
+        sources_field = self._find_field(fields, "sources")
 
         required_fields = {
             "merksatz": self._require_field(fields, "merksatz"),
@@ -204,6 +207,11 @@ class WebflowClient:
         field_data[self._field_slug(required_fields["reading_time"])] = blog_content.get("reading_time", "")
         field_data[self._field_slug(required_fields["meta_title"])] = blog_content.get("meta_title", "")
         field_data[self._field_slug(required_fields["meta_description"])] = blog_content.get("meta_description", "")
+
+        if sources_field is not None:
+            sources_html = self._render_sources_rich_text(blog_content.get("sources") or [])
+            if sources_html:
+                field_data[self._field_slug(sources_field)] = sources_html
 
         preview_image_url = (blog_content.get("preview_image_url") or "").strip()
         if preview_image_url:
@@ -244,6 +252,24 @@ class WebflowClient:
             "url": encoded_url,
             "alt": str(alt_text or "Blog image").strip() or "Blog image",
         }
+
+    def _render_sources_rich_text(self, sources: Sequence[Dict[str, Any]]) -> str:
+        items: List[str] = []
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            title = str(source.get("title") or "").strip()
+            url = str(source.get("url") or "").strip()
+            if not title or not url:
+                continue
+            safe_title = escape(title)
+            safe_url = escape(url, quote=True)
+            items.append(
+                f'<li><a href="{safe_url}" target="_blank" rel="noopener noreferrer">{safe_title}</a></li>'
+            )
+        if not items:
+            return ""
+        return f"<ul>{''.join(items)}</ul>"
 
     def _field_slug(self, field: Dict[str, Any]) -> str:
         slug = field.get("slug")

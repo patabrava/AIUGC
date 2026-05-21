@@ -151,6 +151,40 @@ def test_gemini_image_generation_maps_nanobanana_alias():
     assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
 
 
+def test_gemini_image_generation_maps_nanobananapro_alias():
+    client = LLMClient()
+    client.gemini_provider = "gemini_api"
+    client.gemini_api_fallback_enabled = True
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64.b64encode(b"png-bytes").decode("ascii"),
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
+        result = client.generate_gemini_image(prompt="Quadratisches Coverbild", model="nanobananapro")
+
+    assert result["model"] == "gemini-3-pro-image-preview"
+    assert result["image_bytes"] == b"png-bytes"
+    call = mock_post.call_args
+    assert call.args[0] == "/models/gemini-3-pro-image-preview:generateContent"
+    assert call.kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
+    assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
+
+
 def test_blog_content_from_llm_requires_real_intro_and_closing():
     with pytest.raises(PydanticValidationError):
         build_blog_content_from_llm(
@@ -243,6 +277,58 @@ def test_webflow_client_build_blog_field_data_resolves_field_slugs_and_author_op
     assert field_data["autor"] == "opt-1"
     assert field_data["vorschaubild"]["url"] == "https://images.example.com/Lippe%20Lift/thumb.jpg"
     assert field_data["hauptbild"]["url"] == "https://images.example.com/Lippe%20Lift/thumb.jpg"
+
+
+def test_webflow_client_build_blog_field_data_maps_sources_to_rich_text_field():
+    client = WebflowClient(api_token="test-token", collection_id="col-1", site_id="site-1")
+    client._collection_cache = {
+        "fields": [
+            {"slug": "merksatz", "displayName": "Merksatz"},
+            {"slug": "tipp", "displayName": "Tipp"},
+            {"slug": "zusammenfassung", "displayName": "Zusammenfassung"},
+            {"slug": "inhalt", "displayName": "Inhalt"},
+            {"slug": "quellen", "displayName": "Quellen"},
+            {"slug": "veroeffentlichungsdatum", "displayName": "Veröffentlichungsdatum"},
+            {"slug": "vorschautext", "displayName": "Vorschautext"},
+            {"slug": "lesedauer", "displayName": "Lesedauer"},
+            {"slug": "vorschaubild", "displayName": "Vorschaubild"},
+            {
+                "slug": "autor",
+                "displayName": "Autor",
+                "validations": {"options": [{"id": "opt-1", "name": "Patrick Berg"}]},
+            },
+            {"slug": "meta-titel", "displayName": "Meta-Titel"},
+            {"slug": "meta-beschreibung", "displayName": "Meta-Beschreibung"},
+        ]
+    }
+
+    field_data = client.build_blog_field_data(
+        {
+            "name": "Blog mit Quellen",
+            "slug": "blog-mit-quellen",
+            "merksatz": "Merksatz",
+            "tipp": "Tipp",
+            "summary_html": "<h2>Zusammenfassung</h2>",
+            "body_html": "<p>Text</p>",
+            "preview_text": "Vorschautext",
+            "reading_time": "1 Minute",
+            "author_name": "Patrick Berg",
+            "meta_title": "Meta Titel",
+            "meta_description": "Meta Beschreibung",
+            "sources": [
+                {"title": "Quelle A", "url": "https://example.com/a?x=1&y=2"},
+                {"title": "Quelle B", "url": "https://example.com/b"},
+            ],
+        },
+        publication_date="2026-04-01T09:00:00Z",
+    )
+
+    assert field_data["quellen"] == (
+        "<ul>"
+        '<li><a href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer">Quelle A</a></li>'
+        '<li><a href="https://example.com/b" target="_blank" rel="noopener noreferrer">Quelle B</a></li>'
+        "</ul>"
+    )
 
 
 def test_webflow_client_create_and_publish_payloads_are_correct():
