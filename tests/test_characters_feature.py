@@ -597,6 +597,68 @@ def test_actor_settings_active_post_rejects_non_ready_actor(monkeypatch):
     assert "Only ready ActorIdentity rows can be activated" in response.text
 
 
+def test_generate_scene_reference_uses_lora_id_without_prompt_handle_or_seed(monkeypatch):
+    actor = ActorIdentityRecord(
+        id="actor-1",
+        name="AYRA Actor Long Character",
+        is_active=True,
+        provider="magnific",
+        provider_lora_id="1786946",
+        provider_lora_name="ayra-actor-longchar-20260521",
+        provider_training_task_id="task-1",
+        training_status="completed",
+        training_phase="ready",
+        training_progress_percent=100,
+        training_error=None,
+        training_images=["https://cdn.example.com/a.png"],
+        consent_source="operator",
+        created_at="2026-05-21T00:00:00Z",
+        updated_at="2026-05-21T00:00:00Z",
+    )
+    tables = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "post_type": "value",
+                "topic_title": "Badezimmer Sicherheit",
+                "seed_data": {"script": "Ein kurzer Badezimmer-Tipp.", "target_length_tier": 16},
+            }
+        ],
+        "batches": [{"id": "batch-1", "actor_identity_id": actor.id, "target_length_tier": 16}],
+    }
+    submissions = []
+    created = []
+
+    class _FakeMagnific:
+        def create_mystic_scene_reference(self, **kwargs):
+            submissions.append(kwargs)
+            return {"task_id": f"task-{len(submissions)}", "generated": []}
+
+    monkeypatch.setattr(
+        character_handlers,
+        "get_supabase",
+        lambda: SimpleNamespace(client=SimpleNamespace(table=lambda name: _FakeTable(tables[name]))),
+    )
+    monkeypatch.setattr(character_handlers, "_ready_actor_identity_for_batch", lambda _batch: actor)
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "create_scene_reference_candidate",
+        lambda **kwargs: created.append(kwargs) or SimpleNamespace(**kwargs),
+    )
+
+    response = character_handlers.generate_scene_reference("post-1")
+
+    assert response.status_code == 303
+    assert len(submissions) == 3
+    assert all(submission["lora_id"] == "1786946" for submission in submissions)
+    assert all("extra_options" not in submission for submission in submissions)
+    assert all("@ayra-actor-longchar-20260521" not in submission["prompt"] for submission in submissions)
+    assert all("AYRA Actor Long Character" in submission["prompt"] for submission in submissions)
+    assert len(created) == 3
+
+
 def test_refresh_active_actor_identity_status_recovers_from_poll_failure(monkeypatch):
     actor = ActorIdentityRecord(
         id="actor-1",
