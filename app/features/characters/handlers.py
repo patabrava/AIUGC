@@ -46,6 +46,7 @@ def _actor_settings_context(*, request: Request, correlation_id: str) -> dict:
     actor = _actor_identity_context(correlation_id=correlation_id)
     roster_error = None
     try:
+        character_queries.sync_actor_identity_roster_from_provider(correlation_id=correlation_id)
         actors = character_queries.list_actor_identities()
         actors = character_queries.refresh_actor_identity_roster_statuses(
             actors,

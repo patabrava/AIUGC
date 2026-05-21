@@ -226,6 +226,57 @@ def test_list_actor_identities_returns_sorted_roster(monkeypatch):
     assert [identity.id for identity in result] == ["active", "ready", "training"]
 
 
+def test_sync_actor_identity_roster_from_provider_imports_completed_lora(monkeypatch):
+    created = []
+
+    class _FakeMagnific:
+        def list_loras(self, **_kwargs):
+            return {
+                "data": [
+                    {
+                        "id": "1786946",
+                        "name": "ayra-actor-longchar-20260521",
+                        "task_id": "task-1786946",
+                        "status": "completed",
+                    }
+                ]
+            }
+
+    def _fake_create(**kwargs):
+        created.append(kwargs)
+        return ActorIdentityRecord(
+            id="actor-imported",
+            name=kwargs["name"],
+            is_active=kwargs["is_active"],
+            provider=kwargs["provider"],
+            provider_lora_id=kwargs["provider_lora_id"],
+            provider_lora_name=kwargs["provider_lora_name"],
+            provider_training_task_id=kwargs["provider_training_task_id"],
+            training_status=kwargs["training_status"],
+            training_phase=kwargs["training_phase"],
+            training_progress_percent=kwargs["training_progress_percent"],
+            training_error=kwargs["training_error"],
+            training_images=list(kwargs["training_images"]),
+            consent_source=kwargs["consent_source"],
+            created_at="2026-05-21T00:00:00Z",
+            updated_at="2026-05-21T00:00:00Z",
+            training_started_at=None,
+            training_completed_at=None,
+        )
+
+    monkeypatch.setattr(character_queries, "get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [])
+    monkeypatch.setattr(character_queries, "create_actor_identity", _fake_create)
+
+    result = character_queries.sync_actor_identity_roster_from_provider(correlation_id="test")
+
+    assert created[0]["provider_lora_id"] == "1786946"
+    assert created[0]["provider_lora_name"] == "ayra-actor-longchar-20260521"
+    assert created[0]["training_phase"] == "ready"
+    assert created[0]["training_progress_percent"] == 100
+    assert result[0].provider_lora_id == "1786946"
+
+
 def test_refresh_actor_identity_roster_polls_inactive_training_actor(monkeypatch):
     from app.adapters.magnific_client import MagnificTrainingStatus
 
@@ -411,6 +462,8 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
     training = ActorIdentityRecord.model_validate(
         _actor_row("training", phase="training", progress=40, lora_id=None, updated_at="2026-05-21T13:00:00Z")
     )
+    sync_calls = []
+    monkeypatch.setattr(character_queries, "sync_actor_identity_roster_from_provider", lambda correlation_id: sync_calls.append(correlation_id))
     monkeypatch.setattr(character_queries, "refresh_active_actor_identity_status", lambda correlation_id: active)
     monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: active)
     monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [active, ready, training])
@@ -423,6 +476,7 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
     assert 'value="ready"' in response.text
     assert 'value="training"' not in response.text
     assert "Actor training" in response.text
+    assert sync_calls
 
 
 def test_actor_settings_active_post_calls_activation_helper(monkeypatch):

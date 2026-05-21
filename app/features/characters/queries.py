@@ -7,6 +7,7 @@ from uuid import uuid4
 from postgrest.exceptions import APIError
 
 from app.adapters.magnific_client import get_magnific_client
+from app.adapters.magnific_client import list_lora_rows, normalize_lora_training_status
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import ErrorCode, FlowForgeException
 from app.core.logging import get_logger
@@ -127,6 +128,100 @@ def list_actor_identities() -> list[ActorIdentityRecord]:
     identities = sort_actor_identity_roster(_identity_response_rows(response))
     logger.info("actor_identities_listed", actor_identity_count=len(identities))
     return identities
+
+
+def _actor_identity_reference_index(identities: list[ActorIdentityRecord]) -> dict[str, ActorIdentityRecord]:
+    index: dict[str, ActorIdentityRecord] = {}
+    for identity in identities:
+        for ref in (identity.provider_lora_id, identity.provider_lora_name, identity.provider_training_task_id):
+            if ref:
+                index[str(ref)] = identity
+    return index
+
+
+def sync_actor_identity_roster_from_provider(*, correlation_id: str) -> list[ActorIdentityRecord]:
+    try:
+        loras = get_magnific_client().list_loras(correlation_id=correlation_id)
+    except Exception as exc:  # noqa: BLE001 - roster sync must never break the settings page
+        logger.warning(
+            "actor_identity_provider_sync_failed",
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+        return []
+
+    existing_identities = list_actor_identities()
+    identity_index = _actor_identity_reference_index(existing_identities)
+    synced: list[ActorIdentityRecord] = []
+
+    for row in list_lora_rows(loras):
+        status = normalize_lora_training_status(row)
+        if not (status.provider_lora_id or status.provider_lora_name or status.provider_training_task_id):
+            continue
+
+        match = None
+        for ref in (status.provider_lora_id, status.provider_lora_name, status.provider_training_task_id):
+            if ref and str(ref) in identity_index:
+                match = identity_index[str(ref)]
+                break
+
+        payload = {
+            "name": status.provider_lora_name or status.provider_lora_id or "Magnific Actor",
+            "provider": "magnific",
+            "provider_training_task_id": status.provider_training_task_id,
+            "provider_lora_id": status.provider_lora_id,
+            "provider_lora_name": status.provider_lora_name,
+            "training_status": status.training_status or status.raw_status or "queued",
+            "training_phase": status.training_phase or status.phase or "queued",
+            "training_progress_percent": int(status.training_progress_percent or status.progress_percent or 0),
+            "training_images": match.training_images if match else [],
+            "consent_source": match.consent_source if match else "Magnific provider sync",
+            "training_error": status.training_error,
+            "training_started_at": match.training_started_at.isoformat() if match and match.training_started_at else None,
+            "training_completed_at": (
+                match.training_completed_at.isoformat()
+                if match and match.training_completed_at
+                else None
+            ),
+        }
+
+        if match is None:
+            created = create_actor_identity(
+                name=payload["name"],
+                training_images=list(payload["training_images"]),
+                consent_source=payload["consent_source"],
+                correlation_id=correlation_id,
+                provider=payload["provider"],
+                provider_training_task_id=payload["provider_training_task_id"],
+                provider_lora_id=payload["provider_lora_id"],
+                provider_lora_name=payload["provider_lora_name"],
+                training_status=payload["training_status"],
+                training_phase=payload["training_phase"],
+                training_progress_percent=payload["training_progress_percent"],
+                training_error=payload["training_error"],
+                training_started_at=payload["training_started_at"],
+                training_completed_at=payload["training_completed_at"],
+                is_active=False,
+            )
+            synced.append(created)
+            identity_index = _actor_identity_reference_index([*existing_identities, created])
+            continue
+
+        update_actor_training_status(
+            actor_identity_id=match.id,
+            training_status=payload["training_status"],
+            training_phase=payload["training_phase"],
+            training_progress_percent=payload["training_progress_percent"],
+            provider_training_task_id=payload["provider_training_task_id"],
+            provider_lora_id=payload["provider_lora_id"],
+            provider_lora_name=payload["provider_lora_name"],
+            training_error=payload["training_error"],
+            correlation_id=correlation_id,
+        )
+        refreshed = get_actor_identity_by_id(match.id) or match
+        synced.append(refreshed)
+
+    return sort_actor_identity_roster(synced) if synced else []
 
 
 def get_actor_identity_by_id(actor_identity_id: str) -> Optional[ActorIdentityRecord]:
