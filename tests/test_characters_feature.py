@@ -452,6 +452,26 @@ def test_actor_settings_page_renders_active_actor(monkeypatch):
     assert "100%" in response.text
 
 
+def test_character_settings_page_renders_actor_roster(monkeypatch):
+    active = ActorIdentityRecord.model_validate(
+        _actor_row("active", is_active=True, updated_at="2026-05-21T10:00:00Z")
+    )
+    ready = ActorIdentityRecord.model_validate(
+        _actor_row("ready", is_active=False, updated_at="2026-05-21T12:00:00Z")
+    )
+    monkeypatch.setattr(character_queries, "get_active_character", lambda: None)
+    monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: active)
+    monkeypatch.setattr(character_queries, "refresh_actor_identity_roster_statuses", lambda identities, correlation_id: [active, ready])
+    monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [active, ready])
+
+    response = TestClient(app, base_url="http://localhost").get("/settings/character")
+
+    assert response.status_code == 200
+    assert "Actor roster" in response.text
+    assert "Actor active" in response.text
+    assert "Actor ready" in response.text
+
+
 def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch):
     active = ActorIdentityRecord.model_validate(
         _actor_row("active", is_active=True, updated_at="2026-05-21T10:00:00Z")

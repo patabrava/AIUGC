@@ -114,6 +114,16 @@ def _read_capped(field_name: str, upload: UploadFile) -> bytes:
 def character_settings(request: Request):
     active = character_queries.get_active_character()
     actor_identity = character_queries.get_active_actor_identity()
+    roster_error = None
+    try:
+        actors = character_queries.refresh_actor_identity_roster_statuses(
+            character_queries.list_actor_identities(),
+            correlation_id=f"character_settings_{uuid4()}",
+        )
+    except Exception as exc:  # noqa: BLE001 - legacy settings page must still render
+        actors = []
+        roster_error = "Actor roster could not be loaded."
+        logger.warning("character_settings_actor_roster_load_failed", error=str(exc))
     return templates.TemplateResponse(
         "settings/character.html",
         {
@@ -121,6 +131,8 @@ def character_settings(request: Request):
             "character": active,
             "actor_identity": actor_identity,
             "actor_identity_ready": actor_identity_is_ready(actor_identity),
+            "actors": actors,
+            "actor_roster_error": roster_error,
         },
     )
 

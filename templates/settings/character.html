@@ -10,6 +10,12 @@
   For actor training, use the <a href="/settings/actor" class="font-medium text-[#E58434] hover:underline">Actor Identity</a> tab.
 </p>
 
+{% if actor_roster_error %}
+<div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+  {{ actor_roster_error }}
+</div>
+{% endif %}
+
 <section
   class="mt-6 rounded-lg border border-gray-200 p-4"
   {% if actor_identity and not actor_identity_ready %}
@@ -48,6 +54,50 @@
     <img src="{{ image_url }}" alt="Actor training image {{ loop.index }}" class="aspect-square w-full rounded-md border object-cover" />
     {% endfor %}
   </div>
+  {% endif %}
+</section>
+
+<section class="mt-8 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+  <div class="flex items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">Actor roster</h2>
+      <p class="mt-1 text-sm text-gray-600">Active first, then ready actors, training actors, and failed actors.</p>
+    </div>
+    <a href="/settings/actor" class="rounded-full border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:border-[#E58434]/40 hover:text-[#E58434]">
+      Full roster
+    </a>
+  </div>
+
+  {% if actors and actors | length > 0 %}
+  <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+    {% for row in actors[:4] %}
+    {% set row_ready = row.training_phase == "ready" and row.training_progress_percent == 100 and row.provider_lora_id and not row.training_error %}
+    <article class="rounded-xl border border-gray-200 p-4">
+      <div class="flex flex-wrap items-center gap-2">
+        <h3 class="text-sm font-semibold text-gray-900">{{ row.name }}</h3>
+        {% if row.is_active %}
+        <span class="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-green-700">Active</span>
+        {% elif row_ready %}
+        <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">Ready</span>
+        {% elif row.training_status in ["failed", "error"] or row.training_phase in ["failed", "error"] %}
+        <span class="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-red-700">Failed</span>
+        {% else %}
+        <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">Training</span>
+        {% endif %}
+      </div>
+      <p class="mt-2 text-xs text-gray-500">
+        LoRA: {{ row.provider_lora_id or row.provider_lora_name or "pending" }}
+      </p>
+      <p class="mt-1 text-xs text-gray-500">
+        {{ row.training_phase }} · {{ row.training_progress_percent }}%
+      </p>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="mt-4 rounded-xl border border-dashed border-gray-300 px-4 py-4 text-sm text-gray-600">
+    No ActorIdentity rows exist yet. Train a new actor from the Actor Identity tab.
+  </p>
   {% endif %}
 </section>
 
