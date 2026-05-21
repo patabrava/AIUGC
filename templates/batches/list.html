@@ -298,8 +298,8 @@
                         </select>
                         <p class="mt-1 text-xs text-gray-500">
                             Automated uses the research agent. Manual lets you define each draft yourself.
-                            Character Consistency uses the saved reference character and full Veo 3.1.
-                            <a href="/settings/character" class="text-[#E58434] underline">Manage character</a>
+                            Character Consistency uses the selected ready ActorIdentity and full Veo 3.1.
+                            <a href="/settings/actor" class="text-[#E58434] underline">Choose actor</a>
                         </p>
                     </div>
                     
@@ -341,7 +341,7 @@
                             </div>
                         </div>
                         <p x-show="creationMode === 'character_consistency'" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                            Uses the active character snapshot from Settings. Scenes are varied per post type during prompt generation.
+                            Uses the active ready ActorIdentity from Settings. If blocked, choose a ready actor at /settings/actor.
                         </p>
                     </div>
 

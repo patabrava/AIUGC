@@ -321,6 +321,16 @@ def _normalize_seed_data(seed_data: Any) -> Dict[str, Any]:
         return {}
 
     data = dict(seed_data)
+    if isinstance(data.get("source"), str):
+        source_title = data["source"].strip()
+        if source_title:
+            source_payload = {"title": source_title}
+            summary = data.get("source_summary") or data.get("description")
+            if summary:
+                source_payload["summary"] = summary
+            data["source"] = source_payload
+        else:
+            data.pop("source", None)
 
     framework = data.get("framework")
     framework_map = {
@@ -366,7 +376,7 @@ def _normalize_seed_data(seed_data: Any) -> Dict[str, Any]:
         if summary:
             data["description"] = summary
 
-    if data.get("source") and not data["source"].get("summary") and data.get("description"):
+    if isinstance(data.get("source"), dict) and not data["source"].get("summary") and data.get("description"):
         data["source"]["summary"] = data["description"]
 
     strict_seed = data.get("strict_seed")
@@ -687,9 +697,19 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
         posts_data = get_posts_by_batch(batch_id)
-        scene_references_by_post = character_queries.list_scene_references_for_posts(
+        raw_scene_references_by_post = character_queries.list_scene_references_for_posts(
             [str(p.get("id")) for p in posts_data if p.get("id")]
         )
+        scene_references_by_post = {}
+        for post_id, references in raw_scene_references_by_post.items():
+            latest_reference_set_id = character_queries.select_latest_reference_set_id(references)
+            if latest_reference_set_id:
+                scene_references_by_post[post_id] = character_queries.filter_reference_rows_for_set(
+                    references,
+                    latest_reference_set_id,
+                )
+            else:
+                scene_references_by_post[post_id] = references
         batch_creation_mode = str(batch.get("creation_mode") or "").strip()
         
         posts_list = []

@@ -5,8 +5,7 @@
   <div>
     <h1 class="text-2xl font-semibold text-gray-900">Actor Identity</h1>
     <p class="mt-2 max-w-3xl text-sm text-gray-600">
-      Train the active actor LoRA with 8 to 20 public reference images. This replaces the old prompt-only identity lock
-      for new `character_consistency` work.
+      Select the global ActorIdentity used by new character_consistency batches. Training creates a new actor row, but it does not change the active selection.
     </p>
   </div>
   <a href="/settings/character" class="rounded-full border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:border-[#E58434]/40 hover:text-[#E58434]">
@@ -14,18 +13,30 @@
   </a>
 </div>
 
-{% if actor %}
+{% if active_actor_updated %}
+<div class="mt-5 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+  Active actor updated. Future character_consistency batches will use this ActorIdentity.
+</div>
+{% endif %}
+
+{% if actor_roster_error %}
+<div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+  {{ actor_roster_error }}
+</div>
+{% endif %}
+
 <section class="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+  <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
     <div>
-      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Active Actor</p>
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Current Active Actor</p>
+      {% if actor %}
       <h2 class="mt-1 text-xl font-semibold text-gray-900">{{ actor.name }}</h2>
       <dl class="mt-3 grid grid-cols-1 gap-2 text-sm text-gray-600 sm:grid-cols-2">
         <div><dt class="inline font-medium text-gray-800">Provider</dt> <dd class="inline">{{ actor.provider }}</dd></div>
         <div><dt class="inline font-medium text-gray-800">Status</dt> <dd class="inline">{{ actor.training_status }}</dd></div>
         <div><dt class="inline font-medium text-gray-800">Phase</dt> <dd class="inline">{{ actor.training_phase }}</dd></div>
         <div><dt class="inline font-medium text-gray-800">Progress</dt> <dd class="inline">{{ actor.training_progress_percent }}%</dd></div>
-        <div><dt class="inline font-medium text-gray-800">LoRA ID</dt> <dd class="inline">{{ actor.provider_lora_id or "pending" }}</dd></div>
+        <div><dt class="inline font-medium text-gray-800">LoRA ID</dt> <dd class="inline break-all">{{ actor.provider_lora_id or "pending" }}</dd></div>
         <div><dt class="inline font-medium text-gray-800">Task ID</dt> <dd class="inline break-all">{{ actor.provider_training_task_id or "pending" }}</dd></div>
       </dl>
       {% if actor.training_error %}
@@ -35,55 +46,118 @@
       {% endif %}
       <p class="mt-3 text-xs text-gray-500">Consent source: {{ actor.consent_source or "not recorded" }}</p>
       <p class="mt-1 text-xs text-gray-500">Uploaded training images: {{ actor.training_images | length }}</p>
-    </div>
-    <div class="min-w-[18rem] rounded-xl bg-gray-50 p-4">
-      <div class="h-2 overflow-hidden rounded-full bg-gray-200">
-        <div class="h-full rounded-full bg-[#E58434]" style="width: {{ actor.training_progress_percent }}%"></div>
-      </div>
-      <p class="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">Training progress</p>
-      <p class="mt-1 text-sm text-gray-700">
-        {% if actor.training_status in ["ready", "completed"] %}
-          Ready for new character_consistency batches.
-        {% elif actor.training_status in ["failed", "error"] %}
-          Training failed. Replace the actor with a new upload set.
-        {% else %}
-          Training is still in progress or queued.
-        {% endif %}
+      {% if not (actor.training_phase == "ready" and actor.training_progress_percent == 100 and actor.provider_lora_id and not actor.training_error) %}
+      <p class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        character_consistency is blocked until a ready actor is selected.
       </p>
+      {% endif %}
+      {% else %}
+      <h2 class="mt-1 text-xl font-semibold text-gray-900">No active actor selected</h2>
+      <p class="mt-3 text-sm text-gray-600">
+        Select a ready actor below. If no ready actor exists, train one and wait for it to finish.
+      </p>
+      {% endif %}
     </div>
+
+    <form method="post" action="/settings/actor/active" class="w-full rounded-xl bg-gray-50 p-4 lg:max-w-sm">
+      <label class="block">
+        <span class="text-sm font-medium text-gray-800">Active actor</span>
+        <select
+          name="actor_identity_id"
+          {% if ready_actors | length == 0 %}disabled{% endif %}
+          class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20 disabled:bg-gray-100 disabled:text-gray-400"
+        >
+          {% if ready_actors | length == 0 %}
+          <option value="">No ready actors available</option>
+          {% elif actor and not (actor.training_phase == "ready" and actor.training_progress_percent == 100 and actor.provider_lora_id and not actor.training_error) %}
+          <option value="">Choose a ready actor</option>
+          {% endif %}
+          {% for row in ready_actors %}
+          <option value="{{ row.id }}" {% if actor and actor.id == row.id %}selected{% endif %}>
+            {{ row.name }}{% if row.provider_lora_id %} - {{ row.provider_lora_id }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="mt-2 text-xs text-gray-500">
+        Only ready actors can be selected. Training and failed actors remain visible in the roster below.
+      </p>
+      <button
+        type="submit"
+        {% if ready_actors | length == 0 %}disabled{% endif %}
+        class="mt-4 rounded-lg bg-[#E58434] px-4 py-2 text-sm font-medium text-white hover:bg-[#d27a2f] focus:outline-none focus:ring-2 focus:ring-[#E58434]/30 disabled:bg-gray-300"
+      >
+        Set active
+      </button>
+    </form>
+  </div>
+</section>
+
+<section class="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+  <div class="flex items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">Actor roster</h2>
+      <p class="mt-1 text-sm text-gray-600">Active first, then ready actors, training actors, and failed actors.</p>
+    </div>
+    <span class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">{{ actors | length }} total</span>
   </div>
 
-  {% if actor.training_images %}
-  <div class="mt-5">
-    <p class="text-sm font-medium text-gray-800">Training set</p>
-    <div class="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-      {% for image_url in actor.training_images %}
-      <figure class="overflow-hidden rounded-xl border border-gray-200 bg-white">
-        <img src="{{ image_url }}" alt="Actor training image {{ loop.index }}" class="aspect-square w-full object-cover" />
-        <figcaption class="px-2 py-1 text-[11px] text-gray-500">Image {{ loop.index }}</figcaption>
-      </figure>
-      {% endfor %}
-    </div>
+  {% if actors | length == 0 %}
+  <p class="mt-4 rounded-xl border border-dashed border-gray-300 px-4 py-4 text-sm text-gray-600">
+    No ActorIdentity rows exist yet. Train a new actor below.
+  </p>
+  {% else %}
+  <div class="mt-4 divide-y divide-gray-100">
+    {% for row in actors %}
+    {% set row_ready = row.training_phase == "ready" and row.training_progress_percent == 100 and row.provider_lora_id and not row.training_error %}
+    <article class="py-4">
+      <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="text-sm font-semibold text-gray-900">{{ row.name }}</h3>
+            {% if row.is_active %}
+            <span class="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-green-700">Active</span>
+            {% elif row_ready %}
+            <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">Ready</span>
+            {% elif row.training_status in ["failed", "error"] or row.training_phase in ["failed", "error"] %}
+            <span class="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-red-700">Failed</span>
+            {% else %}
+            <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">Training</span>
+            {% endif %}
+          </div>
+          <p class="mt-1 text-xs text-gray-500">
+            LoRA: {{ row.provider_lora_id or row.provider_lora_name or "pending" }}
+          </p>
+          {% if row.training_error %}
+          <p class="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{{ row.training_error }}</p>
+          {% endif %}
+        </div>
+        <div class="min-w-[12rem]">
+          <div class="h-2 overflow-hidden rounded-full bg-gray-200">
+            <div class="h-full rounded-full bg-[#E58434]" style="width: {{ row.training_progress_percent }}%"></div>
+          </div>
+          <p class="mt-2 text-xs text-gray-500">
+            {{ row.training_phase }} - {{ row.training_progress_percent }}%
+          </p>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
   </div>
   {% endif %}
 </section>
-{% else %}
-<section class="mt-6 rounded-2xl border border-dashed border-gray-300 bg-white p-5">
-  <p class="text-sm text-gray-600">No active actor identity is trained yet. Upload 8 to 20 images below to start one.</p>
-</section>
-{% endif %}
 
 <section class="mt-8 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-  <h2 class="text-lg font-semibold text-gray-900">Train or replace actor</h2>
+  <h2 class="text-lg font-semibold text-gray-900">Train new actor</h2>
   <p class="mt-2 text-sm text-gray-600">
-    This submits a Magnific character LoRA training job. The currently active actor row is replaced when a new set is trained.
+    This submits a Magnific character LoRA training job. The new actor starts inactive and will not replace the current active actor.
   </p>
 
   <form method="post" action="/settings/actor" enctype="multipart/form-data" class="mt-6 space-y-5">
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
       <label class="block">
         <span class="text-sm font-medium text-gray-800">Name</span>
-        <input type="text" name="name" value="{{ actor.name if actor else 'AYRA Actor Identity' }}" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
+        <input type="text" name="name" value="AYRA Actor Identity" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
       </label>
       <label class="block">
         <span class="text-sm font-medium text-gray-800">Quality</span>
@@ -103,7 +177,7 @@
       </label>
       <label class="block">
         <span class="text-sm font-medium text-gray-800">Consent source</span>
-        <input type="text" name="consent_source" value="{{ actor.consent_source if actor and actor.consent_source else 'Operator-provided reference set' }}" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
+        <input type="text" name="consent_source" value="Operator-provided reference set" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
       </label>
     </div>
 
@@ -119,7 +193,7 @@
     </label>
 
     <div class="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
-      This replaces the current active actor identity. New `character_consistency` batches will use the latest ready actor.
+      Training completion does not auto-switch the active actor. Select the ready actor above when you want future batches to use it.
     </div>
 
     <button type="submit" class="rounded-lg bg-[#E58434] px-4 py-2 text-sm font-medium text-white hover:bg-[#d27a2f] focus:outline-none focus:ring-2 focus:ring-[#E58434]/30">

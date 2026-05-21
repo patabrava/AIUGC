@@ -85,3 +85,46 @@ class SceneReferenceImageRecord(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+REQUIRED_SCENE_REFERENCE_ANGLE_KEYS = ("front_mid", "left_three_quarter", "right_profile")
+
+
+class SceneReferenceSetSummary(BaseModel):
+    post_id: str
+    reference_set_id: str
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    approved_rows: list[dict[str, Any]] = Field(default_factory=list)
+    missing_angle_keys: list[str] = Field(default_factory=list)
+    is_ready: bool = False
+
+    @classmethod
+    def from_rows(
+        cls,
+        *,
+        post_id: str,
+        reference_set_id: str,
+        rows: list[dict[str, Any]],
+    ) -> "SceneReferenceSetSummary":
+        approved_by_angle: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            metadata = row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}
+            angle_key = str(metadata.get("angle_key") or "")
+            gate = row.get("identity_gate_result") if isinstance(row.get("identity_gate_result"), dict) else {}
+            if row.get("status") == "approved" and row.get("image_url") and gate.get("status") == "passed":
+                approved_by_angle[angle_key] = row
+
+        approved_rows = [
+            approved_by_angle[key]
+            for key in REQUIRED_SCENE_REFERENCE_ANGLE_KEYS
+            if key in approved_by_angle
+        ]
+        missing = [key for key in REQUIRED_SCENE_REFERENCE_ANGLE_KEYS if key not in approved_by_angle]
+        return cls(
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+            rows=rows,
+            approved_rows=approved_rows,
+            missing_angle_keys=missing,
+            is_ready=len(missing) == 0 and len(approved_rows) == len(REQUIRED_SCENE_REFERENCE_ANGLE_KEYS),
+        )

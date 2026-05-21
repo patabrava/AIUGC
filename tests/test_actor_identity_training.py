@@ -88,11 +88,11 @@ def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch
             submitted.update(kwargs)
             return {"task_id": "train-task-1", "status": "in_progress"}
 
-    def fake_upsert(**kwargs):
+    def fake_create(**kwargs):
         return ActorIdentityRecord(
             id="actor-1",
             name=kwargs["name"],
-            is_active=True,
+            is_active=kwargs.get("is_active", False),
             provider="magnific",
             training_status="not_started",
             training_phase="not_started",
@@ -106,7 +106,7 @@ def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch
     marked = {}
     monkeypatch.setattr(character_handlers, "get_storage_client", lambda: _FakeStorage())
     monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _FakeMagnific())
-    monkeypatch.setattr(character_handlers.character_queries, "upsert_active_actor_identity", fake_upsert)
+    monkeypatch.setattr(character_handlers.character_queries, "create_actor_identity", fake_create)
     monkeypatch.setattr(character_handlers.character_queries, "mark_actor_training_submitted", lambda **kwargs: marked.update(kwargs))
 
     files = [

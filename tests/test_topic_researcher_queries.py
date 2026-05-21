@@ -1150,6 +1150,44 @@ def test_list_topic_suggestions_includes_used_scripts_but_prefers_unused(monkeyp
     assert [row["topic_registry_id"] for row in result] == ["topic-unused", "topic-used"]
 
 
+def test_list_topic_suggestions_keeps_duration_specific_script_over_registry_stub(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    long_script = " ".join(f"wort{i}" for i in range(68)) + "."
+    registry_rows = [
+        {
+            "id": "topic-32",
+            "title": "Kostenfalle Barrierefreiheit",
+            "script": "Kurzer alter Registry Stub.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "kostenfalle barrierefreiheit",
+        },
+    ]
+    script_rows = [
+        {
+            "id": "script-32",
+            "topic_registry_id": "topic-32",
+            "title": "Kostenfalle Barrierefreiheit",
+            "script": long_script,
+            "target_length_tier": 32,
+            "post_type": "value",
+            "audit_status": "pass",
+            "source_urls": [{"url": "https://source.example/kostenfalle"}],
+        },
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: True)
+
+    result = topic_queries.list_topic_suggestions(target_length_tier=32, limit=10, post_type="value")
+
+    assert len(result) == 1
+    assert result[0]["script"] == long_script
+    assert result[0]["rotation"] == long_script
+
+
 def test_count_selectable_topic_families_uses_full_limit(monkeypatch):
     from app.features.topics import queries as topic_queries
 

@@ -3,18 +3,42 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.core.errors import ErrorCode, FlowForgeException
-from app.features.characters.schemas import ActorIdentityRecord, IdentityGateResult
+from app.features.characters.schemas import ActorIdentityRecord, IdentityGateResult, SceneReferenceSetSummary
 
 
-def actor_identity_is_ready(identity: Optional[ActorIdentityRecord]) -> bool:
+def actor_identity_training_ready(identity: Optional[ActorIdentityRecord]) -> bool:
     if identity is None:
         return False
     return (
-        identity.is_active is True
-        and identity.training_phase == "ready"
+        identity.training_phase == "ready"
         and identity.training_progress_percent == 100
         and bool(identity.provider_lora_id)
+        and not identity.training_error
     )
+
+
+def actor_identity_is_ready(identity: Optional[ActorIdentityRecord]) -> bool:
+    return bool(identity and identity.is_active is True and actor_identity_training_ready(identity))
+
+
+def actor_identity_status_group(identity: ActorIdentityRecord) -> str:
+    if identity.is_active:
+        return "active"
+    if actor_identity_training_ready(identity):
+        return "ready"
+    if identity.training_error or identity.training_phase == "failed" or identity.training_status == "failed":
+        return "failed"
+    return "training"
+
+
+def actor_identity_roster_sort_key(identity: ActorIdentityRecord) -> tuple[int, float]:
+    group_order = {"active": 0, "ready": 1, "training": 2, "failed": 3}
+    updated_at = identity.updated_at.timestamp()
+    return (group_order[actor_identity_status_group(identity)], -updated_at)
+
+
+def sort_actor_identity_roster(identities: list[ActorIdentityRecord]) -> list[ActorIdentityRecord]:
+    return sorted(identities, key=actor_identity_roster_sort_key)
 
 
 def pending_manual_gate(reason: str) -> IdentityGateResult:
@@ -77,6 +101,43 @@ def ensure_video_scene_reference_ready(
         "compatible": True,
         "route": route,
         "scene_reference": scene_reference,
+    }
+
+
+def ensure_video_scene_reference_set_ready(
+    *,
+    batch: dict[str, Any],
+    post: dict[str, Any],
+    scene_reference_set: Optional[SceneReferenceSetSummary],
+    route: Optional[str],
+) -> dict[str, Any]:
+    if batch.get("character_snapshot") and not batch.get("actor_identity_id"):
+        return {"source": "legacy_character_snapshot", "compatible": True}
+    if str(batch.get("creation_mode") or "") != "character_consistency":
+        return {"source": "not_character_consistency", "compatible": True}
+    if not batch.get("actor_identity_id"):
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Character Consistency batch is missing ActorIdentity metadata.",
+            details={"batch_id": batch.get("id")},
+            status_code=422,
+        )
+    if scene_reference_set is None or not scene_reference_set.is_ready:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity video generation requires three approved SceneReferenceImages before submit.",
+            details={
+                "post_id": post.get("id"),
+                "batch_id": batch.get("id"),
+                "missing_angle_keys": scene_reference_set.missing_angle_keys if scene_reference_set else [],
+            },
+            status_code=422,
+        )
+    return {
+        "source": "actor_identity_scene_reference_set",
+        "compatible": True,
+        "route": route,
+        "scene_reference_set": scene_reference_set,
     }
 
 

@@ -453,13 +453,14 @@ def _hydrate_script_suggestion(
 ) -> Dict[str, Any]:
     hydrated = dict(script_row)
     registry = _normalize_registry_row(registry_row or {})
+    script_text = str(hydrated.get("script") or "").strip()
     hydrated["id"] = hydrated.get("id") or registry.get("id")
     hydrated["script_id"] = hydrated.get("id")
     hydrated["family_id"] = registry.get("id")
     hydrated["topic_registry_id"] = hydrated.get("topic_registry_id") or registry.get("id")
     hydrated["title"] = str(hydrated.get("title") or registry.get("title") or "").strip()
-    hydrated["rotation"] = registry.get("rotation") or hydrated.get("script") or ""
-    hydrated["cta"] = registry.get("cta") or _extract_cta(str(hydrated.get("script") or ""))
+    hydrated["rotation"] = str(hydrated.get("rotation") or script_text or registry.get("rotation") or "").strip()
+    hydrated["cta"] = str(hydrated.get("cta") or _extract_cta(script_text) or registry.get("cta") or "").strip()
     hydrated["source_urls"] = hydrated.get("source_urls") or []
     hydrated["seed_payload"] = hydrated.get("seed_payload") or {}
     hydrated["canonical_topic"] = str(

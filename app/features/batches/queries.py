@@ -105,9 +105,9 @@ def create_batch(
         actor_identity = get_active_actor_identity()
         if not actor_identity_is_ready(actor_identity):
             raise ValidationError(
-                "Cannot create a Character Consistency batch: ActorIdentity training is not complete. "
-                "Upload 8-20 training images and wait for training at /settings/character.",
-                {"creation_mode": "character_consistency"},
+                "Cannot create a Character Consistency batch: no ready active ActorIdentity is selected. "
+                "Open /settings/actor, select a ready actor, then create the batch again.",
+                {"creation_mode": "character_consistency", "settings_url": "/settings/actor"},
             )
         batch_data["actor_identity_id"] = actor_identity.id
         batch_data["actor_identity_snapshot"] = {

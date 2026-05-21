@@ -228,7 +228,11 @@ async def approve_qa(post_id: str, req: Request):
         identity_gate_result = _json_object(post.get("identity_gate_result"))
         if (
             qa_request.approved
-            and video_metadata.get("actor_identity_source") == "actor_identity_scene_reference"
+            and video_metadata.get("actor_identity_source")
+            in {
+                "actor_identity_scene_reference",
+                "actor_identity_scene_reference_set",
+            }
             and identity_gate_result.get("status") != "passed"
         ):
             raise FlowForgeException(

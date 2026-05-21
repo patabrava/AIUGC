@@ -1532,7 +1532,10 @@ def _store_completed_video(
         **postprocess_metadata,
     }
     video_identity_gate = None
-    if existing_metadata.get("actor_identity_source") == "actor_identity_scene_reference":
+    if existing_metadata.get("actor_identity_source") in {
+        "actor_identity_scene_reference",
+        "actor_identity_scene_reference_set",
+    }:
         video_identity_gate = build_video_identity_gate_result(
             video_url=upload_result["url"],
             automated_available=False,

@@ -12,11 +12,22 @@ from fastapi.templating import Jinja2Templates
 from app.adapters.magnific_client import get_magnific_client, list_lora_rows, normalize_lora_training_status
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
+from app.core.errors import FlowForgeException
 from app.core.logging import get_logger
-from app.features.characters.actor_identity import actor_identity_is_ready, passed_manual_gate, pending_manual_gate
+from app.features.characters.actor_identity import (
+    actor_identity_is_ready,
+    actor_identity_training_ready,
+    passed_manual_gate,
+    pending_manual_gate,
+)
 from app.features.characters import queries as character_queries
 from app.features.characters.schemas import ActorTrainingSet, CharacterRecord
-from app.features.characters.scene_reference import build_scene_reference_prompt, map_script_to_scene_intent
+from app.features.characters.scene_reference import (
+    REQUIRED_SCENE_REFERENCE_ANGLES,
+    build_scene_reference_prompt_for_angle,
+    get_scene_reference_angle,
+    map_script_to_scene_intent,
+)
 
 router = APIRouter(prefix="/settings", tags=["characters"])
 templates = Jinja2Templates(directory="templates")
@@ -29,6 +40,56 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 def _actor_identity_context(*, correlation_id: str):
     refreshed = character_queries.refresh_active_actor_identity_status(correlation_id=correlation_id)
     return refreshed or character_queries.get_active_actor_identity()
+
+
+def _actor_settings_context(*, request: Request, correlation_id: str) -> dict:
+    actor = _actor_identity_context(correlation_id=correlation_id)
+    roster_error = None
+    try:
+        actors = character_queries.list_actor_identities()
+        actors = character_queries.refresh_actor_identity_roster_statuses(
+            actors,
+            correlation_id=correlation_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - settings page must keep training available
+        actors = []
+        roster_error = "Actor roster could not be loaded. Training form is still available."
+        logger.warning(
+            "actor_identity_roster_load_failed",
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+    ready_actors = [row for row in actors if actor_identity_training_ready(row)]
+    return {
+        "request": request,
+        "actor": actor,
+        "actors": actors,
+        "ready_actors": ready_actors,
+        "actor_roster_error": roster_error,
+        "active_actor_updated": request.query_params.get("active_actor_updated") == "1",
+    }
+
+
+def _ready_actor_identity_for_batch(batch: dict):
+    actor_identity_id = str(batch.get("actor_identity_id") or "").strip()
+    actor_identity = (
+        character_queries.get_actor_identity_by_id(actor_identity_id)
+        if actor_identity_id
+        else character_queries.get_active_actor_identity()
+    )
+    if not actor_identity_training_ready(actor_identity):
+        raise HTTPException(status_code=422, detail="ActorIdentity training is not complete")
+    return actor_identity
+
+
+def _ready_actor_identity_for_reference(reference: dict):
+    actor_identity_id = str(reference.get("actor_identity_id") or "").strip()
+    if not actor_identity_id:
+        raise HTTPException(status_code=422, detail="Scene reference is missing ActorIdentity metadata")
+    actor_identity = character_queries.get_actor_identity_by_id(actor_identity_id)
+    if not actor_identity_training_ready(actor_identity):
+        raise HTTPException(status_code=422, detail="ActorIdentity training is not complete")
+    return actor_identity
 
 
 def _validate_upload(field_name: str, upload: Optional[UploadFile]) -> None:
@@ -65,11 +126,51 @@ def character_settings(request: Request):
 
 @router.get("/actor")
 def actor_settings(request: Request):
-    actor = _actor_identity_context(correlation_id=f"actor_settings_get_{uuid4()}")
+    correlation_id = f"actor_settings_get_{uuid4()}"
     return templates.TemplateResponse(
         "settings/actor.html",
-        {"request": request, "actor": actor},
+        _actor_settings_context(request=request, correlation_id=correlation_id),
     )
+
+
+@router.post("/actor/active")
+def activate_actor_identity(
+    request: Request,
+    actor_identity_id: str = Form(...),
+):
+    correlation_id = str(uuid4())
+    try:
+        character_queries.set_active_actor_identity(
+            actor_identity_id=actor_identity_id,
+            correlation_id=correlation_id,
+        )
+    except FlowForgeException as exc:
+        logger.warning(
+            "actor_identity_activation_rejected",
+            correlation_id=correlation_id,
+            actor_identity_id=actor_identity_id,
+            error=exc.message,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    except ValueError as exc:
+        logger.warning(
+            "actor_identity_activation_rejected",
+            correlation_id=correlation_id,
+            actor_identity_id=actor_identity_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "actor_identity_activation_route_failed",
+            correlation_id=correlation_id,
+            actor_identity_id=actor_identity_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="ActorIdentity activation failed; the previous active actor was restored when possible.",
+        ) from exc
+    return RedirectResponse(url="/settings/actor?active_actor_updated=1", status_code=303)
 
 
 @router.post("/character")
@@ -192,7 +293,7 @@ async def train_actor_identity(
     if request.url.path == "/settings/actor":
         from app.adapters import magnific_client as magnific_adapter
 
-        submission = character_queries.upsert_active_actor_identity(
+        identity = character_queries.create_actor_identity(
             name=name,
             provider="magnific",
             provider_training_task_id=None,
@@ -205,6 +306,7 @@ async def train_actor_identity(
             consent_source=training.consent_source,
             training_error=None,
             correlation_id=correlation_id,
+            is_active=False,
         )
         status = magnific_adapter.get_magnific_client().train_character_lora(
             name=name,
@@ -214,29 +316,26 @@ async def train_actor_identity(
             correlation_id=correlation_id,
             description=description or None,
         )
-        identity = character_queries.upsert_active_actor_identity(
-            name=name,
-            provider="magnific",
+        character_queries.update_actor_training_status(
+            actor_identity_id=identity.id,
             provider_training_task_id=status.provider_training_task_id,
             provider_lora_id=status.provider_lora_id,
             provider_lora_name=status.provider_lora_name,
             training_status=str(status.training_status or status.raw_status),
             training_phase=str(status.training_phase or status.phase),
             training_progress_percent=int(status.training_progress_percent or status.progress_percent or 0),
-            training_images=training.images,
-            consent_source=training.consent_source,
             training_error=status.training_error,
-            training_started_at=submission.training_started_at.isoformat() if submission.training_started_at else None,
-            training_completed_at=None,
             correlation_id=correlation_id,
         )
+        identity = character_queries.get_actor_identity_by_id(identity.id) or identity
         redirect_url = "/settings/actor"
     else:
-        identity = character_queries.upsert_active_actor_identity(
+        identity = character_queries.create_actor_identity(
             name=name,
             training_images=training.images,
             consent_source=training.consent_source,
             correlation_id=correlation_id,
+            is_active=False,
         )
         provider_name = _provider_safe_name(identity.name, identity.id)
         task = get_magnific_client().submit_character_training(
@@ -311,11 +410,7 @@ def generate_scene_reference(post_id: str):
     post = _single_row(supabase.table("posts").select("*").eq("id", post_id).execute(), label="Post")
     batch = _single_row(supabase.table("batches").select("*").eq("id", post.get("batch_id")).execute(), label="Batch")
 
-    actor_identity = character_queries.get_active_actor_identity()
-    if not actor_identity_is_ready(actor_identity):
-        raise HTTPException(status_code=422, detail="ActorIdentity training is not complete")
-    if batch.get("actor_identity_id") and str(batch.get("actor_identity_id")) != actor_identity.id:
-        raise HTTPException(status_code=422, detail="Active ActorIdentity does not match this batch")
+    actor_identity = _ready_actor_identity_for_batch(batch)
 
     seed_data = _load_json_object(post.get("seed_data"))
     script = str(seed_data.get("script") or seed_data.get("dialog_script") or post.get("topic_title") or "")
@@ -326,23 +421,24 @@ def generate_scene_reference(post_id: str):
         target_length_tier=target_length_tier,
         seed_data=seed_data,
     )
-    prompt = build_scene_reference_prompt(
-        actor_name=actor_identity.name,
-        scene_key=intent.scene_key,
-        wardrobe_key=intent.wardrobe_key,
-        post_type=str(post.get("post_type") or ""),
-        provider_lora_name=actor_identity.provider_lora_name,
-    )
-
     client = get_magnific_client()
+    reference_set_id = str(uuid4())
     references = []
-    for candidate_idx in range(3):
+    for angle in REQUIRED_SCENE_REFERENCE_ANGLES:
+        prompt = build_scene_reference_prompt_for_angle(
+            actor_name=actor_identity.name,
+            scene_key=intent.scene_key,
+            wardrobe_key=intent.wardrobe_key,
+            post_type=str(post.get("post_type") or ""),
+            angle_key=angle.key,
+            provider_lora_name=actor_identity.provider_lora_name,
+        )
         task = client.create_mystic_scene_reference(
             prompt=prompt,
             lora_id=str(actor_identity.provider_lora_id),
             strength=100,
             correlation_id=correlation_id,
-            extra_options={"seed": candidate_idx + 1},
+            extra_options={"seed": angle.seed_offset},
         )
         references.append(
             character_queries.create_scene_reference_candidate(
@@ -356,8 +452,13 @@ def generate_scene_reference(post_id: str):
                 provider_metadata={
                     "task": task,
                     "reason_code": intent.reason_code,
-                    "candidate_index": candidate_idx,
+                    "angle_key": angle.key,
+                    "angle_label": angle.label,
+                    "reference_set_id": reference_set_id,
+                    "reference_set_status": "pending_review",
                 },
+                reference_set_id=reference_set_id,
+                angle_key=angle.key,
                 correlation_id=correlation_id,
             )
         )
@@ -425,3 +526,68 @@ def reject_scene_reference(reference_id: str):
         correlation_id=correlation_id,
     )
     return RedirectResponse(url=f"/batches/{_post_batch_id(str(reference.get('post_id')))}", status_code=303)
+
+
+@router.post("/character/scene-reference/{reference_id}/regenerate")
+def regenerate_scene_reference(reference_id: str):
+    correlation_id = str(uuid4())
+    reference = character_queries.get_scene_reference_by_id(reference_id)
+    if not reference:
+        raise HTTPException(status_code=404, detail="Scene reference not found")
+
+    metadata = reference.get("provider_metadata") if isinstance(reference.get("provider_metadata"), dict) else {}
+    angle_key = str(metadata.get("angle_key") or "")
+    reference_set_id = str(metadata.get("reference_set_id") or "")
+    if not angle_key or not reference_set_id:
+        raise HTTPException(status_code=422, detail="Scene reference is missing set metadata")
+
+    angle = get_scene_reference_angle(angle_key)
+    actor_identity = _ready_actor_identity_for_reference(reference)
+
+    prompt = build_scene_reference_prompt_for_angle(
+        actor_name=actor_identity.name,
+        scene_key=str(reference.get("scene_key") or ""),
+        wardrobe_key=str(reference.get("wardrobe_key") or ""),
+        post_type="",
+        angle_key=angle.key,
+        provider_lora_name=actor_identity.provider_lora_name,
+    )
+    task = get_magnific_client().create_mystic_scene_reference(
+        prompt=prompt,
+        lora_id=str(actor_identity.provider_lora_id),
+        strength=100,
+        correlation_id=correlation_id,
+        extra_options={"seed": angle.seed_offset + 1000},
+    )
+    character_queries.create_scene_reference_candidate(
+        actor_identity_id=actor_identity.id,
+        post_id=str(reference["post_id"]),
+        scene_key=str(reference.get("scene_key") or ""),
+        wardrobe_key=str(reference.get("wardrobe_key") or ""),
+        provider_task_id=str(task.get("task_id") or ""),
+        image_url=_extract_mystic_image_url(task),
+        prompt=prompt,
+        provider_metadata={
+            "task": task,
+            "angle_key": angle.key,
+            "angle_label": angle.label,
+            "reference_set_id": reference_set_id,
+            "reference_set_status": "pending_review",
+            "regenerated_from_reference_id": reference_id,
+        },
+        reference_set_id=reference_set_id,
+        angle_key=angle.key,
+        correlation_id=correlation_id,
+    )
+    character_queries.record_scene_reference_gate(
+        reference_id=reference_id,
+        gate_result=pending_manual_gate("This reference was superseded by an individual regeneration"),
+        status="rejected",
+        correlation_id=correlation_id,
+    )
+    return RedirectResponse(url=f"/batches/{_post_batch_id(str(reference.get('post_id')))}", status_code=303)
+
+
+@router.post("/character/posts/{post_id}/scene-reference/regenerate-all")
+def regenerate_scene_reference_set(post_id: str):
+    return generate_scene_reference(post_id)

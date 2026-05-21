@@ -25,6 +25,43 @@ class ScriptIntent:
     reason_code: str
 
 
+@dataclass(frozen=True)
+class SceneReferenceAngle:
+    key: str
+    label: str
+    instruction: str
+    seed_offset: int
+
+
+REQUIRED_SCENE_REFERENCE_ANGLES = (
+    SceneReferenceAngle(
+        key="front_mid",
+        label="Front",
+        instruction="front-facing medium close-up, shoulders square to camera, direct eye contact",
+        seed_offset=101,
+    ),
+    SceneReferenceAngle(
+        key="left_three_quarter",
+        label="Left three-quarter",
+        instruction="left three-quarter angle, body turned slightly away, face still clearly recognizable",
+        seed_offset=202,
+    ),
+    SceneReferenceAngle(
+        key="right_profile",
+        label="Right profile",
+        instruction="right-side profile angle, same person and same scene, face contour clearly visible",
+        seed_offset=303,
+    ),
+)
+
+
+def get_scene_reference_angle(angle_key: str) -> SceneReferenceAngle:
+    for angle in REQUIRED_SCENE_REFERENCE_ANGLES:
+        if angle.key == angle_key:
+            return angle
+    raise KeyError(f"Unknown scene reference angle: {angle_key}")
+
+
 def map_script_to_scene_intent(
     *,
     script: str,
@@ -59,4 +96,27 @@ def build_scene_reference_prompt(
         f"Photorealistic vertical UGC still of {actor_ref}, one recognizable adult person, "
         f"wearing {wardrobe}, seated naturally in a wheelchair, in {scene}. "
         f"Medium close-up, direct-to-camera friendly expression, natural skin texture, no text, no logo."
+    )
+
+
+def build_scene_reference_prompt_for_angle(
+    *,
+    actor_name: str,
+    scene_key: str,
+    wardrobe_key: str,
+    post_type: str,
+    angle_key: str,
+    provider_lora_name: str | None = None,
+) -> str:
+    base_prompt = build_scene_reference_prompt(
+        actor_name=actor_name,
+        scene_key=scene_key,
+        wardrobe_key=wardrobe_key,
+        post_type=post_type,
+        provider_lora_name=provider_lora_name,
+    )
+    angle = get_scene_reference_angle(angle_key)
+    return (
+        f"{base_prompt} Keep the exact same background and wardrobe. "
+        f"Camera angle requirement: {angle.instruction}."
     )

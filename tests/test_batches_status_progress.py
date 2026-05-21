@@ -28,6 +28,22 @@ from app.features.topics import handlers as topic_handlers
 from app.features.topics import queries as topic_queries
 
 
+def test_normalize_seed_data_tolerates_string_source():
+    normalized = batch_handlers._normalize_seed_data(
+        {
+            "source": "legacy source text",
+            "source_summary": "Zusammenfassung",
+            "description": "Bestehende Beschreibung",
+        }
+    )
+
+    assert normalized["source"] == {
+        "title": "legacy source text",
+        "summary": "Zusammenfassung",
+    }
+    assert normalized["description"] == "Bestehende Beschreibung"
+
+
 def test_unique_topic_suggestions_scans_past_early_semantic_duplicates():
     suggestions = [
         {

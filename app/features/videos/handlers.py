@@ -39,8 +39,9 @@ from app.core.video_profiles import (
 )
 from app.features.batches.queries import get_batch_by_id
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
-from app.features.characters.actor_identity import ensure_video_scene_reference_ready
+from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
 from app.features.characters import queries as character_queries
+from app.features.characters.schemas import SceneReferenceSetSummary
 from app.features.posts.prompt_text import build_full_prompt_text
 from app.features.posts.prompt_builder import (
     DEFAULT_CHARACTER,
@@ -210,6 +211,7 @@ def _download_image_bytes(url: str) -> bytes:
     response = httpx.get(
         url,
         timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=None),
+        follow_redirects=True,
     )
     response.raise_for_status()
     return response.content
@@ -297,6 +299,71 @@ def _load_scene_reference_asset(
             "wardrobe_key": scene_reference.get("wardrobe_key"),
             "still_identity_gate_result": scene_reference.get("identity_gate_result"),
             "source": "actor_identity_scene_reference",
+        },
+    }
+
+
+def _load_scene_reference_set_assets(
+    *,
+    scene_reference_set: Optional[SceneReferenceSetSummary],
+    correlation_id: str,
+) -> Optional[Dict[str, Any]]:
+    if not scene_reference_set:
+        return None
+    if not scene_reference_set.is_ready:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity video generation requires three approved SceneReferenceImages before submit.",
+            details={
+                "reference_set_id": scene_reference_set.reference_set_id,
+                "missing_angle_keys": scene_reference_set.missing_angle_keys,
+            },
+            status_code=422,
+        )
+    reference_images: list[Dict[str, str]] = []
+    scene_reference_ids: list[str] = []
+    angle_keys: list[str] = []
+    for row in scene_reference_set.approved_rows:
+        image_url = row.get("image_url")
+        if not image_url:
+            raise FlowForgeException(
+                code=ErrorCode.VALIDATION_ERROR,
+                message="Approved SceneReferenceImage is missing an image URL.",
+                details={"scene_reference_image_id": row.get("id")},
+                status_code=422,
+            )
+        mime_type = mimetypes.guess_type(urlparse(str(image_url)).path)[0] or "image/png"
+        if mime_type not in {"image/png", "image/jpeg"}:
+            mime_type = "image/png"
+        metadata = row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}
+        reference_images.append(
+            {
+                "mime_type": mime_type,
+                "data_base64": base64.b64encode(_download_image_bytes(str(image_url))).decode("ascii"),
+            }
+        )
+        scene_reference_ids.append(str(row.get("id") or ""))
+        angle_keys.append(str(metadata.get("angle_key") or ""))
+
+    logger.info(
+        "actor_scene_reference_set_loaded",
+        correlation_id=correlation_id,
+        reference_set_id=scene_reference_set.reference_set_id,
+        reference_image_count=len(reference_images),
+    )
+    first_row = scene_reference_set.approved_rows[0] if scene_reference_set.approved_rows else {}
+    return {
+        "reference_images": reference_images,
+        "metadata": {
+            "reference_images_enabled": True,
+            "reference_image_count": len(reference_images),
+            "actor_identity_id": first_row.get("actor_identity_id"),
+            "scene_reference_set_id": scene_reference_set.reference_set_id,
+            "scene_reference_image_ids": scene_reference_ids,
+            "scene_reference_angle_keys": angle_keys,
+            "scene_key": first_row.get("scene_key"),
+            "wardrobe_key": first_row.get("wardrobe_key"),
+            "source": "actor_identity_scene_reference_set",
         },
     }
 
@@ -1291,15 +1358,15 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         profile = submission_plan.get("profile")
         is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
         route = profile.route if profile else None
-        approved_scene_reference = None
-        scene_reference_check = ensure_video_scene_reference_ready(
+        approved_scene_reference_set = None
+        scene_reference_check = ensure_video_scene_reference_set_ready(
             batch=batch,
             post=post,
-            scene_reference=character_queries.get_approved_scene_reference_for_post(post_id),
+            scene_reference_set=character_queries.get_approved_scene_reference_set_for_post(post_id),
             route=route,
         )
-        if scene_reference_check.get("source") == "actor_identity_scene_reference":
-            approved_scene_reference = scene_reference_check["scene_reference"]
+        if scene_reference_check.get("source") == "actor_identity_scene_reference_set":
+            approved_scene_reference_set = scene_reference_check["scene_reference_set"]
 
         if is_extended:
             prompt_text, segment_metadata = _build_veo_extended_base_prompt(
@@ -1360,7 +1427,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             seed=veo_seed,
             creation_mode=str(batch.get("creation_mode") or "automated"),
             character_snapshot=batch.get("character_snapshot"),
-            scene_reference=approved_scene_reference,
+            scene_reference_set=approved_scene_reference_set,
         )
 
         operation_id = submission_result["operation_id"]
@@ -1411,13 +1478,17 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             submission_metadata["provider_model"] = provider_model
         if submission_result.get("provider_metadata"):
             submission_metadata["provider_metadata"] = submission_result["provider_metadata"]
-        if approved_scene_reference:
-            submission_metadata["actor_identity_source"] = "actor_identity_scene_reference"
+        if approved_scene_reference_set:
+            submission_metadata["actor_identity_source"] = "actor_identity_scene_reference_set"
             submission_metadata["actor_identity_id"] = batch.get("actor_identity_id")
-            submission_metadata["scene_reference_image_id"] = approved_scene_reference.get("id")
-            submission_metadata["scene_key"] = approved_scene_reference.get("scene_key")
-            submission_metadata["wardrobe_key"] = approved_scene_reference.get("wardrobe_key")
-            submission_metadata["still_identity_gate_result"] = approved_scene_reference.get("identity_gate_result")
+            submission_metadata["scene_reference_set_id"] = approved_scene_reference_set.reference_set_id
+            submission_metadata["scene_reference_image_ids"] = [
+                str(row.get("id") or "") for row in approved_scene_reference_set.approved_rows
+            ]
+            submission_metadata["scene_reference_angle_keys"] = [
+                str((row.get("provider_metadata") or {}).get("angle_key") or "")
+                for row in approved_scene_reference_set.approved_rows
+            ]
         if anchor_image_bundle:
             submission_metadata.update(anchor_image_bundle["metadata"])
         submission_metadata["script_duration_contract"] = script_contract
@@ -1675,15 +1746,15 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
 
             profile = submission_plan.get("profile")
             is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
-            scene_reference_check = ensure_video_scene_reference_ready(
+            scene_reference_check = ensure_video_scene_reference_set_ready(
                 batch=batch,
                 post=post,
-                scene_reference=character_queries.get_approved_scene_reference_for_post(post_id),
+                scene_reference_set=character_queries.get_approved_scene_reference_set_for_post(post_id),
                 route=profile.route if profile else None,
             )
-            approved_scene_reference = (
-                scene_reference_check["scene_reference"]
-                if scene_reference_check.get("source") == "actor_identity_scene_reference"
+            approved_scene_reference_set = (
+                scene_reference_check["scene_reference_set"]
+                if scene_reference_check.get("source") == "actor_identity_scene_reference_set"
                 else None
             )
 
@@ -1747,7 +1818,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     "segment_metadata": segment_metadata,
                     "script_contract": script_contract,
                     "quota_requested_units": chain_cost_units(profile, provider=submission_plan["provider"]),
-                    "scene_reference": approved_scene_reference,
+                    "scene_reference_set": approved_scene_reference_set,
                 }
             )
             if is_extended:
@@ -1827,7 +1898,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     seed=batch_veo_seed,
                     creation_mode=str(batch.get("creation_mode") or "automated"),
                     character_snapshot=batch.get("character_snapshot"),
-                    scene_reference=item.get("scene_reference"),
+                    scene_reference_set=item.get("scene_reference_set"),
                 )
                 operation_id = submission_result["operation_id"]
                 provider_model = submission_result.get("provider_model")
@@ -1875,14 +1946,18 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     submission_metadata["quota_consume_error"] = quota_consume_error
                 if submission_plan.get("profile_config"):
                     submission_metadata["veo_efficient_long_route_enabled"] = batch_uses_efficient_long_route
-                if item.get("scene_reference"):
-                    scene_reference = item["scene_reference"]
-                    submission_metadata["actor_identity_source"] = "actor_identity_scene_reference"
+                if item.get("scene_reference_set"):
+                    scene_reference_set = item["scene_reference_set"]
+                    submission_metadata["actor_identity_source"] = "actor_identity_scene_reference_set"
                     submission_metadata["actor_identity_id"] = batch.get("actor_identity_id")
-                    submission_metadata["scene_reference_image_id"] = scene_reference.get("id")
-                    submission_metadata["scene_key"] = scene_reference.get("scene_key")
-                    submission_metadata["wardrobe_key"] = scene_reference.get("wardrobe_key")
-                    submission_metadata["still_identity_gate_result"] = scene_reference.get("identity_gate_result")
+                    submission_metadata["scene_reference_set_id"] = scene_reference_set.reference_set_id
+                    submission_metadata["scene_reference_image_ids"] = [
+                        str(row.get("id") or "") for row in scene_reference_set.approved_rows
+                    ]
+                    submission_metadata["scene_reference_angle_keys"] = [
+                        str((row.get("provider_metadata") or {}).get("angle_key") or "")
+                        for row in scene_reference_set.approved_rows
+                    ]
                 submission_metadata["script_duration_contract"] = script_contract
                 route = profile.route if profile else None
                 provider_status = submission_result.get("status", "submitted")
@@ -2252,6 +2327,7 @@ def _submit_video_request(
     creation_mode: str = "automated",
     character_snapshot: Optional[Dict[str, Any]] = None,
     scene_reference: Optional[Dict[str, Any]] = None,
+    scene_reference_set: Optional[SceneReferenceSetSummary] = None,
 ) -> Dict[str, Any]:
     """Submit a video generation request to the selected provider."""
 
@@ -2263,7 +2339,19 @@ def _submit_video_request(
         mode = str(creation_mode or "automated").strip()
         model_name = select_veo_model_id(creation_mode=mode) if mode == "character_consistency" else (model or select_veo_model_id(creation_mode=mode))
         if mode == "character_consistency":
-            if scene_reference:
+            if scene_reference_set:
+                if veo_duration_seconds == 4:
+                    raise FlowForgeException(
+                        code=ErrorCode.VALIDATION_ERROR,
+                        message="ActorIdentity video route cannot consume approved scene references on a 4s base request.",
+                        details={"scene_reference_set_id": scene_reference_set.reference_set_id},
+                        status_code=422,
+                    )
+                reference_bundle = _load_scene_reference_set_assets(
+                    scene_reference_set=scene_reference_set,
+                    correlation_id=correlation_id,
+                )
+            elif scene_reference:
                 if veo_duration_seconds == 4:
                     raise FlowForgeException(
                         code=ErrorCode.VALIDATION_ERROR,
@@ -2352,7 +2440,22 @@ def _submit_video_request(
         reference_bundle = None
         reference_skip_metadata: Dict[str, Any] = {}
         if mode == "character_consistency":
-            if scene_reference:
+            if scene_reference_set:
+                if vertex_duration != 8:
+                    raise FlowForgeException(
+                        code=ErrorCode.VALIDATION_ERROR,
+                        message="ActorIdentity video route cannot consume approved scene references unless the base request is 8 seconds.",
+                        details={
+                            "scene_reference_set_id": scene_reference_set.reference_set_id,
+                            "provider_duration_seconds": vertex_duration,
+                        },
+                        status_code=422,
+                    )
+                reference_bundle = _load_scene_reference_set_assets(
+                    scene_reference_set=scene_reference_set,
+                    correlation_id=correlation_id,
+                )
+            elif scene_reference:
                 if vertex_duration != 8:
                     raise FlowForgeException(
                         code=ErrorCode.VALIDATION_ERROR,

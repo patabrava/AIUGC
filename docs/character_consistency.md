@@ -13,7 +13,9 @@ Runtime contract:
 - Training requires 8-20 public image URLs. The helper `agents/testscripts/generate_actor_training_refs.py` can generate eight NanoBanana/Gemini references and upload them to R2.
 - Magnific character LoRA training is isolated in `app/adapters/magnific_client.py`; Mystic still generation rejects options known to make LoRAs silently ignored.
 - Existing batches with `character_snapshot` continue through the legacy three-image route.
-- New ActorIdentity-backed posts must generate and approve a controlled `SceneReferenceImage` before video submission.
+- New ActorIdentity-backed posts must generate exactly three Mystic `SceneReferenceImage` rows for the approved script before video submission. The three images share one script-derived background and wardrobe, but use the fixed angles `front_mid`, `left_three_quarter`, and `right_profile`.
+- Manual review is required per generated image. Operators can approve each image, regenerate one image, or regenerate the full three-image set. Video generation is blocked until the latest set has three approved images with passed manual gates.
+- Video submission continues to follow the existing Character Consistency route rules. Where the current route accepts reference images, the approved three-image set is sent together; where the current route rejects or skips reference images, that existing behavior is preserved.
 - Scene and wardrobe choices come only from `SCENE_CATALOG` and `WARDROBE_SET`; raw script text is not sent as scene/wardrobe provider prompt text.
 - The first video identity gate is manual-only. Completed ActorIdentity videos get `identity_gate_result.status=manual_required` until an operator marks the post-video identity gate passed.
 
