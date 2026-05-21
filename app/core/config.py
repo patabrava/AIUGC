@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     # LLM Providers
     openai_api_key: str = Field("", description="OpenAI API key (required for Sora video generation)")
     openai_model: str = Field("gpt-4o-mini", description="Default OpenAI model identifier")
+    magnific_api_key: str = Field(
+        "",
+        validation_alias=AliasChoices("MAGNIFIC_API_KEY"),
+        description="Magnific API key for actor LoRA training and scene reference generation",
+    )
+    magnific_base_url: str = Field(
+        "https://api.magnific.com/v1",
+        validation_alias=AliasChoices("MAGNIFIC_BASE_URL"),
+        description="Base URL for Magnific API calls",
+    )
     gemini_provider: Literal["vertex", "gemini_api"] = Field(
         "vertex",
         validation_alias=AliasChoices("GEMINI_PROVIDER"),

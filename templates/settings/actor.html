@@ -1,0 +1,130 @@
+{% extends "settings/base.html" %}
+
+{% block settings_content %}
+<div class="flex items-start justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold text-gray-900">Actor Identity</h1>
+    <p class="mt-2 max-w-3xl text-sm text-gray-600">
+      Train the active actor LoRA with 8 to 20 public reference images. This replaces the old prompt-only identity lock
+      for new `character_consistency` work.
+    </p>
+  </div>
+  <a href="/settings/character" class="rounded-full border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:border-[#E58434]/40 hover:text-[#E58434]">
+    Reference images
+  </a>
+</div>
+
+{% if actor %}
+<section class="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Active Actor</p>
+      <h2 class="mt-1 text-xl font-semibold text-gray-900">{{ actor.name }}</h2>
+      <dl class="mt-3 grid grid-cols-1 gap-2 text-sm text-gray-600 sm:grid-cols-2">
+        <div><dt class="inline font-medium text-gray-800">Provider</dt> <dd class="inline">{{ actor.provider }}</dd></div>
+        <div><dt class="inline font-medium text-gray-800">Status</dt> <dd class="inline">{{ actor.training_status }}</dd></div>
+        <div><dt class="inline font-medium text-gray-800">Phase</dt> <dd class="inline">{{ actor.training_phase }}</dd></div>
+        <div><dt class="inline font-medium text-gray-800">Progress</dt> <dd class="inline">{{ actor.training_progress_percent }}%</dd></div>
+        <div><dt class="inline font-medium text-gray-800">LoRA ID</dt> <dd class="inline">{{ actor.provider_lora_id or "pending" }}</dd></div>
+        <div><dt class="inline font-medium text-gray-800">Task ID</dt> <dd class="inline break-all">{{ actor.provider_training_task_id or "pending" }}</dd></div>
+      </dl>
+      {% if actor.training_error %}
+      <p class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        {{ actor.training_error }}
+      </p>
+      {% endif %}
+      <p class="mt-3 text-xs text-gray-500">Consent source: {{ actor.consent_source or "not recorded" }}</p>
+      <p class="mt-1 text-xs text-gray-500">Uploaded training images: {{ actor.training_images | length }}</p>
+    </div>
+    <div class="min-w-[18rem] rounded-xl bg-gray-50 p-4">
+      <div class="h-2 overflow-hidden rounded-full bg-gray-200">
+        <div class="h-full rounded-full bg-[#E58434]" style="width: {{ actor.training_progress_percent }}%"></div>
+      </div>
+      <p class="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">Training progress</p>
+      <p class="mt-1 text-sm text-gray-700">
+        {% if actor.training_status in ["ready", "completed"] %}
+          Ready for new character_consistency batches.
+        {% elif actor.training_status in ["failed", "error"] %}
+          Training failed. Replace the actor with a new upload set.
+        {% else %}
+          Training is still in progress or queued.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  {% if actor.training_images %}
+  <div class="mt-5">
+    <p class="text-sm font-medium text-gray-800">Training set</p>
+    <div class="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+      {% for image_url in actor.training_images %}
+      <figure class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <img src="{{ image_url }}" alt="Actor training image {{ loop.index }}" class="aspect-square w-full object-cover" />
+        <figcaption class="px-2 py-1 text-[11px] text-gray-500">Image {{ loop.index }}</figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% else %}
+<section class="mt-6 rounded-2xl border border-dashed border-gray-300 bg-white p-5">
+  <p class="text-sm text-gray-600">No active actor identity is trained yet. Upload 8 to 20 images below to start one.</p>
+</section>
+{% endif %}
+
+<section class="mt-8 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+  <h2 class="text-lg font-semibold text-gray-900">Train or replace actor</h2>
+  <p class="mt-2 text-sm text-gray-600">
+    This submits a Magnific character LoRA training job. The currently active actor row is replaced when a new set is trained.
+  </p>
+
+  <form method="post" action="/settings/actor" enctype="multipart/form-data" class="mt-6 space-y-5">
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <label class="block">
+        <span class="text-sm font-medium text-gray-800">Name</span>
+        <input type="text" name="name" value="{{ actor.name if actor else 'AYRA Actor Identity' }}" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-gray-800">Quality</span>
+        <select name="quality" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20">
+          <option value="high" selected>High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-gray-800">Gender</span>
+        <select name="gender" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20">
+          <option value="woman" selected>Woman</option>
+          <option value="man">Man</option>
+          <option value="non-binary">Non-binary</option>
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-gray-800">Consent source</span>
+        <input type="text" name="consent_source" value="{{ actor.consent_source if actor and actor.consent_source else 'Operator-provided reference set' }}" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
+      </label>
+    </div>
+
+    <label class="block">
+      <span class="text-sm font-medium text-gray-800">Description</span>
+      <textarea name="description" rows="3" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E58434] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" placeholder="Optional training description or guardrails."></textarea>
+    </label>
+
+    <label class="block">
+      <span class="text-sm font-medium text-gray-800">Training images</span>
+      <input type="file" name="training_images" accept="image/png,image/jpeg" multiple required class="mt-1 w-full text-sm" />
+      <p class="mt-2 text-xs text-gray-500">Upload between 8 and 20 PNG or JPEG images. They are uploaded to R2 first and then sent to Magnific as public URLs.</p>
+    </label>
+
+    <div class="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
+      This replaces the current active actor identity. New `character_consistency` batches will use the latest ready actor.
+    </div>
+
+    <button type="submit" class="rounded-lg bg-[#E58434] px-4 py-2 text-sm font-medium text-white hover:bg-[#d27a2f] focus:outline-none focus:ring-2 focus:ring-[#E58434]/30">
+      Start training
+    </button>
+  </form>
+</section>
+{% endblock %}
