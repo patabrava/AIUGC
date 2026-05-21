@@ -155,6 +155,10 @@ def sync_actor_identity_roster_from_provider(*, correlation_id: str) -> list[Act
     synced: list[ActorIdentityRecord] = []
 
     for row in list_lora_rows(loras):
+        if str(row.get("type") or "").strip().lower() != "character":
+            continue
+        if str(row.get("category") or "").strip().lower() not in {"my-character", "character", ""}:
+            continue
         status = normalize_lora_training_status(row)
         if not (status.provider_lora_id or status.provider_lora_name or status.provider_training_task_id):
             continue
@@ -164,6 +168,10 @@ def sync_actor_identity_roster_from_provider(*, correlation_id: str) -> list[Act
             if ref and str(ref) in identity_index:
                 match = identity_index[str(ref)]
                 break
+
+        provider_name = str(status.provider_lora_name or "").lower()
+        if match is None and "actor" not in provider_name:
+            continue
 
         payload = {
             "name": status.provider_lora_name or status.provider_lora_id or "Magnific Actor",

@@ -236,6 +236,8 @@ def test_sync_actor_identity_roster_from_provider_imports_completed_lora(monkeyp
                     {
                         "id": "1786946",
                         "name": "ayra-actor-longchar-20260521",
+                        "category": "my-character",
+                        "type": "character",
                         "task_id": "task-1786946",
                         "status": "completed",
                     }
@@ -275,6 +277,65 @@ def test_sync_actor_identity_roster_from_provider_imports_completed_lora(monkeyp
     assert created[0]["training_phase"] == "ready"
     assert created[0]["training_progress_percent"] == 100
     assert result[0].provider_lora_id == "1786946"
+
+
+def test_sync_actor_identity_roster_from_provider_skips_non_character_loras(monkeypatch):
+    created = []
+
+    class _FakeMagnific:
+        def list_loras(self, **_kwargs):
+            return {
+                "data": [
+                    {"id": "style-1", "name": "stock-style", "category": "style", "type": "style", "status": "completed"},
+                    {"id": "actor-1", "name": "ready-actor", "category": "my-character", "type": "character", "status": "completed"},
+                ]
+            }
+
+    def _fake_create(**kwargs):
+        created.append(kwargs)
+        return ActorIdentityRecord.model_validate(
+            {
+                **_actor_row("actor-imported", lora_id=kwargs["provider_lora_id"]),
+                "name": kwargs["name"],
+                "provider_lora_name": kwargs["provider_lora_name"],
+                "provider_training_task_id": kwargs["provider_training_task_id"],
+                "training_status": kwargs["training_status"],
+                "training_phase": kwargs["training_phase"],
+                "training_progress_percent": kwargs["training_progress_percent"],
+                "training_images": kwargs["training_images"],
+                "consent_source": kwargs["consent_source"],
+                "training_error": kwargs["training_error"],
+            }
+        )
+
+    monkeypatch.setattr(character_queries, "get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [])
+    monkeypatch.setattr(character_queries, "create_actor_identity", _fake_create)
+
+    character_queries.sync_actor_identity_roster_from_provider(correlation_id="test")
+
+    assert [row["provider_lora_id"] for row in created] == ["actor-1"]
+
+
+def test_sync_actor_identity_roster_from_provider_skips_unmatched_non_actor_character(monkeypatch):
+    created = []
+
+    class _FakeMagnific:
+        def list_loras(self, **_kwargs):
+            return {
+                "data": [
+                    {"id": "portrait-1", "name": "portrait-style", "category": "my-character", "type": "character", "status": "completed"},
+                ]
+            }
+
+    monkeypatch.setattr(character_queries, "get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [])
+    monkeypatch.setattr(character_queries, "create_actor_identity", lambda **kwargs: created.append(kwargs))
+
+    result = character_queries.sync_actor_identity_roster_from_provider(correlation_id="test")
+
+    assert created == []
+    assert result == []
 
 
 def test_refresh_actor_identity_roster_polls_inactive_training_actor(monkeypatch):

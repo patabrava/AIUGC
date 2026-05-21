@@ -30,16 +30,31 @@ def _unwrap_data_payload(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_lora_rows(response: dict[str, Any]) -> list[dict[str, Any]]:
+    lora = response.get("lora")
+    if isinstance(lora, dict):
+        normalized = dict(lora)
+        if response.get("task_id") and not normalized.get("task_id"):
+            normalized["task_id"] = response.get("task_id")
+        return [normalized]
+
     data = response.get("data")
     if isinstance(data, list):
-        return [row for row in data if isinstance(row, dict)]
+        rows: list[dict[str, Any]] = []
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            rows.extend(list_lora_rows(row) if isinstance(row.get("lora"), dict) else [row])
+        return rows
     if not isinstance(data, dict):
         return []
 
     rows: list[dict[str, Any]] = []
     for value in data.values():
         if isinstance(value, list):
-            rows.extend(row for row in value if isinstance(row, dict))
+            for row in value:
+                if not isinstance(row, dict):
+                    continue
+                rows.extend(list_lora_rows(row) if isinstance(row.get("lora"), dict) else [row])
     return rows
 
 

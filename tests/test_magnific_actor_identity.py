@@ -83,6 +83,32 @@ def test_list_lora_rows_flattens_grouped_provider_response():
     assert [row["id"] for row in rows] == [1, 110]
 
 
+def test_list_lora_rows_accepts_saved_training_result_shape():
+    rows = list_lora_rows(
+        {
+            "task_id": "train-1786946",
+            "lora": {
+                "id": 1786946,
+                "name": "ayra-actor-longchar-20260521",
+                "category": "my-character",
+                "type": "character",
+                "training": {"status": "completed", "defaultScale": 1, "quality": "ultra"},
+            },
+        }
+    )
+
+    assert rows == [
+        {
+            "id": 1786946,
+            "name": "ayra-actor-longchar-20260521",
+            "category": "my-character",
+            "type": "character",
+            "training": {"status": "completed", "defaultScale": 1, "quality": "ultra"},
+            "task_id": "train-1786946",
+        }
+    ]
+
+
 def test_submit_character_training_unwraps_data_payload(monkeypatch):
     class _FakeHttp:
         def request(self, *_args, **_kwargs):
