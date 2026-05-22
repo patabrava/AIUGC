@@ -15,6 +15,7 @@ jobs:
       PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY != '' && secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
       PROD_SSH_PASSWORD: ${{ secrets.PROD_SSH_PASSWORD != '' && secrets.PROD_SSH_PASSWORD || vars.PROD_SSH_PASSWORD }}
       PROD_ENV_FILE_B64: ${{ secrets.PROD_ENV_FILE_B64 }}
+      PROD_MAGNIFIC_API_KEY: ${{ secrets.PROD_MAGNIFIC_API_KEY }}
       PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64: ${{ secrets.PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 }}
       PROD_APP_ROOT: ${{ secrets.PROD_APP_ROOT != '' && secrets.PROD_APP_ROOT || vars.PROD_APP_ROOT }}
     steps:
@@ -29,6 +30,7 @@ jobs:
             echo "Missing PROD_SSH_PRIVATE_KEY or PROD_SSH_PASSWORD GitHub secret."
             exit 1
           fi
+          test -n "$PROD_MAGNIFIC_API_KEY" || { echo "Missing PROD_MAGNIFIC_API_KEY GitHub secret."; exit 1; }
 
       - name: Preflight SSH TCP reachability
         run: |
@@ -79,7 +81,7 @@ jobs:
           timeout: 60s
           username: ${{ env.PROD_SSH_USER }}
           password: ${{ env.PROD_SSH_PASSWORD }}
-          envs: PROD_ENV_FILE_B64,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
+          envs: PROD_ENV_FILE_B64,PROD_MAGNIFIC_API_KEY,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
           script: |
             export APP_ROOT="${{ env.PROD_APP_ROOT }}"
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
@@ -101,7 +103,7 @@ jobs:
             git checkout -B main origin/main
             git reset --hard origin/main
             git clean -fd
-            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" <<'PY'
+            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" "$PROD_MAGNIFIC_API_KEY" <<'PY'
             import base64
             import json
             import sys
@@ -109,7 +111,9 @@ jobs:
 
             env_path = Path(sys.argv[1])
             adc_b64 = sys.argv[2].strip()
+            magnific_api_key = sys.argv[3].strip()
             overrides = {
+                "MAGNIFIC_API_KEY": magnific_api_key,
                 "GEMINI_PROVIDER": "vertex",
                 "GEMINI_DEEP_RESEARCH_PROVIDER": "vertex_grounded",
                 "GEMINI_API_FALLBACK_ENABLED": "false",
@@ -150,7 +154,7 @@ jobs:
           timeout: 60s
           username: ${{ env.PROD_SSH_USER }}
           key: ${{ env.PROD_SSH_PRIVATE_KEY }}
-          envs: PROD_ENV_FILE_B64,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
+          envs: PROD_ENV_FILE_B64,PROD_MAGNIFIC_API_KEY,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
           script: |
             export APP_ROOT="${{ env.PROD_APP_ROOT }}"
             export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
@@ -172,7 +176,7 @@ jobs:
             git checkout -B main origin/main
             git reset --hard origin/main
             git clean -fd
-            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" <<'PY'
+            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" "$PROD_MAGNIFIC_API_KEY" <<'PY'
             import base64
             import json
             import sys
@@ -180,7 +184,9 @@ jobs:
 
             env_path = Path(sys.argv[1])
             adc_b64 = sys.argv[2].strip()
+            magnific_api_key = sys.argv[3].strip()
             overrides = {
+                "MAGNIFIC_API_KEY": magnific_api_key,
                 "GEMINI_PROVIDER": "vertex",
                 "GEMINI_DEEP_RESEARCH_PROVIDER": "vertex_grounded",
                 "GEMINI_API_FALLBACK_ENABLED": "false",

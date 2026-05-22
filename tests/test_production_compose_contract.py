@@ -121,7 +121,7 @@ def test_hostinger_runtime_checkout_tracks_remote_main():
     compose_text = (Path(__file__).resolve().parents[1] / "docker-compose.hostinger-runtime.yaml").read_text(encoding="utf-8")
     assert 'git checkout -f -B "$$repo_ref" "origin/$$repo_ref"' in compose_text
     assert 'git reset --hard "origin/$$repo_ref"' in compose_text
-    assert "traefik.http.routers.lippelift-prod-web-v3.rule" in compose_text
+    assert "traefik.http.routers.lippelift-prod-web-v4.rule" in compose_text
     assert "TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-production}" in compose_text
     assert "external: true" not in compose_text
 
@@ -155,4 +155,6 @@ def test_github_action_deploys_on_push_to_main():
     assert "export ENV_FILE=\"${APP_ROOT}/.env.production\"" in step_text
     assert "Validate SSH deploy config" in step_text
     assert "Missing PROD_SSH_HOST" in step_text
+    assert "PROD_MAGNIFIC_API_KEY" in step_text
+    assert "Missing PROD_MAGNIFIC_API_KEY" in step_text
     assert "env.PROD_SSH_HOST" in step_text
