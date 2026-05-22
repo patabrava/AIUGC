@@ -1,4 +1,6 @@
 {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] %}
+{% set is_manual_mode = batch.creation_mode in ['manual', 'manual_character_consistency'] %}
+{% set is_character_consistency_mode = batch.creation_mode in ['character_consistency', 'character_consistency_mid', 'character_consistency_light', 'manual_character_consistency'] %}
 <div
     id="video-generation-settings"
     class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mt-6"
@@ -25,7 +27,7 @@
             </label>
             <label class="mt-4 flex flex-col text-sm max-w-xs" for="model-select-routed">
                 <span class="text-gray-700 font-medium">Veo Model</span>
-                {% if batch.creation_mode in ['character_consistency', 'character_consistency_mid', 'character_consistency_light'] %}
+                {% if is_character_consistency_mode %}
                 <div
                     class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
                     title="Character Consistency mode requires Veo 3.1 for reference image support"
@@ -61,7 +63,7 @@
             </label>
             <label class="flex flex-col text-sm" for="model-select">
                 <span class="text-gray-700 font-medium">Veo Model</span>
-                {% if batch.creation_mode in ['character_consistency', 'character_consistency_mid', 'character_consistency_light'] %}
+                {% if is_character_consistency_mode %}
                 <div
                     class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
                     title="Character Consistency mode requires Veo 3.1 for reference image support"
@@ -113,7 +115,7 @@
                 <div>
                     <p class="text-sm font-semibold text-[#006AAB]">Duration-routed batch</p>
                     <p class="mt-1 text-sm text-[#006AAB]">
-                        {% if batch.creation_mode == 'manual' %}
+                        {% if is_manual_mode %}
                         Manual drafts auto-pick the duration tier from each script's word count at submit time (≈2.5 words/sec). Short scripts stay short; longer scripts upgrade up to ~57s. Each post shows its estimated video length live in the editor.
                         {% else %}
                         <span x-text="`${targetLengthTier}s selected at batch setup.`"></span>
@@ -124,7 +126,7 @@
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-text="modelLabel"></span>
-                    {% if batch.creation_mode == 'manual' %}
+                    {% if is_manual_mode %}
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30">Per-post auto duration</span>
                     {% else %}
                     <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#006AAB] ring-1 ring-[#006AAB]/30" x-text="`${targetLengthTier}s target`"></span>

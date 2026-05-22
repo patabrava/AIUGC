@@ -12,7 +12,9 @@
 {% set research_title = seed.get('research_title') or post.topic_title %}
 {% set manual_post_type = seed.get('manual_post_type') or '' %}
 {% set display_post_type = manual_post_type or post.post_type or '' %}
-{% if batch.creation_mode == 'manual' and not manual_post_type and display_post_type == 'value' %}
+{% set is_manual_mode = batch.creation_mode in ['manual', 'manual_character_consistency'] %}
+{% set is_character_consistency_mode = batch.creation_mode in ['character_consistency', 'character_consistency_mid', 'character_consistency_light', 'manual_character_consistency'] %}
+{% if is_manual_mode and not manual_post_type and display_post_type == 'value' %}
 {% set display_post_type = '' %}
 {% endif %}
 {% set review_status = seed.get('script_review_status') or 'pending' %}
@@ -21,7 +23,7 @@
 <div id="post-{{ post.id }}" class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-[#006AAB]/30 transition" data-post-card="post-{{ post.id }}">
     <div class="flex items-center space-x-3 text-xs text-gray-500">
         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB] uppercase tracking-wide">
-            {{ display_post_type or ('Manual Draft' if batch.creation_mode == 'manual' else 'Unassigned') }}
+            {{ display_post_type or ('Manual Draft' if is_manual_mode else 'Unassigned') }}
         </span>
         <span>Created {{ post.created_at or '—' }}</span>
         {% if post.updated_at %}<span>Updated {{ post.updated_at }}</span>{% endif %}
@@ -66,7 +68,7 @@
                 hx-swap="none"
                 hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
             >
-                {% if batch.creation_mode == 'manual' %}
+                {% if is_manual_mode %}
                 <div>
                     <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500">Post Type</label>
                     <input
@@ -80,7 +82,7 @@
                     <p class="mt-1 text-xs text-gray-500">Use any freeform post type you want for this manual draft.</p>
                 </div>
                 {% endif %}
-                {% if batch.creation_mode == 'manual' %}
+                {% if is_manual_mode %}
                 <div
                     x-data="{
                         text: {{ primary_script | tojson | forceescape }},
@@ -407,7 +409,7 @@
     </div>
     {% endif %}
 
-    {% if batch.creation_mode in ['character_consistency', 'character_consistency_mid', 'character_consistency_light'] and batch.actor_identity_id and post.video_prompt_json %}
+    {% if is_character_consistency_mode and batch.actor_identity_id and post.video_prompt_json %}
     {% set scene_references = post.scene_reference_candidates or [] %}
     <div class="mt-6 border-t border-gray-200 pt-4">
         <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">

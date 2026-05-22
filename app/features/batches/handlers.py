@@ -55,6 +55,7 @@ from app.features.publish.handlers import (
 from app.features.blog.schemas import normalize_blog_content
 from app.features.topics.captions import resolve_display_caption
 from app.features.characters import queries as character_queries
+from app.features.characters.actor_identity import is_manual_creation_mode
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -109,7 +110,7 @@ def _resolve_form_target_length_tier(form, creation_mode: str) -> int:
         value = form.get("target_length_tier", 8)
         values = [value] if str(value or "").strip() else [8]
 
-    selected_value = values[-1] if creation_mode == "manual" else values[0]
+    selected_value = values[-1] if is_manual_creation_mode(creation_mode) else values[0]
     return int(selected_value or 8)
 
 
@@ -139,7 +140,7 @@ def _refresh_prompt_scene_for_display(video_prompt: Optional[Dict[str, Any]]) ->
 
 
 def _batch_has_manual_drafts(batch: Dict[str, Any]) -> bool:
-    if str(batch.get("creation_mode") or "").strip() == "manual":
+    if is_manual_creation_mode(batch.get("creation_mode")):
         return True
 
     batch_id = str(batch.get("id") or "").strip()
@@ -211,9 +212,9 @@ async def create_batch_endpoint(request: Request):
             creation_mode=payload.creation_mode,
             manual_post_count=payload.manual_post_count,
         )
-        expected_posts = payload.manual_post_count if payload.creation_mode == "manual" else payload.post_type_counts.total
+        expected_posts = payload.manual_post_count if is_manual_creation_mode(payload.creation_mode) else payload.post_type_counts.total
 
-        if payload.creation_mode == "manual":
+        if is_manual_creation_mode(payload.creation_mode):
             create_manual_draft_posts(
                 batch_id=batch["id"],
                 manual_post_count=payload.manual_post_count or 0,
@@ -229,7 +230,7 @@ async def create_batch_endpoint(request: Request):
             schedule_batch_discovery(batch["id"], reason="batch_create")
 
         if _wants_html(request):
-            if payload.creation_mode == "manual":
+            if is_manual_creation_mode(payload.creation_mode):
                 response = PlainTextResponse("", status_code=status.HTTP_200_OK)
                 response.headers["HX-Redirect"] = f"/batches/{batch['id']}"
                 return response
@@ -717,7 +718,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             normalized_seed = _normalize_seed_data(p.get("seed_data"))
             manual_post_type = str(normalized_seed.get("manual_post_type") or "").strip()
             display_post_type = manual_post_type or str(p.get("post_type") or "").strip()
-            if batch_creation_mode == "manual" and not manual_post_type and display_post_type == "value":
+            if is_manual_creation_mode(batch_creation_mode) and not manual_post_type and display_post_type == "value":
                 display_post_type = ""
 
             video_prompt = p.get("video_prompt_json")

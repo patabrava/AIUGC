@@ -128,6 +128,17 @@ def test_manual_batch_request_requires_manual_post_count():
         )
 
 
+def test_manual_character_consistency_request_requires_manual_post_count():
+    with pytest.raises(ValidationError):
+        CreateBatchRequest.model_validate(
+            {
+                "brand": "ACME",
+                "creation_mode": "manual_character_consistency",
+                "target_length_tier": 8,
+            }
+        )
+
+
 def test_automated_batch_request_still_accepts_type_counts():
     payload = CreateBatchRequest.model_validate(
         {
@@ -338,6 +349,94 @@ async def test_create_batch_endpoint_manual_mode_creates_drafts_and_skips_discov
 
     assert response.data.state.value == "S2_SEEDED"
     assert draft_calls == [("batch-1", 3, 16)]
+    assert scheduled_calls == []
+
+
+@pytest.mark.anyio
+async def test_create_batch_endpoint_manual_character_consistency_creates_drafts_and_skips_discovery(monkeypatch):
+    os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+    os.environ.setdefault("SUPABASE_KEY", "test-key")
+    os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+    os.environ.setdefault("GEMINI_API_KEY", "test-google-key")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
+    os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
+    os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
+    os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
+    os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
+    os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+
+    from app.features.batches import handlers as batch_handlers
+
+    created = {}
+    draft_calls = []
+    scheduled_calls = []
+
+    class _FakeRequest:
+        def __init__(self, payload):
+            self.headers = {"content-type": "application/json"}
+            self._payload = payload
+
+        async def json(self):
+            return self._payload
+
+    def fake_create_batch(**kwargs):
+        created.update(kwargs)
+        return {
+            "id": "batch-1",
+            "brand": kwargs["brand"],
+            "state": "S1_SETUP",
+            "creation_mode": kwargs["creation_mode"],
+            "post_type_counts": kwargs["post_type_counts"],
+            "manual_post_count": kwargs["manual_post_count"],
+            "target_length_tier": kwargs["target_length_tier"],
+            "actor_identity_id": "actor-1",
+            "actor_identity_snapshot": {"provider_lora_id": "110"},
+            "created_at": "2026-04-12T00:00:00Z",
+            "updated_at": "2026-04-12T00:00:00Z",
+            "archived": False,
+        }
+
+    def fake_create_manual_draft_posts(batch_id, manual_post_count, target_length_tier):
+        draft_calls.append((batch_id, manual_post_count, target_length_tier))
+        return [{"id": f"post-{index + 1}"} for index in range(manual_post_count)]
+
+    def fake_update_batch_state(batch_id, target_state):
+        return {
+            "id": batch_id,
+            "brand": "ACME",
+            "state": target_state.value,
+            "creation_mode": "manual_character_consistency",
+            "post_type_counts": {},
+            "manual_post_count": 3,
+            "target_length_tier": 8,
+            "actor_identity_id": "actor-1",
+            "actor_identity_snapshot": {"provider_lora_id": "110"},
+            "created_at": "2026-04-12T00:00:00Z",
+            "updated_at": "2026-04-12T00:00:00Z",
+            "archived": False,
+        }
+
+    monkeypatch.setattr(batch_handlers, "create_batch", fake_create_batch)
+    monkeypatch.setattr(batch_handlers, "create_manual_draft_posts", fake_create_manual_draft_posts)
+    monkeypatch.setattr(batch_handlers, "update_batch_state", fake_update_batch_state)
+    monkeypatch.setattr(batch_handlers, "start_seeding_interaction", lambda *args, **kwargs: scheduled_calls.append(("start", args, kwargs)))
+    monkeypatch.setattr(batch_handlers, "schedule_batch_discovery", lambda *args, **kwargs: scheduled_calls.append(("schedule", args, kwargs)))
+
+    response = await batch_handlers.create_batch_endpoint(
+        _FakeRequest(
+            {
+                "brand": "ACME",
+                "creation_mode": "manual_character_consistency",
+                "manual_post_count": 3,
+                "target_length_tier": 8,
+            }
+        )
+    )
+
+    assert response.data.state.value == "S2_SEEDED"
+    assert created["creation_mode"] == "manual_character_consistency"
+    assert created["post_type_counts"] == {}
+    assert draft_calls == [("batch-1", 3, 8)]
     assert scheduled_calls == []
 
 

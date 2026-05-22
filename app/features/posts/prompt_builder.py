@@ -10,6 +10,7 @@ from typing import Dict, Any, Iterable, Optional
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE_BODY
 from app.features.posts.schemas import VideoPrompt, AudioSection
 from app.features.characters.actor_identity import (
+    is_character_consistency_mode,
     is_character_consistency_light_mode,
     is_character_consistency_mid_mode,
 )
@@ -107,7 +108,7 @@ _VEO_BASE_NEGATIVES = (
 
 def build_negative_prompt(*, creation_mode: str, is_extension: bool) -> str:
     """Build mode-aware Veo negativePrompt text."""
-    if creation_mode in {"character_consistency", "character_consistency_light", "character_consistency_mid"} and not is_extension:
+    if is_character_consistency_mode(creation_mode) and not is_extension:
         return _VEO_BASE_NEGATIVES
     return _VEO_BASE_NEGATIVES + _VEO_SCENE_LOCK_CLAUSE
 
@@ -341,7 +342,7 @@ def _update_batch_scene_plan(batch_id: str, payload: dict) -> None:
 
 
 def ensure_scene_plan(batch: dict, *, topic_titles: list[str], correlation_id: str) -> Optional[dict[str, str]]:
-    if str(batch.get("creation_mode") or "automated").strip() != "character_consistency":
+    if str(batch.get("creation_mode") or "automated").strip() not in {"character_consistency", "manual_character_consistency"}:
         return None
     existing = batch.get("scene_plan")
     if isinstance(existing, dict) and all(existing.get(key) for key in ("value", "lifestyle", "product")):

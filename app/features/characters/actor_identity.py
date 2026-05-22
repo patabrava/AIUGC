@@ -9,12 +9,19 @@ from app.features.characters.schemas import ActorIdentityRecord, IdentityGateRes
 CHARACTER_CONSISTENCY_MODES = {
     "character_consistency",
     "character_consistency_light",
+    "manual_character_consistency",
     "character_consistency_mid",
 }
+
+MANUAL_CREATION_MODES = {"manual", "manual_character_consistency"}
 
 
 def is_character_consistency_mode(value: Any) -> bool:
     return str(value or "").strip() in CHARACTER_CONSISTENCY_MODES
+
+
+def is_manual_creation_mode(value: Any) -> bool:
+    return str(value or "").strip() in MANUAL_CREATION_MODES
 
 
 def is_character_consistency_light_mode(value: Any) -> bool:

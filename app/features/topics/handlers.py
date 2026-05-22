@@ -61,6 +61,7 @@ from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.core.video_profiles import script_word_count
+from app.features.characters.actor_identity import is_manual_creation_mode
 from app.features.topics.hub import (
     _build_script_variants,
     _wants_html,
@@ -534,7 +535,7 @@ def _topic_bank_research_key(*, post_type: str, target_length_tier: int) -> str:
 def _batch_has_manual_drafts(batch_id: str) -> bool:
     try:
         batch = get_batch_by_id(batch_id)
-        if str(batch.get("creation_mode") or "").strip() == "manual":
+        if is_manual_creation_mode(batch.get("creation_mode")):
             return True
 
         for post in get_posts_by_batch(batch_id):

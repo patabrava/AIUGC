@@ -264,7 +264,7 @@
                         detail: {
                             batchId: tempId,
                             brand,
-                            expected: creationMode === 'manual' ? manualPostCount : value + lifestyle + product,
+                            expected: ['manual', 'manual_character_consistency'].includes(creationMode) ? manualPostCount : value + lifestyle + product,
                             targetLengthTier,
                             posts: 0,
                             isTemp: true,
@@ -294,6 +294,7 @@
                         >
                             <option value="automated">Automated</option>
                             <option value="manual">Manual</option>
+                            <option value="manual_character_consistency">Manual Character Consistency</option>
                             <option value="character_consistency">Character Consistency</option>
                             <option value="character_consistency_mid">Character Consistency Mid</option>
                             <option value="character_consistency_light">Character Consistency Light</option>
@@ -305,7 +306,7 @@
                         </p>
                     </div>
                     
-                    <div x-show="creationMode !== 'manual'" x-cloak>
+                    <div x-show="!['manual', 'manual_character_consistency'].includes(creationMode)" x-cloak>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Post Type Counts</label>
                         <div class="space-y-2">
                             <div class="flex items-center justify-between">
@@ -342,12 +343,12 @@
                                 >
                             </div>
                         </div>
-                        <p x-show="creationMode === 'character_consistency' || creationMode === 'character_consistency_mid' || creationMode === 'character_consistency_light'" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <p x-show="['character_consistency', 'character_consistency_mid', 'character_consistency_light'].includes(creationMode)" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                             Uses the active ready ActorIdentity from Settings. If blocked, choose a ready actor at /settings/actor.
                         </p>
                     </div>
 
-                    <div x-show="creationMode === 'manual'" x-cloak>
+                    <div x-show="['manual', 'manual_character_consistency'].includes(creationMode)" x-cloak>
                         <label class="block text-sm font-medium text-gray-700">Manual Draft Count</label>
                         <input
                             type="number"
@@ -358,13 +359,16 @@
                             class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                         <p class="mt-1 text-xs text-gray-500">Manual batches create blank draft posts that you will edit by hand.</p>
+                        <p x-show="creationMode === 'manual_character_consistency'" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            Uses the active ready ActorIdentity from Settings and requires approved scene references before video submission.
+                        </p>
                     </div>
 
-                    <div x-show="creationMode !== 'manual'">
+                    <div x-show="!['manual', 'manual_character_consistency'].includes(creationMode)">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Video Duration</label>
                         <select
                             name="target_length_tier"
-                            :disabled="creationMode === 'manual'"
+                            :disabled="['manual', 'manual_character_consistency'].includes(creationMode)"
                             class="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                             <option value="8">8 seconds</option>
@@ -373,9 +377,9 @@
                         </select>
                         <p class="mt-1 text-xs text-gray-500">Choose the batch duration once. The pipeline is selected automatically.</p>
                     </div>
-                    <div x-show="creationMode === 'manual'" x-cloak class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3 text-sm text-[#006AAB]">
+                    <div x-show="['manual', 'manual_character_consistency'].includes(creationMode)" x-cloak class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3 text-sm text-[#006AAB]">
                         Manual batches resolve video duration automatically from each approved script. Short scripts submit as short clips; longer scripts upgrade to extended routes when the dialogue supports it.
-                        <input type="hidden" name="target_length_tier" value="8" :disabled="creationMode !== 'manual'">
+                        <input type="hidden" name="target_length_tier" value="8" :disabled="!['manual', 'manual_character_consistency'].includes(creationMode)">
                     </div>
                 </div>
                 

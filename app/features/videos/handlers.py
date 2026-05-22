@@ -45,6 +45,7 @@ from app.features.characters.actor_identity import (
     is_character_consistency_light_mode,
     is_character_consistency_mid_mode,
     is_character_consistency_mode,
+    is_manual_creation_mode,
 )
 from app.features.characters import queries as character_queries
 from app.features.characters.schemas import SceneReferenceSetSummary
@@ -383,7 +384,7 @@ def _resolve_extended_provider_aspect_ratio(route: Optional[str], requested_aspe
 
 
 def _is_manual_video_post(batch: Dict[str, Any], seed_data: Optional[Dict[str, Any]]) -> bool:
-    if str(batch.get("creation_mode") or "").strip() == "manual":
+    if is_manual_creation_mode(batch.get("creation_mode")):
         return True
     return isinstance(seed_data, dict) and seed_data.get("manual_draft") is True
 

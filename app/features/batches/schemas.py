@@ -36,12 +36,13 @@ class CreateBatchRequest(BaseModel):
     creation_mode: Literal[
         "automated",
         "manual",
+        "manual_character_consistency",
         "character_consistency",
         "character_consistency_light",
         "character_consistency_mid",
     ] = Field(
         default="automated",
-        description="Batch creation mode: automated, manual, character_consistency, character_consistency_light, or character_consistency_mid.",
+        description="Batch creation mode: automated, manual, manual_character_consistency, character_consistency, character_consistency_light, or character_consistency_mid.",
     )
     post_type_counts: Optional[PostTypeCounts] = Field(
         default=None,
@@ -78,7 +79,7 @@ class CreateBatchRequest(BaseModel):
 
     @validator('manual_post_count', always=True)
     def validate_manual_post_count(cls, v, values):
-        if values.get("creation_mode") == "manual" and v is None:
+        if values.get("creation_mode") in {"manual", "manual_character_consistency"} and v is None:
             raise ValueError("Manual post count must be provided for manual batches")
         return v
 

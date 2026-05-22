@@ -26,6 +26,7 @@ from app.features.posts.prompt_builder import (
 from app.features.characters.actor_identity import (
     is_character_consistency_light_mode,
     is_character_consistency_mid_mode,
+    is_manual_creation_mode,
 )
 from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
@@ -229,7 +230,7 @@ async def update_post_script(post_id: str, request: Request):
         current_seed["script_review_status"] = "pending"
         current_seed.pop("video_excluded", None)
 
-        is_manual_batch = batch_creation_mode == "manual" or current_seed.get("manual_draft") is True
+        is_manual_batch = is_manual_creation_mode(batch_creation_mode) or current_seed.get("manual_draft") is True
         resolved_post_type = (submitted_post_type or str(post.get("post_type") or "").strip()) if is_manual_batch else str(post.get("post_type") or "").strip()
         if is_manual_batch and not resolved_post_type:
             raise HTTPException(

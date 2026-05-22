@@ -54,6 +54,20 @@ def test_creation_mode_accepts_character_consistency_mid():
     assert payload.creation_mode == "character_consistency_mid"
 
 
+def test_creation_mode_accepts_manual_character_consistency():
+    payload = CreateBatchRequest.model_validate(
+        {
+            "brand": "Test Brand",
+            "creation_mode": "manual_character_consistency",
+            "manual_post_count": 3,
+        }
+    )
+
+    assert payload.creation_mode == "manual_character_consistency"
+    assert payload.manual_post_count == 3
+    assert payload.post_type_counts is None
+
+
 def test_creation_mode_rejects_unknown_value():
     with pytest.raises(PydanticValidationError):
         CreateBatchRequest.model_validate(
@@ -160,6 +174,37 @@ def test_create_mid_batch_snapshots_ready_actor_identity(monkeypatch):
     assert captured["payload"]["character_snapshot"] is None
 
 
+def test_create_manual_character_consistency_batch_snapshots_ready_actor_identity(monkeypatch):
+    from app.features.batches import queries as batch_queries
+    from app.features.characters.actor_identity import is_character_consistency_mode, is_manual_creation_mode
+
+    captured = {}
+
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", _ready_actor_identity)
+
+    def fake_insert(payload, legacy_payload=None):
+        captured["payload"] = payload
+        return {"id": "batch-1", **payload}
+
+    monkeypatch.setattr(batch_queries, "_insert_batch_row", fake_insert)
+
+    batch = batch_queries.create_batch(
+        brand="Test",
+        post_type_counts=None,
+        creation_mode="manual_character_consistency",
+        manual_post_count=3,
+    )
+
+    assert is_manual_creation_mode(batch["creation_mode"]) is True
+    assert is_character_consistency_mode(batch["creation_mode"]) is True
+    assert captured["payload"]["creation_mode"] == "manual_character_consistency"
+    assert captured["payload"]["manual_post_count"] == 3
+    assert captured["payload"]["post_type_counts"] == {}
+    assert captured["payload"]["actor_identity_id"] == "actor-1"
+    assert captured["payload"]["actor_identity_snapshot"]["provider_lora_id"] == "110"
+    assert captured["payload"]["character_snapshot"] is None
+
+
 def test_character_consistency_requires_ready_actor_identity_for_new_batches(monkeypatch):
     from app.core.errors import ValidationError
     from app.features.batches import queries as batch_queries
@@ -171,6 +216,24 @@ def test_character_consistency_requires_ready_actor_identity_for_new_batches(mon
             brand="Test",
             post_type_counts={"value": 1, "lifestyle": 0, "product": 0},
             creation_mode="character_consistency",
+        )
+
+    assert "/settings/actor" in exc.value.message
+    assert "select a ready actor" in exc.value.message.lower()
+
+
+def test_manual_character_consistency_requires_ready_actor_identity_for_new_batches(monkeypatch):
+    from app.core.errors import ValidationError
+    from app.features.batches import queries as batch_queries
+
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", lambda: None)
+
+    with pytest.raises(ValidationError) as exc:
+        batch_queries.create_batch(
+            brand="Test",
+            post_type_counts=None,
+            manual_post_count=3,
+            creation_mode="manual_character_consistency",
         )
 
     assert "/settings/actor" in exc.value.message
