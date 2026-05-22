@@ -32,6 +32,7 @@ from app.core.video_profiles import (
     VEO_EXTENDED_VIDEO_ROUTE,
     VEO_PROVIDER,
     get_duration_profile,
+    get_duration_profile_for_creation_mode,
     get_profile_route_config,
     get_submission_video_status,
     script_word_count,
@@ -39,7 +40,11 @@ from app.core.video_profiles import (
 )
 from app.features.batches.queries import get_batch_by_id
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
-from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
+from app.features.characters.actor_identity import (
+    ensure_video_scene_reference_set_ready,
+    is_character_consistency_light_mode,
+    is_character_consistency_mode,
+)
 from app.features.characters import queries as character_queries
 from app.features.characters.schemas import SceneReferenceSetSummary
 from app.features.posts.prompt_text import build_full_prompt_text
@@ -53,6 +58,7 @@ from app.features.posts.prompt_builder import (
     build_video_prompt_from_seed,
     build_negative_prompt,
     ensure_scene_plan,
+    build_lean_veo_base_prompt,
     build_veo_prompt_segment,
     split_dialogue_sentences,
     sync_video_prompt_with_seed_data,
@@ -447,7 +453,7 @@ def _resolve_video_submission_plan(
             if manual_auto_resolved
             else requested_target_length_tier
         )
-        profile = get_duration_profile(target_length_tier)
+        profile = get_duration_profile_for_creation_mode(target_length_tier, batch.get("creation_mode"))
         profile_config = get_profile_route_config(profile)
         resolved_resolution = "720p" if profile.route == VEO_EXTENDED_VIDEO_ROUTE else resolution
         provider_aspect_ratio = _resolve_extended_provider_aspect_ratio(profile.route, aspect_ratio)
@@ -570,7 +576,8 @@ def _load_or_build_video_prompt(
                 video_metadata = {}
         if isinstance(video_metadata, dict) and video_metadata.get("target_length_tier") == 32:
             legacy_32_visuals = True
-        use_legacy_short_character = str((batch or {}).get("creation_mode") or "").strip() == "character_consistency"
+        creation_mode = str((batch or {}).get("creation_mode") or "").strip()
+        use_legacy_short_character = is_character_consistency_mode(creation_mode) and not is_character_consistency_light_mode(creation_mode)
 
         synced_prompt = sync_video_prompt_with_seed_data(
             video_prompt,
@@ -612,9 +619,13 @@ def _load_or_build_video_prompt(
         built_prompt = build_video_prompt_from_seed(
             seed_data,
             legacy_32_visuals=False,
-            use_legacy_short_character=str((batch or {}).get("creation_mode") or "").strip() == "character_consistency",
+            use_legacy_short_character=(
+                is_character_consistency_mode(str((batch or {}).get("creation_mode") or "").strip())
+                and not is_character_consistency_light_mode(str((batch or {}).get("creation_mode") or "").strip())
+            ),
             post_type=str(post.get("post_type") or "value"),
             scene_plan=scene_plan,
+            prompt_style=str((batch or {}).get("creation_mode") or "standard").strip(),
         )
         validate_video_prompt(built_prompt)
     except ValidationError as exc:
@@ -665,6 +676,7 @@ def _build_submission_metadata(
     submission_plan: Dict[str, Any],
     submission_result: Dict[str, Any],
     segment_metadata: Optional[Dict[str, Any]] = None,
+    creation_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     settings = get_settings()
     metadata = dict(existing_metadata)
@@ -692,6 +704,8 @@ def _build_submission_metadata(
         "poller_environment": settings.environment,
         "poller_scope": _resolve_poller_scope(settings),
     }
+    if creation_mode:
+        metadata["creation_mode"] = creation_mode
 
     provider_requested_size = (
         submission_result.get("provider_requested_size")
@@ -1172,6 +1186,7 @@ def _build_veo_extended_base_prompt(
     *,
     planned_extension_hops: Optional[int] = None,
     target_length_tier: Optional[int] = None,
+    creation_mode: str = "automated",
 ) -> tuple[str, Dict[str, Any]]:
     if isinstance(video_prompt, str):
         try:
@@ -1270,6 +1285,12 @@ def _build_veo_extended_base_prompt(
                 "veo_chain_shortened_to_available_segments": effective_hops < planned_extension_hops,
             }
         )
+    if is_character_consistency_light_mode(creation_mode):
+        return build_lean_veo_base_prompt(
+            base_segment,
+            include_final_ending=False,
+        ), segment_metadata
+
     return build_veo_prompt_segment(
         base_segment,
         include_quotes=False,
@@ -1374,10 +1395,15 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 video_prompt,
                 planned_extension_hops=profile.veo_extension_hops,
                 target_length_tier=profile.target_length_tier,
+                creation_mode=str(batch.get("creation_mode") or "automated"),
             )
             prompt_request = {
                 "prompt_text": prompt_text,
-                "negative_prompt": _build_veo_negative_prompt(video_prompt),
+                "negative_prompt": (
+                    build_negative_prompt(creation_mode=str(batch.get("creation_mode") or ""), is_extension=True)
+                    if is_character_consistency_mode(batch.get("creation_mode"))
+                    else _build_veo_negative_prompt(video_prompt)
+                ),
                 "prompt_path": "veo_extended_base_prompt",
             }
         else:
@@ -1466,6 +1492,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             submission_plan=submission_plan,
             submission_result=submission_result,
             segment_metadata=segment_metadata,
+            creation_mode=str(batch.get("creation_mode") or "automated"),
         )
         if veo_seed is not None:
             submission_metadata["veo_seed"] = veo_seed
@@ -1787,10 +1814,11 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     video_prompt,
                     planned_extension_hops=profile.veo_extension_hops,
                     target_length_tier=profile.target_length_tier,
+                    creation_mode=str(batch.get("creation_mode") or "automated"),
                 )
                 negative_prompt = (
-                    build_negative_prompt(creation_mode="character_consistency", is_extension=True)
-                    if str(batch.get("creation_mode") or "") == "character_consistency"
+                    build_negative_prompt(creation_mode=str(batch.get("creation_mode") or ""), is_extension=True)
+                    if is_character_consistency_mode(batch.get("creation_mode"))
                     else _build_veo_negative_prompt(video_prompt)
                 )
             else:
@@ -1936,6 +1964,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     submission_plan=submission_plan,
                     submission_result=submission_result,
                     segment_metadata=segment_metadata,
+                    creation_mode=str(batch.get("creation_mode") or "automated"),
                 )
                 if batch_veo_seed is not None:
                     submission_metadata["veo_seed"] = batch_veo_seed
@@ -2297,7 +2326,7 @@ def _build_provider_prompt_request(
 ) -> Dict[str, Any]:
     """Build provider-specific prompt payload pieces."""
     prompt_text, prompt_path = _build_provider_prompt_text(video_prompt, provider)
-    if provider in {VEO_PROVIDER, "vertex_ai"} and creation_mode == "character_consistency":
+    if provider in {VEO_PROVIDER, "vertex_ai"} and is_character_consistency_mode(creation_mode):
         negative_prompt = build_negative_prompt(creation_mode=creation_mode, is_extension=is_extension)
     else:
         negative_prompt = _build_veo_negative_prompt(video_prompt) if provider in {VEO_PROVIDER, "vertex_ai"} else None
@@ -2337,8 +2366,8 @@ def _submit_video_request(
         requested_aspect = requested_aspect_ratio or aspect_ratio
         veo_duration_seconds = provider_duration_seconds or seconds
         mode = str(creation_mode or "automated").strip()
-        model_name = select_veo_model_id(creation_mode=mode) if mode == "character_consistency" else (model or select_veo_model_id(creation_mode=mode))
-        if mode == "character_consistency":
+        model_name = select_veo_model_id(creation_mode=mode) if is_character_consistency_mode(mode) else (model or select_veo_model_id(creation_mode=mode))
+        if is_character_consistency_mode(mode):
             if scene_reference_set:
                 if veo_duration_seconds == 4:
                     raise FlowForgeException(
@@ -2439,7 +2468,7 @@ def _submit_video_request(
         mode = str(creation_mode or "automated").strip()
         reference_bundle = None
         reference_skip_metadata: Dict[str, Any] = {}
-        if mode == "character_consistency":
+        if is_character_consistency_mode(mode):
             if scene_reference_set:
                 if vertex_duration != 8:
                     raise FlowForgeException(

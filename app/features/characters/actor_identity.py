@@ -6,6 +6,17 @@ from app.core.errors import ErrorCode, FlowForgeException
 from app.features.characters.schemas import ActorIdentityRecord, IdentityGateResult, SceneReferenceSetSummary
 
 
+CHARACTER_CONSISTENCY_MODES = {"character_consistency", "character_consistency_light"}
+
+
+def is_character_consistency_mode(value: Any) -> bool:
+    return str(value or "").strip() in CHARACTER_CONSISTENCY_MODES
+
+
+def is_character_consistency_light_mode(value: Any) -> bool:
+    return str(value or "").strip() == "character_consistency_light"
+
+
 def actor_identity_training_ready(identity: Optional[ActorIdentityRecord]) -> bool:
     if identity is None:
         return False
@@ -72,7 +83,7 @@ def ensure_video_scene_reference_ready(
 ) -> dict[str, Any]:
     if batch.get("character_snapshot") and not batch.get("actor_identity_id"):
         return {"source": "legacy_character_snapshot", "compatible": True}
-    if str(batch.get("creation_mode") or "") != "character_consistency":
+    if not is_character_consistency_mode(batch.get("creation_mode")):
         return {"source": "not_character_consistency", "compatible": True}
     if not batch.get("actor_identity_id"):
         raise FlowForgeException(
@@ -113,7 +124,7 @@ def ensure_video_scene_reference_set_ready(
 ) -> dict[str, Any]:
     if batch.get("character_snapshot") and not batch.get("actor_identity_id"):
         return {"source": "legacy_character_snapshot", "compatible": True}
-    if str(batch.get("creation_mode") or "") != "character_consistency":
+    if not is_character_consistency_mode(batch.get("creation_mode")):
         return {"source": "not_character_consistency", "compatible": True}
     if not batch.get("actor_identity_id"):
         raise FlowForgeException(

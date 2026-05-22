@@ -9,6 +9,7 @@ from typing import Dict, Any, Iterable, Optional
 
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE_BODY
 from app.features.posts.schemas import VideoPrompt, AudioSection
+from app.features.characters.actor_identity import is_character_consistency_light_mode
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
 
@@ -24,6 +25,8 @@ __all__ = [
     "build_optimized_prompt",
     "split_dialogue_sentences",
     "build_veo_prompt_segment",
+    "build_lean_veo_base_prompt",
+    "build_lean_veo_light_continuation_prompt",
     "build_lean_veo_continuation_prompt",
     "propose_scene_plan",
     "ensure_scene_plan",
@@ -99,7 +102,7 @@ _VEO_BASE_NEGATIVES = (
 
 def build_negative_prompt(*, creation_mode: str, is_extension: bool) -> str:
     """Build mode-aware Veo negativePrompt text."""
-    if creation_mode == "character_consistency" and not is_extension:
+    if creation_mode in {"character_consistency", "character_consistency_light"} and not is_extension:
         return _VEO_BASE_NEGATIVES
     return _VEO_BASE_NEGATIVES + _VEO_SCENE_LOCK_CLAUSE
 
@@ -137,6 +140,45 @@ LEAN_CONTINUATION_PROMPT_TEMPLATE = (
     "{ending}\n\n"
     "Audio:\n"
     "{audio_block}"
+)
+
+LEAN_LIGHT_BASE_PROMPT_TEMPLATE = (
+    "Action:\n"
+    "The referenced woman sits in the referenced wheelchair setup and speaks directly to camera "
+    "in one continuous natural smartphone take. Keep her identity, wardrobe, room, lighting, "
+    "camera distance, and framing matched to the reference images. Use small natural hand "
+    "gestures and subtle upper-body nods while speaking.\n\n"
+    "Language:\n"
+    "Speak only in German, with natural conversational pacing.\n\n"
+    "Dialogue:\n"
+    "{dialogue}\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
+    "Audio:\n"
+    "{audio_block}"
+)
+
+LEAN_LIGHT_CONTINUATION_PROMPT_TEMPLATE = (
+    "Action:\n"
+    "Continue from the previous generated segment with the same referenced woman, same wheelchair "
+    "setup, same room, same wardrobe, same lighting, same camera position, and same speaking rhythm. "
+    "Do not redesign the person or the environment. Continue as one seamless smartphone take.\n\n"
+    "Language:\n"
+    "Speak only in German. Maintain the same voice, accent, and speaking pace from the previous segment.\n\n"
+    "Dialogue:\n"
+    "{dialogue}\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
+    "Audio:\n"
+    "{audio_block}"
+)
+
+LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE = (
+    "Continue directly into the next segment with no concluding pause, no scene-ending hold, and no visual reset."
+)
+
+LEAN_LIGHT_BASE_AUDIO_BLOCK = (
+    "Natural single-speaker smartphone room audio. Clear close voice. No music. No background voices."
 )
 
 LEAN_EXTENSION_CHARACTER = (
@@ -376,6 +418,16 @@ def sync_video_prompt_with_seed_data(
     if not isinstance(video_prompt, dict) or not isinstance(seed_data, dict):
         return video_prompt
 
+    if is_character_consistency_light_mode(video_prompt.get("prompt_style")):
+        audio_payload = video_prompt.get("audio")
+        dialogue = str(audio_payload.get("dialogue") or "").strip() if isinstance(audio_payload, dict) else ""
+        if not dialogue:
+            return video_prompt
+        updated_prompt = dict(video_prompt)
+        updated_prompt["veo_prompt"] = build_lean_veo_base_prompt(dialogue, include_final_ending=True)
+        updated_prompt["prompt_style"] = "character_consistency_light"
+        return updated_prompt
+
     resolved_character = _resolve_character_value(
         seed_data,
         legacy_32_visuals,
@@ -445,6 +497,7 @@ def build_video_prompt_from_seed(
     post_type: str = "value",
     scene_plan: Optional[dict] = None,
     scene_override: Optional[str] = None,
+    prompt_style: str = "standard",
 ) -> Dict[str, Any]:
     """
     Assemble video generation prompt by inserting dialogue from Phase 2 seed data.
@@ -513,16 +566,22 @@ def build_video_prompt_from_seed(
         ending=STANDARD_FINAL_ENDING_DIRECTIVE,
         legacy_32_visuals=legacy_32_visuals,
     )
-    veo_prompt = build_optimized_prompt(
-        normalized_dialogue,
-        negative_constraints=None,
-        prompt_mode="standard_final",
-        character=character_value,
-        action=action_value,
-        audio_block=STANDARD_FINAL_AUDIO_BLOCK,
-        ending=STANDARD_FINAL_ENDING_DIRECTIVE,
-        legacy_32_visuals=legacy_32_visuals,
-    )
+    if is_character_consistency_light_mode(prompt_style):
+        veo_prompt = build_lean_veo_base_prompt(
+            normalized_dialogue,
+            include_final_ending=True,
+        )
+    else:
+        veo_prompt = build_optimized_prompt(
+            normalized_dialogue,
+            negative_constraints=None,
+            prompt_mode="standard_final",
+            character=character_value,
+            action=action_value,
+            audio_block=STANDARD_FINAL_AUDIO_BLOCK,
+            ending=STANDARD_FINAL_ENDING_DIRECTIVE,
+            legacy_32_visuals=legacy_32_visuals,
+        )
 
     # Keep a single audio block in the final prompt to avoid contradictory synthesis cues.
     audio_section = AudioSection(dialogue=normalized_dialogue, capture=STANDARD_FINAL_AUDIO_BLOCK)
@@ -549,6 +608,7 @@ def build_video_prompt_from_seed(
     prompt_dict["optimized_prompt"] = optimized_prompt
     prompt_dict["veo_prompt"] = veo_prompt
     prompt_dict["veo_negative_prompt"] = VEO_NEGATIVE_PROMPT
+    prompt_dict["prompt_style"] = prompt_style
     
     logger.info(
         "video_prompt_assembled",
@@ -694,6 +754,34 @@ def build_lean_veo_continuation_prompt(
         continuity=LEAN_EXTENSION_CONTINUITY,
         language=LEAN_EXTENSION_LANGUAGE,
         dialogue=cleaned_dialogue,
+        ending=ending,
+        audio_block=audio_block,
+    )
+
+
+def build_lean_veo_base_prompt(
+    dialogue: str,
+    *,
+    include_final_ending: bool = False,
+) -> str:
+    ending = STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE
+    audio_block = LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_LIGHT_BASE_AUDIO_BLOCK
+    return LEAN_LIGHT_BASE_PROMPT_TEMPLATE.format(
+        dialogue=dialogue.strip(),
+        ending=ending,
+        audio_block=audio_block,
+    )
+
+
+def build_lean_veo_light_continuation_prompt(
+    dialogue: str,
+    *,
+    include_final_ending: bool = False,
+) -> str:
+    ending = EXTENDED_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE
+    audio_block = LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_CONTINUATION_AUDIO_BLOCK
+    return LEAN_LIGHT_CONTINUATION_PROMPT_TEMPLATE.format(
+        dialogue=dialogue.strip(),
         ending=ending,
         audio_block=audio_block,
     )

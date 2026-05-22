@@ -407,7 +407,7 @@
     </div>
     {% endif %}
 
-    {% if batch.creation_mode == 'character_consistency' and batch.actor_identity_id and post.video_prompt_json %}
+    {% if batch.creation_mode in ['character_consistency', 'character_consistency_light'] and batch.actor_identity_id and post.video_prompt_json %}
     {% set scene_references = post.scene_reference_candidates or [] %}
     <div class="mt-6 border-t border-gray-200 pt-4">
         <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">

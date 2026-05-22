@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any
 import httpx
 
 from app.core.config import get_settings
+from app.features.characters.actor_identity import is_character_consistency_mode
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -39,7 +40,7 @@ def _resolve_default_veo_model() -> str:
 
 
 def select_veo_model_id(*, creation_mode: str) -> str:
-    if creation_mode == "character_consistency":
+    if is_character_consistency_mode(creation_mode):
         return _VEO_MODEL_ID
     return _resolve_default_veo_model()
 

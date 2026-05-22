@@ -13,7 +13,7 @@ from app.adapters.supabase_client import get_supabase
 from app.core.states import BatchState, validate_state_transition
 from app.core.errors import NotFoundError, StateTransitionError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
-from app.features.characters.actor_identity import actor_identity_is_ready
+from app.features.characters.actor_identity import actor_identity_is_ready, is_character_consistency_mode
 from app.features.characters.queries import get_active_actor_identity
 from app.features.topics.queries import create_post_for_batch
 
@@ -101,13 +101,13 @@ def create_batch(
         "archived": False
     }
 
-    if creation_mode == "character_consistency":
+    if is_character_consistency_mode(creation_mode):
         actor_identity = get_active_actor_identity()
         if not actor_identity_is_ready(actor_identity):
             raise ValidationError(
                 "Cannot create a Character Consistency batch: no ready active ActorIdentity is selected. "
                 "Open /settings/actor, select a ready actor, then create the batch again.",
-                {"creation_mode": "character_consistency", "settings_url": "/settings/actor"},
+                {"creation_mode": creation_mode, "settings_url": "/settings/actor"},
             )
         batch_data["actor_identity_id"] = actor_identity.id
         batch_data["actor_identity_snapshot"] = {

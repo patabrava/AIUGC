@@ -271,7 +271,11 @@ def test_light_extended_base_prompt_uses_reference_image_motion_prompt():
 
     prompt_text, metadata = video_handlers._build_veo_extended_base_prompt(
         {
-            "script": "Ein erster Satz. Ein zweiter Satz. Ein dritter Satz.",
+            "script": (
+                "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+                "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter. "
+                "So bleibt dein Tag klarer und planbarer."
+            ),
         },
         None,
         planned_extension_hops=1,
@@ -280,11 +284,11 @@ def test_light_extended_base_prompt_uses_reference_image_motion_prompt():
     )
 
     assert "The referenced woman sits in the referenced wheelchair setup" in prompt_text
-    assert "Ein erster Satz." in prompt_text
-    assert "Ein zweiter Satz." not in prompt_text
+    assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
+    assert "So bleibt dein Tag klarer und planbarer." not in prompt_text
     assert "Scene:" not in prompt_text
     assert "38-year-old German woman" not in prompt_text
-    assert metadata["veo_segments_total"] == 3
+    assert metadata["veo_segments_total"] == 2
 
 
 def test_select_veo_model_for_character_consistency_uses_full_model(monkeypatch):
@@ -343,6 +347,28 @@ def test_character_consistency_legacy_veo_request_aliases_to_vertex():
     )
 
     assert plan["provider"] == "vertex_ai"
+
+
+def test_character_consistency_light_16s_uses_eight_second_reference_base():
+    from app.features.videos import handlers as video_handlers
+
+    plan = video_handlers._resolve_video_submission_plan(
+        batch={
+            "id": "batch-1",
+            "creation_mode": "character_consistency_light",
+            "target_length_tier": 16,
+        },
+        requested_provider="veo_3_1",
+        requested_seconds=16,
+        aspect_ratio="9:16",
+        resolution="720p",
+        size=None,
+    )
+
+    assert plan["provider"] == "vertex_ai"
+    assert plan["profile"].target_length_tier == 16
+    assert plan["profile"].veo_base_seconds == 8
+    assert plan["profile"].veo_extension_hops == 1
 
 
 def test_submit_video_request_attaches_character_reference_images_to_vertex(monkeypatch):

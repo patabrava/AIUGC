@@ -307,6 +307,13 @@ def get_duration_profile(value: Optional[int]) -> DurationProfile:
     return _profiles()[tier]
 
 
+def get_duration_profile_for_creation_mode(value: Optional[int], creation_mode: Optional[str]) -> DurationProfile:
+    tier = normalize_target_length_tier(value)
+    if str(creation_mode or "").strip() == "character_consistency_light" and tier == 16:
+        return _EFFICIENT_LONG_ROUTE_PROFILES[16]
+    return get_duration_profile(tier)
+
+
 def derive_pipeline_route(value: Optional[int]) -> str:
     return get_duration_profile(value).route
 

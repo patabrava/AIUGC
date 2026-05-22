@@ -1632,8 +1632,10 @@ def _build_veo_extension_prompt(
     from app.features.posts.prompt_builder import (
         VEO_NEGATIVE_PROMPT,
         build_lean_veo_continuation_prompt,
+        build_lean_veo_light_continuation_prompt,
         split_dialogue_sentences,
     )
+    from app.features.characters.actor_identity import is_character_consistency_light_mode
 
     seed_data = post.get("seed_data") or {}
     metadata = post.get("video_metadata") or {}
@@ -1685,7 +1687,12 @@ def _build_veo_extension_prompt(
     hops_target = metadata.get("veo_extension_hops_target", 0)
     hops_completed = metadata.get("veo_extension_hops_completed", 0)
     is_final = (hops_completed + 1) >= hops_target if hops_target > 0 else True
-    prompt_text = build_lean_veo_continuation_prompt(
+    prompt_builder = (
+        build_lean_veo_light_continuation_prompt
+        if is_character_consistency_light_mode(metadata.get("creation_mode") or video_prompt.get("prompt_style"))
+        else build_lean_veo_continuation_prompt
+    )
+    prompt_text = prompt_builder(
         segment_text,
         include_final_ending=is_final,
     )

@@ -25,7 +25,7 @@
             </label>
             <label class="mt-4 flex flex-col text-sm max-w-xs" for="model-select-routed">
                 <span class="text-gray-700 font-medium">Veo Model</span>
-                {% if batch.creation_mode == 'character_consistency' %}
+                {% if batch.creation_mode in ['character_consistency', 'character_consistency_light'] %}
                 <div
                     class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
                     title="Character Consistency mode requires Veo 3.1 for reference image support"
@@ -61,7 +61,7 @@
             </label>
             <label class="flex flex-col text-sm" for="model-select">
                 <span class="text-gray-700 font-medium">Veo Model</span>
-                {% if batch.creation_mode == 'character_consistency' %}
+                {% if batch.creation_mode in ['character_consistency', 'character_consistency_light'] %}
                 <div
                     class="mt-1 rounded-md border border-[#006AAB]/30 bg-[#006AAB]/5 px-3 py-2 text-sm font-medium text-[#006AAB]"
                     title="Character Consistency mode requires Veo 3.1 for reference image support"
