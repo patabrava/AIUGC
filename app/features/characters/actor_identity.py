@@ -6,7 +6,11 @@ from app.core.errors import ErrorCode, FlowForgeException
 from app.features.characters.schemas import ActorIdentityRecord, IdentityGateResult, SceneReferenceSetSummary
 
 
-CHARACTER_CONSISTENCY_MODES = {"character_consistency", "character_consistency_light"}
+CHARACTER_CONSISTENCY_MODES = {
+    "character_consistency",
+    "character_consistency_light",
+    "character_consistency_mid",
+}
 
 
 def is_character_consistency_mode(value: Any) -> bool:
@@ -15,6 +19,10 @@ def is_character_consistency_mode(value: Any) -> bool:
 
 def is_character_consistency_light_mode(value: Any) -> bool:
     return str(value or "").strip() == "character_consistency_light"
+
+
+def is_character_consistency_mid_mode(value: Any) -> bool:
+    return str(value or "").strip() == "character_consistency_mid"
 
 
 def actor_identity_training_ready(identity: Optional[ActorIdentityRecord]) -> bool:

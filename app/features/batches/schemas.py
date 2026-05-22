@@ -33,9 +33,15 @@ class PostTypeCounts(BaseModel):
 class CreateBatchRequest(BaseModel):
     """Request to create a new batch."""
     brand: str = Field(..., min_length=1, max_length=100, description="Brand name")
-    creation_mode: Literal["automated", "manual", "character_consistency", "character_consistency_light"] = Field(
+    creation_mode: Literal[
+        "automated",
+        "manual",
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+    ] = Field(
         default="automated",
-        description="Batch creation mode: automated, manual, character_consistency, or character_consistency_light.",
+        description="Batch creation mode: automated, manual, character_consistency, character_consistency_light, or character_consistency_mid.",
     )
     post_type_counts: Optional[PostTypeCounts] = Field(
         default=None,
@@ -79,7 +85,7 @@ class CreateBatchRequest(BaseModel):
     @validator('post_type_counts', always=True)
     def validate_creation_mode_contract(cls, v, values):
         creation_mode = values.get("creation_mode") or "automated"
-        if creation_mode in {"automated", "character_consistency", "character_consistency_light"} and v is None:
+        if creation_mode in {"automated", "character_consistency", "character_consistency_light", "character_consistency_mid"} and v is None:
             raise ValueError("Post type counts are required for automated and character consistency batches")
         return v
 

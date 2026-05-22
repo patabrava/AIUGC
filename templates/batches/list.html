@@ -295,6 +295,7 @@
                             <option value="automated">Automated</option>
                             <option value="manual">Manual</option>
                             <option value="character_consistency">Character Consistency</option>
+                            <option value="character_consistency_mid">Character Consistency Mid</option>
                             <option value="character_consistency_light">Character Consistency Light</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500">
@@ -341,7 +342,7 @@
                                 >
                             </div>
                         </div>
-                        <p x-show="creationMode === 'character_consistency' || creationMode === 'character_consistency_light'" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <p x-show="creationMode === 'character_consistency' || creationMode === 'character_consistency_mid' || creationMode === 'character_consistency_light'" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                             Uses the active ready ActorIdentity from Settings. If blocked, choose a ready actor at /settings/actor.
                         </p>
                     </div>

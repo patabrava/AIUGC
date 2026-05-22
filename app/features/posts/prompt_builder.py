@@ -9,7 +9,10 @@ from typing import Dict, Any, Iterable, Optional
 
 from app.features.posts.prompt_defaults import DEFAULT_SCENE, DEFAULT_SCENE_BODY, LEGACY_SCENE_BODY
 from app.features.posts.schemas import VideoPrompt, AudioSection
-from app.features.characters.actor_identity import is_character_consistency_light_mode
+from app.features.characters.actor_identity import (
+    is_character_consistency_light_mode,
+    is_character_consistency_mid_mode,
+)
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
 
@@ -26,6 +29,8 @@ __all__ = [
     "split_dialogue_sentences",
     "build_veo_prompt_segment",
     "build_lean_veo_base_prompt",
+    "build_character_consistency_mid_base_prompt",
+    "build_character_consistency_mid_continuation_prompt",
     "build_lean_veo_light_continuation_prompt",
     "build_lean_veo_continuation_prompt",
     "propose_scene_plan",
@@ -102,7 +107,7 @@ _VEO_BASE_NEGATIVES = (
 
 def build_negative_prompt(*, creation_mode: str, is_extension: bool) -> str:
     """Build mode-aware Veo negativePrompt text."""
-    if creation_mode in {"character_consistency", "character_consistency_light"} and not is_extension:
+    if creation_mode in {"character_consistency", "character_consistency_light", "character_consistency_mid"} and not is_extension:
         return _VEO_BASE_NEGATIVES
     return _VEO_BASE_NEGATIVES + _VEO_SCENE_LOCK_CLAUSE
 
@@ -118,7 +123,7 @@ OPTIMIZED_PROMPT_TEMPLATE = (
     "Cinematography:\n"
     "{cinematography}\n\n"
     "Dialogue:\n"
-    "\"{dialogue}\"\n\n"
+    "{dialogue}\n\n"
     "Ending:\n"
     "{ending}\n\n"
     "Audio:\n"
@@ -135,7 +140,7 @@ LEAN_CONTINUATION_PROMPT_TEMPLATE = (
     "Language:\n"
     "{language}\n\n"
     "Dialogue:\n"
-    "\"{dialogue}\"\n\n"
+    "{dialogue}\n\n"
     "Ending:\n"
     "{ending}\n\n"
     "Audio:\n"
@@ -195,6 +200,10 @@ LEAN_EXTENSION_CONTINUITY = (
     "Maintain the same bedroom, lighting, framing, camera position, and wardrobe from the previous segment."
 )
 
+MID_EXTENSION_CONTINUITY = (
+    "Maintain the same environment, lighting, framing, camera position, and wardrobe from the previous segment."
+)
+
 LEAN_EXTENSION_LANGUAGE = (
     "Speak only in German. Maintain the same voice, accent, and speaking pace from the previous segment."
 )
@@ -206,6 +215,10 @@ LEAN_CONTINUATION_AUDIO_BLOCK = (
 LEAN_FINAL_AUDIO_BLOCK = (
     "Natural single-speaker smartphone room audio. No music. No background voices. "
     "Let the room tone settle briefly after the final word."
+)
+
+CHARACTER_CONSISTENCY_MID_SCENE = (
+    "Match the approved reference images. Keep the same environment without introducing new scene elements or layout changes."
 )
 
 DEFAULT_CHARACTER = (
@@ -418,6 +431,12 @@ def sync_video_prompt_with_seed_data(
     if not isinstance(video_prompt, dict) or not isinstance(seed_data, dict):
         return video_prompt
 
+    resolved_character = _resolve_character_value(
+        seed_data,
+        legacy_32_visuals,
+        use_legacy_short_character=use_legacy_short_character,
+    )
+
     if is_character_consistency_light_mode(video_prompt.get("prompt_style")):
         audio_payload = video_prompt.get("audio")
         dialogue = str(audio_payload.get("dialogue") or "").strip() if isinstance(audio_payload, dict) else ""
@@ -427,12 +446,26 @@ def sync_video_prompt_with_seed_data(
         updated_prompt["veo_prompt"] = build_lean_veo_base_prompt(dialogue, include_final_ending=True)
         updated_prompt["prompt_style"] = "character_consistency_light"
         return updated_prompt
+    if is_character_consistency_mid_mode(video_prompt.get("prompt_style")):
+        audio_payload = video_prompt.get("audio")
+        dialogue = str(audio_payload.get("dialogue") or "").strip() if isinstance(audio_payload, dict) else ""
+        if not dialogue:
+            return video_prompt
+        updated_prompt = dict(video_prompt)
+        updated_prompt["scene"] = f"Scene: {CHARACTER_CONSISTENCY_MID_SCENE}"
+        updated_prompt["veo_prompt"] = build_character_consistency_mid_base_prompt(
+            dialogue,
+            character=str(updated_prompt.get("character") or resolved_character or "").strip(),
+            action=str(updated_prompt.get("action") or "").strip() or None,
+            style=str(updated_prompt.get("style") or "").strip() or None,
+            cinematography=str(updated_prompt.get("cinematography") or "").strip() or None,
+            ending=str(updated_prompt.get("ending_directive") or "").strip() or None,
+            audio_block=str(updated_prompt.get("audio_block") or "").strip() or None,
+            legacy_32_visuals=legacy_32_visuals,
+        )
+        updated_prompt["prompt_style"] = "character_consistency_mid"
+        return updated_prompt
 
-    resolved_character = _resolve_character_value(
-        seed_data,
-        legacy_32_visuals,
-        use_legacy_short_character=use_legacy_short_character,
-    )
     current_character = str(video_prompt.get("character") or "").strip()
     if not resolved_character or current_character == resolved_character:
         return video_prompt
@@ -554,6 +587,8 @@ def build_video_prompt_from_seed(
         resolve_scene_for_post(post_type=post_type, scene_plan=scene_plan, override=scene_override),
         legacy_32_visuals=False,
     )
+    if is_character_consistency_mid_mode(prompt_style):
+        scene_value = CHARACTER_CONSISTENCY_MID_SCENE
     cinematography_value = LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY
 
     optimized_prompt = build_optimized_prompt(
@@ -570,6 +605,17 @@ def build_video_prompt_from_seed(
         veo_prompt = build_lean_veo_base_prompt(
             normalized_dialogue,
             include_final_ending=True,
+        )
+    elif is_character_consistency_mid_mode(prompt_style):
+        veo_prompt = build_character_consistency_mid_base_prompt(
+            normalized_dialogue,
+            character=character_value,
+            action=action_value,
+            style=style_value,
+            cinematography=cinematography_value,
+            ending=STANDARD_FINAL_ENDING_DIRECTIVE,
+            audio_block=STANDARD_FINAL_AUDIO_BLOCK,
+            legacy_32_visuals=legacy_32_visuals,
         )
     else:
         veo_prompt = build_optimized_prompt(
@@ -741,6 +787,19 @@ def build_lean_veo_continuation_prompt(
     *,
     include_final_ending: bool = False,
 ) -> str:
+    return _build_character_consistency_continuation_prompt(
+        dialogue,
+        continuity=LEAN_EXTENSION_CONTINUITY,
+        include_final_ending=include_final_ending,
+    )
+
+
+def _build_character_consistency_continuation_prompt(
+    dialogue: str,
+    *,
+    continuity: str,
+    include_final_ending: bool = False,
+) -> str:
     cleaned_dialogue = dialogue.strip()
     ending = (
         EXTENDED_FINAL_ENDING_DIRECTIVE
@@ -751,7 +810,7 @@ def build_lean_veo_continuation_prompt(
     return LEAN_CONTINUATION_PROMPT_TEMPLATE.format(
         character=LEAN_EXTENSION_CHARACTER,
         style=LEAN_EXTENSION_STYLE,
-        continuity=LEAN_EXTENSION_CONTINUITY,
+        continuity=continuity,
         language=LEAN_EXTENSION_LANGUAGE,
         dialogue=cleaned_dialogue,
         ending=ending,
@@ -770,6 +829,45 @@ def build_lean_veo_base_prompt(
         dialogue=dialogue.strip(),
         ending=ending,
         audio_block=audio_block,
+    )
+
+
+def build_character_consistency_mid_base_prompt(
+    dialogue: str,
+    *,
+    character: Optional[str] = None,
+    action: Optional[str] = None,
+    style: Optional[str] = None,
+    cinematography: Optional[str] = None,
+    ending: Optional[str] = None,
+    audio_block: Optional[str] = None,
+    legacy_32_visuals: bool = False,
+    include_final_ending: bool = True,
+) -> str:
+    return build_optimized_prompt(
+        dialogue.strip(),
+        negative_constraints=None,
+        prompt_mode="standard_final" if include_final_ending else "extended_base_or_continuation",
+        character=character,
+        action=action,
+        style=style,
+        scene=CHARACTER_CONSISTENCY_MID_SCENE,
+        cinematography=cinematography,
+        ending=ending,
+        audio_block=audio_block,
+        legacy_32_visuals=legacy_32_visuals,
+    )
+
+
+def build_character_consistency_mid_continuation_prompt(
+    dialogue: str,
+    *,
+    include_final_ending: bool = False,
+) -> str:
+    return _build_character_consistency_continuation_prompt(
+        dialogue,
+        continuity=MID_EXTENSION_CONTINUITY,
+        include_final_ending=include_final_ending,
     )
 
 

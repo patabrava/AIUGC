@@ -128,7 +128,7 @@ def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch)
             "ending": "Edited ending.",
             "audio_block": "Edited audio block.",
             "universal_negatives": "Edited universal negatives.",
-            "veo_prompt": "Character:\nEdited character\n\nDialogue:\n\"Edited dialogue.\"",
+            "veo_prompt": "Character:\nEdited character\n\nDialogue:\nEdited dialogue.",
             "veo_negative_prompt": "Edited veo negatives.",
         },
     )
@@ -139,7 +139,7 @@ def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch)
     assert stored_prompt["character"] == "Edited character"
     assert stored_prompt["audio"]["dialogue"] == "Edited dialogue."
     assert stored_prompt["optimized_prompt"]
-    assert stored_prompt["veo_prompt"] == "Character:\nEdited character\n\nDialogue:\n\"Edited dialogue.\""
+    assert stored_prompt["veo_prompt"] == "Character:\nEdited character\n\nDialogue:\nEdited dialogue."
 
 
 def test_get_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):
@@ -154,7 +154,14 @@ def test_get_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):
                 },
                 "video_prompt_json": None,
             }
-        ]
+        ],
+        "batches": [
+            {
+                "id": "batch-1",
+                "creation_mode": "automated",
+                "scene_plan": None,
+            }
+        ],
     }
 
     monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
@@ -226,7 +233,14 @@ def test_build_prompt_preserves_existing_manual_prompt_edits(monkeypatch):
                     "optimized_prompt": "Character:\nEdited long character prompt",
                 },
             }
-        ]
+        ],
+        "batches": [
+            {
+                "id": "batch-1",
+                "creation_mode": "automated",
+                "scene_plan": None,
+            }
+        ],
     }
 
     monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
@@ -264,7 +278,7 @@ def test_update_prompt_rebuilds_veo_prompt_from_structured_fields_when_raw_promp
                     "ending_directive": "Old ending.",
                     "audio_block": "Old audio block.",
                     "universal_negatives": "Old negatives.",
-                    "veo_prompt": "Character:\nOld character\n\nDialogue:\n\"Old dialogue.\"",
+                    "veo_prompt": "Character:\nOld character\n\nDialogue:\nOld dialogue.",
                     "veo_negative_prompt": "Old veo negatives.",
                     "optimized_prompt": "Character:\nOld character",
                 },
@@ -287,7 +301,7 @@ def test_update_prompt_rebuilds_veo_prompt_from_structured_fields_when_raw_promp
             "ending": "Edited ending.",
             "audio_block": "Edited audio block.",
             "universal_negatives": "Edited negatives.",
-            "veo_prompt": "Character:\nOld character\n\nDialogue:\n\"Old dialogue.\"",
+            "veo_prompt": "Character:\nOld character\n\nDialogue:\nOld dialogue.",
             "veo_negative_prompt": "Edited veo negatives.",
         },
     )

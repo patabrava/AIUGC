@@ -42,6 +42,18 @@ def test_creation_mode_accepts_character_consistency_light():
     assert payload.creation_mode == "character_consistency_light"
 
 
+def test_creation_mode_accepts_character_consistency_mid():
+    payload = CreateBatchRequest.model_validate(
+        {
+            "brand": "Test Brand",
+            "creation_mode": "character_consistency_mid",
+            "post_type_counts": {"value": 1, "lifestyle": 1, "product": 1},
+        }
+    )
+
+    assert payload.creation_mode == "character_consistency_mid"
+
+
 def test_creation_mode_rejects_unknown_value():
     with pytest.raises(PydanticValidationError):
         CreateBatchRequest.model_validate(
@@ -118,6 +130,31 @@ def test_create_light_batch_snapshots_ready_actor_identity(monkeypatch):
     )
 
     assert captured["payload"]["creation_mode"] == "character_consistency_light"
+    assert captured["payload"]["actor_identity_id"] == "actor-1"
+    assert captured["payload"]["actor_identity_snapshot"]["provider_lora_id"] == "110"
+    assert captured["payload"]["character_snapshot"] is None
+
+
+def test_create_mid_batch_snapshots_ready_actor_identity(monkeypatch):
+    from app.features.batches import queries as batch_queries
+
+    captured = {}
+
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", _ready_actor_identity)
+
+    def fake_insert(payload, legacy_payload=None):
+        captured["payload"] = payload
+        return {"id": "batch-1", **payload}
+
+    monkeypatch.setattr(batch_queries, "_insert_batch_row", fake_insert)
+
+    batch_queries.create_batch(
+        brand="Test",
+        post_type_counts={"value": 1, "lifestyle": 0, "product": 0},
+        creation_mode="character_consistency_mid",
+    )
+
+    assert captured["payload"]["creation_mode"] == "character_consistency_mid"
     assert captured["payload"]["actor_identity_id"] == "actor-1"
     assert captured["payload"]["actor_identity_snapshot"]["provider_lora_id"] == "110"
     assert captured["payload"]["character_snapshot"] is None
@@ -244,6 +281,29 @@ def test_character_consistency_light_prompt_uses_reference_image_motion_prompt()
     assert '"Ein erster Satz' not in prompt["veo_prompt"]
 
 
+def test_character_consistency_mid_prompt_uses_stripped_scene_block():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {
+            "script": "Ein erster Satz. Ein zweiter Satz.",
+            "character": (
+                "Same person as the uploaded @ayra character reference images: "
+                "38-year-old German woman with shoulder-length light brown hair."
+            ),
+        },
+        use_legacy_short_character=True,
+        prompt_style="character_consistency_mid",
+    )
+
+    assert prompt["prompt_style"] == "character_consistency_mid"
+    assert "Character:" in prompt["veo_prompt"]
+    assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt["veo_prompt"]
+    assert "Scene:\nMatch the approved reference images. Keep the same environment without introducing new scene elements or layout changes." in prompt["veo_prompt"]
+    assert "A modern, tidy bedroom with blush-pink walls" not in prompt["veo_prompt"]
+    assert "Dialogue:\nEin erster Satz. Ein zweiter Satz." in prompt["veo_prompt"]
+
+
 def test_32s_extended_base_prompt_uses_legacy_short_character():
     from app.features.posts import prompt_builder
     from app.features.videos import handlers as video_handlers
@@ -291,12 +351,38 @@ def test_light_extended_base_prompt_uses_reference_image_motion_prompt():
     assert metadata["veo_segments_total"] == 2
 
 
+def test_mid_extended_base_prompt_uses_stripped_scene_block():
+    from app.features.videos import handlers as video_handlers
+
+    prompt_text, metadata = video_handlers._build_veo_extended_base_prompt(
+        {
+            "script": (
+                "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+                "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter. "
+                "So bleibt dein Tag klarer und planbarer."
+            ),
+        },
+        None,
+        planned_extension_hops=1,
+        target_length_tier=16,
+        creation_mode="character_consistency_mid",
+    )
+
+    assert "Character:" in prompt_text
+    assert "Scene:\nMatch the approved reference images. Keep the same environment without introducing new scene elements or layout changes." in prompt_text
+    assert "A modern, tidy bedroom with blush-pink walls" not in prompt_text
+    assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
+    assert "So bleibt dein Tag klarer und planbarer." not in prompt_text
+    assert metadata["veo_segments_total"] == 2
+
+
 def test_select_veo_model_for_character_consistency_uses_full_model(monkeypatch):
     from app.adapters import veo_client
 
     monkeypatch.setattr(veo_client, "_resolve_default_veo_model", lambda: "veo-3.1-fast-generate-preview")
 
     assert veo_client.select_veo_model_id(creation_mode="character_consistency") == veo_client._VEO_MODEL_ID
+    assert veo_client.select_veo_model_id(creation_mode="character_consistency_mid") == veo_client._VEO_MODEL_ID
     assert veo_client.select_veo_model_id(creation_mode="character_consistency_light") == veo_client._VEO_MODEL_ID
     assert veo_client.select_veo_model_id(creation_mode="automated") == "veo-3.1-fast-generate-preview"
 
@@ -465,6 +551,18 @@ def test_light_actor_identity_batch_blocks_video_without_complete_reference_set(
     from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
 
     batch = {"id": "batch-1", "creation_mode": "character_consistency_light", "actor_identity_id": "actor-1"}
+    post = {"id": "post-1", "batch_id": "batch-1"}
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=None, route="extended")
+
+    assert "three approved SceneReferenceImages" in exc.value.message
+
+
+def test_mid_actor_identity_batch_blocks_video_without_complete_reference_set():
+    from app.core.errors import FlowForgeException
+    from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
+
+    batch = {"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"}
     post = {"id": "post-1", "batch_id": "batch-1"}
     with pytest.raises(FlowForgeException) as exc:
         ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=None, route="extended")

@@ -16,10 +16,16 @@ from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.video_profiles import validate_script_duration_contract
 from app.features.posts.prompt_builder import (
+    build_character_consistency_mid_base_prompt,
+    build_lean_veo_base_prompt,
     build_video_prompt_from_seed,
     ensure_scene_plan,
     validate_video_prompt,
     build_optimized_prompt,
+)
+from app.features.characters.actor_identity import (
+    is_character_consistency_light_mode,
+    is_character_consistency_mid_mode,
 )
 from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
@@ -74,6 +80,23 @@ def _build_edited_veo_prompt(
     submitted_veo_prompt = payload.veo_prompt.strip()
     if submitted_veo_prompt and submitted_veo_prompt != existing_veo_prompt:
         return submitted_veo_prompt
+    prompt_style = str(existing_prompt.get("prompt_style") or "").strip()
+    if is_character_consistency_light_mode(prompt_style):
+        return build_lean_veo_base_prompt(
+            payload.dialogue,
+            include_final_ending=True,
+        )
+    if is_character_consistency_mid_mode(prompt_style):
+        return build_character_consistency_mid_base_prompt(
+            payload.dialogue,
+            character=payload.character,
+            action=payload.action,
+            style=payload.style,
+            cinematography=payload.cinematography,
+            ending=payload.ending,
+            audio_block=payload.audio_block,
+            include_final_ending=True,
+        )
     return build_optimized_prompt(
         payload.dialogue,
         negative_constraints=None,

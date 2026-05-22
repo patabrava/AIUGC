@@ -43,6 +43,7 @@ from app.features.batches.state_machine import reconcile_batch_video_pipeline_st
 from app.features.characters.actor_identity import (
     ensure_video_scene_reference_set_ready,
     is_character_consistency_light_mode,
+    is_character_consistency_mid_mode,
     is_character_consistency_mode,
 )
 from app.features.characters import queries as character_queries
@@ -55,6 +56,8 @@ from app.features.posts.prompt_builder import (
     LEGACY_32_CINEMATOGRAPHY,
     LEGACY_32_STYLE,
     LEGACY_SHORT_CHARACTER,
+    CHARACTER_CONSISTENCY_MID_SCENE,
+    build_character_consistency_mid_base_prompt,
     build_video_prompt_from_seed,
     build_negative_prompt,
     ensure_scene_plan,
@@ -1242,13 +1245,15 @@ def _build_veo_extended_base_prompt(
             prompt_character = LEGACY_SHORT_CHARACTER
             prompt_style = LEGACY_32_STYLE
             prompt_cinematography = LEGACY_32_CINEMATOGRAPHY
-            prompt_scene = None
+            prompt_scene = None if not is_character_consistency_mid_mode(creation_mode) else CHARACTER_CONSISTENCY_MID_SCENE
             prompt_action = None
         else:
             prompt_character = prompt_character or DEFAULT_CHARACTER
             prompt_style = prompt_style or DEFAULT_STYLE
             prompt_cinematography = prompt_cinematography or DEFAULT_CINEMATOGRAPHY
             prompt_action = _extended_action_without_embedded_dialogue(prompt_action, script)
+            if is_character_consistency_mid_mode(creation_mode):
+                prompt_scene = CHARACTER_CONSISTENCY_MID_SCENE
         prompt_ending = None
         prompt_audio_block = None
         _validate_veo_segment_spoken_budget(
@@ -1288,6 +1293,18 @@ def _build_veo_extended_base_prompt(
     if is_character_consistency_light_mode(creation_mode):
         return build_lean_veo_base_prompt(
             base_segment,
+            include_final_ending=False,
+        ), segment_metadata
+    if is_character_consistency_mid_mode(creation_mode):
+        return build_character_consistency_mid_base_prompt(
+            base_segment,
+            character=prompt_character,
+            action=prompt_action,
+            style=prompt_style,
+            cinematography=prompt_cinematography,
+            ending=prompt_ending,
+            audio_block=prompt_audio_block,
+            legacy_32_visuals=bool(target_length_tier == 32),
             include_final_ending=False,
         ), segment_metadata
 

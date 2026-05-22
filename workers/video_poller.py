@@ -1631,11 +1631,15 @@ def _build_veo_extension_prompt(
     """Build a VEO extension prompt for the given post and segment index."""
     from app.features.posts.prompt_builder import (
         VEO_NEGATIVE_PROMPT,
+        build_character_consistency_mid_continuation_prompt,
         build_lean_veo_continuation_prompt,
         build_lean_veo_light_continuation_prompt,
         split_dialogue_sentences,
     )
-    from app.features.characters.actor_identity import is_character_consistency_light_mode
+    from app.features.characters.actor_identity import (
+        is_character_consistency_light_mode,
+        is_character_consistency_mid_mode,
+    )
 
     seed_data = post.get("seed_data") or {}
     metadata = post.get("video_metadata") or {}
@@ -1687,11 +1691,13 @@ def _build_veo_extension_prompt(
     hops_target = metadata.get("veo_extension_hops_target", 0)
     hops_completed = metadata.get("veo_extension_hops_completed", 0)
     is_final = (hops_completed + 1) >= hops_target if hops_target > 0 else True
-    prompt_builder = (
-        build_lean_veo_light_continuation_prompt
-        if is_character_consistency_light_mode(metadata.get("creation_mode") or video_prompt.get("prompt_style"))
-        else build_lean_veo_continuation_prompt
-    )
+    mode_value = metadata.get("creation_mode") or video_prompt.get("prompt_style")
+    if is_character_consistency_light_mode(mode_value):
+        prompt_builder = build_lean_veo_light_continuation_prompt
+    elif is_character_consistency_mid_mode(mode_value):
+        prompt_builder = build_character_consistency_mid_continuation_prompt
+    else:
+        prompt_builder = build_lean_veo_continuation_prompt
     prompt_text = prompt_builder(
         segment_text,
         include_final_ending=is_final,
