@@ -459,11 +459,13 @@
                 {% set metadata = reference.provider_metadata or {} %}
                 <div class="rounded-md border border-amber-200 bg-white/70 p-2">
                     {% if reference.image_url %}
-                    <img
-                        src="{{ reference.image_url }}"
-                        alt="Actor scene reference {{ metadata.get('angle_label') or metadata.get('angle_key') or 'angle' }}"
-                        class="h-32 w-full rounded object-cover"
-                    >
+                    <div class="flex h-48 items-center justify-center overflow-hidden rounded bg-amber-50 p-2">
+                        <img
+                            src="{{ reference.image_url }}"
+                            alt="Actor scene reference {{ metadata.get('angle_label') or metadata.get('angle_key') or 'angle' }}"
+                            class="max-h-full w-full object-contain"
+                        >
+                    </div>
                     {% else %}
                     <div class="flex h-32 items-center justify-center rounded bg-amber-100 text-xs text-amber-800">
                         {{ reference.status or 'submitted' }}

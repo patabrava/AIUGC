@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import re
 import json
+import re
 from typing import Optional
 from uuid import uuid4
 
@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.adapters.magnific_client import get_magnific_client, list_lora_rows, normalize_lora_training_status
+from app.adapters.magnific_client import get_magnific_client
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException
@@ -37,29 +37,35 @@ ALLOWED_CONTENT_TYPES = {"image/png", "image/jpeg"}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
+def _actor_identity_context_result(*, correlation_id: str):
+    try:
+        refreshed = character_queries.refresh_active_actor_identity_status(correlation_id=correlation_id)
+        return refreshed or character_queries.get_active_actor_identity(), None
+    except Exception as exc:  # noqa: BLE001 - settings recovery states must render without a live roster
+        logger.warning(
+            "actor_identity_context_load_failed",
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+        return None, "Actor readiness could not be refreshed. Retrying while settings stay available."
+
+
 def _actor_identity_context(*, correlation_id: str):
-    refreshed = character_queries.refresh_active_actor_identity_status(correlation_id=correlation_id)
-    return refreshed or character_queries.get_active_actor_identity()
+    actor, _error = _actor_identity_context_result(correlation_id=correlation_id)
+    return actor
 
 
 def _actor_settings_context(*, request: Request, correlation_id: str) -> dict:
-    actor = _actor_identity_context(correlation_id=correlation_id)
+    actor, actor_context_error = _actor_identity_context_result(correlation_id=correlation_id)
     roster_error = None
     try:
         character_queries.sync_actor_identity_roster_from_provider(correlation_id=correlation_id)
         actors = character_queries.list_actor_identities()
-        actors = character_queries.refresh_actor_identity_roster_statuses(
-            actors,
-            correlation_id=correlation_id,
-        )
+        actors = character_queries.refresh_actor_identity_roster_statuses(actors, correlation_id=correlation_id)
     except Exception as exc:  # noqa: BLE001 - settings page must keep training available
         actors = []
         roster_error = "Actor roster could not be loaded. Training form is still available."
-        logger.warning(
-            "actor_identity_roster_load_failed",
-            correlation_id=correlation_id,
-            error=str(exc),
-        )
+        logger.warning("actor_identity_roster_load_failed", correlation_id=correlation_id, error=str(exc))
     ready_actors = [row for row in actors if actor_identity_training_ready(row)]
     return {
         "request": request,
@@ -67,8 +73,42 @@ def _actor_settings_context(*, request: Request, correlation_id: str) -> dict:
         "actors": actors,
         "ready_actors": ready_actors,
         "actor_roster_error": roster_error,
+        "actor_context_error": actor_context_error,
         "active_actor_updated": request.query_params.get("active_actor_updated") == "1",
     }
+
+
+def _actor_form_defaults(request: Request) -> dict:
+    return {
+        "name": request.query_params.get("name") or "AYRA Actor Identity",
+        "quality": request.query_params.get("quality") or "high",
+        "gender": request.query_params.get("gender") or "woman",
+        "consent_source": request.query_params.get("consent_source") or "Operator-provided reference set",
+        "description": request.query_params.get("description") or "",
+    }
+
+
+def _actor_settings_response(
+    *,
+    request: Request,
+    correlation_id: str,
+    status_code: int = 200,
+    actor_form_error: str | None = None,
+    actor_activation_error: str | None = None,
+    actor_form_values: dict | None = None,
+):
+    context = _actor_settings_context(request=request, correlation_id=correlation_id)
+    actor = context.get("actor")
+    context.update(
+        {
+            "settings_section": "actor",
+            "actor_ready": actor_identity_is_ready(actor),
+            "actor_form_error": actor_form_error,
+            "actor_activation_error": actor_activation_error,
+            "actor_form_values": actor_form_values or _actor_form_defaults(request),
+        }
+    )
+    return templates.TemplateResponse("settings/actor.html", context, status_code=status_code)
 
 
 def _ready_actor_identity_for_batch(batch: dict):
@@ -112,27 +152,20 @@ def _read_capped(field_name: str, upload: UploadFile) -> bytes:
 
 @router.get("/character")
 def character_settings(request: Request):
-    active = character_queries.get_active_character()
-    actor_identity = character_queries.get_active_actor_identity()
-    roster_error = None
     try:
-        actors = character_queries.refresh_actor_identity_roster_statuses(
-            character_queries.list_actor_identities(),
-            correlation_id=f"character_settings_{uuid4()}",
-        )
-    except Exception as exc:  # noqa: BLE001 - legacy settings page must still render
-        actors = []
-        roster_error = "Actor roster could not be loaded."
-        logger.warning("character_settings_actor_roster_load_failed", error=str(exc))
+        active = character_queries.get_active_character()
+        character_error = None
+    except Exception as exc:  # noqa: BLE001 - legacy settings should still render guidance
+        active = None
+        character_error = "Legacy character snapshot could not be loaded. Actor Identity settings are still available."
+        logger.warning("character_settings_legacy_snapshot_load_failed", error=str(exc))
     return templates.TemplateResponse(
         "settings/character.html",
         {
             "request": request,
             "character": active,
-            "actor_identity": actor_identity,
-            "actor_identity_ready": actor_identity_is_ready(actor_identity),
-            "actors": actors,
-            "actor_roster_error": roster_error,
+            "character_error": character_error,
+            "settings_section": "character",
         },
     )
 
@@ -140,10 +173,7 @@ def character_settings(request: Request):
 @router.get("/actor")
 def actor_settings(request: Request):
     correlation_id = f"actor_settings_get_{uuid4()}"
-    return templates.TemplateResponse(
-        "settings/actor.html",
-        _actor_settings_context(request=request, correlation_id=correlation_id),
-    )
+    return _actor_settings_response(request=request, correlation_id=correlation_id)
 
 
 @router.post("/actor/active")
@@ -164,7 +194,12 @@ def activate_actor_identity(
             actor_identity_id=actor_identity_id,
             error=exc.message,
         )
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        return _actor_settings_response(
+            request=request,
+            correlation_id=correlation_id,
+            status_code=exc.status_code,
+            actor_activation_error=exc.message,
+        )
     except ValueError as exc:
         logger.warning(
             "actor_identity_activation_rejected",
@@ -172,7 +207,12 @@ def activate_actor_identity(
             actor_identity_id=actor_identity_id,
             error=str(exc),
         )
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _actor_settings_response(
+            request=request,
+            correlation_id=correlation_id,
+            status_code=422,
+            actor_activation_error=str(exc),
+        )
     except Exception as exc:
         logger.exception(
             "actor_identity_activation_route_failed",
@@ -218,12 +258,6 @@ async def upload_character(
     )
     logger.info("character_settings_saved", correlation_id=correlation_id, character_id=record.id)
     return RedirectResponse(url="/settings/character", status_code=303)
-
-
-def _provider_safe_name(name: str, actor_identity_id: str) -> str:
-    base = re.sub(r"[^a-zA-Z0-9_]+", "_", name.strip().lower()).strip("_") or "actor"
-    suffix = re.sub(r"[^a-zA-Z0-9]+", "", actor_identity_id)[0:8]
-    return f"{base}_{suffix}"
 
 
 def _load_json_object(value):
@@ -273,6 +307,12 @@ def _post_batch_id(post_id: str) -> str:
     return str(post.get("batch_id") or "")
 
 
+def _provider_safe_name(name: str, actor_identity_id: str) -> str:
+    base = re.sub(r"[^a-zA-Z0-9_]+", "_", name.strip().lower()).strip("_") or "actor"
+    suffix = re.sub(r"[^a-zA-Z0-9]+", "", actor_identity_id)[0:8]
+    return f"{base}_{suffix}"
+
+
 @router.post("/actor")
 @router.post("/character/actor")
 async def train_actor_identity(
@@ -285,8 +325,21 @@ async def train_actor_identity(
     training_images: list[UploadFile] = File(...),
 ):
     correlation_id = str(uuid4())
+    actor_form_values = {
+        "name": name,
+        "gender": gender,
+        "quality": quality,
+        "consent_source": consent_source,
+        "description": description,
+    }
     if len(training_images) < 8 or len(training_images) > 20:
-        raise HTTPException(status_code=422, detail="ActorIdentity training requires 8-20 images")
+        return _actor_settings_response(
+            request=request,
+            correlation_id=correlation_id,
+            status_code=422,
+            actor_form_error="Upload between 8 and 20 images.",
+            actor_form_values=actor_form_values,
+        )
 
     for idx, upload in enumerate(training_images, start=1):
         _validate_upload(f"training_image_{idx}", upload)
@@ -303,46 +356,7 @@ async def train_actor_identity(
         uploaded_urls.append(result["url"])
 
     training = ActorTrainingSet(images=uploaded_urls, consent_source=consent_source)
-    if request.url.path == "/settings/actor":
-        from app.adapters import magnific_client as magnific_adapter
-
-        identity = character_queries.create_actor_identity(
-            name=name,
-            provider="magnific",
-            provider_training_task_id=None,
-            provider_lora_id=None,
-            provider_lora_name=None,
-            training_status="queued",
-            training_phase="queued",
-            training_progress_percent=10,
-            training_images=training.images,
-            consent_source=training.consent_source,
-            training_error=None,
-            correlation_id=correlation_id,
-            is_active=False,
-        )
-        status = magnific_adapter.get_magnific_client().train_character_lora(
-            name=name,
-            quality=quality,
-            gender=gender,
-            image_urls=training.images,
-            correlation_id=correlation_id,
-            description=description or None,
-        )
-        character_queries.update_actor_training_status(
-            actor_identity_id=identity.id,
-            provider_training_task_id=status.provider_training_task_id,
-            provider_lora_id=status.provider_lora_id,
-            provider_lora_name=status.provider_lora_name,
-            training_status=str(status.training_status or status.raw_status),
-            training_phase=str(status.training_phase or status.phase),
-            training_progress_percent=int(status.training_progress_percent or status.progress_percent or 0),
-            training_error=status.training_error,
-            correlation_id=correlation_id,
-        )
-        identity = character_queries.get_actor_identity_by_id(identity.id) or identity
-        redirect_url = "/settings/actor"
-    else:
+    if request.url.path == "/settings/character/actor":
         identity = character_queries.create_actor_identity(
             name=name,
             training_images=training.images,
@@ -367,51 +381,71 @@ async def train_actor_identity(
             raw_status=str(task.get("status") or "in_progress"),
             correlation_id=correlation_id,
         )
-        redirect_url = "/settings/character"
+        logger.info(
+            "actor_identity_training_started",
+            correlation_id=correlation_id,
+            actor_identity_id=identity.id,
+            training_image_count=len(training.images),
+        )
+        return RedirectResponse(url="/settings/actor", status_code=303)
+
+    from app.adapters import magnific_client as magnific_adapter
+
+    identity = character_queries.create_actor_identity(
+        name=name,
+        provider="magnific",
+        provider_training_task_id=None,
+        provider_lora_id=None,
+        provider_lora_name=None,
+        training_status="queued",
+        training_phase="queued",
+        training_progress_percent=10,
+        training_images=training.images,
+        consent_source=training.consent_source,
+        training_error=None,
+        correlation_id=correlation_id,
+        is_active=False,
+    )
+    status = magnific_adapter.get_magnific_client().train_character_lora(
+        name=name,
+        quality=quality,
+        gender=gender,
+        image_urls=training.images,
+        correlation_id=correlation_id,
+        description=description or None,
+    )
+    character_queries.update_actor_training_status(
+        actor_identity_id=identity.id,
+        provider_training_task_id=status.provider_training_task_id,
+        provider_lora_id=status.provider_lora_id,
+        provider_lora_name=status.provider_lora_name,
+        training_status=str(status.training_status or status.raw_status),
+        training_phase=str(status.training_phase or status.phase),
+        training_progress_percent=int(status.training_progress_percent or status.progress_percent or 0),
+        training_error=status.training_error,
+        correlation_id=correlation_id,
+    )
+    identity = character_queries.get_actor_identity_by_id(identity.id) or identity
     logger.info(
         "actor_identity_training_started",
         correlation_id=correlation_id,
         actor_identity_id=identity.id,
         training_image_count=len(training.images),
     )
-    return RedirectResponse(url=redirect_url, status_code=303)
+    return RedirectResponse(url="/settings/actor", status_code=303)
 
 
-@router.post("/character/actor/poll")
-def poll_actor_identity_training(request: Request):
+@router.post("/actor/poll")
+def poll_actor_settings_training(request: Request):
     correlation_id = str(uuid4())
-    actor_identity = character_queries.get_active_actor_identity()
-    if actor_identity is not None and not actor_identity_is_ready(actor_identity):
-        loras = get_magnific_client().list_loras(correlation_id=correlation_id)
-        match = None
-        for row in list_lora_rows(loras):
-            if actor_identity.provider_lora_id and str(row.get("id")) == str(actor_identity.provider_lora_id):
-                match = row
-                break
-            if actor_identity.provider_lora_name and str(row.get("name")) == actor_identity.provider_lora_name:
-                match = row
-                break
-        if match:
-            status = normalize_lora_training_status(match)
-            character_queries.update_actor_training_status(
-                actor_identity_id=actor_identity.id,
-                training_status=status.raw_status,
-                training_phase=status.phase,
-                training_progress_percent=status.progress_percent,
-                provider_lora_id=status.provider_lora_id,
-                provider_lora_name=status.provider_lora_name,
-                training_error=None,
-                correlation_id=correlation_id,
-            )
-            actor_identity = character_queries.get_active_actor_identity()
-
+    actor, actor_context_error = _actor_identity_context_result(correlation_id=correlation_id)
     return templates.TemplateResponse(
-        "settings/character.html",
+        "settings/_actor_training_status.html",
         {
             "request": request,
-            "character": character_queries.get_active_character(),
-            "actor_identity": actor_identity,
-            "actor_identity_ready": actor_identity_is_ready(actor_identity),
+            "actor": actor,
+            "actor_ready": actor_identity_is_ready(actor),
+            "actor_context_error": actor_context_error,
         },
     )
 

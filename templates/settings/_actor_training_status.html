@@ -1,0 +1,63 @@
+<section
+  id="actor-training-status"
+  class="brand-panel mt-6 rounded-[1.75rem] p-5 sm:p-6"
+  {% if actor_context_error or (actor and not actor_ready) %}
+  hx-post="/settings/actor/poll"
+  hx-trigger="every 10s"
+  hx-swap="outerHTML"
+  {% endif %}
+>
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <p class="brand-section-eyebrow">Readiness</p>
+      <h2 class="mt-2 text-2xl font-brand-heading font-bold text-[var(--lippe-deep-blue)]">
+        {% if actor %}{{ actor.name }}{% elif actor_context_error %}Readiness temporarily unavailable{% else %}No actor selected yet{% endif %}
+      </h2>
+      <p class="mt-2 text-sm text-[color:rgba(28,39,64,0.78)]">
+        {% if actor_context_error %}
+          {{ actor_context_error }}
+        {% elif actor_ready %}
+          Character consistency is ready for new batches.
+        {% else %}
+          Character consistency is blocked until training finishes.
+        {% endif %}
+      </p>
+    </div>
+    <span class="rounded-full px-3 py-1 text-xs font-semibold {% if actor_ready %}bg-emerald-100 text-emerald-900{% else %}bg-amber-100 text-amber-900{% endif %}">
+      {% if actor_context_error %}Retrying{% elif actor_ready %}Ready{% else %}Blocked{% endif %}
+    </span>
+  </div>
+
+  {% if actor %}
+  <div class="mt-5">
+    <div class="flex items-center justify-between text-xs font-medium text-[color:rgba(28,39,64,0.72)]">
+      <span>{{ actor.training_phase|replace("_", " ")|title }}</span>
+      <span>{{ actor.training_progress_percent }}%</span>
+    </div>
+    <div
+      class="mt-2 h-3 overflow-hidden rounded-full bg-[rgba(28,39,64,0.08)]"
+      role="progressbar"
+      aria-label="Actor training progress"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      aria-valuenow="{{ actor.training_progress_percent }}"
+    >
+      <div class="h-full rounded-full bg-[var(--lippe-orange)]" style="width: {{ actor.training_progress_percent }}%"></div>
+    </div>
+    {% if actor.training_error %}
+    <p class="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+      {{ actor.training_error }}
+    </p>
+    {% endif %}
+    <details class="mt-4 text-xs text-[color:rgba(28,39,64,0.66)]">
+      <summary class="cursor-pointer font-medium">Technical details</summary>
+      <div class="mt-2 space-y-1">
+        <p>Provider: {{ actor.provider }}</p>
+        <p>Provider LoRA: {{ actor.provider_lora_id or "pending" }}</p>
+        <p>Training task: {{ actor.provider_training_task_id or "pending" }}</p>
+        <p>Uploaded training images: {{ actor.training_images | length }}</p>
+      </div>
+    </details>
+  </div>
+  {% endif %}
+</section>

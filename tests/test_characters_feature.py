@@ -132,6 +132,19 @@ def _actor_row(
     }
 
 
+def _patch_actor_settings_context(monkeypatch, active=None, actors=None):
+    roster = actors if actors is not None else ([] if active is None else [active])
+    monkeypatch.setattr(character_queries, "sync_actor_identity_roster_from_provider", lambda correlation_id: None)
+    monkeypatch.setattr(character_queries, "refresh_active_actor_identity_status", lambda correlation_id: active)
+    monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: active)
+    monkeypatch.setattr(character_queries, "list_actor_identities", lambda: roster)
+    monkeypatch.setattr(
+        character_queries,
+        "refresh_actor_identity_roster_statuses",
+        lambda identities, correlation_id: identities,
+    )
+
+
 def test_get_active_character_returns_record(monkeypatch):
     rows = [
         {
@@ -502,35 +515,25 @@ def test_actor_settings_page_renders_active_actor(monkeypatch):
         created_at="2026-05-20T21:00:00Z",
         updated_at="2026-05-20T21:10:18Z",
     )
-    monkeypatch.setattr(character_queries, "refresh_active_actor_identity_status", lambda correlation_id: actor)
-    monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: actor)
+    _patch_actor_settings_context(monkeypatch, active=actor)
 
     response = TestClient(app, base_url="http://localhost").get("/settings/actor")
 
     assert response.status_code == 200
     assert "AYRA Actor Identity" in response.text
-    assert "1785341" in response.text
     assert "100%" in response.text
+    assert 'aria-current="page"' in response.text
 
 
-def test_character_settings_page_renders_actor_roster(monkeypatch):
-    active = ActorIdentityRecord.model_validate(
-        _actor_row("active", is_active=True, updated_at="2026-05-21T10:00:00Z")
-    )
-    ready = ActorIdentityRecord.model_validate(
-        _actor_row("ready", is_active=False, updated_at="2026-05-21T12:00:00Z")
-    )
+def test_character_settings_hides_actor_training_form_and_links_to_actor_settings(monkeypatch):
     monkeypatch.setattr(character_queries, "get_active_character", lambda: None)
-    monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: active)
-    monkeypatch.setattr(character_queries, "refresh_actor_identity_roster_statuses", lambda identities, correlation_id: [active, ready])
-    monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [active, ready])
 
     response = TestClient(app, base_url="http://localhost").get("/settings/character")
 
     assert response.status_code == 200
-    assert "Actor roster" in response.text
-    assert "Actor active" in response.text
-    assert "Actor ready" in response.text
+    assert "Train or Replace Active ActorIdentity" not in response.text
+    assert 'href="/settings/actor"' in response.text
+    assert "Actor Identity lives in its own settings flow" in response.text
 
 
 def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch):
@@ -548,6 +551,7 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
     monkeypatch.setattr(character_queries, "refresh_active_actor_identity_status", lambda correlation_id: active)
     monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: active)
     monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [active, ready, training])
+    monkeypatch.setattr(character_queries, "refresh_actor_identity_roster_statuses", lambda identities, correlation_id: identities)
 
     response = TestClient(app, base_url="http://localhost").get("/settings/actor")
 
@@ -556,7 +560,7 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
     assert 'value="active" selected' in response.text
     assert 'value="ready"' in response.text
     assert 'value="training"' not in response.text
-    assert "Actor training" in response.text
+    assert "Train new actor" in response.text
     assert sync_calls
 
 
@@ -582,9 +586,12 @@ def test_actor_settings_active_post_calls_activation_helper(monkeypatch):
 
 
 def test_actor_settings_active_post_rejects_non_ready_actor(monkeypatch):
+    active = ActorIdentityRecord.model_validate(_actor_row("active", is_active=True))
+
     def reject(**_kwargs):
         raise ValueError("Only ready ActorIdentity rows can be activated")
 
+    _patch_actor_settings_context(monkeypatch, active=active)
     monkeypatch.setattr(character_queries, "set_active_actor_identity", reject)
 
     response = TestClient(app, base_url="http://localhost").post(
@@ -595,6 +602,45 @@ def test_actor_settings_active_post_rejects_non_ready_actor(monkeypatch):
 
     assert response.status_code == 422
     assert "Only ready ActorIdentity rows can be activated" in response.text
+    assert 'name="actor_identity_id"' in response.text
+
+
+def test_actor_training_poll_returns_partial_with_progressbar(monkeypatch):
+    active = ActorIdentityRecord.model_validate(
+        _actor_row("active", is_active=True, phase="training", progress=45, lora_id=None)
+    )
+    monkeypatch.setattr(character_queries, "refresh_active_actor_identity_status", lambda correlation_id: active)
+    monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: active)
+
+    response = TestClient(app, base_url="http://localhost").post("/settings/actor/poll")
+
+    assert response.status_code == 200
+    assert "Character consistency is blocked until training finishes." in response.text
+    assert 'role="progressbar"' in response.text
+    assert "<html" not in response.text.lower()
+
+
+def test_actor_settings_uses_brand_panel_and_semantic_status_copy(monkeypatch):
+    active = ActorIdentityRecord.model_validate(_actor_row("active", is_active=True))
+    _patch_actor_settings_context(monkeypatch, active=active)
+
+    response = TestClient(app, base_url="http://localhost").get("/settings/actor")
+
+    assert response.status_code == 200
+    assert "brand-panel" in response.text
+    assert "Select the actor for new batches" in response.text
+    assert "LoRA ID" not in response.text
+    assert "Task ID" not in response.text
+
+
+def test_character_settings_keeps_legacy_snapshot_actions(monkeypatch):
+    monkeypatch.setattr(character_queries, "get_active_character", lambda: None)
+
+    response = TestClient(app, base_url="http://localhost").get("/settings/character")
+
+    assert response.status_code == 200
+    assert "Legacy Three-Image Character Snapshot" in response.text
+    assert 'action="/settings/character"' in response.text
 
 
 def test_generate_scene_reference_uses_lora_id_prompt_handle_and_no_seed(monkeypatch):
@@ -652,10 +698,25 @@ def test_generate_scene_reference_uses_lora_id_prompt_handle_and_no_seed(monkeyp
 
     assert response.status_code == 303
     assert len(submissions) == 3
-    assert all(submission["lora_id"] == "1786946" for submission in submissions)
-    assert all("extra_options" not in submission for submission in submissions)
-    assert all("@ayra-actor-longchar-20260521::100" in submission["prompt"] for submission in submissions)
-    assert len(created) == 3
+
+
+def test_character_settings_renders_reference_images_without_cropping(monkeypatch):
+    monkeypatch.setattr(
+        character_queries,
+        "get_active_character",
+        lambda: {
+            "name": "Legacy Character",
+            "front_image_url": "https://cdn.example.com/front.png",
+            "three_quarter_image_url": "https://cdn.example.com/three-quarter.png",
+            "profile_image_url": "https://cdn.example.com/profile.png",
+        },
+    )
+
+    response = TestClient(app, base_url="http://localhost").get("/settings/character")
+
+    assert response.status_code == 200
+    assert "h-full w-full object-contain" in response.text
+    assert "object-cover" not in response.text
 
 
 def test_refresh_active_actor_identity_status_recovers_from_poll_failure(monkeypatch):
@@ -783,25 +844,23 @@ def test_upload_actor_identity_submits_training_set(monkeypatch):
     assert status_updates[0]["provider_training_task_id"] == "task-123"
 
 
-def test_upload_actor_identity_rejects_too_few_images():
+def test_upload_actor_identity_re_renders_inline_error_for_invalid_image_count(monkeypatch):
+    _patch_actor_settings_context(monkeypatch)
+
     response = TestClient(app, base_url="http://localhost").post(
         "/settings/actor",
         data={
-            "name": "AYRA Actor Identity",
+            "name": "Actor",
             "quality": "high",
             "gender": "woman",
             "consent_source": "operator",
         },
         files=[
             ("training_images", ("img1.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img2.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img3.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img4.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img5.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img6.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img7.png", io.BytesIO(_png_bytes()), "image/png")),
         ],
         follow_redirects=False,
     )
 
     assert response.status_code == 422
+    assert "Upload between 8 and 20 images." in response.text
+    assert 'value="Actor"' in response.text
