@@ -11,7 +11,11 @@ from app.adapters.magnific_client import list_lora_rows, normalize_lora_training
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import ErrorCode, FlowForgeException
 from app.core.logging import get_logger
-from app.features.characters.actor_identity import actor_identity_training_ready, sort_actor_identity_roster
+from app.features.characters.actor_identity import (
+    actor_identity_training_ready,
+    derive_actor_identity_preview_images,
+    sort_actor_identity_roster,
+)
 from app.features.characters.schemas import (
     ActorIdentityRecord,
     CharacterRecord,
@@ -288,11 +292,14 @@ def create_actor_identity(
     is_active: bool = False,
 ) -> ActorIdentityRecord:
     now = datetime.now(timezone.utc).isoformat()
+    portrait_image_url, cover_image_url = derive_actor_identity_preview_images(training_images)
     payload: dict[str, Any] = {
         "id": str(uuid4()),
         "name": name.strip() or "Default Actor",
         "provider": provider.strip() or "magnific",
         "training_images": training_images,
+        "portrait_image_url": portrait_image_url,
+        "cover_image_url": cover_image_url,
         "consent_source": (consent_source or "").strip() or None,
         "training_status": training_status,
         "training_phase": training_phase,

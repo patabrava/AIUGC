@@ -112,6 +112,7 @@ def _actor_row(
     lora_id: str | None = "lora-1",
     error: str | None = None,
     updated_at: str = "2026-05-21T00:00:00Z",
+    image_url: str = "https://cdn.example.com/a.png",
 ) -> dict:
     return {
         "id": actor_id,
@@ -125,7 +126,9 @@ def _actor_row(
         "training_phase": phase,
         "training_progress_percent": progress,
         "training_error": error,
-        "training_images": ["https://cdn.example.com/a.png"] * 8,
+        "training_images": [image_url] * 8,
+        "portrait_image_url": image_url,
+        "cover_image_url": image_url,
         "consent_source": "operator",
         "created_at": "2026-05-20T00:00:00Z",
         "updated_at": updated_at,
@@ -290,6 +293,25 @@ def test_sync_actor_identity_roster_from_provider_imports_completed_lora(monkeyp
     assert created[0]["training_phase"] == "ready"
     assert created[0]["training_progress_percent"] == 100
     assert result[0].provider_lora_id == "1786946"
+
+
+def test_create_actor_identity_persists_preview_images(monkeypatch):
+    rows = []
+    monkeypatch.setattr(character_queries, "get_supabase", lambda: _fake_supabase(rows))
+
+    result = character_queries.create_actor_identity(
+        name="AYRA",
+        training_images=[
+            "https://cdn.example.com/portrait.png",
+            "https://cdn.example.com/cover.png",
+        ],
+        consent_source="operator",
+        correlation_id="test-correlation",
+    )
+
+    assert result.primary_image_url == "https://cdn.example.com/portrait.png"
+    assert rows[0]["portrait_image_url"] == "https://cdn.example.com/portrait.png"
+    assert rows[0]["cover_image_url"] == "https://cdn.example.com/portrait.png"
 
 
 def test_sync_actor_identity_roster_from_provider_skips_non_character_loras(monkeypatch):
@@ -538,13 +560,30 @@ def test_character_settings_hides_actor_training_form_and_links_to_actor_setting
 
 def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch):
     active = ActorIdentityRecord.model_validate(
-        _actor_row("active", is_active=True, updated_at="2026-05-21T10:00:00Z")
+        _actor_row(
+            "active",
+            is_active=True,
+            updated_at="2026-05-21T10:00:00Z",
+            image_url="https://cdn.example.com/active.png",
+        )
     )
     ready = ActorIdentityRecord.model_validate(
-        _actor_row("ready", is_active=False, updated_at="2026-05-21T12:00:00Z")
+        _actor_row(
+            "ready",
+            is_active=False,
+            updated_at="2026-05-21T12:00:00Z",
+            image_url="https://cdn.example.com/ready.png",
+        )
     )
     training = ActorIdentityRecord.model_validate(
-        _actor_row("training", phase="training", progress=40, lora_id=None, updated_at="2026-05-21T13:00:00Z")
+        _actor_row(
+            "training",
+            phase="training",
+            progress=40,
+            lora_id=None,
+            updated_at="2026-05-21T13:00:00Z",
+            image_url="https://cdn.example.com/training.png",
+        )
     )
     sync_calls = []
     monkeypatch.setattr(character_queries, "sync_actor_identity_roster_from_provider", lambda correlation_id: sync_calls.append(correlation_id))
@@ -556,10 +595,12 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
     response = TestClient(app, base_url="http://localhost").get("/settings/actor")
 
     assert response.status_code == 200
-    assert 'name="actor_identity_id"' in response.text
-    assert 'value="active" selected' in response.text
-    assert 'value="ready"' in response.text
-    assert 'value="training"' not in response.text
+    assert 'type="radio"' in response.text
+    assert 'value="active"' in response.text
+    assert 'checked' in response.text
+    assert 'https://cdn.example.com/active.png' in response.text
+    assert 'https://cdn.example.com/ready.png' in response.text
+    assert 'name="actor_identity_id" value="training"' not in response.text
     assert "Train new actor" in response.text
     assert sync_calls
 

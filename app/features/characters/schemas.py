@@ -49,6 +49,8 @@ class ActorIdentityRecord(BaseModel):
     provider_lora_id: Optional[str] = None
     provider_lora_name: Optional[str] = None
     provider_training_task_id: Optional[str] = None
+    portrait_image_url: Optional[str] = None
+    cover_image_url: Optional[str] = None
     training_status: str
     training_phase: str
     training_progress_percent: int
@@ -59,6 +61,17 @@ class ActorIdentityRecord(BaseModel):
     updated_at: datetime
     training_started_at: Optional[datetime] = None
     training_completed_at: Optional[datetime] = None
+
+    @property
+    def primary_image_url(self) -> Optional[str]:
+        for candidate in (
+            self.portrait_image_url,
+            self.cover_image_url,
+            *(self.training_images[:1] if self.training_images else []),
+        ):
+            if candidate and str(candidate).strip():
+                return str(candidate).strip()
+        return None
 
 
 class IdentityGateResult(BaseModel):

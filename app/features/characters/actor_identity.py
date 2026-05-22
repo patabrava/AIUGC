@@ -40,6 +40,21 @@ def actor_identity_is_ready(identity: Optional[ActorIdentityRecord]) -> bool:
     return bool(identity and identity.is_active is True and actor_identity_training_ready(identity))
 
 
+def derive_actor_identity_preview_images(training_images: list[str]) -> tuple[Optional[str], Optional[str]]:
+    cleaned = [str(image).strip() for image in training_images if str(image).strip()]
+    if not cleaned:
+        return None, None
+    portrait_image_url = cleaned[0]
+    cover_image_url = cleaned[0]
+    return portrait_image_url, cover_image_url
+
+
+def actor_identity_preview_image_url(identity: Optional[ActorIdentityRecord]) -> Optional[str]:
+    if identity is None:
+        return None
+    return identity.primary_image_url
+
+
 def actor_identity_status_group(identity: ActorIdentityRecord) -> str:
     if identity.is_active:
         return "active"

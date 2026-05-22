@@ -66,6 +66,56 @@ def test_ready_actor_identity_requires_completed_training():
     assert actor_identity_is_ready(ActorIdentityRecord.model_validate(base)) is False
 
 
+def test_actor_identity_primary_image_url_prefers_explicit_preview_fields():
+    from app.features.characters.schemas import ActorIdentityRecord
+
+    actor = ActorIdentityRecord(
+        id="actor-1",
+        name="AYRA",
+        is_active=True,
+        provider="magnific",
+        provider_lora_id="110",
+        provider_lora_name="ayra",
+        provider_training_task_id="train-1",
+        portrait_image_url="https://cdn.example.com/portrait.png",
+        cover_image_url="https://cdn.example.com/cover.png",
+        training_status="completed",
+        training_phase="ready",
+        training_progress_percent=100,
+        training_error=None,
+        training_images=["https://cdn.example.com/fallback.png"],
+        consent_source="operator",
+        created_at="2026-05-20T00:00:00Z",
+        updated_at="2026-05-20T00:00:00Z",
+    )
+
+    assert actor.primary_image_url == "https://cdn.example.com/portrait.png"
+
+
+def test_actor_identity_primary_image_url_falls_back_to_training_images():
+    from app.features.characters.schemas import ActorIdentityRecord
+
+    actor = ActorIdentityRecord(
+        id="actor-2",
+        name="AYRA",
+        is_active=True,
+        provider="magnific",
+        provider_lora_id="110",
+        provider_lora_name="ayra",
+        provider_training_task_id="train-1",
+        training_status="completed",
+        training_phase="ready",
+        training_progress_percent=100,
+        training_error=None,
+        training_images=["https://cdn.example.com/fallback.png"],
+        consent_source="operator",
+        created_at="2026-05-20T00:00:00Z",
+        updated_at="2026-05-20T00:00:00Z",
+    )
+
+    assert actor.primary_image_url == "https://cdn.example.com/fallback.png"
+
+
 def _png_bytes() -> bytes:
     return b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 

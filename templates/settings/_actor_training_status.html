@@ -8,7 +8,17 @@
   {% endif %}
 >
   <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-    <div>
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
+      {% if actor and actor.primary_image_url %}
+      <div class="shrink-0">
+        <img
+          src="{{ actor.primary_image_url }}"
+          alt="{{ actor.name }} portrait"
+          class="h-24 w-24 rounded-[1.5rem] object-cover ring-1 ring-[rgba(28,39,64,0.12)]"
+        />
+      </div>
+      {% endif %}
+      <div>
       <p class="brand-section-eyebrow">Readiness</p>
       <h2 class="mt-2 text-2xl font-brand-heading font-bold text-[var(--lippe-deep-blue)]">
         {% if actor %}{{ actor.name }}{% elif actor_context_error %}Readiness temporarily unavailable{% else %}No actor selected yet{% endif %}
@@ -22,6 +32,7 @@
           Character consistency is blocked until training finishes.
         {% endif %}
       </p>
+    </div>
     </div>
     <span class="rounded-full px-3 py-1 text-xs font-semibold {% if actor_ready %}bg-emerald-100 text-emerald-900{% else %}bg-amber-100 text-amber-900{% endif %}">
       {% if actor_context_error %}Retrying{% elif actor_ready %}Ready{% else %}Blocked{% endif %}
