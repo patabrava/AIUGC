@@ -597,7 +597,7 @@ def test_actor_settings_active_post_rejects_non_ready_actor(monkeypatch):
     assert "Only ready ActorIdentity rows can be activated" in response.text
 
 
-def test_generate_scene_reference_uses_lora_id_without_prompt_handle_or_seed(monkeypatch):
+def test_generate_scene_reference_uses_lora_id_prompt_handle_and_no_seed(monkeypatch):
     actor = ActorIdentityRecord(
         id="actor-1",
         name="AYRA Actor Long Character",
@@ -654,8 +654,7 @@ def test_generate_scene_reference_uses_lora_id_without_prompt_handle_or_seed(mon
     assert len(submissions) == 3
     assert all(submission["lora_id"] == "1786946" for submission in submissions)
     assert all("extra_options" not in submission for submission in submissions)
-    assert all("@ayra-actor-longchar-20260521" not in submission["prompt"] for submission in submissions)
-    assert all("AYRA Actor Long Character" in submission["prompt"] for submission in submissions)
+    assert all("@ayra-actor-longchar-20260521::100" in submission["prompt"] for submission in submissions)
     assert len(created) == 3
 
 

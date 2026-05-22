@@ -444,6 +444,7 @@ def generate_scene_reference(post_id: str):
             wardrobe_key=intent.wardrobe_key,
             post_type=str(post.get("post_type") or ""),
             angle_key=angle.key,
+            provider_lora_name=actor_identity.provider_lora_name,
         )
         task = client.create_mystic_scene_reference(
             prompt=prompt,
@@ -561,6 +562,7 @@ def regenerate_scene_reference(reference_id: str):
         wardrobe_key=str(reference.get("wardrobe_key") or ""),
         post_type="",
         angle_key=angle.key,
+        provider_lora_name=actor_identity.provider_lora_name,
     )
     task = get_magnific_client().create_mystic_scene_reference(
         prompt=prompt,
