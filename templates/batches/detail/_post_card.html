@@ -436,8 +436,12 @@
                         hx-trigger="click"
                         hx-swap="none"
                         hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                        class="inline-flex items-center rounded-md bg-amber-700 px-3 py-2 text-xs font-medium text-white hover:bg-amber-800"
+                        class="inline-flex items-center gap-2 rounded-md bg-amber-700 px-3 py-2 text-xs font-medium text-white hover:bg-amber-800"
                     >
+                        <svg class="htmx-indicator h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                        </svg>
                         Generate 3 refs
                     </button>
                     {% if scene_references %}
@@ -446,8 +450,12 @@
                         hx-trigger="click"
                         hx-swap="none"
                         hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                        class="inline-flex items-center rounded-md bg-white px-3 py-2 text-xs font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
+                        class="inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
                     >
+                        <svg class="htmx-indicator h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                        </svg>
                         Regenerate all
                     </button>
                     {% endif %}
@@ -467,8 +475,19 @@
                         >
                     </div>
                     {% else %}
-                    <div class="flex h-32 items-center justify-center rounded bg-amber-100 text-xs text-amber-800">
-                        {{ reference.status or 'submitted' }}
+                    <div
+                        class="flex h-48 flex-col items-center justify-center gap-2 rounded bg-amber-100 text-xs text-amber-800"
+                        {% if reference.provider_task_id %}
+                        hx-post="/settings/character/scene-reference/{{ reference.id }}/poll"
+                        hx-trigger="load, every 4s"
+                        hx-swap="none"
+                        {% endif %}
+                    >
+                        <svg class="h-6 w-6 animate-spin text-amber-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                        </svg>
+                        <span>Generating reference · {{ reference.status or 'submitted' }}</span>
                     </div>
                     {% endif %}
                     <p class="mt-2 text-[11px] text-amber-900">
@@ -492,8 +511,12 @@
                             hx-trigger="click"
                             hx-swap="none"
                             hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                            class="inline-flex items-center rounded-md bg-white px-2 py-1 text-[11px] font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
+                            class="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-[11px] font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
                         >
+                            <svg class="htmx-indicator h-3 w-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                            </svg>
                             Regenerate
                         </button>
                         {% endif %}

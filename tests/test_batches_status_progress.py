@@ -913,6 +913,56 @@ def test_batch_detail_template_renders_scene_references_without_cropping():
     assert "h-32 w-full rounded object-cover" not in rendered
 
 
+def test_batch_detail_template_auto_polls_submitted_scene_references():
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("batches/detail/_post_card.html")
+
+    rendered = template.render(
+        batch={"state": "S4_SCRIPTED", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"},
+        post={
+            "id": "post-1",
+            "post_type": "value",
+            "created_at": "2026-03-16T10:00:00+00:00",
+            "updated_at": None,
+            "topic_title": "Beispielthema",
+            "topic_rotation": "Kurzer Scripttext.",
+            "seed_data": {
+                "script": "Kurzer Scripttext.",
+                "script_review_status": "approved",
+            },
+            "blog_enabled": False,
+            "blog_status": None,
+            "video_prompt_json": {"prompt": "value"},
+            "video_status": "pending",
+            "video_url": None,
+            "spoken_duration": 12.3,
+            "scene_reference_image_id": None,
+            "identity_gate_result": None,
+            "review_caption": None,
+            "publish_caption": None,
+            "caption_source_links": [],
+            "caption_status": None,
+            "caption_generation_mode": None,
+            "video_metadata": None,
+            "scene_reference_candidates": [
+                {
+                    "id": "scene-1",
+                    "image_url": None,
+                    "provider_metadata": {"angle_label": "Front"},
+                    "status": "submitted",
+                    "scene_key": "scene-a",
+                    "provider_task_id": "task-1",
+                }
+            ],
+        },
+    )
+
+    assert 'hx-post="/settings/character/scene-reference/scene-1/poll"' in rendered
+    assert 'hx-trigger="load, every 4s"' in rendered
+    assert "animate-spin" in rendered
+    assert "Generating reference" in rendered
+
+
 def test_batch_detail_template_renders_manual_editor_even_for_blank_scripts():
     env = Environment(loader=FileSystemLoader("templates"))
     template = env.get_template("batches/detail/_post_card.html")

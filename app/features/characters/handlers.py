@@ -6,7 +6,7 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.adapters.magnific_client import get_magnific_client
@@ -299,6 +299,10 @@ def _extract_mystic_image_url(task: dict) -> Optional[str]:
     return None
 
 
+def _is_htmx_request(request: Request) -> bool:
+    return request.headers.get("HX-Request", "").lower() == "true"
+
+
 def _post_batch_id(post_id: str) -> str:
     post = _single_row(
         get_supabase().client.table("posts").select("batch_id").eq("id", post_id).execute(),
@@ -537,7 +541,7 @@ def approve_scene_reference(reference_id: str):
 
 
 @router.post("/character/scene-reference/{reference_id}/poll")
-def poll_scene_reference(reference_id: str):
+def poll_scene_reference(request: Request, reference_id: str):
     correlation_id = str(uuid4())
     reference = character_queries.get_scene_reference_by_id(reference_id)
     if not reference:
@@ -556,6 +560,12 @@ def poll_scene_reference(reference_id: str):
             provider_metadata={**metadata, "poll_task": task},
             correlation_id=correlation_id,
         )
+        if _is_htmx_request(request):
+            response = PlainTextResponse("", status_code=200)
+            response.headers["HX-Refresh"] = "true"
+            return response
+    elif _is_htmx_request(request):
+        return PlainTextResponse("", status_code=204)
     return RedirectResponse(url=f"/batches/{_post_batch_id(str(reference.get('post_id')))}", status_code=303)
 
 

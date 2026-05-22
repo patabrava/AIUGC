@@ -741,6 +741,67 @@ def test_generate_scene_reference_uses_lora_id_prompt_handle_and_no_seed(monkeyp
     assert len(submissions) == 3
 
 
+def test_htmx_scene_reference_poll_waits_until_image_is_ready(monkeypatch):
+    reference = {
+        "id": "scene-1",
+        "post_id": "post-1",
+        "provider_task_id": "task-1",
+        "provider_metadata": {"angle_key": "front"},
+    }
+
+    class _FakeMagnific:
+        def get_mystic_task(self, **_kwargs):
+            return {"task_id": "task-1", "status": "processing", "generated": []}
+
+    monkeypatch.setattr(character_handlers.character_queries, "get_scene_reference_by_id", lambda _reference_id: reference)
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _FakeMagnific())
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/settings/character/scene-reference/scene-1/poll",
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 204
+    assert response.text == ""
+    assert "HX-Refresh" not in response.headers
+
+
+def test_htmx_scene_reference_poll_refreshes_when_image_is_ready(monkeypatch):
+    reference = {
+        "id": "scene-1",
+        "post_id": "post-1",
+        "provider_task_id": "task-1",
+        "provider_metadata": {"angle_key": "front"},
+    }
+    generated = []
+
+    class _FakeMagnific:
+        def get_mystic_task(self, **_kwargs):
+            return {
+                "task_id": "task-1",
+                "status": "complete",
+                "generated": [{"url": "https://cdn.example.com/scene.png"}],
+            }
+
+    monkeypatch.setattr(character_handlers.character_queries, "get_scene_reference_by_id", lambda _reference_id: reference)
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "mark_scene_reference_generated",
+        lambda **kwargs: generated.append(kwargs),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/settings/character/scene-reference/scene-1/poll",
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["HX-Refresh"] == "true"
+    assert generated[0]["reference_id"] == "scene-1"
+    assert generated[0]["image_url"] == "https://cdn.example.com/scene.png"
+
+
 def test_character_settings_renders_reference_images_without_cropping(monkeypatch):
     monkeypatch.setattr(
         character_queries,
