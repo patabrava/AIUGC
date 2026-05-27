@@ -16,6 +16,7 @@ from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ErrorCode
 from app.core.logging import get_logger
 from app.core.video_profiles import VIDEO_STATUS_CAPTION_COMPLETED, VIDEO_STATUS_COMPLETED
+from app.features.characters.actor_identity import passed_manual_gate
 from app.features.qa.schemas import (
     AutoQAChecks,
     QAApprovalRequest,
@@ -240,6 +241,7 @@ async def approve_qa(post_id: str, req: Request):
         batch_id = post.get("batch_id")
         video_metadata = _json_object(post.get("video_metadata"))
         identity_gate_result = _json_object(post.get("identity_gate_result"))
+        identity_gate_update = None
         if (
             qa_request.approved
             and video_metadata.get("actor_identity_source")
@@ -247,17 +249,21 @@ async def approve_qa(post_id: str, req: Request):
                 "actor_identity_scene_reference",
                 "actor_identity_scene_reference_set",
             }
-            and identity_gate_result.get("status") != "passed"
         ):
-            raise FlowForgeException(
-                code=ErrorCode.VALIDATION_ERROR,
-                message="ActorIdentity video identity gate must pass before QA approval.",
-                details={
-                    "post_id": post_id,
-                    "identity_gate_result": identity_gate_result,
-                },
-                status_code=422,
-            )
+            if identity_gate_result.get("status") == "manual_required":
+                identity_gate_update = passed_manual_gate(
+                    "Operator approved video identity match during QA review"
+                ).model_dump(mode="json")
+            elif identity_gate_result.get("status") != "passed":
+                raise FlowForgeException(
+                    code=ErrorCode.VALIDATION_ERROR,
+                    message="ActorIdentity video identity gate must pass before QA approval.",
+                    details={
+                        "post_id": post_id,
+                        "identity_gate_result": identity_gate_result,
+                    },
+                    status_code=422,
+                )
         
         seed_data = _seed_data_for_qa_decision(post, approved=qa_request.approved)
 
@@ -268,6 +274,8 @@ async def approve_qa(post_id: str, req: Request):
             "qa_notes": qa_request.notes or "",
             "seed_data": seed_data,
         }
+        if identity_gate_update:
+            update_data["identity_gate_result"] = identity_gate_update
         
         supabase.table("posts").update(update_data).eq("id", post_id).execute()
         

@@ -135,3 +135,35 @@ async def test_rejecting_video_excludes_it_and_advances_with_remaining_approved_
     assert db["posts"][1]["qa_notes"] == "Bad cut"
     assert db["posts"][1]["seed_data"]["video_excluded"] is True
     assert db["posts"][1]["seed_data"]["video_review_status"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_approving_actor_identity_video_passes_manual_identity_gate(monkeypatch):
+    db = {
+        "batches": [{"id": "batch-1", "state": "S6_QA"}],
+        "posts": [
+            {
+                "id": "post-actor-video",
+                "batch_id": "batch-1",
+                "qa_pass": None,
+                "seed_data": {"script_review_status": "approved"},
+                "video_metadata": {"actor_identity_source": "actor_identity_scene_reference_set"},
+                "identity_gate_result": {
+                    "status": "manual_required",
+                    "reason": "Video identity requires manual review because automated face gate is not configured",
+                    "gate_type": "manual",
+                    "details": {},
+                },
+            },
+        ],
+    }
+    fake_client = _FakeSupabaseClient(db)
+    monkeypatch.setattr(qa_handlers, "get_supabase", lambda: SimpleNamespace(client=fake_client))
+
+    response = await qa_handlers.approve_qa("post-actor-video", _JsonRequest({"approved": True}))
+
+    assert response.data["batch_advanced"] is True
+    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
+    assert db["posts"][0]["qa_pass"] is True
+    assert db["posts"][0]["identity_gate_result"]["status"] == "passed"
+    assert db["posts"][0]["identity_gate_result"]["gate_type"] == "manual"
