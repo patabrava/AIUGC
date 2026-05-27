@@ -6,7 +6,7 @@ Per Canon § 3.2: S6_QA state management
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import json
 import httpx
 
@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, status, Request
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ErrorCode
 from app.core.logging import get_logger
+from app.core.video_profiles import VIDEO_STATUS_CAPTION_COMPLETED, VIDEO_STATUS_COMPLETED
 from app.features.qa.schemas import (
     AutoQAChecks,
     QAApprovalRequest,
@@ -24,6 +25,8 @@ from app.features.qa.schemas import (
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/qa", tags=["qa"])
+
+_QA_VIDEO_READY_STATUSES = {VIDEO_STATUS_COMPLETED, VIDEO_STATUS_CAPTION_COMPLETED}
 
 
 def _is_removed_post(post: Dict[str, Any]) -> bool:
@@ -57,6 +60,17 @@ def _active_posts_ready_for_publish(posts: list[Dict[str, Any]]) -> bool:
     if not active_posts:
         return False
     return all(post.get("qa_pass") is True for post in active_posts)
+
+
+def _seed_data_for_qa_decision(post: Dict[str, Any], *, approved: bool) -> Dict[str, Any]:
+    seed_data = _json_object(post.get("seed_data"))
+    if approved:
+        seed_data["video_review_status"] = "approved"
+        seed_data.pop("video_excluded", None)
+    else:
+        seed_data["video_review_status"] = "rejected"
+        seed_data["video_excluded"] = True
+    return seed_data
 
 
 @router.post("/{post_id}/auto-check", response_model=SuccessResponse)
@@ -245,10 +259,14 @@ async def approve_qa(post_id: str, req: Request):
                 status_code=422,
             )
         
-        # Update QA fields
+        seed_data = _seed_data_for_qa_decision(post, approved=qa_request.approved)
+
+        # Update QA fields. A rejected video becomes excluded from publish planning,
+        # matching the existing removed-post contract used downstream.
         update_data = {
             "qa_pass": qa_request.approved,
-            "qa_notes": qa_request.notes or ""
+            "qa_notes": qa_request.notes or "",
+            "seed_data": seed_data,
         }
         
         supabase.table("posts").update(update_data).eq("id", post_id).execute()
@@ -262,12 +280,12 @@ async def approve_qa(post_id: str, req: Request):
             has_notes=bool(qa_request.notes)
         )
         
-        # Check if all posts in batch are now approved
-        # If so, automatically advance batch to S7_PUBLISH_PLAN
+        # Check if all remaining active posts in the batch are approved.
+        # If so, automatically advance batch to S7_PUBLISH_PLAN.
         should_advance = False
-        if qa_request.approved and batch_id:
+        if batch_id:
             # Get all posts in batch
-            all_posts_response = supabase.table("posts").select("id, qa_pass").eq(
+            all_posts_response = supabase.table("posts").select("id, qa_pass, seed_data").eq(
                 "batch_id", batch_id
             ).execute()
             
@@ -365,9 +383,9 @@ async def get_batch_qa_status(batch_id: str):
         active_posts = _active_posts(posts_response.data or [])
 
         total_posts = len(active_posts)
-        posts_with_videos = sum(1 for p in active_posts if p.get("video_status") == "completed")
+        posts_with_videos = sum(1 for p in active_posts if p.get("video_status") in _QA_VIDEO_READY_STATUSES)
         posts_qa_passed = sum(1 for p in active_posts if p.get("qa_pass") is True)
-        posts_qa_pending = posts_with_videos - posts_qa_passed
+        posts_qa_pending = max(total_posts - posts_qa_passed, 0)
         
         all_passed = (total_posts > 0 and posts_qa_passed == total_posts)
         can_advance = all_passed
