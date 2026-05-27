@@ -311,12 +311,109 @@ def test_generate_caption_bundle_uses_extended_profile_when_research_is_deep():
     )
     assert bundle["caption_profile"] == "extended"
     assert bundle["selected_key"] == "extended"
-    assert "Kurz gesagt:" in bundle["selected_body"]
+    assert any(marker in bundle["selected_body"] for marker in captions._EXTENDED_CAPTION_SUMMARY_MARKERS)
     assert "Basierend auf:" in bundle["selected_body"]
     assert "https://source-a.example" not in bundle["selected_body"]
     assert "https://source-b.example" not in bundle["selected_body"]
     assert "https://source-c.example" not in bundle["selected_body"]
     assert bundle["source_labels"]
+
+
+def test_extended_caption_records_deterministic_presentation_profile():
+    topic_title = "Rollstuhl-Drehkreis: Der unerwartete 1,50m-Fakt für jede Wohnungstür!"
+    script = "150 Zentimeter. So viel Bewegungsfläche vor Türen bräuchtest du eigentlich."
+    bundle = captions.generate_caption_bundle(
+        topic_title=topic_title,
+        post_type="value",
+        script=script,
+        research_facts=[],
+        seed_payload={
+            "strict_seed": {
+                "facts": [
+                    "Gemäß DIN 18040-2 braucht die Aufschlagseite einer Drehflügeltür 150 cm x 150 cm Bewegungsfläche.",
+                    "Auf der Schlossseite müssen mindestens 50 cm freie Wandfläche neben dem Drücker bleiben.",
+                    "Seit 2025 sind Schwellen strenger auf maximal einen Zentimeter und gute Überrollbarkeit begrenzt.",
+                    "Eine zu tiefe Türlaibung macht den Türdrücker aus dem Rollstuhl schwer erreichbar.",
+                    "Private Anbieter sind in der aktuellen BGG-Debatte weiter ein kritischer Streitpunkt.",
+                ]
+            },
+            "source_urls": [{"title": "DIN Türplanung", "url": "https://source-a.test/tueren"}],
+        },
+    )
+
+    profile = captions._select_extended_caption_presentation_profile(
+        topic_title=topic_title,
+        post_type="value",
+        script=script,
+    )
+    assert bundle["caption_profile"] == "extended"
+    assert bundle["generation_mode"] == "deterministic_extended"
+    assert bundle["selection_reason"] == "research_depth_gate"
+    assert bundle["caption_presentation_profile"] == profile["key"]
+    assert profile["summary_label"] in bundle["selected_body"]
+    assert "Kurz gesagt:" not in bundle["selected_body"]
+
+
+def test_extended_caption_varies_visible_structure_across_contexts():
+    facts = [
+        "Viele Aufzüge melden Ausfälle nicht konsistent an Apps weiter.",
+        "Barrierefreie Toiletten helfen nur, wenn sie klar ausgeschildert sind.",
+        "Begleitservice braucht oft Vorlauf und klare Kontaktwege.",
+        "Klare Echtzeitdaten senken Stress im Umstieg deutlich.",
+        "Digitale Wegeleitung spart Zeit, wenn die Ansage spät kommt.",
+    ]
+    seed_payload = {
+        "strict_seed": {"facts": facts},
+        "source_urls": [{"title": "Bahnhofsdaten", "url": "https://source-a.test/bahn"}],
+    }
+
+    first = captions.generate_caption_bundle(
+        topic_title="Rollstuhl-Drehkreis: Der unerwartete 1,50m-Fakt für jede Wohnungstür!",
+        post_type="value",
+        script="150 Zentimeter. So viel Bewegungsfläche vor Türen bräuchtest du eigentlich.",
+        seed_payload=seed_payload,
+    )
+    second = captions.generate_caption_bundle(
+        topic_title="Dein Freund ist spontan? Für mich bedeutet das immer 30 Minuten mehr Planung – und das ist ok!",
+        post_type="value",
+        script="Dein spontaner Partner hat eine tolle Idee? Für dich bedeutet das leider immer sofort 30 Minuten mehr Planung.",
+        seed_payload=seed_payload,
+    )
+
+    assert first["caption_presentation_profile"] != second["caption_presentation_profile"]
+    assert first["selected_body"].split("\n\n", 1)[0] != second["selected_body"].split("\n\n", 1)[0]
+
+
+def test_extended_caption_discards_research_headings_before_rendering():
+    bundle = captions.generate_caption_bundle(
+        topic_title="Türplanung",
+        post_type="value",
+        script="Türplanung braucht Platz, damit Rollstuhlnutzende sicher rangieren können.",
+        research_facts=[],
+        seed_payload={
+            "strict_seed": {
+                "facts": [
+                    "Zentrale Erkenntnisse (Key Points):**",
+                    "Einführende Einordnung**",
+                    "**Der 1,50m-Fakt:** Die Bewegungsfläche vor einer Drehflügeltür muss 150 cm x 150 cm betragen.",
+                    "**Die 50-cm-Anfahrregel:** Neben dem Drücker braucht es freie Wandfläche.",
+                    "**Schwellen-Novellierung:** Seit 2025 gelten strengere Schwellenanforderungen.",
+                    "Spontaneität.",
+                    "Begrenzte Laibungstiefe macht den Türdrücker aus dem Rollstuhl erreichbar.",
+                    "Aktuelle BGG-Debatten zeigen Lücken bei privatwirtschaftlichen Pflichten.",
+                ]
+            },
+            "source_urls": [{"title": "DIN Türplanung", "url": "https://source-a.test/tueren"}],
+        },
+    )
+
+    assert bundle["caption_profile"] == "extended"
+    assert "Key Points" not in bundle["selected_body"]
+    assert "**" not in bundle["selected_body"]
+    assert "Zentrale Erkenntnisse" not in bundle["selected_body"]
+    assert "Einführende" not in bundle["selected_body"]
+    assert "Spontaneität." not in bundle["selected_body"]
+    assert "Die Bewegungsfläche vor einer Drehflügeltür muss 150 cm x 150 cm betragen" in bundle["selected_body"]
 
 
 def test_generate_caption_bundle_extended_profile_handles_long_source_urls():
@@ -446,7 +543,7 @@ def test_extended_caption_includes_source_links_and_preserves_bundle_shape():
     )
     assert bundle["caption_profile"] == "extended"
     assert "https://one.example" not in bundle["selected_body"]
-    assert "Kurz gesagt:" in bundle["selected_body"]
+    assert any(marker in bundle["selected_body"] for marker in captions._EXTENDED_CAPTION_SUMMARY_MARKERS)
     assert "Basierend auf:" in bundle["selected_body"]
     assert set(bundle.keys()) >= {
         "variants",

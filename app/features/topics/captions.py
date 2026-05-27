@@ -33,6 +33,39 @@ VALUE_CAPTION_QUALITY_PASS = 80
 VALUE_CAPTION_QUALITY_WARN = 60
 VALUE_CAPTION_CTA_TEXT = "Mehr dazu im Beitrag."
 _VALUE_CAPTION_CTA_MARKERS = ("mehr dazu", "speicher", "kommentier", "teile", "schick", "folge", "folgt")
+_EXTENDED_CAPTION_PRESENTATION_PROFILES = (
+    {
+        "key": "why_this_matters",
+        "hook_prefix": "Darum zählt das:",
+        "summary_label": "Warum das wichtig ist:",
+        "impact_label": "Was sich dadurch ändert:",
+        "evidence_intro": "Konkrete Punkte.",
+    },
+    {
+        "key": "quick_briefing",
+        "hook_prefix": "Kurz einordnen:",
+        "summary_label": "In der Praxis heißt das:",
+        "impact_label": "Für den Alltag bedeutet das:",
+        "evidence_intro": "Merke dir vor allem.",
+    },
+    {
+        "key": "myth_vs_reality",
+        "hook_prefix": "Viele übersehen das:",
+        "summary_label": "Der Unterschied in der Praxis:",
+        "impact_label": "Tatsächlich relevant ist:",
+        "evidence_intro": "Wichtig im Detail.",
+    },
+    {
+        "key": "problem_to_action",
+        "hook_prefix": "Das Problem dahinter:",
+        "summary_label": "Heißt konkret:",
+        "impact_label": "Was du daraus mitnehmen kannst:",
+        "evidence_intro": "Prüf diese Punkte.",
+    },
+)
+_EXTENDED_CAPTION_SUMMARY_MARKERS = tuple(
+    profile["summary_label"] for profile in _EXTENDED_CAPTION_PRESENTATION_PROFILES
+)
 
 _MARKER_PATTERN = re.compile(r"^\[(curiosity|personal|provocative)\]\s*$", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"(?<!\w)#[A-Za-zÀ-ÿ0-9_]+")
@@ -172,10 +205,41 @@ def _clean_caption_fact(fact: str) -> str:
     cleaned = _normalize_line_breaks(fact)
     if not cleaned:
         return ""
+    cleaned = re.sub(r"\[cite:?\s*[^\]]+\]", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[*_`]+", "", cleaned)
+    cleaned = re.sub(r"^\s*[-•]\s*", "", cleaned)
     if re.search(r"\b(?:community|forschung|dossier|source_context|recherche)\b", cleaned, flags=re.IGNORECASE):
         return ""
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"(?i)^kernthema\s*:\s*", "", cleaned).strip()
+    heading = re.sub(r"[:;.\s]+$", "", cleaned).strip().lower()
+    normalized_heading = heading.strip("()[] ")
+    heading_tokens = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", heading)
+    if len(heading_tokens) <= 6 and ("key points" in normalized_heading or re.search(
+        r"(?i)^(zentrale erkenntnisse|key points|einführende(?: einordnung)?|psychologische grundlagen|spontaneität vs|spontanität vs|vorteile und risiken)",
+        normalized_heading,
+    )):
+        return ""
+    has_sentence_signal = re.search(
+        r"(?i)\b(?:ist|sind|muss|müssen|kann|können|braucht|helfen|hilft|zeigt|gelten|gilt|kostet|spart|senkt|steigt|fallen)\b",
+        normalized_heading,
+    )
+    if len(heading_tokens) <= 2 and not any(char.isdigit() for char in normalized_heading) and not has_sentence_signal:
+        return ""
     return cleaned
+
+
+def _select_extended_caption_presentation_profile(
+    *, topic_title: str, post_type: str, script: str,
+) -> Dict[str, str]:
+    digest = hashlib.sha256(f"{topic_title}|{post_type}|{script}".encode("utf-8")).hexdigest()
+    mixed = (
+        int(digest[:8], 16)
+        ^ int(digest[8:16], 16)
+        ^ int(digest[16:24], 16)
+        ^ int(digest[24:32], 16)
+    )
+    return dict(_EXTENDED_CAPTION_PRESENTATION_PROFILES[mixed % len(_EXTENDED_CAPTION_PRESENTATION_PROFILES)])
 
 
 def _normalize_source_url(url: Any) -> str:
@@ -678,13 +742,18 @@ def _build_extended_caption(
     if len(source_labels) < 1:
         return None
 
+    presentation = _select_extended_caption_presentation_profile(
+        topic_title=topic_title,
+        post_type=post_type,
+        script=script,
+    )
     headline_fact = _complete_caption_sentence(facts[0], 420)
     why_it_matters = _complete_caption_sentence(
-        f"Warum das wichtig ist: {facts[1] if len(facts) > 1 else facts[0]}",
+        f"{presentation['summary_label']} {facts[1] if len(facts) > 1 else facts[0]}",
         420,
     )
     what_it_changes = _complete_caption_sentence(
-        f"Was das konkret bedeutet: {facts[2] if len(facts) > 2 else facts[1] if len(facts) > 1 else facts[0]}",
+        f"{presentation['impact_label']} {facts[2] if len(facts) > 2 else facts[1] if len(facts) > 1 else facts[0]}",
         460,
     )
     evidence_lines = [
@@ -695,9 +764,9 @@ def _build_extended_caption(
     if len(evidence_lines) < 2:
         return None
 
-    hook = _complete_caption_sentence(f"Wichtiger Punkt: {headline_fact}", 460)
+    hook = _complete_caption_sentence(f"{presentation['hook_prefix']} {headline_fact}", 460)
     quick_takeaway = _complete_caption_sentence(
-        "Kurz gesagt: " + " ".join(part for part in [why_it_matters, what_it_changes] if part),
+        " ".join(part for part in [why_it_matters, what_it_changes] if part),
         700,
     )
     sources_block = "Basierend auf: " + " · ".join(source_labels[:3])
@@ -705,7 +774,7 @@ def _build_extended_caption(
     body = "\n\n".join([
         hook,
         quick_takeaway,
-        "Mehr dazu.\n" + "\n".join(evidence_lines),
+        f"{presentation['evidence_intro']}\n" + "\n".join(evidence_lines),
         sources_block,
         _extended_caption_cta(post_type),
         hashtags,
@@ -716,6 +785,7 @@ def _build_extended_caption(
         "facts": facts,
         "source_urls": source_urls,
         "source_labels": source_labels,
+        "presentation_profile": presentation["key"],
     }
 
 
@@ -730,7 +800,7 @@ def _validate_extended_caption(
             message="Extended caption does not match target length bucket",
             details={"char_count": char_count, "expected": {"min": EXTENDED_CAPTION_MIN_CHARS, "max": EXTENDED_CAPTION_MAX_CHARS}},
         )
-    if "Kurz gesagt:" not in normalized:
+    if not any(marker in normalized for marker in _EXTENDED_CAPTION_SUMMARY_MARKERS):
         raise ValidationError(message="Extended caption missing summary block", details={})
     if "Basierend auf" not in normalized:
         raise ValidationError(message="Extended caption missing source-label block", details={})
@@ -1152,6 +1222,7 @@ def _generate_legacy_caption_bundle(
                 "caption_depth_reason": depth_reason,
                 "source_urls": extended["source_urls"][:3],
                 "source_labels": extended["source_labels"][:3],
+                "caption_presentation_profile": extended.get("presentation_profile"),
             }
         except Exception as exc:
             logger.warning(
@@ -1266,14 +1337,18 @@ def generate_caption_bundle(
                 research_facts=fallback_bundle.get("facts") or research_facts,
             )
 
-        legacy_bundle["selection_reason"] = "llm_informative"
+        if legacy_bundle.get("caption_profile") == EXTENDED_CAPTION_KEY:
+            generation_mode = "deterministic_extended"
+        else:
+            legacy_bundle["selection_reason"] = "llm_informative"
+            generation_mode = "llm_informative"
         return _finalize_caption_bundle_metadata(
             legacy_bundle,
             topic_title=canonical_topic,
             post_type=post_type,
             script=script,
             seed_payload=seed_payload,
-            generation_mode="llm_informative",
+            generation_mode=generation_mode,
             research_facts=research_facts,
         )
 

@@ -85,9 +85,13 @@ def test_value_caption_uses_deterministic_informative_fallback_on_llm_failure(mo
 def test_create_post_for_batch_persists_selected_publish_caption(monkeypatch):
     storage = {"posts": []}
     monkeypatch.setattr(queries, "supabase", _FakeSupabase(storage))
+    script = (
+        "Rollstuhl im Kofferraum sicher verstauen ist leichter, wenn du zwei Punkte beachtest, "
+        "Gurte richtig anlegst, lose Teile entfernst und vor jeder Fahrt kurz prüfst, ob nichts verrutschen kann."
+    )
 
     seed_data = {
-        "script": "Rollstuhl im Kofferraum sicher verstauen ist leichter, wenn du zwei Punkte beachtest.",
+        "script": script,
         "strict_seed": {
             "facts": [
                 "Der Rollstuhl muss im Kofferraum gegen Verrutschen gesichert werden.",
@@ -114,7 +118,7 @@ def test_create_post_for_batch_persists_selected_publish_caption(monkeypatch):
         batch_id="batch-1",
         post_type="value",
         topic_title="Rollstuhl im Kofferraum",
-        topic_rotation="Rollstuhl im Kofferraum sicher verstauen ist leichter, wenn du zwei Punkte beachtest.",
+        topic_rotation=script,
         topic_cta="Speicher dir das.",
         spoken_duration=5.0,
         seed_data=seed_data,
@@ -123,4 +127,3 @@ def test_create_post_for_batch_persists_selected_publish_caption(monkeypatch):
 
     assert post["publish_caption"] == seed_data["caption_bundle"]["selected_body"]
     assert storage["posts"][0]["publish_caption"] == seed_data["caption_bundle"]["selected_body"]
-
