@@ -28,6 +28,7 @@ from app.features.topics.topic_validation import (
     estimate_script_duration_seconds,
     normalize_framework,
     validate_duration,
+    validate_german_only_text,
     validate_german_content,
     validate_round_robin,
     validate_sources_accessible,
@@ -47,10 +48,10 @@ FOCUS_STOPWORDS = {
 
 _PROMPT3_LABEL_ALIASES = {
     "produkt": {"produkt", "produktname", "product", "product name", "name"},
-    "angle": {"angle", "winkel", "produktwinkel", "aufhänger", "aufhaenger"},
-    "script": {"script", "skript", "text", "copy", "sprechtext", "voiceover", "voice over", "dialog", "hook", "hook line", "hooktext"},
-    "cta": {"cta", "call to action", "call-to-action", "handlungsaufforderung", "schluss", "schlusssatz"},
-    "facts": {"fakten", "facts", "fakt", "faktenliste", "stichpunkte", "stutzfakten", "stützfakten", "support facts"},
+    "angle": {"winkel", "produktwinkel", "aufhänger", "aufhaenger", "angle"},
+    "script": {"sprechtext", "skript", "text", "gesprochener text", "script", "copy", "voiceover", "voice over", "dialog", "hook", "hook line", "hooktext"},
+    "cta": {"handlungsaufforderung", "aufforderung", "schluss", "schlusssatz", "cta", "call to action", "call-to-action"},
+    "facts": {"fakten", "fakt", "faktenliste", "stichpunkte", "stützfakten", "stutzfakten", "facts", "support facts"},
 }
 
 
@@ -296,11 +297,19 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
 
     headers = {
         "problem-agitieren-lösung ads": "problem_agitate_solution",
+        "problem, zuspitzung, lösung": "problem_agitate_solution",
+        "problem zuspitzung lösung": "problem_agitate_solution",
+        "problem zuspitzung und lösung": "problem_agitate_solution",
+        "erfahrungsbericht": "testimonial",
+        "erfahrungsberichte": "testimonial",
         "testimonial ads": "testimonial",
         "testimonial-stil ads": "testimonial",
+        "wandelgeschichte": "transformation",
+        "wandelgeschichten": "transformation",
         "transformations-geschichten ads": "transformation",
         "transformation ads": "transformation",
         "beschreibung": "description",
+        "begleittext": "description",
     }
     buckets: Dict[str, List[str]] = {
         "problem_agitate_solution": [],
@@ -373,6 +382,12 @@ def parse_prompt2_response(raw: str, max_per_category: int = 5) -> DialogScripts
     if description_text and len(description_text.strip()) < 35:
         padded = f"{description_text.strip()} Damit ist das Thema für den Alltag klarer einzuordnen."
         description_text = padded.strip()
+
+    for category, scripts in buckets.items():
+        for index, script in enumerate(scripts):
+            validate_german_only_text(script, field_name=category, context=f"prompt2:{index}")
+    if description_text:
+        validate_german_only_text(description_text, field_name="description", context="prompt2")
 
     payload = {**buckets, "description": description_text}
     try:
@@ -922,8 +937,8 @@ def _synthesize_research_dossier_from_seed(
         "Die Rohantwort war unbrauchbar, daher wird ein sicherer Seed-Fallback verwendet."
     )
     cluster_summary = (
-        f"Safely synthesized research dossier for {topic}. "
-        "This fallback keeps persistence stable even when provider output is contaminated."
+        f"Automatisch erstelltes Recherchedossier für {topic}. "
+        "Dieser Ersatz hält die Speicherung stabil, wenn die Anbieterantwort unbrauchbar ist."
     )
     payload: Dict[str, Any] = {
         "cluster_id": f"{_slugify_research_label(topic)}-{secrets.token_hex(4)}",

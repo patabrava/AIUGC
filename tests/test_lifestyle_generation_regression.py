@@ -149,6 +149,25 @@ def test_generate_lifestyle_topics_synthesizes_tier_valid_fallback_after_prompt2
     assert len(calls) == 4
 
 
+def test_lifestyle_synthetic_fallback_uses_real_umlauts_and_no_anglicisms():
+    generated = lifestyle_runtime.generate_lifestyle_topics(
+        count=1,
+        target_length_tier=16,
+        generate_dialog_scripts_fn=lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValidationError(message="provider unavailable", details={})
+        ),
+    )
+
+    script = generated[0]["dialog_scripts"].problem_agitate_solution[0]
+    description = generated[0]["dialog_scripts"].description
+
+    assert "Lifestyle" not in description
+    assert "fuer" not in script
+    assert "spuerbar" not in script
+    assert "zurueck" not in script
+    assert detect_spoken_copy_issues(script) == []
+
+
 def test_generate_lifestyle_topics_pads_reported_16s_underlength_script():
     live_underlength_script = (
         "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "

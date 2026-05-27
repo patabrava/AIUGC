@@ -1,11 +1,11 @@
 core: |
   PROMPT_2
-  Du schreibst kurze Dialog-Skripte für 8-Sekunden-UGC-Videos einer Creatorin im Rollstuhl.
-  Dein Ziel: Community stärken, praktische Impulse geben, Empathie aufbauen – ohne Verkauf.
+  Du schreibst kurze Dialogtexte für 8 Sekunden lange Kurzvideos einer Sprecherin im Rollstuhl.
+  Dein Ziel: Gemeinschaft stärken, praktische Impulse geben, Verständnis aufbauen, ohne Verkauf.
 
 audience_context: |
   THEMA: {topic}
-  Zielgruppe: Rollstuhlnutzer:innen in Deutschland. Sprich locker-direkt, "du"-Anrede, keine Pity-Sprache.
+  Zielgruppe: Rollstuhlnutzer:innen in Deutschland. Sprich locker-direkt, mit "du"-Anrede, ohne Mitleidssprache.
 
 voice: |
   Schreibe im Präsens, lockere "du"-Anrede, keine Mitleidssprache, keine Absolutismen.
@@ -13,7 +13,7 @@ voice: |
 
 structure: |
   Struktur des Skripts:
-    1. Hook – VARIIERE STARK zwischen sanfteren Community-Hooks und stärkeren Aufmerksamkeits-Hooks:
+    1. Aufhänger – VARIIERE STARK zwischen sanfteren Gemeinschaftsaufhängern und stärkeren Aufmerksamkeitsaufhängern:
        • "Schon mal erlebt…?"
        • "Ich dachte früher…"
        • "Neulich ist mir aufgefallen…"
@@ -39,32 +39,32 @@ structure: |
 
 length_rules: |
   LÄNGE: 16-20 Wörter (max. 8 Sekunden Sprechzeit), ein Satz pro Zeile, keine Regieanweisungen.
-  Kein CTA, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
+  Keine Handlungsaufforderung, keine Aufforderungen wie "Schreib", "Kommentier", "Sag".
   Jeder Skript-Satz muss als vollständige, zusammenhängende Zeile stehen und mit ".", "!" oder "?" enden.
   Hänge keinen abgeschnittenen Rest, keine halbe zweite Aussage und keine ausgelagerte Schlussphrase an.
   Wenn du eine Zeile nicht vollständig beenden kannst, schreibe sie kürzer statt sie abzuschneiden.
 
 headings: |
   Gib die Ausgabe mit EINER Überschrift und darunter GENAU {scripts_per_category} SKRIPTE zurück:
-    Problem-Agitieren-Lösung Ads
+    Problem, Zuspitzung, Lösung
   
-  Jedes Skript folgt der Struktur: variabler Hook + persönlicher Einblick oder konkrete Beobachtung/Konsequenz.
+  Jedes Skript folgt der Struktur: variabler Aufhänger + persönlicher Einblick oder konkrete Beobachtung/Konsequenz.
   Trenne die Skripte durch Leerzeilen.
 
 description_section: |
-  BESCHREIBUNG FÜR SOCIAL MEDIA:
+  BESCHREIBUNG FÜR KURZVIDEO-PLATTFORMEN:
   Nach dem Skript füge eine zweite Sektion hinzu:
     Beschreibung
   
   Darunter schreibe EINEN zusammenhängenden Text (35-80 Wörter), der zusätzlichen Kontext zum Thema "{topic}" liefert.
-  Diese Beschreibung wird als Social-Media-Caption verwendet und MUSS ergänzende Fakten/Details enthalten, die NICHT im Dialog-Skript vorkommen.
+  Diese Beschreibung wird als Begleittext verwendet und MUSS ergänzende Fakten/Details enthalten, die NICHT im Dialog-Skript vorkommen.
   Schließe den Text mit GENAU drei thematisch passenden Hashtags ab (Format: #BeispielOhneLeerzeichen, getrennt durch Leerzeichen). Keine zusätzlichen Hashtags.
   Stil: direkt, freundlich, empowernd, du-Form – wie das Skript, aber informativer und kontextreicher.
 
 closing: |
   Antworte ausschließlich mit der Überschrift und den Skripten, kein zusätzlicher Text oder Erklärungen.
-  WICHTIG: Schreibe GENAU {scripts_per_category} SKRIPTE unter der Überschrift "Problem-Agitieren-Lösung Ads".
-  Jedes Skript muss einen ANDEREN Hook verwenden.
+  WICHTIG: Schreibe GENAU {scripts_per_category} SKRIPTE unter der Überschrift "Problem, Zuspitzung, Lösung".
+  Jedes Skript muss einen ANDEREN Aufhänger verwenden.
   Vergiss nicht die "Beschreibung"-Sektion am Ende mit einem zusammenhängenden Text von 35-80 Wörtern.
   KEIN Skript darf unvollständig enden; jede Zeile muss ein vollständiger, abgeschlossener Satz sein.
 

@@ -23,6 +23,7 @@ from app.features.topics.topic_validation import (
     get_prompt3_sentence_bounds,
     sanitize_spoken_fragment,
     trim_spoken_script_to_word_bounds,
+    validate_german_only_text,
 )
 
 
@@ -88,7 +89,9 @@ def _build_product_fallback_script(entry, *, target_length_tier: int) -> str:
 
 def _build_product_fallback_topic(entry, *, target_length_tier: int, reason: str) -> Dict[str, object]:
     script = _build_product_fallback_script(entry, target_length_tier=target_length_tier)
-    cta = f"Frag nach {entry.product_name} für dein Zuhause."
+    cta = "Frag nach einer passenden Lösung für dein Zuhause."
+    validate_german_only_text(script, field_name="script", context="prompt3_fallback")
+    validate_german_only_text(cta, field_name="cta", context="prompt3_fallback")
     rotation = strip_cta_from_script(script, cta) or script
     return {
         "title": f"{entry.product_name}: verlässliche Lösung für zuhause",
@@ -152,10 +155,9 @@ def generate_product_topics(
             except ValidationError as exc:
                 last_error = exc.message
                 prompt = (
-                    f"{prompt}\n\nFEEDBACK: Der letzte Entwurf war noch nicht klar genug. "
-                    "Nutze eine Zeile pro Feld und verwende sinngemaeß Produkt/Produktname, "
-                    "Angle/Winkel/Hook, Script/Text, CTA und Fakten/Stichpunkte. "
-                    "Keine Einleitung, kein Fliesstext."
+                    f"{prompt}\n\nRÜCKMELDUNG: Der letzte Entwurf war noch nicht klar genug. "
+                    "Nutze eine Zeile pro Feld: Produkt, Winkel, Sprechtext, Handlungsaufforderung, Fakten. "
+                    "Keine Einleitung, kein Fließtext und keine Anglizismen."
                 )
                 continue
             if not _matches_entry(entry.product_name, entry.aliases, candidate.product_name):
@@ -168,6 +170,17 @@ def generate_product_topics(
                 continue
 
             normalized_script = sanitize_spoken_fragment(candidate.script, ensure_terminal=True)
+            try:
+                validate_german_only_text(normalized_script, field_name="script", context="prompt3")
+                validate_german_only_text(candidate.cta, field_name="cta", context="prompt3")
+            except ValidationError as exc:
+                last_error = exc.message
+                prompt = (
+                    f"{prompt}\n\nRÜCKMELDUNG: Der Sprechtext oder die Handlungsaufforderung enthält Anglizismen. "
+                    "Schreibe beides rein deutsch. Ersetze englische Lehnwörter durch natürliche deutsche Wörter. "
+                    f"Details: {exc.details}"
+                )
+                continue
             normalized_word_count = script_word_count(normalized_script)
             min_sentences, max_sentences = get_prompt3_sentence_bounds(profile.target_length_tier)
             sentence_count = count_spoken_sentences(normalized_script)

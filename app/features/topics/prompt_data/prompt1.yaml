@@ -11,8 +11,8 @@ core: |
 
 audience_context: |
   ZIELGRUPPE: Rollstuhlnutzer:innen in Deutschland.
-  Sprich locker-direkt, "du"-Anrede, keine Pity-Sprache.
-  Schreibe für deutschsprachige Social-Media-Inhalte in Deutschland.
+  Sprich locker-direkt, mit "du"-Anrede, ohne Mitleidssprache.
+  Schreibe für deutschsprachige Kurzvideo-Inhalte in Deutschland.
   Bevorzuge deutsche Quellen und deutsche Terminologie.
 
 topic_pool: |
@@ -24,12 +24,12 @@ topic_pool: |
     - BahnCard & weitere Ermäßigungen für Menschen mit Schwerbehindertenausweis.
     - Mobilitätsservice-Zentrale der Deutschen Bahn: Unterstützung buchen, Fristen, Ablauf vor Ort.
     - Rechte bei Bahnreisen: barrierefreie Bahnhöfe, reservierte Plätze, Entschädigung bei Störungen.
-    - Rollstuhltransport im Zug und Flugzeug: Anmeldung, Boarding-Hilfen, Schadensmeldungen.
-    - Fluggastrechte mit Rollstuhl: Sicherheitskontrollen, Akku/Batterie-Regeln, Airline-Service.
+    - Rollstuhltransport im Zug und Flugzeug: Anmeldung, Einstiegshilfen, Schadensmeldungen.
+    - Fluggastrechte mit Rollstuhl: Sicherheitskontrollen, Akku/Batterie-Regeln, Fluggesellschaftsbetreuung.
     - Inlandsreisen: Hotels & Ferienwohnungen mit „Reisen für Alle“ oder anderen Barrierefrei-Siegeln.
     - Städtereisen mit Rollstuhl: Kopfsteinpflaster, Gehsteige, Stadtbusse, U-Bahn-Zugänge.
-    - Roadtrips & Mietwagen: Fahrzeuganpassung, barrierefreie Raststätten, Mitnahme von Hilfsmitteln.
-    - Kreuzfahrten & Bootsreisen: barrierefreie Kabinen, Boarding, Ausflüge.
+    - Autoreisen & Mietwagen: Fahrzeuganpassung, barrierefreie Raststätten, Mitnahme von Hilfsmitteln.
+    - Kreuzfahrten & Bootsreisen: barrierefreie Kabinen, Einstieg, Ausflüge.
     - Barrierefreie Naturreisen: Nationalparks, Wanderwege, Aussichtspunkte mit Rollstuhlzugang.
     - Urlaub mit Familie oder Freund:innen: Bedürfnisse abstimmen, Zimmerwahl, gemeinsame Aktivitäten.
     - Reisen mit Assistenz: Vertragsgestaltung, Logistik, Kostenerstattung unterwegs.
@@ -43,10 +43,10 @@ topic_pool: |
     - Merkzeichen im Detail (B, G, aG, H, Bl, RF, Gl, TBl): Mobilität, Begleitperson, Gebühren.
     - Steuerliche Vorteile: Behinderten-Pauschbetrag, außergewöhnliche Belastungen, Fahrtkosten.
     - Kfz-Steuerbefreiung oder -ermäßigung bei Merkzeichen aG, Bl, H und notwendige Nachweise.
-    - Bundesteilhabegesetz-Updates 2025: neue Leistungsregeln, Auswirkungen auf Teilhabebudget.
+    - Bundesteilhabegesetz-Aktualisierungen 2025: neue Leistungsregeln, Auswirkungen auf Teilhabebudget.
     - Barrierefreiheits-Stärkungsgesetz (BFSG): Anforderungen an Produkte & Dienstleistungen ab 28.06.2025.
-    - Barrierefreiheit von Behörden-Websites & Apps (BITV 2.0, Feedback-Stellen, Fristen).
-    - Verbraucherrechte im E-Commerce und Bankwesen unter dem Blick von Menschen mit Behinderung.
+    - Barrierefreiheit von Netzseiten und Anwendungen von Behörden (BITV 2.0, Rückmeldestellen, Fristen).
+    - Verbraucherrechte im Netzhandel und Bankwesen unter dem Blick von Menschen mit Behinderung.
     - Öffentliche Mobilitätsanbieter: Pflichten zur Barrierefreiheit, Beschwerdewege, Sanktionen.
     - Kommunale Teilhabe: Behindertenbeirat, Beteiligungsverfahren, Stadtplanung beeinflussen.
     - Rechtlicher Weg bei Barrieren: Beratung, Widerspruch, Klage, Schlichtungsstelle BGG.
@@ -56,10 +56,10 @@ topic_pool: |
     - Teilhaberecht im Wohnungs- und Arbeitsmarkt: Diskriminierungsschutz, Gleichstellung, Fristen.
     - Inklusion im Arbeitsleben: Arbeitgeberpflichten, Integrationsamt, technische Arbeitshilfen.
     - Barrierefrei ins Wahlrecht: Wahllokal-Zugang, Briefwahl, Hilfspersonenregelungen.
-    - Selbsthilfegruppen & Verbände (z. B. VdK): Beratung, Lobbyarbeit, Peer-Support.
+    - Selbsthilfegruppen & Verbände (z. B. VdK): Beratung, Lobbyarbeit, gegenseitige Unterstützung.
     - Barrierefreie Kommunikation: Gebärdensprache, Leichte Sprache, verständliche Behördenpost.
     - Bildungs- und Weiterbildungsangebote für Menschen mit Behinderung: Rechte, Fördermittel.
-    - Digitalisierung & Teilhabe: Online-Dienste, Telemedizin, digitale Identitäten, eID.
+    - Digitalisierung & Teilhabe: Netzdienste, Fernmedizin, digitale Identitäten, eID.
   Gesundheit, Pflege & Assistenz:
     - Gesetzliche Krankenkasse und Zusatzleistungen für Rollstuhlnutzer:innen: Anträge, Zuzahlungen, Hilfsmittel.
     - Pflegegrad beantragen und Leistungen der Pflegeversicherung 2025 optimal nutzen.
@@ -72,12 +72,12 @@ topic_pool: |
     - Blasen- und Darmmanagement: Produkte, Schulungen, Reisefreigaben, Diskretion.
     - Inkontinenzversorgung: Hilfsmittel, Kostenträger, Alltagstipps.
     - Sexualität & Beziehung mit Behinderung: Beratung, Barrieren, Privatsphäre.
-    - Psychische Gesundheit: Therapieangebote, Peer-Support, Umgang mit Isolation oder Frust.
+    - Psychische Gesundheit: Therapieangebote, gegenseitige Unterstützung, Umgang mit Isolation oder Frust.
     - Assistenz im Alltag: Arbeitgebermodell, Arbeitsrecht, Notfallplanung.
     - Hilfsmittelverzeichnis der GKV: Auswahl, Formulare, Widerspruchsstrategien.
     - Medikamentenversorgung: Wechselwirkungen, Spezialapotheken, Reisebedarf.
-    - Ernährung & Bewegung im Rollstuhl: Trainingsprogramme, Fitness, Prävention.
-    - Transfertechniken: selbständig oder mit Hilfe sicher umsetzen, Hilfsmittel einsetzen.
+    - Ernährung & Bewegung im Rollstuhl: Trainingsprogramme, Bewegung, Prävention.
+    - Umsetztechniken: selbständig oder mit Hilfe sicher umsetzen, Hilfsmittel einsetzen.
     - Ergotherapie & Physiotherapie: Ziele, Finanzierung, Alltagstraining.
     - Frühwarnzeichen für gesundheitliche Komplikationen: Haut, Atmung, Kreislauf, Spastik.
     - Pandemie- und Infektionsschutz: Impfungen, Hygienekonzepte, Zugänge im Gesundheitssystem.
@@ -85,19 +85,19 @@ topic_pool: |
     - GKV-Hilfsmittelverzeichnis: welche Rollstühle und Zubehör abrechenbar sind.
     - Aktiv-, Elektro- oder Hybridrollstuhl wählen: Anpassung, Gutachten, Probefahrten.
     - Sitz- und Rückenkissenwahl: Druckverteilung, Atteste, Formulierungen für die Kasse.
-    - Wartung, Reparatur und Leihservice: Abläufe, Serviceverträge, Dokumentation.
+    - Wartung, Reparatur und Leihversorgung: Abläufe, Wartungsverträge, Dokumentation.
     - Alltagshilfen: Greifzangen, Transferbretter, Stehrahmen, smarte Assistenzgeräte.
-    - Smart-Home-Lösungen: Türöffner, Sprachsteuerung, Sensorik für Barrierefreiheit.
+    - Vernetzte Wohnhilfen: Türöffner, Sprachsteuerung, Sensorik für Barrierefreiheit.
     - Assistenzroboter & Exoskelette: Einsatzgebiete, Finanzierung, Grenzen.
     - Fahrzeuganpassung: Handbedienung, Hebebühnen, Kostenübernahme.
     - Autofahren mit Behinderung: Fahrtests, Umschulung, Finanzierung durch Kostenträger.
     - Behindertengerechte Taxi- und Fahrdienste: Buchung, Kostenerstattung, regionale Unterschiede.
     - Elektrorollstuhl-Akkus im Flugverkehr: Sicherheitsregeln, Ersatzakkus, Transportboxen.
     - Barrierefreies Wohnen mit Technik: Rampen, Türautomaten, bodengleiche Duschen.
-    - Apps für Barrierefreiheit: Toilettenfinder, Restaurantbewertungen, ÖPNV-Echtzeiten.
+    - Anwendungen für Barrierefreiheit: Toilettenfinder, Restaurantbewertungen, ÖPNV-Echtzeiten.
     - Dokumentation & Fotografie: Beweise für Hilfsmittel-Anträge und Mangelmeldungen.
-    - Second-Life-Hilfsmittel & Spendenbörsen: rechtliche Rahmen, Sicherheit, Aufarbeitung.
-    - Digitale Barrierefreiheit von Hilfsmitteln: Software-Updates, App-Anbindung, Datenschutz.
+    - Gebrauchte Hilfsmittel & Spendenbörsen: rechtliche Rahmen, Sicherheit, Aufarbeitung.
+    - Digitale Barrierefreiheit von Hilfsmitteln: Programmaktualisierungen, Anbindung an Anwendungen, Datenschutz.
   Wohnen & Lebensumfeld:
     - Barrierefreie Wohnung nach DIN 18040: Planung, Maße, Ausstattung.
     - Finanzierung von Umbauten: KfW 455-B, Pflegekassen, regionale Zuschüsse.
@@ -105,9 +105,9 @@ topic_pool: |
     - Bestehende Wohnungen anpassen: Rampen, Türen, Badezimmer, Küchenlösungen.
     - Stadtinfrastruktur: Bordsteinkanten, Gehwege, Winterdienst und Barrierefreiheit.
     - Nachbarschaft & Gemeinschaft: Einfluss barrierefreier Quartiere auf Lebensqualität.
-    - Notfall-Vorbereitung: Evakuierungspläne, Notruf-Apps, Hilfsmittel-Listen.
+    - Notfall-Vorbereitung: Evakuierungspläne, Notrufanwendungen, Hilfsmittel-Listen.
     - Haustiere und Assistenzhunde: Rechte, Training, Vermieterzustimmung.
-    - Smart-Home-Integration: Licht, Heizung, Fenster via Sprache oder App.
+    - Vernetzte Wohnhilfen: Licht, Heizung, Fenster via Sprache oder Anwendung.
     - Gemeinschaftsräume & Hausverwaltung: Aufzüge, Müllraum, Briefkästen barrierefrei gestalten.
     - Altersgerechtes Wohnen: langfristige Planung, Mehrgenerationen- und Pflegearrangements.
     - Innenraumgestaltung: Küche, Bad, Arbeits- und Wohnraum für Rollstuhlnutzung optimieren.
@@ -116,23 +116,23 @@ topic_pool: |
     - Garten & Außenbereich: barrierefreie Wege, Terrassen, Hochbeete.
     - Barrierefreie Freizeit zu Hause: Hobbys, Gästebarrierefreiheit, Technik.
   Arbeit, Bildung & Beruf:
-    - Rückkehr ins Berufsleben nach Krankheit oder Unfall: stufenweise Wiedereingliederung, Reha-Management.
+    - Rückkehr ins Berufsleben nach Krankheit oder Unfall: stufenweise Wiedereingliederung, Reha Begleitung.
     - Inklusionsbetriebe vs. offener Arbeitsmarkt: Chancen, Förderprogramme, Erfahrungsberichte.
     - Integrationsamt & BIH: Leistungen für Arbeitsplatzsicherung, technische Arbeitshilfen.
     - Arbeitsplatzgestaltung: Höhenverstellung, barrierefreie Wege, digitale Assistenzsysteme.
-    - Assistive Technik & digitale Arbeitsplätze: Homeoffice, Softwarebarrierefreiheit, Ergonomie.
+    - Hilfstechnik & digitale Arbeitsplätze: Heimarbeit, Programmbarrierefreiheit, Ergonomie.
     - Arbeitsrecht: Kündigungsschutz, Teilzeit, Schwerbehindertenvertretung, Gleichstellung.
     - Förderprogramme: Eingliederungszuschuss, Budget für Arbeit, Bildungsprämien.
-    - Studium & Weiterbildung mit Behinderung: Nachteilsausgleich, barrierefreier Campus, Prüfungsrechte.
+    - Studium & Weiterbildung mit Behinderung: Nachteilsausgleich, barrierefreies Hochschulgelände, Prüfungsrechte.
     - Selbstständigkeit mit Behinderung: Geschäftsmodelle, Fördermittel, Netzwerkaufbau.
-    - Netzwerke & Mentoring: Austausch mit anderen Rollstuhlnutzer:innen im Beruf.
-    - Sichtbarkeit & Vorbilder: Frauen mit Behinderung im Beruf, Role Models, Öffentlichkeitsarbeit.
-    - Digitale Kompetenzen & Weiterbildung: Online-Kurse, barrierefreie Lernplattformen, Zertifikate.
-  Community, Sport & Sichtbarkeit:
-    - Community & Peer-Support: lokale Gruppen, Foren, Mentoring.
+    - Netzwerke & Begleitung: Austausch mit anderen Rollstuhlnutzer:innen im Beruf.
+    - Sichtbarkeit & Vorbilder: Frauen mit Behinderung im Beruf, Vorbilder, Öffentlichkeitsarbeit.
+    - Digitale Kompetenzen & Weiterbildung: Netzkurse, barrierefreie Lernplattformen, Zertifikate.
+  Gemeinschaft, Sport & Sichtbarkeit:
+    - Gemeinschaft & gegenseitige Unterstützung: lokale Gruppen, Foren, Begleitung.
     - Sport & Bewegung über DRS-Vereine: von Basketball bis WCMX.
     - Rollstuhlbasketball-Bundesliga verfolgen: Teams, Spieltage, Zugang.
-    - Aktiv und sichtbar bleiben: Events, Aktionstage, Medien mit gutem Behinderungsverständnis.
+    - Aktiv und sichtbar bleiben: Aktionstreffen, Aktionstage, Medien mit gutem Behinderungsverständnis.
 
 output_schema: |
   OUTPUT FORMAT — JSON array mit GENAU {desired_topics} Objekten.
@@ -151,13 +151,13 @@ output_schema: |
   - Nutze kurze, gut sprechbare Formulierungen. Vermeide mehrere lange Behörden- oder Kompositawörter in einem Satz.
   - Wenn ein langer Institutionsname nötig ist, vereinfache den Rest des Satzes konsequent.
   - script MUSS vollständig auf Deutsch sein
-  - Start with a VARIED, aufmerksamkeitsstarken opening. Rotate between mehreren Hook-Familien und wiederhole keine Familie zu oft:
+  - Starte abwechslungsreich und aufmerksamkeitsstark. Wechsle zwischen mehreren Aufhängerfamilien und wiederhole keine Familie zu oft:
       • Fragen: "Kennst du...?", "Weißt du...?", "Hast du...?", "Brauchst du...?", "Suchst du...?"
-      • Direkte Aussagen: "Check mal...", "Schau dir an...", "Hier kommt...", "Das musst du wissen..."
-      • Empathische Hooks: "Stell dir vor...", "Ich zeig dir...", "Lass mich dir zeigen..."
-      • Kontrast- und Mythos-Hooks: "Die größte Lüge über ... ist, dass ...", "Fast alle denken, ...", "Alle reden über ..., aber ..."
-      • Konsequenz- und Friktions-Hooks: "Wenn du ... ignorierst, ...", "Der unangenehme Grund, warum ...", "Dieser kleine Fehler macht ..."
-      • Aha- und Handlungs-Hooks: "Bevor du ...", "Alles verändert sich, wenn du ...", "Was dir bei ... niemand klar sagt: ..."
+      • Direkte Aussagen: "Schau dir an...", "Hier kommt...", "Das musst du wissen..."
+      • Empathische Aufhänger: "Stell dir vor...", "Ich zeig dir...", "Lass mich dir zeigen..."
+      • Kontrast- und Mythos-Aufhänger: "Die größte Lüge über ... ist, dass ...", "Fast alle denken, ...", "Alle reden über ..., aber ..."
+      • Konsequenz- und Friktions-Aufhänger: "Wenn du ... ignorierst, ...", "Der unangenehme Grund, warum ...", "Dieser kleine Fehler macht ..."
+      • Aha- und Handlungs-Aufhänger: "Bevor du ...", "Alles verändert sich, wenn du ...", "Was dir bei ... niemand klar sagt: ..."
       NIEMALS billige Schock-Formeln wie "Du wirst nicht glauben ..." oder passive Ankündigungen wie "Ab 2025 gibt's..." / "Es gibt...".
       Immer du-Form, direkt, freundlich, empowernd. Ergänze konkrete Fakten oder Vorteile, bis die Länge passt.
     script  – ein Satz, 12-15 Wörter (≈ 5-6 Sekunden Sprechzeit)
@@ -187,15 +187,15 @@ example: |
   script: Kennst du das Hilfsmittelverzeichnis? Es zeigt dir genau, welche aktive und elektrische Rollstühle die Kasse heute übernehmen muss.
   
   Beispiel 2 (Direkte Aussage):
-  script: Check mal die B-Marke in deinem Ausweis – damit fährt deine Begleitperson im ÖPNV komplett gratis mit.
+  script: Schau dir die B-Marke in deinem Ausweis an – damit fährt deine Begleitperson im ÖPNV komplett gratis mit.
   
-  Beispiel 3 (Kontrast-/Mythos-Hook):
+  Beispiel 3 (Kontrast-/Mythos-Aufhänger):
   script: Die größte Lüge über Hilfsmittelanträge ist, dass ein Rezept reicht – oft fehlen dir noch Begründung und genaue Unterlagen.
 
-  Beispiel 4 (Aha-/Handlungs-Hook):
+  Beispiel 4 (Aha-/Handlungs-Aufhänger):
   script: Bevor du den Parkausweis beantragst, prüf dieses Detail genau, sonst verlierst du unnötig Zeit mit Rückfragen und Nachweisen.
 
-  Beispiel 5 (Empathischer Hook):
+  Beispiel 5 (Empathischer Aufhänger):
   script: Stell dir vor, du bekommst mehr Pflegegeld ab 2025 – ich zeig dir, wie du deinen Anspruch prüfst.
   
   SCHLECHTES BEISPIEL (NIEMALS so!):

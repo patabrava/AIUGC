@@ -96,6 +96,91 @@ ACCEPTED_GERMAN_LOAN_PHRASES = {
     "peer support",
 }
 
+GERMAN_ONLY_BANNED_TERMS = {
+    "ad",
+    "ads",
+    "airline",
+    "app",
+    "apps",
+    "boarding",
+    "brand",
+    "call to action",
+    "camping",
+    "caption",
+    "challenge",
+    "community",
+    "content",
+    "creator",
+    "cta",
+    "deep research",
+    "event",
+    "events",
+    "feedback",
+    "fitness",
+    "hook",
+    "hooks",
+    "influencer",
+    "instagram",
+    "lane",
+    "lifestyle",
+    "made in germany",
+    "marketing",
+    "mentoring",
+    "online",
+    "peer",
+    "peer support",
+    "pity",
+    "post",
+    "posts",
+    "prompt",
+    "research",
+    "roadtrip",
+    "role model",
+    "role models",
+    "scroll",
+    "second life",
+    "service",
+    "smart home",
+    "social media",
+    "software",
+    "story",
+    "support",
+    "testimonial",
+    "tiktok",
+    "training",
+    "transfer",
+    "ugc",
+    "update",
+    "updates",
+    "value",
+    "voiceover",
+    "website",
+    "websites",
+}
+
+GERMAN_ONLY_ALLOWED_EXACT_TOKENS = {
+    "adac",
+    "bfsg",
+    "bgg",
+    "bih",
+    "bitv",
+    "bl",
+    "drv",
+    "drs",
+    "eu",
+    "gkv",
+    "kfw",
+    "ll12",
+    "öpnv",
+    "pbefg",
+    "rf",
+    "st70",
+    "stl300",
+    "t80",
+    "tbl",
+    "vdk",
+}
+
 SPOKEN_COPY_LABEL_MARKERS = (
     "demografische dringlichkeit",
     "zentrale erkenntnisse",
@@ -553,6 +638,12 @@ def validate_pre_persistence_topic_payload(
             cleaned = normalize_dash_separators(raw)
             cleaned = normalize_spoken_whitespace(cleaned).strip(" ,;:-")
             normalized[field] = cleaned
+        if field in {"caption", "source_summary", "rotation", "cta"}:
+            validate_german_only_text(
+                normalized[field],
+                field_name=field,
+                context=str(post_type or "value"),
+            )
 
     # Normalize script with the same dash/time rules.
     script = sanitize_spoken_fragment(
@@ -560,6 +651,7 @@ def validate_pre_persistence_topic_payload(
         ensure_terminal=True,
     )
     normalized_post_type = str(post_type or "").strip().lower()
+    validate_german_only_text(script, field_name="script", context=normalized_post_type or "value")
     if normalized_post_type == "product":
         min_words, max_words = get_prompt3_word_bounds(target_length_tier)
     elif normalized_post_type == "lifestyle":
@@ -1053,6 +1145,52 @@ def _find_english_markers(text: str) -> List[str]:
     return sorted({token for token in tokens if token in filtered_signals})
 
 
+def find_german_only_violations(text: Any) -> List[Dict[str, Any]]:
+    value = str(text or "").strip()
+    if not value:
+        return []
+    lowered = value.lower()
+    violations: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for phrase in sorted(GERMAN_ONLY_BANNED_TERMS, key=len, reverse=True):
+        if " " not in phrase:
+            continue
+        phrase_parts = [re.escape(part) for part in phrase.split()]
+        separator = r"[\s\-\u2010-\u2015\u2212]+"
+        pattern = re.compile(
+            rf"(?<![a-zäöüß]){separator.join(phrase_parts)}(?![a-zäöüß])",
+            re.IGNORECASE,
+        )
+        if pattern.search(lowered) and phrase not in seen:
+            seen.add(phrase)
+            violations.append({"token": phrase, "kind": "anglicism"})
+
+    for token in _tokenize_language_words(value):
+        normalized = token.lower()
+        if normalized in GERMAN_ONLY_ALLOWED_EXACT_TOKENS:
+            continue
+        if normalized in GERMAN_ONLY_BANNED_TERMS and normalized not in seen:
+            seen.add(normalized)
+            violations.append({"token": normalized, "kind": "anglicism"})
+
+    return violations
+
+
+def validate_german_only_text(text: Any, *, field_name: str, context: str = "") -> None:
+    violations = find_german_only_violations(text)
+    if violations:
+        raise ValidationError(
+            message="Generated text contains Anglicisms",
+            details={
+                "field": field_name,
+                "context": context,
+                "violations": violations,
+                "value": str(text or "")[:240],
+            },
+        )
+
+
 def _count_german_markers(text: str) -> int:
     tokens = _tokenize_language_words(text)
     return sum(1 for token in tokens if token in GERMAN_SIGNAL_WORDS)
@@ -1111,6 +1249,16 @@ def validate_german_content(item: ResearchAgentItem) -> None:
     violations: List[Dict[str, Any]] = []
     for field_name, value in fields_to_check.items():
         english_markers = _find_english_markers(value)
+        german_only_violations = find_german_only_violations(value)
+        if german_only_violations:
+            violations.append(
+                {
+                    "field": field_name,
+                    "english_markers": [item["token"] for item in german_only_violations],
+                    "value": value[:200],
+                }
+            )
+            continue
         german_markers = _count_german_markers(value)
         if not english_markers:
             continue

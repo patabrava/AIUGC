@@ -23,6 +23,31 @@ def _clean_line(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
 
 
+def _normalize_prompt_fact_language(value: str) -> str:
+    cleaned = _clean_line(value)
+    replacements = (
+        (r"\b100\s*%\s*Made in Germany\b", "in Deutschland gefertigt"),
+        (r"\bMade in Germany\b", "in Deutschland gefertigt"),
+        (r"\bWebsites\b", "Netzseiten"),
+        (r"\bWebsite\b", "Netzseite"),
+        (r"\bServiceverträge\b", "Wartungsverträge"),
+        (r"\bLeihservice\b", "Leihversorgung"),
+        (r"\bService\b", "Betreuung"),
+        (r"\bSupport\b", "Unterstützung"),
+        (r"\bApps\b", "Anwendungen"),
+        (r"\bApp\b", "Anwendung"),
+        (r"\bSoftware-Updates\b", "Programmaktualisierungen"),
+        (r"\bUpdates\b", "Aktualisierungen"),
+        (r"\bUpdate\b", "Aktualisierung"),
+        (r"\bSmart-Home\b", "vernetzte Wohnhilfen"),
+        (r"\bSmart Home\b", "vernetzte Wohnhilfen"),
+        (r"\bMarketingname\b", "Produktname"),
+    )
+    for pattern, replacement in replacements:
+        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+    return _clean_line(cleaned)
+
+
 def _section_range(raw: str, match: re.Match[str], next_match: Optional[re.Match[str]]) -> str:
     start = match.start()
     end = next_match.start() if next_match is not None else len(raw)
@@ -35,7 +60,7 @@ def _extract_support_facts(raw: str) -> List[str]:
     for line in before_products.splitlines():
         stripped = line.strip()
         if stripped.startswith("- "):
-            item = _clean_line(stripped[2:])
+            item = _normalize_prompt_fact_language(stripped[2:])
             if item:
                 support_facts.append(item)
     return support_facts[:8]
@@ -46,7 +71,7 @@ def _extract_product_facts(block: str) -> List[str]:
     for line in block.splitlines():
         stripped = line.strip()
         if stripped.startswith("- "):
-            fact = _clean_line(stripped[2:])
+            fact = _normalize_prompt_fact_language(stripped[2:])
             if fact and fact not in facts:
                 facts.append(fact)
     return facts

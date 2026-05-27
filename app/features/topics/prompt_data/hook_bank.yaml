@@ -2,7 +2,7 @@ source_file: prompt1_8s.txt
 
 families:
 # --- HIGH PRIORITY: proven scroll-stoppers ---
-- name: Kontrast- und Mythos-Hooks
+- name: Kontrast- und Mythos-Aufhänger
   priority: high
   emotional_core: Unrecht, Versagen, Widerspruch
   examples:
@@ -38,7 +38,7 @@ families:
   - "Nur jede fünfte Haltestelle ist tatsächlich barrierefrei."
   - "Eine einzige Zahl zeigt, warum ..."
 
-- name: Konsequenz- und Friktions-Hooks
+- name: Konsequenz- und Friktions-Aufhänger
   priority: high
   emotional_core: Dringlichkeit, Handlungsdruck
   examples:
@@ -70,11 +70,11 @@ families:
   priority: medium
   emotional_core: Sarkasmus, Ironie, Systemversagen
   examples:
-  - "2022 sollte alles barrierefrei sein. Spoiler: ist es nicht."
+  - "2022 sollte alles barrierefrei sein. Die Realität: nein."
   - "Was das Gesetz sagt und was du an der Haltestelle erlebst."
   - "Deutschland 2026. Und du kommst trotzdem nicht in den Bus."
 
-- name: Aha- und Handlungs-Hooks
+- name: Aha- und Handlungs-Aufhänger
   priority: medium
   emotional_core: Neugier, Aktivierung, Aha-Moment
   examples:
@@ -83,7 +83,7 @@ families:
   - "Was dir bei ... niemand klar sagt: ..."
   - "3 Tipps, die ich gerne früher gewusst hätte."
 
-- name: Empathische Hooks (Situation, nicht Mitleid)
+- name: Empathische Aufhänger (Situation, nicht Mitleid)
   priority: medium
   emotional_core: Mitgefühl mit der Situation, NICHT mit der Behinderung
   examples:
@@ -95,7 +95,7 @@ families:
   priority: medium
   emotional_core: Handlung, Empowerment, Tipp
   examples:
-  - "Check mal, was sich bei ... geändert hat."
+  - "Schau dir an, was sich bei ... geändert hat."
   - "Das musst du wissen, bevor du ..."
   - "Hier ist, was du tun kannst."
 
@@ -116,7 +116,7 @@ families:
   - "Wie kann es sein, dass ... im Jahr 2026 noch fehlt?"
   - "Wusstest du, dass nur 2 Prozent aller Wohnungen rollstuhlgerecht sind?"
 
-- name: POV-Hooks
+- name: Perspektivwechsel Aufhänger
   priority: low
   emotional_core: Perspektivwechsel, Szenario
   examples:

@@ -396,7 +396,7 @@ def _format_hook_bank_section() -> str:
     banned = [str(item).strip() for item in list(payload.get("banned_patterns") or []) if str(item).strip()]
     negative_examples = list(payload.get("negative_examples") or [])
     if not families and not banned:
-        return "HOOK-BANK (verbindlich):\n- Keine zusätzlichen Hook-Bank-Regeln verfügbar."
+        return "AUFHÄNGER-SAMMLUNG (verbindlich):\n- Keine zusätzlichen Aufhängerregeln verfügbar."
 
     priority_order = {"high": 0, "medium": 1, "low": 2}
     sorted_families = sorted(
@@ -404,7 +404,7 @@ def _format_hook_bank_section() -> str:
         key=lambda f: priority_order.get(str(f.get("priority", "medium")), 1),
     )
 
-    lines = ["HOOK-BANK (verbindlich):"]
+    lines = ["AUFHÄNGER-SAMMLUNG (verbindlich):"]
     current_priority = None
     for family in sorted_families:
         name = str(family.get("name") or "").strip()
@@ -420,7 +420,7 @@ def _format_hook_bank_section() -> str:
         lines.append(f"- {name}: " + ", ".join(f'"{example}"' for example in examples))
 
     if banned:
-        lines.append("\nVerbotene Hook-Starter (NIEMALS verwenden):")
+        lines.append("\nVerbotene Aufhängerstarts (NIEMALS verwenden):")
         lines.extend(f"- {item}" for item in banned)
 
     if negative_examples:
@@ -483,17 +483,17 @@ def _format_prompt1_research_context(
         "DOSSIER-KONTEXT FÜR DIESEN DURCHLAUF:",
         f"Cluster-Thema: {payload.get('topic', '').strip()}",
         f"Seed-Topic: {payload.get('seed_topic', '').strip()}",
-        f"Lane-Titel: {str(lane.get('title') or '').strip()}",
-        f"Lane-Familie: {str(lane.get('lane_family') or '').strip()}",
-        f"Lane-Winkel: {str(lane.get('angle') or '').strip()}",
-        f"Framework-Kandidaten: {lane_frameworks}",
-        f"Lane Source Summary: {_clip_text(sanitize_metadata_text(lane.get('source_summary') or payload.get('source_summary') or ''), 450)}",
+        f"Themenvariantentitel: {str(lane.get('title') or '').strip()}",
+        f"Themenvariantenfamilie: {str(lane.get('lane_family') or '').strip()}",
+        f"Themenvariantenwinkel: {str(lane.get('angle') or '').strip()}",
+        f"Struktur-Kandidaten: {lane_frameworks}",
+        f"Zusammenfassung der Themenvariante: {_clip_text(sanitize_metadata_text(lane.get('source_summary') or payload.get('source_summary') or ''), 450)}",
     ]
     if lane_facts:
-        sections.extend(["Lane-Fakten:", *lane_facts])
+        sections.extend(["Fakten der Themenvariante:", *lane_facts])
     if lane_risks:
-        sections.extend(["Lane-Risiken:", *lane_risks])
-    sections.append("Bleibe strikt bei diesem Lane-Winkel und erfinde kein neues Thema.")
+        sections.extend(["Risiken der Themenvariante:", *lane_risks])
+    sections.append("Bleibe strikt bei diesem Themenvariantenwinkel und erfinde kein neues Thema.")
     return _join_sections(*sections)
 
 
@@ -501,7 +501,7 @@ def _format_prompt2_research_context(dossier: ResearchDossier | Dict[str, Any] |
     context = _format_research_context(dossier)
     if not context:
         return ""
-    return _join_sections("RESEARCH-KONTEXT FÜR DIE SKRIPTE:", context)
+    return _join_sections("RECHERCHE-KONTEXT FÜR DIE SKRIPTE:", context)
 
 
 def _format_rotation_section(assigned_topics: Optional[List[str]]) -> str:
@@ -566,8 +566,8 @@ def build_prompt1_variant(
     constraint_block = (
         f"\n\nPFLICHT-VORGABEN FÜR DIESES SKRIPT:\n"
         f"- Framework: {forced_framework}\n"
-        f"- Hook-Stil: {forced_hook_style}\n"
-        f"Halte dich strikt an dieses Framework und diesen Hook-Stil."
+        f"- Aufhänger-Stil: {forced_hook_style}\n"
+        f"Halte dich strikt an dieses Framework und diesen Aufhänger-Stil."
     )
     hook_bank_section = (hook_bank_section + constraint_block).strip()
 
@@ -706,7 +706,32 @@ def build_prompt2(
 
 
 def _format_prompt3_fact_lines(values: List[str]) -> str:
-    cleaned = [sanitize_metadata_text(value, max_sentences=2) for value in values if str(value or "").strip()]
+    replacements = (
+        (r"\b100\s*%\s*Made in Germany\b", "in Deutschland gefertigt"),
+        (r"\bMade in Germany\b", "in Deutschland gefertigt"),
+        (r"\bWebsites\b", "Netzseiten"),
+        (r"\bWebsite\b", "Netzseite"),
+        (r"\bServiceverträge\b", "Wartungsverträge"),
+        (r"\bLeihservice\b", "Leihversorgung"),
+        (r"\bService\b", "Betreuung"),
+        (r"\bSupport\b", "Unterstützung"),
+        (r"\bApps\b", "Anwendungen"),
+        (r"\bApp\b", "Anwendung"),
+        (r"\bSoftware-Updates\b", "Programmaktualisierungen"),
+        (r"\bUpdates\b", "Aktualisierungen"),
+        (r"\bUpdate\b", "Aktualisierung"),
+        (r"\bSmart-Home\b", "vernetzte Wohnhilfen"),
+        (r"\bSmart Home\b", "vernetzte Wohnhilfen"),
+        (r"\bMarketingname\b", "Produktname"),
+    )
+    cleaned = []
+    for value in values:
+        if not str(value or "").strip():
+            continue
+        normalized = str(value)
+        for pattern, replacement in replacements:
+            normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+        cleaned.append(sanitize_metadata_text(normalized, max_sentences=2))
     if not cleaned:
         return "- Keine Zusatzfakten vorhanden."
     return "\n".join(f"- {item}" for item in cleaned[:8])

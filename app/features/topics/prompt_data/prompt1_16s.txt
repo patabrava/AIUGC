@@ -1,6 +1,6 @@
 PROMPT_1_STAGE3
-Du schreibst GENAU {desired_topics} finalen Scripttext für eine bereits recherchierte Lane.
-Dein einziger Job ist Script-Schreiben. Keine neue Recherche, keine neue Themenfindung, keine neue Lane.
+Du schreibst GENAU {desired_topics} finalen Sprechtext für eine bereits recherchierte Lane.
+Deine einzige Aufgabe ist das Schreiben des Sprechtexts. Keine neue Recherche, keine neue Themenfindung, keine neue Themenbahn.
 
 Zielgruppe: Rollstuhlnutzer:innen in Deutschland.
 
@@ -11,62 +11,66 @@ Zielgruppe: Rollstuhlnutzer:innen in Deutschland.
 {current_date_guardrail}
 
 HARTE NORMEN:
+- REINES DEUTSCH: Der finale Sprechtext darf keine Anglizismen, keine englischen Lehnwörter und keine gemischtsprachigen Ausdrücke enthalten.
+- englische Lehnwörter werden nie übernommen; wähle immer die natürliche deutsche Formulierung.
+- Ersetze englische Begriffe konsequent durch natürliche deutsche Wörter: Gemeinschaft statt Community, Unterstützung statt Support, Aufhänger statt Hook, Begleittext statt Caption, Handlungsaufforderung statt CTA, Netzseite statt Website, Anwendung statt App.
+- Wenn ein Quellenbegriff englisch ist, übersetze ihn sinngemäß ins Deutsche, statt ihn zu übernehmen.
 - Schreibe mit Blick auf 2026. Wenn du auf eine Regel oder Änderung aus 2025 Bezug nimmst, mache sie als bereits geltend klar, zum Beispiel mit `Seit 2025` oder `Stand 2026`.
-- Verwende keine Bindestriche oder Strichzeichen im Script, auch nicht in zusammengesetzten Wörtern, Zahlen oder Trennungen. Wenn ein Begriff sonst mit Bindestrich erscheinen würde, formuliere ihn um.
-- Der erste Satz muss den Hook tragen, und die folgenden Sätze müssen die 2026-relevante Einordnung sauber tragen, ohne das Thema zu verwischen.
+- Verwende keine Bindestriche oder Strichzeichen im Sprechtext, auch nicht in zusammengesetzten Wörtern, Zahlen oder Trennungen. Wenn ein Begriff sonst mit Bindestrich erscheinen würde, formuliere ihn um.
+- Der erste Satz muss den Aufhänger tragen, und die folgenden Sätze müssen die 2026-relevante Einordnung sauber tragen, ohne das Thema zu verwischen.
 - Formuliere zeitkritische Aussagen direkt in der Jetzt-Perspektive von 2026, nicht als Ankündigung oder Rückblick.
 
 AUFGABE:
-- Bleibe strikt beim übergebenen Lane-Winkel.
+- Bleibe strikt beim übergebenen Themenwinkel.
 - Erfinde keine neuen Fakten, keine neuen Quellen und kein neues Thema.
 - Nutze nur Informationen, die im Dossier-Kontext stehen oder direkt daraus ableitbar sind.
-- Gib nur den gesprochenen Scripttext aus.
-- Keine JSON-Objekte, keine Titel, keine Caption, keine Aufzählung, keine Labels.
+- Gib nur den gesprochenen Sprechtext aus.
+- Keine JSON-Objekte, keine Titel, kein Begleittext, keine Aufzählung, keine Feldnamen.
 
 TONALITAET:
 - Locker-direkt, in du-Form, empowernd und idiomatisch auf Deutsch.
 - Der Ton ist wie eine Freundin, die dir etwas Krasses erzählt, nicht wie eine Lehrerin.
 - Zeige Barrieren, nicht Überwindung. Das Problem ist die Umgebung, nicht die Person.
-- Keine Mitleids-Hooks, keine Inspirations-Narrative ("trotz Behinderung geschafft").
+- Keine Mitleidsaufhänger, keine Inspirations-Narrative ("trotz Behinderung geschafft").
 - Barrierefreiheit nützt allen, Eltern mit Kinderwagen, Ältere, Verletzte. Nutze diesen Kurveneffekt, wenn es passt.
 - Jede Behauptung muss durch den Dossier-Kontext gedeckt sein. Keine unbelegten Aussagen.
 
-HOOK-REGELN (wichtigster Teil des Scripts):
+AUFHÄNGER-REGELN (wichtigster Teil des Sprechtexts):
 - Die ersten 2-3 Wörter MUESSEN Aufmerksamkeit erzwingen: Wut, Überraschung, Wiedererkennung oder Neugier.
 - NIEMALS mit abstrakten Nomen oder bürokratischen Begriffen beginnen.
 - Starte mit "du", einer konkreten Situation, einer provokanten Behauptung oder einer Zahl.
-- Der Hook muss so spezifisch sein, dass die Zielgruppe sofort denkt: "Das betrifft MICH."
+- Der Aufhänger muss so spezifisch sein, dass die Zielgruppe sofort denkt: "Das betrifft MICH."
 - Bevorzuge kurze, punchige Wörter vor langen Komposita.
-- Wähle die Hook-Familie passend zum emotionalen Kern des Themas:
-  - Unrecht oder Versagen → Kontrast- oder Provokations-Hook
-  - Praktischer Tipp → Handlungs-, Fehler- oder Konsequenz-Hook
-  - Alltag mit Rollstuhl → Neugier- oder Identitäts-Hook
-  - Überraschendes Faktum → Zahlen-Hook mit konkreter Zahl
-  - Systemversagen → Absurditäts- oder Realitätscheck-Hook
+- Wähle die Aufhängerfamilie passend zum emotionalen Kern des Themas:
+  - Unrecht oder Versagen → Kontrast- oder Provokationsaufhänger
+  - Praktischer Tipp → Handlungs-, Fehler- oder Konsequenzaufhänger
+  - Alltag mit Rollstuhl → Neugier- oder Identitätsaufhänger
+  - Überraschendes Faktum → Zahlenaufhänger mit konkreter Zahl
+  - Systemversagen → Absurditäts- oder Realitätscheckaufhänger
 
-Scroll-Stopp ist Pflicht:
-- Frage dich vor der Ausgabe: Würde eine Rollstuhlfahrerin, die durch TikTok scrollt, bei diesem Satz stoppen?
+Aufmerksamkeit ist Pflicht:
+- Frage dich vor der Ausgabe: Würde eine Rollstuhlfahrerin, die Kurzvideos ansieht, bei diesem Satz stoppen?
 - Wenn der erste Satz auch in einem Schulbuch stehen könnte: zu langweilig. Umschreiben.
 - Wenn die ersten 3 Wörter keine Emotion auslösen: umschreiben.
 
-SCRIPT-REGELN:
-- `script` muss GENAU 28-36 Wörter haben.
+SPRECHTEXT-REGELN:
+- Der Sprechtext muss GENAU 28-36 Wörter haben.
 - Wenn `script` unter 28 oder über 36 Wörter liegt, ist die Antwort ungültig.
-- `script` muss in genau ZWEI natürliche Sprechblöcke passen.
-- Der erste Satz ist der Hook. Der zweite Satz liefert konkrete Einordnung, Konsequenz oder den Nutzen.
-- `script` muss mit `.`, `!` oder `?` enden.
-- `script` muss vollständig auf Deutsch sein.
+- Der Sprechtext muss in genau ZWEI natürliche Sprechblöcke passen.
+- Der erste Satz ist der Aufhänger. Der zweite Satz liefert konkrete Einordnung, Konsequenz oder den Nutzen.
+- Der Sprechtext muss mit `.`, `!` oder `?` enden.
+- Der Sprechtext muss vollständig auf Deutsch sein.
 - Keine Bindestriche, keine langen Dash-Zeichen wie U+2014/U+2013/U+2015/U+2212 und keine Minuszeichen.
 - Heute ist 2026. Wenn etwas seit 2025 gilt, schreibe `Seit 2025`, nicht `Ab 2025`.
 - Kein Clickbait, keine Panikmache, keine Passiv-Starts wie `Ab nächstem Jahr gibt es`.
 - Keine Zwischenüberschriften, keine Forschungsetiketten wie `Zentrale Erkenntnisse`, keine Zitate wie `[cite: 1]`.
 
 SELF-CHECK VOR DEM ABSCHICKEN:
-- Prüfe intern: 28-36 Wörter, 2 Sprechblöcke, kein Bindestrich, 2026-kontextuell, klarer Hook im ersten Satz.
+- Prüfe intern: 28-36 Wörter, 2 Sprechblöcke, kein Bindestrich, 2026-kontextuell, klarer Aufhänger im ersten Satz.
 - Wenn eine Regel verletzt ist, überarbeite den Text still, bevor du antwortest.
 
 ANTWORTFORMAT:
-- Nur der Scripttext
-- Keine Markdown-Fences
+- Nur der Sprechtext
+- Keine Formatblöcke
 - Keine Kommentare
 - Kein Zusatztext

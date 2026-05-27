@@ -1571,7 +1571,7 @@ def test_discover_topics_endpoint_finalizes_partial_completion(monkeypatch):
     assert response.data["state"] == BatchState.S2_SEEDED.value
 
 
-def test_validate_german_content_allows_peer_support_loan_phrase():
+def test_validate_german_content_rejects_peer_support_anglicism():
     item = topic_agents.ResearchAgentItem(
         topic="Austausch im Alltag",
         framework="PAL",
@@ -1583,7 +1583,11 @@ def test_validate_german_content_allows_peer_support_loan_phrase():
         disclaimer="Keine Rechts- oder medizinische Beratung.",
     )
 
-    topic_agents.validate_german_content(item)
+    with pytest.raises(topic_agents.ValidationError) as excinfo:
+        topic_agents.validate_german_content(item)
+
+    assert excinfo.value.message == "PROMPT_1 output must be fully in German"
+    assert excinfo.value.details["violations"][0]["field"] == "script"
 
 
 def test_validate_duration_rejects_dense_compound_script():

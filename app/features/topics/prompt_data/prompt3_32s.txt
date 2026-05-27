@@ -1,4 +1,4 @@
-Du schreibst deutsche Produkt-Skripte für 32-Sekunden-UGC-Videos auf TikTok und Instagram.
+Du schreibst deutsche Produktsprechtexte für 32-Sekunden-Kurzvideos für kurze Videoplattformen.
 
 PRODUKT:
 {product_name}
@@ -7,15 +7,18 @@ Kurzkontext:
 {product_summary}
 
 HARTE REGELN:
+- REINES DEUTSCH: Sprechtext und Handlungsaufforderung dürfen keine Anglizismen, keine englischen Lehnwörter und keine gemischtsprachigen Ausdrücke enthalten.
+- englische Lehnwörter werden nie übernommen; wähle immer die natürliche deutsche Formulierung.
+- Übersetze englische Quellbegriffe sinngemäß ins Deutsche und übernimm sie nicht in den Sprechtext.
 - Antworte nicht in JSON.
 - Antworte nur im exakt vorgegebenen Textformat.
 - Nenne nur dieses Produkt und keine anderen Produkte.
 - Nutze nur die Fakten aus diesem Prompt.
-- Halte den Scripttext auf 64-84 Wörter und fünf bis sechs natürliche Sätze.
-- Im Script nur echte Umlaute schreiben: ä, ö, ü. Keine Umschreibungen mit ae, oe, ue.
-- Du-Form, endkundentauglich, direkter Hook, kein LinkedIn-Ton.
-- Wenn die Antwort leicht anders aufgebaut ist, akzeptiere sinngemäße Labels wie Produkt/Produktname, Angle/Winkel/Hook, Script/Text/Sprechtext, CTA/Call to action und Fakten/Stichpunkte.
-- Keine Hashtags, keine Emojis, keine Aufzählungen im Script.
+- Halte den Sprechtext auf 64-84 Wörter und fünf bis sechs natürliche Sätze.
+- Im Sprechtext nur echte Umlaute schreiben: ä, ö, ü. Keine Umschreibungen mit ae, oe, ue.
+- Du-Form, endkundentauglich, direkter Aufhänger, kein Geschäftsnetzwerkton.
+- Wenn die Antwort leicht anders aufgebaut ist, akzeptiere sinngemäße Labels wie Produkt/Produktname, Winkel/Aufhänger, Text/Sprechtext, Handlungsaufforderung und Fakten/Stichpunkte.
+- Keine Raute Schlagwörter, keine Bildzeichen, keine Aufzählungen im Sprechtext.
 - Keine Aussagen zu LL12 oder Konstanz.
 
 PRODUKTFAKTEN:
@@ -26,9 +29,9 @@ STUETZFAKTEN:
 
 ANTWORTFORMAT:
 Produkt: {product_name}
-Angle: <ein klarer Produktwinkel für Endkunden>
-Script: <ein finaler Scripttext in fünf bis sechs natürlichen Sätzen>
-CTA: <ein kurzer CTA>
+Winkel: <ein klarer Produktwinkel für Endkunden>
+Sprechtext: <ein finaler Sprechtext in fünf bis sechs natürlichen Sätzen>
+Handlungsaufforderung: <eine kurze Aufforderung>
 Fakten:
 - <Fakt 1>
 - <Fakt 2>

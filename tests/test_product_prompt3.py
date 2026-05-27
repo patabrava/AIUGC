@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.video_profiles import get_duration_profile
 from app.core.errors import ThirdPartyError, ValidationError
 from app.features.topics.product_knowledge import parse_product_knowledge_base, plan_product_mix
+from app.features.topics.prompts import build_prompt3
 from app.features.topics.prompt3_runtime import generate_product_topics
 from app.features.topics.response_parsers import parse_prompt3_response
 from app.features.topics.schemas import ProductKnowledgeEntry
@@ -51,8 +53,30 @@ def test_parse_product_knowledge_base_returns_only_active_products():
 
 def test_parse_product_knowledge_base_attaches_support_facts_to_each_product():
     entries = parse_product_knowledge_base(SAMPLE_KNOWLEDGE_BASE)
-    assert "100% Made in Germany" in entries[0].support_facts
+    assert "in Deutschland gefertigt" in entries[0].support_facts
     assert "5 Jahre Gewaehrleistung auf den gesamten Lift" in entries[1].support_facts
+
+
+def test_build_prompt3_sanitizes_anglicism_support_facts():
+    prompt = build_prompt3(
+        product=ProductKnowledgeEntry(
+            product_name="VARIO PLUS",
+            source_label="PLATTFORMTREPPENLIFT T80",
+            aliases=["VARIO PLUS"],
+            summary="Plattform oder Sitzlift auf derselben Schiene.",
+            facts=["Smart-Home Anschluss per App."],
+            support_facts=["100% Made in Germany", "Website Service Update"],
+        ),
+        profile=get_duration_profile(8),
+    )
+
+    assert "Made in Germany" not in prompt
+    assert "Smart-Home" not in prompt
+    assert "Website" not in prompt
+    assert "Service" not in prompt
+    assert "Update" not in prompt
+    assert "in Deutschland gefertigt" in prompt
+    assert "vernetzte Wohnhilfen" in prompt
 
 
 def test_parse_product_knowledge_base_clips_facts_to_schema_limit():
@@ -269,6 +293,46 @@ def test_generate_product_topics_retries_on_malformed_prompt3_response(monkeypat
 
     assert generated[0]["product_name"] == "VARIO PLUS"
     assert len(fake_llm.text_prompts) == 2
+
+
+def test_generate_product_topics_retries_on_anglicism_in_prompt3_script(monkeypatch):
+    monkeypatch.setattr(
+        "app.features.topics.prompt3_runtime.get_product_knowledge_base",
+        lambda: [
+            ProductKnowledgeEntry(
+                product_name="VARIO PLUS",
+                source_label="PLATTFORMTREPPENLIFT T80",
+                aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+                summary="Plattform oder Sitzlift auf derselben Schiene.",
+                facts=["Plattform oder Sitzlift auf derselben Schiene", "Tragfaehigkeit bis 300 kg"],
+                support_facts=["in Deutschland gefertigt"],
+            )
+        ],
+    )
+    fake_llm = _FakeProductLLM(
+        [
+            """Produkt: VARIO PLUS
+Winkel: Mehr Sicherheit
+Sprechtext: VARIO PLUS gibt dir Support und Made in Germany sorgt für Vertrauen im Alltag.
+Handlungsaufforderung: Frag nach VARIO PLUS.
+Fakten:
+- Plattform oder Sitzlift auf derselben Schiene
+""",
+            """Produkt: VARIO PLUS
+Winkel: Mehr Sicherheit
+Sprechtext: Deine Treppe bleibt besser nutzbar, wenn dieselbe Schiene heute und später gut zu deinem Alltag passt.
+Handlungsaufforderung: Frag nach einer passenden Lösung für dein Zuhause.
+Fakten:
+- Plattform oder Sitzlift auf derselben Schiene
+""",
+        ]
+    )
+
+    generated = generate_product_topics(count=1, target_length_tier=8, llm_factory=lambda: fake_llm)
+
+    assert len(fake_llm.text_prompts) == 2
+    assert "Anglizismen" in fake_llm.text_prompts[1][0]
+    assert "Support" not in generated[0]["script"]
 
 
 def test_generate_product_topics_accepts_32s_product_scripts_inside_current_contract(monkeypatch):

@@ -1,4 +1,4 @@
-Du schreibst deutsche Produkt-Skripte für 8-Sekunden-UGC-Videos auf TikTok und Instagram.
+Du schreibst deutsche Produktsprechtexte für 8-Sekunden-Kurzvideos für kurze Videoplattformen.
 
 PRODUKT:
 {product_name}
@@ -7,16 +7,19 @@ Kurzkontext:
 {product_summary}
 
 HARTE REGELN:
+- REINES DEUTSCH: Sprechtext und Handlungsaufforderung dürfen keine Anglizismen, keine englischen Lehnwörter und keine gemischtsprachigen Ausdrücke enthalten.
+- englische Lehnwörter werden nie übernommen; wähle immer die natürliche deutsche Formulierung.
+- Übersetze englische Quellbegriffe sinngemäß ins Deutsche und übernimm sie nicht in den Sprechtext.
 - Antworte nicht in JSON.
 - Antworte nur im exakt vorgegebenen Textformat.
 - Wenn dir andere saubere Feldnamen natürlicher vorkommen, sind nahe Varianten okay:
-  Produkt/Produktname, Angle/Winkel/Hook, Script/Text/Sprechtext, CTA/Call to action, Fakten/Stichpunkte.
+  Produkt/Produktname, Winkel/Aufhänger, Text/Sprechtext, Handlungsaufforderung und Fakten/Stichpunkte.
 - Nenne nur dieses Produkt und keine anderen Produkte.
 - Nutze nur die Fakten aus diesem Prompt.
-- Halte den Scripttext auf 16-20 Wörter und genau einen Satz.
-- Im Script nur echte Umlaute schreiben: ä, ö, ü. Keine Umschreibungen mit ae, oe, ue.
-- Du-Form, endkundentauglich, direkter Hook, kein LinkedIn-Ton.
-- Keine Hashtags, keine Emojis, keine Aufzählungen im Script.
+- Halte den Sprechtext auf 16-20 Wörter und genau einen Satz.
+- Im Sprechtext nur echte Umlaute schreiben: ä, ö, ü. Keine Umschreibungen mit ae, oe, ue.
+- Du-Form, endkundentauglich, direkter Aufhänger, kein Geschäftsnetzwerkton.
+- Keine Raute Schlagwörter, keine Bildzeichen, keine Aufzählungen im Sprechtext.
 - Keine Aussagen zu LL12 oder Konstanz.
 
 PRODUKTFAKTEN:
@@ -27,9 +30,9 @@ STUETZFAKTEN:
 
 ANTWORTFORMAT:
 Produkt: {product_name}
-Angle: <ein klarer Produktwinkel für Endkunden>
-Script: <ein finaler Ein-Satz-Scripttext>
-CTA: <ein kurzer CTA>
+Winkel: <ein klarer Produktwinkel für Endkunden>
+Sprechtext: <ein finaler Ein-Satz-Sprechtext>
+Handlungsaufforderung: <eine kurze Aufforderung>
 Fakten:
 - <Fakt 1>
 - <Fakt 2>

@@ -52,11 +52,11 @@ def test_build_prompt1_uses_32s_text_template():
 
     assert "FUENF oder SECHS vollständige Sätze" in prompt
     assert "68-88 Wörter" in prompt
-    assert "Lane-Titel:" in prompt
-    assert "Nur der Scripttext" in prompt
+    assert "Themenvariantentitel:" in prompt
+    assert "Nur der Sprechtext" in prompt
     assert "Keine Zwischenüberschriften" in prompt
     assert "keine Zitate wie `[cite: 1]`" in prompt
-    assert "HOOK-BANK" in prompt
+    assert "AUFHÄNGER-SAMMLUNG" in prompt
     assert "Fragen" in prompt
     assert "Nur valides JSON-Array" not in prompt
     assert "caption" not in prompt
@@ -84,7 +84,7 @@ def test_build_prompt2_uses_32s_text_template():
         profile=get_duration_profile(32),
     )
 
-    assert "32-Sekunden-UGC-Videos" in prompt
+    assert "32 Sekunden lange Kurzvideos" in prompt
     assert "64-84 Wörter" in prompt
     assert "5-6 Sätze" in prompt
     assert "ZIELWORTZAHL: 64-84 Wörter" in prompt
@@ -98,7 +98,7 @@ def test_build_prompt2_uses_16s_text_template():
         profile=get_duration_profile(16),
     )
 
-    assert "16-Sekunden-UGC-Videos" in prompt
+    assert "16 Sekunden lange Kurzvideos" in prompt
     assert "28-34 Wörter" in prompt
     assert "2 Sprechblöcke" in prompt
     assert "ZIELWORTZAHL: 28-34 Wörter" in prompt
@@ -113,7 +113,7 @@ def test_build_prompt2_uses_8s_text_template():
         profile=get_duration_profile(8),
     )
 
-    assert "8-Sekunden-UGC-Videos" in prompt
+    assert "8 Sekunden lange Kurzvideos" in prompt
     assert "16-20 Wörter" in prompt
     assert "ZIELWORTZAHL: 16-20 Wörter" in prompt
 
@@ -130,7 +130,7 @@ def _sample_product() -> ProductKnowledgeEntry:
             "Innen- und Aussenbereich",
         ],
         support_facts=[
-            "100% Made in Germany",
+            "in Deutschland gefertigt",
             "5 Jahre Gewaehrleistung auf den gesamten Lift",
         ],
     )
@@ -139,7 +139,7 @@ def _sample_product() -> ProductKnowledgeEntry:
 def test_build_prompt3_uses_32s_text_template():
     prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(32))
 
-    assert "32-Sekunden-UGC-Videos" in prompt
+    assert "32-Sekunden-Kurzvideos" in prompt
     assert "64-84 Wörter" in prompt
     assert "fünf bis sechs natürlichen Sätzen" in prompt
     assert "Antworte nicht in JSON" in prompt
@@ -156,7 +156,7 @@ def test_parse_prompt1_response_normalizes_trailing_fragment(monkeypatch):
           "framework": "Transformation",
           "sources": [{"title": "Quelle", "url": "https://example.com"}],
           "script": "Erster Satz für dich. Zweiter Satz mit mehr Kontext. Abgeschnittener Rest ohne Punkt",
-          "source_summary": "Zusätzlicher Kontext zu einer Unterkunfts-Option in Deutschland, die sich auf rollstuhlgerechte Wohnmobile und flexible Selbstversorgung bezieht. #ReisenOhneBarrieren #Rollstuhlurlaub #Camping",
+          "source_summary": "Zusätzlicher Kontext zu einer Unterkunfts-Option in Deutschland, die sich auf rollstuhlgerechte Wohnmobile und flexible Selbstversorgung bezieht. #ReisenOhneBarrieren #Rollstuhlurlaub #Naturreise",
           "estimated_duration_s": 27,
           "tone": "direkt, freundlich, empowernd, du-Form",
           "disclaimer": "Keine Rechts- oder medizinische Beratung."
@@ -196,8 +196,8 @@ def test_prompt1_8s_contains_hook_mechanics():
     """8s prompt must contain explicit hook mechanics, not just 'klaren Hook-Start'."""
     prompt = build_prompt1(post_type="value", desired_topics=1)
     assert "klaren Hook-Start" not in prompt, "Old vague hook instruction still present"
-    assert "HOOK-REGELN" in prompt
-    assert "Scroll-Stopp" in prompt
+    assert "AUFHÄNGER-REGELN" in prompt
+    assert "Aufmerksamkeit" in prompt
     assert "TONALITAET" in prompt
 
 
@@ -208,8 +208,8 @@ def test_prompt1_16s_contains_hook_mechanics():
     )
     assert "klaren Hook" not in prompt, "Old vague hook instruction still present in 16s"
     assert "2 Sprechblöcke" in prompt
-    assert "HOOK-REGELN" in prompt
-    assert "Scroll-Stopp" in prompt
+    assert "AUFHÄNGER-REGELN" in prompt
+    assert "Aufmerksamkeit" in prompt
     assert "TONALITAET" in prompt
 
 
@@ -219,8 +219,8 @@ def test_prompt1_32s_contains_hook_mechanics():
         post_type="value", desired_topics=1, profile=get_duration_profile(32),
     )
     assert "klaren Hook" not in prompt, "Old vague hook instruction still present in 32s"
-    assert "HOOK-REGELN" in prompt
-    assert "Scroll-Stopp" in prompt
+    assert "AUFHÄNGER-REGELN" in prompt
+    assert "Aufmerksamkeit" in prompt
     assert "TONALITAET" in prompt
 
 
@@ -310,3 +310,33 @@ def test_hook_bank_examples_no_longer_contain_long_dashes_or_ab_2025():
 def test_audit_prompt_reflects_new_8s_word_range():
     audit_prompt = (PROMPT_DATA_DIR / "audit_prompt.txt").read_text(encoding="utf-8")
     assert "8s: 14-18" in audit_prompt
+
+
+def test_script_prompts_contain_german_only_contract():
+    prompt1 = build_prompt1(post_type="value", desired_topics=1, profile=get_duration_profile(8))
+    prompt2 = build_prompt2(topic="Barrierefreie Wege", scripts_per_category=1, profile=get_duration_profile(8))
+    prompt3 = build_prompt3(product=_sample_product(), profile=get_duration_profile(8))
+
+    for prompt in (prompt1, prompt2, prompt3):
+        assert "REINES DEUTSCH" in prompt
+        assert "Anglizismen" in prompt
+        assert "englische Lehnwörter" in prompt
+
+
+def test_prompt2_uses_german_only_output_heading():
+    prompt = build_prompt2(topic="Barrierefreie Wege", scripts_per_category=1, profile=get_duration_profile(8))
+
+    assert "Problem, Zuspitzung, Lösung" in prompt
+    assert "Problem-Agitieren-Lösung Ads" not in prompt
+
+
+def test_prompt3_prefers_german_output_labels():
+    prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(8))
+
+    assert "Winkel:" in prompt
+    assert "Sprechtext:" in prompt
+    assert "Handlungsaufforderung:" in prompt
+    assert "Angle:" not in prompt
+    assert "Script:" not in prompt
+    assert "CTA:" not in prompt
+    assert "Call to action" not in prompt

@@ -41,6 +41,7 @@ from app.features.topics.topic_validation import (  # noqa: E402
     count_spoken_sentences,
     detect_metadata_bleed,
     detect_spoken_copy_issues,
+    find_german_only_violations,
     get_prompt1_sentence_bounds,
 )
 from app.features.topics.variant_expansion import expand_topic_variants  # noqa: E402
@@ -111,6 +112,11 @@ def validate_script(
     if not script_text or not script_text.strip():
         blocking.append("empty_script")
         return blocking, soft
+
+    german_only_violations = find_german_only_violations(script_text)
+    if german_only_violations:
+        tokens = ",".join(item["token"] for item in german_only_violations)
+        blocking.append(f"german_only_violation:{tokens}")
 
     profile = get_duration_profile(tier)
     word_count = _script_word_count(script_text)
@@ -561,13 +567,13 @@ def main() -> int:
     parser.add_argument("--topic-pool-size", type=int, default=60)
     parser.add_argument("--output-dir", default="tasks")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--seeds", type=int, nargs="+", default=None)
     parser.add_argument("--post-types", default="value,lifestyle,product")
     parser.add_argument("--min-usable-pct", type=float, default=100.0)
     parser.add_argument("--min-strict-pct", type=float, default=100.0)
     args = parser.parse_args()
 
-    if args.seed is not None:
-        random.seed(args.seed)
+    seed_values = list(args.seeds or [args.seed])
 
     started_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     print("=" * 80)
@@ -595,63 +601,69 @@ def main() -> int:
     total_started_at = time.time()
 
     with stress_test_isolation():
-        if "smoke" in phases_to_run:
-            print("\n[PHASE 1] smoke — 1 sequential per tier", flush=True)
-            for tier in smoke_tiers:
-                for post_type in post_types:
-                    r = run_one_shot(phase="smoke", tier=tier, post_type=post_type, topics=topic_pool)
-                    results.append(r)
-                    _print_shot_line(r)
+        for seed_index, seed_value in enumerate(seed_values, start=1):
+            if seed_value is not None:
+                random.seed(seed_value)
+            phase_suffix = f"_seed{seed_value}" if len(seed_values) > 1 and seed_value is not None else ""
+            print(f"\n[SEED {seed_index}/{len(seed_values)}] seed={seed_value}", flush=True)
 
-        if "concurrency" in phases_to_run:
-            n = args.concurrency_parallel
-            print(f"\n[PHASE 2] concurrency — {n} parallel × 3 tiers in one batch", flush=True)
-            jobs: List[Tuple[int, str]] = []
-            for tier in (8, 16, 32):
-                for post_type in post_types:
-                    jobs.extend([(tier, post_type)] * n)
-            random.shuffle(jobs)
-            with ThreadPoolExecutor(max_workers=n * 3) as pool:
-                futures = [
-                    pool.submit(run_one_shot, phase="concurrency", tier=t, post_type=pt, topics=topic_pool)
-                    for (t, pt) in jobs
-                ]
-                for fut in as_completed(futures):
-                    r = fut.result()
-                    results.append(r)
-                    _print_shot_line(r)
+            if "smoke" in phases_to_run:
+                print("\n[PHASE 1] smoke — 1 sequential per tier", flush=True)
+                for tier in smoke_tiers:
+                    for post_type in post_types:
+                        r = run_one_shot(phase=f"smoke{phase_suffix}", tier=tier, post_type=post_type, topics=topic_pool)
+                        results.append(r)
+                        _print_shot_line(r)
 
-        if "heavy" in phases_to_run:
-            n = args.heavy_parallel
-            rounds = args.heavy_rounds
-            total = n * rounds * 3 * max(len(post_types), 1)
-            print(f"\n[PHASE 3] heavy — {n} parallel × {rounds} rounds × 3 tiers ({total} calls)", flush=True)
-            for round_n in range(rounds):
-                print(f"  -- round {round_n + 1}/{rounds} --", flush=True)
-                jobs = []
+            if "concurrency" in phases_to_run:
+                n = args.concurrency_parallel
+                print(f"\n[PHASE 2] concurrency — {n} parallel × 3 tiers in one batch", flush=True)
+                jobs: List[Tuple[int, str]] = []
                 for tier in (8, 16, 32):
                     for post_type in post_types:
                         jobs.extend([(tier, post_type)] * n)
                 random.shuffle(jobs)
                 with ThreadPoolExecutor(max_workers=n * 3) as pool:
                     futures = [
-                        pool.submit(
-                            run_one_shot,
-                            phase=f"heavy_r{round_n + 1}",
-                            tier=t,
-                            post_type=pt,
-                            topics=topic_pool,
-                        )
+                        pool.submit(run_one_shot, phase=f"concurrency{phase_suffix}", tier=t, post_type=pt, topics=topic_pool)
                         for (t, pt) in jobs
                     ]
-                    round_results = []
                     for fut in as_completed(futures):
                         r = fut.result()
-                        round_results.append(r)
                         results.append(r)
                         _print_shot_line(r)
-                ok = sum(1 for r in round_results if r.success)
-                print(f"  round {round_n + 1}: {ok}/{len(round_results)} clean", flush=True)
+
+            if "heavy" in phases_to_run:
+                n = args.heavy_parallel
+                rounds = args.heavy_rounds
+                total = n * rounds * 3 * max(len(post_types), 1)
+                print(f"\n[PHASE 3] heavy — {n} parallel × {rounds} rounds × 3 tiers ({total} calls)", flush=True)
+                for round_n in range(rounds):
+                    print(f"  -- round {round_n + 1}/{rounds} --", flush=True)
+                    jobs = []
+                    for tier in (8, 16, 32):
+                        for post_type in post_types:
+                            jobs.extend([(tier, post_type)] * n)
+                    random.shuffle(jobs)
+                    with ThreadPoolExecutor(max_workers=n * 3) as pool:
+                        futures = [
+                            pool.submit(
+                                run_one_shot,
+                                phase=f"heavy{phase_suffix}_r{round_n + 1}",
+                                tier=t,
+                                post_type=pt,
+                                topics=topic_pool,
+                            )
+                            for (t, pt) in jobs
+                        ]
+                        round_results = []
+                        for fut in as_completed(futures):
+                            r = fut.result()
+                            round_results.append(r)
+                            results.append(r)
+                            _print_shot_line(r)
+                    ok = sum(1 for r in round_results if r.success)
+                    print(f"  round {round_n + 1}: {ok}/{len(round_results)} clean", flush=True)
 
     total_elapsed = time.time() - total_started_at
 
@@ -681,6 +693,7 @@ def main() -> int:
         "post_types": post_types,
         "topic_pool_size": len(topic_pool),
         "seed": args.seed,
+        "seeds": seed_values,
     }
     jsonl_path, md_path = write_reports(
         results, output_dir, timestamp, duplicate_pairs, successful, config

@@ -102,8 +102,8 @@ def _synthesize_prompt2_fallback(topic: str, *, scripts_required: int, target_le
     script = _build_prompt2_fallback_script(topic, target_length_tier=target_length_tier)
     scripts = [script for _ in range(max(1, min(5, scripts_required)))]
     description = (
-        f"Lifestyle-Beitrag zu {topic}: Der Beitrag erklärt knapp, wie bessere Planung, "
-        "klare Wege und kleine Routinen den Rollstuhl-Alltag entlasten."
+        f"Begleittext zu {topic}: Der Beitrag erklärt knapp, wie bessere Planung, "
+        "klare Wege und kleine Routinen den Alltag mit Rollstuhl entlasten."
     )
     return DialogScripts(
         problem_agitate_solution=scripts,
@@ -864,7 +864,12 @@ def generate_dialog_scripts(
                 error=last_error,
                 details=getattr(exc, "details", {}),
             )
-            prompt = f"{prompt}\n\nFEEDBACK: {last_error}. Details: {json.dumps(getattr(exc, 'details', {}), default=str)[:800]}"
+            prompt = (
+                f"{prompt}\n\nRÜCKMELDUNG: {last_error}. "
+                "Überarbeite die Antwort still. Verwende im Sprechtext und Begleittext keine Anglizismen, "
+                "keine englischen Lehnwörter und keine englischen Überschriften. "
+                f"Details: {json.dumps(getattr(exc, 'details', {}), default=str)[:800]}"
+            )
 
     if provider_boundary_failed:
         fallback = _synthesize_prompt2_fallback(

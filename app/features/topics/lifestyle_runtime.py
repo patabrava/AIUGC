@@ -92,11 +92,11 @@ def _topic_hint(topic_template: str) -> str:
 def _lifestyle_padding_sentences(topic_hint: str) -> List[str]:
     hint = topic_hint or "dein Alltag"
     return [
-        f"Gerade bei {hint} summieren sich kleine Umwege schneller, als viele von aussen erwarten.",
-        "Wenn du den Weg vorher kurz pruefst, sparst du dir spaeter hektische Stopps und unnoetiges Zuruecksetzen.",
-        "So bleibt der naechste Schritt klar, auch wenn unterwegs wieder etwas nicht sofort passt.",
-        "Diese paar Minuten Planung klingen klein, machen im Rollstuhl-Alltag aber oft den groessten Unterschied.",
-        "Am Ende bleibt mehr Energie fuer den eigentlichen Termin, statt schon auf dem Hinweg verloren zu gehen.",
+        f"Gerade bei {hint} summieren sich kleine Umwege schneller, als viele von außen erwarten.",
+        "Wenn du den Weg vorher kurz prüfst, sparst du dir später hektische Stopps und unnötiges Zurücksetzen.",
+        "So bleibt der nächste Schritt klar, auch wenn unterwegs wieder etwas nicht sofort passt.",
+        "Diese paar Minuten Planung klingen klein, machen im Rollstuhl Alltag aber oft den größten Unterschied.",
+        "Am Ende bleibt mehr Energie für den eigentlichen Termin, statt schon auf dem Hinweg verloren zu gehen.",
     ]
 
 
@@ -105,10 +105,10 @@ def _short_lifestyle_padding_sentences() -> List[str]:
         "Das hilft.",
         "Das spart Kraft.",
         "So bleibst du ruhiger.",
-        "Das spart dir spuerbar Kraft.",
+        "Das spart dir spürbar Kraft.",
         "So bleibt dein Alltag planbarer.",
-        "Das macht deinen Weg spuerbar leichter.",
-        "So bleibt mehr Energie fuer deinen Termin.",
+        "Das macht deinen Weg spürbar leichter.",
+        "So bleibt mehr Energie für deinen Termin.",
     ]
 
 
@@ -122,16 +122,16 @@ def _synthesize_lifestyle_dialog_scripts(
         " ".join(
             [
                 f"Wenn {hint} im Alltag mehr Kraft kostet, merkst du das oft erst nach mehreren kleinen Umwegen.",
-                "Pruefe den Weg vorher kurz und plane einen einfachen Ausweichschritt ein.",
+                "Prüfe den Weg vorher kurz und plane einen einfachen Ausweichschritt ein.",
                 "Damit musst du unterwegs weniger improvisieren und bleibst im Kopf deutlich ruhiger.",
                 "Genau solche Routinen nehmen Druck raus, wenn der Alltag sowieso schon genug Energie kostet.",
-                "So bleibt mehr Kraft fuer das, was du eigentlich vorhast, statt fuer zusaetzliche Barrieren draufzugehen.",
+                "So bleibt mehr Kraft für das, was du eigentlich vorhast, statt für zusätzliche Barrieren draufzugehen.",
             ]
         ),
         target_length_tier=target_length_tier,
     )
     description = (
-        "Dieser Lifestyle Beitrag zeigt einen konkreten Alltagsschritt, "
+        "Dieser Alltagsbeitrag zeigt einen konkreten Schritt, "
         "der Rollstuhlnutzerinnen und Rollstuhlnutzern Planung, Kraft und "
         "Orientierung im Tagesablauf erleichtert."
     )
@@ -151,12 +151,12 @@ def generate_lifestyle_topics(
     generate_dialog_scripts_fn: Callable,
 ) -> List[Dict[str, object]]:
     lifestyle_topic_templates = [
-        "Rollstuhl-Alltag – Tipps & Tricks",
+        "Rollstuhl Alltag - praktische Hinweise",
         "Barrierefreiheit im Alltag erleben",
-        "Community-Erfahrungen teilen",
+        "Erfahrungen aus der Gemeinschaft teilen",
         "Freizeit mit Rollstuhl genießen",
         "Alltägliche Herausforderungen meistern",
-        "Spontane Wege ohne Extra-Stress planen",
+        "Spontane Wege ohne Zusatzdruck planen",
         "ÖPNV, Umwege und clevere Alltagsroutinen",
         "Wohnung, Türen und enge Übergänge entspannter meistern",
         "Selbstbestimmt unterwegs trotz kleiner Barrieren",
