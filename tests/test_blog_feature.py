@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 from unittest.mock import MagicMock, patch
 import asyncio
@@ -8,6 +9,7 @@ import base64
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.errors import ThirdPartyError
@@ -31,6 +33,13 @@ from app.features.blog import queries as blog_queries
 from app.features.blog.schemas import BlogContent, BlogSource, build_blog_content_from_llm, normalize_blog_content
 from app.features.blog.webflow_client import WebflowClient
 from pathlib import Path
+
+
+def _make_png_bytes() -> bytes:
+    buffer = io.BytesIO()
+    image = Image.new("RGBA", (8, 8), (18, 52, 86, 255))
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def test_blog_content_from_llm_is_webflow_ready():
@@ -475,6 +484,67 @@ def test_gemini_image_generation_decodes_inline_image_bytes():
     assert result["image_bytes"] == png_bytes
     assert result["mime_type"] == "image/png"
     assert mock_post.call_args.kwargs["params"]["key"]
+
+
+def test_generate_blog_image_converts_provider_png_to_webp_before_upload(monkeypatch):
+    png_bytes = _make_png_bytes()
+    captured_upload = {}
+    update_calls = []
+
+    fake_post = {
+        "id": "post-1",
+        "blog_enabled": True,
+        "blog_status": "draft",
+        "blog_content": {
+            "name": "Title",
+            "slug": "title",
+            "body_html": "<p>Text</p>",
+            "image_prompt": "Quadratisches Coverbild",
+            "preview_image_url": None,
+        },
+    }
+
+    class _FakeLLM:
+        def generate_gemini_image(self, **kwargs):
+            assert kwargs["prompt"] == "Quadratisches Coverbild"
+            return {
+                "image_bytes": png_bytes,
+                "mime_type": "image/png",
+                "model": "gemini-2.5-flash-image",
+            }
+
+    class _FakeStorage:
+        def upload_image(self, **kwargs):
+            captured_upload.update(kwargs)
+            return {
+                "url": f"https://cdn.example.com/blog/{kwargs['file_name']}",
+                "storage_key": f"Lippe Lift Studio/images/{kwargs['file_name']}",
+            }
+
+    def _fake_update_blog_status(post_id, **kwargs):
+        update_calls.append((post_id, kwargs))
+        return {"id": post_id, **kwargs}
+
+    monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _post_id: fake_post)
+    monkeypatch.setattr(
+        blog_runtime,
+        "_lookup_dossier",
+        lambda _post: {"id": "dossier-1", "normalized_payload": {"topic": "Title"}},
+    )
+    monkeypatch.setattr(blog_runtime, "get_llm_client", lambda: _FakeLLM())
+    monkeypatch.setattr(blog_runtime, "get_storage_client", lambda: _FakeStorage())
+    monkeypatch.setattr(blog_runtime, "update_blog_status", _fake_update_blog_status)
+
+    result = blog_runtime.generate_blog_image("post-1")
+
+    assert captured_upload["file_name"] == "title.webp"
+    assert captured_upload["content_type"] == "image/webp"
+    assert captured_upload["image_bytes"].startswith(b"RIFF")
+    assert captured_upload["image_bytes"][8:12] == b"WEBP"
+    assert result["preview_image_url"] == "https://cdn.example.com/blog/title.webp"
+    assert result["storage_key"] == "Lippe Lift Studio/images/title.webp"
+    assert update_calls[0][0] == "post-1"
+    assert update_calls[0][1]["blog_content"]["preview_image_url"] == "https://cdn.example.com/blog/title.webp"
 
 
 def test_blog_toggle_endpoint_is_registered():
