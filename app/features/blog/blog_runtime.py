@@ -8,9 +8,11 @@ Per Constitution § V: Locality & Vertical Slices
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError as PydanticValidationError
 
 from app.adapters.llm_client import get_llm_client
@@ -35,6 +37,29 @@ from app.features.topics.queries import get_topic_research_dossiers
 logger = get_logger(__name__)
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "topics" / "prompt_data" / "blog_post.txt"
+
+
+def _convert_generated_image_to_webp(image_bytes: bytes, *, correlation_id: str) -> bytes:
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            has_alpha = image.mode in {"RGBA", "LA"} or "transparency" in image.info
+            target_mode = "RGBA" if has_alpha else "RGB"
+            converted = image if image.mode == target_mode else image.convert(target_mode)
+
+            output = BytesIO()
+            converted.save(output, format="WEBP", quality=88, method=6)
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        logger.error(
+            "blog_image_webp_conversion_failed",
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+        raise ThirdPartyError(
+            "Generated blog image could not be converted to WebP.",
+            details={"post_id": correlation_id},
+        ) from exc
+
 
 def _load_prompt_template() -> str:
     """Load the blog post prompt template from disk."""
@@ -467,12 +492,13 @@ def generate_blog_image(post_id: str, *, image_prompt: Optional[str] = None) -> 
         temperature=0.8,
         max_tokens=2048,
     )
+    webp_bytes = _convert_generated_image_to_webp(image_result["image_bytes"], correlation_id=post_id)
     storage = get_storage_client()
     uploaded = storage.upload_image(
-        image_bytes=image_result["image_bytes"],
-        file_name=f"{blog_content.get('slug') or post_id}.png",
+        image_bytes=webp_bytes,
+        file_name=f"{blog_content.get('slug') or post_id}.webp",
         correlation_id=post_id,
-        content_type=image_result.get("mime_type") or "image/png",
+        content_type="image/webp",
     )
     updated_content = merge_blog_content_updates(
         blog_content,
