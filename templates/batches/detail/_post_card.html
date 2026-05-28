@@ -62,6 +62,7 @@
             {% else %}
             {% set script_rows = [3, (((primary_script | default('') | length) // 40) + 1)] | max %}
             <form
+                id="script-form-{{ post.id }}"
                 class="space-y-3"
                 hx-put="/posts/{{ post.id }}/script"
                 hx-trigger="submit"
@@ -195,6 +196,7 @@
             <button
                 hx-put="/posts/{{ post.id }}/script-review"
                 hx-vals='{"action":"approved"}'
+                hx-include="#script-form-{{ post.id }}"
                 hx-swap="none"
                 hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
                 class="px-3 py-2 text-sm font-medium rounded-md brand-button-primary focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition brand-focus text-white"

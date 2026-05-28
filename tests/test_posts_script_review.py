@@ -98,6 +98,54 @@ def test_remove_script_review_marks_post_removed_and_returns_success(monkeypatch
     assert storage["posts"][0]["video_status"] == "pending"
 
 
+def test_approve_manual_character_script_saves_text_and_marks_approved(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "post_type": "value",
+                "seed_data": {
+                    "script": "",
+                    "manual_draft": True,
+                    "manual_post_type": "",
+                    "target_length_tier": 8,
+                    "script_review_status": "pending",
+                },
+                "video_prompt_json": {"stale": True},
+                "video_status": "pending",
+            }
+        ],
+        "batches": [
+            {
+                "id": "batch-1",
+                "creation_mode": "manual_character_consistency",
+                "target_length_tier": 8,
+            }
+        ],
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.put(
+        "/posts/post-1/script-review",
+        data={
+            "action": "approved",
+            "script_text": "Das ist ein kurzer gespeicherter Testtext fuer die Freigabe mit klarer Laenge im Zielbereich.",
+            "post_type": "",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["script_review_status"] == "approved"
+    seed_data = storage["posts"][0]["seed_data"]
+    assert seed_data["script"] == "Das ist ein kurzer gespeicherter Testtext fuer die Freigabe mit klarer Laenge im Zielbereich."
+    assert seed_data["script_review_status"] == "approved"
+    assert seed_data["manual_post_type"] == "value"
+    assert storage["posts"][0]["video_prompt_json"] is None
+
+
 def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):
     storage = {
         "posts": [

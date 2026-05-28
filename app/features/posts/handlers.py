@@ -173,6 +173,63 @@ def _load_batch_script_settings(batch_id: str, supabase_client) -> dict:
     }
 
 
+def _apply_script_text_update(
+    *,
+    post: dict,
+    seed_data: dict,
+    script_text: str,
+    submitted_post_type: Optional[str],
+    supabase_client,
+) -> dict:
+    batch_settings = _load_batch_script_settings(post["batch_id"], supabase_client)
+    batch_creation_mode = batch_settings["creation_mode"]
+    seed_data["script"] = script_text
+    seed_data["script_review_status"] = "pending"
+    seed_data.pop("video_excluded", None)
+
+    is_manual_batch = is_manual_creation_mode(batch_creation_mode) or seed_data.get("manual_draft") is True
+    stored_post_type = str(post.get("post_type") or "").strip()
+    resolved_post_type = (submitted_post_type or stored_post_type) if is_manual_batch else stored_post_type
+    if is_manual_batch and not resolved_post_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="post_type is required for manual batches",
+        )
+    if resolved_post_type:
+        seed_data["post_type"] = resolved_post_type
+        seed_data["manual_post_type"] = resolved_post_type
+
+    target_length_tier = batch_settings.get("target_length_tier") or seed_data.get("target_length_tier")
+    if target_length_tier and resolved_post_type:
+        contract = validate_script_duration_contract(
+            script=script_text,
+            post_type=resolved_post_type,
+            target_length_tier=target_length_tier,
+            row_id=post.get("id"),
+            table="posts",
+        )
+        seed_data["target_length_tier"] = int(target_length_tier)
+        seed_data["script_duration_contract"] = contract
+
+    supabase_client.table("posts").update(
+        {"seed_data": seed_data, "video_prompt_json": None}
+    ).eq("id", post["id"]).execute()
+    if resolved_post_type:
+        try:
+            supabase_client.table("posts").update({"post_type": resolved_post_type}).eq("id", post["id"]).execute()
+        except APIError as exc:
+            error_text = str(exc)
+            if exc.code == "PGRST204" or "posts_post_type_check" in error_text or "check" in error_text.lower():
+                logger.warning(
+                    "manual_post_type_column_update_fallback",
+                    post_id=post.get("id"),
+                    error=error_text,
+                )
+            else:
+                raise
+    return seed_data
+
+
 def _load_batch_for_prompt(batch_id: str, supabase_client) -> dict:
     response = (
         supabase_client.table("batches")
@@ -224,54 +281,13 @@ async def update_post_script(post_id: str, request: Request):
         supabase = get_supabase().client
         
         post, current_seed = _load_post_seed_data(post_id, supabase)
-        batch_settings = _load_batch_script_settings(post["batch_id"], supabase)
-        batch_creation_mode = batch_settings["creation_mode"]
-        current_seed["script"] = script_text
-        current_seed["script_review_status"] = "pending"
-        current_seed.pop("video_excluded", None)
-
-        is_manual_batch = is_manual_creation_mode(batch_creation_mode) or current_seed.get("manual_draft") is True
-        resolved_post_type = (submitted_post_type or str(post.get("post_type") or "").strip()) if is_manual_batch else str(post.get("post_type") or "").strip()
-        if is_manual_batch and not resolved_post_type:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="post_type is required for manual batches",
-            )
-        if resolved_post_type:
-            current_seed["post_type"] = resolved_post_type
-            current_seed["manual_post_type"] = resolved_post_type
-        target_length_tier = batch_settings.get("target_length_tier") or current_seed.get("target_length_tier")
-        if target_length_tier and resolved_post_type:
-            contract = validate_script_duration_contract(
-                script=script_text,
-                post_type=resolved_post_type,
-                target_length_tier=target_length_tier,
-                row_id=post_id,
-                table="posts",
-            )
-            current_seed["target_length_tier"] = int(target_length_tier)
-            current_seed["script_duration_contract"] = contract
-
-        update_payload = {
-            "seed_data": current_seed,
-            # Editing the script must invalidate any prompt assembled from the old text.
-            "video_prompt_json": None,
-        }
-
-        supabase.table("posts").update(update_payload).eq("id", post_id).execute()
-        if resolved_post_type:
-            try:
-                supabase.table("posts").update({"post_type": resolved_post_type}).eq("id", post_id).execute()
-            except APIError as exc:
-                error_text = str(exc)
-                if exc.code == "PGRST204" or "posts_post_type_check" in error_text or "check" in error_text.lower():
-                    logger.warning(
-                        "manual_post_type_column_update_fallback",
-                        post_id=post_id,
-                        error=error_text,
-                    )
-                else:
-                    raise
+        current_seed = _apply_script_text_update(
+            post=post,
+            seed_data=current_seed,
+            script_text=script_text,
+            submitted_post_type=submitted_post_type,
+            supabase_client=supabase,
+        )
         
         logger.info(
             "post_script_updated",
@@ -280,8 +296,8 @@ async def update_post_script(post_id: str, request: Request):
         )
         
         response_payload = {"id": post_id, "script_text": script_text}
-        if resolved_post_type:
-            response_payload["post_type"] = resolved_post_type
+        if current_seed.get("manual_post_type"):
+            response_payload["post_type"] = current_seed["manual_post_type"]
         return SuccessResponse(data=response_payload)
     
     except ValidationError as exc:
@@ -306,6 +322,8 @@ async def update_post_script_review(post_id: str, request: Request):
     """Approve, remove, or reset an individual post script during S2 review."""
     try:
         content_type = request.headers.get("content-type", "")
+        submitted_script_text = None
+        submitted_post_type = None
         if "application/json" in content_type:
             data = await request.json()
             payload = UpdateScriptReviewRequest.model_validate(data)
@@ -313,6 +331,10 @@ async def update_post_script_review(post_id: str, request: Request):
         else:
             form = await request.form()
             action = str(form.get("action", "")).strip()
+            script_text_raw = form.get("script_text", None)
+            submitted_script_text = None if script_text_raw is None else str(script_text_raw).strip()
+            submitted_post_type_raw = form.get("post_type", None)
+            submitted_post_type = None if submitted_post_type_raw is None else str(submitted_post_type_raw).strip()
 
         allowed_actions = {"approved", "removed", "reset"}
         if action not in allowed_actions:
@@ -325,6 +347,14 @@ async def update_post_script_review(post_id: str, request: Request):
         post, seed_data = _load_post_seed_data(post_id, supabase)
 
         if action == "approved":
+            if submitted_script_text:
+                seed_data = _apply_script_text_update(
+                    post=post,
+                    seed_data=seed_data,
+                    script_text=submitted_script_text,
+                    submitted_post_type=submitted_post_type,
+                    supabase_client=supabase,
+                )
             if not (seed_data.get("script") or "").strip():
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -341,7 +371,9 @@ async def update_post_script_review(post_id: str, request: Request):
 
         update_payload = {
             "seed_data": seed_data,
-            "video_prompt_json": None if action == "removed" else post.get("video_prompt_json"),
+            "video_prompt_json": (
+                None if action == "removed" or submitted_script_text else post.get("video_prompt_json")
+            ),
         }
         if action == "removed":
             # Keep the existing non-null video_status; removal is expressed via seed_data flags.
