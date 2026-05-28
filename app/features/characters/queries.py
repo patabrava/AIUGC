@@ -21,6 +21,7 @@ from app.features.characters.schemas import (
     CharacterRecord,
     CharacterSnapshot,
     IdentityGateResult,
+    REQUIRED_SCENE_REFERENCE_ANGLE_KEYS,
     SceneReferenceImageRecord,
     SceneReferenceSetSummary,
 )
@@ -693,11 +694,53 @@ def select_latest_reference_set_id(rows: list[dict[str, Any]]) -> Optional[str]:
 
 
 def filter_reference_rows_for_set(rows: list[dict[str, Any]], reference_set_id: str) -> list[dict[str, Any]]:
-    return [
+    matching = [
         row
         for row in rows
         if str(_reference_metadata(row).get("reference_set_id") or "") == reference_set_id
     ]
+    latest_by_angle: dict[str, dict[str, Any]] = {}
+    for row in matching:
+        angle_key = str(_reference_metadata(row).get("angle_key") or "")
+        if not angle_key:
+            continue
+        existing = latest_by_angle.get(angle_key)
+        if existing is None or str(row.get("created_at") or "") >= str(existing.get("created_at") or ""):
+            latest_by_angle[angle_key] = row
+    if not latest_by_angle:
+        return matching
+    ordered = [latest_by_angle[key] for key in REQUIRED_SCENE_REFERENCE_ANGLE_KEYS if key in latest_by_angle]
+    ordered.extend(
+        row
+        for key, row in sorted(latest_by_angle.items(), key=lambda item: str(item[1].get("created_at") or ""))
+        if key not in REQUIRED_SCENE_REFERENCE_ANGLE_KEYS
+    )
+    return ordered
+
+
+def list_scene_references_for_set(*, post_id: str, reference_set_id: str) -> list[dict[str, Any]]:
+    if not reference_set_id:
+        return []
+    return filter_reference_rows_for_set(list_scene_references_for_post(post_id), reference_set_id)
+
+
+def record_scene_reference_set_gate(
+    *,
+    post_id: str,
+    reference_set_id: str,
+    gate_result: IdentityGateResult,
+    status: str,
+    correlation_id: str,
+) -> list[dict[str, Any]]:
+    rows = list_scene_references_for_set(post_id=post_id, reference_set_id=reference_set_id)
+    for row in rows:
+        record_scene_reference_gate(
+            reference_id=str(row["id"]),
+            gate_result=gate_result,
+            status=status,
+            correlation_id=correlation_id,
+        )
+    return rows
 
 
 def list_scene_references_for_post(post_id: str) -> list[dict[str, Any]]:

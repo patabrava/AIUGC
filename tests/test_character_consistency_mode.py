@@ -18,6 +18,18 @@ os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://cdn.example.com"
 from app.features.batches.schemas import CreateBatchRequest
 
 
+def _set_gate(reference_set_id: str = "set-1") -> dict:
+    return {
+        "status": "passed",
+        "reason": "ok",
+        "gate_type": "manual",
+        "details": {
+            "scene_consistency_set_approved": True,
+            "reference_set_id": reference_set_id,
+        },
+    }
+
+
 def test_creation_mode_accepts_character_consistency():
     payload = CreateBatchRequest.model_validate(
         {
@@ -598,7 +610,7 @@ def test_actor_identity_batch_blocks_video_without_complete_reference_set():
                 "status": "approved",
                 "image_url": "https://cdn.example.com/front.png",
                 "provider_metadata": {"angle_key": "front_mid"},
-                "identity_gate_result": {"status": "passed", "reason": "ok", "gate_type": "manual"},
+                "identity_gate_result": _set_gate(),
             }
         ],
     )
@@ -716,7 +728,7 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
                 "scene_key": "bathroom_adaptation",
                 "wardrobe_key": "everyday_sweater",
                 "provider_metadata": {"reference_set_id": "set-1", "angle_key": "front_mid"},
-                "identity_gate_result": {"status": "passed", "reason": "ok", "gate_type": "manual"},
+                "identity_gate_result": _set_gate(),
             },
             {
                 "id": "scene-left",
@@ -726,7 +738,7 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
                 "scene_key": "bathroom_adaptation",
                 "wardrobe_key": "everyday_sweater",
                 "provider_metadata": {"reference_set_id": "set-1", "angle_key": "left_three_quarter"},
-                "identity_gate_result": {"status": "passed", "reason": "ok", "gate_type": "manual"},
+                "identity_gate_result": _set_gate(),
             },
             {
                 "id": "scene-profile",
@@ -736,7 +748,7 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
                 "scene_key": "bathroom_adaptation",
                 "wardrobe_key": "everyday_sweater",
                 "provider_metadata": {"reference_set_id": "set-1", "angle_key": "right_profile"},
-                "identity_gate_result": {"status": "passed", "reason": "ok", "gate_type": "manual"},
+                "identity_gate_result": _set_gate(),
             },
         ],
     )

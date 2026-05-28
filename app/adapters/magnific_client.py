@@ -11,7 +11,8 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-INCOMPATIBLE_MYSTIC_MODELS = {"fluid", "flexible", "super_real", "editorial_portraits"}
+LORA_UNSAFE_MYSTIC_OPTION_KEYS = {"structure_reference", "style_reference", "model"}
+PROTECTED_MYSTIC_PAYLOAD_KEYS = {"prompt", "resolution", "aspect_ratio", "styling", "webhook_url", "fixed_generation"}
 
 
 class MagnificCompatibilityError(ValueError):
@@ -113,6 +114,29 @@ def normalize_lora_training_status(row: dict[str, Any]) -> MagnificTrainingStatu
     )
 
 
+def _normalize_mystic_style_loras(style_loras: Optional[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in style_loras or []:
+        if not isinstance(row, dict):
+            raise MagnificCompatibilityError("Mystic style LoRA rows must be objects")
+        name = str(row.get("name") or "").strip()
+        if not name:
+            raise MagnificCompatibilityError("Mystic style LoRA row requires a name")
+        strength = row.get("strength", 100)
+        if isinstance(strength, bool):
+            raise MagnificCompatibilityError("Mystic style LoRA strength must be an integer")
+        if isinstance(strength, int):
+            strength_int = strength
+        elif isinstance(strength, str) and strength.strip().lstrip("-").isdigit():
+            strength_int = int(strength.strip())
+        else:
+            raise MagnificCompatibilityError("Mystic style LoRA strength must be an integer")
+        if strength_int < 0 or strength_int > 200:
+            raise MagnificCompatibilityError("Mystic style LoRA strength must be between 0 and 200")
+        normalized.append({"name": name, "strength": strength_int})
+    return normalized
+
+
 def build_mystic_character_payload(
     *,
     prompt: str,
@@ -120,23 +144,32 @@ def build_mystic_character_payload(
     strength: int,
     aspect_ratio: str = "social_story_9_16",
     resolution: str = "2k",
+    fixed_generation: Optional[bool] = None,
     webhook_url: Optional[str] = None,
     extra_options: Optional[dict[str, Any]] = None,
+    style_loras: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     options = dict(extra_options or {})
-    if options.get("structure_reference") or options.get("style_reference"):
-        raise MagnificCompatibilityError("Mystic LoRA payload cannot include structure_reference or style_reference")
-    model = str(options.get("model") or "").strip()
-    if model in INCOMPATIBLE_MYSTIC_MODELS:
-        raise MagnificCompatibilityError(f"Mystic model {model} silently ignores LoRAs")
+    unsafe_keys = sorted(set(options) & LORA_UNSAFE_MYSTIC_OPTION_KEYS)
+    if unsafe_keys:
+        raise MagnificCompatibilityError(f"Mystic LoRA payload cannot include {', '.join(unsafe_keys)}")
+    protected_keys = sorted(set(options) & PROTECTED_MYSTIC_PAYLOAD_KEYS)
+    if protected_keys:
+        raise MagnificCompatibilityError(f"Mystic LoRA payload cannot override {', '.join(protected_keys)}")
+    styling: dict[str, Any] = {"characters": [{"id": str(lora_id), "strength": int(strength)}]}
+    normalized_styles = _normalize_mystic_style_loras(style_loras)
+    if normalized_styles:
+        styling["styles"] = normalized_styles
     payload: dict[str, Any] = {
         "prompt": prompt,
         "resolution": resolution,
         "aspect_ratio": aspect_ratio,
-        "styling": {"characters": [{"id": str(lora_id), "strength": int(strength)}]},
+        "styling": styling,
     }
     if webhook_url:
         payload["webhook_url"] = webhook_url
+    if fixed_generation is not None:
+        payload["fixed_generation"] = fixed_generation
     payload.update(options)
     return payload
 
@@ -248,6 +281,55 @@ class MagnificClient:
         logger.info("magnific_character_training_submitted", correlation_id=correlation_id, task_id=data.get("task_id"))
         return data
 
+    def build_style_training_payload(
+        self,
+        *,
+        name: str,
+        quality: str,
+        images: list[str],
+        description: Optional[str] = None,
+        webhook_url: Optional[str] = None,
+    ) -> dict[str, Any]:
+        cleaned_images = [str(url).strip() for url in images if str(url or "").strip()]
+        if len(cleaned_images) < 6 or len(cleaned_images) > 20:
+            raise MagnificCompatibilityError("Magnific style LoRA training requires 6 to 20 image URLs")
+        payload: dict[str, Any] = {
+            "name": name.strip(),
+            "quality": quality,
+            "images": cleaned_images,
+        }
+        if description:
+            payload["description"] = description
+        if webhook_url:
+            payload["webhook_url"] = webhook_url
+        return payload
+
+    def submit_style_training(
+        self,
+        *,
+        name: str,
+        quality: str,
+        images: list[str],
+        description: Optional[str],
+        webhook_url: Optional[str],
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        payload = self.build_style_training_payload(
+            name=name,
+            quality=quality,
+            images=images,
+            description=description,
+            webhook_url=webhook_url,
+        )
+        data = _unwrap_data_payload(
+            self._request("POST", "/v1/ai/loras/styles", correlation_id=correlation_id, json_payload=payload)
+        )
+        task_id = data.get("task_id") or data.get("id") or data.get("lora_id")
+        if task_id is not None:
+            data["task_id"] = str(task_id)
+        logger.info("magnific_style_training_submitted", correlation_id=correlation_id, task_id=data.get("task_id"))
+        return data
+
     def train_character_lora(
         self,
         *,
@@ -320,8 +402,10 @@ class MagnificClient:
         correlation_id: str,
         aspect_ratio: str = "social_story_9_16",
         resolution: str = "2k",
+        fixed_generation: Optional[bool] = None,
         webhook_url: Optional[str] = None,
         extra_options: Optional[dict[str, Any]] = None,
+        style_loras: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         payload = build_mystic_character_payload(
             prompt=prompt,
@@ -329,8 +413,10 @@ class MagnificClient:
             strength=strength,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
+            fixed_generation=fixed_generation,
             webhook_url=webhook_url,
             extra_options=extra_options,
+            style_loras=style_loras,
         )
         data = _unwrap_data_payload(
             self._request("POST", "/v1/ai/mystic", correlation_id=correlation_id, json_payload=payload)
@@ -338,7 +424,31 @@ class MagnificClient:
         task_id = data.get("task_id") or data.get("id")
         if task_id is not None:
             data["task_id"] = str(task_id)
+        data["_request_payload"] = payload
         return data
+
+    def create_image_to_prompt_task(
+        self,
+        *,
+        image: str,
+        correlation_id: str,
+        webhook_url: Optional[str] = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"image": image}
+        if webhook_url:
+            payload["webhook_url"] = webhook_url
+        data = _unwrap_data_payload(
+            self._request("POST", "/v1/ai/image-to-prompt", correlation_id=correlation_id, json_payload=payload)
+        )
+        task_id = data.get("task_id") or data.get("id")
+        if task_id is not None:
+            data["task_id"] = str(task_id)
+        return data
+
+    def get_image_to_prompt_task(self, *, task_id: str, correlation_id: str) -> dict[str, Any]:
+        return _unwrap_data_payload(
+            self._request("GET", f"/v1/ai/image-to-prompt/{task_id}", correlation_id=correlation_id)
+        )
 
     def get_mystic_task(self, *, task_id: str, correlation_id: str) -> dict[str, Any]:
         return _unwrap_data_payload(
