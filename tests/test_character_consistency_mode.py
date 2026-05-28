@@ -334,6 +334,98 @@ def test_character_consistency_prompt_uses_legacy_short_character():
     assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt["veo_prompt"]
 
 
+def test_character_consistency_prompt_omits_scene_text_when_reference_images_define_scene():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {
+            "script": "Ein ruhiger Satz fuer den Test.",
+            "character": (
+                "Same person as the uploaded @ayra character reference images: "
+                "38-year-old German woman with shoulder-length light brown hair."
+            ),
+        },
+        use_legacy_short_character=True,
+        prompt_style="character_consistency",
+        scene_plan={
+            "value": "A generated kitchen scene that must not be submitted.",
+            "lifestyle": "A generated cafe scene that must not be submitted.",
+            "product": "A generated office scene that must not be submitted.",
+        },
+    )
+
+    assert prompt["prompt_style"] == "character_consistency"
+    assert "Scene:\n" not in prompt["veo_prompt"]
+    assert "A generated kitchen scene" not in prompt["veo_prompt"]
+    assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
+    assert prompt_builder.LEGACY_SCENE_BODY not in prompt["veo_prompt"]
+    assert "approved reference images" in prompt["veo_prompt"]
+    assert "Ein ruhiger Satz fuer den Test." in prompt["veo_prompt"]
+
+
+def test_manual_character_consistency_prompt_omits_scene_text_when_reference_images_define_scene():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {"script": "Ein manueller Satz fuer den Test."},
+        use_legacy_short_character=True,
+        prompt_style="manual_character_consistency",
+        scene_override="A manually entered bedroom scene that must not be submitted.",
+    )
+
+    assert prompt["prompt_style"] == "manual_character_consistency"
+    assert "Scene:\n" not in prompt["veo_prompt"]
+    assert "A manually entered bedroom scene" not in prompt["veo_prompt"]
+    assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
+    assert "approved reference images" in prompt["veo_prompt"]
+    assert "Ein manueller Satz fuer den Test." in prompt["veo_prompt"]
+
+
+def test_character_consistency_mid_prompt_omits_scene_block_when_reference_images_define_scene():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {"script": "Ein Mid Satz fuer den Test."},
+        use_legacy_short_character=True,
+        prompt_style="character_consistency_mid",
+    )
+
+    assert prompt["prompt_style"] == "character_consistency_mid"
+    assert "Scene:\n" not in prompt["veo_prompt"]
+    assert "Match the approved reference images" not in prompt["veo_prompt"]
+    assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
+    assert "approved reference images" in prompt["veo_prompt"]
+    assert "Ein Mid Satz fuer den Test." in prompt["veo_prompt"]
+
+
+def test_character_consistency_prompt_sync_removes_legacy_scene_text():
+    from app.features.posts import prompt_builder
+
+    existing_prompt = prompt_builder.build_video_prompt_from_seed(
+        {"script": "Ein alter Satz fuer den Test."},
+        prompt_style="standard",
+    )
+    existing_prompt["prompt_style"] = "character_consistency"
+    existing_prompt["scene"] = "Scene: A legacy bedroom scene that must not be submitted."
+    existing_prompt["veo_prompt"] = (
+        "Character:\nOld character\n\n"
+        "Scene:\nA legacy bedroom scene that must not be submitted.\n\n"
+        "Dialogue:\nEin alter Satz fuer den Test."
+    )
+
+    synced = prompt_builder.sync_video_prompt_with_seed_data(
+        existing_prompt,
+        {"script": "Ein neuer Satz fuer den Test."},
+        use_legacy_short_character=True,
+    )
+
+    assert synced["prompt_style"] == "character_consistency"
+    assert "Scene:\n" not in synced["veo_prompt"]
+    assert "legacy bedroom scene" not in synced["veo_prompt"]
+    assert "approved reference images" in synced["veo_prompt"]
+    assert "Ein neuer Satz fuer den Test." in synced["veo_prompt"]
+
+
 def test_character_consistency_light_prompt_uses_reference_image_motion_prompt():
     from app.features.posts import prompt_builder
 
@@ -374,7 +466,8 @@ def test_character_consistency_mid_prompt_uses_stripped_scene_block():
     assert prompt["prompt_style"] == "character_consistency_mid"
     assert "Character:" in prompt["veo_prompt"]
     assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt["veo_prompt"]
-    assert "Scene:\nMatch the approved reference images. Keep the same environment without introducing new scene elements or layout changes." in prompt["veo_prompt"]
+    assert "Scene:\n" not in prompt["veo_prompt"]
+    assert "approved reference images" in prompt["veo_prompt"]
     assert "A modern, tidy bedroom with blush-pink walls" not in prompt["veo_prompt"]
     assert "Dialogue:\nEin erster Satz. Ein zweiter Satz." in prompt["veo_prompt"]
 
@@ -444,11 +537,43 @@ def test_mid_extended_base_prompt_uses_stripped_scene_block():
     )
 
     assert "Character:" in prompt_text
-    assert "Scene:\nMatch the approved reference images. Keep the same environment without introducing new scene elements or layout changes." in prompt_text
+    assert "Scene:\n" not in prompt_text
+    assert "approved reference images" in prompt_text
     assert "A modern, tidy bedroom with blush-pink walls" not in prompt_text
     assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
     assert "So bleibt dein Tag klarer und planbarer." not in prompt_text
     assert metadata["veo_segments_total"] == 2
+
+
+def test_character_consistency_extended_base_prompt_omits_scene_text():
+    from app.features.posts import prompt_builder
+    from app.features.videos import handlers as video_handlers
+
+    script = (
+        "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+        "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter. "
+        "So bleibt dein Tag klarer und planbarer."
+    )
+    video_prompt = prompt_builder.build_video_prompt_from_seed(
+        {"script": script},
+        prompt_style="character_consistency",
+        use_legacy_short_character=True,
+    )
+    video_prompt["scene"] = "Scene: A stored scene that must not be submitted."
+
+    prompt_text, metadata = video_handlers._build_veo_extended_base_prompt(
+        {"script": script, "target_length_tier": 16},
+        video_prompt,
+        planned_extension_hops=1,
+        target_length_tier=16,
+        creation_mode="character_consistency",
+    )
+
+    assert metadata["veo_segments_total"] >= 2
+    assert "Scene:\n" not in prompt_text
+    assert "stored scene" not in prompt_text
+    assert "approved reference images" in prompt_text
+    assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
 
 
 def test_select_veo_model_for_character_consistency_uses_full_model(monkeypatch):
@@ -773,6 +898,78 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
     assert result["provider_metadata"]["source"] == "actor_identity_scene_reference_set"
     assert result["provider_metadata"]["scene_reference_image_ids"] == ["scene-front", "scene-left", "scene-profile"]
     assert result["provider_metadata"]["reference_image_count"] == 3
+
+
+def test_character_consistency_provider_payload_keeps_reference_images_with_no_scene_prompt(monkeypatch):
+    from app.features.characters.schemas import SceneReferenceSetSummary
+    from app.features.videos import handlers as video_handlers
+
+    captured = {}
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "operation_id": "op-reference-scene",
+                "status": "queued",
+                "provider_model": "veo-test",
+            }
+
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+    monkeypatch.setattr(
+        video_handlers,
+        "_load_scene_reference_set_assets",
+        lambda *, scene_reference_set, correlation_id: {
+            "reference_images": [
+                {"mime_type": "image/png", "data": "aaa", "description": "front"},
+                {"mime_type": "image/png", "data": "bbb", "description": "left"},
+                {"mime_type": "image/png", "data": "ccc", "description": "right"},
+            ],
+            "metadata": {
+                "reference_images_enabled": True,
+                "reference_image_count": 3,
+                "source": "actor_identity_scene_reference_set",
+            },
+        },
+    )
+
+    scene_reference_set = SceneReferenceSetSummary(
+        post_id="post-1",
+        reference_set_id="set-1",
+        actor_identity_id="actor-1",
+        approved_rows=[
+            {"id": "ref-1", "provider_metadata": {"angle_key": "front_mid"}},
+            {"id": "ref-2", "provider_metadata": {"angle_key": "left_three_quarter"}},
+            {"id": "ref-3", "provider_metadata": {"angle_key": "right_profile"}},
+        ],
+        missing_angle_keys=[],
+    )
+
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        model=None,
+        prompt_text=(
+            "Action:\nUse the approved reference images as the only scene source.\n\n"
+            "Dialogue:\nEin Satz."
+        ),
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="1080p",
+        seconds=8,
+        size=None,
+        correlation_id="test-reference-scene",
+        provider_duration_seconds=8,
+        creation_mode="character_consistency",
+        character_snapshot=None,
+        scene_reference_set=scene_reference_set,
+    )
+
+    assert result["operation_id"] == "op-reference-scene"
+    assert captured["reference_images"] and len(captured["reference_images"]) == 3
+    assert "Scene:\n" not in captured["prompt"]
+    assert "approved reference images" in captured["prompt"]
 
 
 def test_actor_scene_reference_download_follows_provider_redirects(monkeypatch):

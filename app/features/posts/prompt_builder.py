@@ -30,6 +30,7 @@ __all__ = [
     "split_dialogue_sentences",
     "build_veo_prompt_segment",
     "build_lean_veo_base_prompt",
+    "build_reference_image_scene_base_prompt",
     "build_character_consistency_mid_base_prompt",
     "build_character_consistency_mid_continuation_prompt",
     "build_lean_veo_light_continuation_prompt",
@@ -156,6 +157,27 @@ LEAN_LIGHT_BASE_PROMPT_TEMPLATE = (
     "gestures and subtle upper-body nods while speaking.\n\n"
     "Language:\n"
     "Speak only in German, with natural conversational pacing.\n\n"
+    "Dialogue:\n"
+    "{dialogue}\n\n"
+    "Ending:\n"
+    "{ending}\n\n"
+    "Audio:\n"
+    "{audio_block}"
+)
+
+REFERENCE_SCENE_BASE_PROMPT_TEMPLATE = (
+    "Character:\n"
+    "{character}\n\n"
+    "Style:\n"
+    "{style}\n\n"
+    "Action:\n"
+    "Use the approved reference images as the only scene, wardrobe, lighting, camera-distance, "
+    "and room-layout source. The woman remains seated in the same wheelchair setup shown in the "
+    "reference images and speaks directly to camera in one continuous natural smartphone take. "
+    "Do not invent, replace, or describe a new environment. Use small natural hand gestures and "
+    "subtle upper-body nods while speaking.\n\n"
+    "Cinematography:\n"
+    "{cinematography}\n\n"
     "Dialogue:\n"
     "{dialogue}\n\n"
     "Ending:\n"
@@ -292,6 +314,14 @@ def _is_reference_image_character_text(value: str) -> bool:
         normalized.startswith(prefix) and "reference image" in normalized
         for prefix in REFERENCE_IMAGE_CHARACTER_PREFIXES
     )
+
+
+def _uses_reference_image_scene_prompt(prompt_style: Any) -> bool:
+    return str(prompt_style or "").strip() in {
+        "character_consistency",
+        "manual_character_consistency",
+        "character_consistency_mid",
+    }
 
 logger = get_logger(__name__)
 
@@ -447,24 +477,26 @@ def sync_video_prompt_with_seed_data(
         updated_prompt["veo_prompt"] = build_lean_veo_base_prompt(dialogue, include_final_ending=True)
         updated_prompt["prompt_style"] = "character_consistency_light"
         return updated_prompt
-    if is_character_consistency_mid_mode(video_prompt.get("prompt_style")):
+    if _uses_reference_image_scene_prompt(video_prompt.get("prompt_style")):
+        seed_dialogue = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
         audio_payload = video_prompt.get("audio")
-        dialogue = str(audio_payload.get("dialogue") or "").strip() if isinstance(audio_payload, dict) else ""
+        stored_dialogue = str(audio_payload.get("dialogue") or "").strip() if isinstance(audio_payload, dict) else ""
+        dialogue = seed_dialogue or stored_dialogue
         if not dialogue:
             return video_prompt
         updated_prompt = dict(video_prompt)
-        updated_prompt["scene"] = f"Scene: {CHARACTER_CONSISTENCY_MID_SCENE}"
-        updated_prompt["veo_prompt"] = build_character_consistency_mid_base_prompt(
+        updated_prompt["character"] = resolved_character
+        updated_prompt["veo_prompt"] = build_reference_image_scene_base_prompt(
             dialogue,
-            character=str(updated_prompt.get("character") or resolved_character or "").strip(),
-            action=str(updated_prompt.get("action") or "").strip() or None,
+            character=resolved_character,
             style=str(updated_prompt.get("style") or "").strip() or None,
             cinematography=str(updated_prompt.get("cinematography") or "").strip() or None,
             ending=str(updated_prompt.get("ending_directive") or "").strip() or None,
-            audio_block=str(updated_prompt.get("audio_block") or "").strip() or None,
+            audio_block=LEAN_FINAL_AUDIO_BLOCK,
             legacy_32_visuals=legacy_32_visuals,
+            include_final_ending=True,
         )
-        updated_prompt["prompt_style"] = "character_consistency_mid"
+        updated_prompt["prompt_style"] = str(video_prompt.get("prompt_style") or "character_consistency").strip()
         return updated_prompt
 
     current_character = str(video_prompt.get("character") or "").strip()
@@ -607,16 +639,16 @@ def build_video_prompt_from_seed(
             normalized_dialogue,
             include_final_ending=True,
         )
-    elif is_character_consistency_mid_mode(prompt_style):
-        veo_prompt = build_character_consistency_mid_base_prompt(
+    elif _uses_reference_image_scene_prompt(prompt_style):
+        veo_prompt = build_reference_image_scene_base_prompt(
             normalized_dialogue,
             character=character_value,
-            action=action_value,
             style=style_value,
             cinematography=cinematography_value,
             ending=STANDARD_FINAL_ENDING_DIRECTIVE,
-            audio_block=STANDARD_FINAL_AUDIO_BLOCK,
+            audio_block=LEAN_FINAL_AUDIO_BLOCK,
             legacy_32_visuals=legacy_32_visuals,
+            include_final_ending=True,
         )
     else:
         veo_prompt = build_optimized_prompt(
@@ -830,6 +862,41 @@ def build_lean_veo_base_prompt(
         dialogue=dialogue.strip(),
         ending=ending,
         audio_block=audio_block,
+    )
+
+
+def build_reference_image_scene_base_prompt(
+    dialogue: str,
+    *,
+    character: Optional[str] = None,
+    style: Optional[str] = None,
+    cinematography: Optional[str] = None,
+    ending: Optional[str] = None,
+    audio_block: Optional[str] = None,
+    legacy_32_visuals: bool = False,
+    include_final_ending: bool = True,
+) -> str:
+    cleaned_dialogue = dialogue.strip()
+    resolved_character = (character or LEGACY_SHORT_CHARACTER).strip()
+    resolved_style = (style or (LEGACY_32_STYLE if legacy_32_visuals else DEFAULT_STYLE)).strip()
+    resolved_cinematography = (
+        cinematography or (LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY)
+    ).strip()
+    resolved_ending = (
+        ending
+        or (STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE)
+    ).strip()
+    resolved_audio = (
+        audio_block
+        or (LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_LIGHT_BASE_AUDIO_BLOCK)
+    ).strip()
+    return REFERENCE_SCENE_BASE_PROMPT_TEMPLATE.format(
+        character=resolved_character,
+        style=resolved_style,
+        cinematography=resolved_cinematography,
+        dialogue=cleaned_dialogue,
+        ending=resolved_ending,
+        audio_block=resolved_audio,
     )
 
 
