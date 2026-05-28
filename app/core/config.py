@@ -146,7 +146,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MAGNIFIC_WEBHOOK_SECRET"),
     )
     scene_reference_style_loras: str = Field(
-        "",
+        (
+            "bathroom_accessibility_a=bathroom-accessibility-a:65,"
+            "car_transfer_residential_a=car-transfer-residential-a:65,"
+            "home_living_room_advice_a=home-living-room-advice-a:65"
+        ),
         validation_alias=AliasChoices("SCENE_REFERENCE_STYLE_LORAS"),
         description=(
             "Comma-separated scene style LoRAs for Magnific Mystic, e.g. "

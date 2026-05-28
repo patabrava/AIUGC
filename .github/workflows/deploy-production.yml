@@ -126,6 +126,7 @@ jobs:
                 "VERTEX_GROUNDED_RESEARCH_MODEL": "gemini-2.5-pro",
                 "VERTEX_GROUNDED_RESEARCH_LOCATION": "global",
                 "GOOGLE_APPLICATION_CREDENTIALS": "",
+                "SCENE_REFERENCE_STYLE_LORAS": "bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65",
             }
             if adc_b64:
                 # Always compact the JSON before stuffing into env file so docker-compose's
@@ -199,6 +200,7 @@ jobs:
                 "VERTEX_GROUNDED_RESEARCH_MODEL": "gemini-2.5-pro",
                 "VERTEX_GROUNDED_RESEARCH_LOCATION": "global",
                 "GOOGLE_APPLICATION_CREDENTIALS": "",
+                "SCENE_REFERENCE_STYLE_LORAS": "bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65",
             }
             if adc_b64:
                 # Always compact the JSON before stuffing into env file so docker-compose's
