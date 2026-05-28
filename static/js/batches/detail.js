@@ -177,6 +177,26 @@
         return `Request failed (${response.status})`;
     };
 
+    document.body.addEventListener('htmx:responseError', async (event) => {
+        const root = document.querySelector('#batch-detail-root');
+        const target = event.detail?.target;
+        if (!root || !target || !root.contains(target)) {
+            return;
+        }
+        const xhr = event.detail.xhr;
+        if (!xhr || !xhr.responseURL?.includes('/posts/')) {
+            return;
+        }
+        let message = `Request failed (${xhr.status})`;
+        try {
+            const payload = JSON.parse(xhr.responseText || '{}');
+            message = payload?.message || payload?.detail?.message || payload?.detail || message;
+        } catch (_error) {
+            message = xhr.responseText || message;
+        }
+        window.alert(message);
+    });
+
     window.videoSettingsComponent = function (options = {}) {
         const DEFAULT_MODEL = 'veo-3.1-generate-001';
         const supportedModels = {

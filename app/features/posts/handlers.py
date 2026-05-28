@@ -180,6 +180,7 @@ def _apply_script_text_update(
     script_text: str,
     submitted_post_type: Optional[str],
     supabase_client,
+    require_valid_duration: bool = False,
 ) -> dict:
     batch_settings = _load_batch_script_settings(post["batch_id"], supabase_client)
     batch_creation_mode = batch_settings["creation_mode"]
@@ -201,13 +202,23 @@ def _apply_script_text_update(
 
     target_length_tier = batch_settings.get("target_length_tier") or seed_data.get("target_length_tier")
     if target_length_tier and resolved_post_type:
-        contract = validate_script_duration_contract(
-            script=script_text,
-            post_type=resolved_post_type,
-            target_length_tier=target_length_tier,
-            row_id=post.get("id"),
-            table="posts",
-        )
+        try:
+            contract = validate_script_duration_contract(
+                script=script_text,
+                post_type=resolved_post_type,
+                target_length_tier=target_length_tier,
+                row_id=post.get("id"),
+                table="posts",
+            )
+        except ValidationError as exc:
+            if require_valid_duration:
+                raise
+            contract = exc.details or {
+                "status": "invalid",
+                "message": exc.message or str(exc),
+                "target_length_tier": int(target_length_tier),
+                "post_type": resolved_post_type,
+            }
         seed_data["target_length_tier"] = int(target_length_tier)
         seed_data["script_duration_contract"] = contract
 
@@ -287,6 +298,7 @@ async def update_post_script(post_id: str, request: Request):
             script_text=script_text,
             submitted_post_type=submitted_post_type,
             supabase_client=supabase,
+            require_valid_duration=False,
         )
         
         logger.info(
@@ -354,6 +366,7 @@ async def update_post_script_review(post_id: str, request: Request):
                     script_text=submitted_script_text,
                     submitted_post_type=submitted_post_type,
                     supabase_client=supabase,
+                    require_valid_duration=True,
                 )
             if not (seed_data.get("script") or "").strip():
                 raise HTTPException(
