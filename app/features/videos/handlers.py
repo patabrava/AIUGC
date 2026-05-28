@@ -58,7 +58,7 @@ from app.features.posts.prompt_builder import (
     LEGACY_32_STYLE,
     LEGACY_SHORT_CHARACTER,
     CHARACTER_CONSISTENCY_MID_SCENE,
-    build_character_consistency_mid_base_prompt,
+    build_reference_image_scene_base_prompt,
     build_video_prompt_from_seed,
     build_negative_prompt,
     ensure_scene_plan,
@@ -1246,11 +1246,14 @@ def _build_veo_extended_base_prompt(
             base_segment,
             include_final_ending=False,
         ), segment_metadata
-    if is_character_consistency_mid_mode(creation_mode):
-        return build_character_consistency_mid_base_prompt(
+    if str(creation_mode or "").strip() in {
+        "character_consistency",
+        "manual_character_consistency",
+        "character_consistency_mid",
+    }:
+        return build_reference_image_scene_base_prompt(
             base_segment,
             character=prompt_character,
-            action=prompt_action,
             style=prompt_style,
             cinematography=prompt_cinematography,
             ending=prompt_ending,
