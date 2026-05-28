@@ -41,9 +41,9 @@ from app.core.video_profiles import (
 from app.features.batches.queries import get_batch_by_id
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.characters.actor_identity import (
+    actor_identity_training_ready,
     ensure_video_scene_reference_set_ready,
     is_character_consistency_light_mode,
-    is_character_consistency_mid_mode,
     is_character_consistency_mode,
     is_manual_creation_mode,
 )
@@ -57,7 +57,6 @@ from app.features.posts.prompt_builder import (
     LEGACY_32_CINEMATOGRAPHY,
     LEGACY_32_STYLE,
     LEGACY_SHORT_CHARACTER,
-    CHARACTER_CONSISTENCY_MID_SCENE,
     build_reference_image_scene_base_prompt,
     build_video_prompt_from_seed,
     build_negative_prompt,
@@ -227,6 +226,116 @@ def _download_image_bytes(url: str) -> bytes:
     return response.content
 
 
+def _reference_image_payload_from_url(url: str) -> Dict[str, str]:
+    mime_type = mimetypes.guess_type(urlparse(str(url)).path)[0] or "image/png"
+    if mime_type not in {"image/png", "image/jpeg"}:
+        mime_type = "image/png"
+    return {
+        "mime_type": mime_type,
+        "data_base64": base64.b64encode(_download_image_bytes(str(url))).decode("ascii"),
+    }
+
+
+def _dedupe_nonempty_urls(urls: list[Any]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for raw_url in urls:
+        url = str(raw_url or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+    return deduped
+
+
+def _actor_identity_reference_urls(actor_identity_id: Optional[str], *, required_count: int = 3) -> list[str]:
+    if not actor_identity_id:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Approved SceneReferenceImage is missing ActorIdentity metadata.",
+            details={"actor_identity_id": actor_identity_id},
+            status_code=422,
+        )
+
+    actor_identity = character_queries.get_actor_identity_by_id(str(actor_identity_id))
+    if not actor_identity:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity referenced by approved SceneReferenceImage was not found.",
+            details={"actor_identity_id": actor_identity_id},
+            status_code=422,
+        )
+    if not actor_identity_training_ready(actor_identity):
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity referenced by approved SceneReferenceImage is not ready for video generation.",
+            details={
+                "actor_identity_id": actor_identity.id,
+                "training_phase": actor_identity.training_phase,
+                "training_progress_percent": actor_identity.training_progress_percent,
+            },
+            status_code=422,
+        )
+
+    urls = _dedupe_nonempty_urls(
+        [
+            actor_identity.portrait_image_url,
+            actor_identity.cover_image_url,
+            *actor_identity.training_images,
+        ]
+    )
+    if len(urls) < required_count:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity must provide at least three stable reference images for scene-consistent video generation.",
+            details={"actor_identity_id": actor_identity.id, "reference_image_count": len(urls)},
+            status_code=422,
+        )
+    return urls[:required_count]
+
+
+def _build_actor_reference_bundle(
+    *,
+    actor_identity_id: Optional[str],
+    scene_metadata: Dict[str, Any],
+    scene_reference_ids: list[str],
+    scene_reference_angle_keys: list[str],
+    selected_scene_reference_id: Optional[str],
+    selected_scene_reference_angle_key: Optional[str],
+    source: str,
+    correlation_id: str,
+) -> Dict[str, Any]:
+    actor_urls = _actor_identity_reference_urls(actor_identity_id, required_count=3)
+    reference_images = [_reference_image_payload_from_url(url) for url in actor_urls]
+    logger.info(
+        "actor_identity_reference_set_loaded",
+        correlation_id=correlation_id,
+        actor_identity_id=actor_identity_id,
+        reference_image_count=len(reference_images),
+        scene_reference_images_used_for_video=False,
+    )
+    return {
+        "reference_images": reference_images,
+        "metadata": {
+            "reference_images_enabled": True,
+            "reference_image_count": len(reference_images),
+            "actor_identity_id": actor_identity_id,
+            "actor_identity_reference_image_count": len(actor_urls),
+            "scene_reference_image_count": 0,
+            "scene_reference_image_ids": scene_reference_ids,
+            "scene_reference_angle_keys": scene_reference_angle_keys,
+            "selected_scene_reference_image_id": selected_scene_reference_id,
+            "selected_scene_reference_angle_key": selected_scene_reference_angle_key,
+            "scene_reference_images_used_for_video": False,
+            "scene_reference_images_role": "approval_only",
+            "scene_key": scene_metadata.get("scene_key"),
+            "wardrobe_key": scene_metadata.get("wardrobe_key"),
+            "reference_image_roles": ["actor_identity", "actor_identity", "actor_identity"],
+            "source": source,
+        },
+    }
+
+
 def _load_character_snapshot_assets(
     *,
     snapshot: Optional[Dict[str, Any]],
@@ -242,15 +351,7 @@ def _load_character_snapshot_assets(
     ]
     reference_images: list[Dict[str, str]] = []
     for url in urls:
-        mime_type = mimetypes.guess_type(urlparse(url).path)[0] or "image/png"
-        if mime_type not in {"image/png", "image/jpeg"}:
-            mime_type = "image/png"
-        reference_images.append(
-            {
-                "mime_type": mime_type,
-                "data_base64": base64.b64encode(_download_image_bytes(url)).decode("ascii"),
-            }
-        )
+        reference_images.append(_reference_image_payload_from_url(url))
 
     logger.info(
         "veo_character_snapshot_loaded",
@@ -277,40 +378,16 @@ def _load_scene_reference_asset(
 ) -> Optional[Dict[str, Any]]:
     if not scene_reference:
         return None
-    image_url = scene_reference.get("image_url")
-    if not image_url:
-        raise FlowForgeException(
-            code=ErrorCode.VALIDATION_ERROR,
-            message="Approved SceneReferenceImage is missing an image URL.",
-            details={"scene_reference_image_id": scene_reference.get("id")},
-            status_code=422,
-        )
-    mime_type = mimetypes.guess_type(urlparse(str(image_url)).path)[0] or "image/png"
-    if mime_type not in {"image/png", "image/jpeg"}:
-        mime_type = "image/png"
-    reference_image = {
-        "mime_type": mime_type,
-        "data_base64": base64.b64encode(_download_image_bytes(str(image_url))).decode("ascii"),
-    }
-    logger.info(
-        "actor_scene_reference_loaded",
-        correlation_id=correlation_id,
-        scene_reference_image_id=scene_reference.get("id"),
+    return _build_actor_reference_bundle(
         actor_identity_id=scene_reference.get("actor_identity_id"),
+        scene_metadata=scene_reference,
+        scene_reference_ids=[str(scene_reference.get("id") or "")],
+        scene_reference_angle_keys=[],
+        selected_scene_reference_id=str(scene_reference.get("id") or ""),
+        selected_scene_reference_angle_key=None,
+        source="actor_identity_reference_set",
+        correlation_id=correlation_id,
     )
-    return {
-        "reference_images": [reference_image],
-        "metadata": {
-            "reference_images_enabled": True,
-            "reference_image_count": 1,
-            "actor_identity_id": scene_reference.get("actor_identity_id"),
-            "scene_reference_image_id": scene_reference.get("id"),
-            "scene_key": scene_reference.get("scene_key"),
-            "wardrobe_key": scene_reference.get("wardrobe_key"),
-            "still_identity_gate_result": scene_reference.get("identity_gate_result"),
-            "source": "actor_identity_scene_reference",
-        },
-    }
 
 
 def _load_scene_reference_set_assets(
@@ -330,7 +407,6 @@ def _load_scene_reference_set_assets(
             },
             status_code=422,
         )
-    reference_images: list[Dict[str, str]] = []
     scene_reference_ids: list[str] = []
     angle_keys: list[str] = []
     for row in scene_reference_set.approved_rows:
@@ -342,40 +418,24 @@ def _load_scene_reference_set_assets(
                 details={"scene_reference_image_id": row.get("id")},
                 status_code=422,
             )
-        mime_type = mimetypes.guess_type(urlparse(str(image_url)).path)[0] or "image/png"
-        if mime_type not in {"image/png", "image/jpeg"}:
-            mime_type = "image/png"
         metadata = row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}
-        reference_images.append(
-            {
-                "mime_type": mime_type,
-                "data_base64": base64.b64encode(_download_image_bytes(str(image_url))).decode("ascii"),
-            }
-        )
         scene_reference_ids.append(str(row.get("id") or ""))
         angle_keys.append(str(metadata.get("angle_key") or ""))
 
-    logger.info(
-        "actor_scene_reference_set_loaded",
-        correlation_id=correlation_id,
-        reference_set_id=scene_reference_set.reference_set_id,
-        reference_image_count=len(reference_images),
-    )
     first_row = scene_reference_set.approved_rows[0] if scene_reference_set.approved_rows else {}
-    return {
-        "reference_images": reference_images,
-        "metadata": {
-            "reference_images_enabled": True,
-            "reference_image_count": len(reference_images),
-            "actor_identity_id": first_row.get("actor_identity_id"),
-            "scene_reference_set_id": scene_reference_set.reference_set_id,
-            "scene_reference_image_ids": scene_reference_ids,
-            "scene_reference_angle_keys": angle_keys,
-            "scene_key": first_row.get("scene_key"),
-            "wardrobe_key": first_row.get("wardrobe_key"),
-            "source": "actor_identity_scene_reference_set",
-        },
-    }
+    first_metadata = first_row.get("provider_metadata") if isinstance(first_row.get("provider_metadata"), dict) else {}
+    bundle = _build_actor_reference_bundle(
+        actor_identity_id=first_row.get("actor_identity_id") or getattr(scene_reference_set, "actor_identity_id", None),
+        scene_metadata=first_row,
+        scene_reference_ids=scene_reference_ids,
+        scene_reference_angle_keys=angle_keys,
+        selected_scene_reference_id=str(first_row.get("id") or ""),
+        selected_scene_reference_angle_key=str(first_metadata.get("angle_key") or ""),
+        source="actor_identity_reference_set",
+        correlation_id=correlation_id,
+    )
+    bundle["metadata"]["scene_reference_set_id"] = scene_reference_set.reference_set_id
+    return bundle
 
 
 def _resolve_extended_provider_aspect_ratio(route: Optional[str], requested_aspect_ratio: str) -> str:
@@ -1196,15 +1256,13 @@ def _build_veo_extended_base_prompt(
             prompt_character = LEGACY_SHORT_CHARACTER
             prompt_style = LEGACY_32_STYLE
             prompt_cinematography = LEGACY_32_CINEMATOGRAPHY
-            prompt_scene = None if not is_character_consistency_mid_mode(creation_mode) else CHARACTER_CONSISTENCY_MID_SCENE
+            prompt_scene = None
             prompt_action = None
         else:
             prompt_character = prompt_character or DEFAULT_CHARACTER
             prompt_style = prompt_style or DEFAULT_STYLE
             prompt_cinematography = prompt_cinematography or DEFAULT_CINEMATOGRAPHY
             prompt_action = _extended_action_without_embedded_dialogue(prompt_action, script)
-            if is_character_consistency_mid_mode(creation_mode):
-                prompt_scene = CHARACTER_CONSISTENCY_MID_SCENE
         prompt_ending = None
         prompt_audio_block = None
         _validate_veo_segment_spoken_budget(
@@ -1244,6 +1302,7 @@ def _build_veo_extended_base_prompt(
     if is_character_consistency_light_mode(creation_mode):
         return build_lean_veo_base_prompt(
             base_segment,
+            scene=prompt_scene,
             include_final_ending=False,
         ), segment_metadata
     if str(creation_mode or "").strip() in {
@@ -1255,6 +1314,7 @@ def _build_veo_extended_base_prompt(
             base_segment,
             character=prompt_character,
             style=prompt_style,
+            scene=prompt_scene,
             cinematography=prompt_cinematography,
             ending=prompt_ending,
             audio_block=prompt_audio_block,

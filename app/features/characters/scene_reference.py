@@ -371,15 +371,17 @@ def build_scene_reference_prompt(
     actor_ref = f"@{provider_lora_name}::{SCENE_REFERENCE_IDENTITY_STRENGTH}" if provider_lora_name else actor_name
     return (
         f"Photorealistic vertical UGC smartphone still of {actor_ref}, one recognizable adult woman, "
-        f"wearing {wardrobe}, seated naturally in a wheelchair, in {scene.generation_anchor}. "
-        f"{actor_ref} is the dominant visible subject and the only visible adult person in the frame. "
-        "Full head, face, upper body, hands, and wheelchair context are visible. "
-        f"The same location must be preserved across the three-reference set: {scene.layout_lock}. "
+        "large face identity lock, chest-up seated portrait framing, "
+        "face occupying 35 to 45 percent of image height, full head visible, eyes and facial features sharp, "
+        f"wearing {wardrobe}. "
+        f"Background is the same supporting scene: {scene.generation_anchor}. "
+        f"{actor_ref} is the dominant identity signal and the only visible adult person in the frame. "
+        "Keep the scene recognizable but secondary behind the actor. "
+        "Do not show the full wheelchair, full legs, full-body pose, distant shot, wide establishing shot, tiny face, or scene-dominant composition. "
         "Keep the same wardrobe across all angles: same cream crewneck sweater and neutral trousers. "
-        f"Scene anchor lock: {scene.anchor_lock}. "
+        f"Keep the same supporting location details across every angle: {scene.consistency_anchor}. "
         f"Do not add {_human_join_rejectors(scene.scene_specific_rejectors)}. "
-        "Medium close-up, direct-to-camera friendly expression, natural skin texture, soft realistic lighting, no text, no logo. "
-        f"Keep the same supporting location details across every angle: {scene.consistency_anchor}."
+        "Medium close-up, direct-to-camera friendly expression when angle allows, natural skin texture, soft realistic lighting, no text, no logo."
     )
 
 

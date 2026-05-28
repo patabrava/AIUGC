@@ -12,7 +12,6 @@ from app.features.posts.schemas import VideoPrompt, AudioSection
 from app.features.characters.actor_identity import (
     is_character_consistency_mode,
     is_character_consistency_light_mode,
-    is_character_consistency_mid_mode,
 )
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
@@ -150,11 +149,13 @@ LEAN_CONTINUATION_PROMPT_TEMPLATE = (
 )
 
 LEAN_LIGHT_BASE_PROMPT_TEMPLATE = (
+    "Scene:\n"
+    "{scene}\n\n"
     "Action:\n"
-    "The referenced woman sits in the referenced wheelchair setup and speaks directly to camera "
-    "in one continuous natural smartphone take. Keep her identity, wardrobe, room, lighting, "
-    "camera distance, and framing matched to the reference images. Use small natural hand "
-    "gestures and subtle upper-body nods while speaking.\n\n"
+    "Use the approved reference images only as the woman identity source: face, hair, age, body type, "
+    "and overall appearance. Place that same woman in the scene above, seated in a wheelchair, speaking "
+    "directly to camera in one continuous natural smartphone take. Keep her identity matched to the "
+    "reference images. Use small natural hand gestures and subtle upper-body nods while speaking.\n\n"
     "Language:\n"
     "Speak only in German, with natural conversational pacing.\n\n"
     "Dialogue:\n"
@@ -170,12 +171,14 @@ REFERENCE_SCENE_BASE_PROMPT_TEMPLATE = (
     "{character}\n\n"
     "Style:\n"
     "{style}\n\n"
+    "Scene:\n"
+    "{scene}\n\n"
     "Action:\n"
-    "Use the approved reference images as the only scene, wardrobe, lighting, camera-distance, "
-    "and room-layout source. The woman remains seated in the same wheelchair setup shown in the "
-    "reference images and speaks directly to camera in one continuous natural smartphone take. "
-    "Do not invent, replace, or describe a new environment. Use small natural hand gestures and "
-    "subtle upper-body nods while speaking.\n\n"
+    "Use all approved reference images only as the woman identity source: face, hair, age, body type, "
+    "and overall appearance. Do not use reference-image backgrounds as the scene source. Place that same "
+    "woman in the scene above, seated in a wheelchair, speaking directly to camera in one continuous "
+    "natural smartphone take. Keep her identity matched to the reference images while the location follows "
+    "the Scene block. Use small natural hand gestures and subtle upper-body nods while speaking.\n\n"
     "Cinematography:\n"
     "{cinematography}\n\n"
     "Dialogue:\n"
@@ -238,10 +241,6 @@ LEAN_CONTINUATION_AUDIO_BLOCK = (
 LEAN_FINAL_AUDIO_BLOCK = (
     "Natural single-speaker smartphone room audio. No music. No background voices. "
     "Let the room tone settle briefly after the final word."
-)
-
-CHARACTER_CONSISTENCY_MID_SCENE = (
-    "Match the approved reference images. Keep the same environment without introducing new scene elements or layout changes."
 )
 
 DEFAULT_CHARACTER = (
@@ -474,7 +473,11 @@ def sync_video_prompt_with_seed_data(
         if not dialogue:
             return video_prompt
         updated_prompt = dict(video_prompt)
-        updated_prompt["veo_prompt"] = build_lean_veo_base_prompt(dialogue, include_final_ending=True)
+        updated_prompt["veo_prompt"] = build_lean_veo_base_prompt(
+            dialogue,
+            scene=str(updated_prompt.get("scene") or "").strip() or None,
+            include_final_ending=True,
+        )
         updated_prompt["prompt_style"] = "character_consistency_light"
         return updated_prompt
     if _uses_reference_image_scene_prompt(video_prompt.get("prompt_style")):
@@ -490,6 +493,7 @@ def sync_video_prompt_with_seed_data(
             dialogue,
             character=resolved_character,
             style=str(updated_prompt.get("style") or "").strip() or None,
+            scene=str(updated_prompt.get("scene") or "").strip() or None,
             cinematography=str(updated_prompt.get("cinematography") or "").strip() or None,
             ending=str(updated_prompt.get("ending_directive") or "").strip() or None,
             audio_block=LEAN_FINAL_AUDIO_BLOCK,
@@ -620,8 +624,6 @@ def build_video_prompt_from_seed(
         resolve_scene_for_post(post_type=post_type, scene_plan=scene_plan, override=scene_override),
         legacy_32_visuals=False,
     )
-    if is_character_consistency_mid_mode(prompt_style):
-        scene_value = CHARACTER_CONSISTENCY_MID_SCENE
     cinematography_value = LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY
 
     optimized_prompt = build_optimized_prompt(
@@ -637,6 +639,7 @@ def build_video_prompt_from_seed(
     if is_character_consistency_light_mode(prompt_style):
         veo_prompt = build_lean_veo_base_prompt(
             normalized_dialogue,
+            scene=scene_value,
             include_final_ending=True,
         )
     elif _uses_reference_image_scene_prompt(prompt_style):
@@ -644,6 +647,7 @@ def build_video_prompt_from_seed(
             normalized_dialogue,
             character=character_value,
             style=style_value,
+            scene=scene_value,
             cinematography=cinematography_value,
             ending=STANDARD_FINAL_ENDING_DIRECTIVE,
             audio_block=LEAN_FINAL_AUDIO_BLOCK,
@@ -851,14 +855,24 @@ def _build_character_consistency_continuation_prompt(
     )
 
 
+def _normalize_scene_block(scene: str) -> str:
+    cleaned = str(scene or "").strip()
+    if cleaned.startswith("Scene:"):
+        cleaned = cleaned[len("Scene:"):].strip()
+    return cleaned or DEFAULT_SCENE_BODY
+
+
 def build_lean_veo_base_prompt(
     dialogue: str,
     *,
+    scene: Optional[str] = None,
     include_final_ending: bool = False,
 ) -> str:
     ending = STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE
     audio_block = LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_LIGHT_BASE_AUDIO_BLOCK
+    resolved_scene = _normalize_scene_block(scene or DEFAULT_SCENE_BODY)
     return LEAN_LIGHT_BASE_PROMPT_TEMPLATE.format(
+        scene=resolved_scene,
         dialogue=dialogue.strip(),
         ending=ending,
         audio_block=audio_block,
@@ -870,6 +884,7 @@ def build_reference_image_scene_base_prompt(
     *,
     character: Optional[str] = None,
     style: Optional[str] = None,
+    scene: Optional[str] = None,
     cinematography: Optional[str] = None,
     ending: Optional[str] = None,
     audio_block: Optional[str] = None,
@@ -882,6 +897,7 @@ def build_reference_image_scene_base_prompt(
     resolved_cinematography = (
         cinematography or (LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY)
     ).strip()
+    resolved_scene = _normalize_scene_block(scene or (LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY))
     resolved_ending = (
         ending
         or (STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE)
@@ -893,6 +909,7 @@ def build_reference_image_scene_base_prompt(
     return REFERENCE_SCENE_BASE_PROMPT_TEMPLATE.format(
         character=resolved_character,
         style=resolved_style,
+        scene=resolved_scene,
         cinematography=resolved_cinematography,
         dialogue=cleaned_dialogue,
         ending=resolved_ending,
@@ -906,24 +923,23 @@ def build_character_consistency_mid_base_prompt(
     character: Optional[str] = None,
     action: Optional[str] = None,
     style: Optional[str] = None,
+    scene: Optional[str] = None,
     cinematography: Optional[str] = None,
     ending: Optional[str] = None,
     audio_block: Optional[str] = None,
     legacy_32_visuals: bool = False,
     include_final_ending: bool = True,
 ) -> str:
-    return build_optimized_prompt(
-        dialogue.strip(),
-        negative_constraints=None,
-        prompt_mode="standard_final" if include_final_ending else "extended_base_or_continuation",
+    return build_reference_image_scene_base_prompt(
+        dialogue,
         character=character,
-        action=action,
         style=style,
-        scene=CHARACTER_CONSISTENCY_MID_SCENE,
+        scene=scene,
         cinematography=cinematography,
         ending=ending,
         audio_block=audio_block,
         legacy_32_visuals=legacy_32_visuals,
+        include_final_ending=include_final_ending,
     )
 
 

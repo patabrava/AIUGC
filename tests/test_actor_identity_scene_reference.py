@@ -447,8 +447,13 @@ def test_scene_bible_prompt_keeps_actor_handle_first():
     assert prompt.index("@ayra_actor::100") < prompt.index("the same compact accessible bathroom")
     assert "Actor Identity:" not in prompt
     assert "Primary Subject:" not in prompt
-    assert "@ayra_actor::100 is the dominant visible subject" in prompt
+    assert "@ayra_actor::100 is the dominant identity signal" in prompt
     assert "only visible adult person in the frame" in prompt
+    assert "large face identity lock" in prompt
+    assert "face occupying 35 to 45 percent of image height" in prompt
+    assert "Background is the same supporting scene" in prompt
+    assert "Do not show the full wheelchair" in prompt
+    assert "wide establishing shot" in prompt
     assert "natural skin texture" in prompt
     assert "texture-only frame" not in prompt
     assert "Scene Bible:" not in prompt
@@ -470,12 +475,12 @@ def test_scene_reference_prompts_share_same_location_lock_without_labels():
     ]
 
     shared_sentence = (
-        "The same location must be preserved across the three-reference set: same quiet residential curb: "
-        "silver compact hatchback beside actor, open passenger door, dark grey interior, low brick garden wall, muted green hedge."
+        "Keep the same supporting location details across every angle: same silver hatchback, open passenger door, "
+        "quiet curb, low brick garden wall, muted hedge, overcast daylight."
     )
     assert all(shared_sentence in prompt for prompt in prompts)
     assert all("@ayra_actor::100" in prompt for prompt in prompts)
-    assert all(prompt.index("@ayra_actor::100") < prompt.index("same quiet residential curb") for prompt in prompts)
+    assert all(prompt.index("@ayra_actor::100") < prompt.index("quiet residential curb") for prompt in prompts)
     assert all("Scene Consistency:" not in prompt for prompt in prompts)
     assert all("Background Anchor:" not in prompt for prompt in prompts)
     assert all("Scene Bible:" not in prompt for prompt in prompts)
@@ -617,7 +622,7 @@ def test_scene_reference_prompt_includes_scene_specific_rejectors_and_wardrobe_l
         "Do not add tall cabinets, doors behind the actor, plants, ladder shelves, radiators, mirrors, shower curtains, or extra towels"
         in prompt
     )
-    assert "grab rail, wall-mounted sink, frosted window, and single oak towel shelf" in prompt
+    assert "same grab rail, sink, sage-green towel shelf, frosted window" in prompt
 
 
 def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(monkeypatch):

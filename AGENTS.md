@@ -42,7 +42,7 @@ LLM_FRIENDLY_PLAN_TEST_DEBUG
 END_LLM_FRIENDLY_PLAN_TEST_DEBUG
 
 2) Specific repo rules
-- Character Consistency video prompts must not describe the scene in text when approved scene reference images are available; the submitted Veo prompt may refer to the approved reference images as the only scene source, but must not include generated/default `Scene:` blocks or location/set descriptions.
+- Character Consistency VEO submissions must reserve all three `referenceImages` for ActorIdentity anchors; approved scene reference images are approval-only metadata and must not be submitted as VEO visual references, because any face/person inside a scene image competes with the actor identity. The submitted VEO prompt must include the scene in text and explicitly treat reference images only as the actor identity source.
 - Live `lippelift.xyz` deploys must run from a VPS checkout plus `/opt/aiugc-prod/.env.production` through `scripts/deploy/production.sh`; do not rely on Hostinger repo-wrapper env injection or repo `.env`, or pushes to `main` will diverge from the live runtime.
 - Live Supabase bootstrap must validate `SUPABASE_SERVICE_KEY` shape and fall back to `SUPABASE_KEY` when Hostinger env injection corrupts the service-role JWT, or `/health` and background workers will fail with `401 Invalid API key`.
 - Supabase client bootstrap must probe the chosen key and automatically retry with the alternate key on `401 Invalid API key`; trusting the first JWT-shaped secret lets a bad Hostinger injection keep the whole app in a restart loop even when the backup key is valid.

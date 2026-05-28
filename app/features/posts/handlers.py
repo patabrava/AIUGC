@@ -96,6 +96,7 @@ def _build_edited_veo_prompt(
             character=payload.character,
             action=payload.action,
             style=payload.style,
+            scene=payload.scene,
             cinematography=payload.cinematography,
             ending=payload.ending,
             audio_block=payload.audio_block,
