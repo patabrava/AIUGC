@@ -14,7 +14,14 @@ Runtime contract:
 - Magnific character LoRA training is isolated in `app/adapters/magnific_client.py`; Mystic still generation rejects options known to make LoRAs silently ignored.
 - Existing batches with `character_snapshot` continue through the legacy three-image route.
 - New ActorIdentity-backed posts must generate exactly three Mystic `SceneReferenceImage` rows for the approved script before video submission. The three images share one script-derived background and wardrobe, but use the fixed angles `front_mid`, `left_three_quarter`, and `right_profile`.
-- Manual review is required per generated image. Operators can approve each image, regenerate one image, or regenerate the full three-image set. Video generation is blocked until the latest set has three approved images with passed manual gates.
+- ActorIdentity scene references now use three explicit scene bibles: `bathroom_accessibility_a`, `car_transfer_residential_a`, and `home_living_room_advice_a`. The prompt must stay actor-first, beginning with the Magnific `@...::strength` handle; Mystic receives compact generation/consistency anchors with no section labels, while the full verbose scene bible is persisted in metadata instead of being sent as material-heavy prompt text.
+- Magnific Mystic scene-reference requests remain text-only plus actor LoRA. The app must not pass `structure_reference` or `style_reference` with a character LoRA request because those options can cause the LoRA to be ignored.
+- The scene-reference request omits `model` by default for the LoRA-safe path, uses `engine=magnific_sparkle`, `creative_detailing=18`, `resolution=2k`, and stores the exact outbound request under `provider_metadata.mystic_request`.
+- A live Mystic check on 2026-05-27 showed `fixed_generation=true` collapsing the three-angle set into near-identical unusable texture frames, so the default scene-reference request uses `fixed_generation=false`.
+- A follow-up live check on 2026-05-27 confirmed the corrected `WC` title route persisted `bathroom_accessibility_a`, but the scene-reference LoRA strength had drifted to `@...::200` / `styling.characters` strength 200. That overdriven strength caused room material and body texture blending even after the prompt was actor-first. A single-variable provider probe with the same final prompt/request keys and strength restored to 100 returned a usable full actor frame, so scene references must keep the Magnific character handle and `styling.characters` strength at 100.
+- Scene consistency is a separate manual gate from actor quality. The app stores a `scene_consistency_contract` per generated set, prompts Mystic with compact same-location anchors, and requires the operator to approve or reject the full three-image set before video submission. Do not use `structure_reference` or `style_reference` to force scene layout unless Magnific explicitly supports those fields together with character LoRAs; those fields are treated as LoRA-unsafe.
+- The selected scene bible is persisted in `provider_metadata.scene_bible_id`, `provider_metadata.scene_bible_version`, and `provider_metadata.scene_bible_name`.
+- Manual review is required for each generated set. Operators can reject or regenerate one image for repair, regenerate the full three-image set, or approve/reject the full set. Video generation is blocked until the latest active set has three images approved through the full-set scene consistency gate.
 - Video submission continues to follow the existing Character Consistency route rules. Where the current route accepts reference images, the approved three-image set is sent together; where the current route rejects or skips reference images, that existing behavior is preserved.
 - Scene and wardrobe choices come only from `SCENE_CATALOG` and `WARDROBE_SET`; raw script text is not sent as scene/wardrobe provider prompt text.
 - The first video identity gate is manual-only. Completed ActorIdentity videos get `identity_gate_result.status=manual_required` until an operator marks the post-video identity gate passed.
@@ -321,3 +328,58 @@ Threaded a `uint32` seed through all VEO video generation and extension calls to
 - [BetterLink: Complete guide to VEO 3 character consistency](https://eastondev.com/blog/en/posts/ai/20251207-veo3-character-consistency-guide/)
 - [Google AI Forum: Reference images API discussion](https://discuss.ai.google.dev/t/veo-3-1-reference-images-docs-say-available-api-says-not-supported/111853)
 - [Skywork: VEO 3.1 multi-prompt storytelling best practices](https://skywork.ai/blog/multi-prompt-multi-shot-consistency-veo-3-1-best-practices/)
+
+## Magnific Scene Consistency Improvement Workflow
+
+Current constraint: ActorIdentity scene references must stay on the Mystic LoRA-compatible path. Do not add `structure_reference`, `style_reference`, or an explicit `model` to ActorIdentity Mystic requests, because Magnific documents that those combinations silently ignore LoRAs.
+
+### Scene Style LoRA Config
+
+Optional scene style LoRAs are configured with:
+
+```bash
+SCENE_REFERENCE_STYLE_LORAS="bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65"
+```
+
+Each entry is `scene_id=style_lora_name:strength`. If a scene is omitted, generation falls back to the actor-only Mystic request.
+
+### Train Scene Style LoRAs
+
+Use 6-20 curated reference image URLs per scene. Prefer images where the background anchors are visible and stable:
+
+- `bathroom_accessibility_a`: grab rail, wall-mounted sink, frosted window, single oak towel shelf, no extra furniture.
+- `car_transfer_residential_a`: silver hatchback, open passenger door, brick wall, hedge, quiet curb.
+- `home_living_room_advice_a`: light-oak side table, white mug, terracotta plant, beige curtain, warm off-white wall.
+
+The adapter exposes `MagnificClient.submit_style_training(...)`; use it only from an explicit operator script or console run, not from default tests.
+
+### Live Sweep
+
+Run a paid comparison sweep:
+
+```bash
+APP_ENV_FILE=/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/.env \
+python3 agents/testscripts/run_scene_reference_sweep.py \
+  --out-dir output/live-scene-consistency-sweep-$(date +%Y%m%d-%H%M%S) \
+  --sets-per-scene 1 \
+  --profiles baseline,fixed-low-detail,style-low-detail,style-sharpy
+```
+
+Expected artifacts:
+
+- `manifest.json`
+- one contact sheet per scene
+- downloaded images grouped by scene, profile, set, and angle
+
+### Anchor Analysis
+
+Run paid image-to-prompt analysis against a sweep manifest:
+
+```bash
+APP_ENV_FILE=/Users/camiloecheverri/Documents/AI/AIUGC/AIUGC/.env \
+python3 agents/testscripts/analyze_scene_reference_anchors.py \
+  --manifest output/live-scene-consistency-sweep-YYYYMMDD-HHMMSS/manifest.json \
+  --out output/live-scene-consistency-sweep-YYYYMMDD-HHMMSS/anchor_report.json
+```
+
+Use the anchor report as a pre-gate. A set still requires human approval before it becomes video-ready.

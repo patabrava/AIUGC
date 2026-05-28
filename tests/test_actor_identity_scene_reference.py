@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from app.features.characters.scene_reference import (
     SCENE_CATALOG,
     WARDROBE_SET,
     build_scene_reference_prompt,
+    build_scene_reference_prompt_for_angle,
+    get_scene_bible,
     map_script_to_scene_intent,
 )
 
@@ -28,6 +34,18 @@ def _ready_actor(actor_id: str, *, is_active: bool):
         created_at="2026-05-21T00:00:00Z",
         updated_at="2026-05-21T00:00:00Z",
     )
+
+
+def _set_gate(reference_set_id: str = "set-1") -> dict:
+    return {
+        "status": "passed",
+        "reason": "ok",
+        "gate_type": "manual",
+        "details": {
+            "scene_consistency_set_approved": True,
+            "reference_set_id": reference_set_id,
+        },
+    }
 
 
 def test_batch_scene_reference_uses_batch_actor_after_active_switch(monkeypatch):
@@ -72,6 +90,23 @@ def test_regenerated_scene_reference_uses_original_reference_actor(monkeypatch):
     assert result.id == "reference-actor"
 
 
+def test_scene_reference_requires_provider_lora_name(monkeypatch):
+    from app.features.characters import handlers as character_handlers
+
+    actor = _ready_actor("actor-without-name", is_active=True).model_copy(update={"provider_lora_name": None})
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "get_actor_identity_by_id",
+        lambda actor_identity_id: actor,
+    )
+
+    with pytest.raises(character_handlers.HTTPException) as exc_info:
+        character_handlers._ready_actor_identity_for_batch({"actor_identity_id": "actor-without-name"})
+
+    assert exc_info.value.status_code == 422
+    assert "provider LoRA name" in exc_info.value.detail
+
+
 def test_script_intent_maps_only_to_catalog_values():
     result = map_script_to_scene_intent(
         script="Im Badezimmer zeigt sie, wie kleine Anpassungen am Morgen Sicherheit geben.",
@@ -91,7 +126,7 @@ def test_ambiguous_script_uses_conservative_default():
         target_length_tier=8,
         seed_data={},
     )
-    assert result.scene_key == "neutral_home"
+    assert result.scene_key == "home_living_room_advice_a"
     assert result.wardrobe_key == "everyday_sweater"
 
 
@@ -103,7 +138,9 @@ def test_scene_reference_prompt_does_not_include_freeform_script_text():
         post_type="value",
     )
     assert "Badezimmer" not in prompt
-    assert "bright accessible bathroom" in prompt
+    assert "the same compact accessible bathroom" in prompt
+    assert "Accessible bathroom scene A" not in prompt
+    assert "texture-only" not in prompt
 
 
 def test_scene_reference_prompt_can_include_provider_lora_handle():
@@ -158,20 +195,53 @@ def test_scene_reference_set_summary_requires_three_approved_images():
                 "status": "approved",
                 "image_url": "https://cdn.example.com/front.png",
                 "provider_metadata": {"angle_key": "front_mid"},
-                "identity_gate_result": {"status": "passed", "reason": "ok", "gate_type": "manual"},
+                "identity_gate_result": _set_gate(),
             },
             {
                 "id": "ref-2",
                 "status": "approved",
                 "image_url": "https://cdn.example.com/left.png",
                 "provider_metadata": {"angle_key": "left_three_quarter"},
-                "identity_gate_result": {"status": "passed", "reason": "ok", "gate_type": "manual"},
+                "identity_gate_result": _set_gate(),
             },
         ],
     )
 
     assert summary.is_ready is False
     assert summary.missing_angle_keys == ["right_profile"]
+
+
+def test_scene_reference_set_summary_requires_full_set_gate_details():
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
+    rows = [
+        {
+            "id": "ref-1",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/front.png",
+            "provider_metadata": {"angle_key": "front_mid"},
+            "identity_gate_result": {"status": "passed", "reason": "single image approval", "gate_type": "manual"},
+        },
+        {
+            "id": "ref-2",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/left.png",
+            "provider_metadata": {"angle_key": "left_three_quarter"},
+            "identity_gate_result": {"status": "passed", "reason": "single image approval", "gate_type": "manual"},
+        },
+        {
+            "id": "ref-3",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/profile.png",
+            "provider_metadata": {"angle_key": "right_profile"},
+            "identity_gate_result": {"status": "passed", "reason": "single image approval", "gate_type": "manual"},
+        },
+    ]
+
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+
+    assert summary.is_ready is False
+    assert summary.missing_angle_keys == ["front_mid", "left_three_quarter", "right_profile"]
 
 
 def test_select_latest_reference_set_id_uses_newest_complete_set():
@@ -203,6 +273,71 @@ def test_filter_reference_rows_for_set_keeps_requested_set_only():
     ]
 
     assert [row["id"] for row in filter_reference_rows_for_set(rows, "set-b")] == ["2"]
+
+
+def test_filter_reference_rows_for_set_keeps_newest_row_per_angle():
+    from app.features.characters.queries import filter_reference_rows_for_set
+
+    rows = [
+        {
+            "id": "old-front",
+            "created_at": "2026-05-21T10:00:00Z",
+            "provider_metadata": {"reference_set_id": "set-1", "angle_key": "front_mid"},
+        },
+        {
+            "id": "new-front",
+            "created_at": "2026-05-21T10:10:00Z",
+            "provider_metadata": {"reference_set_id": "set-1", "angle_key": "front_mid"},
+        },
+        {
+            "id": "left",
+            "created_at": "2026-05-21T10:00:01Z",
+            "provider_metadata": {"reference_set_id": "set-1", "angle_key": "left_three_quarter"},
+        },
+        {
+            "id": "profile",
+            "created_at": "2026-05-21T10:00:02Z",
+            "provider_metadata": {"reference_set_id": "set-1", "angle_key": "right_profile"},
+        },
+    ]
+
+    assert [row["id"] for row in filter_reference_rows_for_set(rows, "set-1")] == [
+        "new-front",
+        "left",
+        "profile",
+    ]
+
+
+def test_record_scene_reference_set_gate_updates_only_requested_set(monkeypatch):
+    from app.features.characters import queries as character_queries
+    from app.features.characters.actor_identity import passed_manual_gate
+
+    rows = [
+        {"id": "old-front", "post_id": "post-1", "provider_metadata": {"reference_set_id": "old", "angle_key": "front_mid"}},
+        {"id": "new-front", "post_id": "post-1", "provider_metadata": {"reference_set_id": "new", "angle_key": "front_mid"}},
+        {"id": "new-left", "post_id": "post-1", "provider_metadata": {"reference_set_id": "new", "angle_key": "left_three_quarter"}},
+        {"id": "new-profile", "post_id": "post-1", "provider_metadata": {"reference_set_id": "new", "angle_key": "right_profile"}},
+    ]
+    recorded = []
+
+    monkeypatch.setattr(character_queries, "list_scene_references_for_post", lambda post_id: rows)
+    monkeypatch.setattr(
+        character_queries,
+        "record_scene_reference_gate",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+
+    updated = character_queries.record_scene_reference_set_gate(
+        post_id="post-1",
+        reference_set_id="new",
+        gate_result=passed_manual_gate("Operator approved actor identity and scene consistency for the full set"),
+        status="approved",
+        correlation_id="corr-1",
+    )
+
+    assert [row["id"] for row in updated] == ["new-front", "new-left", "new-profile"]
+    assert [item["reference_id"] for item in recorded] == ["new-front", "new-left", "new-profile"]
+    assert all(item["status"] == "approved" for item in recorded)
 
 
 def test_angle_specific_prompts_keep_same_background_and_distinct_angles():
@@ -264,3 +399,608 @@ def test_reference_candidates_keep_latest_set_group_together():
         "new-left",
         "new-profile",
     ]
+
+
+def test_scene_bible_prompt_reuses_exact_scene_identity_across_angles():
+    from app.features.characters.scene_reference import REQUIRED_SCENE_REFERENCE_ANGLES
+
+    bible = get_scene_bible("bathroom_accessibility_a")
+    prompts = [
+        build_scene_reference_prompt_for_angle(
+            actor_name="AYRA",
+            scene_key=bible.scene_id,
+            wardrobe_key="everyday_sweater",
+            post_type="value",
+            angle_key=angle.key,
+            provider_lora_name="ayra_actor",
+        )
+        for angle in REQUIRED_SCENE_REFERENCE_ANGLES
+    ]
+
+    assert len(set(prompts)) == 3
+    for prompt in prompts:
+        assert bible.scene_identity not in prompt
+        assert bible.generation_anchor in prompt
+        assert "cream crewneck sweater, neutral beige trousers, no logos, no jewelry, no glasses, natural makeup" in prompt
+        assert "Background Anchor:" not in prompt
+        assert "Scene Consistency:" not in prompt
+        assert "pale grey microcement floor" not in prompt
+        assert "texture-only" not in prompt
+        assert "room surfaces" not in prompt
+
+    assert any("front-facing" in prompt for prompt in prompts)
+    assert any("left three-quarter" in prompt for prompt in prompts)
+    assert any("right-side profile" in prompt for prompt in prompts)
+
+
+def test_scene_bible_prompt_keeps_actor_handle_first():
+    prompt = build_scene_reference_prompt_for_angle(
+        actor_name="AYRA",
+        scene_key="bathroom_accessibility_a",
+        wardrobe_key="everyday_sweater",
+        post_type="value",
+        angle_key="front_mid",
+        provider_lora_name="ayra_actor",
+    )
+
+    assert prompt.startswith("Photorealistic vertical UGC smartphone still of @ayra_actor::100")
+    assert prompt.index("@ayra_actor::100") < prompt.index("the same compact accessible bathroom")
+    assert "Actor Identity:" not in prompt
+    assert "Primary Subject:" not in prompt
+    assert "@ayra_actor::100 is the dominant visible subject" in prompt
+    assert "only visible adult person in the frame" in prompt
+    assert "natural skin texture" in prompt
+    assert "texture-only frame" not in prompt
+    assert "Scene Bible:" not in prompt
+
+
+def test_scene_reference_prompts_share_same_location_lock_without_labels():
+    from app.features.characters.scene_reference import REQUIRED_SCENE_REFERENCE_ANGLES
+
+    prompts = [
+        build_scene_reference_prompt_for_angle(
+            actor_name="AYRA",
+            scene_key="car_transfer_residential_a",
+            wardrobe_key="everyday_sweater",
+            post_type="value",
+            angle_key=angle.key,
+            provider_lora_name="ayra_actor",
+        )
+        for angle in REQUIRED_SCENE_REFERENCE_ANGLES
+    ]
+
+    shared_sentence = (
+        "The same location must be preserved across the three-reference set: same quiet residential curb: "
+        "silver compact hatchback beside actor, open passenger door, dark grey interior, low brick garden wall, muted green hedge."
+    )
+    assert all(shared_sentence in prompt for prompt in prompts)
+    assert all("@ayra_actor::100" in prompt for prompt in prompts)
+    assert all(prompt.index("@ayra_actor::100") < prompt.index("same quiet residential curb") for prompt in prompts)
+    assert all("Scene Consistency:" not in prompt for prompt in prompts)
+    assert all("Background Anchor:" not in prompt for prompt in prompts)
+    assert all("Scene Bible:" not in prompt for prompt in prompts)
+    assert all("texture-only" not in prompt for prompt in prompts)
+    assert all("room surfaces" not in prompt for prompt in prompts)
+
+
+def test_script_intent_routes_to_three_scene_bibles_only():
+    samples = [
+        ("Im Badezimmer gibt ein Haltegriff mehr Sicherheit.", "value", "bathroom_accessibility_a"),
+        ("Beim Transfer ins Auto hilft eine klare Routine.", "value", "car_transfer_residential_a"),
+        ("Ein ruhiger Alltagstipp fuer heute.", "value", "home_living_room_advice_a"),
+        ("Dieses Hilfsmittel liegt auf dem Tisch.", "product", "home_living_room_advice_a"),
+    ]
+
+    for script, post_type, expected_scene_id in samples:
+        result = map_script_to_scene_intent(
+            script=script,
+            post_type=post_type,
+            target_length_tier=8,
+            seed_data={},
+        )
+
+        assert result.scene_key == expected_scene_id
+        assert result.scene_key in SCENE_CATALOG
+        assert result.wardrobe_key == "everyday_sweater"
+
+
+def test_scene_reference_metadata_includes_scene_bible_contract():
+    from app.features.characters.scene_reference import build_scene_bible_provider_metadata, build_scene_consistency_contract
+
+    assert build_scene_bible_provider_metadata("car_transfer_residential_a") == {
+        "scene_bible_id": "car_transfer_residential_a",
+        "scene_bible_version": 1,
+        "scene_bible_name": "Residential car transfer A",
+        "scene_bible_identity": get_scene_bible("car_transfer_residential_a").scene_identity,
+        "scene_generation_anchor": get_scene_bible("car_transfer_residential_a").generation_anchor,
+        "scene_consistency_contract": build_scene_consistency_contract("car_transfer_residential_a"),
+    }
+
+
+def test_parse_scene_reference_style_loras_maps_scene_to_style():
+    from app.features.characters.scene_reference import parse_scene_reference_style_loras
+
+    result = parse_scene_reference_style_loras(
+        "bathroom_accessibility_a=bathroom-accessibility-a:65,"
+        "car_transfer_residential_a=car-transfer-residential-a:70,"
+        "home_living_room_advice_a=home-living-room-advice-a"
+    )
+
+    assert result == {
+        "bathroom_accessibility_a": [{"name": "bathroom-accessibility-a", "strength": 65}],
+        "car_transfer_residential_a": [{"name": "car-transfer-residential-a", "strength": 70}],
+        "home_living_room_advice_a": [{"name": "home-living-room-advice-a", "strength": 65}],
+    }
+
+
+def test_parse_scene_reference_style_loras_ignores_unknown_scene_keys():
+    from app.features.characters.scene_reference import parse_scene_reference_style_loras
+
+    result = parse_scene_reference_style_loras(
+        "unknown_scene=unused-style:65,bathroom_accessibility_a=bathroom-style:80"
+    )
+
+    assert result == {"bathroom_accessibility_a": [{"name": "bathroom-style", "strength": 80}]}
+
+
+def test_scene_consistency_contract_is_stable_for_supported_bibles():
+    from app.features.characters.scene_reference import SCENE_BIBLES, build_scene_consistency_contract
+
+    expected_contracts = {
+        "bathroom_accessibility_a": {
+            "layout_lock": "same compact accessible bathroom: grab rail behind actor left, white sink behind actor right, frosted window high rear-left, oak towel shelf with folded sage-green towel",
+            "must_match": [
+                "grab rail remains behind actor left",
+                "white wall-mounted sink remains behind actor right",
+                "frosted window remains high on the rear-left wall",
+                "sage-green towel remains folded on a narrow oak shelf",
+                "soft daylight stays consistent across all three angles",
+            ],
+        },
+        "car_transfer_residential_a": {
+            "layout_lock": "same quiet residential curb: silver compact hatchback beside actor, open passenger door, dark grey interior, low brick garden wall, muted green hedge",
+            "must_match": [
+                "silver hatchback remains next to the actor",
+                "front passenger door remains open",
+                "dark grey car interior remains visible",
+                "low brick garden wall remains behind the car",
+                "muted green hedge remains in the far background",
+            ],
+        },
+        "home_living_room_advice_a": {
+            "layout_lock": "same quiet living room: warm off-white wall, narrow light-oak side table on actor right, white mug, small green plant, beige curtain at far left",
+            "must_match": [
+                "light-oak side table remains on actor right",
+                "single white mug remains on the side table",
+                "small green plant remains in a terracotta pot",
+                "beige curtain remains at far left",
+                "warm off-white wall and soft window light remain consistent",
+            ],
+        },
+    }
+
+    for scene_id, expected in expected_contracts.items():
+        contract = build_scene_consistency_contract(scene_id)
+        assert contract["scene_bible_id"] == scene_id
+        assert contract["scene_bible_version"] == SCENE_BIBLES[scene_id].version
+        assert contract["layout_lock"] == expected["layout_lock"]
+        assert contract["anchor_lock"]
+        assert contract["wardrobe_lock"] == "cream crewneck sweater, neutral trousers, no logos, no jewelry"
+        assert contract["wardrobe_drift_rejector"] == (
+            "different pants color, changed sweater, logos, jewelry, glasses, hat, or changed hairstyle"
+        )
+        assert contract["drift_rejectors_by_scene"]
+        assert contract["must_match"] == expected["must_match"]
+        assert contract["drift_rejectors"] == [
+            "different room or location",
+            "moved anchor objects",
+            "missing wheelchair context",
+            "extra adult person",
+            "changed wardrobe",
+            "changed lighting family",
+        ]
+        assert len(contract["acceptance_checklist"]) == 5
+
+
+def test_scene_reference_prompt_includes_scene_specific_rejectors_and_wardrobe_lock():
+    prompt = build_scene_reference_prompt_for_angle(
+        actor_name="AYRA Actor",
+        scene_key="bathroom_accessibility_a",
+        wardrobe_key="everyday_sweater",
+        post_type="value",
+        angle_key="front_mid",
+        provider_lora_name="ayra-actor-longchar-20260521",
+    )
+
+    assert "same cream crewneck sweater and neutral trousers" in prompt
+    assert (
+        "Do not add tall cabinets, doors behind the actor, plants, ladder shelves, radiators, mirrors, shower curtains, or extra towels"
+        in prompt
+    )
+    assert "grab rail, wall-mounted sink, frosted window, and single oak towel shelf" in prompt
+
+
+def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(monkeypatch):
+    from app.core.config import Settings
+    from app.features.characters import handlers as character_handlers
+
+    actor = _ready_actor("actor-1", is_active=True)
+    captured_tasks = []
+    captured_candidates = []
+
+    class _Response:
+        def __init__(self, data):
+            self.data = data
+
+    class _Table:
+        def __init__(self, name):
+            self.name = name
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            if self.name == "posts":
+                return _Response(
+                    [
+                        {
+                            "id": "post-1",
+                            "batch_id": "batch-1",
+                            "post_type": "value",
+                            "topic_title": "WC-Fiasko im Bad",
+                            "seed_data": {
+                                "script": "Ein klarer Alltagstipp, der nicht frei in die Szene kopiert wird.",
+                                "target_length_tier": 8,
+                            },
+                        }
+                    ]
+                )
+            if self.name == "batches":
+                return _Response([{"id": "batch-1", "actor_identity_id": "actor-1", "target_length_tier": 8}])
+            return _Response([])
+
+    class _Supabase:
+        def table(self, name):
+            return _Table(name)
+
+    class _SupabaseContainer:
+        client = _Supabase()
+
+    class _MysticClient:
+        def create_mystic_scene_reference(self, **kwargs):
+            captured_tasks.append(kwargs)
+            return {
+                "task_id": f"task-{len(captured_tasks)}",
+                "generated": [f"https://cdn.example.com/{len(captured_tasks)}.png"],
+                "_request_payload": {
+                    "prompt": kwargs["prompt"],
+                    "resolution": kwargs["resolution"],
+                    "fixed_generation": kwargs["fixed_generation"],
+                    "engine": kwargs["extra_options"]["engine"],
+                    "creative_detailing": kwargs["extra_options"]["creative_detailing"],
+                    "styling": {
+                        "characters": [{"id": kwargs["lora_id"], "strength": kwargs["strength"]}],
+                        "styles": kwargs["style_loras"],
+                    },
+                },
+            }
+
+    monkeypatch.setattr(character_handlers, "get_supabase", lambda: _SupabaseContainer())
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _MysticClient())
+    monkeypatch.setattr(
+        character_handlers,
+        "get_settings",
+        lambda: Settings(
+            supabase_url="https://supabase.example.com",
+            supabase_key="test-key",
+            supabase_service_key="test-service-key",
+            cloudflare_r2_public_base_url="https://cdn.example.com",
+            scene_reference_style_loras="bathroom_accessibility_a=bathroom-accessibility-a:65",
+        ),
+    )
+    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_identity_id: actor)
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "create_scene_reference_candidate",
+        lambda **kwargs: captured_candidates.append(kwargs) or kwargs,
+    )
+
+    response = character_handlers.generate_scene_reference("post-1")
+
+    assert response.status_code == 303
+    assert len(captured_tasks) == 3
+    assert all(task["strength"] == 100 for task in captured_tasks)
+    assert all(task["resolution"] == "2k" for task in captured_tasks)
+    assert all(task["fixed_generation"] is False for task in captured_tasks)
+    assert all(task["extra_options"] == {"engine": "magnific_sparkle", "creative_detailing": 18} for task in captured_tasks)
+    assert len(captured_candidates) == 3
+    for candidate in captured_candidates:
+        metadata = candidate["provider_metadata"]
+        assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
+        assert metadata["scene_bible_version"] == 1
+        assert metadata["scene_bible_name"] == "Accessible bathroom A"
+        assert metadata["scene_bible_identity"].startswith("Accessible bathroom scene A")
+        assert metadata["scene_generation_anchor"].startswith("the same compact accessible bathroom")
+        assert metadata["scene_consistency_contract"]["scene_bible_id"] == "bathroom_accessibility_a"
+        assert metadata["scene_consistency_contract"]["layout_lock"].startswith("same compact accessible bathroom")
+        assert metadata["reason_code"] == "bathroom_terms"
+        assert "the same compact accessible bathroom" in candidate["prompt"]
+        assert "Accessible bathroom scene A" not in candidate["prompt"]
+        assert metadata["angle_key"] in {"front_mid", "left_three_quarter", "right_profile"}
+        assert metadata["angle_label"] in {"Front", "Left three-quarter", "Right profile"}
+        assert metadata["reference_set_id"]
+        assert metadata["reference_set_status"] == "pending_review"
+        assert metadata["identity_lock_contract"]["actor_identity_id"] == "actor-1"
+        assert metadata["identity_lock_contract"]["provider_lora_id"] == "lora-actor-1"
+        assert metadata["identity_lock_contract"]["identity_strength"] == 100
+        assert metadata["identity_lock_contract"]["prompt_lora_handle_required"] is True
+        assert metadata["identity_lock_contract"]["styling_characters_required"] is True
+        assert metadata["scene_style_loras"] == [{"name": "bathroom-accessibility-a", "strength": 65}]
+        assert metadata["mystic_request"]["styling"]["characters"] == [{"id": "lora-actor-1", "strength": 100}]
+        assert metadata["mystic_request"]["styling"]["styles"] == [{"name": "bathroom-accessibility-a", "strength": 65}]
+        assert metadata["mystic_request"]["fixed_generation"] is False
+        assert metadata["mystic_request"]["engine"] == "magnific_sparkle"
+        assert metadata["mystic_request"]["creative_detailing"] == 18
+        assert "model" not in metadata["mystic_request"]
+        assert set(metadata["task"]) == {"task_id", "generated"}
+        assert "_request_payload" not in metadata["task"]
+
+
+def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
+    from app.core.config import Settings
+    from app.features.characters import handlers as character_handlers
+
+    actor = _ready_actor("actor-1", is_active=True)
+    created = []
+
+    class _MysticClient:
+        def create_mystic_scene_reference(self, **kwargs):
+            return {
+                "task_id": "task-regenerated",
+                "generated": ["https://cdn.example.com/regenerated.png"],
+                "_request_payload": {
+                    "prompt": kwargs["prompt"],
+                    "resolution": kwargs["resolution"],
+                    "fixed_generation": kwargs["fixed_generation"],
+                    "engine": kwargs["extra_options"]["engine"],
+                    "creative_detailing": kwargs["extra_options"]["creative_detailing"],
+                    "styling": {
+                        "characters": [{"id": kwargs["lora_id"], "strength": kwargs["strength"]}],
+                        "styles": kwargs["style_loras"],
+                    },
+                },
+            }
+
+    reference = {
+        "id": "ref-1",
+        "actor_identity_id": "actor-1",
+        "post_id": "post-1",
+        "scene_key": "bathroom_accessibility_a",
+        "wardrobe_key": "everyday_sweater",
+        "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"},
+    }
+
+    monkeypatch.setattr(character_handlers.character_queries, "get_scene_reference_by_id", lambda reference_id: reference)
+    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_identity_id: actor)
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _MysticClient())
+    monkeypatch.setattr(
+        character_handlers,
+        "get_settings",
+        lambda: Settings(
+            supabase_url="https://supabase.example.com",
+            supabase_key="test-key",
+            supabase_service_key="test-service-key",
+            cloudflare_r2_public_base_url="https://cdn.example.com",
+            scene_reference_style_loras="bathroom_accessibility_a=bathroom-accessibility-a:65",
+        ),
+    )
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "create_scene_reference_candidate",
+        lambda **kwargs: created.append(kwargs) or kwargs,
+    )
+    monkeypatch.setattr(character_handlers.character_queries, "record_scene_reference_gate", lambda **_kwargs: None)
+    monkeypatch.setattr(character_handlers, "_post_batch_id", lambda post_id: "batch-1")
+
+    response = character_handlers.regenerate_scene_reference("ref-1")
+
+    assert response.status_code == 303
+    metadata = created[0]["provider_metadata"]
+    assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
+    assert metadata["scene_bible_version"] == 1
+    assert metadata["scene_bible_name"] == "Accessible bathroom A"
+    assert metadata["scene_consistency_contract"]["scene_bible_id"] == "bathroom_accessibility_a"
+    assert metadata["scene_consistency_contract"]["layout_lock"].startswith("same compact accessible bathroom")
+    assert metadata["angle_key"] == "front_mid"
+    assert metadata["angle_label"] == "Front"
+    assert metadata["reference_set_id"] == "set-1"
+    assert metadata["reference_set_status"] == "pending_review"
+    assert metadata["identity_lock_contract"]["actor_identity_id"] == "actor-1"
+    assert metadata["identity_lock_contract"]["provider_lora_id"] == "lora-actor-1"
+    assert metadata["identity_lock_contract"]["identity_strength"] == 100
+    assert metadata["regenerated_from_reference_id"] == "ref-1"
+    assert metadata["scene_style_loras"] == [{"name": "bathroom-accessibility-a", "strength": 65}]
+    assert metadata["mystic_request"]["resolution"] == "2k"
+    assert metadata["mystic_request"]["fixed_generation"] is False
+    assert metadata["mystic_request"]["engine"] == "magnific_sparkle"
+    assert metadata["mystic_request"]["creative_detailing"] == 18
+    assert metadata["mystic_request"]["styling"]["characters"] == [{"id": "lora-actor-1", "strength": 100}]
+    assert metadata["mystic_request"]["styling"]["styles"] == [{"name": "bathroom-accessibility-a", "strength": 65}]
+    assert "model" not in metadata["mystic_request"]
+    assert set(metadata["task"]) == {"task_id", "generated"}
+    assert "_request_payload" not in metadata["task"]
+
+
+def test_approve_scene_reference_set_requires_three_generated_images(monkeypatch):
+    from app.features.characters import handlers as character_handlers
+
+    rows = [
+        {"id": "front", "post_id": "post-1", "image_url": "https://cdn.example.com/front.png", "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"}},
+        {"id": "left", "post_id": "post-1", "image_url": None, "provider_metadata": {"angle_key": "left_three_quarter", "reference_set_id": "set-1"}},
+        {"id": "profile", "post_id": "post-1", "image_url": "https://cdn.example.com/profile.png", "provider_metadata": {"angle_key": "right_profile", "reference_set_id": "set-1"}},
+    ]
+
+    monkeypatch.setattr(character_handlers.character_queries, "list_scene_references_for_set", lambda **_kwargs: rows)
+
+    with pytest.raises(character_handlers.HTTPException) as exc_info:
+        character_handlers.approve_scene_reference_set("post-1", "set-1")
+
+    assert exc_info.value.status_code == 422
+    assert "three generated scene references" in exc_info.value.detail
+
+
+def test_approve_scene_reference_set_requires_canonical_angles(monkeypatch):
+    from app.features.characters import handlers as character_handlers
+
+    rows = [
+        {"id": "front-a", "post_id": "post-1", "image_url": "https://cdn.example.com/front-a.png", "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"}},
+        {"id": "front-b", "post_id": "post-1", "image_url": "https://cdn.example.com/front-b.png", "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"}},
+        {"id": "left", "post_id": "post-1", "image_url": "https://cdn.example.com/left.png", "provider_metadata": {"angle_key": "left_three_quarter", "reference_set_id": "set-1"}},
+    ]
+
+    monkeypatch.setattr(character_handlers.character_queries, "list_scene_references_for_set", lambda **_kwargs: rows)
+
+    with pytest.raises(character_handlers.HTTPException) as exc_info:
+        character_handlers.approve_scene_reference_set("post-1", "set-1")
+
+    assert exc_info.value.status_code == 422
+    assert "each required angle" in exc_info.value.detail
+
+
+def test_approve_scene_reference_set_marks_all_rows_and_attaches_front(monkeypatch):
+    from app.features.characters import handlers as character_handlers
+
+    rows = [
+        {"id": "front", "post_id": "post-1", "image_url": "https://cdn.example.com/front.png", "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"}},
+        {"id": "left", "post_id": "post-1", "image_url": "https://cdn.example.com/left.png", "provider_metadata": {"angle_key": "left_three_quarter", "reference_set_id": "set-1"}},
+        {"id": "profile", "post_id": "post-1", "image_url": "https://cdn.example.com/profile.png", "provider_metadata": {"angle_key": "right_profile", "reference_set_id": "set-1"}},
+    ]
+    recorded = []
+    attached = []
+
+    monkeypatch.setattr(character_handlers.character_queries, "list_scene_references_for_set", lambda **_kwargs: rows)
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "record_scene_reference_set_gate",
+        lambda **kwargs: recorded.append(kwargs) or rows,
+    )
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "attach_scene_reference_to_post",
+        lambda **kwargs: attached.append(kwargs),
+    )
+    monkeypatch.setattr(character_handlers, "_post_batch_id", lambda post_id: "batch-1")
+
+    response = character_handlers.approve_scene_reference_set("post-1", "set-1")
+
+    assert response.status_code == 303
+    assert recorded[0]["reference_set_id"] == "set-1"
+    assert recorded[0]["status"] == "approved"
+    assert recorded[0]["gate_result"].status == "passed"
+    assert "scene consistency" in recorded[0]["gate_result"].reason
+    assert recorded[0]["gate_result"].details == {
+        "scene_consistency_set_approved": True,
+        "reference_set_id": "set-1",
+    }
+    assert attached[0]["post_id"] == "post-1"
+    assert attached[0]["reference_id"] == "front"
+
+
+def test_reject_scene_reference_set_marks_all_rows(monkeypatch):
+    from app.features.characters import handlers as character_handlers
+
+    rows = [
+        {"id": "front", "post_id": "post-1", "image_url": "https://cdn.example.com/front.png", "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"}},
+        {"id": "left", "post_id": "post-1", "image_url": "https://cdn.example.com/left.png", "provider_metadata": {"angle_key": "left_three_quarter", "reference_set_id": "set-1"}},
+        {"id": "profile", "post_id": "post-1", "image_url": "https://cdn.example.com/profile.png", "provider_metadata": {"angle_key": "right_profile", "reference_set_id": "set-1"}},
+    ]
+    recorded = []
+
+    monkeypatch.setattr(character_handlers.character_queries, "list_scene_references_for_set", lambda **_kwargs: rows)
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "record_scene_reference_set_gate",
+        lambda **kwargs: recorded.append(kwargs) or rows,
+    )
+    monkeypatch.setattr(character_handlers, "_post_batch_id", lambda post_id: "batch-1")
+
+    response = character_handlers.reject_scene_reference_set("post-1", "set-1")
+
+    assert response.status_code == 303
+    assert recorded[0]["reference_set_id"] == "set-1"
+    assert recorded[0]["status"] == "rejected"
+    assert recorded[0]["gate_result"].status == "manual_required"
+    assert "Regenerate the full set" in recorded[0]["gate_result"].reason
+
+
+def test_regenerate_scene_reference_accepts_legacy_scene_alias(monkeypatch):
+    from app.features.characters import handlers as character_handlers
+
+    actor = _ready_actor("actor-1", is_active=True)
+    created = []
+
+    class _MysticClient:
+        def create_mystic_scene_reference(self, **kwargs):
+            return {
+                "task_id": "task-regenerated",
+                "generated": ["https://cdn.example.com/regenerated.png"],
+                "_request_payload": {"prompt": kwargs["prompt"]},
+            }
+
+    reference = {
+        "id": "ref-1",
+        "actor_identity_id": "actor-1",
+        "post_id": "post-1",
+        "scene_key": "bathroom_adaptation",
+        "wardrobe_key": "everyday_sweater",
+        "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"},
+    }
+
+    monkeypatch.setattr(character_handlers.character_queries, "get_scene_reference_by_id", lambda reference_id: reference)
+    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_identity_id: actor)
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _MysticClient())
+    monkeypatch.setattr(
+        character_handlers,
+        "get_settings",
+        lambda: SimpleNamespace(scene_reference_style_loras=""),
+    )
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "create_scene_reference_candidate",
+        lambda **kwargs: created.append(kwargs) or kwargs,
+    )
+    monkeypatch.setattr(character_handlers.character_queries, "record_scene_reference_gate", lambda **_kwargs: None)
+    monkeypatch.setattr(character_handlers, "_post_batch_id", lambda post_id: "batch-1")
+
+    response = character_handlers.regenerate_scene_reference("ref-1")
+
+    assert response.status_code == 303
+    metadata = created[0]["provider_metadata"]
+    assert created[0]["scene_key"] == "bathroom_adaptation"
+    assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
+    assert "the same compact accessible bathroom" in created[0]["prompt"]
+    assert "Accessible bathroom scene A" not in created[0]["prompt"]
+
+
+def test_regenerate_scene_reference_rejects_unknown_scene_key(monkeypatch):
+    from app.features.characters import handlers as character_handlers
+
+    reference = {
+        "id": "ref-1",
+        "actor_identity_id": "actor-1",
+        "post_id": "post-1",
+        "scene_key": "unknown_scene",
+        "wardrobe_key": "everyday_sweater",
+        "provider_metadata": {"angle_key": "front_mid", "reference_set_id": "set-1"},
+    }
+
+    monkeypatch.setattr(character_handlers.character_queries, "get_scene_reference_by_id", lambda reference_id: reference)
+
+    with pytest.raises(character_handlers.HTTPException) as exc_info:
+        character_handlers.regenerate_scene_reference("ref-1")
+
+    assert exc_info.value.status_code == 422
+    assert "unknown scene bible" in exc_info.value.detail

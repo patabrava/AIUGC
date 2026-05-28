@@ -13,6 +13,7 @@ from app.adapters.magnific_client import get_magnific_client
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.characters.actor_identity import (
     actor_identity_is_ready,
@@ -24,9 +25,16 @@ from app.features.characters import queries as character_queries
 from app.features.characters.schemas import ActorTrainingSet, CharacterRecord
 from app.features.characters.scene_reference import (
     REQUIRED_SCENE_REFERENCE_ANGLES,
+    SCENE_REFERENCE_CREATIVE_DETAILING,
+    SCENE_REFERENCE_ENGINE,
+    SCENE_REFERENCE_FIXED_GENERATION,
+    SCENE_REFERENCE_IDENTITY_STRENGTH,
+    SCENE_REFERENCE_RESOLUTION,
+    build_scene_bible_provider_metadata,
     build_scene_reference_prompt_for_angle,
     get_scene_reference_angle,
     map_script_to_scene_intent,
+    scene_reference_style_loras_for,
 )
 
 router = APIRouter(prefix="/settings", tags=["characters"])
@@ -118,9 +126,7 @@ def _ready_actor_identity_for_batch(batch: dict):
         if actor_identity_id
         else character_queries.get_active_actor_identity()
     )
-    if not actor_identity_training_ready(actor_identity):
-        raise HTTPException(status_code=422, detail="ActorIdentity training is not complete")
-    return actor_identity
+    return _ready_scene_reference_actor_identity(actor_identity)
 
 
 def _ready_actor_identity_for_reference(reference: dict):
@@ -128,8 +134,14 @@ def _ready_actor_identity_for_reference(reference: dict):
     if not actor_identity_id:
         raise HTTPException(status_code=422, detail="Scene reference is missing ActorIdentity metadata")
     actor_identity = character_queries.get_actor_identity_by_id(actor_identity_id)
+    return _ready_scene_reference_actor_identity(actor_identity)
+
+
+def _ready_scene_reference_actor_identity(actor_identity):
     if not actor_identity_training_ready(actor_identity):
         raise HTTPException(status_code=422, detail="ActorIdentity training is not complete")
+    if not str(actor_identity.provider_lora_name or "").strip():
+        raise HTTPException(status_code=422, detail="ActorIdentity provider LoRA name is required for scene reference generation")
     return actor_identity
 
 
@@ -299,6 +311,28 @@ def _extract_mystic_image_url(task: dict) -> Optional[str]:
     return None
 
 
+def _mystic_task_without_request_payload(task: dict) -> dict:
+    return {key: value for key, value in task.items() if key != "_request_payload"}
+
+
+def _mystic_request_payload(task: dict) -> dict:
+    request_payload = task.get("_request_payload")
+    return dict(request_payload) if isinstance(request_payload, dict) else {}
+
+
+def _scene_reference_identity_contract(actor_identity) -> dict:
+    return {
+        "actor_identity_id": actor_identity.id,
+        "actor_identity_name": actor_identity.name,
+        "provider": actor_identity.provider,
+        "provider_lora_id": actor_identity.provider_lora_id,
+        "provider_lora_name": actor_identity.provider_lora_name,
+        "identity_strength": SCENE_REFERENCE_IDENTITY_STRENGTH,
+        "prompt_lora_handle_required": True,
+        "styling_characters_required": True,
+    }
+
+
 def _is_htmx_request(request: Request) -> bool:
     return request.headers.get("HX-Request", "").lower() == "true"
 
@@ -466,15 +500,25 @@ def generate_scene_reference(post_id: str):
     seed_data = _load_json_object(post.get("seed_data"))
     script = str(seed_data.get("script") or seed_data.get("dialog_script") or post.get("topic_title") or "")
     target_length_tier = int(seed_data.get("target_length_tier") or batch.get("target_length_tier") or 8)
+    intent_seed_data = {
+        **seed_data,
+        "topic_title": seed_data.get("topic_title") or post.get("topic_title") or "",
+        "topic": seed_data.get("topic") or post.get("topic_title") or "",
+    }
     intent = map_script_to_scene_intent(
         script=script,
         post_type=str(post.get("post_type") or ""),
         target_length_tier=target_length_tier,
-        seed_data=seed_data,
+        seed_data=intent_seed_data,
     )
     client = get_magnific_client()
     reference_set_id = str(uuid4())
     references = []
+    scene_bible_metadata = build_scene_bible_provider_metadata(intent.scene_key)
+    scene_style_loras = scene_reference_style_loras_for(
+        intent.scene_key,
+        get_settings().scene_reference_style_loras,
+    )
     for angle in REQUIRED_SCENE_REFERENCE_ANGLES:
         prompt = build_scene_reference_prompt_for_angle(
             actor_name=actor_identity.name,
@@ -487,8 +531,15 @@ def generate_scene_reference(post_id: str):
         task = client.create_mystic_scene_reference(
             prompt=prompt,
             lora_id=str(actor_identity.provider_lora_id),
-            strength=100,
+            strength=SCENE_REFERENCE_IDENTITY_STRENGTH,
             correlation_id=correlation_id,
+            resolution=SCENE_REFERENCE_RESOLUTION,
+            fixed_generation=SCENE_REFERENCE_FIXED_GENERATION,
+            style_loras=scene_style_loras,
+            extra_options={
+                "engine": SCENE_REFERENCE_ENGINE,
+                "creative_detailing": SCENE_REFERENCE_CREATIVE_DETAILING,
+            },
         )
         references.append(
             character_queries.create_scene_reference_candidate(
@@ -500,7 +551,11 @@ def generate_scene_reference(post_id: str):
                 image_url=_extract_mystic_image_url(task),
                 prompt=prompt,
                 provider_metadata={
-                    "task": task,
+                    **scene_bible_metadata,
+                    "task": _mystic_task_without_request_payload(task),
+                    "mystic_request": _mystic_request_payload(task),
+                    "scene_style_loras": scene_style_loras,
+                    "identity_lock_contract": _scene_reference_identity_contract(actor_identity),
                     "reason_code": intent.reason_code,
                     "angle_key": angle.key,
                     "angle_label": angle.label,
@@ -514,6 +569,74 @@ def generate_scene_reference(post_id: str):
         )
     logger.info("scene_reference_generation_submitted", correlation_id=correlation_id, post_id=post_id, count=len(references))
     return RedirectResponse(url=f"/batches/{post.get('batch_id')}", status_code=303)
+
+
+def _scene_reference_set_rows_or_422(post_id: str, reference_set_id: str) -> list[dict]:
+    rows = character_queries.list_scene_references_for_set(post_id=post_id, reference_set_id=reference_set_id)
+    if len(rows) != len(REQUIRED_SCENE_REFERENCE_ANGLES):
+        raise HTTPException(status_code=422, detail="Scene reference set must contain exactly three generated scene references")
+    if any(not row.get("image_url") for row in rows):
+        raise HTTPException(status_code=422, detail="Scene reference set must contain exactly three generated scene references")
+    expected_angles = {angle.key for angle in REQUIRED_SCENE_REFERENCE_ANGLES}
+    actual_angles = {
+        str((row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}).get("angle_key") or "")
+        for row in rows
+    }
+    if actual_angles != expected_angles:
+        raise HTTPException(status_code=422, detail="Scene reference set must contain one generated image for each required angle")
+    return rows
+
+
+def _front_reference_id(rows: list[dict]) -> str:
+    for row in rows:
+        metadata = row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}
+        if metadata.get("angle_key") == "front_mid":
+            return str(row["id"])
+    raise HTTPException(status_code=422, detail="Scene reference set is missing the front angle")
+
+
+@router.post("/character/posts/{post_id}/scene-reference/sets/{reference_set_id}/approve")
+def approve_scene_reference_set(post_id: str, reference_set_id: str):
+    correlation_id = str(uuid4())
+    rows = _scene_reference_set_rows_or_422(post_id, reference_set_id)
+    gate = passed_manual_gate("Operator approved actor identity and scene consistency for the full scene reference set")
+    gate.details.update(
+        {
+            "scene_consistency_set_approved": True,
+            "reference_set_id": reference_set_id,
+        }
+    )
+    character_queries.record_scene_reference_set_gate(
+        post_id=post_id,
+        reference_set_id=reference_set_id,
+        gate_result=gate,
+        status="approved",
+        correlation_id=correlation_id,
+    )
+    character_queries.attach_scene_reference_to_post(
+        post_id=post_id,
+        reference_id=_front_reference_id(rows),
+        gate_result=gate,
+        correlation_id=correlation_id,
+    )
+    return RedirectResponse(url=f"/batches/{_post_batch_id(post_id)}", status_code=303)
+
+
+@router.post("/character/posts/{post_id}/scene-reference/sets/{reference_set_id}/reject")
+def reject_scene_reference_set(post_id: str, reference_set_id: str):
+    correlation_id = str(uuid4())
+    rows = character_queries.list_scene_references_for_set(post_id=post_id, reference_set_id=reference_set_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Scene reference set not found")
+    gate = pending_manual_gate("Operator rejected scene consistency. Regenerate the full set before video submission.")
+    character_queries.record_scene_reference_set_gate(
+        post_id=post_id,
+        reference_set_id=reference_set_id,
+        gate_result=gate,
+        status="rejected",
+        correlation_id=correlation_id,
+    )
+    return RedirectResponse(url=f"/batches/{_post_batch_id(post_id)}", status_code=303)
 
 
 @router.post("/character/scene-reference/{reference_id}/approve")
@@ -598,11 +721,20 @@ def regenerate_scene_reference(reference_id: str):
         raise HTTPException(status_code=422, detail="Scene reference is missing set metadata")
 
     angle = get_scene_reference_angle(angle_key)
+    scene_key = str(reference.get("scene_key") or "")
+    try:
+        scene_bible_metadata = build_scene_bible_provider_metadata(scene_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail="Scene reference has unknown scene bible metadata") from exc
+    scene_style_loras = scene_reference_style_loras_for(
+        scene_key,
+        get_settings().scene_reference_style_loras,
+    )
     actor_identity = _ready_actor_identity_for_reference(reference)
 
     prompt = build_scene_reference_prompt_for_angle(
         actor_name=actor_identity.name,
-        scene_key=str(reference.get("scene_key") or ""),
+        scene_key=scene_key,
         wardrobe_key=str(reference.get("wardrobe_key") or ""),
         post_type="",
         angle_key=angle.key,
@@ -611,19 +743,30 @@ def regenerate_scene_reference(reference_id: str):
     task = get_magnific_client().create_mystic_scene_reference(
         prompt=prompt,
         lora_id=str(actor_identity.provider_lora_id),
-        strength=100,
+        strength=SCENE_REFERENCE_IDENTITY_STRENGTH,
         correlation_id=correlation_id,
+        resolution=SCENE_REFERENCE_RESOLUTION,
+        fixed_generation=SCENE_REFERENCE_FIXED_GENERATION,
+        style_loras=scene_style_loras,
+        extra_options={
+            "engine": SCENE_REFERENCE_ENGINE,
+            "creative_detailing": SCENE_REFERENCE_CREATIVE_DETAILING,
+        },
     )
     character_queries.create_scene_reference_candidate(
         actor_identity_id=actor_identity.id,
         post_id=str(reference["post_id"]),
-        scene_key=str(reference.get("scene_key") or ""),
+        scene_key=scene_key,
         wardrobe_key=str(reference.get("wardrobe_key") or ""),
         provider_task_id=str(task.get("task_id") or ""),
         image_url=_extract_mystic_image_url(task),
         prompt=prompt,
         provider_metadata={
-            "task": task,
+            **scene_bible_metadata,
+            "task": _mystic_task_without_request_payload(task),
+            "mystic_request": _mystic_request_payload(task),
+            "scene_style_loras": scene_style_loras,
+            "identity_lock_contract": _scene_reference_identity_contract(actor_identity),
             "angle_key": angle.key,
             "angle_label": angle.label,
             "reference_set_id": reference_set_id,

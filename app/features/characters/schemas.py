@@ -124,7 +124,12 @@ class SceneReferenceSetSummary(BaseModel):
             metadata = row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}
             angle_key = str(metadata.get("angle_key") or "")
             gate = row.get("identity_gate_result") if isinstance(row.get("identity_gate_result"), dict) else {}
-            if row.get("status") == "approved" and row.get("image_url") and gate.get("status") == "passed":
+            gate_details = gate.get("details") if isinstance(gate.get("details"), dict) else {}
+            set_gate_passed = (
+                gate_details.get("scene_consistency_set_approved") is True
+                and str(gate_details.get("reference_set_id") or "") == reference_set_id
+            )
+            if row.get("status") == "approved" and row.get("image_url") and gate.get("status") == "passed" and set_gate_passed:
                 approved_by_angle[angle_key] = row
 
         approved_rows = [

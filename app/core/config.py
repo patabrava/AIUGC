@@ -145,6 +145,14 @@ class Settings(BaseSettings):
         "",
         validation_alias=AliasChoices("MAGNIFIC_WEBHOOK_SECRET"),
     )
+    scene_reference_style_loras: str = Field(
+        "",
+        validation_alias=AliasChoices("SCENE_REFERENCE_STYLE_LORAS"),
+        description=(
+            "Comma-separated scene style LoRAs for Magnific Mystic, e.g. "
+            "bathroom_accessibility_a=bathroom-accessibility-a:65"
+        ),
+    )
     actor_identity_gate_mode: Literal["manual", "disabled"] = Field(
         "manual",
         validation_alias=AliasChoices("ACTOR_IDENTITY_GATE_MODE"),
