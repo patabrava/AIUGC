@@ -146,6 +146,56 @@ def test_approve_manual_character_script_saves_text_and_marks_approved(monkeypat
     assert storage["posts"][0]["video_prompt_json"] is None
 
 
+def test_approve_manual_character_script_auto_derives_duration_tier(monkeypatch):
+    script = " ".join(["wort"] * 31)
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "post_type": "test",
+                "seed_data": {
+                    "script": "",
+                    "manual_draft": True,
+                    "manual_post_type": "test",
+                    "target_length_tier": 8,
+                    "script_review_status": "pending",
+                },
+                "video_prompt_json": {"stale": True},
+                "video_status": "pending",
+            }
+        ],
+        "batches": [
+            {
+                "id": "batch-1",
+                "creation_mode": "manual_character_consistency",
+                "target_length_tier": 8,
+            }
+        ],
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.put(
+        "/posts/post-1/script-review",
+        data={
+            "action": "approved",
+            "script_text": script,
+            "post_type": "test",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    seed_data = storage["posts"][0]["seed_data"]
+    assert seed_data["script_review_status"] == "approved"
+    assert seed_data["target_length_tier"] == 16
+    assert seed_data["script_duration_contract"]["target_length_tier"] == 16
+    assert seed_data["script_duration_contract"]["word_count"] == 31
+    assert seed_data["script_duration_contract"]["status"] == "valid"
+    assert storage["posts"][0]["video_prompt_json"] is None
+
+
 def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):
     storage = {
         "posts": [

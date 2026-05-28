@@ -28,12 +28,12 @@ from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.video_profiles import (
     DEFAULT_TARGET_LENGTH_TIER,
-    SUPPORTED_TARGET_LENGTH_TIERS,
     VEO_EXTENDED_VIDEO_ROUTE,
     VEO_PROVIDER,
     get_duration_profile,
     get_duration_profile_for_creation_mode,
     get_profile_route_config,
+    resolve_manual_target_length_tier as _resolve_manual_target_length_tier,
     get_submission_video_status,
     script_word_count,
     uses_duration_routing,
@@ -387,56 +387,6 @@ def _is_manual_video_post(batch: Dict[str, Any], seed_data: Optional[Dict[str, A
     if is_manual_creation_mode(batch.get("creation_mode")):
         return True
     return isinstance(seed_data, dict) and seed_data.get("manual_draft") is True
-
-
-def _count_script_words(script: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", script))
-
-
-def _estimate_speech_seconds_for_script(script: str) -> float:
-    """Estimate spoken duration in seconds for a script using the project's
-    canonical 2.5 words-per-second cadence (matches `_estimate_spoken_seconds`
-    used elsewhere)."""
-    word_count = _count_script_words(script)
-    if word_count <= 0:
-        return 0.0
-    return word_count / _WORDS_PER_SECOND
-
-
-def _resolve_manual_target_length_tier(seed_data: Optional[Dict[str, Any]]) -> int:
-    """Auto-derive the target tier for a MANUAL post from script word count.
-
-    Replaces the old sentence-count heuristic that silently capped:
-      - long single-sentence scripts at tier 8 (~7.5s),
-      - long two/three-sentence scripts at tier 16 (~14.5s).
-
-    Algorithm:
-      estimated_speech_seconds = word_count / _WORDS_PER_SECOND
-      pick the smallest tier whose `provider_target_seconds` >= estimate
-      fall back to the highest supported tier when the script overflows.
-
-    Topic-based batches keep using the explicit tier on the batch row; this
-    function is only invoked when `_is_manual_video_post(...)` is True.
-    """
-    if not isinstance(seed_data, dict):
-        return DEFAULT_TARGET_LENGTH_TIER
-
-    script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
-    if not script:
-        return DEFAULT_TARGET_LENGTH_TIER
-
-    estimated_seconds = _estimate_speech_seconds_for_script(script)
-    if estimated_seconds <= 0:
-        return DEFAULT_TARGET_LENGTH_TIER
-
-    sorted_tiers = sorted(SUPPORTED_TARGET_LENGTH_TIERS)
-    for tier in sorted_tiers:
-        profile = get_duration_profile(tier)
-        if profile.provider_target_seconds >= estimated_seconds:
-            return tier
-    # Script overflows our biggest supported tier — return the max and let
-    # the partitioner pack the surplus words (Veo will speed-talk slightly).
-    return sorted_tiers[-1]
 
 
 def _resolve_video_submission_plan(

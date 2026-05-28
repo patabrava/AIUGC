@@ -14,7 +14,10 @@ from app.adapters.supabase_client import get_supabase
 from postgrest.exceptions import APIError
 from app.core.errors import FlowForgeException, SuccessResponse, ValidationError, ErrorCode
 from app.core.logging import get_logger
-from app.core.video_profiles import validate_script_duration_contract
+from app.core.video_profiles import (
+    resolve_manual_target_length_tier,
+    validate_script_duration_contract,
+)
 from app.features.posts.prompt_builder import (
     build_character_consistency_mid_base_prompt,
     build_lean_veo_base_prompt,
@@ -200,7 +203,11 @@ def _apply_script_text_update(
         seed_data["post_type"] = resolved_post_type
         seed_data["manual_post_type"] = resolved_post_type
 
-    target_length_tier = batch_settings.get("target_length_tier") or seed_data.get("target_length_tier")
+    target_length_tier = (
+        resolve_manual_target_length_tier(seed_data)
+        if is_manual_batch
+        else batch_settings.get("target_length_tier") or seed_data.get("target_length_tier")
+    )
     if target_length_tier and resolved_post_type:
         try:
             contract = validate_script_duration_contract(

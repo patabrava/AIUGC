@@ -18,6 +18,7 @@ DEFAULT_TARGET_LENGTH_TIER = 8
 # 48 and 64 added for manual auto-derive of long scripts. Topic-based batches
 # continue to use 8/16/32 (CANON unchanged for the topic flow).
 SUPPORTED_TARGET_LENGTH_TIERS = (8, 16, 32, 48, 64)
+MANUAL_SCRIPT_WORDS_PER_SECOND = 2.5
 SCRIPT_WORD_BOUNDS = {
     "value": {
         8: (14, 18),
@@ -259,6 +260,34 @@ def estimate_duration_from_word_count(word_count: int) -> int:
     if word_count <= 0:
         return 0
     return max(1, int(round(word_count / 2.6)))
+
+
+def estimate_manual_speech_seconds(script: Any) -> float:
+    word_count = script_word_count(script)
+    if word_count <= 0:
+        return 0.0
+    return word_count / MANUAL_SCRIPT_WORDS_PER_SECOND
+
+
+def resolve_manual_target_length_tier(seed_data: Optional[Dict[str, Any]]) -> int:
+    """Auto-derive the target tier for manual posts from their script length."""
+    if not isinstance(seed_data, dict):
+        return DEFAULT_TARGET_LENGTH_TIER
+
+    script = str(seed_data.get("script") or seed_data.get("dialog_script") or "").strip()
+    if not script:
+        return DEFAULT_TARGET_LENGTH_TIER
+
+    estimated_seconds = estimate_manual_speech_seconds(script)
+    if estimated_seconds <= 0:
+        return DEFAULT_TARGET_LENGTH_TIER
+
+    sorted_tiers = sorted(SUPPORTED_TARGET_LENGTH_TIERS)
+    for tier in sorted_tiers:
+        profile = get_duration_profile(tier)
+        if profile.provider_target_seconds >= estimated_seconds:
+            return tier
+    return sorted_tiers[-1]
 
 
 def validate_script_duration_contract(
