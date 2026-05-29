@@ -962,11 +962,15 @@ def test_batch_detail_template_renders_scene_reference_review_modal():
         },
     )
 
-    assert 'aria-label="Review actor scene reference image"' in rendered
+    assert "VEO identity anchors" in rendered
+    assert "3 ActorIdentity images are submitted to VEO." in rendered
+    assert "These images are scene previews only; they are not VEO identity anchors." in rendered
+    assert 'aria-label="Review Mystic scene preview image"' in rendered
     assert "sceneReferenceReviewOpen = true" in rendered
     assert "sceneReferenceReviewIndex = 0" in rendered
     assert "sceneReferenceReviewIndex = 1" in rendered
-    assert "Reference image review" in rendered
+    assert "Mystic scene preview review" in rendered
+    assert "VEO identity remains locked by the ActorIdentity anchors" in rendered
     assert "Previous reference" in rendered
     assert "Next reference" in rendered
     assert "Regenerate this angle" in rendered
@@ -1020,7 +1024,7 @@ def test_batch_detail_template_auto_polls_submitted_scene_references():
     assert 'hx-post="/settings/character/scene-reference/scene-1/poll"' in rendered
     assert 'hx-trigger="load, every 4s"' in rendered
     assert "animate-spin" in rendered
-    assert "Generating reference" in rendered
+    assert "Generating scene preview" in rendered
 
 
 def test_batch_detail_template_renders_scene_set_consistency_controls():
@@ -1102,13 +1106,15 @@ def test_batch_detail_template_renders_scene_set_consistency_controls():
         },
     )
 
-    assert "Scene consistency review" in rendered
+    assert "Mystic scene preview review" in rendered
+    assert "Approval checks scene continuity only." in rendered
+    assert "not submitted to VEO as reference images under strategy A" in rendered
     assert "same compact accessible bathroom" in rendered
     assert "Does this look like the same bathroom as the other two angles?" in rendered
     assert 'hx-post="/settings/character/posts/post-1/scene-reference/sets/set-1/approve"' in rendered
     assert 'hx-post="/settings/character/posts/post-1/scene-reference/sets/set-1/reject"' in rendered
-    assert "Approve full set" in rendered
-    assert "Reject full set" in rendered
+    assert "Approve scene preview set" in rendered
+    assert "Reject scene preview set" in rendered
     assert "/settings/character/scene-reference/front/approve" not in rendered
 
 
@@ -1162,7 +1168,7 @@ def test_batch_detail_template_keeps_scene_set_controls_for_legacy_image_approva
     )
 
     assert 'hx-post="/settings/character/posts/post-1/scene-reference/sets/set-legacy/approve"' in rendered
-    assert "Approve full set" in rendered
+    assert "Approve scene preview set" in rendered
 
 
 def test_batch_detail_template_renders_manual_editor_even_for_blank_scripts():
