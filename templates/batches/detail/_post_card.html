@@ -414,7 +414,13 @@
     {% if is_character_consistency_mode and batch.actor_identity_id and post.video_prompt_json %}
     {% set scene_references = post.scene_reference_candidates or [] %}
     <div class="mt-6 border-t border-gray-200 pt-4">
-        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+        <div
+            class="rounded-lg border border-amber-200 bg-amber-50 p-3"
+            x-data="{ sceneReferenceReviewOpen: false, sceneReferenceReviewIndex: 0, sceneReferenceReviewCount: {{ scene_references | selectattr('image_url') | list | length }} }"
+            @keydown.escape.window="sceneReferenceReviewOpen = false"
+            @keydown.arrow-left.window="if (sceneReferenceReviewOpen && sceneReferenceReviewCount > 1) { sceneReferenceReviewIndex = (sceneReferenceReviewIndex + sceneReferenceReviewCount - 1) % sceneReferenceReviewCount }"
+            @keydown.arrow-right.window="if (sceneReferenceReviewOpen && sceneReferenceReviewCount > 1) { sceneReferenceReviewIndex = (sceneReferenceReviewIndex + 1) % sceneReferenceReviewCount }"
+        >
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                     <p class="text-sm font-semibold text-amber-900">Actor Scene Reference</p>
@@ -519,17 +525,24 @@
                 </div>
             </div>
             <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                {% set thumbnail_modal = namespace(index=0) %}
                 {% for reference in scene_references %}
                 {% set metadata = reference.provider_metadata or {} %}
                 <div class="rounded-md border border-amber-200 bg-white/70 p-2">
                     {% if reference.image_url %}
-                    <div class="flex h-48 items-center justify-center overflow-hidden rounded bg-amber-50 p-2">
+                    <button
+                        type="button"
+                        class="flex h-48 w-full items-center justify-center overflow-hidden rounded bg-amber-50 p-2 text-left ring-1 ring-transparent transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600"
+                        @click="sceneReferenceReviewIndex = {{ thumbnail_modal.index }}; sceneReferenceReviewOpen = true"
+                        aria-label="Review actor scene reference image"
+                    >
                         <img
                             src="{{ reference.image_url }}"
                             alt="Actor scene reference {{ metadata.get('angle_label') or metadata.get('angle_key') or 'angle' }}"
                             class="max-h-full w-full object-contain"
                         >
-                    </div>
+                    </button>
+                    {% set thumbnail_modal.index = thumbnail_modal.index + 1 %}
                     {% else %}
                     <div
                         class="flex h-48 flex-col items-center justify-center gap-2 rounded bg-amber-100 text-xs text-amber-800"
@@ -591,6 +604,145 @@
                 </div>
                 {% endfor %}
             </div>
+            {% if generated_count > 0 %}
+            <div
+                x-cloak
+                x-show="sceneReferenceReviewOpen"
+                x-transition.opacity
+                class="fixed inset-0 z-50 flex items-center justify-center px-3 py-4 sm:px-6"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Reference image review"
+            >
+                <div class="absolute inset-0 bg-gray-950/80" aria-hidden="true" @click="sceneReferenceReviewOpen = false"></div>
+                <div class="relative z-10 flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-amber-200 bg-white shadow-2xl">
+                    <div class="flex items-start justify-between gap-4 border-b border-amber-100 px-4 py-3 sm:px-5">
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-amber-800">Reference image review</p>
+                            <p class="mt-1 text-sm text-gray-600">Inspect the full reference before approving or regenerating the set.</p>
+                        </div>
+                        <button
+                            type="button"
+                            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-600"
+                            @click="sceneReferenceReviewOpen = false"
+                            aria-label="Close reference review"
+                        >
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
+                        <div class="relative flex min-h-[55vh] items-center justify-center bg-gray-950 p-3 sm:p-5">
+                            {% set modal_reference = namespace(index=0) %}
+                            {% for reference in scene_references %}
+                            {% if reference.image_url %}
+                            {% set metadata = reference.provider_metadata or {} %}
+                            <div
+                                x-show="sceneReferenceReviewIndex === {{ modal_reference.index }}"
+                                class="flex h-full w-full items-center justify-center"
+                            >
+                                <img
+                                    src="{{ reference.image_url }}"
+                                    alt="Actor scene reference {{ metadata.get('angle_label') or metadata.get('angle_key') or 'angle' }} full review"
+                                    class="max-h-[72vh] max-w-full object-contain"
+                                >
+                            </div>
+                            {% set modal_reference.index = modal_reference.index + 1 %}
+                            {% endif %}
+                            {% endfor %}
+                            {% if generated_count > 1 %}
+                            <button
+                                type="button"
+                                class="absolute left-3 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-gray-900 shadow hover:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                @click="sceneReferenceReviewIndex = (sceneReferenceReviewIndex + sceneReferenceReviewCount - 1) % sceneReferenceReviewCount"
+                                aria-label="Previous reference"
+                            >
+                                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                            </button>
+                            <button
+                                type="button"
+                                class="absolute right-3 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-gray-900 shadow hover:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                @click="sceneReferenceReviewIndex = (sceneReferenceReviewIndex + 1) % sceneReferenceReviewCount"
+                                aria-label="Next reference"
+                            >
+                                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            </button>
+                            {% endif %}
+                        </div>
+                        <div class="min-h-0 overflow-y-auto border-t border-amber-100 p-4 lg:border-l lg:border-t-0">
+                            {% set modal_details = namespace(index=0) %}
+                            {% for reference in scene_references %}
+                            {% if reference.image_url %}
+                            {% set metadata = reference.provider_metadata or {} %}
+                            <div x-show="sceneReferenceReviewIndex === {{ modal_details.index }}" class="space-y-4">
+                                <div>
+                                    <p class="text-xs font-semibold uppercase tracking-wide text-amber-800">Selected angle</p>
+                                    <h5 class="mt-1 text-base font-semibold text-gray-900">{{ metadata.get('angle_label') or metadata.get('angle_key') or 'angle' }}</h5>
+                                    <p class="mt-1 text-xs text-gray-600">{{ reference.scene_key }} · {{ reference.status }}</p>
+                                </div>
+                                {% if scene_contract.get('layout_lock') %}
+                                <div>
+                                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Layout lock</p>
+                                    <p class="mt-1 text-sm text-gray-800">{{ scene_contract.get('layout_lock') }}</p>
+                                </div>
+                                {% endif %}
+                                {% if scene_contract.get('acceptance_checklist') %}
+                                <div>
+                                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Check before approval</p>
+                                    <ul class="mt-2 list-disc space-y-1 pl-4 text-sm text-gray-700">
+                                        {% for item in scene_contract.get('acceptance_checklist') %}
+                                        <li>{{ item }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                                <div class="flex flex-wrap gap-2 border-t border-gray-100 pt-4">
+                                    <a
+                                        href="{{ reference.image_url }}"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        class="inline-flex items-center rounded-md bg-white px-3 py-2 text-xs font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-50"
+                                    >
+                                        Open original
+                                    </a>
+                                    <button
+                                        hx-post="/settings/character/scene-reference/{{ reference.id }}/regenerate"
+                                        hx-trigger="click"
+                                        hx-swap="none"
+                                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                        class="inline-flex items-center rounded-md bg-white px-3 py-2 text-xs font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-50"
+                                    >
+                                        Regenerate this angle
+                                    </button>
+                                    {% if reference_set_id and generated_count == 3 and set_gate.approved_count < 3 %}
+                                    <button
+                                        hx-post="/settings/character/posts/{{ post.id }}/scene-reference/sets/{{ reference_set_id }}/approve"
+                                        hx-trigger="click"
+                                        hx-swap="none"
+                                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                        class="inline-flex items-center rounded-md bg-green-700 px-3 py-2 text-xs font-medium text-white hover:bg-green-800"
+                                    >
+                                        Approve full set
+                                    </button>
+                                    <button
+                                        hx-post="/settings/character/posts/{{ post.id }}/scene-reference/sets/{{ reference_set_id }}/reject"
+                                        hx-trigger="click"
+                                        hx-swap="none"
+                                        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                                        class="inline-flex items-center rounded-md bg-white px-3 py-2 text-xs font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-50"
+                                    >
+                                        Reject full set
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% set modal_details.index = modal_details.index + 1 %}
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
             {% endif %}
         </div>
     </div>
