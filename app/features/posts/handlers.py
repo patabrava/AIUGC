@@ -27,6 +27,7 @@ from app.features.posts.prompt_builder import (
     build_optimized_prompt,
 )
 from app.features.characters.actor_identity import (
+    is_character_consistency_mode,
     is_character_consistency_light_mode,
     is_character_consistency_mid_mode,
     is_manual_creation_mode,
@@ -492,6 +493,11 @@ async def build_post_prompt(post_id: str):
             post_type=str(post.get("post_type") or "value"),
             scene_plan=scene_plan,
             legacy_32_visuals=_should_use_legacy_32_visuals(post),
+            use_legacy_short_character=(
+                is_character_consistency_mode(str(batch.get("creation_mode") or "").strip())
+                and not is_character_consistency_light_mode(str(batch.get("creation_mode") or "").strip())
+            ),
+            prompt_style=str(batch.get("creation_mode") or "standard").strip(),
         )
 
         existing_prompt = _parse_json_document(post.get("video_prompt_json"))

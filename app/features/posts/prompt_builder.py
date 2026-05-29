@@ -376,7 +376,7 @@ def _update_batch_scene_plan(batch_id: str, payload: dict) -> None:
 
 
 def ensure_scene_plan(batch: dict, *, topic_titles: list[str], correlation_id: str) -> Optional[dict[str, str]]:
-    if str(batch.get("creation_mode") or "automated").strip() not in {"character_consistency", "manual_character_consistency"}:
+    if not is_character_consistency_mode(str(batch.get("creation_mode") or "automated").strip()):
         return None
     existing = batch.get("scene_plan")
     if isinstance(existing, dict) and all(existing.get(key) for key in ("value", "lifestyle", "product")):

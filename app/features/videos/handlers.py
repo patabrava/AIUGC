@@ -576,6 +576,25 @@ def _load_or_build_video_prompt(
             legacy_32_visuals=legacy_32_visuals,
             use_legacy_short_character=use_legacy_short_character,
         )
+        if is_character_consistency_mode(creation_mode) and batch:
+            scene_plan = ensure_scene_plan(
+                batch,
+                topic_titles=[str(post.get("topic_title") or "").strip()],
+                correlation_id=correlation_id,
+            )
+            planned_scene = ""
+            if isinstance(scene_plan, dict):
+                planned_scene = str(scene_plan.get(str(post.get("post_type") or "value")) or "").strip()
+            current_scene = str(synced_prompt.get("scene") or "").strip()
+            if planned_scene and planned_scene not in current_scene:
+                synced_prompt = build_video_prompt_from_seed(
+                    seed_data,
+                    legacy_32_visuals=legacy_32_visuals,
+                    use_legacy_short_character=use_legacy_short_character,
+                    post_type=str(post.get("post_type") or "value"),
+                    scene_plan=scene_plan,
+                    prompt_style=creation_mode,
+                )
         if synced_prompt != video_prompt:
             supabase_client.table("posts").update({
                 "video_prompt_json": synced_prompt,

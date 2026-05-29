@@ -294,6 +294,7 @@ def test_scene_and_negative_prompt_helpers(monkeypatch):
             return {"value": "kitchen", "lifestyle": "cafe", "product": "office"}
 
     monkeypatch.setattr(prompt_builder, "_get_llm_client", lambda: _FakeLLM())
+    monkeypatch.setattr(prompt_builder, "_update_batch_scene_plan", lambda *args, **kwargs: None)
 
     assert prompt_builder.propose_scene_plan(
         brand="Brand",
@@ -310,6 +311,17 @@ def test_scene_and_negative_prompt_helpers(monkeypatch):
         scene_plan={"value": "kitchen"},
         override="custom",
     ) == "custom"
+    batch = {
+        "id": "batch-mid",
+        "brand": "Brand",
+        "creation_mode": "character_consistency_mid",
+        "scene_plan": None,
+    }
+    assert prompt_builder.ensure_scene_plan(
+        batch,
+        topic_titles=["A"],
+        correlation_id="corr",
+    ) == {"value": "kitchen", "lifestyle": "cafe", "product": "office"}
     assert "different room" not in prompt_builder.build_negative_prompt(
         creation_mode="character_consistency",
         is_extension=False,
@@ -418,6 +430,27 @@ def test_character_consistency_mid_prompt_includes_default_scene_with_actor_only
     assert prompt_builder.DEFAULT_SCENE_BODY in prompt["veo_prompt"]
     assert "submitted actor identity reference images only as the woman identity source" in prompt["veo_prompt"]
     assert "Ein Mid Satz fuer den Test." in prompt["veo_prompt"]
+
+
+def test_character_consistency_mid_prompt_uses_scene_plan_text():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {"script": "Ein Mid Satz fuer den Test."},
+        use_legacy_short_character=True,
+        prompt_style="character_consistency_mid",
+        post_type="lifestyle",
+        scene_plan={
+            "value": "A compact kitchen advice scene.",
+            "lifestyle": "A quiet living room advice scene with a light sofa and one small side table.",
+            "product": "A simple office product scene.",
+        },
+    )
+
+    assert prompt["prompt_style"] == "character_consistency_mid"
+    assert "A quiet living room advice scene" in prompt["veo_prompt"]
+    assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
+    assert "submitted actor identity reference images only as the woman identity source" in prompt["veo_prompt"]
 
 
 def test_video_prompt_uses_approved_scene_reference_scene_text_before_submit():
