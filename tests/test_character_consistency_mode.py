@@ -453,6 +453,37 @@ def test_character_consistency_mid_prompt_uses_scene_plan_text():
     assert "submitted actor identity reference images only as the woman identity source" in prompt["veo_prompt"]
 
 
+def test_character_consistency_scene_plan_fallback_uses_scene_bible(monkeypatch):
+    from app.features.characters.scene_reference import get_scene_bible
+    from app.features.posts import prompt_builder
+
+    class _FailingLLM:
+        def generate_json(self, *args, **kwargs):
+            raise RuntimeError("llm unavailable")
+
+    monkeypatch.setattr(prompt_builder, "_get_llm_client", lambda: _FailingLLM())
+    monkeypatch.setattr(prompt_builder, "_update_batch_scene_plan", lambda *args, **kwargs: None)
+
+    plan = prompt_builder.ensure_scene_plan(
+        {
+            "id": "batch-mid",
+            "brand": "Brand",
+            "creation_mode": "character_consistency_mid",
+            "scene_plan": None,
+        },
+        topic_titles=["A"],
+        correlation_id="corr",
+    )
+
+    scene = get_scene_bible("home_living_room_advice_a").scene_identity
+    assert plan == {
+        "value": f"Scene: {scene}",
+        "lifestyle": f"Scene: {scene}",
+        "product": f"Scene: {scene}",
+    }
+    assert prompt_builder.DEFAULT_SCENE_BODY not in plan["value"]
+
+
 def test_video_prompt_uses_approved_scene_reference_scene_text_before_submit():
     from app.features.characters.schemas import SceneReferenceSetSummary
     from app.features.characters.scene_reference import get_scene_bible

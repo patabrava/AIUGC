@@ -13,6 +13,7 @@ from app.features.characters.actor_identity import (
     is_character_consistency_mode,
     is_character_consistency_light_mode,
 )
+from app.features.characters.scene_reference import get_scene_bible
 from app.core.logging import get_logger
 from app.core.errors import ValidationError
 
@@ -355,17 +356,18 @@ def propose_scene_plan(*, brand: str, topic_titles: Iterable[str], correlation_i
         brand=brand,
         topics_block="\n".join(f"- {title}" for title in topics) or "- (none yet)",
     )
-    fallback = {"value": DEFAULT_SCENE, "lifestyle": DEFAULT_SCENE, "product": DEFAULT_SCENE}
+    fallback_scene = f"Scene: {get_scene_bible('home_living_room_advice_a').scene_identity}"
+    fallback = {"value": fallback_scene, "lifestyle": fallback_scene, "product": fallback_scene}
     try:
         response = _get_llm_client().generate_json(prompt, system_prompt=_SCENE_PROPOSAL_SYSTEM_PROMPT)
     except Exception as exc:  # noqa: BLE001 - LLM fallback must be non-blocking here.
-        logger.warning("scene_plan_llm_failed_fallback_to_default", correlation_id=correlation_id, error=str(exc))
+        logger.warning("scene_plan_llm_failed_fallback_to_scene_bible", correlation_id=correlation_id, error=str(exc))
         return fallback
 
     return {
-        "value": str(response.get("value") or DEFAULT_SCENE).strip() or DEFAULT_SCENE,
-        "lifestyle": str(response.get("lifestyle") or DEFAULT_SCENE).strip() or DEFAULT_SCENE,
-        "product": str(response.get("product") or DEFAULT_SCENE).strip() or DEFAULT_SCENE,
+        "value": str(response.get("value") or fallback_scene).strip() or fallback_scene,
+        "lifestyle": str(response.get("lifestyle") or fallback_scene).strip() or fallback_scene,
+        "product": str(response.get("product") or fallback_scene).strip() or fallback_scene,
     }
 
 
