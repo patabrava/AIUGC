@@ -3,7 +3,7 @@ Video Prompt Audit Trail
 Records the exact prompt sent to video generation providers for debugging.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from app.adapters.supabase_client import get_supabase
 from app.core.logging import get_logger
@@ -25,6 +25,7 @@ def record_prompt_audit(
     correlation_id: str,
     batch_id: Optional[str] = None,
     seed: Optional[int] = None,
+    reference_image_metadata: Optional[dict[str, Any]] = None,
 ) -> None:
     """Record the prompt sent to a video provider for audit/debugging.
 
@@ -42,6 +43,7 @@ def record_prompt_audit(
         "resolution": resolution,
         "requested_seconds": requested_seconds,
         "correlation_id": correlation_id,
+        "reference_image_metadata": reference_image_metadata or {},
     }
     if seed is not None:
         row["seed"] = seed

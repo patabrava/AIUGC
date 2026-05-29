@@ -603,6 +603,7 @@ def approve_scene_reference_set(post_id: str, reference_set_id: str):
     gate.details.update(
         {
             "scene_consistency_set_approved": True,
+            "actor_identity_match_confirmed": True,
             "reference_set_id": reference_set_id,
         }
     )

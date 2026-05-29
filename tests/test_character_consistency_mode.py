@@ -25,7 +25,28 @@ def _set_gate(reference_set_id: str = "set-1") -> dict:
         "gate_type": "manual",
         "details": {
             "scene_consistency_set_approved": True,
+            "actor_identity_match_confirmed": True,
             "reference_set_id": reference_set_id,
+        },
+    }
+
+
+def _lora_metadata(angle_key: str = "front_mid", reference_set_id: str = "set-1") -> dict:
+    return {
+        "reference_set_id": reference_set_id,
+        "angle_key": angle_key,
+        "identity_lock_contract": {
+            "provider": "magnific",
+            "provider_lora_id": "1786946",
+            "provider_lora_name": "ayra-actor-longchar-20260521",
+            "actor_identity_id": "actor-1",
+            "identity_strength": 100,
+            "prompt_lora_handle_required": True,
+            "styling_characters_required": True,
+        },
+        "mystic_request": {
+            "prompt": "Photorealistic still of @ayra-actor-longchar-20260521::100 in a stable scene.",
+            "styling": {"characters": [{"id": "1786946", "strength": 100}]},
         },
     }
 
@@ -359,8 +380,8 @@ def test_character_consistency_prompt_keeps_scene_text_with_actor_only_reference
     assert "A generated kitchen scene" in prompt["veo_prompt"]
     assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
     assert prompt_builder.LEGACY_SCENE_BODY not in prompt["veo_prompt"]
-    assert "approved reference images" in prompt["veo_prompt"]
-    assert "Do not use reference-image backgrounds as the scene source" in prompt["veo_prompt"]
+    assert "approved LoRA-generated reference images" in prompt["veo_prompt"]
+    assert "visual source for the same woman, wardrobe, wheelchair framing, and room layout" in prompt["veo_prompt"]
     assert "Ein ruhiger Satz fuer den Test." in prompt["veo_prompt"]
 
 
@@ -378,7 +399,7 @@ def test_manual_character_consistency_prompt_keeps_manual_scene_text_with_actor_
     assert "Scene:\n" in prompt["veo_prompt"]
     assert "A manually entered bedroom scene" in prompt["veo_prompt"]
     assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
-    assert "approved reference images" in prompt["veo_prompt"]
+    assert "approved LoRA-generated reference images" in prompt["veo_prompt"]
     assert "Ein manueller Satz fuer den Test." in prompt["veo_prompt"]
 
 
@@ -395,8 +416,86 @@ def test_character_consistency_mid_prompt_includes_default_scene_with_actor_only
     assert "Scene:\n" in prompt["veo_prompt"]
     assert "Match the approved reference images" not in prompt["veo_prompt"]
     assert prompt_builder.DEFAULT_SCENE_BODY in prompt["veo_prompt"]
-    assert "approved reference images" in prompt["veo_prompt"]
+    assert "approved LoRA-generated reference images" in prompt["veo_prompt"]
     assert "Ein Mid Satz fuer den Test." in prompt["veo_prompt"]
+
+
+def test_video_prompt_uses_approved_scene_reference_scene_text_before_submit():
+    from app.features.characters.schemas import SceneReferenceSetSummary
+    from app.features.characters.scene_reference import get_scene_bible
+    from app.features.posts import prompt_builder
+    from app.features.videos import handlers as video_handlers
+
+    prompt = prompt_builder.build_video_prompt_from_seed(
+        {"script": "Ein Satz fuer das Wohnzimmer."},
+        use_legacy_short_character=True,
+        prompt_style="character_consistency_mid",
+    )
+    reference_set = SceneReferenceSetSummary.from_rows(
+        post_id="post-1",
+        reference_set_id="set-1",
+        rows=[
+            {
+                "id": "ref-front",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn.example.com/front.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata("front_mid", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+            {
+                "id": "ref-left",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn.example.com/left.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+            {
+                "id": "ref-profile",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn.example.com/profile.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata("right_profile", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+        ],
+    )
+
+    updated = video_handlers._apply_scene_reference_scene_to_video_prompt(
+        prompt,
+        {"script": "Ein Satz fuer das Wohnzimmer."},
+        scene_reference_set=reference_set,
+        creation_mode="character_consistency_mid",
+    )
+
+    scene_anchor = get_scene_bible("home_living_room_advice_a").scene_identity
+    assert prompt_builder.DEFAULT_SCENE_BODY in prompt["veo_prompt"]
+    assert scene_anchor in updated["veo_prompt"]
+    assert "A modern, tidy bedroom with blush-pink walls" not in updated["veo_prompt"]
+    assert "Ein Satz fuer das Wohnzimmer." in updated["veo_prompt"]
+
+
+def test_character_consistency_prompt_treats_lora_stills_as_visual_source():
+    from app.features.posts import prompt_builder
+
+    prompt = prompt_builder.build_reference_image_scene_base_prompt(
+        "Ein Satz fuer den Test.",
+        character=prompt_builder.LEGACY_SHORT_CHARACTER,
+        scene="Home living room advice scene A. Keep this exact room identity.",
+    )
+
+    assert "approved LoRA-generated reference images" in prompt
+    assert "visual source for the same woman, wardrobe, wheelchair framing, and room layout" in prompt
+    assert "only as the woman identity source" not in prompt
+    assert "Do not use reference-image backgrounds as the scene source" not in prompt
+    assert "Home living room advice scene A" in prompt
 
 
 def test_character_consistency_prompt_sync_removes_legacy_scene_text():
@@ -423,7 +522,7 @@ def test_character_consistency_prompt_sync_removes_legacy_scene_text():
     assert synced["prompt_style"] == "character_consistency"
     assert "Scene:\n" in synced["veo_prompt"]
     assert "legacy bedroom scene" in synced["veo_prompt"]
-    assert "approved reference images" in synced["veo_prompt"]
+    assert "approved LoRA-generated reference images" in synced["veo_prompt"]
     assert "Ein neuer Satz fuer den Test." in synced["veo_prompt"]
 
 
@@ -442,8 +541,8 @@ def test_character_consistency_light_prompt_uses_reference_image_motion_prompt()
     )
 
     assert prompt["prompt_style"] == "character_consistency_light"
-    assert "Use the approved reference images only as the woman identity source" in prompt["veo_prompt"]
-    assert "Place that same woman in the scene above" in prompt["veo_prompt"]
+    assert "Use the approved LoRA-generated reference images as the visual source" in prompt["veo_prompt"]
+    assert "Do not invent a new face, hairstyle, wardrobe, wheelchair setup, or room layout" in prompt["veo_prompt"]
     assert "38-year-old German woman" not in prompt["veo_prompt"]
     assert "Scene:" in prompt["veo_prompt"]
     assert '"Ein erster Satz' not in prompt["veo_prompt"]
@@ -468,7 +567,7 @@ def test_character_consistency_mid_prompt_uses_stripped_scene_block():
     assert "Character:" in prompt["veo_prompt"]
     assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt["veo_prompt"]
     assert "Scene:\n" in prompt["veo_prompt"]
-    assert "approved reference images" in prompt["veo_prompt"]
+    assert "approved LoRA-generated reference images" in prompt["veo_prompt"]
     assert "A modern, tidy bedroom with blush-pink walls" in prompt["veo_prompt"]
     assert "Dialogue:\nEin erster Satz. Ein zweiter Satz." in prompt["veo_prompt"]
 
@@ -512,7 +611,7 @@ def test_light_extended_base_prompt_uses_reference_image_motion_prompt():
         creation_mode="character_consistency_light",
     )
 
-    assert "Use the approved reference images only as the woman identity source" in prompt_text
+    assert "Use the approved LoRA-generated reference images as the visual source" in prompt_text
     assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
     assert "So bleibt dein Tag klarer und planbarer." not in prompt_text
     assert "Scene:" in prompt_text
@@ -539,7 +638,7 @@ def test_mid_extended_base_prompt_uses_stripped_scene_block():
 
     assert "Character:" in prompt_text
     assert "Scene:\n" in prompt_text
-    assert "approved reference images" in prompt_text
+    assert "approved LoRA-generated reference images" in prompt_text
     assert "A modern, tidy bedroom with blush-pink walls" in prompt_text
     assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
     assert "So bleibt dein Tag klarer und planbarer." not in prompt_text
@@ -573,7 +672,7 @@ def test_character_consistency_extended_base_prompt_keeps_scene_text():
     assert metadata["veo_segments_total"] >= 2
     assert "Scene:\n" in prompt_text
     assert "stored scene" in prompt_text
-    assert "approved reference images" in prompt_text
+    assert "approved LoRA-generated reference images" in prompt_text
     assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
 
 
@@ -771,6 +870,41 @@ def test_mid_actor_identity_batch_blocks_video_without_complete_reference_set():
     assert "three approved SceneReferenceImages" in exc.value.message
 
 
+def test_character_consistency_32s_blocks_lora_backed_video_route():
+    from app.core.errors import FlowForgeException
+    from app.core.video_profiles import get_duration_profile_for_creation_mode
+    from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
+    from app.features.characters.schemas import SceneReferenceSetSummary
+    from app.features.videos import handlers as video_handlers
+
+    rows = []
+    for angle_key in ("front_mid", "left_three_quarter", "right_profile"):
+        rows.append(
+            {
+                "id": f"ref-{angle_key}",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": f"https://cdn.example.com/{angle_key}.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata(angle_key, "set-1"),
+                "identity_gate_result": _set_gate(),
+            }
+        )
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+    profile = get_duration_profile_for_creation_mode(32, "character_consistency_mid")
+
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_set_ready(
+            batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
+            post={"id": "post-1", "batch_id": "batch-1"},
+            scene_reference_set=summary,
+            route=video_handlers._scene_reference_route_key(profile),
+        )
+
+    assert "8-second VEO base request" in exc.value.message
+
+
 def test_submit_video_request_attaches_actor_scene_reference_to_vertex(monkeypatch):
     from app.features.videos import handlers as video_handlers
 
@@ -818,17 +952,61 @@ def test_submit_video_request_attaches_actor_scene_reference_to_vertex(monkeypat
         },
     )
 
-    assert len(captured["reference_images"]) == 3
-    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
-    assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn.example.com/1.png"
-    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/2.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_reference_set"
-    assert result["provider_metadata"]["actor_identity_reference_image_count"] == 3
-    assert result["provider_metadata"]["scene_reference_image_count"] == 0
-    assert result["provider_metadata"]["scene_reference_images_used_for_video"] is False
-    assert result["provider_metadata"]["scene_reference_images_role"] == "approval_only"
-    assert result["provider_metadata"]["selected_scene_reference_image_id"] == "scene-1"
-    assert result["provider_metadata"]["reference_image_roles"] == ["actor_identity", "actor_identity", "actor_identity"]
+    assert len(captured["reference_images"]) == 1
+    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn/scene.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_scene_reference"
+    assert result["provider_metadata"]["scene_reference_image_id"] == "scene-1"
+    assert result["provider_metadata"]["scene_reference_images_used_for_video"] is True
+    assert result["provider_metadata"]["reference_image_roles"] == ["scene_reference"]
+
+
+def test_submit_video_request_rejects_unverified_scene_reference_set(monkeypatch):
+    from app.core.errors import FlowForgeException
+    from app.features.characters.schemas import SceneReferenceSetSummary
+    from app.features.videos import handlers as video_handlers
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            raise AssertionError("provider should not be called")
+
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+    reference_set = SceneReferenceSetSummary.from_rows(
+        post_id="post-1",
+        reference_set_id="set-1",
+        rows=[
+            {
+                "id": f"scene-{angle_key}",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": f"https://cdn/{angle_key}.png",
+                "scene_key": "bathroom_adaptation",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": {"reference_set_id": "set-1", "angle_key": angle_key},
+                "identity_gate_result": _set_gate(),
+            }
+            for angle_key in ("front_mid", "left_three_quarter", "right_profile")
+        ],
+    )
+
+    with pytest.raises(FlowForgeException) as exc:
+        video_handlers._submit_video_request(
+            provider="veo_3_1",
+            model=None,
+            prompt_text="Prompt",
+            negative_prompt=None,
+            aspect_ratio="9:16",
+            provider_aspect_ratio="9:16",
+            requested_aspect_ratio="9:16",
+            resolution="1080p",
+            seconds=8,
+            size=None,
+            correlation_id="test-unverified-reference-scene",
+            provider_duration_seconds=8,
+            creation_mode="character_consistency",
+            scene_reference_set=reference_set,
+        )
+
+    assert "LoRA identity lock metadata" in exc.value.message
 
 
 def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(monkeypatch):
@@ -862,7 +1040,7 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
                 "image_url": "https://cdn/front.png",
                 "scene_key": "bathroom_adaptation",
                 "wardrobe_key": "everyday_sweater",
-                "provider_metadata": {"reference_set_id": "set-1", "angle_key": "front_mid"},
+                "provider_metadata": _lora_metadata("front_mid", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
             {
@@ -872,7 +1050,7 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
                 "image_url": "https://cdn/left.png",
                 "scene_key": "bathroom_adaptation",
                 "wardrobe_key": "everyday_sweater",
-                "provider_metadata": {"reference_set_id": "set-1", "angle_key": "left_three_quarter"},
+                "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
             {
@@ -882,7 +1060,7 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
                 "image_url": "https://cdn/profile.png",
                 "scene_key": "bathroom_adaptation",
                 "wardrobe_key": "everyday_sweater",
-                "provider_metadata": {"reference_set_id": "set-1", "angle_key": "right_profile"},
+                "provider_metadata": _lora_metadata("right_profile", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
         ],
@@ -905,20 +1083,39 @@ def test_submit_video_request_attaches_three_actor_scene_references_to_vertex(mo
     )
 
     assert len(captured["reference_images"]) == 3
-    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
-    assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn.example.com/1.png"
-    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/2.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_reference_set"
+    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn/front.png"
+    assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn/left.png"
+    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn/profile.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_scene_reference_set"
     assert result["provider_metadata"]["scene_reference_set_id"] == "set-1"
     assert result["provider_metadata"]["scene_reference_image_ids"] == ["scene-front", "scene-left", "scene-profile"]
-    assert result["provider_metadata"]["selected_scene_reference_image_id"] == "scene-front"
-    assert result["provider_metadata"]["selected_scene_reference_angle_key"] == "front_mid"
-    assert result["provider_metadata"]["actor_identity_reference_image_count"] == 3
-    assert result["provider_metadata"]["scene_reference_image_count"] == 0
-    assert result["provider_metadata"]["scene_reference_images_used_for_video"] is False
-    assert result["provider_metadata"]["scene_reference_images_role"] == "approval_only"
-    assert result["provider_metadata"]["reference_image_roles"] == ["actor_identity", "actor_identity", "actor_identity"]
+    assert result["provider_metadata"]["scene_reference_image_count"] == 3
+    assert result["provider_metadata"]["scene_reference_images_used_for_video"] is True
+    assert result["provider_metadata"]["reference_image_roles"] == ["scene_reference", "scene_reference", "scene_reference"]
     assert result["provider_metadata"]["reference_image_count"] == 3
+
+
+def test_batch_prompt_audit_receives_scene_reference_metadata():
+    from app.features.videos import handlers as video_handlers
+
+    video_handlers.record_prompt_audit(
+        post_id="post-1",
+        operation_id="op-1",
+        provider="vertex_ai",
+        prompt_text="Prompt",
+        negative_prompt=None,
+        prompt_path="batch_standard",
+        aspect_ratio="9:16",
+        resolution="720p",
+        requested_seconds=8,
+        correlation_id="corr",
+        batch_id="batch-1",
+        reference_image_metadata={
+            "source": "actor_identity_scene_reference_set",
+            "scene_reference_image_ids": ["front", "left", "profile"],
+            "reference_image_roles": ["scene_reference", "scene_reference", "scene_reference"],
+        },
+    )
 
 
 def test_character_consistency_provider_payload_keeps_reference_images_with_no_scene_prompt(monkeypatch):
@@ -959,9 +1156,24 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
         reference_set_id="set-1",
         actor_identity_id="actor-1",
         approved_rows=[
-            {"id": "ref-1", "provider_metadata": {"angle_key": "front_mid"}},
-            {"id": "ref-2", "provider_metadata": {"angle_key": "left_three_quarter"}},
-            {"id": "ref-3", "provider_metadata": {"angle_key": "right_profile"}},
+            {
+                "id": "ref-1",
+                "actor_identity_id": "actor-1",
+                "provider_metadata": _lora_metadata("front_mid", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+            {
+                "id": "ref-2",
+                "actor_identity_id": "actor-1",
+                "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+            {
+                "id": "ref-3",
+                "actor_identity_id": "actor-1",
+                "provider_metadata": _lora_metadata("right_profile", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
         ],
         missing_angle_keys=[],
     )
@@ -991,6 +1203,77 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
     assert captured["reference_images"] and len(captured["reference_images"]) == 3
     assert "Scene:\n" not in captured["prompt"]
     assert "approved reference images" in captured["prompt"]
+
+
+def test_submit_veo_rejects_scene_reference_set_unless_eight_second_base(monkeypatch):
+    from app.core.errors import FlowForgeException
+    from app.features.characters.schemas import SceneReferenceSetSummary
+    from app.features.videos import handlers as video_handlers
+
+    class FakeVeoClient:
+        def submit_video_generation(self, **kwargs):
+            return {"operation_id": "op-should-not-submit", "status": "queued"}
+
+    monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
+
+    reference_set = SceneReferenceSetSummary.from_rows(
+        post_id="post-1",
+        reference_set_id="set-1",
+        rows=[
+            {
+                "id": "scene-front",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/front.png",
+                "scene_key": "bathroom_adaptation",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata("front_mid", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+            {
+                "id": "scene-left",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/left.png",
+                "scene_key": "bathroom_adaptation",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+            {
+                "id": "scene-profile",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/profile.png",
+                "scene_key": "bathroom_adaptation",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata("right_profile", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
+        ],
+    )
+
+    with pytest.raises(FlowForgeException) as exc:
+        video_handlers._submit_video_request(
+            provider="veo_3_1",
+            model=None,
+            prompt_text="Prompt",
+            negative_prompt=None,
+            aspect_ratio="9:16",
+            provider_aspect_ratio="9:16",
+            requested_aspect_ratio="9:16",
+            resolution="1080p",
+            seconds=6,
+            size=None,
+            correlation_id="test-reference-scene-duration",
+            provider_duration_seconds=6,
+            creation_mode="character_consistency",
+            character_snapshot=None,
+            scene_reference_set=reference_set,
+        )
+
+    assert "8 seconds" in exc.value.message
 
 
 def test_actor_scene_reference_download_follows_provider_redirects(monkeypatch):

@@ -43,7 +43,28 @@ def _set_gate(reference_set_id: str = "set-1") -> dict:
         "gate_type": "manual",
         "details": {
             "scene_consistency_set_approved": True,
+            "actor_identity_match_confirmed": True,
             "reference_set_id": reference_set_id,
+        },
+    }
+
+
+def _lora_metadata(angle_key: str = "front_mid", reference_set_id: str = "set-1") -> dict:
+    return {
+        "reference_set_id": reference_set_id,
+        "angle_key": angle_key,
+        "identity_lock_contract": {
+            "provider": "magnific",
+            "provider_lora_id": "1786946",
+            "provider_lora_name": "ayra-actor-longchar-20260521",
+            "actor_identity_id": "actor-1",
+            "identity_strength": 100,
+            "prompt_lora_handle_required": True,
+            "styling_characters_required": True,
+        },
+        "mystic_request": {
+            "prompt": "Photorealistic still of @ayra-actor-longchar-20260521::100 in a stable scene.",
+            "styling": {"characters": [{"id": "1786946", "strength": 100}]},
         },
     }
 
@@ -242,6 +263,182 @@ def test_scene_reference_set_summary_requires_full_set_gate_details():
 
     assert summary.is_ready is False
     assert summary.missing_angle_keys == ["front_mid", "left_three_quarter", "right_profile"]
+
+
+def test_video_scene_reference_set_gate_requires_actor_identity_confirmation():
+    from app.core.errors import FlowForgeException
+    from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
+    rows = [
+        {
+            "id": "front",
+            "actor_identity_id": "actor-1",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/front.png",
+            "scene_key": "home_living_room_advice_a",
+            "wardrobe_key": "everyday_sweater",
+            "provider_metadata": _lora_metadata("front_mid", "set-1"),
+            "identity_gate_result": {
+                "status": "passed",
+                "reason": "scene only",
+                "gate_type": "manual",
+                "details": {"scene_consistency_set_approved": True, "reference_set_id": "set-1"},
+            },
+        },
+        {
+            "id": "left",
+            "actor_identity_id": "actor-1",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/left.png",
+            "scene_key": "home_living_room_advice_a",
+            "wardrobe_key": "everyday_sweater",
+            "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
+            "identity_gate_result": {
+                "status": "passed",
+                "reason": "scene only",
+                "gate_type": "manual",
+                "details": {"scene_consistency_set_approved": True, "reference_set_id": "set-1"},
+            },
+        },
+        {
+            "id": "profile",
+            "actor_identity_id": "actor-1",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/profile.png",
+            "scene_key": "home_living_room_advice_a",
+            "wardrobe_key": "everyday_sweater",
+            "provider_metadata": _lora_metadata("right_profile", "set-1"),
+            "identity_gate_result": {
+                "status": "passed",
+                "reason": "scene only",
+                "gate_type": "manual",
+                "details": {"scene_consistency_set_approved": True, "reference_set_id": "set-1"},
+            },
+        },
+    ]
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_set_ready(
+            batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
+            post={"id": "post-1", "batch_id": "batch-1"},
+            scene_reference_set=summary,
+            route="short",
+        )
+
+    assert "actor identity match" in exc.value.message
+
+
+def test_video_scene_reference_set_gate_requires_lora_lock_metadata():
+    from app.core.errors import FlowForgeException
+    from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
+    rows = []
+    for angle_key in ("front_mid", "left_three_quarter", "right_profile"):
+        rows.append(
+            {
+                "id": f"ref-{angle_key}",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": f"https://cdn.example.com/{angle_key}.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": {"reference_set_id": "set-1", "angle_key": angle_key},
+                "identity_gate_result": _set_gate(),
+            }
+        )
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_set_ready(
+            batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
+            post={"id": "post-1", "batch_id": "batch-1"},
+            scene_reference_set=summary,
+            route="short",
+        )
+
+    assert "LoRA identity lock metadata" in exc.value.message
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("structure_reference", "unsafe-reference"),
+        ("structure_reference", None),
+        ("structure_reference", ""),
+        ("style_reference", "unsafe-reference"),
+        ("style_reference", None),
+        ("style_reference", ""),
+        ("model", "fluid"),
+        ("model", None),
+    ],
+)
+def test_video_scene_reference_set_gate_rejects_lora_unsafe_mystic_references(field, value):
+    from app.core.errors import FlowForgeException
+    from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
+    rows = []
+    for angle_key in ("front_mid", "left_three_quarter", "right_profile"):
+        metadata = _lora_metadata(angle_key, "set-1")
+        metadata["mystic_request"][field] = value
+        rows.append(
+            {
+                "id": f"ref-{angle_key}",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": f"https://cdn.example.com/{angle_key}.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": metadata,
+                "identity_gate_result": _set_gate(),
+            }
+        )
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_set_ready(
+            batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
+            post={"id": "post-1", "batch_id": "batch-1"},
+            scene_reference_set=summary,
+            route="short",
+        )
+
+    assert "LoRA identity lock metadata" in exc.value.message
+
+
+def test_video_scene_reference_set_gate_blocks_extended_lora_route():
+    from app.core.errors import FlowForgeException
+    from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
+    rows = []
+    for angle_key in ("front_mid", "left_three_quarter", "right_profile"):
+        rows.append(
+            {
+                "id": f"ref-{angle_key}",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": f"https://cdn.example.com/{angle_key}.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata(angle_key, "set-1"),
+                "identity_gate_result": _set_gate(),
+            }
+        )
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+
+    with pytest.raises(FlowForgeException) as exc:
+        ensure_video_scene_reference_set_ready(
+            batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
+            post={"id": "post-1", "batch_id": "batch-1"},
+            scene_reference_set=summary,
+            route="extended",
+        )
+
+    assert "8-second VEO base request" in exc.value.message
 
 
 def test_select_latest_reference_set_id_uses_newest_complete_set():
@@ -908,6 +1105,7 @@ def test_approve_scene_reference_set_marks_all_rows_and_attaches_front(monkeypat
     assert "scene consistency" in recorded[0]["gate_result"].reason
     assert recorded[0]["gate_result"].details == {
         "scene_consistency_set_approved": True,
+        "actor_identity_match_confirmed": True,
         "reference_set_id": "set-1",
     }
     assert attached[0]["post_id"] == "post-1"

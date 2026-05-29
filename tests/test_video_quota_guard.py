@@ -27,7 +27,8 @@ def _valid_32s_script() -> str:
         "Erster langer Satz erklärt ruhig den Einstieg und setzt den Kontext für die Zuschauerin heute klar. "
         "Zweiter langer Satz führt die Beobachtung weiter und bleibt natürlich im gesprochenen Rhythmus stabil. "
         "Dritter langer Satz nennt den konkreten Nutzen und verbindet ihn mit einer Alltagssituation direkt. "
-        "Vierter langer Satz schließt den Gedanken sauber ab und bleibt ohne neue Pointe."
+        "Vierter langer Satz schließt den Gedanken sauber ab, zeigt den nächsten kleinen Schritt im Alltag "
+        "und bleibt ohne neue Pointe oder unnötige visuelle Ablenkung."
     )
 
 

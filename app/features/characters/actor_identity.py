@@ -145,6 +145,87 @@ def ensure_video_scene_reference_ready(
     }
 
 
+def _scene_reference_set_has_actor_identity_confirmation(scene_reference_set: SceneReferenceSetSummary) -> bool:
+    for row in scene_reference_set.approved_rows:
+        gate = row.get("identity_gate_result") if isinstance(row.get("identity_gate_result"), dict) else {}
+        details = gate.get("details") if isinstance(gate.get("details"), dict) else {}
+        if details.get("actor_identity_match_confirmed") is not True:
+            return False
+    return True
+
+
+def _metadata_int_equals(value: Any, expected: int) -> bool:
+    try:
+        return int(value) == expected
+    except (TypeError, ValueError):
+        return False
+
+
+def _scene_reference_row_has_lora_identity_lock(row: dict[str, Any], *, batch_actor_identity_id: Any) -> bool:
+    actor_identity_id = str(row.get("actor_identity_id") or "").strip()
+    if not actor_identity_id or actor_identity_id != str(batch_actor_identity_id or "").strip():
+        return False
+
+    metadata = row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}
+    identity_contract = (
+        metadata.get("identity_lock_contract") if isinstance(metadata.get("identity_lock_contract"), dict) else {}
+    )
+    if str(identity_contract.get("actor_identity_id") or "").strip() != actor_identity_id:
+        return False
+    if identity_contract.get("prompt_lora_handle_required") is not True:
+        return False
+    if identity_contract.get("styling_characters_required") is not True:
+        return False
+    if not _metadata_int_equals(identity_contract.get("identity_strength"), 100):
+        return False
+
+    mystic_request = metadata.get("mystic_request") if isinstance(metadata.get("mystic_request"), dict) else {}
+    if any(key in mystic_request for key in ("structure_reference", "style_reference", "model")):
+        return False
+
+    styling = mystic_request.get("styling") if isinstance(mystic_request.get("styling"), dict) else {}
+    characters = styling.get("characters") if isinstance(styling.get("characters"), list) else []
+    first_character = characters[0] if characters and isinstance(characters[0], dict) else {}
+    provider_lora_id = str(identity_contract.get("provider_lora_id") or "").strip()
+    if not provider_lora_id or str(first_character.get("id") or "").strip() != provider_lora_id:
+        return False
+    if not _metadata_int_equals(first_character.get("strength"), 100):
+        return False
+
+    provider_lora_name = str(identity_contract.get("provider_lora_name") or "").strip()
+    prompt_text = str(mystic_request.get("prompt") or row.get("prompt") or "")
+    return bool(provider_lora_name and f"@{provider_lora_name}::100" in prompt_text)
+
+
+def _scene_reference_set_has_lora_identity_lock(
+    scene_reference_set: SceneReferenceSetSummary,
+    *,
+    batch_actor_identity_id: Any,
+) -> bool:
+    return all(
+        _scene_reference_row_has_lora_identity_lock(row, batch_actor_identity_id=batch_actor_identity_id)
+        for row in scene_reference_set.approved_rows
+    )
+
+
+def scene_reference_set_has_lora_identity_lock(
+    scene_reference_set: SceneReferenceSetSummary,
+    *,
+    batch_actor_identity_id: Any = None,
+) -> bool:
+    resolved_actor_identity_id = batch_actor_identity_id or getattr(scene_reference_set, "actor_identity_id", None)
+    if not resolved_actor_identity_id and scene_reference_set.approved_rows:
+        resolved_actor_identity_id = scene_reference_set.approved_rows[0].get("actor_identity_id")
+    return _scene_reference_set_has_lora_identity_lock(
+        scene_reference_set,
+        batch_actor_identity_id=resolved_actor_identity_id,
+    )
+
+
+def scene_reference_set_has_actor_identity_confirmation(scene_reference_set: SceneReferenceSetSummary) -> bool:
+    return _scene_reference_set_has_actor_identity_confirmation(scene_reference_set)
+
+
 def ensure_video_scene_reference_set_ready(
     *,
     batch: dict[str, Any],
@@ -171,6 +252,43 @@ def ensure_video_scene_reference_set_ready(
                 "post_id": post.get("id"),
                 "batch_id": batch.get("id"),
                 "missing_angle_keys": scene_reference_set.missing_angle_keys if scene_reference_set else [],
+            },
+            status_code=422,
+        )
+    if not scene_reference_set_has_actor_identity_confirmation(scene_reference_set):
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity video generation requires operator-confirmed actor identity match for all three approved SceneReferenceImages.",
+            details={
+                "post_id": post.get("id"),
+                "batch_id": batch.get("id"),
+                "reference_set_id": scene_reference_set.reference_set_id,
+            },
+            status_code=422,
+        )
+    if not scene_reference_set_has_lora_identity_lock(
+        scene_reference_set,
+        batch_actor_identity_id=batch.get("actor_identity_id"),
+    ):
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity video generation requires LoRA identity lock metadata on all three approved SceneReferenceImages.",
+            details={
+                "post_id": post.get("id"),
+                "batch_id": batch.get("id"),
+                "reference_set_id": scene_reference_set.reference_set_id,
+            },
+            status_code=422,
+        )
+    if route in {"extended", "veo_extended"}:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="LoRA-backed Character Consistency video generation requires an 8-second VEO base request; the current extended route cannot safely submit approved SceneReferenceImages.",
+            details={
+                "post_id": post.get("id"),
+                "batch_id": batch.get("id"),
+                "route": route,
+                "reference_set_id": scene_reference_set.reference_set_id,
             },
             status_code=422,
         )
