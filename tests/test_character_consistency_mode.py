@@ -1127,6 +1127,56 @@ def test_submit_video_request_uses_actor_identity_anchors_not_scene_references_t
     assert result["provider_metadata"]["reference_image_count"] == 3
 
 
+def test_submit_video_request_uses_actor_identity_anchors_without_scene_reference_set(monkeypatch):
+    from app.features.videos import handlers as video_handlers
+
+    captured = {}
+
+    class FakeVertexClient:
+        def submit_text_video(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/actor-only",
+                "status": "submitted",
+                "provider_model": kwargs.get("model") or "veo-3.1-generate-001",
+            }
+
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})())
+    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
+    monkeypatch.setattr(video_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: _ready_actor_identity())
+
+    result = video_handlers._submit_video_request(
+        provider="vertex_ai",
+        prompt_text="Prompt with scene text only",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size=None,
+        correlation_id="corr-actor-only",
+        provider_duration_seconds=8,
+        creation_mode="character_consistency_mid",
+        actor_identity_id="actor-1",
+        character_snapshot=None,
+        scene_reference_set=None,
+    )
+
+    assert len(captured["reference_images"]) == 3
+    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_anchor_images"
+    assert result["provider_metadata"]["actor_identity_id"] == "actor-1"
+    assert result["provider_metadata"]["reference_image_roles"] == [
+        "actor_identity_anchor",
+        "actor_identity_anchor",
+        "actor_identity_anchor",
+    ]
+    assert result["provider_metadata"]["reference_image_count"] == 3
+    assert "scene_reference_set_id" not in result["provider_metadata"]
+
+
 def test_batch_prompt_audit_receives_scene_reference_metadata():
     from app.features.videos import handlers as video_handlers
 

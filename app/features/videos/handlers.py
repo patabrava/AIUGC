@@ -2507,6 +2507,11 @@ def _submit_video_request(
                     scene_reference=scene_reference,
                     correlation_id=correlation_id,
                 )
+            elif actor_identity_id and veo_duration_seconds == 8:
+                reference_bundle = _load_actor_identity_anchor_assets(
+                    actor_identity_id=actor_identity_id,
+                    correlation_id=correlation_id,
+                )
             else:
                 reference_bundle = _load_character_snapshot_assets(
                     snapshot=character_snapshot,
@@ -2615,6 +2620,11 @@ def _submit_video_request(
                 reference_bundle = _load_actor_identity_anchor_assets(
                     actor_identity_id=actor_identity_id,
                     scene_reference=scene_reference,
+                    correlation_id=correlation_id,
+                )
+            elif actor_identity_id and vertex_duration == 8:
+                reference_bundle = _load_actor_identity_anchor_assets(
+                    actor_identity_id=actor_identity_id,
                     correlation_id=correlation_id,
                 )
             elif vertex_duration == 8:
