@@ -866,54 +866,7 @@ def test_batch_detail_template_exposes_an_explicit_script_save_action_in_s2():
     assert 'Save changes' in rendered
 
 
-def test_batch_detail_template_renders_scene_references_without_cropping():
-    env = Environment(loader=FileSystemLoader("templates"))
-    template = env.get_template("batches/detail/_post_card.html")
-
-    rendered = template.render(
-        batch={"state": "S4_SCRIPTED", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"},
-        post={
-            "id": "post-1",
-            "post_type": "value",
-            "created_at": "2026-03-16T10:00:00+00:00",
-            "updated_at": None,
-            "topic_title": "Beispielthema",
-            "topic_rotation": "Kurzer Scripttext.",
-            "seed_data": {
-                "script": "Kurzer Scripttext.",
-                "script_review_status": "approved",
-            },
-            "blog_enabled": False,
-            "blog_status": None,
-            "video_prompt_json": {"prompt": "value"},
-            "video_status": "pending",
-            "video_url": None,
-            "spoken_duration": 12.3,
-            "scene_reference_image_id": None,
-            "identity_gate_result": None,
-            "review_caption": None,
-            "publish_caption": None,
-            "caption_source_links": [],
-            "caption_status": None,
-            "caption_generation_mode": None,
-            "video_metadata": None,
-            "scene_reference_candidates": [
-                {
-                    "image_url": "https://cdn.example.com/scene.png",
-                    "provider_metadata": {"angle_label": "Front"},
-                    "status": "generated",
-                    "scene_key": "scene-a",
-                    "provider_task_id": "task-1",
-                }
-            ],
-        },
-    )
-
-    assert "max-h-full w-full object-contain" in rendered
-    assert "h-32 w-full rounded object-cover" not in rendered
-
-
-def test_batch_detail_template_renders_scene_reference_review_modal():
+def test_batch_detail_template_explains_strategy_a_without_scene_preview_controls():
     env = Environment(loader=FileSystemLoader("templates"))
     template = env.get_template("batches/detail/_post_card.html")
 
@@ -949,226 +902,21 @@ def test_batch_detail_template_renders_scene_reference_review_modal():
                     "status": "generated",
                     "scene_key": "bathroom_accessibility_a",
                     "provider_task_id": "task-front",
-                },
-                {
-                    "id": "left",
-                    "image_url": "https://cdn.example.com/left.png",
-                    "provider_metadata": {"angle_label": "Left three-quarter", "reference_set_id": "set-1"},
-                    "status": "generated",
-                    "scene_key": "bathroom_accessibility_a",
-                    "provider_task_id": "task-left",
-                },
-            ],
-        },
-    )
-
-    assert "VEO identity anchors" in rendered
-    assert "3 ActorIdentity images are submitted to VEO." in rendered
-    assert "These images are scene previews only; they are not VEO identity anchors." in rendered
-    assert 'aria-label="Review Mystic scene preview image"' in rendered
-    assert "sceneReferenceReviewOpen = true" in rendered
-    assert "sceneReferenceReviewIndex = 0" in rendered
-    assert "sceneReferenceReviewIndex = 1" in rendered
-    assert "Mystic scene preview review" in rendered
-    assert "VEO identity remains locked by the ActorIdentity anchors" in rendered
-    assert "Previous reference" in rendered
-    assert "Next reference" in rendered
-    assert "Regenerate this angle" in rendered
-    assert "Open original" in rendered
-
-
-def test_batch_detail_template_auto_polls_submitted_scene_references():
-    env = Environment(loader=FileSystemLoader("templates"))
-    template = env.get_template("batches/detail/_post_card.html")
-
-    rendered = template.render(
-        batch={"state": "S4_SCRIPTED", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"},
-        post={
-            "id": "post-1",
-            "post_type": "value",
-            "created_at": "2026-03-16T10:00:00+00:00",
-            "updated_at": None,
-            "topic_title": "Beispielthema",
-            "topic_rotation": "Kurzer Scripttext.",
-            "seed_data": {
-                "script": "Kurzer Scripttext.",
-                "script_review_status": "approved",
-            },
-            "blog_enabled": False,
-            "blog_status": None,
-            "video_prompt_json": {"prompt": "value"},
-            "video_status": "pending",
-            "video_url": None,
-            "spoken_duration": 12.3,
-            "scene_reference_image_id": None,
-            "identity_gate_result": None,
-            "review_caption": None,
-            "publish_caption": None,
-            "caption_source_links": [],
-            "caption_status": None,
-            "caption_generation_mode": None,
-            "video_metadata": None,
-            "scene_reference_candidates": [
-                {
-                    "id": "scene-1",
-                    "image_url": None,
-                    "provider_metadata": {"angle_label": "Front"},
-                    "status": "submitted",
-                    "scene_key": "scene-a",
-                    "provider_task_id": "task-1",
                 }
             ],
         },
     )
 
-    assert 'hx-post="/settings/character/scene-reference/scene-1/poll"' in rendered
-    assert 'hx-trigger="load, every 4s"' in rendered
-    assert "animate-spin" in rendered
-    assert "Generating scene preview" in rendered
-
-
-def test_batch_detail_template_renders_scene_set_consistency_controls():
-    env = Environment(loader=FileSystemLoader("templates"))
-    template = env.get_template("batches/detail/_post_card.html")
-
-    contract = {
-        "layout_lock": "same compact accessible bathroom: grab rail behind actor left, white sink behind actor right",
-        "acceptance_checklist": [
-            "Does this look like the same bathroom as the other two angles?",
-            "Are the grab rail, sink, window, and towel shelf still present?",
-        ],
-    }
-    rendered = template.render(
-        batch={"state": "S4_SCRIPTED", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"},
-        post={
-            "id": "post-1",
-            "post_type": "value",
-            "created_at": "2026-03-16T10:00:00+00:00",
-            "updated_at": None,
-            "topic_title": "Beispielthema",
-            "topic_rotation": "Kurzer Scripttext.",
-            "seed_data": {"script": "Kurzer Scripttext.", "script_review_status": "approved"},
-            "blog_enabled": False,
-            "blog_status": None,
-            "video_prompt_json": {"prompt": "value"},
-            "video_status": "pending",
-            "video_url": None,
-            "spoken_duration": 12.3,
-            "scene_reference_image_id": None,
-            "identity_gate_result": None,
-            "review_caption": None,
-            "publish_caption": None,
-            "caption_source_links": [],
-            "caption_status": None,
-            "caption_generation_mode": None,
-            "video_metadata": None,
-            "scene_reference_candidates": [
-                {
-                    "id": "front",
-                    "image_url": "https://cdn.example.com/front.png",
-                    "provider_metadata": {
-                        "angle_label": "Front",
-                        "angle_key": "front_mid",
-                        "reference_set_id": "set-1",
-                        "scene_consistency_contract": contract,
-                    },
-                    "status": "generated",
-                    "scene_key": "bathroom_accessibility_a",
-                    "provider_task_id": "task-front",
-                },
-                {
-                    "id": "left",
-                    "image_url": "https://cdn.example.com/left.png",
-                    "provider_metadata": {
-                        "angle_label": "Left three-quarter",
-                        "angle_key": "left_three_quarter",
-                        "reference_set_id": "set-1",
-                        "scene_consistency_contract": contract,
-                    },
-                    "status": "generated",
-                    "scene_key": "bathroom_accessibility_a",
-                    "provider_task_id": "task-left",
-                },
-                {
-                    "id": "profile",
-                    "image_url": "https://cdn.example.com/profile.png",
-                    "provider_metadata": {
-                        "angle_label": "Right profile",
-                        "angle_key": "right_profile",
-                        "reference_set_id": "set-1",
-                        "scene_consistency_contract": contract,
-                    },
-                    "status": "generated",
-                    "scene_key": "bathroom_accessibility_a",
-                    "provider_task_id": "task-profile",
-                },
-            ],
-        },
-    )
-
-    assert "Mystic scene preview review" in rendered
-    assert "Approval checks scene continuity only." in rendered
-    assert "not submitted to VEO as reference images under strategy A" in rendered
-    assert "same compact accessible bathroom" in rendered
-    assert "Does this look like the same bathroom as the other two angles?" in rendered
-    assert 'hx-post="/settings/character/posts/post-1/scene-reference/sets/set-1/approve"' in rendered
-    assert 'hx-post="/settings/character/posts/post-1/scene-reference/sets/set-1/reject"' in rendered
-    assert "Approve scene preview set" in rendered
-    assert "Reject scene preview set" in rendered
-    assert "/settings/character/scene-reference/front/approve" not in rendered
-
-
-def test_batch_detail_template_keeps_scene_set_controls_for_legacy_image_approvals():
-    env = Environment(loader=FileSystemLoader("templates"))
-    template = env.get_template("batches/detail/_post_card.html")
-
-    references = [
-        {
-            "id": angle,
-            "image_url": f"https://cdn.example.com/{angle}.png",
-            "provider_metadata": {
-                "angle_label": angle,
-                "angle_key": angle,
-                "reference_set_id": "set-legacy",
-                "scene_consistency_contract": {"layout_lock": "same bathroom", "acceptance_checklist": ["same room?"]},
-            },
-            "identity_gate_result": {"status": "passed", "reason": "legacy single image approval", "gate_type": "manual"},
-            "status": "approved",
-            "scene_key": "bathroom_accessibility_a",
-            "provider_task_id": f"task-{angle}",
-        }
-        for angle in ["front_mid", "left_three_quarter", "right_profile"]
-    ]
-    rendered = template.render(
-        batch={"state": "S4_SCRIPTED", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"},
-        post={
-            "id": "post-1",
-            "post_type": "value",
-            "created_at": "2026-03-16T10:00:00+00:00",
-            "updated_at": None,
-            "topic_title": "Beispielthema",
-            "topic_rotation": "Kurzer Scripttext.",
-            "seed_data": {"script": "Kurzer Scripttext.", "script_review_status": "approved"},
-            "blog_enabled": False,
-            "blog_status": None,
-            "video_prompt_json": {"prompt": "value"},
-            "video_status": "pending",
-            "video_url": None,
-            "spoken_duration": 12.3,
-            "scene_reference_image_id": None,
-            "identity_gate_result": None,
-            "review_caption": None,
-            "publish_caption": None,
-            "caption_source_links": [],
-            "caption_status": None,
-            "caption_generation_mode": None,
-            "video_metadata": None,
-            "scene_reference_candidates": references,
-        },
-    )
-
-    assert 'hx-post="/settings/character/posts/post-1/scene-reference/sets/set-legacy/approve"' in rendered
-    assert "Approve scene preview set" in rendered
+    assert "Character Consistency Strategy A" in rendered
+    assert "3 ActorIdentity images are submitted to VEO." in rendered
+    assert "No separate scene preview generation or approval runs in this mode." in rendered
+    assert "The final video uses the actor anchors for identity and the prompt scene contract for background consistency." in rendered
+    assert "Mystic scene preview review" not in rendered
+    assert "Generate 3 scene previews" not in rendered
+    assert "Approve scene preview set" not in rendered
+    assert "Reject scene preview set" not in rendered
+    assert 'aria-label="Review Mystic scene preview image"' not in rendered
+    assert "/settings/character/scene-reference/" not in rendered
 
 
 def test_batch_detail_template_renders_manual_editor_even_for_blank_scripts():

@@ -478,6 +478,7 @@ def test_video_prompt_uses_approved_scene_reference_scene_text_before_submit():
     scene_anchor = get_scene_bible("home_living_room_advice_a").scene_identity
     assert prompt_builder.DEFAULT_SCENE_BODY in prompt["veo_prompt"]
     assert scene_anchor in updated["veo_prompt"]
+    assert "quiet modern living room behind the actor" not in updated["veo_prompt"]
     assert "A modern, tidy bedroom with blush-pink walls" not in updated["veo_prompt"]
     assert "Ein Satz fuer das Wohnzimmer." in updated["veo_prompt"]
 

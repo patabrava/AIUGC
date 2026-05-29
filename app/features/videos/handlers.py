@@ -41,7 +41,6 @@ from app.core.video_profiles import (
 from app.features.batches.queries import get_batch_by_id
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.characters.actor_identity import (
-    ensure_video_scene_reference_set_ready,
     is_character_consistency_light_mode,
     is_character_consistency_mode,
     is_manual_creation_mode,
@@ -65,6 +64,7 @@ from app.features.posts.prompt_builder import (
     build_negative_prompt,
     ensure_scene_plan,
     build_lean_veo_base_prompt,
+    LEAN_FINAL_AUDIO_BLOCK,
     build_veo_prompt_segment,
     split_dialogue_sentences,
     sync_video_prompt_with_seed_data,
@@ -1451,39 +1451,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         )
         profile = submission_plan.get("profile")
         is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
-        route = _scene_reference_route_key(profile)
         approved_scene_reference_set = None
-        scene_reference_set = (
-            character_queries.get_approved_scene_reference_set_for_post(post_id)
-            if is_character_consistency_mode(batch.get("creation_mode"))
-            else None
-        )
-        scene_reference_check = ensure_video_scene_reference_set_ready(
-            batch=batch,
-            post=post,
-            scene_reference_set=scene_reference_set,
-            route=route,
-        )
-        if scene_reference_check.get("source") == "actor_identity_scene_reference_set":
-            approved_scene_reference_set = scene_reference_check["scene_reference_set"]
-
-        scene_synced_prompt = _apply_scene_reference_scene_to_video_prompt(
-            video_prompt,
-            seed_data,
-            scene_reference_set=approved_scene_reference_set,
-            creation_mode=str(batch.get("creation_mode") or "automated"),
-        )
-        if scene_synced_prompt != video_prompt:
-            video_prompt = scene_synced_prompt
-            supabase.table("posts").update({"video_prompt_json": video_prompt}).eq("id", post_id).execute()
-            post["video_prompt_json"] = video_prompt
-            logger.info(
-                "video_prompt_synced_from_scene_reference",
-                post_id=post_id,
-                batch_id=post.get("batch_id"),
-                scene_reference_set_id=approved_scene_reference_set.reference_set_id if approved_scene_reference_set else None,
-                correlation_id=correlation_id,
-            )
 
         if is_extended:
             prompt_text, segment_metadata = _build_veo_extended_base_prompt(
@@ -1874,22 +1842,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
 
             profile = submission_plan.get("profile")
             is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
-            scene_reference_set = (
-                character_queries.get_approved_scene_reference_set_for_post(post_id)
-                if is_character_consistency_mode(batch.get("creation_mode"))
-                else None
-            )
-            scene_reference_check = ensure_video_scene_reference_set_ready(
-                batch=batch,
-                post=post,
-                scene_reference_set=scene_reference_set,
-                route=_scene_reference_route_key(profile),
-            )
-            approved_scene_reference_set = (
-                scene_reference_check["scene_reference_set"]
-                if scene_reference_check.get("source") == "actor_identity_scene_reference_set"
-                else None
-            )
+            approved_scene_reference_set = None
 
             try:
                 video_prompt = _load_or_build_video_prompt(
@@ -1907,24 +1860,6 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 )
                 skipped_count += 1
                 continue
-
-            scene_synced_prompt = _apply_scene_reference_scene_to_video_prompt(
-                video_prompt,
-                seed_data,
-                scene_reference_set=approved_scene_reference_set,
-                creation_mode=str(batch.get("creation_mode") or "automated"),
-            )
-            if scene_synced_prompt != video_prompt:
-                video_prompt = scene_synced_prompt
-                supabase.table("posts").update({"video_prompt_json": video_prompt}).eq("id", post_id).execute()
-                post["video_prompt_json"] = video_prompt
-                logger.info(
-                    "video_prompt_synced_from_scene_reference",
-                    post_id=post_id,
-                    batch_id=batch_id,
-                    scene_reference_set_id=approved_scene_reference_set.reference_set_id if approved_scene_reference_set else None,
-                    correlation_id=f"{correlation_id}_{post_id}",
-                )
 
             script_contract = _validate_post_duration_contract_for_video(
                 post=post,
