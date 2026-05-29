@@ -484,6 +484,38 @@ def test_character_consistency_scene_plan_fallback_uses_scene_bible(monkeypatch)
     assert prompt_builder.DEFAULT_SCENE_BODY not in plan["value"]
 
 
+def test_character_consistency_replaces_persisted_default_scene_plan(monkeypatch):
+    from app.features.characters.scene_reference import get_scene_bible
+    from app.features.posts import prompt_builder
+
+    updates = []
+    monkeypatch.setattr(
+        prompt_builder,
+        "_update_batch_scene_plan",
+        lambda batch_id, payload: updates.append((batch_id, payload)),
+    )
+
+    plan = prompt_builder.ensure_scene_plan(
+        {
+            "id": "batch-mid",
+            "brand": "Brand",
+            "creation_mode": "character_consistency_mid",
+            "scene_plan": {
+                "value": prompt_builder.DEFAULT_SCENE,
+                "lifestyle": prompt_builder.DEFAULT_SCENE,
+                "product": prompt_builder.DEFAULT_SCENE,
+            },
+        },
+        topic_titles=["A"],
+        correlation_id="corr",
+    )
+
+    scene = get_scene_bible("home_living_room_advice_a").scene_identity
+    assert plan["value"] == f"Scene: {scene}"
+    assert prompt_builder.DEFAULT_SCENE_BODY not in plan["value"]
+    assert updates == [("batch-mid", {"scene_plan": plan})]
+
+
 def test_video_prompt_uses_approved_scene_reference_scene_text_before_submit():
     from app.features.characters.schemas import SceneReferenceSetSummary
     from app.features.characters.scene_reference import get_scene_bible

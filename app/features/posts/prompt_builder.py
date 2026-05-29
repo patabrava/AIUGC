@@ -356,8 +356,7 @@ def propose_scene_plan(*, brand: str, topic_titles: Iterable[str], correlation_i
         brand=brand,
         topics_block="\n".join(f"- {title}" for title in topics) or "- (none yet)",
     )
-    fallback_scene = f"Scene: {get_scene_bible('home_living_room_advice_a').scene_identity}"
-    fallback = {"value": fallback_scene, "lifestyle": fallback_scene, "product": fallback_scene}
+    fallback = _scene_bible_fallback_plan()
     try:
         response = _get_llm_client().generate_json(prompt, system_prompt=_SCENE_PROPOSAL_SYSTEM_PROMPT)
     except Exception as exc:  # noqa: BLE001 - LLM fallback must be non-blocking here.
@@ -365,9 +364,9 @@ def propose_scene_plan(*, brand: str, topic_titles: Iterable[str], correlation_i
         return fallback
 
     return {
-        "value": str(response.get("value") or fallback_scene).strip() or fallback_scene,
-        "lifestyle": str(response.get("lifestyle") or fallback_scene).strip() or fallback_scene,
-        "product": str(response.get("product") or fallback_scene).strip() or fallback_scene,
+        "value": str(response.get("value") or fallback["value"]).strip() or fallback["value"],
+        "lifestyle": str(response.get("lifestyle") or fallback["lifestyle"]).strip() or fallback["lifestyle"],
+        "product": str(response.get("product") or fallback["product"]).strip() or fallback["product"],
     }
 
 
@@ -377,16 +376,34 @@ def _update_batch_scene_plan(batch_id: str, payload: dict) -> None:
     update_batch_scene_plan(batch_id=batch_id, scene_plan=payload["scene_plan"])
 
 
+def _scene_bible_fallback_plan() -> dict[str, str]:
+    fallback_scene = f"Scene: {get_scene_bible('home_living_room_advice_a').scene_identity}"
+    return {"value": fallback_scene, "lifestyle": fallback_scene, "product": fallback_scene}
+
+
 def ensure_scene_plan(batch: dict, *, topic_titles: list[str], correlation_id: str) -> Optional[dict[str, str]]:
-    if not is_character_consistency_mode(str(batch.get("creation_mode") or "automated").strip()):
+    creation_mode = str(batch.get("creation_mode") or "automated").strip()
+    if not is_character_consistency_mode(creation_mode):
         return None
     existing = batch.get("scene_plan")
     if isinstance(existing, dict) and all(existing.get(key) for key in ("value", "lifestyle", "product")):
-        return {
+        plan = {
             "value": str(existing["value"]),
             "lifestyle": str(existing["lifestyle"]),
             "product": str(existing["product"]),
         }
+        if not any(DEFAULT_SCENE_BODY in value for value in plan.values()):
+            return plan
+        logger.warning(
+            "scene_plan_default_scene_replaced_with_scene_bible",
+            batch_id=batch.get("id"),
+            correlation_id=correlation_id,
+            creation_mode=creation_mode,
+        )
+        plan = _scene_bible_fallback_plan()
+        _update_batch_scene_plan(str(batch["id"]), {"scene_plan": plan})
+        batch["scene_plan"] = plan
+        return plan
     plan = propose_scene_plan(
         brand=str(batch.get("brand") or ""),
         topic_titles=topic_titles,
