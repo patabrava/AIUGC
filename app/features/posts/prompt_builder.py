@@ -152,12 +152,13 @@ LEAN_LIGHT_BASE_PROMPT_TEMPLATE = (
     "Scene:\n"
     "{scene}\n\n"
     "Action:\n"
-    "Use the approved LoRA-generated reference images as the visual source for the same woman, "
-    "wardrobe, wheelchair framing, and room layout. Preserve the actor identity shown in those "
-    "references while following the Scene block exactly. The woman remains seated in the same "
-    "wheelchair setup and speaks directly to camera in one continuous natural smartphone take. "
-    "Do not invent a new face, hairstyle, wardrobe, wheelchair setup, or room layout. Use small "
-    "natural hand gestures and subtle upper-body nods while speaking.\n\n"
+    "Use the submitted actor identity reference images only as the woman identity source. "
+    "Do not use reference-image backgrounds, wardrobe, or rooms as the scene source; the Scene "
+    "block defines the environment. Preserve the same face, facial proportions, skin texture, "
+    "hair identity, and age from the actor references while following the Scene block exactly. "
+    "The woman remains seated and speaks directly to camera in one continuous natural smartphone "
+    "take. Do not invent a new face, hairstyle, or age. Use small natural hand gestures and subtle "
+    "upper-body nods while speaking.\n\n"
     "Language:\n"
     "Speak only in German, with natural conversational pacing.\n\n"
     "Dialogue:\n"
@@ -176,12 +177,13 @@ REFERENCE_SCENE_BASE_PROMPT_TEMPLATE = (
     "Scene:\n"
     "{scene}\n\n"
     "Action:\n"
-    "Use the approved LoRA-generated reference images as the visual source for the same woman, "
-    "wardrobe, wheelchair framing, and room layout. Preserve the actor identity shown in those "
-    "references while following the Scene block exactly. The woman remains seated in the same "
-    "wheelchair setup and speaks directly to camera in one continuous natural smartphone take. "
-    "Do not invent a new face, hairstyle, wardrobe, wheelchair setup, or room layout. Use small "
-    "natural hand gestures and subtle upper-body nods while speaking.\n\n"
+    "Use the submitted actor identity reference images only as the woman identity source. "
+    "Do not use reference-image backgrounds, wardrobe, or rooms as the scene source; the Scene "
+    "block defines the environment. Preserve the same face, facial proportions, skin texture, "
+    "hair identity, and age from the actor references while following the Scene block exactly. "
+    "The woman remains seated and speaks directly to camera in one continuous natural smartphone "
+    "take. Do not invent a new face, hairstyle, or age. Use small natural hand gestures and subtle "
+    "upper-body nods while speaking.\n\n"
     "Cinematography:\n"
     "{cinematography}\n\n"
     "Dialogue:\n"
@@ -865,6 +867,43 @@ def _normalize_scene_block(scene: str) -> str:
     return cleaned or DEFAULT_SCENE_BODY
 
 
+def _join_scene_terms(values: tuple[str, ...]) -> str:
+    cleaned = [str(value).strip() for value in values if str(value).strip()]
+    if not cleaned:
+        return "none"
+    return ", ".join(cleaned)
+
+
+def _canonical_scene_bible_for_text(scene_text: str) -> Any:
+    try:
+        from app.features.characters.scene_reference import SCENE_BIBLES
+    except Exception:  # pragma: no cover - prompt fallback must stay available during partial imports
+        return None
+
+    normalized_scene = " ".join(str(scene_text or "").split())
+    for bible in SCENE_BIBLES.values():
+        normalized_identity = " ".join(str(bible.scene_identity).split())
+        if normalized_scene == normalized_identity or normalized_identity in normalized_scene:
+            return bible
+    return None
+
+
+def _apply_minimal_scene_bible_lock(scene_text: str) -> str:
+    resolved_scene = _normalize_scene_block(scene_text)
+    bible = _canonical_scene_bible_for_text(resolved_scene)
+    if bible is None:
+        return resolved_scene
+    return (
+        f"{resolved_scene}\n\n"
+        "Minimal scene Bible lock:\n"
+        f"Object budget: only these set anchors may be visible beyond the actor and wheelchair context: {bible.anchor_lock}.\n"
+        f"Layout lock: {bible.layout_lock}.\n"
+        "Simplicity rule: keep the background sparse, uncluttered, and secondary; use no decorative props beyond the listed anchors.\n"
+        f"Forbidden scene additions: {_join_scene_terms(bible.scene_specific_rejectors)}.\n"
+        f"Camera boundary: {bible.composition} Do not widen into an establishing shot or reveal unlisted room areas."
+    )
+
+
 def build_lean_veo_base_prompt(
     dialogue: str,
     *,
@@ -873,7 +912,7 @@ def build_lean_veo_base_prompt(
 ) -> str:
     ending = STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE
     audio_block = LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_LIGHT_BASE_AUDIO_BLOCK
-    resolved_scene = _normalize_scene_block(scene or DEFAULT_SCENE_BODY)
+    resolved_scene = _apply_minimal_scene_bible_lock(scene or DEFAULT_SCENE_BODY)
     return LEAN_LIGHT_BASE_PROMPT_TEMPLATE.format(
         scene=resolved_scene,
         dialogue=dialogue.strip(),
@@ -900,7 +939,7 @@ def build_reference_image_scene_base_prompt(
     resolved_cinematography = (
         cinematography or (LEGACY_32_CINEMATOGRAPHY if legacy_32_visuals else DEFAULT_CINEMATOGRAPHY)
     ).strip()
-    resolved_scene = _normalize_scene_block(scene or (LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY))
+    resolved_scene = _apply_minimal_scene_bible_lock(scene or (LEGACY_SCENE_BODY if legacy_32_visuals else DEFAULT_SCENE_BODY))
     resolved_ending = (
         ending
         or (STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE)

@@ -16,8 +16,8 @@ load_dotenv(ROOT / ".env")
 from app.adapters.supabase_client import get_supabase
 
 
-EXPECTED_SOURCE = "actor_identity_scene_reference_set"
-EXPECTED_ROLES = ["scene_reference", "scene_reference", "scene_reference"]
+EXPECTED_SOURCE = "actor_identity_anchor_images"
+EXPECTED_ROLES = ["actor_identity_anchor", "actor_identity_anchor", "actor_identity_anchor"]
 
 
 def _die(message: str) -> None:
@@ -43,6 +43,8 @@ def _latest_audit_for_post(
 def _submitted_post_result(
     post: dict[str, Any],
     audit_rows: list[dict[str, Any]],
+    *,
+    audit_required: bool,
 ) -> dict[str, Any]:
     metadata = _as_dict(post.get("video_metadata"))
     provider_metadata = _as_dict(metadata.get("provider_metadata"))
@@ -57,21 +59,28 @@ def _submitted_post_result(
     checks = {
         "provider_source": provider_metadata.get("source") == EXPECTED_SOURCE,
         "scene_reference_images_used_for_video": (
-            provider_metadata.get("scene_reference_images_used_for_video") is True
+            provider_metadata.get("scene_reference_images_used_for_video") is False
+        ),
+        "scene_reference_images_approval_only": (
+            provider_metadata.get("scene_reference_images_approval_only") is True
         ),
         "reference_image_roles": reference_image_roles == EXPECTED_ROLES,
+        "actor_identity_anchor_image_count": provider_metadata.get("actor_identity_anchor_image_count") == 3,
         "scene_reference_image_ids": (
             isinstance(scene_reference_image_ids, list)
             and len(scene_reference_image_ids) == 3
             and all(scene_reference_image_ids)
         ),
-        "audit_source": audit_reference.get("source") == EXPECTED_SOURCE,
+        "audit_source": (not audit_required) or audit_reference.get("source") == EXPECTED_SOURCE,
         "audit_scene_reference_images_used_for_video": (
-            audit_reference.get("scene_reference_images_used_for_video") is True
+            (not audit_required) or audit_reference.get("scene_reference_images_used_for_video") is False
         ),
-        "audit_reference_image_roles": audit_reference_image_roles == EXPECTED_ROLES,
-        "audit_scene_reference_image_ids": audit_scene_reference_image_ids == scene_reference_image_ids,
-        "audit_reference_image_count": audit_reference.get("reference_image_count") == 3,
+        "audit_scene_reference_images_approval_only": (
+            (not audit_required) or audit_reference.get("scene_reference_images_approval_only") is True
+        ),
+        "audit_reference_image_roles": (not audit_required) or audit_reference_image_roles == EXPECTED_ROLES,
+        "audit_scene_reference_image_ids": (not audit_required) or audit_scene_reference_image_ids == scene_reference_image_ids,
+        "audit_reference_image_count": (not audit_required) or audit_reference.get("reference_image_count") == 3,
     }
     post_ok = all(checks.values())
     return {
@@ -82,12 +91,19 @@ def _submitted_post_result(
         "scene_reference_images_used_for_video": provider_metadata.get(
             "scene_reference_images_used_for_video"
         ),
+        "scene_reference_images_approval_only": provider_metadata.get(
+            "scene_reference_images_approval_only"
+        ),
         "reference_image_roles": reference_image_roles,
+        "actor_identity_anchor_image_count": provider_metadata.get("actor_identity_anchor_image_count"),
         "scene_reference_image_ids": scene_reference_image_ids,
         "audit_operation_id": latest_audit.get("operation_id"),
         "audit_source": audit_reference.get("source"),
         "audit_scene_reference_images_used_for_video": audit_reference.get(
             "scene_reference_images_used_for_video"
+        ),
+        "audit_scene_reference_images_approval_only": audit_reference.get(
+            "scene_reference_images_approval_only"
         ),
         "audit_reference_image_roles": audit_reference_image_roles,
         "audit_scene_reference_image_ids": audit_scene_reference_image_ids,
@@ -163,7 +179,11 @@ def main() -> int:
             )
             continue
         submitted_count += 1
-        result = _submitted_post_result(post, audits_by_post.get(str(post.get("id")), []))
+        result = _submitted_post_result(
+            post,
+            audits_by_post.get(str(post.get("id")), []),
+            audit_required=audit_warning is None,
+        )
         submitted_ok = submitted_ok and result["ok"]
         rows.append(result)
 

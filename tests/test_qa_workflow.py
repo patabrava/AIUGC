@@ -138,7 +138,8 @@ async def test_rejecting_video_excludes_it_and_advances_with_remaining_approved_
 
 
 @pytest.mark.asyncio
-async def test_approving_actor_identity_video_passes_manual_identity_gate(monkeypatch):
+@pytest.mark.parametrize("actor_identity_source", ["actor_identity_anchor_images", "actor_identity_scene_reference_set"])
+async def test_approving_actor_identity_video_passes_manual_identity_gate(monkeypatch, actor_identity_source):
     db = {
         "batches": [{"id": "batch-1", "state": "S6_QA"}],
         "posts": [
@@ -147,7 +148,7 @@ async def test_approving_actor_identity_video_passes_manual_identity_gate(monkey
                 "batch_id": "batch-1",
                 "qa_pass": None,
                 "seed_data": {"script_review_status": "approved"},
-                "video_metadata": {"actor_identity_source": "actor_identity_scene_reference_set"},
+                "video_metadata": {"actor_identity_source": actor_identity_source},
                 "identity_gate_result": {
                     "status": "manual_required",
                     "reason": "Video identity requires manual review because automated face gate is not configured",

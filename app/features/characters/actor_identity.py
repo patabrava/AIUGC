@@ -14,6 +14,11 @@ CHARACTER_CONSISTENCY_MODES = {
 }
 
 MANUAL_CREATION_MODES = {"manual", "manual_character_consistency"}
+ACTOR_IDENTITY_VIDEO_SOURCES = {
+    "actor_identity_anchor_images",
+    "actor_identity_scene_reference",
+    "actor_identity_scene_reference_set",
+}
 
 
 def is_character_consistency_mode(value: Any) -> bool:
@@ -22,6 +27,10 @@ def is_character_consistency_mode(value: Any) -> bool:
 
 def is_manual_creation_mode(value: Any) -> bool:
     return str(value or "").strip() in MANUAL_CREATION_MODES
+
+
+def is_actor_identity_video_source(value: Any) -> bool:
+    return str(value or "").strip() in ACTOR_IDENTITY_VIDEO_SOURCES
 
 
 def is_character_consistency_light_mode(value: Any) -> bool:
@@ -283,7 +292,7 @@ def ensure_video_scene_reference_set_ready(
     if route in {"extended", "veo_extended"}:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="LoRA-backed Character Consistency video generation requires an 8-second VEO base request; the current extended route cannot safely submit approved SceneReferenceImages.",
+            message="Character Consistency video generation requires an 8-second VEO base request; the current extended route cannot safely submit actor identity reference anchors.",
             details={
                 "post_id": post.get("id"),
                 "batch_id": batch.get("id"),

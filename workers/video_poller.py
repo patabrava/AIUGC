@@ -29,7 +29,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings, google_ai_context_fingerprint, resolve_google_application_credentials_path
 from app.core.errors import ErrorCode, FlowForgeException, ValidationError
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
-from app.features.characters.actor_identity import build_video_identity_gate_result
+from app.features.characters.actor_identity import build_video_identity_gate_result, is_actor_identity_video_source
 from app.features.videos.prompt_audit import record_prompt_audit
 from app.features.videos.quota_guard import (
     build_reservation_key,
@@ -1532,10 +1532,7 @@ def _store_completed_video(
         **postprocess_metadata,
     }
     video_identity_gate = None
-    if existing_metadata.get("actor_identity_source") in {
-        "actor_identity_scene_reference",
-        "actor_identity_scene_reference_set",
-    }:
+    if is_actor_identity_video_source(existing_metadata.get("actor_identity_source")):
         video_identity_gate = build_video_identity_gate_result(
             video_url=upload_result["url"],
             automated_available=False,

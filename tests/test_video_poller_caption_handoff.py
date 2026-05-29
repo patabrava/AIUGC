@@ -210,3 +210,46 @@ class TestPollerCaptionHandoff:
         assert provider_metadata["reference_images_enabled"] is True
         assert provider_metadata["reference_image_count"] == 3
         assert provider_metadata["video_uri"] == "https://provider.example.com/video.mp4"
+
+    @patch("workers.video_poller._trim_tail", return_value=(b"fake_video_bytes", {}))
+    @patch("workers.video_poller.get_storage_client")
+    @patch("workers.video_poller.get_supabase")
+    def test_store_completed_actor_anchor_video_sets_manual_identity_gate(
+        self,
+        mock_sb_factory,
+        mock_storage,
+        mock_trim,
+    ):
+        from workers.video_poller import _store_completed_video
+
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.upload_video.return_value = {
+            "storage_provider": "cloudflare_r2",
+            "storage_key": "test/key.mp4",
+            "url": "https://cdn.example.com/test/key.mp4",
+            "size": 1024,
+            "file_path": "test/key.mp4",
+            "file_type": "video/mp4",
+            "thumbnail_url": None,
+        }
+        mock_storage.return_value = mock_storage_instance
+
+        mock_client = MagicMock()
+        mock_sb_factory.return_value.client = mock_client
+        mock_table = mock_client.table.return_value
+        mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+        _store_completed_video(
+            post_id="post_123",
+            provider="vertex_ai",
+            video_source=b"fake_video_bytes",
+            correlation_id="test_corr",
+            provider_metadata={"video_uri": "https://provider.example.com/video.mp4"},
+            existing_metadata={"actor_identity_source": "actor_identity_anchor_images"},
+        )
+
+        update_payload = mock_table.update.call_args[0][0]
+        gate = update_payload["identity_gate_result"]
+        metadata_gate = update_payload["video_metadata"]["video_identity_gate_result"]
+        assert gate["status"] == "manual_required"
+        assert metadata_gate["status"] == "manual_required"

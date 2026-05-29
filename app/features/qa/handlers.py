@@ -16,7 +16,7 @@ from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ErrorCode
 from app.core.logging import get_logger
 from app.core.video_profiles import VIDEO_STATUS_CAPTION_COMPLETED, VIDEO_STATUS_COMPLETED
-from app.features.characters.actor_identity import passed_manual_gate
+from app.features.characters.actor_identity import is_actor_identity_video_source, passed_manual_gate
 from app.features.qa.schemas import (
     AutoQAChecks,
     QAApprovalRequest,
@@ -244,11 +244,7 @@ async def approve_qa(post_id: str, req: Request):
         identity_gate_update = None
         if (
             qa_request.approved
-            and video_metadata.get("actor_identity_source")
-            in {
-                "actor_identity_scene_reference",
-                "actor_identity_scene_reference_set",
-            }
+            and is_actor_identity_video_source(video_metadata.get("actor_identity_source"))
         ):
             if identity_gate_result.get("status") == "manual_required":
                 identity_gate_update = passed_manual_gate(
