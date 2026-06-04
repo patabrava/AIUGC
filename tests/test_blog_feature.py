@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from pydantic import ValidationError as PydanticValidationError
 
-from app.core.errors import ThirdPartyError
+from app.core.errors import FlowForgeException, ThirdPartyError
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -624,7 +624,7 @@ def test_blog_prompt_requests_plain_text_output():
     assert "Bildprompt:" in prompt
 
 
-def test_update_blog_status_falls_back_for_legacy_status_constraint(monkeypatch):
+def test_update_blog_status_fails_closed_for_scheduled_legacy_status_constraint(monkeypatch):
     class _FakeResponse:
         def __init__(self, data):
             self.data = data
@@ -653,13 +653,85 @@ def test_update_blog_status_falls_back_for_legacy_status_constraint(monkeypatch)
 
     monkeypatch.setattr(blog_queries, "get_supabase", lambda: _FakeSupabase())
 
-    updated = blog_queries.update_blog_status("post-1", status="publishing", scheduled_at="2026-04-01T09:00:00Z")
+    with pytest.raises(FlowForgeException, match="Failed to persist scheduled blog status"):
+        blog_queries.update_blog_status("post-1", status="publishing", scheduled_at="2026-04-01T09:00:00Z")
 
     assert table.update_calls[0]["blog_status"] == "publishing"
     assert table.update_calls[0]["blog_scheduled_at"] == "2026-04-01T09:00:00Z"
+    assert len(table.update_calls) == 1
+
+
+def test_update_blog_status_preserves_manual_publishing_legacy_fallback(monkeypatch):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.update_calls = []
+
+        def update(self, payload):
+            self.update_calls.append(dict(payload))
+            self._payload = payload
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def execute(self):
+            if len(self.update_calls) == 1:
+                raise Exception("violates check constraint posts_blog_status_check")
+            return _FakeResponse([self._payload])
+
+    table = _FakeTable()
+
+    class _FakeSupabase:
+        client = type("Client", (), {"table": staticmethod(lambda _name: table)})()
+
+    monkeypatch.setattr(blog_queries, "get_supabase", lambda: _FakeSupabase())
+
+    updated = blog_queries.update_blog_status("post-1", status="publishing")
+
+    assert table.update_calls[0]["blog_status"] == "publishing"
     assert table.update_calls[1]["blog_status"] == "draft"
     assert "blog_scheduled_at" not in table.update_calls[1]
     assert updated["blog_status"] == "draft"
+
+
+def test_update_blog_status_preserves_clear_schedule_legacy_fallback(monkeypatch):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.update_calls = []
+
+        def update(self, payload):
+            self.update_calls.append(dict(payload))
+            self._payload = payload
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def execute(self):
+            if len(self.update_calls) == 1:
+                raise Exception("column posts.blog_scheduled_at does not exist")
+            return _FakeResponse([self._payload])
+
+    table = _FakeTable()
+
+    class _FakeSupabase:
+        client = type("Client", (), {"table": staticmethod(lambda _name: table)})()
+
+    monkeypatch.setattr(blog_queries, "get_supabase", lambda: _FakeSupabase())
+
+    updated = blog_queries.update_blog_status("post-1", status="published", clear_scheduled_at=True)
+
+    assert table.update_calls[0] == {"blog_status": "published", "blog_scheduled_at": None}
+    assert table.update_calls[1] == {"blog_status": "published"}
+    assert updated["blog_status"] == "published"
 
 
 def test_publish_blog_post_requires_accepted_image_when_prompt_exists(monkeypatch):

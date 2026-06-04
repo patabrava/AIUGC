@@ -23,6 +23,10 @@ from app.features.blog.schemas import (
 logger = get_logger(__name__)
 
 
+def _database_error_code() -> ErrorCode:
+    return getattr(ErrorCode, "DATABASE_ERROR", ErrorCode.INTERNAL_ERROR)
+
+
 def _isoformat_optional(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -138,6 +142,10 @@ def update_blog_status(
 ) -> Dict[str, Any]:
     """Update blog_status and optionally blog_content/webflow fields."""
     supabase = get_supabase()
+    schedule_contract_operation = (
+        status == "scheduled"
+        or scheduled_at is not None
+    )
     update_payload: Dict[str, Any] = {"blog_status": status}
     if blog_content is not None:
         update_payload["blog_content"] = blog_content
@@ -157,6 +165,18 @@ def update_blog_status(
     try:
         response = supabase.client.table("posts").update(update_payload).eq("id", post_id).execute()
     except Exception as exc:
+        if schedule_contract_operation:
+            raise FlowForgeException(
+                code=_database_error_code(),
+                message=f"Failed to persist scheduled blog status for post {post_id}",
+                details={
+                    "post_id": post_id,
+                    "status": status,
+                    "scheduled_at": scheduled_at,
+                    "clear_scheduled_at": clear_scheduled_at,
+                    "error": str(exc),
+                },
+            )
         error_text = str(exc).lower()
         if "posts_blog_status_check" in error_text and status in {"publishing", "scheduled"}:
             fallback_status = "draft"
@@ -175,7 +195,33 @@ def update_blog_status(
             message=f"Failed to update blog status for post {post_id}",
             details={"post_id": post_id},
         )
-    return response.data[0]
+    updated = response.data[0]
+    if schedule_contract_operation:
+        persisted_status = updated.get("blog_status")
+        requested_scheduled_at = None
+        should_check_scheduled_at = scheduled_at is not None or clear_scheduled_at
+        if scheduled_at is not None:
+            requested_scheduled_at = _isoformat_optional(scheduled_at)
+        persisted_scheduled_at = _isoformat_optional(updated.get("blog_scheduled_at"))
+        if (
+            persisted_status != status
+            or (
+                should_check_scheduled_at
+                and persisted_scheduled_at != requested_scheduled_at
+            )
+        ):
+            raise FlowForgeException(
+                code=_database_error_code(),
+                message=f"Blog schedule was not persisted for post {post_id}",
+                details={
+                    "post_id": post_id,
+                    "requested_blog_status": status,
+                    "persisted_blog_status": persisted_status,
+                    "requested_blog_scheduled_at": requested_scheduled_at,
+                    "persisted_blog_scheduled_at": persisted_scheduled_at,
+                },
+            )
+    return updated
 
 
 def update_blog_content_fields(post_id: str, *, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -238,5 +284,13 @@ def get_due_scheduled_blog_posts(limit: int = 10) -> List[Dict[str, Any]]:
             .execute()
         )
         return response.data or []
-    except Exception:
-        return []
+    except Exception as exc:
+        raise FlowForgeException(
+            code=_database_error_code(),
+            message="Failed to query due scheduled blog posts",
+            details={
+                "limit": limit,
+                "checked_at": now,
+                "error": str(exc),
+            },
+        )

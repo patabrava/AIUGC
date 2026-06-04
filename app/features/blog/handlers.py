@@ -209,12 +209,13 @@ async def schedule_blog_publish(post_id: str, request: BlogScheduleRequest):
             status="scheduled",
             scheduled_at=scheduled_at.isoformat(),
         )
-        update_blog_content_fields(post_id, updates={"publication_date": scheduled_at.isoformat()})
+        persisted_scheduled_at = str(updated.get("blog_scheduled_at") or scheduled_at.isoformat())
+        update_blog_content_fields(post_id, updates={"publication_date": persisted_scheduled_at})
         return SuccessResponse(
             data=BlogScheduleResponse(
                 post_id=post_id,
                 blog_status=updated.get("blog_status", "scheduled"),
-                blog_scheduled_at=str(updated.get("blog_scheduled_at") or scheduled_at.isoformat()),
+                blog_scheduled_at=persisted_scheduled_at,
             ).model_dump(),
         )
     except FlowForgeException:

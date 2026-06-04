@@ -18,7 +18,7 @@ from pydantic import ValidationError as PydanticValidationError
 from app.adapters.llm_client import get_llm_client
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
-from app.core.errors import ThirdPartyError
+from app.core.errors import ErrorCode, ThirdPartyError
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.blog.queries import (

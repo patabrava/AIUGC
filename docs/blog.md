@@ -71,6 +71,29 @@ Enables selecting posts within a batch to generate blog articles from their rese
 | `PUT` | `/blog/posts/{id}/blog/content` | Save edits to blog fields (blur-save) |
 | `POST` | `/blog/posts/{id}/blog/publish` | Push to Webflow CMS |
 
+## Scheduled Webflow Publishing
+
+Blog scheduling is owned by Lippe Lift Studio, not by Webflow's native CMS scheduler.
+
+The operator flow is:
+
+1. Enable a blog post in the batch detail page.
+2. Generate the blog draft and preview image.
+3. Pick a schedule time in the dedicated Blog Posts panel.
+4. The app stores `posts.blog_status = 'scheduled'` and `posts.blog_scheduled_at = <UTC timestamp>`.
+5. The in-process scheduler and `/blog/cron/dispatch` endpoint check due rows.
+6. When a row is due, the app creates or updates the staged Webflow CMS item, verifies imported image fields, and calls `POST /v2/collections/:collection_id/items/publish`.
+
+This design is intentional. Webflow's CMS API supports staged/live item publishing but does not expose an API-owned native scheduled-publish state. The app therefore keeps the schedule in Supabase and uses Webflow only when the post is due.
+
+Required production database contract:
+
+- `posts.blog_scheduled_at TIMESTAMPTZ`
+- `posts.blog_status` check constraint allows `scheduled` and `publishing`
+- `idx_posts_blog_scheduled_at` exists for due-row lookup
+
+If scheduling fails, check Supabase first. The schedule endpoint must not silently fall back to `draft` or drop `blog_scheduled_at`.
+
 ---
 
 ## Database Schema (Migration 020)
