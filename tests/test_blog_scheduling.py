@@ -271,3 +271,19 @@ def test_webflow_publish_item_uses_v2_collection_item_publish_endpoint():
     assert mock_request.call_args.args[0] == "POST"
     assert mock_request.call_args.args[1] == "/collections/col-1/items/publish"
     assert mock_request.call_args.kwargs["json"] == {"itemIds": ["wf-item-123"]}
+
+
+def test_blog_cron_dispatch_bypasses_global_auth_with_cron_bearer(monkeypatch):
+    async def _fake_dispatch_due_blog_posts(trigger="scheduler"):
+        return {"processed": 0, "published": 0, "failed": 0, "trigger": trigger}
+
+    monkeypatch.setattr(blog_runtime, "dispatch_due_blog_posts", _fake_dispatch_due_blog_posts)
+
+    client = TestClient(app)
+    response = client.post(
+        "/blog/cron/dispatch",
+        headers={"Authorization": "Bearer test-cron-secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["trigger"] == "cron"
