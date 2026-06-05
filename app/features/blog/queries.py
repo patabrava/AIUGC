@@ -38,6 +38,20 @@ def _isoformat_optional(value: Any) -> Optional[str]:
     return text or None
 
 
+def _utc_datetime_optional(value: Any) -> Optional[datetime]:
+    text = _isoformat_optional(value)
+    if text is None:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
     """Fetch a post with blog-relevant fields."""
     supabase = get_supabase()
@@ -203,11 +217,18 @@ def update_blog_status(
         if scheduled_at is not None:
             requested_scheduled_at = _isoformat_optional(scheduled_at)
         persisted_scheduled_at = _isoformat_optional(updated.get("blog_scheduled_at"))
+        requested_scheduled_dt = _utc_datetime_optional(scheduled_at)
+        persisted_scheduled_dt = _utc_datetime_optional(updated.get("blog_scheduled_at"))
+        schedule_matches = (
+            requested_scheduled_dt == persisted_scheduled_dt
+            if requested_scheduled_dt is not None and persisted_scheduled_dt is not None
+            else persisted_scheduled_at == requested_scheduled_at
+        )
         if (
             persisted_status != status
             or (
                 should_check_scheduled_at
-                and persisted_scheduled_at != requested_scheduled_at
+                and not schedule_matches
             )
         ):
             raise FlowForgeException(

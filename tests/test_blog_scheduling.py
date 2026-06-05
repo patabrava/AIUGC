@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -149,6 +149,40 @@ def test_update_blog_status_scheduled_raises_when_scheduled_at_did_not_persist(m
         raise AssertionError("Expected FlowForgeException")
 
 
+def test_update_blog_status_accepts_equivalent_fractional_second_schedule(monkeypatch):
+    class _FakeResponse:
+        data = [
+            {
+                "id": "post-1",
+                "blog_status": "scheduled",
+                "blog_scheduled_at": "2026-06-05T14:01:19.445+00:00",
+            }
+        ]
+
+    class _FakeTable:
+        def update(self, _payload):
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def execute(self):
+            return _FakeResponse()
+
+    class _FakeSupabase:
+        client = type("Client", (), {"table": staticmethod(lambda _name: _FakeTable())})()
+
+    monkeypatch.setattr(blog_queries, "get_supabase", lambda: _FakeSupabase())
+
+    updated = blog_queries.update_blog_status(
+        "post-1",
+        status="scheduled",
+        scheduled_at="2026-06-05T14:01:19.445000+00:00",
+    )
+
+    assert updated["blog_status"] == "scheduled"
+
+
 def test_get_due_scheduled_blog_posts_raises_on_query_error(monkeypatch):
     class _FailingQuery:
         def select(self, *_args):
@@ -187,7 +221,8 @@ def test_get_due_scheduled_blog_posts_raises_on_query_error(monkeypatch):
 
 
 def test_schedule_blog_endpoint_returns_persisted_schedule(monkeypatch):
-    scheduled = "2026-06-05T08:00:00+00:00"
+    scheduled_dt = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=1)
+    scheduled = scheduled_dt.isoformat()
 
     monkeypatch.setattr(
         blog_handlers,
@@ -224,9 +259,7 @@ def test_schedule_blog_endpoint_returns_persisted_schedule(monkeypatch):
     response = asyncio.run(
         blog_handlers.schedule_blog_publish(
             "post-1",
-            blog_handlers.BlogScheduleRequest(
-                scheduled_at=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc)
-            ),
+            blog_handlers.BlogScheduleRequest(scheduled_at=scheduled_dt),
         )
     )
 
