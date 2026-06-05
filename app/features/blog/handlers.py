@@ -4,6 +4,7 @@ FastAPI route handlers for blog post operations.
 Per Constitution § V: Locality & Vertical Slices
 """
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -31,6 +32,43 @@ from app.features.blog.schemas import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/blog", tags=["blog"])
+_MAX_NEAR_TERM_BLOG_WAKEUP_SECONDS = 60 * 60
+
+
+async def _delayed_blog_dispatch(scheduled_at: datetime) -> None:
+    delay_seconds = max(0.0, (scheduled_at - datetime.now(timezone.utc)).total_seconds())
+    if delay_seconds > 0:
+        await asyncio.sleep(delay_seconds)
+    try:
+        from app.features.blog.blog_runtime import dispatch_due_blog_posts
+
+        result = await dispatch_due_blog_posts(trigger="schedule_wakeup")
+        logger.info("blog_schedule_wakeup_dispatched", **result)
+    except Exception as exc:
+        logger.exception("blog_schedule_wakeup_failed", error=str(exc))
+
+
+def _queue_near_term_blog_dispatch(scheduled_at: datetime) -> bool:
+    delay_seconds = max(0.0, (scheduled_at - datetime.now(timezone.utc)).total_seconds())
+    if delay_seconds > _MAX_NEAR_TERM_BLOG_WAKEUP_SECONDS:
+        logger.info(
+            "blog_schedule_wakeup_skipped",
+            scheduled_at=scheduled_at.isoformat(),
+            delay_seconds=round(delay_seconds, 3),
+        )
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.warning("blog_schedule_wakeup_no_running_loop", scheduled_at=scheduled_at.isoformat())
+        return False
+    loop.create_task(_delayed_blog_dispatch(scheduled_at))
+    logger.info(
+        "blog_schedule_wakeup_queued",
+        scheduled_at=scheduled_at.isoformat(),
+        delay_seconds=round(delay_seconds, 3),
+    )
+    return True
 
 
 class ToggleRequest(BaseModel):
@@ -211,6 +249,7 @@ async def schedule_blog_publish(post_id: str, request: BlogScheduleRequest):
         )
         persisted_scheduled_at = str(updated.get("blog_scheduled_at") or scheduled_at.isoformat())
         update_blog_content_fields(post_id, updates={"publication_date": persisted_scheduled_at})
+        _queue_near_term_blog_dispatch(scheduled_at)
         return SuccessResponse(
             data=BlogScheduleResponse(
                 post_id=post_id,

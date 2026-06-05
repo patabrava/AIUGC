@@ -255,6 +255,12 @@ def test_schedule_blog_endpoint_returns_persisted_schedule(monkeypatch):
         "update_blog_content_fields",
         lambda post_id, *, updates: saved_updates.append((post_id, updates)) or {"id": post_id},
     )
+    wakeups = []
+    monkeypatch.setattr(
+        blog_handlers,
+        "_queue_near_term_blog_dispatch",
+        lambda scheduled_at: wakeups.append(scheduled_at) or True,
+    )
 
     response = asyncio.run(
         blog_handlers.schedule_blog_publish(
@@ -267,6 +273,56 @@ def test_schedule_blog_endpoint_returns_persisted_schedule(monkeypatch):
     assert response.data["blog_status"] == "scheduled"
     assert response.data["blog_scheduled_at"] == scheduled
     assert saved_updates == [("post-1", {"publication_date": scheduled})]
+    assert wakeups == [scheduled_dt]
+
+
+def test_schedule_blog_endpoint_queues_near_term_dispatch(monkeypatch):
+    scheduled_dt = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(minutes=5)
+    scheduled = scheduled_dt.isoformat()
+
+    monkeypatch.setattr(
+        blog_handlers,
+        "_load_post_for_blog",
+        lambda _post_id: {
+            "id": "post-1",
+            "blog_enabled": True,
+            "blog_status": "draft",
+            "blog_content": {
+                "name": "Test Blog",
+                "slug": "test-blog",
+                "body_html": "<p>Body</p>",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        blog_handlers,
+        "update_blog_status",
+        lambda post_id, **_kwargs: {
+            "id": post_id,
+            "blog_status": "scheduled",
+            "blog_scheduled_at": scheduled,
+        },
+    )
+    monkeypatch.setattr(
+        blog_handlers,
+        "update_blog_content_fields",
+        lambda post_id, *, updates: {"id": post_id, "updates": updates},
+    )
+    wakeups = []
+    monkeypatch.setattr(
+        blog_handlers,
+        "_queue_near_term_blog_dispatch",
+        lambda scheduled_at: wakeups.append(scheduled_at) or True,
+    )
+
+    asyncio.run(
+        blog_handlers.schedule_blog_publish(
+            "post-1",
+            blog_handlers.BlogScheduleRequest(scheduled_at=scheduled_dt),
+        )
+    )
+
+    assert wakeups == [scheduled_dt]
 
 
 def test_run_scheduled_blog_publish_job_reports_due_query_error(monkeypatch):

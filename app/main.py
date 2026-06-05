@@ -101,9 +101,6 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=30,
         )
-        scheduler.start()
-        logger.info("publish_scheduler_started", interval_minutes=1)
-
         scheduler.add_job(
             _run_blog_publish_scheduler_job_sync,
             "interval",
@@ -113,6 +110,8 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=30,
         )
+        scheduler.start()
+        logger.info("publish_scheduler_started", interval_minutes=1)
         logger.info("blog_publish_scheduler_started", interval_minutes=1)
 
     if _env_flag_enabled("DISABLE_STARTUP_RECOVERY_CHECKS"):
