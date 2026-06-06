@@ -6,6 +6,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 from app.features.publish.schemas import PostNowRequest, SocialNetwork
 from app.core.states import BatchState
 from app.core.errors import ValidationError
@@ -45,6 +46,86 @@ class TestPostNowRequestSchema:
                 publish_caption="Test caption",
                 social_networks=[SocialNetwork.FACEBOOK, SocialNetwork.FACEBOOK],
             )
+
+    def test_accepts_valid_tiktok_settings_for_post_now(self):
+        req = PostNowRequest(
+            post_id="post-1",
+            publish_caption="Test caption",
+            social_networks=[SocialNetwork.TIKTOK],
+            tiktok_settings={
+                "title": "TikTok title",
+                "privacy_level": "PUBLIC_TO_EVERYONE",
+                "allow_comment": True,
+                "allow_duet": False,
+                "allow_stitch": False,
+                "commercial_disclosure": False,
+                "your_brand": False,
+                "branded_content": False,
+                "consent_acknowledged": True,
+            },
+        )
+
+        assert req.tiktok_settings.consent_acknowledged is True
+
+    def test_rejects_tiktok_settings_without_consent(self):
+        with pytest.raises(Exception) as excinfo:
+            PostNowRequest(
+                post_id="post-1",
+                publish_caption="Test caption",
+                social_networks=[SocialNetwork.TIKTOK],
+                tiktok_settings={
+                    "title": "TikTok title",
+                    "privacy_level": "PUBLIC_TO_EVERYONE",
+                    "consent_acknowledged": False,
+                },
+            )
+
+        assert "consent_acknowledged" in str(excinfo.value)
+
+
+def test_post_now_route_passes_tiktok_settings(monkeypatch):
+    import app.core.config as config_module
+    from app.main import app
+
+    captured = {}
+
+    async def fake_publish_post_now(post_id, social_networks, *, publish_caption=None, tiktok_settings=None):
+        captured["post_id"] = post_id
+        captured["social_networks"] = social_networks
+        captured["publish_caption"] = publish_caption
+        captured["tiktok_settings"] = tiktok_settings
+        return {"post_id": post_id, "publish_status": "published", "publish_results": {}, "platform_ids": {}}
+
+    monkeypatch.setattr(publish_handlers, "publish_post_now", fake_publish_post_now)
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("BYPASS_AUTH_IN_DEVELOPMENT", "true")
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.post(
+        "/publish/posts/post-1/now",
+        json={
+            "post_id": "post-1",
+            "publish_caption": "Test caption",
+            "social_networks": ["tiktok"],
+            "tiktok_settings": {
+                "title": "TikTok title",
+                "privacy_level": "PUBLIC_TO_EVERYONE",
+                "allow_comment": True,
+                "allow_duet": False,
+                "allow_stitch": False,
+                "commercial_disclosure": False,
+                "your_brand": False,
+                "branded_content": False,
+                "consent_acknowledged": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured["post_id"] == "post-1"
+    assert captured["social_networks"] == ["tiktok"]
+    assert captured["tiktok_settings"]["consent_acknowledged"] is True
 
 
 class _FakeResponse:

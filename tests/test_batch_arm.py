@@ -294,6 +294,7 @@ class TestBatchArmHandler:
             "commercial_disclosure": False,
             "your_brand": False,
             "branded_content": False,
+            "consent_acknowledged": True,
         }
         client = _FakeClient(storage)
 
@@ -346,6 +347,7 @@ def test_arm_accepts_tiktok_post_with_complete_settings(monkeypatch):
                 "commercial_disclosure": False,
                 "your_brand": False,
                 "branded_content": False,
+                "consent_acknowledged": True,
             },
         },
     ]

@@ -128,6 +128,10 @@ class PostNowRequest(BaseModel):
         min_length=1,
         description="Selected social networks (Instagram, Facebook, TikTok)",
     )
+    tiktok_settings: Optional["TikTokPostSettings"] = Field(
+        default=None,
+        description="Required TikTok post settings when direct posting is available",
+    )
 
     @field_validator("social_networks")
     @classmethod
@@ -321,6 +325,7 @@ class TikTokPostSettings(BaseModel):
     commercial_disclosure: bool = Field(default=False)
     your_brand: bool = Field(default=False)
     branded_content: bool = Field(default=False)
+    consent_acknowledged: bool = Field(default=False)
 
     @field_validator("title")
     @classmethod
@@ -350,6 +355,8 @@ class TikTokPostSettings(BaseModel):
             raise ValueError(
                 "your_brand/branded_content require commercial_disclosure to be true"
             )
+        if not self.consent_acknowledged:
+            raise ValueError("consent_acknowledged must be true before TikTok posting")
         return self
 
 
@@ -381,10 +388,22 @@ class TikTokPublishRequest(BaseModel):
     """Post one generated video directly to TikTok."""
     post_id: str = Field(..., min_length=1, description="Post id for the generated video")
     caption: Optional[str] = Field(default=None, max_length=2200, description="Optional TikTok post caption")
+    title: str = Field(..., min_length=1, max_length=90, description="TikTok post title")
     privacy_level: str = Field(..., min_length=1, description="TikTok privacy level chosen from creator_info")
-    disable_comment: bool = Field(default=False, description="Disable comments for the TikTok post")
-    disable_duet: bool = Field(default=False, description="Disable duet for the TikTok post")
-    disable_stitch: bool = Field(default=False, description="Disable stitch for the TikTok post")
+    allow_comment: bool = Field(default=False, description="Allow comments for the TikTok post")
+    allow_duet: bool = Field(default=False, description="Allow duet for the TikTok post")
+    allow_stitch: bool = Field(default=False, description="Allow stitch for the TikTok post")
+    your_brand: bool = Field(default=False, description="TikTok commercial disclosure: creator's own brand")
+    branded_content: bool = Field(default=False, description="TikTok commercial disclosure: third-party branded content")
+    consent_acknowledged: bool = Field(default=False, description="Creator accepted TikTok posting confirmation")
+
+    @model_validator(mode="after")
+    def validate_direct_post_consent(self) -> "TikTokPublishRequest":
+        if not self.consent_acknowledged:
+            raise ValueError("consent_acknowledged must be true before TikTok posting")
+        if self.branded_content and self.privacy_level == "SELF_ONLY":
+            raise ValueError("branded_content cannot use SELF_ONLY privacy level")
+        return self
 
 
 class TikTokPublishJobResponse(BaseModel):

@@ -462,8 +462,15 @@
                 if (!s.privacy_level) return false;
                 if (s.commercial_disclosure && !s.your_brand && !s.branded_content) return false;
                 if (s.branded_content && s.privacy_level === 'SELF_ONLY') return false;
-                if (!s.consentAcknowledged) return false;
+                if (!(s.consent_acknowledged || s.consentAcknowledged)) return false;
                 return true;
+            },
+
+            tiktokActionLabel() {
+                const tiktok = options.tiktokState || {};
+                if (!this.networks.includes('tiktok')) return 'Publish Now';
+                if (tiktok.publish_ready) return 'Post to TikTok';
+                return 'Upload Draft';
             },
 
             _buildSlots(count) {

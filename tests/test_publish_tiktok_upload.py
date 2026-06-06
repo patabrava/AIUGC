@@ -4,6 +4,8 @@ import asyncio
 from copy import deepcopy
 from types import SimpleNamespace
 
+import pytest
+
 from app.features.publish import tiktok
 from app.features.publish.schemas import TikTokPublishRequest, TikTokUploadDraftRequest
 from app.core.errors import ThirdPartyError, ValidationError
@@ -286,6 +288,36 @@ def test_tiktok_token_expiry_parser_accepts_supabase_fractional_timestamp():
     assert parsed.isoformat() == "2027-04-29T16:11:35.563700+00:00"
 
 
+def test_build_tiktok_post_info_marks_generated_video_as_aigc():
+    payload = tiktok._build_tiktok_post_info(
+        title="Creator title",
+        privacy_level="SELF_ONLY",
+        disable_comment=False,
+        disable_duet=False,
+        disable_stitch=False,
+        brand_content_toggle=False,
+        brand_organic_toggle=False,
+    )
+
+    assert payload["is_aigc"] is True
+
+
+def test_tiktok_publish_request_requires_consent_acknowledged():
+    with pytest.raises(ValueError) as excinfo:
+        TikTokPublishRequest(
+            post_id="post-1",
+            caption="TikTok caption",
+            title="Creator title",
+            privacy_level="SELF_ONLY",
+            allow_comment=True,
+            allow_duet=True,
+            allow_stitch=False,
+            consent_acknowledged=False,
+        )
+
+    assert "consent_acknowledged" in str(excinfo.value)
+
+
 def test_load_tiktok_secret_refreshes_expired_access_token(monkeypatch):
     storage = {
         "tiktok_secret": {
@@ -544,6 +576,7 @@ def test_publish_tiktok_direct_persists_published_post_result(monkeypatch):
                 allow_comment=True,
                 allow_duet=True,
                 allow_stitch=False,
+                consent_acknowledged=True,
             )
         )
     )
@@ -624,6 +657,7 @@ def test_publish_tiktok_direct_allows_s8_complete_after_meta_publish(monkeypatch
                 allow_comment=True,
                 allow_duet=True,
                 allow_stitch=False,
+                consent_acknowledged=True,
             )
         )
     )
@@ -696,14 +730,15 @@ def test_publish_tiktok_direct_surfaces_private_account_restriction(monkeypatch)
                 TikTokPublishRequest(
                     post_id="post-1",
                     caption="TikTok caption",
-                    title="Topic",
-                    privacy_level="SELF_ONLY",
-                    allow_comment=True,
-                    allow_duet=True,
-                    allow_stitch=False,
+                        title="Topic",
+                        privacy_level="SELF_ONLY",
+                        allow_comment=True,
+                        allow_duet=True,
+                        allow_stitch=False,
+                        consent_acknowledged=True,
+                    )
                 )
             )
-        )
         raise AssertionError("Expected ValidationError")
     except ValidationError as exc:
         assert "private account" in str(exc) or "blocked" in str(exc)

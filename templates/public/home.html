@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lippe Lift Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/brand.css">
+</head>
+<body class="min-h-screen bg-white text-[#1C2740]">
+    <header class="border-b border-gray-200 bg-white">
+        <div class="mx-auto flex max-w-6xl items-center justify-between gap-5 px-5 py-5">
+            <a href="/" class="inline-flex items-center gap-3">
+                <img src="/static/images/logo-Lippe-Lift_01.png" alt="Lippe Lift Studio" class="h-10 w-auto">
+                <span class="font-brand-heading text-lg font-bold">Lippe Lift Studio</span>
+            </a>
+            <nav class="flex items-center gap-4 text-sm font-medium">
+                <a href="/terms" class="text-[#1C2740]/70 hover:text-[#006AAB]">Terms</a>
+                <a href="/privacy" class="text-[#1C2740]/70 hover:text-[#006AAB]">Privacy</a>
+                <a href="/auth/login" class="rounded-md bg-[#006AAB] px-4 py-2 text-white hover:bg-[#005a90]">Sign in</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="mx-auto grid max-w-6xl gap-8 px-5 py-12 lg:grid-cols-[1.05fr_.95fr] lg:items-center">
+            <div>
+                <p class="text-sm font-semibold uppercase tracking-wide text-[#006AAB]">Creator workflow for original short-form video</p>
+                <h1 class="mt-4 font-brand-heading text-4xl font-extrabold leading-tight text-[#1C2740] md:text-5xl">Lippe Lift Studio helps creators review and publish original UGC videos.</h1>
+                <p class="mt-5 max-w-2xl text-lg leading-8 text-[#1C2740]/75">
+                    Plan a post, review the generated script, approve the video preview, edit the TikTok title and caption, choose privacy and interaction settings, then publish only after explicit creator consent.
+                </p>
+                <div class="mt-7 flex flex-wrap gap-3">
+                    <a href="/auth/login" class="rounded-md bg-[#006AAB] px-5 py-3 text-sm font-semibold text-white hover:bg-[#005a90]">Open Studio</a>
+                    <a href="/privacy" class="rounded-md border border-gray-300 px-5 py-3 text-sm font-semibold text-[#1C2740] hover:border-[#006AAB] hover:text-[#006AAB]">Read privacy policy</a>
+                </div>
+            </div>
+            <div class="rounded-lg border border-gray-200 bg-gray-50 p-5">
+                <div class="aspect-[9/16] max-h-[520px] rounded-md bg-black p-3 text-white">
+                    <div class="flex h-full flex-col justify-end rounded bg-gradient-to-b from-[#1C2740] to-[#006AAB] p-5">
+                        <p class="text-xs uppercase tracking-wide text-white/70">Video preview</p>
+                        <p class="mt-2 text-2xl font-bold">Creator stays in control before TikTok receives the video.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="border-y border-gray-200 bg-gray-50">
+            <div class="mx-auto grid max-w-6xl gap-5 px-5 py-10 md:grid-cols-3">
+                <article class="rounded-lg bg-white p-5 shadow-sm">
+                    <h2 class="font-brand-heading text-lg font-bold">Original content workflow</h2>
+                    <p class="mt-2 text-sm leading-6 text-[#1C2740]/70">Creators work from reviewed scripts and generated videos produced inside the studio, not copied posts from other platforms.</p>
+                </article>
+                <article class="rounded-lg bg-white p-5 shadow-sm">
+                    <h2 class="font-brand-heading text-lg font-bold">TikTok-ready controls</h2>
+                    <p class="mt-2 text-sm leading-6 text-[#1C2740]/70">The posting screen shows account identity, privacy options, interaction controls, commercial disclosure, consent, and processing status.</p>
+                </article>
+                <article class="rounded-lg bg-white p-5 shadow-sm">
+                    <h2 class="font-brand-heading text-lg font-bold">Human approval first</h2>
+                    <p class="mt-2 text-sm leading-6 text-[#1C2740]/70">No content is sent to TikTok until a creator previews the video and confirms the posting metadata.</p>
+                </article>
+            </div>
+        </section>
+    </main>
+
+    <footer class="mx-auto flex max-w-6xl flex-col gap-3 px-5 py-6 text-sm text-[#1C2740]/65 sm:flex-row sm:items-center sm:justify-between">
+        <p>Lippe Lift Studio</p>
+        <div class="flex gap-4">
+            <a href="/terms" class="hover:text-[#006AAB]">Terms of Service</a>
+            <a href="/privacy" class="hover:text-[#006AAB]">Privacy Policy</a>
+            <a href="/auth/login" class="hover:text-[#006AAB]">Sign in</a>
+        </div>
+    </footer>
+</body>
+</html>

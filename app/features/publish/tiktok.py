@@ -810,6 +810,7 @@ def _build_tiktok_post_info(
         "video_cover_timestamp_ms": 1000,
         "brand_content_toggle": brand_content_toggle,
         "brand_organic_toggle": brand_organic_toggle,
+        "is_aigc": True,
     }
 
 

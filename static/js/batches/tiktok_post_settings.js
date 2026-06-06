@@ -16,6 +16,10 @@
             },
             options.initial || {},
         );
+        initial.consentAcknowledged = !!(
+            initial.consent_acknowledged ||
+            initial.consentAcknowledged
+        );
 
         return {
             scope: options.scope || "post",
@@ -114,7 +118,7 @@
                     commercial_disclosure: this.settings.commercialDisclosure,
                     your_brand: this.settings.commercialDisclosure && this.settings.yourBrand,
                     branded_content: this.settings.commercialDisclosure && this.settings.brandedContent,
-                    consentAcknowledged: this.scope === 'post' ? !!this.settings.consentAcknowledged : false,
+                    consent_acknowledged: this.scope === 'post' ? !!this.settings.consentAcknowledged : false,
                 };
             },
 

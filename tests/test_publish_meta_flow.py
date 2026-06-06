@@ -3,6 +3,7 @@
 import asyncio
 from copy import deepcopy
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from fastapi import HTTPException
 import pytest
@@ -12,6 +13,16 @@ from app.core.errors import ThirdPartyError, ValidationError
 from app.features.batches import handlers as batch_handlers
 from app.features.publish import handlers as publish_handlers
 from app.features.publish.schemas import ConfirmPublishRequest, PostScheduleRequest, SocialNetwork
+
+
+def test_publish_panel_distinguishes_tiktok_direct_and_draft_labels():
+    detail_js = Path("static/js/batches/detail.js").read_text()
+    panel = Path("templates/batches/detail/_publish_panel.html").read_text()
+
+    assert "tiktokActionLabel" in detail_js
+    assert "Post to TikTok" in detail_js
+    assert "Upload Draft" in detail_js
+    assert "tiktokActionLabel" in panel
 
 
 class _FakeResponse:

@@ -32,6 +32,7 @@ def test_save_post_tiktok_settings_round_trip(monkeypatch):
             "commercial_disclosure": True,
             "your_brand": True,
             "branded_content": False,
+            "consent_acknowledged": True,
         },
     )
 

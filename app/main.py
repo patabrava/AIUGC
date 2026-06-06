@@ -271,7 +271,7 @@ async def correlation_id_middleware(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Redirect unauthenticated requests to login."""
-    redirect = await require_auth(request)
+    redirect = None if request.url.path == "/" else await require_auth(request)
     if redirect is not None:
         return redirect
 
@@ -460,14 +460,14 @@ if tiktok_router is not None:
     app.include_router(tiktok_router)
 
 
+templates = Jinja2Templates(directory="templates")
+
+
 # Root endpoint
 @app.get("/")
-async def root():
-    """Root endpoint - redirect to batches dashboard."""
-    return RedirectResponse(url="/batches", status_code=status.HTTP_302_FOUND)
-
-
-templates = Jinja2Templates(directory="templates")
+async def root(request: Request):
+    """Serve the public product page used for app review and unauthenticated visitors."""
+    return templates.TemplateResponse("public/home.html", {"request": request})
 
 @app.get("/terms")
 async def terms_page(request: Request):

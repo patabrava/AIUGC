@@ -157,7 +157,7 @@
                                         commercialDisclosure: !!(post.tiktokSettings && post.tiktokSettings.commercial_disclosure),
                                         yourBrand: !!(post.tiktokSettings && post.tiktokSettings.your_brand),
                                         brandedContent: !!(post.tiktokSettings && post.tiktokSettings.branded_content),
-                                        consentAcknowledged: !!(post.tiktokSettings && post.tiktokSettings.consentAcknowledged)
+                                        consentAcknowledged: !!(post.tiktokSettings && (post.tiktokSettings.consent_acknowledged || post.tiktokSettings.consentAcknowledged))
                                     },
                                     onSaved: function (payload) { post.tiktokSettings = payload; }
                                  })'>
@@ -337,7 +337,7 @@
                                 commercialDisclosure: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.commercial_disclosure),
                                 yourBrand: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.your_brand),
                                 brandedContent: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.branded_content),
-                                consentAcknowledged: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.consentAcknowledged)
+                                consentAcknowledged: !!(postNowTarget.tiktokSettings && (postNowTarget.tiktokSettings.consent_acknowledged || postNowTarget.tiktokSettings.consentAcknowledged))
                             },
                             onSaved: function (payload) {
                                 postNowTarget.tiktokSettings = payload;
@@ -366,7 +366,7 @@
                     :disabled="postNowSaving || !canPostNow"
                     class="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition"
                     :class="(postNowSaving || !canPostNow) ? 'bg-gray-300 cursor-wait' : 'bg-orange-500 hover:bg-orange-600'">
-                    <span x-text="postNowSaving ? (networks.includes('tiktok') ? 'Uploading Draft...' : 'Publishing...') : (networks.includes('tiktok') ? '&#x25B6; Upload Draft' : '&#x25B6; Publish Now')"></span>
+                    <span x-text="postNowSaving ? (networks.includes('tiktok') ? 'Submitting to TikTok...' : 'Publishing...') : ('▶ ' + tiktokActionLabel())"></span>
                 </button>
             </div>
         </div>
