@@ -422,3 +422,8 @@ class TikTokPublishJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     published_at: Optional[datetime] = None
+
+
+# Resolve the forward reference used by PostNowRequest on import so Pydantic
+# can build the schema consistently in production environments.
+PostNowRequest.model_rebuild(_types_namespace={"Optional": Optional, "TikTokPostSettings": TikTokPostSettings})
