@@ -98,6 +98,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("VERTEX_GEMINI_IMAGE_MODEL"),
         description="Vertex Gemini image generation model",
     )
+    vertex_gemini_image_location: str = Field(
+        "global",
+        validation_alias=AliasChoices("VERTEX_GEMINI_IMAGE_LOCATION"),
+        description="Vertex location for Gemini image generation requests",
+    )
     vertex_grounded_research_model: str = Field(
         "gemini-2.5-pro",
         validation_alias=AliasChoices("VERTEX_GROUNDED_RESEARCH_MODEL"),

@@ -163,6 +163,8 @@ class VertexGeminiClient:
         model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        aspect_ratio: str = "1:1",
+        image_size: str = "1K",
     ) -> Dict[str, Any]:
         target_model = model or self._settings.vertex_gemini_image_model
         payload = self._build_generate_content_payload(
@@ -173,10 +175,13 @@ class VertexGeminiClient:
         )
         payload.setdefault("generationConfig", {})
         payload["generationConfig"]["responseModalities"] = ["IMAGE"]
-        payload["generationConfig"]["imageConfig"] = {"aspectRatio": "1:1", "imageSize": "1K"}
+        payload["generationConfig"]["imageConfig"] = {
+            "aspectRatio": aspect_ratio,
+            "imageSize": image_size,
+        }
         data = self._post_generate_content(
             model=target_model,
-            location=self._settings.vertex_ai_location,
+            location=self._settings.vertex_gemini_image_location or self._settings.vertex_ai_location,
             payload=payload,
             log_event="vertex_gemini_generate_image",
         )
@@ -185,6 +190,8 @@ class VertexGeminiClient:
             "image_bytes": image_payload["bytes"],
             "mime_type": image_payload["mime_type"],
             "model": target_model,
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
             "raw_response": data,
         }
 

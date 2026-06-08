@@ -50,6 +50,9 @@ from app.features.characters.actor_identity import (
 from app.features.characters import queries as character_queries
 from app.features.characters.scene_reference import get_scene_bible
 from app.features.characters.schemas import ActorIdentityRecord, SceneReferenceSetSummary
+from app.features.scenes import queries as scene_queries
+from app.features.scenes.handlers import generate_canonical_scene_asset
+from app.features.scenes.schemas import CanonicalSceneAssetRecord
 from app.features.posts.prompt_text import build_full_prompt_text
 from app.features.posts.prompt_builder import (
     DEFAULT_CHARACTER,
@@ -332,10 +335,44 @@ def _scene_reference_context_metadata(
     return {}
 
 
+def _canonical_scene_context_metadata(
+    canonical_scene_asset: CanonicalSceneAssetRecord,
+) -> Dict[str, Any]:
+    return {
+        "canonical_scene_asset_id": canonical_scene_asset.id,
+        "canonical_scene_key": canonical_scene_asset.scene_key,
+        "canonical_scene_bible_version": canonical_scene_asset.scene_bible_version,
+        "canonical_scene_image_url": canonical_scene_asset.image_url,
+        "canonical_scene_reference_used_for_video": True,
+    }
+
+
+def _resolve_canonical_scene_asset_for_submission(
+    *,
+    prompt_text: Optional[str],
+    scene_text: Optional[str],
+    post_type: Optional[str],
+    seed_data: Optional[Dict[str, Any]],
+    correlation_id: str,
+) -> CanonicalSceneAssetRecord:
+    scene_key = scene_queries.resolve_canonical_scene_key(
+        scene_text=scene_text,
+        prompt_text=prompt_text,
+        post_type=post_type,
+        seed_data=seed_data,
+        target_length_tier=int((seed_data or {}).get("target_length_tier") or DEFAULT_TARGET_LENGTH_TIER),
+    )
+    existing = scene_queries.get_canonical_scene_asset(scene_key=scene_key, aspect_ratio="9:16", image_size="1K")
+    if existing and existing.status == "generated" and existing.image_url:
+        return existing
+    return generate_canonical_scene_asset(scene_key=scene_key, correlation_id=correlation_id)
+
+
 def _load_actor_identity_anchor_assets(
     *,
     actor_identity_id: Optional[str],
     correlation_id: str,
+    canonical_scene_asset: CanonicalSceneAssetRecord,
     scene_reference: Optional[Dict[str, Any]] = None,
     scene_reference_set: Optional[SceneReferenceSetSummary] = None,
 ) -> Dict[str, Any]:
@@ -365,20 +402,34 @@ def _load_actor_identity_anchor_assets(
         )
 
     anchor_urls = _actor_identity_anchor_urls(actor_identity)
-    if len(anchor_urls) < 3:
+    if len(anchor_urls) < 2:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires at least three actor identity anchor images.",
+            message="ActorIdentity video generation requires at least two actor identity anchor images.",
             details={"actor_identity_id": resolved_actor_identity_id, "anchor_image_count": len(anchor_urls)},
             status_code=422,
         )
+    if not canonical_scene_asset.image_url:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity video generation requires a generated canonical scene image URL.",
+            details={
+                "actor_identity_id": resolved_actor_identity_id,
+                "canonical_scene_asset_id": canonical_scene_asset.id,
+                "canonical_scene_key": canonical_scene_asset.scene_key,
+            },
+            status_code=422,
+        )
 
-    reference_images = [_reference_image_payload_from_url(url) for url in anchor_urls]
+    actor_anchor_urls = anchor_urls[:2]
+    reference_images = [_reference_image_payload_from_url(url) for url in actor_anchor_urls]
+    reference_images.append(_reference_image_payload_from_url(canonical_scene_asset.image_url))
     logger.info(
         "actor_identity_anchors_loaded_for_veo",
         correlation_id=correlation_id,
         actor_identity_id=resolved_actor_identity_id,
         reference_image_count=len(reference_images),
+        canonical_scene_key=canonical_scene_asset.scene_key,
         scene_reference_set_id=scene_reference_set.reference_set_id if scene_reference_set else None,
         scene_reference_image_id=scene_reference.get("id") if scene_reference else None,
     )
@@ -386,12 +437,17 @@ def _load_actor_identity_anchor_assets(
     metadata = {
         "reference_images_enabled": True,
         "reference_image_count": len(reference_images),
-        "reference_image_roles": ["actor_identity_anchor" for _ in reference_images],
+        "reference_image_roles": [
+            "actor_identity_anchor",
+            "actor_identity_anchor",
+            "canonical_scene_anchor",
+        ],
         "actor_identity_id": resolved_actor_identity_id,
         "actor_identity_anchor_source": "actor_identity_training_images",
-        "actor_identity_anchor_image_count": len(reference_images),
-        "source": "actor_identity_anchor_images",
+        "actor_identity_anchor_image_count": len(actor_anchor_urls),
+        "source": "actor_identity_plus_canonical_scene_anchor",
     }
+    metadata.update(_canonical_scene_context_metadata(canonical_scene_asset))
     metadata.update(
         _scene_reference_context_metadata(
             scene_reference=scene_reference,
@@ -697,6 +753,68 @@ def _scene_text_from_reference_set(scene_reference_set: Optional[SceneReferenceS
             scene_key=scene_key,
         )
         return None
+
+
+def _scene_text_from_canonical_scene_asset(
+    canonical_scene_asset: Optional[CanonicalSceneAssetRecord],
+) -> Optional[str]:
+    if canonical_scene_asset is None:
+        return None
+    try:
+        return get_scene_bible(canonical_scene_asset.scene_key).scene_identity
+    except KeyError:
+        logger.warning(
+            "canonical_scene_prompt_scene_unknown",
+            canonical_scene_asset_id=canonical_scene_asset.id,
+            scene_key=canonical_scene_asset.scene_key,
+        )
+        return None
+
+
+def _apply_canonical_scene_to_video_prompt(
+    video_prompt: Dict[str, Any],
+    seed_data: Dict[str, Any],
+    *,
+    canonical_scene_asset: Optional[CanonicalSceneAssetRecord],
+    creation_mode: str,
+) -> Dict[str, Any]:
+    if not isinstance(video_prompt, dict) or not is_character_consistency_mode(creation_mode):
+        return video_prompt
+
+    scene_text = _scene_text_from_canonical_scene_asset(canonical_scene_asset)
+    if not scene_text:
+        return video_prompt
+
+    audio_payload = video_prompt.get("audio") if isinstance(video_prompt.get("audio"), dict) else {}
+    dialogue = str(
+        audio_payload.get("dialogue")
+        or seed_data.get("script")
+        or seed_data.get("dialog_script")
+        or ""
+    ).strip()
+    if not dialogue:
+        return video_prompt
+
+    updated_prompt = dict(video_prompt)
+    updated_prompt["scene"] = f"Scene: {scene_text}"
+    if is_character_consistency_light_mode(creation_mode):
+        updated_prompt["veo_prompt"] = build_lean_veo_base_prompt(
+            dialogue,
+            scene=scene_text,
+            include_final_ending=True,
+        )
+    else:
+        updated_prompt["veo_prompt"] = build_reference_image_scene_base_prompt(
+            dialogue,
+            character=str(updated_prompt.get("character") or LEGACY_SHORT_CHARACTER).strip(),
+            style=str(updated_prompt.get("style") or "").strip() or None,
+            scene=scene_text,
+            cinematography=str(updated_prompt.get("cinematography") or "").strip() or None,
+            ending=str(updated_prompt.get("ending_directive") or "").strip() or None,
+            audio_block=LEAN_FINAL_AUDIO_BLOCK,
+            include_final_ending=True,
+        )
+    return updated_prompt
 
 
 def _apply_scene_reference_scene_to_video_prompt(
@@ -1453,6 +1571,21 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             correlation_id=correlation_id,
             batch=batch,
         )
+        canonical_scene_asset = None
+        if is_character_consistency_mode(batch.get("creation_mode")):
+            canonical_scene_asset = _resolve_canonical_scene_asset_for_submission(
+                prompt_text=str(video_prompt.get("veo_prompt") or ""),
+                scene_text=str(video_prompt.get("scene") or ""),
+                post_type=str(post.get("post_type") or ""),
+                seed_data=seed_data,
+                correlation_id=correlation_id,
+            )
+            video_prompt = _apply_canonical_scene_to_video_prompt(
+                video_prompt,
+                seed_data,
+                canonical_scene_asset=canonical_scene_asset,
+                creation_mode=str(batch.get("creation_mode") or "automated"),
+            )
         script_contract = _validate_post_duration_contract_for_video(
             post=post,
             batch=batch,
@@ -1537,6 +1670,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             creation_mode=str(batch.get("creation_mode") or "automated"),
             character_snapshot=batch.get("character_snapshot"),
             actor_identity_id=batch.get("actor_identity_id"),
+            canonical_scene_asset=canonical_scene_asset,
             scene_reference_set=approved_scene_reference_set,
         )
 
@@ -1870,6 +2004,21 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     correlation_id=f"{correlation_id}_{post_id}",
                     batch=batch,
                 )
+                canonical_scene_asset = None
+                if is_character_consistency_mode(batch.get("creation_mode")):
+                    canonical_scene_asset = _resolve_canonical_scene_asset_for_submission(
+                        prompt_text=str(video_prompt.get("veo_prompt") or ""),
+                        scene_text=str(video_prompt.get("scene") or ""),
+                        post_type=str(post.get("post_type") or ""),
+                        seed_data=seed_data,
+                        correlation_id=f"{correlation_id}_{post_id}",
+                    )
+                    video_prompt = _apply_canonical_scene_to_video_prompt(
+                        video_prompt,
+                        seed_data,
+                        canonical_scene_asset=canonical_scene_asset,
+                        creation_mode=str(batch.get("creation_mode") or "automated"),
+                    )
             except FlowForgeException as exc:
                 logger.warning(
                     "post_skipped_no_prompt",
@@ -1924,6 +2073,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     "segment_metadata": segment_metadata,
                     "script_contract": script_contract,
                     "quota_requested_units": chain_cost_units(profile, provider=submission_plan["provider"]),
+                    "canonical_scene_asset": canonical_scene_asset,
                     "scene_reference_set": approved_scene_reference_set,
                 }
             )
@@ -2005,6 +2155,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     creation_mode=str(batch.get("creation_mode") or "automated"),
                     character_snapshot=batch.get("character_snapshot"),
                     actor_identity_id=batch.get("actor_identity_id"),
+                    canonical_scene_asset=item.get("canonical_scene_asset"),
                     scene_reference_set=item.get("scene_reference_set"),
                 )
                 operation_id = submission_result["operation_id"]
@@ -2431,6 +2582,11 @@ def _reference_image_audit_metadata(provider_metadata: Optional[Dict[str, Any]])
         "actor_identity_id",
         "actor_identity_anchor_source",
         "actor_identity_anchor_image_count",
+        "canonical_scene_asset_id",
+        "canonical_scene_key",
+        "canonical_scene_bible_version",
+        "canonical_scene_image_url",
+        "canonical_scene_reference_used_for_video",
         "scene_reference_set_id",
         "scene_reference_image_id",
         "scene_reference_image_ids",
@@ -2480,6 +2636,7 @@ def _submit_video_request(
     creation_mode: str = "automated",
     character_snapshot: Optional[Dict[str, Any]] = None,
     actor_identity_id: Optional[str] = None,
+    canonical_scene_asset: Optional[CanonicalSceneAssetRecord] = None,
     scene_reference: Optional[Dict[str, Any]] = None,
     scene_reference_set: Optional[SceneReferenceSetSummary] = None,
 ) -> Dict[str, Any]:
@@ -2507,6 +2664,13 @@ def _submit_video_request(
                     )
                 reference_bundle = _load_actor_identity_anchor_assets(
                     actor_identity_id=actor_identity_id,
+                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
+                        prompt_text=prompt_text,
+                        scene_text=None,
+                        post_type=None,
+                        seed_data=None,
+                        correlation_id=correlation_id,
+                    ),
                     scene_reference_set=scene_reference_set,
                     correlation_id=correlation_id,
                 )
@@ -2523,12 +2687,26 @@ def _submit_video_request(
                     )
                 reference_bundle = _load_actor_identity_anchor_assets(
                     actor_identity_id=actor_identity_id,
+                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
+                        prompt_text=prompt_text,
+                        scene_text=str(scene_reference.get("scene_key") or ""),
+                        post_type=None,
+                        seed_data=None,
+                        correlation_id=correlation_id,
+                    ),
                     scene_reference=scene_reference,
                     correlation_id=correlation_id,
                 )
             elif actor_identity_id and veo_duration_seconds == 8:
                 reference_bundle = _load_actor_identity_anchor_assets(
                     actor_identity_id=actor_identity_id,
+                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
+                        prompt_text=prompt_text,
+                        scene_text=None,
+                        post_type=None,
+                        seed_data=None,
+                        correlation_id=correlation_id,
+                    ),
                     correlation_id=correlation_id,
                 )
             else:
@@ -2622,6 +2800,13 @@ def _submit_video_request(
                     )
                 reference_bundle = _load_actor_identity_anchor_assets(
                     actor_identity_id=actor_identity_id,
+                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
+                        prompt_text=prompt_text,
+                        scene_text=None,
+                        post_type=None,
+                        seed_data=None,
+                        correlation_id=correlation_id,
+                    ),
                     scene_reference_set=scene_reference_set,
                     correlation_id=correlation_id,
                 )
@@ -2638,12 +2823,26 @@ def _submit_video_request(
                     )
                 reference_bundle = _load_actor_identity_anchor_assets(
                     actor_identity_id=actor_identity_id,
+                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
+                        prompt_text=prompt_text,
+                        scene_text=str(scene_reference.get("scene_key") or ""),
+                        post_type=None,
+                        seed_data=None,
+                        correlation_id=correlation_id,
+                    ),
                     scene_reference=scene_reference,
                     correlation_id=correlation_id,
                 )
             elif actor_identity_id and vertex_duration == 8:
                 reference_bundle = _load_actor_identity_anchor_assets(
                     actor_identity_id=actor_identity_id,
+                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
+                        prompt_text=prompt_text,
+                        scene_text=None,
+                        post_type=None,
+                        seed_data=None,
+                        correlation_id=correlation_id,
+                    ),
                     correlation_id=correlation_id,
                 )
             elif vertex_duration == 8:

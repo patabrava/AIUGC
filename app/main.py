@@ -33,6 +33,7 @@ from app.features.blog.handlers import router as blog_router, run_scheduled_blog
 from app.features.auth.handlers import router as auth_router
 from app.features.auth.middleware import require_auth, is_public_path
 from app.features.characters.handlers import router as characters_router
+from app.features.scenes.handlers import router as scenes_router
 
 try:
     from app.features.publish.tiktok import router as tiktok_router
@@ -449,6 +450,7 @@ async def health_check():
 # Register routers
 app.include_router(auth_router)
 app.include_router(characters_router)
+app.include_router(scenes_router)
 app.include_router(batches_router)
 app.include_router(topics_router)
 app.include_router(posts_router)

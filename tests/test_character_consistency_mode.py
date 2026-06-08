@@ -133,6 +133,29 @@ def _ready_actor_identity():
     )
 
 
+def _canonical_scene_asset(scene_key: str = "home_living_room_advice_a", image_url: str = "https://cdn.example.com/canonical-scene.png"):
+    from app.features.scenes.schemas import CanonicalSceneAssetRecord
+
+    return CanonicalSceneAssetRecord(
+        id=f"canonical-{scene_key}",
+        scene_key=scene_key,
+        scene_bible_version=1,
+        status="generated",
+        provider="vertex_gemini",
+        provider_model="gemini-3-pro-image-preview",
+        system_prompt_name="reality_first_prompt_v1",
+        prompt_text="Prompt",
+        aspect_ratio="9:16",
+        image_size="1K",
+        image_url=image_url,
+        storage_key=f"canonical-scenes/{scene_key}.png",
+        provider_metadata={},
+        generated_at="2026-06-08T00:00:00Z",
+        created_at="2026-06-08T00:00:00Z",
+        updated_at="2026-06-08T00:00:00Z",
+    )
+
+
 def test_create_batch_snapshots_ready_actor_identity(monkeypatch):
     from app.features.batches import queries as batch_queries
 
@@ -367,7 +390,7 @@ def test_character_consistency_prompt_uses_legacy_short_character():
     assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt["veo_prompt"]
 
 
-def test_character_consistency_prompt_keeps_scene_text_with_actor_only_references():
+def test_character_consistency_prompt_keeps_scene_text_with_canonical_scene_reference():
     from app.features.posts import prompt_builder
 
     prompt = prompt_builder.build_video_prompt_from_seed(
@@ -393,7 +416,7 @@ def test_character_consistency_prompt_keeps_scene_text_with_actor_only_reference
     assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
     assert prompt_builder.LEGACY_SCENE_BODY not in prompt["veo_prompt"]
     assert "submitted actor identity reference images only as the woman identity source" in prompt["veo_prompt"]
-    assert "Do not use reference-image backgrounds, wardrobe, or rooms as the scene source" in prompt["veo_prompt"]
+    assert "submitted canonical scene reference image as the environment, layout, prop, and lighting source" in prompt["veo_prompt"]
     assert "Ein ruhiger Satz fuer den Test." in prompt["veo_prompt"]
 
 
@@ -579,7 +602,7 @@ def test_video_prompt_uses_approved_scene_reference_scene_text_before_submit():
     assert "Ein Satz fuer das Wohnzimmer." in updated["veo_prompt"]
 
 
-def test_character_consistency_prompt_treats_reference_images_as_actor_identity_only():
+def test_character_consistency_prompt_uses_actor_identity_and_canonical_scene_roles():
     from app.features.posts import prompt_builder
 
     prompt = prompt_builder.build_reference_image_scene_base_prompt(
@@ -590,7 +613,7 @@ def test_character_consistency_prompt_treats_reference_images_as_actor_identity_
 
     assert "actor identity reference images only as the woman identity source" in prompt
     assert "visual source for the same woman, wardrobe, wheelchair framing, and room layout" not in prompt
-    assert "Do not use reference-image backgrounds, wardrobe, or rooms as the scene source" in prompt
+    assert "submitted canonical scene reference image as the environment, layout, prop, and lighting source" in prompt
     assert "Home living room advice scene A" in prompt
 
 
@@ -1043,6 +1066,7 @@ def test_submit_video_request_uses_actor_identity_anchors_for_single_scene_refer
     )
     monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
     monkeypatch.setattr(video_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: _ready_actor_identity())
+    canonical_asset = _canonical_scene_asset(scene_key="bathroom_accessibility_a", image_url="https://cdn.example.com/canonical-bathroom.png")
 
     result = video_handlers._submit_video_request(
         provider="vertex_ai",
@@ -1057,6 +1081,7 @@ def test_submit_video_request_uses_actor_identity_anchors_for_single_scene_refer
         correlation_id="corr-actor-ref",
         provider_duration_seconds=8,
         creation_mode="character_consistency",
+        canonical_scene_asset=canonical_asset,
         scene_reference={
             "id": "scene-1",
             "actor_identity_id": "actor-1",
@@ -1071,16 +1096,17 @@ def test_submit_video_request_uses_actor_identity_anchors_for_single_scene_refer
     assert len(captured["reference_images"]) == 3
     assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
     assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn.example.com/1.png"
-    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/2.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_anchor_images"
+    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/canonical-bathroom.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_plus_canonical_scene_anchor"
     assert result["provider_metadata"]["scene_reference_image_id"] == "scene-1"
     assert result["provider_metadata"]["scene_reference_images_used_for_video"] is False
     assert result["provider_metadata"]["scene_reference_images_approval_only"] is True
     assert result["provider_metadata"]["reference_image_roles"] == [
         "actor_identity_anchor",
         "actor_identity_anchor",
-        "actor_identity_anchor",
+        "canonical_scene_anchor",
     ]
+    assert result["provider_metadata"]["canonical_scene_key"] == "bathroom_accessibility_a"
 
 
 def test_submit_video_request_rejects_unverified_scene_reference_set(monkeypatch):
@@ -1151,6 +1177,7 @@ def test_submit_video_request_uses_actor_identity_anchors_not_scene_references_t
     monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})())
     monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
     monkeypatch.setattr(video_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: _ready_actor_identity())
+    canonical_asset = _canonical_scene_asset(scene_key="bathroom_accessibility_a", image_url="https://cdn.example.com/canonical-bathroom.png")
 
     reference_set = SceneReferenceSetSummary.from_rows(
         post_id="post-1",
@@ -1202,14 +1229,15 @@ def test_submit_video_request_uses_actor_identity_anchors_not_scene_references_t
         correlation_id="corr-actor-ref-set",
         provider_duration_seconds=8,
         creation_mode="character_consistency",
+        canonical_scene_asset=canonical_asset,
         scene_reference_set=reference_set,
     )
 
     assert len(captured["reference_images"]) == 3
     assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
     assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn.example.com/1.png"
-    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/2.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_anchor_images"
+    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/canonical-bathroom.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_plus_canonical_scene_anchor"
     assert result["provider_metadata"]["scene_reference_set_id"] == "set-1"
     assert result["provider_metadata"]["scene_reference_image_ids"] == ["scene-front", "scene-left", "scene-profile"]
     assert result["provider_metadata"]["scene_reference_image_count"] == 3
@@ -1218,9 +1246,10 @@ def test_submit_video_request_uses_actor_identity_anchors_not_scene_references_t
     assert result["provider_metadata"]["reference_image_roles"] == [
         "actor_identity_anchor",
         "actor_identity_anchor",
-        "actor_identity_anchor",
+        "canonical_scene_anchor",
     ]
     assert result["provider_metadata"]["reference_image_count"] == 3
+    assert result["provider_metadata"]["canonical_scene_key"] == "bathroom_accessibility_a"
 
 
 def test_submit_video_request_uses_actor_identity_anchors_without_scene_reference_set(monkeypatch):
@@ -1241,6 +1270,7 @@ def test_submit_video_request_uses_actor_identity_anchors_without_scene_referenc
     monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})())
     monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
     monkeypatch.setattr(video_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: _ready_actor_identity())
+    canonical_asset = _canonical_scene_asset()
 
     result = video_handlers._submit_video_request(
         provider="vertex_ai",
@@ -1256,21 +1286,24 @@ def test_submit_video_request_uses_actor_identity_anchors_without_scene_referenc
         provider_duration_seconds=8,
         creation_mode="character_consistency_mid",
         actor_identity_id="actor-1",
+        canonical_scene_asset=canonical_asset,
         character_snapshot=None,
         scene_reference_set=None,
     )
 
     assert len(captured["reference_images"]) == 3
     assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_anchor_images"
+    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/canonical-scene.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_plus_canonical_scene_anchor"
     assert result["provider_metadata"]["actor_identity_id"] == "actor-1"
     assert result["provider_metadata"]["reference_image_roles"] == [
         "actor_identity_anchor",
         "actor_identity_anchor",
-        "actor_identity_anchor",
+        "canonical_scene_anchor",
     ]
     assert result["provider_metadata"]["reference_image_count"] == 3
     assert "scene_reference_set_id" not in result["provider_metadata"]
+    assert result["provider_metadata"]["canonical_scene_key"] == "home_living_room_advice_a"
 
 
 def test_batch_prompt_audit_receives_scene_reference_metadata():
@@ -1289,9 +1322,12 @@ def test_batch_prompt_audit_receives_scene_reference_metadata():
         correlation_id="corr",
         batch_id="batch-1",
         reference_image_metadata={
-            "source": "actor_identity_anchor_images",
+            "source": "actor_identity_plus_canonical_scene_anchor",
             "scene_reference_image_ids": ["front", "left", "profile"],
-            "reference_image_roles": ["actor_identity_anchor", "actor_identity_anchor", "actor_identity_anchor"],
+            "reference_image_roles": ["actor_identity_anchor", "actor_identity_anchor", "canonical_scene_anchor"],
+            "canonical_scene_asset_id": "canonical-home_living_room_advice_a",
+            "canonical_scene_key": "home_living_room_advice_a",
+            "canonical_scene_reference_used_for_video": True,
             "scene_reference_images_used_for_video": False,
             "scene_reference_images_approval_only": True,
         },
@@ -1317,7 +1353,7 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
     monkeypatch.setattr(
         video_handlers,
         "_load_actor_identity_anchor_assets",
-        lambda *, actor_identity_id, correlation_id, scene_reference=None, scene_reference_set=None: {
+        lambda *, actor_identity_id, correlation_id, canonical_scene_asset, scene_reference=None, scene_reference_set=None: {
             "reference_images": [
                 {"mime_type": "image/png", "data": "aaa", "description": "front"},
                 {"mime_type": "image/png", "data": "bbb", "description": "left"},
@@ -1326,9 +1362,9 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
             "metadata": {
                 "reference_images_enabled": True,
                 "reference_image_count": 3,
-                "reference_image_roles": ["actor_identity_anchor", "actor_identity_anchor", "actor_identity_anchor"],
+                "reference_image_roles": ["actor_identity_anchor", "actor_identity_anchor", "canonical_scene_anchor"],
                 "scene_reference_images_used_for_video": False,
-                "source": "actor_identity_anchor_images",
+                "source": "actor_identity_plus_canonical_scene_anchor",
             },
         },
     )
@@ -1379,6 +1415,7 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
         creation_mode="character_consistency",
         character_snapshot=None,
         actor_identity_id="actor-1",
+        canonical_scene_asset=_canonical_scene_asset(),
         scene_reference_set=scene_reference_set,
     )
 

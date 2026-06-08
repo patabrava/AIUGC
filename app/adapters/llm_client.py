@@ -707,6 +707,8 @@ class LLMClient:
         model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        aspect_ratio: str = "1:1",
+        image_size: str = "1K",
     ) -> Dict[str, Any]:
         """Generate a single image using Gemini and return image bytes plus mime type."""
         if self.gemini_provider == "vertex":
@@ -717,6 +719,8 @@ class LLMClient:
                 model=target_model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
             )
 
         target_model = self._resolve_gemini_image_model(model)
@@ -731,8 +735,8 @@ class LLMClient:
             "generationConfig": {
                 "responseModalities": ["IMAGE"],
                 "imageConfig": {
-                    "aspectRatio": "1:1",
-                    "imageSize": "1K",
+                    "aspectRatio": aspect_ratio,
+                    "imageSize": image_size,
                 },
             },
         }
@@ -778,6 +782,8 @@ class LLMClient:
                 "image_bytes": image_payload["bytes"],
                 "mime_type": image_payload["mime_type"],
                 "model": target_model,
+                "aspect_ratio": aspect_ratio,
+                "image_size": image_size,
                 "raw_response": data,
             }
         except ThirdPartyError:
