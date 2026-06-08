@@ -5,221 +5,280 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
     env:
-      PROD_SSH_HOST: 187.124.16.6
-      PROD_SSH_USER: ${{ secrets.PROD_SSH_USER != '' && secrets.PROD_SSH_USER || vars.PROD_SSH_USER }}
-      PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY != '' && secrets.PROD_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
-      PROD_SSH_PASSWORD: ${{ secrets.PROD_SSH_PASSWORD != '' && secrets.PROD_SSH_PASSWORD || vars.PROD_SSH_PASSWORD }}
+      HOSTINGER_API_BASE: https://developers.hostinger.com
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      HOSTINGER_PROJECT_NAME: aiugc-prod
+      HOSTINGER_VPS_ID: "1498567"
       PROD_ENV_FILE_B64: ${{ secrets.PROD_ENV_FILE_B64 }}
-      PROD_MAGNIFIC_API_KEY: ${{ secrets.PROD_MAGNIFIC_API_KEY }}
       PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64: ${{ secrets.PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 }}
-      PROD_APP_ROOT: ${{ secrets.PROD_APP_ROOT != '' && secrets.PROD_APP_ROOT || vars.PROD_APP_ROOT }}
+      PROD_MAGNIFIC_API_KEY: ${{ secrets.PROD_MAGNIFIC_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Validate SSH deploy config
+      - name: Validate production deploy config
         run: |
-          test -n "$PROD_SSH_HOST" || { echo "Missing PROD_SSH_HOST (GitHub secret or variable)."; exit 1; }
-          test -n "$PROD_SSH_USER" || { echo "Missing PROD_SSH_USER (GitHub secret or variable)."; exit 1; }
-          if [ -z "$PROD_SSH_PRIVATE_KEY" ] && [ -z "$PROD_SSH_PASSWORD" ]; then
-            echo "Missing PROD_SSH_PRIVATE_KEY or PROD_SSH_PASSWORD GitHub secret."
-            exit 1
-          fi
+          test -n "$HOSTINGER_API_TOKEN" || { echo "Missing HOSTINGER_API_TOKEN GitHub secret."; exit 1; }
+          test -n "$PROD_ENV_FILE_B64" || { echo "Missing PROD_ENV_FILE_B64 GitHub secret."; exit 1; }
           test -n "$PROD_MAGNIFIC_API_KEY" || { echo "Missing PROD_MAGNIFIC_API_KEY GitHub secret."; exit 1; }
+          test -n "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" || { echo "Missing PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 GitHub secret."; exit 1; }
 
-      - name: Preflight SSH TCP reachability
+      - name: Resolve immutable image reference
+        id: image
+        run: |
+          image_repo="$(printf '%s' "ghcr.io/${GITHUB_REPOSITORY_OWNER}/aiugc-prod" | tr '[:upper:]' '[:lower:]')"
+          echo "repo=$image_repo" >> "$GITHUB_OUTPUT"
+          echo "ref=${image_repo}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.ref }}
+            ${{ steps.image.outputs.repo }}:main
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Render Hostinger compose payload
+        run: |
+          mkdir -p .deploy
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          from pathlib import Path
+
+          def parse_env_lines(text: str) -> dict[str, str]:
+              env: dict[str, str] = {}
+              for raw_line in text.splitlines():
+                  line = raw_line.strip()
+                  if not line or line.startswith("#") or "=" not in line:
+                      continue
+                  key, value = line.split("=", 1)
+                  key = key.strip()
+                  value = value.strip()
+                  if value[:1] == value[-1:] == '"':
+                      try:
+                          value = json.loads(value)
+                      except json.JSONDecodeError:
+                          value = value[1:-1]
+                  elif value[:1] == value[-1:] == "'":
+                      value = value[1:-1]
+                  env[key] = value
+              return env
+
+          env_text = base64.b64decode(os.environ["PROD_ENV_FILE_B64"]).decode()
+          env_map = parse_env_lines(env_text)
+          env_map.update(
+              {
+                  "DISABLE_BACKGROUND_SCHEDULERS": "true",
+                  "DISABLE_STARTUP_RECOVERY_CHECKS": "true",
+                  "GEMINI_API_FALLBACK_ENABLED": "false",
+                  "GEMINI_DEEP_RESEARCH_PROVIDER": "vertex_grounded",
+                  "GEMINI_PROVIDER": "vertex",
+                  "GOOGLE_APPLICATION_CREDENTIALS": "",
+                  "MAGNIFIC_API_KEY": os.environ["PROD_MAGNIFIC_API_KEY"].strip(),
+                  "SCENE_REFERENCE_STYLE_LORAS": "bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65",
+                  "TRAEFIK_CERTRESOLVER": env_map.get("TRAEFIK_CERTRESOLVER", "letsencrypt"),
+                  "TRAEFIK_ENTRYPOINTS": env_map.get("TRAEFIK_ENTRYPOINTS", "websecure"),
+                  "TRAEFIK_HOST_RULE": env_map.get(
+                      "TRAEFIK_HOST_RULE",
+                      "Host(`lippelift.xyz`) || Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)",
+                  ),
+                  "VERTEX_AI_ENABLED": "true",
+                  "VERTEX_AI_LOCATION": "us-central1",
+                  "VERTEX_AI_OUTPUT_GCS_URI": "gs://project-ad4d28ca-000c-4432-b4f-vertex-output/",
+                  "VERTEX_AI_PROJECT_ID": "project-ad4d28ca-000c-4432-b4f",
+                  "VERTEX_GEMINI_IMAGE_MODEL": "gemini-2.5-flash-image",
+                  "VERTEX_GEMINI_MODEL": "gemini-2.5-flash",
+                  "VERTEX_GROUNDED_RESEARCH_LOCATION": "global",
+                  "VERTEX_GROUNDED_RESEARCH_MODEL": "gemini-2.5-pro",
+                  "VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION": env_map.get(
+                      "VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION",
+                      "false",
+                  ),
+              }
+          )
+          env_map["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = json.dumps(
+              json.loads(base64.b64decode(os.environ["PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64"]).decode()),
+              separators=(",", ":"),
+              ensure_ascii=False,
+          )
+
+          image_ref = os.environ["IMAGE_REF"]
+          env_keys = sorted(env_map)
+          env_lines = [f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in env_map.items()]
+          service_env_block = [f"      - {key}" for key in env_keys]
+          compose_lines = [
+              "services:",
+              "  web:",
+              f"    image: {image_ref}",
+              "    pull_policy: always",
+              "    restart: unless-stopped",
+              "    environment:",
+              *service_env_block,
+              "    command: uvicorn app.main:app --host 0.0.0.0 --port 8000",
+              '    expose:',
+              '      - "8000"',
+              "    ports:",
+              '      - "127.0.0.1:8000:8000"',
+              "    labels:",
+              "      - traefik.enable=true",
+              "      - 'traefik.http.routers.lippelift-prod-web-v4.rule=${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`) || Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)}'",
+              "      - 'traefik.http.routers.lippelift-prod-web-v4.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}'",
+              "      - 'traefik.http.routers.lippelift-prod-web-v4.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}'",
+              "      - traefik.http.services.lippelift-prod-web-v4.loadbalancer.server.port=8000",
+              "",
+              "  worker:",
+              f"    image: {image_ref}",
+              "    pull_policy: always",
+              "    restart: unless-stopped",
+              "    environment:",
+              *service_env_block,
+              "    command: python workers/video_poller.py",
+              "",
+              "  expansion-worker:",
+              f"    image: {image_ref}",
+              "    pull_policy: always",
+              "    restart: unless-stopped",
+              "    environment:",
+              *service_env_block,
+              "    command: python workers/expansion_worker.py",
+              "",
+              "  topic-worker:",
+              f"    image: {image_ref}",
+              "    pull_policy: always",
+              "    restart: unless-stopped",
+              "    environment:",
+              *service_env_block,
+              "    command: python workers/topic_worker.py",
+              "",
+              "  caption-worker:",
+              f"    image: {image_ref}",
+              "    pull_policy: always",
+              "    restart: unless-stopped",
+              "    environment:",
+              *service_env_block,
+              "    command: python -m workers.caption_worker",
+          ]
+          compose_text = "\n".join(compose_lines) + "\n"
+
+          deploy_dir = Path(".deploy")
+          deploy_dir.mkdir(exist_ok=True)
+          deploy_dir.joinpath("hostinger-compose.yml").write_text(compose_text, encoding="utf-8")
+          deploy_dir.joinpath("hostinger.env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+          deploy_dir.joinpath("payload.json").write_text(
+              json.dumps(
+                  {
+                      "content": compose_text,
+                      "environment": "\n".join(env_lines) + "\n",
+                      "project_name": os.environ["HOSTINGER_PROJECT_NAME"],
+                  },
+                  ensure_ascii=False,
+              ),
+              encoding="utf-8",
+          )
+          PY
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+
+      - name: Replace Hostinger project with immutable image release
         run: |
           python3 - <<'PY'
+          import json
           import os
-          import socket
-          import time
           import sys
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
 
-          host = os.environ["PROD_SSH_HOST"]
-          timeout_seconds = 15
-          attempts = 5
-          last_error = None
+          api_base = os.environ["HOSTINGER_API_BASE"].rstrip("/")
+          token = os.environ["HOSTINGER_API_TOKEN"]
+          vps_id = os.environ["HOSTINGER_VPS_ID"]
+          payload = Path(".deploy/payload.json").read_text(encoding="utf-8").encode()
 
-          for attempt in range(1, attempts + 1):
-              sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-              sock.settimeout(timeout_seconds)
+          def request(method: str, url: str, data: bytes | None = None) -> dict:
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method=method,
+                  headers={
+                      "Accept": "application/json",
+                      "Authorization": f"Bearer {token}",
+                      "Content-Type": "application/json",
+                  },
+              )
               try:
-                  sock.connect((host, 22))
-                  sock.close()
-                  print(f"TCP reachability verified for {host}:22 on attempt {attempt}/{attempts}")
+                  with urllib.request.urlopen(req, timeout=60) as response:
+                      body = response.read().decode()
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode()
+                  print(body, file=sys.stderr)
+                  raise SystemExit(f"Hostinger API {method} {url} failed with HTTP {exc.code}") from exc
+              return json.loads(body)
+
+          def find_action_id(node):
+              if isinstance(node, dict):
+                  if isinstance(node.get("action_id"), int):
+                      return node["action_id"]
+                  if isinstance(node.get("id"), int) and str(node.get("name", "")).startswith("docker_compose"):
+                      return node["id"]
+                  for value in node.values():
+                      action_id = find_action_id(value)
+                      if action_id is not None:
+                          return action_id
+              elif isinstance(node, list):
+                  for value in node:
+                      action_id = find_action_id(value)
+                      if action_id is not None:
+                          return action_id
+              return None
+
+          create_url = f"{api_base}/api/vps/v1/virtual-machines/{vps_id}/docker"
+          create_response = request("POST", create_url, payload)
+          action_id = find_action_id(create_response)
+          if action_id is None:
+              raise SystemExit(f"Could not find Hostinger action id in response: {create_response}")
+          print(f"Triggered Hostinger action {action_id}")
+
+          action_url = f"{api_base}/api/vps/v1/virtual-machines/{vps_id}/actions/{action_id}"
+          deadline = time.time() + 15 * 60
+          while time.time() < deadline:
+              action = request("GET", action_url)
+              state = str(action.get("state", "")).lower()
+              print(json.dumps(action, ensure_ascii=False))
+              if state == "success":
                   sys.exit(0)
-              except OSError as exc:
-                  last_error = exc
-                  print(
-                      f"Attempt {attempt}/{attempts} could not open TCP to {host}:22 within {timeout_seconds}s: {exc}",
-                      file=sys.stderr,
-                  )
-                  time.sleep(5)
-              finally:
-                  try:
-                      sock.close()
-                  except OSError:
-                      pass
+              if state in {"failed", "error", "canceled"}:
+                  raise SystemExit(f"Hostinger deployment action {action_id} finished in state '{state}'")
+              time.sleep(10)
 
-          print(
-              f"GitHub runner could not open IPv4 TCP to {host}:22 after {attempts} attempts: {last_error}",
-              file=sys.stderr,
-          )
-          sys.exit(1)
+          raise SystemExit(f"Timed out waiting for Hostinger action {action_id}")
           PY
-
-      - name: Deploy over SSH with password
-        if: env.PROD_SSH_PASSWORD != ''
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ env.PROD_SSH_HOST }}
-          timeout: 60s
-          username: ${{ env.PROD_SSH_USER }}
-          password: ${{ env.PROD_SSH_PASSWORD }}
-          envs: PROD_ENV_FILE_B64,PROD_MAGNIFIC_API_KEY,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
-          script: |
-            export APP_ROOT="${{ env.PROD_APP_ROOT }}"
-            export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
-            export REPO_DIR="${APP_ROOT}/repo"
-            export ENV_FILE="${APP_ROOT}/.env.production"
-            export APP_ENV_FILE="$ENV_FILE"
-            export HEALTHCHECK_URL="https://lippelift.xyz/livez"
-            export READINESSCHECK_URL="https://lippelift.xyz/health"
-            mkdir -p "$APP_ROOT"
-            if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
-              printf '%s' "$PROD_ENV_FILE_B64" | base64 -d > "$ENV_FILE"
-              chmod 600 "$ENV_FILE"
-            fi
-            if [ ! -d "$REPO_DIR/.git" ]; then
-              git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
-            fi
-            cd "$REPO_DIR"
-            git fetch origin main
-            git checkout -B main origin/main
-            git reset --hard origin/main
-            git clean -fd
-            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" "$PROD_MAGNIFIC_API_KEY" <<'PY'
-            import base64
-            import json
-            import sys
-            from pathlib import Path
-
-            env_path = Path(sys.argv[1])
-            adc_b64 = sys.argv[2].strip()
-            magnific_api_key = sys.argv[3].strip()
-            overrides = {
-                "MAGNIFIC_API_KEY": magnific_api_key,
-                "GEMINI_PROVIDER": "vertex",
-                "GEMINI_DEEP_RESEARCH_PROVIDER": "vertex_grounded",
-                "GEMINI_API_FALLBACK_ENABLED": "false",
-                "VERTEX_AI_PROJECT_ID": "project-ad4d28ca-000c-4432-b4f",
-                "VERTEX_AI_LOCATION": "us-central1",
-                "VERTEX_AI_ENABLED": "true",
-                "VERTEX_AI_OUTPUT_GCS_URI": "gs://project-ad4d28ca-000c-4432-b4f-vertex-output/",
-                "VERTEX_GEMINI_MODEL": "gemini-2.5-flash",
-                "VERTEX_GEMINI_IMAGE_MODEL": "gemini-2.5-flash-image",
-                "VERTEX_GROUNDED_RESEARCH_MODEL": "gemini-2.5-pro",
-                "VERTEX_GROUNDED_RESEARCH_LOCATION": "global",
-                "GOOGLE_APPLICATION_CREDENTIALS": "",
-                "SCENE_REFERENCE_STYLE_LORAS": "bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65",
-            }
-            if adc_b64:
-                # Always compact the JSON before stuffing into env file so docker-compose's
-                # env_file parser doesn't choke on embedded newlines / escapes.
-                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = json.dumps(
-                    json.loads(base64.b64decode(adc_b64).decode()),
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                )
-
-            lines = env_path.read_text().splitlines() if env_path.exists() else []
-            keys = set(overrides)
-            kept = [line for line in lines if "=" not in line or line.split("=", 1)[0] not in keys]
-            for key, value in overrides.items():
-                kept.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
-            env_path.write_text("\n".join(kept) + "\n")
-            env_path.chmod(0o600)
-            PY
-            bash scripts/deploy/production.sh
-
-      - name: Deploy over SSH with key
-        if: env.PROD_SSH_PASSWORD == ''
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ env.PROD_SSH_HOST }}
-          timeout: 60s
-          username: ${{ env.PROD_SSH_USER }}
-          key: ${{ env.PROD_SSH_PRIVATE_KEY }}
-          envs: PROD_ENV_FILE_B64,PROD_MAGNIFIC_API_KEY,PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64
-          script: |
-            export APP_ROOT="${{ env.PROD_APP_ROOT }}"
-            export APP_ROOT="${APP_ROOT:-/opt/aiugc-prod}"
-            export REPO_DIR="${APP_ROOT}/repo"
-            export ENV_FILE="${APP_ROOT}/.env.production"
-            export APP_ENV_FILE="$ENV_FILE"
-            export HEALTHCHECK_URL="https://lippelift.xyz/livez"
-            export READINESSCHECK_URL="https://lippelift.xyz/health"
-            mkdir -p "$APP_ROOT"
-            if [ -n "${PROD_ENV_FILE_B64:-}" ]; then
-              printf '%s' "$PROD_ENV_FILE_B64" | base64 -d > "$ENV_FILE"
-              chmod 600 "$ENV_FILE"
-            fi
-            if [ ! -d "$REPO_DIR/.git" ]; then
-              git clone https://github.com/patabrava/AIUGC.git "$REPO_DIR"
-            fi
-            cd "$REPO_DIR"
-            git fetch origin main
-            git checkout -B main origin/main
-            git reset --hard origin/main
-            git clean -fd
-            python3 - "$ENV_FILE" "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" "$PROD_MAGNIFIC_API_KEY" <<'PY'
-            import base64
-            import json
-            import sys
-            from pathlib import Path
-
-            env_path = Path(sys.argv[1])
-            adc_b64 = sys.argv[2].strip()
-            magnific_api_key = sys.argv[3].strip()
-            overrides = {
-                "MAGNIFIC_API_KEY": magnific_api_key,
-                "GEMINI_PROVIDER": "vertex",
-                "GEMINI_DEEP_RESEARCH_PROVIDER": "vertex_grounded",
-                "GEMINI_API_FALLBACK_ENABLED": "false",
-                "VERTEX_AI_PROJECT_ID": "project-ad4d28ca-000c-4432-b4f",
-                "VERTEX_AI_LOCATION": "us-central1",
-                "VERTEX_AI_ENABLED": "true",
-                "VERTEX_AI_OUTPUT_GCS_URI": "gs://project-ad4d28ca-000c-4432-b4f-vertex-output/",
-                "VERTEX_GEMINI_MODEL": "gemini-2.5-flash",
-                "VERTEX_GEMINI_IMAGE_MODEL": "gemini-2.5-flash-image",
-                "VERTEX_GROUNDED_RESEARCH_MODEL": "gemini-2.5-pro",
-                "VERTEX_GROUNDED_RESEARCH_LOCATION": "global",
-                "GOOGLE_APPLICATION_CREDENTIALS": "",
-                "SCENE_REFERENCE_STYLE_LORAS": "bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65",
-            }
-            if adc_b64:
-                # Always compact the JSON before stuffing into env file so docker-compose's
-                # env_file parser doesn't choke on embedded newlines / escapes.
-                overrides["GOOGLE_APPLICATION_CREDENTIALS_JSON"] = json.dumps(
-                    json.loads(base64.b64decode(adc_b64).decode()),
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                )
-
-            lines = env_path.read_text().splitlines() if env_path.exists() else []
-            keys = set(overrides)
-            kept = [line for line in lines if "=" not in line or line.split("=", 1)[0] not in keys]
-            for key, value in overrides.items():
-                kept.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
-            env_path.write_text("\n".join(kept) + "\n")
-            env_path.chmod(0o600)
-            PY
-            bash scripts/deploy/production.sh
 
       - name: Verify production route from runner
         run: |
@@ -234,57 +293,3 @@ jobs:
           curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/livez
           curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/auth/login >/dev/null
           curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/health >/dev/null
-
-      - name: Diagnose production route with password
-        if: failure() && env.PROD_SSH_PASSWORD != ''
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ env.PROD_SSH_HOST }}
-          timeout: 60s
-          username: ${{ env.PROD_SSH_USER }}
-          password: ${{ env.PROD_SSH_PASSWORD }}
-          script: |
-            cd /opt/aiugc-prod/repo
-            echo "== local app =="
-            curl -i --connect-timeout 3 --max-time 10 http://127.0.0.1:8000/livez || true
-            echo "== local traefik https =="
-            curl -k -i --resolve lippelift.xyz:443:127.0.0.1 --connect-timeout 3 --max-time 10 https://lippelift.xyz/livez || true
-            echo "== compose ps =="
-            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production ps || true
-            echo "== web labels =="
-            docker inspect aiugc-prod-web-1 --format '{{json .Config.Labels}}' || true
-            echo "== web networks =="
-            docker inspect aiugc-prod-web-1 --format '{{json .NetworkSettings.Networks}}' || true
-            echo "== listeners =="
-            ss -ltnp | grep -E ':80|:443|:8000' || true
-            echo "== web logs =="
-            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production logs --tail=160 web || true
-            echo "== traefik logs =="
-            docker logs traefik-traefik-1 --tail=240 2>&1 | grep -Ei 'lippelift|aiugc|error|timeout|502|504|bad gateway' || true
-
-      - name: Diagnose production route with key
-        if: failure() && env.PROD_SSH_PASSWORD == ''
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ env.PROD_SSH_HOST }}
-          timeout: 60s
-          username: ${{ env.PROD_SSH_USER }}
-          key: ${{ env.PROD_SSH_PRIVATE_KEY }}
-          script: |
-            cd /opt/aiugc-prod/repo
-            echo "== local app =="
-            curl -i --connect-timeout 3 --max-time 10 http://127.0.0.1:8000/livez || true
-            echo "== local traefik https =="
-            curl -k -i --resolve lippelift.xyz:443:127.0.0.1 --connect-timeout 3 --max-time 10 https://lippelift.xyz/livez || true
-            echo "== compose ps =="
-            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production ps || true
-            echo "== web labels =="
-            docker inspect aiugc-prod-web-1 --format '{{json .Config.Labels}}' || true
-            echo "== web networks =="
-            docker inspect aiugc-prod-web-1 --format '{{json .NetworkSettings.Networks}}' || true
-            echo "== listeners =="
-            ss -ltnp | grep -E ':80|:443|:8000' || true
-            echo "== web logs =="
-            docker compose -f docker-compose.production.yml -p aiugc-prod --env-file /opt/aiugc-prod/.env.production logs --tail=160 web || true
-            echo "== traefik logs =="
-            docker logs traefik-traefik-1 --tail=240 2>&1 | grep -Ei 'lippelift|aiugc|error|timeout|502|504|bad gateway' || true

@@ -137,24 +137,25 @@ def test_github_action_deploys_on_push_to_main():
     workflow_on = data.get("on", data.get(True))
     assert workflow_on["push"]["branches"] == ["main"]
     assert data["jobs"]["deploy"]["environment"] == "production"
+    assert data["permissions"]["packages"] == "write"
+    assert data["jobs"]["deploy"]["env"]["HOSTINGER_VPS_ID"] == "1498567"
+    assert data["jobs"]["deploy"]["env"]["HOSTINGER_PROJECT_NAME"] == "aiugc-prod"
     steps = data["jobs"]["deploy"]["steps"]
     step_text = "\n".join(str(step) for step in steps)
     assert "actions/checkout@v5" in step_text
-    assert "appleboy/ssh-action" in step_text
-    assert "scripts/deploy/production.sh" in step_text
-    assert "mkdir -p \"$APP_ROOT\"" in step_text
+    assert "docker/login-action@v3" in step_text
+    assert "docker/build-push-action@v6" in step_text
+    assert "ghcr.io/${GITHUB_REPOSITORY_OWNER}/aiugc-prod" in step_text
+    assert "HOSTINGER_API_TOKEN" in step_text
+    assert "/api/vps/v1/virtual-machines/{vps_id}/docker" in step_text
+    assert "\"project_name\": os.environ[\"HOSTINGER_PROJECT_NAME\"]" in step_text
+    assert "Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)" in step_text
+    assert "Triggered Hostinger action" in step_text
     assert "https://lippelift.xyz/health >/dev/null" in step_text
     assert "Production readiness is degraded" not in step_text
-    assert "git clone https://github.com/patabrava/AIUGC.git \"$REPO_DIR\"" in step_text
-    assert "git fetch origin main" in step_text
-    assert "git checkout -B main origin/main" in step_text
-    assert "git reset --hard origin/main" in step_text
-    assert "git clean -fd" in step_text
-    assert "export APP_ROOT=\"${APP_ROOT:-/opt/aiugc-prod}\"" in step_text
-    assert "export REPO_DIR=\"${APP_ROOT}/repo\"" in step_text
-    assert "export ENV_FILE=\"${APP_ROOT}/.env.production\"" in step_text
-    assert "Validate SSH deploy config" in step_text
-    assert "Missing PROD_SSH_HOST" in step_text
+    assert "appleboy/ssh-action" not in step_text
+    assert "scripts/deploy/production.sh" not in step_text
+    assert "Validate production deploy config" in step_text
+    assert "Missing HOSTINGER_API_TOKEN" in step_text
     assert "PROD_MAGNIFIC_API_KEY" in step_text
     assert "Missing PROD_MAGNIFIC_API_KEY" in step_text
-    assert "env.PROD_SSH_HOST" in step_text
