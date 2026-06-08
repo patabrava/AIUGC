@@ -65,16 +65,18 @@ def test_build_prompt3_sanitizes_anglicism_support_facts():
             aliases=["VARIO PLUS"],
             summary="Plattform oder Sitzlift auf derselben Schiene.",
             facts=["Smart-Home Anschluss per App."],
-            support_facts=["100% Made in Germany", "Website Service Update"],
+            support_facts=["100% Made in Germany", "LIPPE Lift Website Service Update"],
         ),
         profile=get_duration_profile(8),
     )
 
     assert "Made in Germany" not in prompt
+    assert "LIPPE Lift" not in prompt
     assert "Smart-Home" not in prompt
     assert "Website" not in prompt
     assert "Service" not in prompt
     assert "Update" not in prompt
+    assert "der Hersteller" in prompt
     assert "in Deutschland gefertigt" in prompt
     assert "vernetzte Wohnhilfen" in prompt
 
@@ -245,8 +247,8 @@ Fakten:
 """,
             """Produkt: VARIO PLUS
 Angle: Eine Schiene fuer heute und spaeter
-Script: VARIO PLUS gibt dir heute Sicherheit und morgen Flexibilitaet fuer deine Treppe zuhause ohne komplizierten Umbau.
-CTA: Lass dir zeigen, wie eine Schiene beide Wege offen haelt.
+Script: Dieselbe Schiene gibt dir heute Sicherheit und später Flexibilität für deine Treppe zuhause ohne komplizierten Umbau.
+Schlusssatz: So bleibt mehr Ruhe in einer Entscheidung, die jeden Tag spürbar wird.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
 - Tragfaehigkeit bis 300 kg
@@ -281,7 +283,7 @@ def test_generate_product_topics_retries_on_malformed_prompt3_response(monkeypat
     fake_llm = _FakeProductLLM(
         [
             """Einleitung ohne passende Feldnamen.\nDieses Produkt ist fuer zuhause gedacht.""",
-            """Produktname: VARIO PLUS\nWinkel: Mehr Sicherheit mit VARIO PLUS im Alltag\nHook: VARIO PLUS gibt dir heute Sicherheit und morgen Flexibilitaet fuer deine Treppe zuhause ohne komplizierten Umbau.\nCall to action: Frag nach VARIO PLUS, wenn du eine klare Loesung fuer Zuhause suchst.\nStichpunkte:\n- Plattform oder Sitzlift auf derselben Schiene\n- Tragfaehigkeit bis 300 kg\n""",
+            """Produktname: VARIO PLUS\nWinkel: Mehr Sicherheit mit einer Liftlösung im Alltag\nHook: Dieselbe Schiene gibt dir heute Sicherheit und später Flexibilität für deine Treppe zuhause ohne komplizierten Umbau.\nSchlusssatz: So bleibt mehr Ruhe in einer Entscheidung, die jeden Tag spürbar wird.\nStichpunkte:\n- Plattform oder Sitzlift auf derselben Schiene\n- Tragfaehigkeit bis 300 kg\n""",
         ]
     )
 
@@ -321,7 +323,7 @@ Fakten:
             """Produkt: VARIO PLUS
 Winkel: Mehr Sicherheit
 Sprechtext: Deine Treppe bleibt besser nutzbar, wenn dieselbe Schiene heute und später gut zu deinem Alltag passt.
-Handlungsaufforderung: Frag nach einer passenden Lösung für dein Zuhause.
+Schlusssatz: So bleibt Planung näher an deinem Alltag und weniger an Verkaufsdruck.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
 """,
@@ -333,6 +335,89 @@ Fakten:
     assert len(fake_llm.text_prompts) == 2
     assert "Anglizismen" in fake_llm.text_prompts[1][0]
     assert "Support" not in generated[0]["script"]
+
+
+def test_generate_product_topics_retries_on_user_facing_product_name_leak(monkeypatch):
+    monkeypatch.setattr(
+        "app.features.topics.prompt3_runtime.get_product_knowledge_base",
+        lambda: [
+            ProductKnowledgeEntry(
+                product_name="VARIO PLUS",
+                source_label="PLATTFORMTREPPENLIFT T80",
+                aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+                summary="Plattform oder Sitzlift auf derselben Schiene.",
+                facts=["Plattform oder Sitzlift auf derselben Schiene", "Tragfaehigkeit bis 300 kg"],
+                support_facts=["in Deutschland gefertigt", "verlässliche Fertigung"],
+            )
+        ],
+    )
+    fake_llm = _FakeProductLLM(
+        [
+            """Produkt: VARIO PLUS
+Winkel: VARIO PLUS fuer zuhause
+Sprechtext: VARIO PLUS gibt dir heute Sicherheit und morgen Flexibilitaet fuer deine Treppe zuhause ohne komplizierten Umbau.
+Handlungsaufforderung: Frag nach VARIO PLUS fuer dein Zuhause.
+Fakten:
+- Plattform oder Sitzlift auf derselben Schiene
+""",
+            """Produkt: VARIO PLUS
+Winkel: Mehr Ruhe mit einem Plattformlift im Alltag
+Sprechtext: Ein Plattformlift macht Wege zuhause ruhiger, wenn er zuverlässig fährt und langfristig zu deinem Alltag passt.
+Schlusssatz: So bleibt Planung näher an deinem Alltag und weniger an Verkaufsdruck.
+Fakten:
+- Plattform oder Sitzlift auf derselben Schiene
+""",
+        ]
+    )
+
+    generated = generate_product_topics(count=1, target_length_tier=8, llm_factory=lambda: fake_llm)
+
+    assert generated[0]["product_name"] == "VARIO PLUS"
+    assert "VARIO PLUS" not in generated[0]["angle"]
+    assert "VARIO PLUS" not in generated[0]["script"]
+    assert "VARIO PLUS" not in generated[0]["cta"]
+    assert len(fake_llm.text_prompts) == 2
+    assert "nicht in Winkel, Sprechtext oder Schlusssatz" in fake_llm.text_prompts[1][0]
+
+
+def test_generate_product_topics_retries_on_sales_like_closing(monkeypatch):
+    monkeypatch.setattr(
+        "app.features.topics.prompt3_runtime.get_product_knowledge_base",
+        lambda: [
+            ProductKnowledgeEntry(
+                product_name="VARIO PLUS",
+                source_label="PLATTFORMTREPPENLIFT T80",
+                aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+                summary="Plattform oder Sitzlift auf derselben Schiene.",
+                facts=["Plattform oder Sitzlift auf derselben Schiene", "Tragfaehigkeit bis 300 kg"],
+                support_facts=["in Deutschland gefertigt", "verlässliche Fertigung"],
+            )
+        ],
+    )
+    fake_llm = _FakeProductLLM(
+        [
+            """Produkt: VARIO PLUS
+Winkel: Mehr Ruhe mit einem Plattformlift im Alltag
+Sprechtext: Ein Plattformlift macht Wege zuhause ruhiger, wenn er zuverlässig fährt und langfristig zu deinem Alltag passt.
+Schlusssatz: Frag nach einer passenden Lösung für dein Zuhause.
+Fakten:
+- Plattform oder Sitzlift auf derselben Schiene
+""",
+            """Produkt: VARIO PLUS
+Winkel: Mehr Ruhe mit einem Plattformlift im Alltag
+Sprechtext: Ein Plattformlift macht Wege zuhause ruhiger, wenn er zuverlässig fährt und langfristig zu deinem Alltag passt.
+Schlusssatz: So fühlt sich Planung weniger nach Druck und mehr nach Alltag an.
+Fakten:
+- Plattform oder Sitzlift auf derselben Schiene
+""",
+        ]
+    )
+
+    generated = generate_product_topics(count=1, target_length_tier=8, llm_factory=lambda: fake_llm)
+
+    assert generated[0]["cta"] == "So fühlt sich Planung weniger nach Druck und mehr nach Alltag an."
+    assert len(fake_llm.text_prompts) == 2
+    assert "keine Verkaufsaufforderung" in fake_llm.text_prompts[1][0]
 
 
 def test_generate_product_topics_accepts_32s_product_scripts_inside_current_contract(monkeypatch):
@@ -361,8 +446,8 @@ Fakten:
 """,
             """Produkt: LEVEL
 Angle: Sechs klare Schritte bis zur barrierefreien Loesung
-Script: Du brauchst einen Zugang, der nicht an einer Treppe haengen bleibt und deinen Alltag sofort ruhiger macht. LEVEL loest das mit bis zu 2.990 Millimetern Hoehe und gibt dir klare Planung. Kein Aufzugsschacht noetig macht den Umbau entspannter, besonders wenn draussen wenig Platz ist. Vor dem Termin klaerst du Flaeche, Bedienung und Sicherheitsgefuehl gemeinsam. So weisst du frueher, welche Loesung wirklich passt und dein Zuhause deutlich einfacher wird.
-CTA: Frag nach LEVEL.
+Script: Du brauchst einen Zugang, der nicht an einer Treppe hängen bleibt und deinen Alltag sofort ruhiger macht. Der Plattformlift überbrückt bis zu 2.990 Millimeter Höhe und gibt dir klare Planung. Kein Aufzugsschacht nötig macht den Umbau entspannter, besonders wenn draußen wenig Platz ist. Vor dem Termin klärst du Fläche, Bedienung und Sicherheitsgefühl gemeinsam. So weißt du früher, welche Lösung wirklich passt und dein Zuhause deutlich einfacher wird.
+Schlusssatz: So wird aus Technik eher Alltag als Verkaufsgespräch.
 Fakten:
 - Fuer Hoehen bis 2.990 mm
 - Kein Aufzugsschacht erforderlich
@@ -399,8 +484,8 @@ def test_generate_product_topics_retries_on_retryable_provider_error(monkeypatch
         [
             """Produkt: VARIO PLUS
 Angle: Eine Schiene fuer heute und spaeter
-Script: VARIO PLUS gibt dir heute Sicherheit und morgen Flexibilitaet fuer deine Treppe zuhause ohne komplizierten Umbau.
-CTA: Lass dir zeigen, wie eine Schiene beide Wege offen haelt.
+Script: Dieselbe Schiene gibt dir heute Sicherheit und später Flexibilität für deine Treppe zuhause ohne komplizierten Umbau.
+Schlusssatz: So bleibt mehr Ruhe in einer Entscheidung, die jeden Tag spürbar wird.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
 - Tragfaehigkeit bis 300 kg
@@ -490,15 +575,15 @@ def test_generate_product_topics_trims_overlong_prompt3_response(monkeypatch):
             f"""Produkt: VARIO PLUS
 Angle: Flexibilitaet fuer jede Treppe
 Script: {long_script.split('.')[0]}. {long_script.split('.')[0]}. {long_script.split('.')[0]}. {long_script.split('.')[0]}.
-CTA: Frag nach VARIO PLUS fuer dein Zuhause.
+Schlusssatz: So bleibt Planung näher an deinem Alltag und weniger an Verkaufsdruck.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
 - Tragfaehigkeit bis 300 kg
             """,
             """Produkt: VARIO PLUS
 Angle: Flexibilitaet fuer jede Treppe
-Script: VARIO PLUS passt sich an deine Treppe an und bleibt dabei klar und verlässlich. Du nutzt dieselbe Schiene fuer heute und spaeter. Innen und aussen bleibt die Loesung flexibel und alltagstauglich. Mit 300 Kilo Tragkraft bekommst du Sicherheit im Alltag und mehr Ruhe. Vor dem Einbau klaerst du gemeinsam, welche Variante, Bedienung und Ausstattung wirklich zu deinem Zuhause passen. Das macht Entscheidungen deutlich leichter.
-CTA: Frag nach VARIO PLUS fuer dein Zuhause.
+Script: Eine passende Liftlösung passt sich an deine Treppe an und bleibt dabei klar und verlässlich. Du nutzt dieselbe Schiene für heute und später. Innen und außen bleibt die Lösung flexibel und alltagstauglich. Mit 300 Kilo Tragkraft bekommst du Sicherheit im Alltag und mehr Ruhe. Vor dem Einbau klärst du gemeinsam, welche Variante, Bedienung und Ausstattung wirklich zu deinem Zuhause passen. Das macht Entscheidungen deutlich leichter.
+Schlusssatz: So bleibt Planung näher an deinem Alltag und weniger an Verkaufsdruck.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
 - Tragfaehigkeit bis 300 kg
@@ -533,8 +618,8 @@ def test_generate_product_topics_returns_sanitized_script_when_cleaned_copy_is_i
         ],
     )
     live_shape_script = (
-        "Dein Alltag wird einfacher mit dem VARIO PLUS! "
-        "Ob steile Treppe oder enge Kurve, der VARIO PLUS meistert jede Herausforderung. "
+        "Dein Alltag wird einfacher mit einer passenden Liftlösung! "
+        "Ob steile Treppe oder enge Kurve, die Lösung macht Wege wieder ruhiger. "
         "Und das Beste: Er passt sich jederzeit deinen Bedürfnissen an, auch nachträglich als Sitz- oder Plattformlift."
     )
     fake_llm = _FakeProductLLM(
@@ -542,7 +627,7 @@ def test_generate_product_topics_returns_sanitized_script_when_cleaned_copy_is_i
             f"""Produkt: VARIO PLUS
 Angle: Der einzige Lift, der mit dir und deinem Leben mitwächst.
 Script: {live_shape_script}
-CTA: Frag nach VARIO PLUS fuer dein Zuhause.
+Schlusssatz: So bleibt Planung näher an deinem Alltag und weniger an Verkaufsdruck.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
 - Tragfaehigkeit bis 300 kg
@@ -574,8 +659,8 @@ def test_generate_product_topics_accepts_decimal_product_copy(monkeypatch):
         [
             """Produkt: LEVEL
 Angle: Barrierefreiheit ohne Treppe
-Script: Dein LEVEL bringt dich bis zu 2.990 mm hoch und hält den Raum darunter im Alltag nutzbar und frei.
-CTA: Jetzt mehr erfahren!
+Script: Der Plattformlift bringt dich bis zu 2.990 mm hoch und hält den Raum darunter im Alltag nutzbar und frei.
+Schlusssatz: So wird ein Höhenunterschied im Alltag weniger bestimmend.
 Fakten:
 - Für Höhen bis 2.990 mm, unabhängig von einer Treppe.
 - Raum unter Plattform bleibt vollständig nutzbar.
@@ -611,6 +696,7 @@ def test_generate_product_topics_disables_thinking_budget(monkeypatch):
     fake_llm = _FakeProductLLM(
         [
             """Produkt: VARIO PLUS\nAngle: Maximale Flexibilitaet\nScript: VARIO PLUS hilft dir bei jeder Treppe und bleibt flexibel. Du nutzt dieselbe Schiene fuer heute und spaeter. Innen und aussen bleibt die Loesung ruhig, sicher und gut planbar. Mit 300 Kilo Tragkraft bekommst du zusaetzliche Sicherheit im Alltag. Vor dem Einbau klaerst du Kurven, Bedienung, Sitzwechsel und die passende Ausstattung gemeinsam. So passt sich dein Zuhause spuerbar an und bleibt selbstbestimmt und frei.\nCTA: Frag jetzt nach VARIO PLUS.\nFakten:\n- Plattform oder Sitzlift auf derselben Schiene\n- Tragfaehigkeit bis 300 kg\n""",
+            """Produkt: VARIO PLUS\nAngle: Maximale Flexibilitaet\nScript: Eine passende Liftlösung hilft dir bei jeder Treppe und bleibt flexibel. Du nutzt dieselbe Schiene für heute und später. Innen und außen bleibt die Lösung ruhig, sicher und gut planbar. Mit 300 Kilo Tragkraft bekommst du zusätzliche Sicherheit im Alltag. Vor dem Einbau klärst du Kurven, Bedienung, Sitzwechsel und die passende Ausstattung gemeinsam. So passt sich dein Zuhause spürbar an und bleibt selbstbestimmt und frei.\nSchlusssatz: So bleibt Planung näher an deinem Alltag und weniger an Verkaufsdruck.\nFakten:\n- Plattform oder Sitzlift auf derselben Schiene\n- Tragfaehigkeit bis 300 kg\n""",
         ]
     )
 

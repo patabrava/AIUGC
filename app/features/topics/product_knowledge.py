@@ -26,6 +26,10 @@ def _clean_line(value: str) -> str:
 def _normalize_prompt_fact_language(value: str) -> str:
     cleaned = _clean_line(value)
     replacements = (
+        (r"\bLIPPE\s*Lift\b", "der Hersteller"),
+        (r"\bLippe\s*Lift\b", "der Hersteller"),
+        (r"\bLipperlift\b", "der Hersteller"),
+        (r"\blippelift\.de\b", "die Netzseite"),
         (r"\b100\s*%\s*Made in Germany\b", "in Deutschland gefertigt"),
         (r"\bMade in Germany\b", "in Deutschland gefertigt"),
         (r"\bWebsites\b", "Netzseiten"),

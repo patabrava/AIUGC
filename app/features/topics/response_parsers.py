@@ -475,7 +475,7 @@ def parse_prompt3_response(
         fields["angle"] = first_sentence[:120] or fields["script"][:120]
     if "cta" not in fields and fields.get("script"):
         cta_source = re.split(r"(?<=[.!?])\s+", fields["script"].strip())[-1].strip()
-        fields["cta"] = cta_source[:120] or f"Frag nach {fields.get('produkt', fallback_product_name or '')}".strip()
+        fields["cta"] = cta_source[:120] or "So bleibt die Entscheidung näher an deinem echten Alltag."
 
     if not {"produkt", "angle", "script", "cta"}.issubset(fields):
         raise ValidationError(

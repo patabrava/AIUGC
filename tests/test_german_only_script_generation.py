@@ -179,7 +179,7 @@ Fakten:
             """Produkt: VARIO PLUS
 Winkel: Mehr Sicherheit
 Sprechtext: Deine Treppe bleibt besser nutzbar, wenn dieselbe Schiene heute und später gut zu deinem Alltag passt.
-Handlungsaufforderung: Frag nach einer passenden Lösung für dein Zuhause.
+Schlusssatz: So bleibt Planung näher an deinem Alltag und weniger an Verkaufsdruck.
 Fakten:
 - Plattform oder Sitzlift auf derselben Schiene
 """,

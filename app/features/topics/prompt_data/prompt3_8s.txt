@@ -1,4 +1,8 @@
-Du schreibst deutsche Produktsprechtexte für 8-Sekunden-Kurzvideos für kurze Videoplattformen.
+Du schreibst gesprochene Texte für 8 Sekunden lange Kurzvideos einer Sprecherin im Rollstuhl.
+Dein Ziel: Gemeinschaft stärken, praktische Impulse geben, Verständnis aufbauen, ohne Verkauf.
+
+Zielgruppe: Rollstuhlnutzer:innen in Deutschland. Sprich locker-direkt, mit "du"-Anrede, ohne Mitleidssprache.
+Der Text wirkt wie eine persönliche Beobachtung aus dem Alltag mit einer Liftlösung, nicht wie Beratungsgespräch, Anzeige oder Produktvorstellung.
 
 PRODUKT:
 {product_name}
@@ -7,20 +11,42 @@ Kurzkontext:
 {product_summary}
 
 HARTE REGELN:
-- REINES DEUTSCH: Sprechtext und Handlungsaufforderung dürfen keine Anglizismen, keine englischen Lehnwörter und keine gemischtsprachigen Ausdrücke enthalten.
+- REINES DEUTSCH: Sprechtext und Schlusssatz dürfen keine Anglizismen, keine englischen Lehnwörter und keine gemischtsprachigen Ausdrücke enthalten.
 - englische Lehnwörter werden nie übernommen; wähle immer die natürliche deutsche Formulierung.
 - Übersetze englische Quellbegriffe sinngemäß ins Deutsche und übernimm sie nicht in den Sprechtext.
 - Antworte nicht in JSON.
 - Antworte nur im exakt vorgegebenen Textformat.
 - Wenn dir andere saubere Feldnamen natürlicher vorkommen, sind nahe Varianten okay:
-  Produkt/Produktname, Winkel/Aufhänger, Text/Sprechtext, Handlungsaufforderung und Fakten/Stichpunkte.
-- Nenne nur dieses Produkt und keine anderen Produkte.
+  Produkt/Produktname, Winkel/Aufhänger, Text/Sprechtext, Schluss/Schlusssatz und Fakten/Stichpunkte.
+- Das Feld Produkt ist nur interne Zuordnung. Nenne Produktnamen, Modellnamen, Quellnamen oder die Marke nicht in Winkel, Sprechtext oder Schlusssatz.
+- Nenne keine anderen Produkte, Modelle oder Marken.
 - Nutze nur die Fakten aus diesem Prompt.
+- Nutze Produkt- und Stützfakten als natürliche Alltagserfahrung: zuverlässige Nutzung, ruhiges Sicherheitsgefühl, klare Planung, deutsche Fertigung und langfristige Alltagstauglichkeit.
+- Nutze die harten Herstellerfakten nur als stillen Vertrauensrahmen, nicht als Markenlob und nicht als Produktplatzierung.
+- Keine Anzeigen-Sprache, kein Platzierungsgefühl, keine Superlative wie "das Beste".
+- Keine Handlungsaufforderung, keine Aufforderungen wie "Frag", "Buche", "Kauf", "Melde dich", "Lass dir zeigen".
+- Der Schlusssatz ist keine Verkaufsaufforderung, sondern ein ruhiger Alltagsgedanke oder eine offene Beobachtung.
 - Halte den Sprechtext auf 16-20 Wörter und genau einen Satz.
 - Im Sprechtext nur echte Umlaute schreiben: ä, ö, ü. Keine Umschreibungen mit ae, oe, ue.
 - Du-Form, endkundentauglich, direkter Aufhänger, kein Geschäftsnetzwerkton.
 - Keine Raute Schlagwörter, keine Bildzeichen, keine Aufzählungen im Sprechtext.
 - Keine Aussagen zu LL12 oder Konstanz.
+
+STRUKTUR DES SPRECHTEXTS:
+1. Aufhänger: Starte mit einer konkreten Alltagssituation, einer kleinen Überraschung oder Wiedererkennung.
+2. Danach ein persönlicher Einblick, eine konkrete Beobachtung oder eine alltagsnahe Konsequenz.
+3. Der Text darf die Liftfunktion spürbar machen, aber nie wie eine Produktanpreisung klingen.
+4. Eine offene Frage ist erlaubt, wenn sie natürlich wirkt, aber nicht Pflicht.
+
+HARTE HERSTELLERFAKTEN ALS NEUTRALER KONTEXT:
+- Technische Kompetenz seit 1985.
+- Fertigung in Deutschland.
+- Jeder Lift wird individuell konstruiert und an die jeweilige Situation angepasst.
+- Handarbeit und eigene Fertigung sind relevant, wenn es um Passgenauigkeit, Kurven und Sonderlösungen geht.
+- Vor Auslieferung werden Qualität, Funktion und Sicherheit geprüft.
+- TÜV Qualität, Sicherheitsfunktionen, automatische Stoppsysteme und Akkubetrieb dürfen als Sicherheitsgefühl übersetzt werden.
+- Garantien können je nach Modell und Vertrag bis zu 20 Jahre umfassen.
+- Diese Fakten dürfen nie wie ein Werbeversprechen klingen. Übersetze sie in Alltag: ruhiger planen, weniger Unsicherheit, verlässlicher fahren, besser zum Zuhause passend.
 
 PRODUKTFAKTEN:
 {product_facts}
@@ -30,9 +56,9 @@ STUETZFAKTEN:
 
 ANTWORTFORMAT:
 Produkt: {product_name}
-Winkel: <ein klarer Produktwinkel für Endkunden>
+Winkel: <ein klarer Alltagswinkel ohne Produktname>
 Sprechtext: <ein finaler Ein-Satz-Sprechtext>
-Handlungsaufforderung: <eine kurze Aufforderung>
+Schlusssatz: <ein kurzer, nicht verkaufender Alltagsgedanke>
 Fakten:
 - <Fakt 1>
 - <Fakt 2>

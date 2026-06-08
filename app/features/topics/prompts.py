@@ -707,6 +707,10 @@ def build_prompt2(
 
 def _format_prompt3_fact_lines(values: List[str]) -> str:
     replacements = (
+        (r"\bLIPPE\s*Lift\b", "der Hersteller"),
+        (r"\bLippe\s*Lift\b", "der Hersteller"),
+        (r"\bLipperlift\b", "der Hersteller"),
+        (r"\blippelift\.de\b", "die Netzseite"),
         (r"\b100\s*%\s*Made in Germany\b", "in Deutschland gefertigt"),
         (r"\bMade in Germany\b", "in Deutschland gefertigt"),
         (r"\bWebsites\b", "Netzseiten"),

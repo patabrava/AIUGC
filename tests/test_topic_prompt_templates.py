@@ -139,10 +139,11 @@ def _sample_product() -> ProductKnowledgeEntry:
 def test_build_prompt3_uses_32s_text_template():
     prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(32))
 
-    assert "32-Sekunden-Kurzvideos" in prompt
+    assert "32 Sekunden lange Kurzvideos" in prompt
     assert "64-84 Wörter" in prompt
     assert "fünf bis sechs natürlichen Sätzen" in prompt
     assert "Antworte nicht in JSON" in prompt
+    assert "ohne Verkauf" in prompt
     assert "LL12" in prompt
 
 
@@ -335,8 +336,35 @@ def test_prompt3_prefers_german_output_labels():
 
     assert "Winkel:" in prompt
     assert "Sprechtext:" in prompt
-    assert "Handlungsaufforderung:" in prompt
+    assert "Schlusssatz:" in prompt
+    assert "Handlungsaufforderung:" not in prompt
     assert "Angle:" not in prompt
     assert "Script:" not in prompt
     assert "CTA:" not in prompt
     assert "Call to action" not in prompt
+
+
+def test_prompt3_uses_prompt2_non_sales_spoken_structure():
+    prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(16))
+
+    assert "ohne Verkauf" in prompt
+    assert "Zielgruppe: Rollstuhlnutzer:innen in Deutschland" in prompt
+    assert "Aufhänger" in prompt
+    assert "persönlicher Einblick" in prompt
+    assert "konkrete Beobachtung" in prompt
+    assert "Keine Handlungsaufforderung" in prompt
+    assert "keine Aufforderungen wie" in prompt
+    assert "Dein Ziel:" in prompt
+
+
+def test_prompt3_includes_neutral_hard_company_fact_context():
+    prompt = build_prompt3(product=_sample_product(), profile=get_duration_profile(32))
+
+    assert "HARTE HERSTELLERFAKTEN ALS NEUTRALER KONTEXT" in prompt
+    assert "Technische Kompetenz seit 1985" in prompt
+    assert "Fertigung in Deutschland" in prompt
+    assert "individuell konstruiert" in prompt
+    assert "Qualität, Funktion und Sicherheit geprüft" in prompt
+    assert "TÜV Qualität" in prompt
+    assert "bis zu 20 Jahre" in prompt
+    assert "nie wie ein Werbeversprechen" in prompt

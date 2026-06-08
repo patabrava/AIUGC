@@ -5,6 +5,7 @@ Product Prompt 3 runtime.
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Callable, Dict, List, Optional
 
@@ -28,6 +29,18 @@ from app.features.topics.topic_validation import (
 
 
 _INACTIVE_PRODUCT_MARKERS = ("LL12", "Konstanz")
+_BRAND_MARKERS = ("LIPPE Lift", "Lippe Lift", "Lipperlift", "lippelift.de")
+_SALES_COPY_MARKERS = (
+    "frag nach",
+    "frag jetzt",
+    "lass dir zeigen",
+    "jetzt mehr erfahren",
+    "mehr erfahren",
+    "buche",
+    "kauf",
+    "kaufe",
+    "melde dich",
+)
 _RETRYABLE_PROVIDER_STATUS_CODES = {429, 500, 503}
 logger = get_logger(__name__)
 
@@ -43,6 +56,35 @@ def _matches_entry(product_name: str, aliases: List[str], candidate_name: str) -
     return normalized in {_normalize(alias) for alias in aliases if alias}
 
 
+def _user_facing_product_markers(product_name: str, aliases: List[str]) -> List[str]:
+    markers: List[str] = []
+    for value in [product_name, *aliases, *_BRAND_MARKERS]:
+        normalized = " ".join(str(value or "").strip().split())
+        if normalized and _normalize(normalized) not in {_normalize(marker) for marker in markers}:
+            markers.append(normalized)
+        for token in re.findall(r"\b[A-ZÄÖÜ]{1,6}\d{1,4}[A-Z0-9]*\b", str(value or "")):
+            if _normalize(token) not in {_normalize(marker) for marker in markers}:
+                markers.append(token)
+    return markers
+
+
+def _find_user_facing_product_marker(*, angle: str, script: str, cta: str, product_name: str, aliases: List[str]) -> str:
+    haystack = _normalize(" ".join([angle, script, cta]))
+    for marker in _user_facing_product_markers(product_name, aliases):
+        if _normalize(marker) in haystack:
+            return marker
+    return ""
+
+
+def _find_sales_copy_marker(*, angle: str, script: str, cta: str) -> str:
+    haystack = _normalize(" ".join([angle, script, cta]))
+    for marker in _SALES_COPY_MARKERS:
+        normalized_marker = _normalize(marker)
+        if re.search(rf"(?<!\w){re.escape(normalized_marker)}(?!\w)", haystack):
+            return marker
+    return ""
+
+
 def _is_retryable_provider_error(exc: ThirdPartyError) -> bool:
     details = exc.details if isinstance(exc.details, dict) else {}
     status_code = details.get("status_code")
@@ -56,21 +98,20 @@ def _build_product_fallback_script(entry, *, target_length_tier: int) -> str:
     fact = sanitize_spoken_fragment((entry.facts or [entry.summary])[0], ensure_terminal=False).rstrip(".!?")
     if not fact:
         fact = "die Lösung deinen Alltag zuhause besser planbar macht"
-    product = entry.product_name
     if target_length_tier <= 8:
-        script = f"{product} hilft dir zuhause, weil {fact} und dein Alltag dadurch sicherer planbar bleibt."
+        script = f"Ein Plattformlift hilft dir zuhause, weil {fact} und dein Alltag dadurch ruhiger planbar bleibt."
     elif target_length_tier <= 16:
         script = (
-            f"{product} hilft dir zuhause. {fact} bleibt der zentrale Vorteil. "
-            "So wird deine Treppe sicherer, ruhiger und ohne unnötigen Umbau besser planbar."
+            f"Ein Plattformlift hilft dir zuhause. {fact} bleibt der zentrale Vorteil. "
+            "So wird deine Treppe ruhiger, verlässlicher und ohne unnötigen Umbau besser planbar."
         )
     else:
         script = (
-            f"{product} hilft dir zuhause. {fact} bleibt der zentrale Vorteil. "
+            f"Ein Plattformlift hilft dir zuhause. {fact} bleibt der zentrale Vorteil. "
             "Du siehst früh, welche Variante zu deiner Treppe passt, welche Bedienung sich richtig anfühlt "
             "und welche Details du vor dem Einbau klären solltest. "
             "Das gibt dir mehr Sicherheit auf Wegen, die jeden Tag zählen. "
-            "Die Planung bleibt klar und alltagstauglich. So wird dein Zuhause ohne unnötigen Umbau besser nutzbar."
+            "Die Planung bleibt klar, verlässlich und alltagstauglich. So wird dein Zuhause ohne unnötigen Umbau besser nutzbar."
         )
     min_words, max_words = get_prompt3_word_bounds(target_length_tier)
     cleaned = sanitize_spoken_fragment(script, ensure_terminal=True)
@@ -89,7 +130,7 @@ def _build_product_fallback_script(entry, *, target_length_tier: int) -> str:
 
 def _build_product_fallback_topic(entry, *, target_length_tier: int, reason: str) -> Dict[str, object]:
     script = _build_product_fallback_script(entry, target_length_tier=target_length_tier)
-    cta = "Frag nach einer passenden Lösung für dein Zuhause."
+    cta = "So bleibt die Entscheidung näher an deinem echten Alltag."
     validate_german_only_text(script, field_name="script", context="prompt3_fallback")
     validate_german_only_text(cta, field_name="cta", context="prompt3_fallback")
     rotation = strip_cta_from_script(script, cta) or script
@@ -156,13 +197,38 @@ def generate_product_topics(
                 last_error = exc.message
                 prompt = (
                     f"{prompt}\n\nRÜCKMELDUNG: Der letzte Entwurf war noch nicht klar genug. "
-                    "Nutze eine Zeile pro Feld: Produkt, Winkel, Sprechtext, Handlungsaufforderung, Fakten. "
+                    "Nutze eine Zeile pro Feld: Produkt, Winkel, Sprechtext, Schlusssatz, Fakten. "
                     "Keine Einleitung, kein Fließtext und keine Anglizismen."
                 )
                 continue
             if not _matches_entry(entry.product_name, entry.aliases, candidate.product_name):
                 last_error = f"Falsches Produkt genannt: {candidate.product_name}"
                 prompt = f"{prompt}\n\nFEEDBACK: {last_error}. Nenne nur {entry.product_name}."
+                continue
+            leaked_marker = _find_user_facing_product_marker(
+                angle=candidate.angle,
+                script=candidate.script,
+                cta=candidate.cta,
+                product_name=entry.product_name,
+                aliases=entry.aliases,
+            )
+            if leaked_marker:
+                last_error = f"Produktname in Nutzertext genannt: {leaked_marker}"
+                prompt = (
+                    f"{prompt}\n\nFEEDBACK: {last_error}. Das Feld Produkt bleibt intern, aber nenne "
+                    "Produktnamen, Modellnamen, Quellnamen oder die Marke nicht in Winkel, Sprechtext oder "
+                    "Schlusssatz. Schreibe über die Erfahrung mit dem Plattformlift, zuverlässige "
+                    "Nutzung, deutsche Fertigung und Alltagstauglichkeit."
+                )
+                continue
+            sales_marker = _find_sales_copy_marker(angle=candidate.angle, script=candidate.script, cta=candidate.cta)
+            if sales_marker:
+                last_error = f"Verkaufsaufforderung im Nutzertext: {sales_marker}"
+                prompt = (
+                    f"{prompt}\n\nFEEDBACK: {last_error}. Schreibe keine Verkaufsaufforderung. "
+                    "Der Schlusssatz muss wie ein ruhiger Alltagsgedanke klingen, nicht wie ein Aufruf zur Anfrage, "
+                    "Beratung, Buchung oder zum Kauf."
+                )
                 continue
             if any(marker.lower() in candidate.script.lower() for marker in _INACTIVE_PRODUCT_MARKERS):
                 last_error = "Inactive product marker leaked into script"
@@ -176,7 +242,7 @@ def generate_product_topics(
             except ValidationError as exc:
                 last_error = exc.message
                 prompt = (
-                    f"{prompt}\n\nRÜCKMELDUNG: Der Sprechtext oder die Handlungsaufforderung enthält Anglizismen. "
+                    f"{prompt}\n\nRÜCKMELDUNG: Der Sprechtext oder der Schlusssatz enthält Anglizismen. "
                     "Schreibe beides rein deutsch. Ersetze englische Lehnwörter durch natürliche deutsche Wörter. "
                     f"Details: {exc.details}"
                 )
