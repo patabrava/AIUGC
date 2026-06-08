@@ -122,6 +122,7 @@ def _png_bytes() -> bytes:
 
 def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch):
     from app.features.characters import handlers as character_handlers
+    from app.adapters.magnific_client import MagnificTrainingStatus
     from app.features.characters.schemas import ActorIdentityRecord
 
     uploaded_urls = []
@@ -134,9 +135,15 @@ def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch
             return {"url": url, "storage_key": f"images/{kwargs['file_name']}"}
 
     class _FakeMagnific:
-        def submit_character_training(self, **kwargs):
+        def train_character_lora(self, **kwargs):
             submitted.update(kwargs)
-            return {"task_id": "train-task-1", "status": "in_progress"}
+            return MagnificTrainingStatus(
+                raw_status="in_progress",
+                phase="training",
+                progress_percent=50,
+                provider_training_task_id="train-task-1",
+                provider_lora_name="AYRA",
+            )
 
     def fake_create(**kwargs):
         return ActorIdentityRecord(
@@ -153,18 +160,19 @@ def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch
             updated_at="2026-05-20T00:00:00Z",
         )
 
-    marked = {}
+    updated = {}
     monkeypatch.setattr(character_handlers, "get_storage_client", lambda: _FakeStorage())
-    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr("app.adapters.magnific_client.get_magnific_client", lambda: _FakeMagnific())
     monkeypatch.setattr(character_handlers.character_queries, "create_actor_identity", fake_create)
-    monkeypatch.setattr(character_handlers.character_queries, "mark_actor_training_submitted", lambda **kwargs: marked.update(kwargs))
+    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: fake_create(name="AYRA", training_images=uploaded_urls, consent_source="owned training set", is_active=False, correlation_id="test") if actor_id == "actor-1" else None)
+    monkeypatch.setattr(character_handlers.character_queries, "update_actor_training_status", lambda **kwargs: updated.update(kwargs))
 
     files = [
         ("training_images", (f"actor-{idx}.png", io.BytesIO(_png_bytes()), "image/png"))
         for idx in range(8)
     ]
     response = TestClient(app, base_url="http://localhost").post(
-        "/settings/character/actor",
+        "/settings/actor",
         data={
             "name": "AYRA",
             "gender": "female",
@@ -177,5 +185,5 @@ def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch
 
     assert response.status_code in {200, 303}, response.text
     assert len(uploaded_urls) == 8
-    assert submitted["images"] == uploaded_urls
-    assert marked["provider_training_task_id"] == "train-task-1"
+    assert submitted["image_urls"] == uploaded_urls
+    assert updated["provider_training_task_id"] == "train-task-1"

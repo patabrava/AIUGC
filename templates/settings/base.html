@@ -3,7 +3,7 @@
 {% block title %}Settings - Lippe Lift Studio{% endblock %}
 
 {% block content %}
-{% set current_settings_section = settings_section|default("character") %}
+{% set current_settings_section = settings_section|default("actor") %}
 <div class="mx-auto max-w-5xl px-4 py-8">
   <nav class="mb-8 flex flex-wrap gap-3 border-b border-[var(--lippe-border)] pb-4 text-sm" aria-label="Settings sections">
     <a
@@ -12,13 +12,6 @@
       {% if current_settings_section == "actor" %}aria-current="page"{% endif %}
     >
       Actor Identity
-    </a>
-    <a
-      href="/settings/character"
-      class="rounded-full px-4 py-2 font-medium transition {% if current_settings_section == 'character' %}bg-[var(--lippe-orange)] text-white{% else %}text-[var(--lippe-deep-blue)] hover:bg-white/70{% endif %}"
-      {% if current_settings_section == "character" %}aria-current="page"{% endif %}
-    >
-      Legacy Character Snapshot
     </a>
   </nav>
   {% block settings_content %}{% endblock %}

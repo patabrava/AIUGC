@@ -474,8 +474,9 @@ def test_set_active_actor_identity_restores_previous_active_on_activation_failur
     assert [row["id"] for row in rows if row["is_active"]] == ["old"]
 
 
-def test_upload_character_persists_three_images(monkeypatch):
+def test_upload_character_redirects_without_persisting_legacy_snapshot(monkeypatch):
     captured_uploads = []
+    upsert_calls = []
 
     class _FakeStorage:
         def upload_image(self, **kwargs):
@@ -489,16 +490,7 @@ def test_upload_character_persists_three_images(monkeypatch):
     monkeypatch.setattr(
         character_handlers.character_queries,
         "upsert_active_character",
-        lambda **kwargs: CharacterRecord(
-            id="00000000-0000-0000-0000-000000000001",
-            name=kwargs["name"],
-            front_image_url=kwargs["front_image_url"],
-            three_quarter_image_url=kwargs["three_quarter_image_url"],
-            profile_image_url=kwargs["profile_image_url"],
-            is_active=True,
-            created_at="2026-05-08T00:00:00Z",
-            updated_at="2026-05-08T00:00:00Z",
-        ),
+        lambda **kwargs: upsert_calls.append(kwargs),
     )
 
     response = TestClient(app, base_url="http://localhost").post(
@@ -513,7 +505,9 @@ def test_upload_character_persists_three_images(monkeypatch):
     )
 
     assert response.status_code in {200, 303}, response.text
-    assert {item["file_name"] for item in captured_uploads} == {"front.png", "3q.png", "profile.png"}
+    assert response.headers["location"] == "/settings/actor"
+    assert captured_uploads == []
+    assert upsert_calls == []
     assert all(item["content_type"] == "image/png" for item in captured_uploads)
 
 
@@ -547,15 +541,14 @@ def test_actor_settings_page_renders_active_actor(monkeypatch):
     assert 'aria-current="page"' in response.text
 
 
-def test_character_settings_hides_actor_training_form_and_links_to_actor_settings(monkeypatch):
-    monkeypatch.setattr(character_queries, "get_active_character", lambda: None)
+def test_character_settings_redirects_to_actor_settings():
+    response = TestClient(app, base_url="http://localhost").get(
+        "/settings/character",
+        follow_redirects=False,
+    )
 
-    response = TestClient(app, base_url="http://localhost").get("/settings/character")
-
-    assert response.status_code == 200
-    assert "Train or Replace Active ActorIdentity" not in response.text
-    assert 'href="/settings/actor"' in response.text
-    assert "Actor Identity lives in its own settings flow" in response.text
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings/actor"
 
 
 def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch):
@@ -674,14 +667,20 @@ def test_actor_settings_uses_brand_panel_and_semantic_status_copy(monkeypatch):
     assert "Task ID" not in response.text
 
 
-def test_character_settings_keeps_legacy_snapshot_actions(monkeypatch):
-    monkeypatch.setattr(character_queries, "get_active_character", lambda: None)
+def test_character_settings_post_redirects_to_actor_settings():
+    response = TestClient(app, base_url="http://localhost").post(
+        "/settings/character",
+        data={"name": "Legacy Character"},
+        files={
+            "front": ("front.png", _png_bytes(), "image/png"),
+            "three_quarter": ("three-quarter.png", _png_bytes(), "image/png"),
+            "profile": ("profile.png", _png_bytes(), "image/png"),
+        },
+        follow_redirects=False,
+    )
 
-    response = TestClient(app, base_url="http://localhost").get("/settings/character")
-
-    assert response.status_code == 200
-    assert "Legacy Three-Image Character Snapshot" in response.text
-    assert 'action="/settings/character"' in response.text
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings/actor"
 
 
 def test_generate_scene_reference_uses_lora_id_prompt_handle_and_no_seed(monkeypatch):
@@ -802,23 +801,15 @@ def test_htmx_scene_reference_poll_refreshes_when_image_is_ready(monkeypatch):
     assert generated[0]["image_url"] == "https://cdn.example.com/scene.png"
 
 
-def test_character_settings_renders_reference_images_without_cropping(monkeypatch):
-    monkeypatch.setattr(
-        character_queries,
-        "get_active_character",
-        lambda: {
-            "name": "Legacy Character",
-            "front_image_url": "https://cdn.example.com/front.png",
-            "three_quarter_image_url": "https://cdn.example.com/three-quarter.png",
-            "profile_image_url": "https://cdn.example.com/profile.png",
-        },
-    )
+def test_actor_settings_no_longer_links_to_legacy_snapshot_tools(monkeypatch):
+    active = ActorIdentityRecord.model_validate(_actor_row("active", is_active=True))
+    _patch_actor_settings_context(monkeypatch, active=active)
 
-    response = TestClient(app, base_url="http://localhost").get("/settings/character")
+    response = TestClient(app, base_url="http://localhost").get("/settings/actor")
 
     assert response.status_code == 200
-    assert "h-full w-full object-contain" in response.text
-    assert "object-cover" not in response.text
+    assert "Open legacy snapshot tools" not in response.text
+    assert "Legacy Character Snapshot" not in response.text
 
 
 def test_refresh_active_actor_identity_status_recovers_from_poll_failure(monkeypatch):

@@ -22,7 +22,7 @@ from app.features.characters.actor_identity import (
     pending_manual_gate,
 )
 from app.features.characters import queries as character_queries
-from app.features.characters.schemas import ActorTrainingSet, CharacterRecord
+from app.features.characters.schemas import ActorTrainingSet
 from app.features.characters.scene_reference import (
     REQUIRED_SCENE_REFERENCE_ANGLES,
     SCENE_REFERENCE_CREATIVE_DETAILING,
@@ -164,22 +164,7 @@ def _read_capped(field_name: str, upload: UploadFile) -> bytes:
 
 @router.get("/character")
 def character_settings(request: Request):
-    try:
-        active = character_queries.get_active_character()
-        character_error = None
-    except Exception as exc:  # noqa: BLE001 - legacy settings should still render guidance
-        active = None
-        character_error = "Legacy character snapshot could not be loaded. Actor Identity settings are still available."
-        logger.warning("character_settings_legacy_snapshot_load_failed", error=str(exc))
-    return templates.TemplateResponse(
-        "settings/character.html",
-        {
-            "request": request,
-            "character": active,
-            "character_error": character_error,
-            "settings_section": "character",
-        },
-    )
+    return RedirectResponse(url="/settings/actor", status_code=303)
 
 
 @router.get("/actor")
@@ -246,30 +231,15 @@ async def upload_character(
     three_quarter: UploadFile = File(...),
     profile: UploadFile = File(...),
 ):
-    correlation_id = str(uuid4())
-    for field_name, upload in (("front", front), ("three_quarter", three_quarter), ("profile", profile)):
-        _validate_upload(field_name, upload)
-
-    storage = get_storage_client()
-    uploaded: dict[str, str] = {}
-    for field_name, upload in (("front", front), ("three_quarter", three_quarter), ("profile", profile)):
-        result = storage.upload_image(
-            image_bytes=_read_capped(field_name, upload),
-            file_name=upload.filename or f"{field_name}.png",
-            correlation_id=correlation_id,
-            content_type=upload.content_type or "image/png",
-        )
-        uploaded[field_name] = result["url"]
-
-    record: CharacterRecord = character_queries.upsert_active_character(
-        name=name,
-        front_image_url=uploaded["front"],
-        three_quarter_image_url=uploaded["three_quarter"],
-        profile_image_url=uploaded["profile"],
-        correlation_id=correlation_id,
+    logger.info(
+        "legacy_character_settings_upload_blocked",
+        route=request.url.path,
+        submitted_name=name,
+        front_filename=front.filename if front else None,
+        three_quarter_filename=three_quarter.filename if three_quarter else None,
+        profile_filename=profile.filename if profile else None,
     )
-    logger.info("character_settings_saved", correlation_id=correlation_id, character_id=record.id)
-    return RedirectResponse(url="/settings/character", status_code=303)
+    return RedirectResponse(url="/settings/actor", status_code=303)
 
 
 def _load_json_object(value):
@@ -352,7 +322,6 @@ def _provider_safe_name(name: str, actor_identity_id: str) -> str:
 
 
 @router.post("/actor")
-@router.post("/character/actor")
 async def train_actor_identity(
     request: Request,
     name: str = Form(default="Default Actor"),
@@ -394,39 +363,6 @@ async def train_actor_identity(
         uploaded_urls.append(result["url"])
 
     training = ActorTrainingSet(images=uploaded_urls, consent_source=consent_source)
-    if request.url.path == "/settings/character/actor":
-        identity = character_queries.create_actor_identity(
-            name=name,
-            training_images=training.images,
-            consent_source=training.consent_source,
-            correlation_id=correlation_id,
-            is_active=False,
-        )
-        provider_name = _provider_safe_name(identity.name, identity.id)
-        task = get_magnific_client().submit_character_training(
-            name=provider_name,
-            quality=quality,
-            gender=gender,
-            images=training.images,
-            description=f"ActorIdentity {identity.id}",
-            webhook_url=None,
-            correlation_id=correlation_id,
-        )
-        character_queries.mark_actor_training_submitted(
-            actor_identity_id=identity.id,
-            provider_training_task_id=str(task.get("task_id") or ""),
-            provider_lora_name=provider_name,
-            raw_status=str(task.get("status") or "in_progress"),
-            correlation_id=correlation_id,
-        )
-        logger.info(
-            "actor_identity_training_started",
-            correlation_id=correlation_id,
-            actor_identity_id=identity.id,
-            training_image_count=len(training.images),
-        )
-        return RedirectResponse(url="/settings/actor", status_code=303)
-
     from app.adapters import magnific_client as magnific_adapter
 
     identity = character_queries.create_actor_identity(
