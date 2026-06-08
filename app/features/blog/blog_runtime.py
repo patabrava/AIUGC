@@ -12,7 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError as PydanticValidationError
 
 from app.adapters.llm_client import get_llm_client
@@ -37,6 +37,8 @@ from app.features.topics.queries import get_topic_research_dossiers
 logger = get_logger(__name__)
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "topics" / "prompt_data" / "blog_post.txt"
+BLOG_IMAGE_WIDTH = 1150
+BLOG_IMAGE_HEIGHT = 850
 
 
 def _convert_generated_image_to_webp(image_bytes: bytes, *, correlation_id: str) -> bytes:
@@ -45,9 +47,16 @@ def _convert_generated_image_to_webp(image_bytes: bytes, *, correlation_id: str)
             has_alpha = image.mode in {"RGBA", "LA"} or "transparency" in image.info
             target_mode = "RGBA" if has_alpha else "RGB"
             converted = image if image.mode == target_mode else image.convert(target_mode)
+            resampling_filter = getattr(Image, "Resampling", Image).LANCZOS
+            formatted = ImageOps.fit(
+                converted,
+                (BLOG_IMAGE_WIDTH, BLOG_IMAGE_HEIGHT),
+                method=resampling_filter,
+                centering=(0.5, 0.5),
+            )
 
             output = BytesIO()
-            converted.save(output, format="WEBP", quality=88, method=6)
+            formatted.save(output, format="WEBP", quality=88, method=6)
             return output.getvalue()
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         logger.error(
@@ -114,7 +123,7 @@ def _build_blog_image_prompt(blog_content: Dict[str, Any], dossier_payload: Dict
     summary = _limit_text(blog_content.get("preview_text") or blog_content.get("merksatz") or "", 90)
     return _limit_text(
         (
-            f"Quadratisches Coverbild für einen deutschen Blogartikel über {topic}. "
+            f"Querformat-Coverbild im Format 1150 x 850 Pixel für einen deutschen Blogartikel über {topic}. "
             f"Kontext: {cluster_summary}. "
             f"Teaser: {summary}. "
             "Freundliche realistische Editorial-Illustration, hell, professionell, ohne Text, Logo oder Wasserzeichen."

@@ -547,6 +547,57 @@ def test_generate_blog_image_converts_provider_png_to_webp_before_upload(monkeyp
     assert update_calls[0][1]["blog_content"]["preview_image_url"] == "https://cdn.example.com/blog/title.webp"
 
 
+def test_generate_blog_image_uploads_webflow_required_dimensions(monkeypatch):
+    png_buffer = io.BytesIO()
+    Image.new("RGB", (1024, 1024), (24, 94, 160)).save(png_buffer, format="PNG")
+    captured_upload = {}
+
+    fake_post = {
+        "id": "post-1",
+        "blog_enabled": True,
+        "blog_status": "draft",
+        "blog_content": {
+            "name": "Title",
+            "slug": "title",
+            "body_html": "<p>Text</p>",
+            "image_prompt": "Landscape cover image",
+            "preview_image_url": None,
+        },
+    }
+
+    class _FakeLLM:
+        def generate_gemini_image(self, **_kwargs):
+            return {
+                "image_bytes": png_buffer.getvalue(),
+                "mime_type": "image/png",
+                "model": "gemini-2.5-flash-image",
+            }
+
+    class _FakeStorage:
+        def upload_image(self, **kwargs):
+            captured_upload.update(kwargs)
+            return {
+                "url": f"https://cdn.example.com/blog/{kwargs['file_name']}",
+                "storage_key": f"Lippe Lift Studio/images/{kwargs['file_name']}",
+            }
+
+    monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _post_id: fake_post)
+    monkeypatch.setattr(
+        blog_runtime,
+        "_lookup_dossier",
+        lambda _post: {"id": "dossier-1", "normalized_payload": {"topic": "Title"}},
+    )
+    monkeypatch.setattr(blog_runtime, "get_llm_client", lambda: _FakeLLM())
+    monkeypatch.setattr(blog_runtime, "get_storage_client", lambda: _FakeStorage())
+    monkeypatch.setattr(blog_runtime, "update_blog_status", lambda post_id, **kwargs: {"id": post_id, **kwargs})
+
+    blog_runtime.generate_blog_image("post-1")
+
+    with Image.open(io.BytesIO(captured_upload["image_bytes"])) as uploaded:
+        assert uploaded.format == "WEBP"
+        assert uploaded.size == (1150, 850)
+
+
 def test_blog_toggle_endpoint_is_registered():
     client = TestClient(app)
     response = client.put("/blog/posts/nonexistent/blog-toggle", allow_redirects=False)
