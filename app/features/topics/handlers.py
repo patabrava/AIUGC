@@ -49,6 +49,7 @@ from app.features.topics.queries import (
     get_posts_by_batch,
     list_topic_suggestions,
     list_topic_research_runs,
+    mark_topic_family_used,
     mark_topic_script_used,
     get_topic_registry_by_id,
     get_topic_scripts_for_registry,
@@ -412,12 +413,7 @@ def _create_post_from_suggestion(
         script_fallback=topic_rotation,
         canonical_topic=canonical_topic or topic_title,
     )
-    add_topic_to_registry(
-        title=topic_title,
-        script=topic_rotation,
-        post_type=post_type,
-        canonical_topic=canonical_topic or topic_title,
-    )
+    mark_topic_family_used(suggestion.get("topic_registry_id") or family_id)
     mark_topic_script_used(script_id=suggestion.get("script_id"))
     return create_post_for_batch(
         batch_id=batch_id,

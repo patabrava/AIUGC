@@ -1129,6 +1129,68 @@ def test_list_topic_suggestions_skips_inaccessible_value_source_urls(monkeypatch
     ]
 
 
+def test_list_topic_suggestions_skips_chopped_value_rows_from_metadata_fragments(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {
+            "id": "topic-bad",
+            "title": "Handbremsen-Hack Mechanik physikalische Grundlagen",
+            "script": "Alter Registry Stub.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "handbremsen-hack",
+        },
+        {
+            "id": "topic-good",
+            "title": "Rampe sicher pruefen",
+            "script": "Mit einer kurzen Neigungspruefung erkennst du frueh, ob eine Rampe fuer dich sicher bleibt.",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "rampe sicher pruefen",
+        },
+    ]
+    script_rows = [
+        {
+            "id": "script-bad",
+            "topic_registry_id": "topic-bad",
+            "title": "Handbremsen-Hack Mechanik physikalische Grundlagen",
+            "script": "Dein Einkaufswagen rollt weg, Mechanik und physikalische Grundlagen, Wenn jeder Einkaufswagen über eine individuelle Feststellbremse….",
+            "post_type": "value",
+            "target_length_tier": 8,
+            "audit_status": "pass",
+            "source_summary": "Der Handbremsen-Hack fuer Einkaufswagen und rechtliche Rahmenbedingungen.",
+            "source_urls": [{"url": "https://source.example/handbremse"}],
+            "seed_payload": {
+                "research_title": "Handbremsen-Hack Mechanik physikalische Grundlagen",
+                "strict_seed": {
+                    "facts": [
+                        "Wenn jeder Einkaufswagen über eine individuelle Feststellbremse verfügen würde, wäre das Stapeln viel aufwendiger."
+                    ]
+                },
+            },
+        },
+        {
+            "id": "script-good",
+            "topic_registry_id": "topic-good",
+            "title": "Rampe sicher pruefen",
+            "script": "Mit einer kurzen Neigungspruefung erkennst du frueh, ob eine Rampe fuer dich sicher bleibt.",
+            "post_type": "value",
+            "target_length_tier": 8,
+            "audit_status": "pass",
+            "source_urls": [{"url": "https://source.example/rampe"}],
+        },
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda url: True)
+
+    result = topic_queries.list_topic_suggestions(target_length_tier=8, limit=10, post_type="value")
+
+    assert [row["topic_registry_id"] for row in result] == ["topic-good"]
+
+
 def test_list_topic_suggestions_includes_used_scripts_but_prefers_unused(monkeypatch):
     from app.features.topics import queries as topic_queries
 

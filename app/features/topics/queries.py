@@ -21,8 +21,8 @@ from app.features.topics.captions import resolve_selected_caption
 from app.features.topics.seed_builders import clean_source_url, select_relevant_sources
 from app.features.topics.topic_validation import (
     classify_script_overlap,
-    detect_metadata_bleed,
     detect_spoken_copy_issues,
+    detect_metadata_bleed,
     get_prompt1_sentence_bounds,
     get_prompt1_word_bounds,
     get_prompt3_sentence_bounds,
@@ -154,6 +154,48 @@ def _is_value_source_url_accessible(url: Any, timeout: float = 6.0) -> bool:
 
 
 def _script_is_selectable(script_row: Dict[str, Any]) -> bool:
+    script = str(script_row.get("script") or "").strip()
+    if not script:
+        return False
+    if detect_spoken_copy_issues(script):
+        return False
+    if "..." in script or "…" in script:
+        return False
+
+    metadata_candidates = [
+        str(script_row.get("title") or "").strip(),
+        str(script_row.get("source_summary") or "").strip(),
+    ]
+    seed_payload = script_row.get("seed_payload") or {}
+    if isinstance(seed_payload, dict):
+        metadata_candidates.extend(
+            [
+                str(seed_payload.get("research_title") or "").strip(),
+                str(seed_payload.get("research_caption") or "").strip(),
+                str(seed_payload.get("description") or "").strip(),
+                str(((seed_payload.get("source") or {}) if isinstance(seed_payload.get("source"), dict) else {}).get("summary") or "").strip(),
+            ]
+        )
+        strict_seed = seed_payload.get("strict_seed") or {}
+        if isinstance(strict_seed, dict):
+            metadata_candidates.extend(
+                str(fact or "").strip()
+                for fact in list(strict_seed.get("facts") or [])
+                if str(fact or "").strip()
+            )
+            metadata_candidates.append(str(strict_seed.get("source_context") or "").strip())
+
+    for metadata_text in metadata_candidates:
+        if not metadata_text:
+            continue
+        bleed = detect_metadata_bleed(
+            script,
+            source_summary=metadata_text,
+            cluster_summary="",
+            min_consecutive_words=4,
+        )
+        if bleed:
+            return False
     return True
 
 
@@ -423,6 +465,25 @@ def touch_topic_registry(
     return _normalize_registry_row(response.data[0])
 
 
+def mark_topic_family_used(topic_registry_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Increment family usage without replacing the canonical family script."""
+    if not topic_registry_id:
+        return None
+    supabase = _get_supabase_adapter()
+    response = supabase.client.table("topic_registry").select("*").eq("id", topic_registry_id).limit(1).execute()
+    if not response.data:
+        return None
+    existing_row = _normalize_registry_row(response.data[0])
+    update_payload = {
+        "use_count": int(existing_row.get("use_count") or 0) + 1,
+        "last_used_at": datetime.now(timezone.utc).isoformat(),
+    }
+    updated = supabase.client.table("topic_registry").update(update_payload).eq("id", topic_registry_id).execute()
+    if not updated.data:
+        return existing_row
+    return _normalize_registry_row(updated.data[0])
+
+
 def _registry_row_to_topic_suggestion(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = _normalize_registry_row(row)
     script = normalized["script"]
@@ -668,6 +729,14 @@ def list_topic_suggestions(
                 continue
             normalized_script = _normalize_script_row(row)
             if normalized_script.get("audit_status") != "pass":
+                continue
+            if not _script_is_selectable(normalized_script):
+                logger.warning(
+                    "topic_script_selection_rejected",
+                    script_id=normalized_script.get("id"),
+                    topic_registry_id=topic_registry_id,
+                    target_length_tier=normalized_script.get("target_length_tier"),
+                )
                 continue
             if normalized_script.get("target_length_tier") is not None:
                 try:

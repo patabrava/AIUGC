@@ -102,7 +102,7 @@ def test_reused_topic_suggestion_persists_spoken_script_in_seed_payload(monkeypa
     }
 
     monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption="Caption"))
-    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", lambda **kwargs: {"id": "topic-1"})
+    monkeypatch.setattr(topic_handlers, "mark_topic_family_used", lambda *args, **kwargs: {"id": "topic-1"})
     monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id=None: None)
 
     def fake_create_post_for_batch(**kwargs):
@@ -146,7 +146,7 @@ def test_reused_topic_suggestion_overwrites_stale_seed_source(monkeypatch):
     }
 
     monkeypatch.setattr(topic_handlers, "_attach_publish_captions", lambda **kwargs: dict(kwargs["seed_payload"], caption="Caption"))
-    monkeypatch.setattr(topic_handlers, "add_topic_to_registry", lambda **kwargs: {"id": "topic-1"})
+    monkeypatch.setattr(topic_handlers, "mark_topic_family_used", lambda *args, **kwargs: {"id": "topic-1"})
     monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id=None: None)
 
     def fake_create_post_for_batch(**kwargs):
