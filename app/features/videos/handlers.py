@@ -1539,7 +1539,11 @@ def _build_veo_extended_base_prompt(
 
     base_segment = segments[0] if segments else ""
     if profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE:
-        if target_length_tier == 32:
+        # The tier-32 legacy override hardcodes a generic demo persona, which is correct for
+        # topic/automated videos but overwrites the selected actor on Character Consistency /
+        # ActorIdentity videos (the base text fights the actor reference images). Keep the real
+        # per-post character for Character Consistency modes, exactly like tier 16.
+        if target_length_tier == 32 and not is_character_consistency_mode(creation_mode):
             prompt_character = LEGACY_SHORT_CHARACTER
             prompt_style = LEGACY_32_STYLE
             prompt_cinematography = LEGACY_32_CINEMATOGRAPHY

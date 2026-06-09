@@ -381,8 +381,11 @@ def test_veo_extension_prompt_uses_efficient_32s_visual_contract():
     )
 
     prompt_text = prompt["prompt_text"]
-    assert "Same person as the previous segment" in prompt_text
-    assert "shoulder-length light brown hair with subtle blonde highlights" in prompt_text
+    # Extension hops must preserve the actual actor by deferring to the previous segment,
+    # not by re-asserting a hardcoded generic persona (the 32s actor-drift regression).
+    assert "exact same person as the previous segment" in prompt_text
+    assert "do not invent a new face" in prompt_text.lower()
+    assert "shoulder-length light brown hair with subtle blonde highlights" not in prompt_text
     assert DEFAULT_SCENE_BODY not in prompt_text
     assert LEGACY_SCENE not in prompt_text
     assert "Maintain the same bedroom, lighting, framing, camera position, and wardrobe from the previous segment." in prompt_text

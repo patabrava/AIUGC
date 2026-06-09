@@ -219,9 +219,10 @@ LEAN_LIGHT_BASE_AUDIO_BLOCK = (
 )
 
 LEAN_EXTENSION_CHARACTER = (
-    "Same person as the previous segment: 38-year-old German woman with shoulder-length "
-    "light brown hair with subtle blonde highlights, hazel eyes, warm light-medium skin "
-    "tone, friendly oval face, natural expression."
+    "The exact same person as the previous segment. Preserve their face, facial proportions, "
+    "skin tone and texture, hair identity, age, and build precisely as already established. "
+    "Do not redesign, restyle, or substitute the person, and do not invent a new face, "
+    "hairstyle, or age."
 )
 
 LEAN_EXTENSION_STYLE = (

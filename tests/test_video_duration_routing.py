@@ -677,6 +677,43 @@ def test_build_veo_extended_base_prompt_uses_legacy_32s_default_visual_contract(
     _assert_segment_budgets_pass(seg_meta)
 
 
+def test_build_veo_extended_base_prompt_32s_character_consistency_keeps_actor_character():
+    # Regression: tier-32 Character Consistency videos must keep the selected actor's character,
+    # not the hardcoded LEGACY_SHORT_CHARACTER persona that overwrote the actor and made the
+    # 32s actor "completely ignored" while 8s/16s worked.
+    seed_data = {"script": _valid_32s_script()}
+    distinctive_character = "28-year-old man with a shaved head and a full dark beard"
+
+    prompt, seg_meta = video_handlers._build_veo_extended_base_prompt(
+        seed_data,
+        video_prompt={
+            "character": distinctive_character,
+            "scene": "Scene: living room",
+            "audio": {"dialogue": seed_data["script"]},
+        },
+        planned_extension_hops=3,
+        target_length_tier=32,
+        creation_mode="character_consistency",
+    )
+
+    assert distinctive_character in prompt
+    # The hardcoded generic persona must not override the real actor.
+    assert "38-year-old German woman with shoulder-length light brown hair" not in prompt
+    assert seg_meta["veo_extension_hops_target"] == 3
+
+
+def test_lean_continuation_prompt_defers_to_previous_segment_not_hardcoded_actor():
+    # Regression: extension hops must preserve the actual actor by deferring to the previous
+    # segment instead of re-asserting a fixed "38-year-old German woman" on every hop.
+    from app.features.posts.prompt_builder import build_lean_veo_continuation_prompt
+
+    prompt = build_lean_veo_continuation_prompt("Ein ruhiger Satz fuer das naechste Segment.")
+
+    assert "38-year-old German woman with shoulder-length light brown hair" not in prompt
+    assert "exact same person as the previous segment" in prompt
+    assert "do not invent a new face" in prompt.lower()
+
+
 def test_batch_video_generation_request_accepts_duration_tier_seconds():
     req = BatchVideoGenerationRequest(
         provider="vertex_ai",
