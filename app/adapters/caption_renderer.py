@@ -193,6 +193,36 @@ def _get_video_dimensions(video_path: str) -> tuple[int, int]:
         return 1080, 1920
 
 
+def _build_word_overlay_segments(words: list[Word], *, fps: float) -> list[tuple[float, float, Word]]:
+    """Build monotonic half-open overlay windows for each caption word."""
+    if not words:
+        return []
+
+    safe_fps = max(float(fps or 0.0), 1.0)
+    min_duration = min(1.0 / safe_fps, 0.05)
+    segments: list[tuple[float, float, Word]] = []
+    previous_end = 0.0
+
+    for index, word in enumerate(words):
+        start = max(float(word.start or 0.0), 0.0, previous_end)
+        next_start = None
+        if index < len(words) - 1:
+            next_start = max(float(words[index + 1].start or 0.0), 0.0)
+
+        candidates = [float(word.end or 0.0), start + min_duration]
+        if next_start is not None:
+            candidates.append(next_start)
+        end = max(candidates)
+
+        if end <= start:
+            end = start + min_duration
+
+        segments.append((start, end, word))
+        previous_end = end
+
+    return segments
+
+
 def generate_ass_content(
     transcript: WordLevelTranscript, *, video_width: int = 1080, video_height: int = 1920
 ) -> str:
@@ -233,6 +263,7 @@ def burn_captions(
     if video_width == 0 or video_height == 0:
         video_width, video_height = _get_video_dimensions(video_path)
 
+    fps = _get_video_fps(video_path)
     font_size = max(int(video_width * 0.1), 72)
 
     # Create temp directory for overlay frames
@@ -244,14 +275,8 @@ def burn_captions(
         # Hormozi style: one word at a time, each as its own frame
         segments = []
         all_words = transcript.words
-        for global_idx, word in enumerate(all_words):
-            word_start = word.start
-            # End time: use next word's start if available, else this word's end
-            if global_idx < len(all_words) - 1:
-                word_end = all_words[global_idx + 1].start
-            else:
-                word_end = word.end
-
+        overlay_segments = _build_word_overlay_segments(all_words, fps=fps)
+        for global_idx, (word_start, word_end, word) in enumerate(overlay_segments):
             frame_img = _render_caption_frame(
                 text=word.word,
                 highlight_index=0,
@@ -283,7 +308,7 @@ def burn_captions(
             input_idx = i + 1
             out_label = f"[v{i}]" if i < len(segments) - 1 else "[vout]"
             filter_parts.append(
-                f"{prev_label}[{input_idx}:v]overlay=0:0:enable='between(t,{start:.3f},{end:.3f})'{out_label}"
+                f"{prev_label}[{input_idx}:v]overlay=0:0:enable='gte(t,{start:.3f})*lt(t,{end:.3f})'{out_label}"
             )
             prev_label = out_label
 

@@ -115,3 +115,35 @@ class TestBurnCaptions:
                 burn_captions(video_path=input_path, transcript=transcript, correlation_id="test_fail")
         finally:
             os.unlink(input_path)
+
+    @patch("app.adapters.caption_renderer.subprocess.run")
+    @patch("app.adapters.caption_renderer._get_video_fps", return_value=30.0)
+    @patch("app.adapters.caption_renderer._get_video_dimensions", return_value=(1080, 1920))
+    def test_burn_uses_half_open_overlay_windows_to_avoid_boundary_overlap(self, mock_dims, mock_fps, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        transcript = WordLevelTranscript(
+            words=[
+                Word("Bleibt", 0.0, 0.5),
+                Word("ruhig", 0.5, 0.9),
+            ],
+            full_text="Bleibt ruhig",
+        )
+        output_path = None
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            f.write(b"fake_video_data")
+            input_path = f.name
+        try:
+            output_path = burn_captions(
+                video_path=input_path,
+                transcript=transcript,
+                correlation_id="test_half_open_windows",
+            )
+            cmd = mock_run.call_args[0][0]
+            filter_complex = cmd[cmd.index("-filter_complex") + 1]
+            assert "between(t," not in filter_complex
+            assert "gte(t,0.000)*lt(t,0.500)" in filter_complex
+            assert "gte(t,0.500)*lt(t,0.900)" in filter_complex
+        finally:
+            os.unlink(input_path)
+            if output_path and os.path.exists(output_path):
+                os.unlink(output_path)
