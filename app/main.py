@@ -31,7 +31,12 @@ from app.features.qa.handlers import router as qa_router
 from app.features.publish.handlers import router as publish_router, run_scheduled_publish_job
 from app.features.blog.handlers import router as blog_router, run_scheduled_blog_publish_job
 from app.features.auth.handlers import router as auth_router
-from app.features.auth.middleware import require_auth, is_public_path
+from app.features.auth.middleware import (
+    require_auth,
+    is_public_path,
+    load_authenticated_user,
+    encode_session_cookie,
+)
 from app.features.characters.handlers import router as characters_router
 from app.features.scenes.handlers import router as scenes_router
 
@@ -469,6 +474,25 @@ templates = Jinja2Templates(directory="templates")
 @app.get("/")
 async def root(request: Request):
     """Serve the public product page used for app review and unauthenticated visitors."""
+    if await load_authenticated_user(request):
+        response = RedirectResponse(url="/batches", status_code=302)
+        new_session = getattr(request.state, "new_session", None)
+        if new_session:
+            settings = get_settings()
+            cookie_data = {
+                "access_token": new_session["access_token"],
+                "refresh_token": new_session["refresh_token"],
+            }
+            cookie_value = encode_session_cookie(cookie_data, settings.token_encryption_key)
+            response.set_cookie(
+                key=settings.session_cookie_name,
+                value=cookie_value,
+                max_age=settings.session_max_age,
+                httponly=True,
+                secure=settings.is_production,
+                samesite="lax",
+            )
+        return response
     return templates.TemplateResponse("public/home.html", {"request": request})
 
 @app.get("/terms")

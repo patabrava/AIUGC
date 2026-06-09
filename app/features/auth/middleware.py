@@ -78,6 +78,40 @@ def is_public_path(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES)
 
 
+async def load_authenticated_user(request: Request) -> bool:
+    """Populate request auth state from the session cookie when available."""
+    settings = get_settings()
+    if should_bypass_auth(request):
+        request.state.user_email = "local-dev@lippelift.de"
+        return True
+
+    cookie_value = request.cookies.get(settings.session_cookie_name)
+    if not cookie_value:
+        return False
+
+    session = decode_session_cookie(cookie_value, settings.token_encryption_key)
+    if not session or "access_token" not in session:
+        return False
+
+    # Validate token with Supabase
+    from app.features.auth.queries import get_user_from_token, refresh_session
+
+    user = await get_user_from_token(session["access_token"])
+    if user:
+        request.state.user_email = user["email"]
+        return True
+
+    # Token expired — try refresh
+    if "refresh_token" in session:
+        new_session = await refresh_session(session["refresh_token"])
+        if new_session:
+            request.state.user_email = new_session["user"]["email"]
+            request.state.new_session = new_session  # Handler will update cookie
+            return True
+
+    return False
+
+
 async def require_auth(request: Request) -> Optional[RedirectResponse]:
     """
     Auth middleware. Returns None if authenticated (sets request.state.user_email),
@@ -87,33 +121,7 @@ async def require_auth(request: Request) -> Optional[RedirectResponse]:
     if is_public_path(path):
         return None
 
-    settings = get_settings()
-    if should_bypass_auth(request):
-        request.state.user_email = "local-dev@lippelift.de"
+    if await load_authenticated_user(request):
         return None
-
-    cookie_value = request.cookies.get(settings.session_cookie_name)
-    if not cookie_value:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    session = decode_session_cookie(cookie_value, settings.token_encryption_key)
-    if not session or "access_token" not in session:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    # Validate token with Supabase
-    from app.features.auth.queries import get_user_from_token, refresh_session
-
-    user = await get_user_from_token(session["access_token"])
-    if user:
-        request.state.user_email = user["email"]
-        return None
-
-    # Token expired — try refresh
-    if "refresh_token" in session:
-        new_session = await refresh_session(session["refresh_token"])
-        if new_session:
-            request.state.user_email = new_session["user"]["email"]
-            request.state.new_session = new_session  # Handler will update cookie
-            return None
 
     return RedirectResponse(url="/auth/login", status_code=302)

@@ -340,6 +340,47 @@ def test_reviewer_email_direct_login_from_send_otp(monkeypatch):
     assert "ff_session=" in response.headers.get("set-cookie", "")
 
 
+def test_root_keeps_authenticated_reviewer_in_app(monkeypatch):
+    import app.core.config as config_module
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "tiktok-review@lippelift.xyz")
+    monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
+
+    client = TestClient(app, base_url="https://lippelift.xyz")
+    login_response = client.get("/auth/review?token=review-secret-token", allow_redirects=False)
+
+    assert login_response.status_code == 302
+    assert login_response.headers["location"] == "/batches"
+
+    response = client.get("/", allow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/batches"
+
+
+def test_root_stays_public_without_session(monkeypatch):
+    import app.core.config as config_module
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
+
+    client = TestClient(app, base_url="https://lippelift.xyz")
+    response = client.get("/", allow_redirects=False)
+
+    assert response.status_code == 200
+    assert "Open Studio" in response.text
+
+
 def test_reviewer_login_rejects_invalid_token(monkeypatch):
     import app.core.config as config_module
     from fastapi.testclient import TestClient
@@ -359,9 +400,11 @@ def test_reviewer_login_rejects_invalid_token(monkeypatch):
 
 
 def test_reviewer_login_requires_configuration(monkeypatch):
+    import app.core.config as config_module
     from fastapi.testclient import TestClient
     from app.main import app
 
+    monkeypatch.setattr(config_module, "_settings", None)
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
     monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "")
