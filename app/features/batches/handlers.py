@@ -702,15 +702,25 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             [str(p.get("id")) for p in posts_data if p.get("id")]
         )
         scene_references_by_post = {}
+        batch_actor_identity_id = str(batch.get("actor_identity_id") or "").strip()
         for post_id, references in raw_scene_references_by_post.items():
-            latest_reference_set_id = character_queries.select_latest_reference_set_id(references)
+            actor_scoped_references = (
+                [
+                    row
+                    for row in references
+                    if str(row.get("actor_identity_id") or "").strip() == batch_actor_identity_id
+                ]
+                if batch_actor_identity_id
+                else references
+            )
+            latest_reference_set_id = character_queries.select_latest_reference_set_id(actor_scoped_references)
             if latest_reference_set_id:
                 scene_references_by_post[post_id] = character_queries.filter_reference_rows_for_set(
-                    references,
+                    actor_scoped_references,
                     latest_reference_set_id,
                 )
             else:
-                scene_references_by_post[post_id] = references
+                scene_references_by_post[post_id] = actor_scoped_references
         batch_creation_mode = str(batch.get("creation_mode") or "").strip()
         
         posts_list = []

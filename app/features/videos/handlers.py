@@ -38,7 +38,7 @@ from app.core.video_profiles import (
     script_word_count,
     uses_duration_routing,
 )
-from app.features.batches.queries import get_batch_by_id
+from app.features.batches.queries import get_batch_by_id, sync_character_consistency_batch_actor
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.characters.actor_identity import (
     is_character_consistency_light_mode,
@@ -1558,6 +1558,8 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         post = response.data[0]
         seed_data = _normalize_seed_data(post.get("seed_data"))
         batch = get_batch_by_id(post.get("batch_id"))
+        if is_character_consistency_mode(batch.get("creation_mode")):
+            batch = sync_character_consistency_batch_actor(batch, correlation_id=correlation_id)
 
         if seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True:
             raise ValidationError(
@@ -1936,6 +1938,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         response = supabase.table("posts").select("*").eq("batch_id", batch_id).execute()
         posts = response.data
         batch = get_batch_by_id(batch_id)
+        if is_character_consistency_mode(batch.get("creation_mode")):
+            batch = sync_character_consistency_batch_actor(batch, correlation_id=correlation_id)
 
         if not posts:
             raise FlowForgeException(

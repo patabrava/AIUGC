@@ -180,10 +180,24 @@ def activate_actor_identity(
 ):
     correlation_id = str(uuid4())
     try:
-        character_queries.set_active_actor_identity(
+        active_actor = character_queries.set_active_actor_identity(
             actor_identity_id=actor_identity_id,
             correlation_id=correlation_id,
         )
+        try:
+            from app.features.batches import queries as batch_queries
+
+            batch_queries.sync_pending_character_consistency_batches_to_actor(
+                active_actor=active_actor,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - activation must stick even if eligible batch sync falls back to submit-time repair
+            logger.warning(
+                "actor_identity_activation_batch_sync_failed",
+                correlation_id=correlation_id,
+                actor_identity_id=actor_identity_id,
+                error=str(exc),
+            )
     except FlowForgeException as exc:
         logger.warning(
             "actor_identity_activation_rejected",

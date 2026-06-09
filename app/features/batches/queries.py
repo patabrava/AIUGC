@@ -24,6 +24,149 @@ BATCH_LIST_FIELDS = (
     "id,brand,state,post_type_counts,target_length_tier,created_at,updated_at,archived"
 )
 POSTS_SUMMARY_FIELDS = "id,post_type"
+VIDEO_SUBMISSION_STARTED_STATUSES = {
+    "submitted",
+    "processing",
+    "completed",
+    "extended_submitted",
+    "extended_processing",
+}
+
+
+def _actor_identity_snapshot_payload(actor_identity) -> Dict[str, Any]:
+    return {
+        "actor_identity_id": actor_identity.id,
+        "name": actor_identity.name,
+        "provider": actor_identity.provider,
+        "provider_lora_id": actor_identity.provider_lora_id,
+        "provider_lora_name": actor_identity.provider_lora_name,
+        "training_completed_at": (
+            actor_identity.training_completed_at.isoformat()
+            if actor_identity.training_completed_at
+            else None
+        ),
+    }
+
+
+def _batch_has_started_video_submission(batch_id: str) -> bool:
+    supabase = get_supabase()
+    response = (
+        supabase.client.table("posts")
+        .select("id,video_status")
+        .eq("batch_id", batch_id)
+        .execute()
+    )
+    rows = getattr(response, "data", None) or []
+    return any(str(row.get("video_status") or "").strip() in VIDEO_SUBMISSION_STARTED_STATUSES for row in rows)
+
+
+def sync_character_consistency_batch_actor(
+    batch: Dict[str, Any],
+    *,
+    correlation_id: str,
+    active_actor=None,
+) -> Dict[str, Any]:
+    if not is_character_consistency_mode(batch.get("creation_mode")):
+        return batch
+
+    resolved_actor = active_actor or get_active_actor_identity()
+    if not actor_identity_is_ready(resolved_actor):
+        raise ValidationError(
+            "Character Consistency batch requires a ready active ActorIdentity before video generation.",
+            {"batch_id": batch.get("id"), "settings_url": "/settings/actor"},
+        )
+
+    current_actor_identity_id = str(batch.get("actor_identity_id") or "").strip()
+    snapshot = batch.get("actor_identity_snapshot") if isinstance(batch.get("actor_identity_snapshot"), dict) else {}
+    snapshot_matches = (
+        str(snapshot.get("actor_identity_id") or "").strip() == resolved_actor.id
+        and str(snapshot.get("provider_lora_id") or "").strip() == str(resolved_actor.provider_lora_id or "").strip()
+        and str(snapshot.get("provider_lora_name") or "").strip() == str(resolved_actor.provider_lora_name or "").strip()
+    )
+    if current_actor_identity_id == resolved_actor.id and snapshot_matches:
+        return batch
+
+    batch_id = str(batch.get("id") or "").strip()
+    if not batch_id:
+        raise ValidationError("Character Consistency batch is missing an id.", {"batch": batch})
+
+    if current_actor_identity_id and current_actor_identity_id != resolved_actor.id and _batch_has_started_video_submission(batch_id):
+        raise ValidationError(
+            "This Character Consistency batch already started video generation with a different actor. "
+            "Create or duplicate a new batch before submitting more videos with the newly selected actor.",
+            {
+                "batch_id": batch_id,
+                "batch_actor_identity_id": current_actor_identity_id,
+                "active_actor_identity_id": resolved_actor.id,
+                "settings_url": "/settings/actor",
+            },
+        )
+
+    now = datetime.now().isoformat()
+    payload = {
+        "actor_identity_id": resolved_actor.id,
+        "actor_identity_snapshot": _actor_identity_snapshot_payload(resolved_actor),
+        "updated_at": now,
+    }
+    supabase = get_supabase().client
+    response = supabase.table("batches").update(payload).eq("id", batch_id).execute()
+    supabase.table("posts").update(
+        {
+            "scene_reference_image_id": None,
+            "identity_gate_result": None,
+        }
+    ).eq("batch_id", batch_id).execute()
+    logger.info(
+        "character_consistency_batch_actor_synced",
+        correlation_id=correlation_id,
+        batch_id=batch_id,
+        previous_actor_identity_id=current_actor_identity_id or None,
+        actor_identity_id=resolved_actor.id,
+    )
+    updated_row = (getattr(response, "data", None) or [None])[0] or {}
+    return {
+        **batch,
+        **updated_row,
+        "actor_identity_id": resolved_actor.id,
+        "actor_identity_snapshot": payload["actor_identity_snapshot"],
+    }
+
+
+def sync_pending_character_consistency_batches_to_actor(*, active_actor, correlation_id: str) -> int:
+    if not actor_identity_is_ready(active_actor):
+        return 0
+
+    response = (
+        get_supabase()
+        .client.table("batches")
+        .select("*")
+        .eq("archived", False)
+        .execute()
+    )
+    rows = getattr(response, "data", None) or []
+    synced = 0
+    for row in rows:
+        if not is_character_consistency_mode(row.get("creation_mode")):
+            continue
+        try:
+            updated = sync_character_consistency_batch_actor(
+                row,
+                correlation_id=correlation_id,
+                active_actor=active_actor,
+            )
+        except ValidationError as exc:
+            logger.info(
+                "character_consistency_batch_actor_sync_skipped",
+                correlation_id=correlation_id,
+                batch_id=row.get("id"),
+                actor_identity_id=row.get("actor_identity_id"),
+                active_actor_identity_id=active_actor.id,
+                reason=exc.message,
+            )
+            continue
+        if str(updated.get("actor_identity_id") or "").strip() == active_actor.id:
+            synced += 1
+    return synced
 
 
 def _execute_with_retry(operation_name: str, callback):
@@ -110,14 +253,7 @@ def create_batch(
                 {"creation_mode": creation_mode, "settings_url": "/settings/actor"},
             )
         batch_data["actor_identity_id"] = actor_identity.id
-        batch_data["actor_identity_snapshot"] = {
-            "actor_identity_id": actor_identity.id,
-            "name": actor_identity.name,
-            "provider": actor_identity.provider,
-            "provider_lora_id": actor_identity.provider_lora_id,
-            "provider_lora_name": actor_identity.provider_lora_name,
-            "training_completed_at": actor_identity.training_completed_at.isoformat() if actor_identity.training_completed_at else None,
-        }
+        batch_data["actor_identity_snapshot"] = _actor_identity_snapshot_payload(actor_identity)
         batch_data["character_snapshot"] = None
         batch_data["scene_plan"] = None
 
