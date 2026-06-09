@@ -131,15 +131,19 @@ jobs:
           image_ref = os.environ["IMAGE_REF"]
           env_keys = sorted(env_map)
           env_lines = [f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in env_map.items()]
-          service_env_block = [f"      - {key}" for key in env_keys]
+          # Hostinger's docker API caps the compose "content" field at 8192
+          # chars. Define the env list once via a YAML anchor and alias it in
+          # every service so the rendered compose stays well under that limit.
           compose_lines = [
+              "x-app-env: &app-env",
+              *[f"  - {key}" for key in env_keys],
+              "",
               "services:",
               "  web:",
               f"    image: {image_ref}",
               "    pull_policy: always",
               "    restart: unless-stopped",
-              "    environment:",
-              *service_env_block,
+              "    environment: *app-env",
               "    command: uvicorn app.main:app --host 0.0.0.0 --port 8000",
               '    expose:',
               '      - "8000"',
@@ -156,32 +160,28 @@ jobs:
               f"    image: {image_ref}",
               "    pull_policy: always",
               "    restart: unless-stopped",
-              "    environment:",
-              *service_env_block,
+              "    environment: *app-env",
               "    command: python workers/video_poller.py",
               "",
               "  expansion-worker:",
               f"    image: {image_ref}",
               "    pull_policy: always",
               "    restart: unless-stopped",
-              "    environment:",
-              *service_env_block,
+              "    environment: *app-env",
               "    command: python workers/expansion_worker.py",
               "",
               "  topic-worker:",
               f"    image: {image_ref}",
               "    pull_policy: always",
               "    restart: unless-stopped",
-              "    environment:",
-              *service_env_block,
+              "    environment: *app-env",
               "    command: python workers/topic_worker.py",
               "",
               "  caption-worker:",
               f"    image: {image_ref}",
               "    pull_policy: always",
               "    restart: unless-stopped",
-              "    environment:",
-              *service_env_block,
+              "    environment: *app-env",
               "    command: python -m workers.caption_worker",
           ]
           compose_text = "\n".join(compose_lines) + "\n"
