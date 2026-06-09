@@ -230,6 +230,9 @@ jobs:
                       "Accept": "application/json",
                       "Authorization": f"Bearer {token}",
                       "Content-Type": "application/json",
+                      # Cloudflare on developers.hostinger.com bans the default
+                      # "Python-urllib/x.y" agent (error 1010). Send a browser UA.
+                      "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                   },
               )
               try:
