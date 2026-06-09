@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import app.features.topics.handlers as topic_handlers
+from app.features.topics.captions import attach_caption_bundle
 from app.features.topics.seed_builders import build_product_seed_payload
 
 
@@ -104,3 +105,40 @@ def test_discover_topics_routes_product_batches_to_prompt3(monkeypatch):
     assert {post["post_type"] for post in created_posts} == {"product"}
     assert created_posts[0]["seed_data"]["product_name"] == "VARIO PLUS"
     assert variant_calls, "Product posts should still create registry variants"
+
+
+def test_attach_caption_bundle_keeps_product_captions_neutral():
+    payload = build_product_seed_payload(
+        {
+            "title": "VARIO PLUS: Eine Schiene fuer heute und spaeter",
+            "rotation": "Ein Plattformlift hilft dir zuhause, weil Wege ruhiger und planbarer werden.",
+            "cta": "So bleibt die Entscheidung näher an deinem Alltag.",
+            "spoken_duration": 6,
+            "script": "Ein Plattformlift hilft dir zuhause, weil Wege ruhiger und planbarer werden.",
+            "framework": "PAL",
+            "product_name": "VARIO PLUS",
+            "angle": "Eine Schiene fuer heute und spaeter",
+            "facts": [
+                "Plattform oder Sitzlift auf derselben Schiene",
+                "Tragfaehigkeit bis 300 kg",
+            ],
+            "source_summary": "Plattform oder Sitzlift auf derselben Schiene.",
+            "support_facts": ["In Deutschland gefertigt", "TUEV-baumustergeprueft"],
+        }
+    )
+
+    enriched = attach_caption_bundle(
+        payload,
+        topic_title="VARIO PLUS: Eine Schiene fuer heute und spaeter",
+        post_type="product",
+        script_fallback=payload["script"],
+        llm_factory=lambda: (_ for _ in ()).throw(AssertionError("product captions should not call the llm")),
+        canonical_topic=payload["canonical_topic"],
+    )
+
+    caption = enriched["caption"]
+    assert "VARIO PLUS" not in caption
+    assert "Kommentier" not in caption
+    assert "Speicher" not in caption
+    assert "#Barrierefreiheit" in caption
+    assert "#Zuhause" in caption

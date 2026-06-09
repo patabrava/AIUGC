@@ -9,7 +9,11 @@ from postgrest.exceptions import APIError
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import ErrorCode, FlowForgeException
 from app.core.logging import get_logger
-from app.features.characters.scene_reference import get_scene_bible, map_script_to_scene_intent
+from app.features.characters.scene_reference import (
+    SCENE_BIBLES,
+    get_scene_bible,
+    map_script_to_scene_intent,
+)
 from app.features.scenes.schemas import CanonicalSceneAssetRecord
 
 logger = get_logger(__name__)
@@ -35,6 +39,7 @@ def resolve_canonical_scene_key(
     seed_data: Optional[dict[str, Any]] = None,
     target_length_tier: int = 8,
 ) -> str:
+    # An explicit, valid scene key/alias in scene_text is authoritative.
     direct_scene_key = str(scene_text or "").strip()
     if direct_scene_key:
         try:
@@ -42,6 +47,27 @@ def resolve_canonical_scene_key(
         except KeyError:
             pass
 
+    # The per-post script/topic is the only per-video discriminator under the canon's scene
+    # model. When the post carries real content, the content router decides (a specialized
+    # scene on an explicit keyword, otherwise a deterministic neutral-pool rotation) and that
+    # must win over scene_text/prompt_text, which carry the batch-level scene_plan prose
+    # (shared across every post of the same post_type, and the verbatim home identity under
+    # the fallback plan). Without this, those posts collapse onto one canonical scene image
+    # and it never switches per video.
+    sd = seed_data or {}
+    script = str(sd.get("script") or sd.get("dialog_script") or "")
+    intent = map_script_to_scene_intent(
+        script=script,
+        post_type=str(post_type or sd.get("post_type") or "value"),
+        target_length_tier=target_length_tier,
+        seed_data=sd,
+    )
+    content_fields = ("script", "dialog_script", "topic_title", "canonical_topic", "research_title", "topic")
+    if any(str(sd.get(field) or "").strip() for field in content_fields):
+        return intent.scene_key
+
+    # No per-post content (internal fallback callers): honor a canonical scene named in the
+    # scene/prompt text if present, otherwise the content router's default.
     normalized_scene = _normalize_scene_text(scene_text)
     if not normalized_scene and prompt_text:
         prompt_text_value = str(prompt_text)
@@ -50,18 +76,11 @@ def resolve_canonical_scene_key(
             normalized_scene = _normalize_scene_text(scene_block)
 
     if normalized_scene:
-        for candidate in ("bathroom_accessibility_a", "car_transfer_residential_a", "home_living_room_advice_a"):
-            bible = get_scene_bible(candidate)
+        for bible in SCENE_BIBLES.values():
             normalized_identity = " ".join(str(bible.scene_identity).split())
             if normalized_scene == normalized_identity or normalized_identity in normalized_scene:
                 return bible.scene_id
 
-    intent = map_script_to_scene_intent(
-        script=str((seed_data or {}).get("script") or (seed_data or {}).get("dialog_script") or ""),
-        post_type=str(post_type or (seed_data or {}).get("post_type") or "value"),
-        target_length_tier=target_length_tier,
-        seed_data=seed_data or {},
-    )
     return intent.scene_key
 
 

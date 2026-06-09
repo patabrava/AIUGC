@@ -896,6 +896,32 @@ def test_character_consistency_light_16s_uses_eight_second_reference_base():
     assert plan["profile"].veo_extension_hops == 1
 
 
+@pytest.mark.parametrize(
+    "creation_mode",
+    [
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+        "manual_character_consistency",
+    ],
+)
+def test_character_consistency_16s_uses_eight_second_base_even_when_efficient_route_disabled(
+    monkeypatch, creation_mode
+):
+    """Every Character Consistency mode must route 16s to an 8s VEO base so LoRA reference anchors
+    attach at this length, even with the legacy efficient-long-route flag disabled."""
+    from app.core import video_profiles
+
+    monkeypatch.setattr(video_profiles.get_settings(), "veo_enable_efficient_long_route", False)
+
+    profile = video_profiles.get_duration_profile_for_creation_mode(16, creation_mode)
+
+    assert profile.target_length_tier == 16
+    assert profile.veo_base_seconds == 8
+    # A non-Character-Consistency mode keeps the legacy 4s base when the flag is off.
+    assert video_profiles.get_duration_profile_for_creation_mode(16, "automated").veo_base_seconds == 4
+
+
 def test_submit_video_request_attaches_character_reference_images_to_vertex(monkeypatch):
     from app.features.videos import handlers as video_handlers
 
@@ -1570,3 +1596,50 @@ def test_submit_video_request_skips_character_reference_images_for_vertex_4s_bas
     assert result["provider_metadata"]["reference_images_enabled"] is False
     assert result["provider_metadata"]["reference_images_skipped_reason"] == "vertex_reference_images_support_only_8s_base"
     assert result["provider_metadata"]["character_id"] == "char-1"
+
+
+def test_submit_video_request_blocks_actor_identity_when_anchors_cannot_attach(monkeypatch):
+    """An ActorIdentity batch that resolves to a non-8s base must raise instead of silently
+    submitting a reference-less text-to-video request (regression: LoRA anchors silently dropped)."""
+    from app.core.errors import FlowForgeException
+    from app.features.videos import handlers as video_handlers
+
+    class FakeVertexClient:
+        def submit_text_video(self, **kwargs):
+            pytest.fail("ActorIdentity submission must not reach the provider without reference anchors")
+
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(
+        video_handlers,
+        "get_settings",
+        lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})(),
+    )
+    monkeypatch.setattr(
+        video_handlers,
+        "_download_image_bytes",
+        lambda url: pytest.fail("Blocked ActorIdentity submission must not download reference images"),
+    )
+
+    with pytest.raises(FlowForgeException) as exc:
+        video_handlers._submit_video_request(
+            provider="vertex_ai",
+            prompt_text="Prompt",
+            negative_prompt=None,
+            aspect_ratio="9:16",
+            provider_aspect_ratio="9:16",
+            requested_aspect_ratio="9:16",
+            resolution="720p",
+            seconds=32,
+            size=None,
+            correlation_id="corr-actor-identity-anchor-guard",
+            provider_duration_seconds=4,
+            creation_mode="character_consistency",
+            actor_identity_id="actor-1",
+            character_snapshot=None,
+        )
+
+    assert exc.value.status_code == 422
+    assert "actor identity reference anchors" in exc.value.message
+    assert exc.value.details["actor_identity_id"] == "actor-1"
+    assert exc.value.details["provider_duration_seconds"] == 4
+    assert exc.value.details["reference_images_skipped_reason"] == "vertex_reference_images_support_only_8s_base"

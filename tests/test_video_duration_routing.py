@@ -1,6 +1,7 @@
 import base64
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.core.errors import ValidationError
@@ -196,6 +197,41 @@ def test_submit_video_request_threads_selected_vertex_model(monkeypatch):
     assert captured["prompt"] == "Hallo Welt"
     assert result["provider_model"] == "veo-3.1-lite-generate-001"
     assert result["requested_model"] == "veo-3.1-lite-generate-001"
+
+
+def test_submit_video_request_translates_vertex_http_errors(monkeypatch):
+    request = httpx.Request("POST", "https://vertex.example.test")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={"error": {"message": "Prompt blocked by provider policy"}},
+    )
+
+    class FakeVertexClient:
+        def submit_text_video(self, **kwargs):
+            raise httpx.HTTPStatusError("bad request", request=request, response=response)
+
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": ""})())
+
+    with pytest.raises(video_handlers.FlowForgeException) as exc:
+        video_handlers._submit_video_request(
+            provider="vertex_ai",
+            model="veo-3.1-generate-001",
+            prompt_text="Hallo Welt",
+            negative_prompt=None,
+            aspect_ratio="9:16",
+            provider_aspect_ratio="9:16",
+            requested_aspect_ratio="9:16",
+            resolution="720p",
+            seconds=8,
+            size="720x1280",
+            correlation_id="corr-vertex-http-error",
+        )
+
+    assert exc.value.code == video_handlers.ErrorCode.THIRD_PARTY_FAIL
+    assert exc.value.details["status_code"] == 400
+    assert exc.value.details["response"]["error"]["message"] == "Prompt blocked by provider policy"
 
 
 def test_build_submission_metadata_initializes_extension_chain():

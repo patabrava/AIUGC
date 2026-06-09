@@ -336,9 +336,26 @@ def get_duration_profile(value: Optional[int]) -> DurationProfile:
     return _profiles()[tier]
 
 
+# Character Consistency modes that must route to an 8-second VEO base so the LoRA reference anchors
+# attach to the base segment at every target length. Mirrors CHARACTER_CONSISTENCY_MODES in
+# app/features/characters/actor_identity.py (kept local to avoid a core -> features import).
+_EIGHT_SECOND_BASE_REQUIRED_MODES = frozenset(
+    {
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+        "manual_character_consistency",
+    }
+)
+
+
 def get_duration_profile_for_creation_mode(value: Optional[int], creation_mode: Optional[str]) -> DurationProfile:
     tier = normalize_target_length_tier(value)
-    if str(creation_mode or "").strip() == "character_consistency_light" and tier == 16:
+    # LoRA reference anchors attach to the VEO base segment, which the provider supports only on an
+    # 8-second base; the extension chain then carries the actor through to the full length. Tier 16's
+    # legacy profile uses a 4-second base, so force every Character Consistency mode onto the 8s-base
+    # efficient profile to keep the actor attached at every length (8/32/48/64 already use an 8s base).
+    if str(creation_mode or "").strip() in _EIGHT_SECOND_BASE_REQUIRED_MODES and tier == 16:
         return _EFFICIENT_LONG_ROUTE_PROFILES[16]
     return get_duration_profile(tier)
 

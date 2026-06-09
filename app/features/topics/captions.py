@@ -33,6 +33,8 @@ VALUE_CAPTION_QUALITY_PASS = 80
 VALUE_CAPTION_QUALITY_WARN = 60
 VALUE_CAPTION_CTA_TEXT = "Mehr dazu im Beitrag."
 _VALUE_CAPTION_CTA_MARKERS = ("mehr dazu", "speicher", "kommentier", "teile", "schick", "folge", "folgt")
+_PRODUCT_BRAND_MARKERS = ("lippelift", "lippe lift", "lipperlift", "lippelift.de")
+_PRODUCT_CAPTION_HASHTAGS = ("#Barrierefreiheit", "#Zuhause", "#Mobilitaet")
 _EXTENDED_CAPTION_PRESENTATION_PROFILES = (
     {
         "key": "why_this_matters",
@@ -706,6 +708,106 @@ def _complete_caption_sentence(text: str, limit: int) -> str:
     clipped = normalized[:limit].rstrip(" ,;:-")
     clipped = re.sub(r"\s+[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+$", "", clipped).rstrip(" ,;:-")
     return _ensure_terminal_punctuation(clipped or normalized[:limit].rstrip(" ,;:-"))
+
+
+def _product_marker_values(seed_payload: Optional[Dict[str, Any]]) -> List[str]:
+    payload = dict(seed_payload or {})
+    product_name = str(payload.get("product_name") or "").strip()
+    markers = [product_name, *_PRODUCT_BRAND_MARKERS]
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for marker in markers:
+        normalized = marker.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            deduped.append(marker.strip())
+    return deduped
+
+
+def _contains_product_marker(text: str, seed_payload: Optional[Dict[str, Any]]) -> bool:
+    normalized = _normalize_line_breaks(text).lower()
+    if not normalized:
+        return False
+    for marker in _product_marker_values(seed_payload):
+        if marker.lower() in normalized:
+            return True
+    return False
+
+
+def _pick_product_support_line(seed_payload: Optional[Dict[str, Any]]) -> str:
+    payload = dict(seed_payload or {})
+    support_facts = [
+        _normalize_line_breaks(str(item or "")).strip()
+        for item in list(payload.get("support_facts") or [])
+        if str(item or "").strip()
+    ]
+    joined = " ".join(support_facts).lower()
+    support_parts: List[str] = []
+    if "deutschland" in joined:
+        support_parts.append("Fertigung in Deutschland")
+    if "tüv" in joined or "tuv" in joined or "sicherheit" in joined or "geprüft" in joined:
+        support_parts.append("geprüfte Sicherheitsstandards")
+    if "individ" in joined or "handgefertigt" in joined or "konstruiert" in joined:
+        support_parts.append("individuelle Anpassung an die Treppe")
+    if "gewähr" in joined or "garantie" in joined:
+        support_parts.append("langfristig planbare Qualität")
+    if not support_parts:
+        support_parts.append("ruhige und verlässliche Nutzung im Alltag")
+    support_text = ", ".join(dict.fromkeys(part for part in support_parts if part))
+    return _complete_caption_sentence(f"Zusätzlich wichtig sind {support_text}.", 190)
+
+
+def _build_product_caption_bundle(
+    *,
+    topic_title: str,
+    script: str,
+    seed_payload: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    payload = dict(seed_payload or {})
+    fact_pool = _collect_caption_facts(payload)
+    lead = str(payload.get("product_angle") or "").strip()
+    if not lead or _contains_product_marker(lead, payload):
+        lead = "Worauf es bei einem Plattformlift im Alltag ankommt"
+    lead = lead.rstrip(" .!?:;")
+    if lead:
+        lead = lead[0].upper() + lead[1:]
+    lead_line = _complete_caption_sentence(lead, 120)
+
+    first_fact = next((fact for fact in fact_pool if not _contains_product_marker(fact, payload)), "")
+    if first_fact:
+        fact_line = _complete_caption_sentence(f"Wichtig im Alltag: {first_fact.rstrip('.!?')}.", 190)
+    else:
+        fact_line = _complete_caption_sentence(
+            "Wichtig im Alltag ist vor allem eine Lösung, die Wege zuhause ruhig und planbar macht.",
+            190,
+        )
+
+    support_line = _pick_product_support_line(payload)
+    hashtags = " ".join(_PRODUCT_CAPTION_HASHTAGS)
+    body = _normalize_line_breaks("\n".join([lead_line, fact_line, support_line, hashtags]))
+    return _finalize_caption_bundle_metadata(
+        {
+            "variants": [
+                {
+                    "key": "product_informative",
+                    "body": body,
+                    "char_count": len(body),
+                    "hashtags": _extract_hashtags(body),
+                }
+            ],
+            "selected_key": "product_informative",
+            "selected_body": body,
+            "selection_reason": "deterministic_product_copy",
+            "caption_profile": "product_informative",
+            "caption_depth_reason": {"mode": "product_neutral"},
+        },
+        topic_title=topic_title,
+        post_type="product",
+        script=script,
+        seed_payload=payload,
+        generation_mode="product_informative",
+        research_facts=fact_pool,
+    )
 
 
 def _extended_caption_hashtags(topic_title: str, post_type: str) -> List[str]:
@@ -1384,6 +1486,22 @@ def attach_caption_bundle(
     payload = dict(seed_payload or {})
     script = str(payload.get("dialog_script") or payload.get("script") or script_fallback or "").strip()
     if not script:
+        return payload
+    if post_type == "product":
+        canonical_topic = _resolve_canonical_topic(
+            topic_title=topic_title,
+            payload={**payload, **({"canonical_topic": canonical_topic} if canonical_topic else {})},
+        )
+        bundle = _build_product_caption_bundle(
+            topic_title=canonical_topic,
+            script=script,
+            seed_payload=payload,
+        )
+        payload["canonical_topic"] = canonical_topic
+        payload["caption_bundle"] = bundle
+        payload["description"] = bundle["selected_body"]
+        payload["caption"] = bundle["selected_body"]
+        payload["caption_review_required"] = False
         return payload
     strict_seed = payload.get("strict_seed") or {}
     research_facts = sanitize_fact_fragments(list(strict_seed.get("facts") or []))

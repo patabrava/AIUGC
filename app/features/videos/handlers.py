@@ -354,13 +354,19 @@ def _resolve_canonical_scene_asset_for_submission(
     post_type: Optional[str],
     seed_data: Optional[Dict[str, Any]],
     correlation_id: str,
+    topic_title: Optional[str] = None,
 ) -> CanonicalSceneAssetRecord:
+    # The post's topic_title is the most reliable per-video scene signal but is not part of
+    # seed_data, so surface it to the resolver when the caller has it.
+    routing_seed_data = seed_data
+    if topic_title and not str((seed_data or {}).get("topic_title") or "").strip():
+        routing_seed_data = {**(seed_data or {}), "topic_title": topic_title}
     scene_key = scene_queries.resolve_canonical_scene_key(
         scene_text=scene_text,
         prompt_text=prompt_text,
         post_type=post_type,
-        seed_data=seed_data,
-        target_length_tier=int((seed_data or {}).get("target_length_tier") or DEFAULT_TARGET_LENGTH_TIER),
+        seed_data=routing_seed_data,
+        target_length_tier=int((routing_seed_data or {}).get("target_length_tier") or DEFAULT_TARGET_LENGTH_TIER),
     )
     existing = scene_queries.get_canonical_scene_asset(scene_key=scene_key, aspect_ratio="9:16", image_size="1K")
     if existing and existing.status == "generated" and existing.image_url:
@@ -458,6 +464,43 @@ def _load_actor_identity_anchor_assets(
         "reference_images": reference_images,
         "metadata": metadata,
     }
+
+
+def _require_reference_images_for_character_consistency(
+    *,
+    mode: str,
+    reference_images: Optional[list],
+    provider: str,
+    actor_identity_id: Optional[str],
+    provider_duration_seconds: int,
+    skipped_reason: Optional[str] = None,
+) -> None:
+    """Block an ActorIdentity submission from silently degrading to text-to-video.
+
+    ActorIdentity (LoRA) videos must carry reference anchors. If a batch bound to an actor identity
+    reaches the provider with no reference images attached, we raise a clear 422 instead of silently
+    submitting a reference-less (text-to-video) request. Legacy character-snapshot batches (no
+    actor_identity_id) keep their existing behavior, including the intentional non-8s-base reference skip.
+    """
+    if not is_character_consistency_mode(mode) or not actor_identity_id or reference_images:
+        return
+    raise FlowForgeException(
+        code=ErrorCode.VALIDATION_ERROR,
+        message=(
+            "ActorIdentity video generation could not attach actor identity reference anchors, "
+            "so the request was blocked instead of silently submitting a text-to-video request. "
+            "This batch resolved to a VEO base that cannot carry reference anchors (only an 8-second "
+            "base is supported); use a tier/route that yields an 8-second base."
+        ),
+        details={
+            "creation_mode": mode,
+            "provider": provider,
+            "actor_identity_id": actor_identity_id,
+            "provider_duration_seconds": provider_duration_seconds,
+            "reference_images_skipped_reason": skipped_reason,
+        },
+        status_code=422,
+    )
 
 
 def _resolve_extended_provider_aspect_ratio(route: Optional[str], requested_aspect_ratio: str) -> str:
@@ -943,6 +986,71 @@ def _build_submission_metadata(
         metadata.update(segment_metadata)
 
     return metadata
+
+
+def _persist_submission_failure(
+    *,
+    supabase_client: Any,
+    post: Dict[str, Any],
+    submission_plan: Dict[str, Any],
+    error: FlowForgeException,
+    correlation_id: str,
+) -> None:
+    metadata = dict(post.get("video_metadata") or {})
+    requested_aspect_ratio = submission_plan.get("requested_aspect_ratio") or submission_plan.get("aspect_ratio")
+    metadata.update(
+        {
+            "provider": submission_plan.get("provider"),
+            "provider_status": "failed",
+            "error": error.message,
+            "error_type": error.__class__.__name__,
+            "error_code": str(error.code),
+            "failed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    )
+    if requested_aspect_ratio:
+        metadata["requested_aspect_ratio"] = requested_aspect_ratio
+    if submission_plan.get("resolution"):
+        metadata["requested_resolution"] = submission_plan["resolution"]
+    if submission_plan.get("seconds") is not None:
+        metadata["requested_seconds"] = submission_plan["seconds"]
+    if submission_plan.get("requested_size"):
+        metadata["requested_size"] = submission_plan["requested_size"]
+    if submission_plan.get("provider_aspect_ratio"):
+        metadata["provider_aspect_ratio"] = submission_plan["provider_aspect_ratio"]
+    if submission_plan.get("provider_requested_size"):
+        metadata["provider_requested_size"] = submission_plan["provider_requested_size"]
+
+    provider_status_code = error.details.get("status_code")
+    if provider_status_code is not None:
+        metadata["provider_status_code"] = provider_status_code
+
+    response_body = error.details.get("response_body")
+    if response_body is None and error.details.get("response") is not None:
+        response_body = json.dumps(error.details["response"], ensure_ascii=False)[:4000]
+    if response_body:
+        metadata["provider_response_body"] = str(response_body)[:4000]
+
+    supabase_client.table("posts").update(
+        {
+            "video_provider": submission_plan.get("provider"),
+            "video_format": requested_aspect_ratio,
+            "video_status": "failed",
+            "video_metadata": metadata,
+        }
+    ).eq("id", post.get("id")).execute()
+    post["video_status"] = "failed"
+    post["video_metadata"] = metadata
+
+    logger.warning(
+        "video_submission_failure_persisted",
+        post_id=post.get("id"),
+        batch_id=post.get("batch_id"),
+        correlation_id=correlation_id,
+        provider=submission_plan.get("provider"),
+        error_code=str(error.code),
+        provider_status_code=provider_status_code,
+    )
 
 
 def _resolve_poller_scope(settings: Any) -> str:
@@ -1581,6 +1689,7 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
                 post_type=str(post.get("post_type") or ""),
                 seed_data=seed_data,
                 correlation_id=correlation_id,
+                topic_title=str(post.get("topic_title") or ""),
             )
             video_prompt = _apply_canonical_scene_to_video_prompt(
                 video_prompt,
@@ -1821,6 +1930,18 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             and not exc.details.get("blocked_before_submit")
         ):
             maybe_freeze_after_provider_429(provider=VEO_PROVIDER, reason=exc.message)
+        if (
+            "supabase" in locals()
+            and "post" in locals()
+            and exc.code in {ErrorCode.THIRD_PARTY_FAIL, ErrorCode.RATE_LIMIT}
+        ):
+            _persist_submission_failure(
+                supabase_client=supabase,
+                post=post,
+                submission_plan=submission_plan,
+                error=exc,
+                correlation_id=correlation_id,
+            )
         raise
     except HTTPException:
         raise
@@ -2016,6 +2137,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         post_type=str(post.get("post_type") or ""),
                         seed_data=seed_data,
                         correlation_id=f"{correlation_id}_{post_id}",
+                        topic_title=str(post.get("topic_title") or ""),
                     )
                     video_prompt = _apply_canonical_scene_to_video_prompt(
                         video_prompt,
@@ -2286,6 +2408,14 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         reason=exc.message,
                         final_status="released",
                         error_code=str(exc.code),
+                    )
+                if exc.code in {ErrorCode.THIRD_PARTY_FAIL, ErrorCode.RATE_LIMIT}:
+                    _persist_submission_failure(
+                        supabase_client=supabase,
+                        post=post,
+                        submission_plan=submission_plan,
+                        error=exc,
+                        correlation_id=f"{correlation_id}_{post_id}",
                     )
                 logger.warning(
                     "batch_video_submission_skipped",
@@ -2721,6 +2851,13 @@ def _submit_video_request(
         else:
             reference_bundle = _load_global_veo_reference_assets(correlation_id=correlation_id, strict=False)
         reference_images = reference_bundle["reference_images"] if reference_bundle else None
+        _require_reference_images_for_character_consistency(
+            mode=mode,
+            reference_images=reference_images,
+            provider=provider,
+            actor_identity_id=actor_identity_id,
+            provider_duration_seconds=veo_duration_seconds,
+        )
         if veo_duration_seconds not in {4, 6, 8}:
             veo_duration_seconds = 8
         try:
@@ -2869,6 +3006,14 @@ def _submit_video_request(
                     duration_seconds=vertex_duration,
                 )
         reference_images = reference_bundle["reference_images"] if reference_bundle else None
+        _require_reference_images_for_character_consistency(
+            mode=mode,
+            reference_images=reference_images,
+            provider=provider,
+            actor_identity_id=actor_identity_id,
+            provider_duration_seconds=vertex_duration,
+            skipped_reason=reference_skip_metadata.get("reference_images_skipped_reason"),
+        )
         try:
             result = vertex_client.submit_text_video(
                 prompt=prompt_text,
@@ -2881,6 +3026,47 @@ def _submit_video_request(
                 negative_prompt=negative_prompt,
                 seed=seed,
             )
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            try:
+                error_payload = exc.response.json()
+            except ValueError:
+                error_payload = {"body": exc.response.text[:500]}
+
+            error_message = None
+            if isinstance(error_payload, dict):
+                raw_error = error_payload.get("error")
+                if isinstance(raw_error, dict):
+                    error_message = raw_error.get("message") or raw_error.get("status")
+                elif raw_error:
+                    error_message = str(raw_error)
+                elif error_payload.get("message"):
+                    error_message = str(error_payload.get("message"))
+
+            if status_code == 429:
+                raise FlowForgeException(
+                    code=ErrorCode.RATE_LIMIT,
+                    message=error_message or "Vertex AI quota exhausted",
+                    details={
+                        "provider": provider,
+                        "status_code": status_code,
+                        "response": error_payload,
+                        "response_body": exc.response.text[:4000],
+                    },
+                    status_code=429,
+                ) from exc
+
+            raise FlowForgeException(
+                code=ErrorCode.THIRD_PARTY_FAIL,
+                message=error_message or "Vertex AI video submission failed",
+                details={
+                    "provider": provider,
+                    "status_code": status_code,
+                    "response": error_payload,
+                    "response_body": exc.response.text[:4000],
+                },
+                status_code=503,
+            ) from exc
         except ValidationError as exc:
             raise FlowForgeException(
                 code=ErrorCode.THIRD_PARTY_FAIL,

@@ -604,3 +604,72 @@ def test_generate_all_videos_aborts_before_provider_for_underlength_32s_lifestyl
 
     assert "lifestyle 32s script has 24 words" in str(exc.value)
     assert captured_calls == []
+
+
+def test_generate_all_videos_persists_failed_post_when_submit_errors(monkeypatch):
+    posts = [
+        {
+            "id": "post-fail",
+            "batch_id": "batch-1",
+            "post_type": "value",
+            "video_prompt_json": {"veo_prompt": "Prompt fail"},
+            "seed_data": {"script": _valid_16s_script(), "script_review_status": "approved"},
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+        {
+            "id": "post-ok",
+            "batch_id": "batch-1",
+            "post_type": "lifestyle",
+            "video_prompt_json": {"veo_prompt": "Prompt ok"},
+            "seed_data": {"script": _valid_16s_script(), "script_review_status": "approved"},
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+    submit_calls = []
+
+    def _fake_submit(**kwargs):
+        submit_calls.append(kwargs["correlation_id"])
+        if kwargs["correlation_id"].endswith("post-fail"):
+            raise FlowForgeException(
+                code=ErrorCode.THIRD_PARTY_FAIL,
+                message="Vertex AI video submission failed",
+                details={
+                    "provider": "vertex_ai",
+                    "status_code": 400,
+                    "response": {"error": {"message": "Prompt blocked"}},
+                    "response_body": '{"error":{"message":"Prompt blocked"}}',
+                },
+                status_code=503,
+            )
+        return {
+            "operation_id": "operations/test-ok",
+            "status": "submitted",
+            "requested_size": "720x1280",
+            "provider_metadata": {"operation_id": "operations/test-ok"},
+        }
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr(
+        "app.features.videos.handlers.get_batch_by_id",
+        lambda batch_id: {"id": batch_id, "target_length_tier": 16},
+    )
+    monkeypatch.setattr("app.features.videos.handlers.ensure_immediate_submit_slot", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.release_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers._submit_video_request", _fake_submit)
+
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=16)
+    response = asyncio.run(generate_all_videos("batch-1", request))
+
+    assert response.data["submitted_count"] == 1
+    assert response.data["skipped_count"] == 1
+    assert posts[0]["video_status"] == "failed"
+    assert posts[0]["video_metadata"]["provider_status_code"] == 400
+    assert posts[0]["video_metadata"]["error"] == "Vertex AI video submission failed"
+    assert posts[1]["video_status"] == "extended_submitted"

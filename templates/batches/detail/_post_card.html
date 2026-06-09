@@ -17,6 +17,9 @@
 {% if is_manual_mode and not manual_post_type and display_post_type == 'value' %}
 {% set display_post_type = '' %}
 {% endif %}
+{% set product_angle = seed.get('product_angle') or '' %}
+{% set card_title = product_angle if display_post_type == 'product' and product_angle else canonical_topic %}
+{% set card_subtitle = '' if display_post_type == 'product' and product_angle else research_title %}
 {% set review_status = seed.get('script_review_status') or 'pending' %}
 {% set post_removed = review_status == 'removed' or seed.get('video_excluded') == True %}
 
@@ -28,9 +31,9 @@
         <span>Created {{ post.created_at or '—' }}</span>
         {% if post.updated_at %}<span>Updated {{ post.updated_at }}</span>{% endif %}
     </div>
-    <h4 class="mt-2 text-lg font-semibold text-gray-900">{{ canonical_topic }}</h4>
-    {% if research_title and research_title != canonical_topic %}
-    <p class="mt-1 text-sm text-gray-500">{{ research_title }}</p>
+    <h4 class="mt-2 text-lg font-semibold text-gray-900">{{ card_title }}</h4>
+    {% if card_subtitle and card_subtitle != card_title %}
+    <p class="mt-1 text-sm text-gray-500">{{ card_subtitle }}</p>
     {% endif %}
     <div class="mt-3 flex items-center gap-2">
         {{ review_status_chip(review_status, post_removed) }}

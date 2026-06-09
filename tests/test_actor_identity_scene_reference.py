@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.features.characters.scene_reference import (
+    NEUTRAL_SCENE_POOL,
     SCENE_CATALOG,
     WARDROBE_SET,
     build_scene_reference_prompt,
@@ -685,25 +686,127 @@ def test_scene_reference_prompts_share_same_location_lock_without_labels():
     assert all("room surfaces" not in prompt for prompt in prompts)
 
 
-def test_script_intent_routes_to_three_scene_bibles_only():
-    samples = [
+def test_script_intent_routes_specialized_and_neutral_scenes():
+    specialized = [
         ("Im Badezimmer gibt ein Haltegriff mehr Sicherheit.", "value", "bathroom_accessibility_a"),
+        ("Ein Treppenlift macht das Treppensteigen wieder sicher.", "value", "hallway_stairlift_a"),
         ("Beim Transfer ins Auto hilft eine klare Routine.", "value", "car_transfer_residential_a"),
-        ("Ein ruhiger Alltagstipp fuer heute.", "value", "home_living_room_advice_a"),
-        ("Dieses Hilfsmittel liegt auf dem Tisch.", "product", "home_living_room_advice_a"),
+        ("Im Schlafzimmer erleichtert ein Pflegebett das Aufstehen.", "value", "bedroom_accessibility_a"),
+        ("Eine Rampe am Hauseingang beseitigt die Türschwelle.", "value", "entryway_ramp_a"),
+        ("Frische Luft im Garten tut gut.", "value", "garden_patio_a"),
     ]
-
-    for script, post_type, expected_scene_id in samples:
+    for script, post_type, expected_scene_id in specialized:
         result = map_script_to_scene_intent(
             script=script,
             post_type=post_type,
             target_length_tier=8,
             seed_data={},
         )
-
         assert result.scene_key == expected_scene_id
         assert result.scene_key in SCENE_CATALOG
         assert result.wardrobe_key == "everyday_sweater"
+
+    # Generic advice content carries no scene keyword -> deterministic neutral-pool rotation.
+    for script in ("Ein ruhiger Alltagstipp fuer heute.", "Dieses Hilfsmittel liegt auf dem Tisch."):
+        result = map_script_to_scene_intent(
+            script=script,
+            post_type="value",
+            target_length_tier=8,
+            seed_data={},
+        )
+        assert result.scene_key in NEUTRAL_SCENE_POOL
+        assert result.reason_code == "neutral_rotation"
+
+    # Empty content falls back to the stable home default.
+    empty = map_script_to_scene_intent(script="", post_type="value", target_length_tier=8, seed_data={})
+    assert empty.scene_key == "home_living_room_advice_a"
+    assert empty.reason_code == "default"
+
+
+def test_resolve_canonical_scene_key_per_post_intent_wins_over_scene_plan_prose():
+    from app.features.scenes import queries as scene_queries
+
+    # The home fallback scene_plan sets every post's scene_text to the verbatim home
+    # identity string, which previously short-circuited resolution to home for all posts.
+    home_scene_text = f"Scene: {get_scene_bible('home_living_room_advice_a').scene_identity}"
+
+    bathroom_key = scene_queries.resolve_canonical_scene_key(
+        scene_text=home_scene_text,
+        post_type="value",
+        seed_data={"script": "Im Badezimmer gibt ein Haltegriff mehr Sicherheit."},
+    )
+    car_key = scene_queries.resolve_canonical_scene_key(
+        scene_text=home_scene_text,
+        post_type="lifestyle",
+        seed_data={"script": "Beim Transfer ins Auto hilft eine klare Routine."},
+    )
+
+    # Per-video topic wins over the shared home scene_plan prose.
+    assert bathroom_key == "bathroom_accessibility_a"
+    assert car_key == "car_transfer_residential_a"
+    # Two posts sharing a post_type but different scenes no longer collapse together.
+    assert bathroom_key != car_key
+
+
+def test_resolve_canonical_scene_key_generic_and_explicit_fallbacks():
+    from app.features.scenes import queries as scene_queries
+
+    home_scene_text = f"Scene: {get_scene_bible('home_living_room_advice_a').scene_identity}"
+
+    # Generic topic with no scene keyword rotates across the neutral pool (no longer pinned
+    # to home by the shared scene_plan prose).
+    assert (
+        scene_queries.resolve_canonical_scene_key(
+            scene_text=home_scene_text,
+            post_type="value",
+            seed_data={"script": "Ein ruhiger Alltagstipp fuer heute."},
+        )
+        in NEUTRAL_SCENE_POOL
+    )
+
+    # Secondary callers pass seed_data=None with no scene_text; this must stay safe.
+    assert (
+        scene_queries.resolve_canonical_scene_key(scene_text=None, seed_data=None)
+        == "home_living_room_advice_a"
+    )
+
+    # An explicit, valid scene key/alias in scene_text stays authoritative.
+    assert (
+        scene_queries.resolve_canonical_scene_key(scene_text="car_transfer_residential_a", seed_data=None)
+        == "car_transfer_residential_a"
+    )
+    assert (
+        scene_queries.resolve_canonical_scene_key(scene_text="bathroom_adaptation", seed_data=None)
+        == "bathroom_accessibility_a"
+    )
+
+
+def test_neutral_pool_rotation_is_deterministic_and_varied():
+    from app.features.scenes import queries as scene_queries
+
+    # Even when the shared scene_plan prose is the home identity, abstract advice topics
+    # (no scene keyword) spread across the neutral pool deterministically.
+    home_scene_text = f"Scene: {get_scene_bible('home_living_room_advice_a').scene_identity}"
+    topics = [
+        "Assistenzleistungen vs Pflegeleistungen",
+        "Pflegegrad beantragen Tipps",
+        "Kostentraeger und Zuschuesse erklaert",
+        "Hausnotruf sinnvoll einrichten",
+    ]
+    resolved = {}
+    for topic in topics:
+        first = scene_queries.resolve_canonical_scene_key(
+            scene_text=home_scene_text, post_type="value", seed_data={"topic_title": topic, "script": "x"}
+        )
+        second = scene_queries.resolve_canonical_scene_key(
+            scene_text=home_scene_text, post_type="value", seed_data={"topic_title": topic, "script": "x"}
+        )
+        assert first == second  # deterministic for the same input
+        assert first in NEUTRAL_SCENE_POOL
+        resolved[topic] = first
+
+    # The pool is genuinely exercised: these topics do not all collapse onto one scene.
+    assert len(set(resolved.values())) >= 2
 
 
 def test_scene_reference_metadata_includes_scene_bible_contract():
