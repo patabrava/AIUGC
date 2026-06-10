@@ -4,7 +4,8 @@ Shared duration-tier profiles for batch routing, scripts, and Veo chaining.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import math
 import re
 from typing import Any, Dict, Optional
 
@@ -14,6 +15,12 @@ from app.core.errors import ValidationError
 
 SHORT_VIDEO_ROUTE = "short"
 VEO_EXTENDED_VIDEO_ROUTE = "veo_extended"
+# Drift-free long route: N independent 8s reference-anchored Veo generations stitched with ffmpeg.
+# The actor reference bundle re-attaches to every segment, so identity never decays across hops.
+VEO_SEGMENTED_VIDEO_ROUTE = "veo_segmented"
+# Veo reference-image generation only accepts an 8-second clip (4s/6s rejected), so segments are
+# fixed at 8s and a tier resolves to ceil(tier / 8) segments.
+SEGMENTED_SEGMENT_SECONDS = 8
 DEFAULT_TARGET_LENGTH_TIER = 8
 # 48 and 64 added for manual auto-derive of long scripts. Topic-based batches
 # continue to use 8/16/32 (CANON unchanged for the topic flow).
@@ -48,6 +55,8 @@ VIDEO_STATUS_CAPTION_PENDING = "caption_pending"
 VIDEO_STATUS_CAPTION_PROCESSING = "caption_processing"
 VIDEO_STATUS_CAPTION_COMPLETED = "caption_completed"
 VIDEO_STATUS_CAPTION_FAILED = "caption_failed"
+# Segmented route: all segments generated, now being concatenated by the stitcher in the poller.
+VIDEO_STATUS_STITCHING = "stitching"
 
 
 @dataclass(frozen=True)
@@ -207,8 +216,42 @@ _EFFICIENT_LONG_ROUTE_PROFILES = {
 }
 
 
+def segment_count_for_tier(tier: int) -> int:
+    """Number of 8s segments the segmented route produces for a tier (ceil(tier / 8))."""
+    return max(1, math.ceil(int(tier) / SEGMENTED_SEGMENT_SECONDS))
+
+
+def _segmented_profile(base: DurationProfile) -> DurationProfile:
+    """Derive a segmented-route profile from a base profile.
+
+    Every segment is a standalone 8s reference-anchored generation, so the chain becomes
+    ``segment_count`` independent submissions (veo_extension_hops = segment_count - 1 keeps
+    ``get_profile_request_cost_units`` == segment_count). The script word-count contract
+    (prompt1_*/prompt2_* fields) is preserved unchanged — only the video assembly differs.
+    """
+    segments = segment_count_for_tier(base.target_length_tier)
+    return replace(
+        base,
+        route=VEO_SEGMENTED_VIDEO_ROUTE,
+        provider_target_seconds=segments * SEGMENTED_SEGMENT_SECONDS,
+        veo_base_seconds=SEGMENTED_SEGMENT_SECONDS,
+        veo_extension_seconds=0,
+        veo_extension_hops=segments - 1,
+    )
+
+
 def _profiles() -> dict[int, DurationProfile]:
     settings = get_settings()
+    if getattr(settings, "veo_enable_segmented_route", False):
+        # Opt-in drift-free route: 8s short clip stays single-call; 16/32/48/64 become
+        # ceil(tier/8) independent 8s reference-anchored segments stitched in the poller.
+        return {
+            8: _BASE_PROFILES[8],
+            16: _segmented_profile(_BASE_PROFILES[16]),
+            32: _segmented_profile(_BASE_PROFILES[32]),
+            48: _segmented_profile(_BASE_PROFILES[48]),
+            64: _segmented_profile(_BASE_PROFILES[64]),
+        }
     if settings.veo_enable_efficient_long_route:
         return {
             8: _BASE_PROFILES[8],
@@ -351,6 +394,10 @@ _EIGHT_SECOND_BASE_REQUIRED_MODES = frozenset(
 
 def get_duration_profile_for_creation_mode(value: Optional[int], creation_mode: Optional[str]) -> DurationProfile:
     tier = normalize_target_length_tier(value)
+    # Segmented route is already 8s-based on every segment, so the legacy tier-16 forcing below is
+    # unnecessary (and the segmented profile must win) when the segmented flag is enabled.
+    if getattr(get_settings(), "veo_enable_segmented_route", False):
+        return get_duration_profile(tier)
     # LoRA reference anchors attach to the VEO base segment, which the provider supports only on an
     # 8-second base; the extension chain then carries the actor through to the full length. Tier 16's
     # legacy profile uses a 4-second base, so force every Character Consistency mode onto the 8s-base
@@ -424,6 +471,7 @@ def get_pollable_video_statuses() -> tuple[str, ...]:
         VIDEO_STATUS_PROCESSING,
         VIDEO_STATUS_EXTENDED_SUBMITTED,
         VIDEO_STATUS_EXTENDED_PROCESSING,
+        VIDEO_STATUS_STITCHING,
     )
 
 

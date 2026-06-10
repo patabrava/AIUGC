@@ -28,14 +28,17 @@ from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.video_profiles import (
     DEFAULT_TARGET_LENGTH_TIER,
+    SEGMENTED_SEGMENT_SECONDS,
     VEO_EXTENDED_VIDEO_ROUTE,
     VEO_PROVIDER,
+    VEO_SEGMENTED_VIDEO_ROUTE,
     get_duration_profile,
     get_duration_profile_for_creation_mode,
     get_profile_route_config,
     resolve_manual_target_length_tier as _resolve_manual_target_length_tier,
     get_submission_video_status,
     script_word_count,
+    segment_count_for_tier,
     uses_duration_routing,
 )
 from app.features.batches.queries import get_batch_by_id, sync_character_consistency_batch_actor
@@ -63,6 +66,7 @@ from app.features.posts.prompt_builder import (
     LEGACY_SHORT_CHARACTER,
     LEAN_FINAL_AUDIO_BLOCK,
     build_reference_image_scene_base_prompt,
+    build_segment_prompts,
     build_video_prompt_from_seed,
     build_negative_prompt,
     ensure_scene_plan,
@@ -72,6 +76,10 @@ from app.features.posts.prompt_builder import (
     split_dialogue_sentences,
     sync_video_prompt_with_seed_data,
     validate_video_prompt,
+)
+from app.features.videos.segmented_pipeline import (
+    build_initial_segment_ops,
+    plan_segment_submissions,
 )
 from app.features.topics.topic_validation import (
     resolve_effective_script_text,
@@ -1628,6 +1636,259 @@ def _build_veo_extended_base_prompt(
     ), segment_metadata
 
 
+def _split_script_into_segments(script: str, segment_count: int) -> list[str]:
+    """Split a dialogue script into exactly ``segment_count`` word-balanced 8s beats.
+
+    Reuses the extend route's sentence splitter and word-budget partitioner, but with an equal
+    ~8s budget per segment (segments are independent and all 8s long on the segmented route).
+    """
+    cleaned = str(script or "").strip()
+    if segment_count <= 1:
+        return [cleaned] if cleaned else []
+    raw_segments = split_dialogue_sentences(cleaned) if cleaned else []
+    if not raw_segments and cleaned:
+        raw_segments = [cleaned]
+    target_words = [SEGMENTED_SEGMENT_SECONDS * _WORDS_PER_SECOND] * segment_count
+    beats = _split_dialogue_text_by_word_budget(
+        " ".join(raw_segments),
+        target_words=target_words,
+        required_segments=segment_count,
+    )
+    return [beat for beat in beats if beat.strip()]
+
+
+def _build_segmented_segment_prompts(
+    *,
+    seed_data: Dict[str, Any],
+    video_prompt: Optional[Dict[str, Any]],
+    segment_count: int,
+    creation_mode: str,
+    target_length_tier: Optional[int],
+) -> tuple[list[str], list[str]]:
+    """Return ``(beats, prompts)`` for a segmented post.
+
+    Every segment is a self-contained generation: the FULL character + scene context is rebuilt for
+    each beat using the same mode-appropriate builder the extend route uses for its *base* clip, so
+    the actor reference bundle re-anchors on every segment instead of decaying across hops. Only the
+    final segment carries the ending directive.
+    """
+    if isinstance(video_prompt, str):
+        try:
+            video_prompt = json.loads(video_prompt)
+        except json.JSONDecodeError:
+            video_prompt = {}
+    if not isinstance(video_prompt, dict):
+        video_prompt = {}
+
+    prompt_character = str(video_prompt.get("character") or "").strip() or None
+    prompt_style = str(video_prompt.get("style") or "").strip() or None
+    prompt_action = str(video_prompt.get("action") or "").strip() or None
+    prompt_scene = str(video_prompt.get("scene") or "").strip() or None
+    prompt_cinematography = str(video_prompt.get("cinematography") or "").strip() or None
+    prompt_audio_block = str(video_prompt.get("audio_block") or "").strip() or None
+
+    prompt_audio = video_prompt.get("audio") or {}
+    if not isinstance(prompt_audio, dict):
+        prompt_audio = {}
+    script = str(
+        prompt_audio.get("dialogue")
+        or seed_data.get("script")
+        or seed_data.get("dialog_script")
+        or ""
+    ).strip()
+
+    beats = _split_script_into_segments(script, segment_count)
+    if len(beats) != segment_count:
+        raise ValidationError(
+            "Script could not be split into the required number of 8s segments. "
+            "The script likely has too few words for this duration.",
+            {
+                "required_segments": segment_count,
+                "produced_segments": len(beats),
+                "script_word_count": len(script.split()),
+            },
+        )
+
+    mode = str(creation_mode or "").strip()
+    last_index = segment_count - 1
+    legacy_32 = bool(target_length_tier == 32)
+
+    prompts: list[str] = []
+    for index, beat in enumerate(beats):
+        include_final_ending = index == last_index
+        if mode in {"character_consistency", "manual_character_consistency", "character_consistency_mid"}:
+            prompts.append(
+                build_reference_image_scene_base_prompt(
+                    beat,
+                    character=prompt_character,
+                    style=prompt_style,
+                    scene=prompt_scene,
+                    cinematography=prompt_cinematography,
+                    legacy_32_visuals=legacy_32,
+                    include_final_ending=include_final_ending,
+                )
+            )
+        elif is_character_consistency_light_mode(mode):
+            prompts.append(
+                build_lean_veo_base_prompt(
+                    beat,
+                    scene=prompt_scene,
+                    include_final_ending=include_final_ending,
+                )
+            )
+        else:
+            prompts.append(
+                build_veo_prompt_segment(
+                    beat,
+                    include_ending=include_final_ending,
+                    character=prompt_character,
+                    action=prompt_action,
+                    style=prompt_style,
+                    scene=prompt_scene,
+                    cinematography=prompt_cinematography,
+                    audio_block=prompt_audio_block,
+                    legacy_32_visuals=legacy_32,
+                )
+            )
+    return beats, prompts
+
+
+def _submit_segmented_post(
+    *,
+    post: Dict[str, Any],
+    batch: Dict[str, Any],
+    submission_plan: Dict[str, Any],
+    video_prompt: Optional[Dict[str, Any]],
+    seed_data: Dict[str, Any],
+    canonical_scene_asset: Optional[CanonicalSceneAssetRecord],
+    scene_reference_set: Optional[SceneReferenceSetSummary],
+    veo_seed: Optional[int],
+    correlation_id: str,
+    model: Optional[str],
+) -> Dict[str, Any]:
+    """Fan out N independent 8s reference-anchored generations for one segmented-route post.
+
+    Each segment reuses ``_submit_video_request`` with ``provider_duration_seconds=8`` and the same
+    actor reference context, so the identity bundle attaches to every segment. A single shared seed
+    is threaded through all of them. Returns the operation ids and per-segment submission results.
+
+    On a mid-fan-out provider failure the exception propagates to the caller's standard failure
+    handling; already-accepted segment operations are logged as orphaned (paid but untracked).
+    """
+    profile = submission_plan["profile"]
+    creation_mode = str(batch.get("creation_mode") or "automated")
+    segment_count = segment_count_for_tier(profile.target_length_tier)
+    shared_seed = veo_seed if veo_seed is not None else random.randint(0, 2**32 - 1)
+
+    beats, prompts = _build_segmented_segment_prompts(
+        seed_data=seed_data,
+        video_prompt=video_prompt,
+        segment_count=segment_count,
+        creation_mode=creation_mode,
+        target_length_tier=profile.target_length_tier,
+    )
+    subs = plan_segment_submissions(
+        profile=profile,
+        segments=beats,
+        prompts=prompts,
+        seed=shared_seed,
+    )
+
+    operation_ids: list[str] = []
+    results: list[Dict[str, Any]] = []
+    logger.info(
+        "veo_segmented_fanout_start",
+        post_id=post["id"],
+        segment_count=segment_count,
+        seed=shared_seed,
+        provider=submission_plan["provider"],
+        target_length_tier=profile.target_length_tier,
+    )
+    for sub in subs:
+        try:
+            result = _submit_video_request(
+                provider=submission_plan["provider"],
+                model=model,
+                prompt_text=sub.prompt,
+                negative_prompt=None,
+                aspect_ratio=submission_plan["aspect_ratio"],
+                provider_aspect_ratio=submission_plan.get("provider_aspect_ratio"),
+                requested_aspect_ratio=submission_plan.get("requested_aspect_ratio"),
+                resolution=submission_plan["resolution"],
+                seconds=submission_plan["seconds"],
+                size=submission_plan["size"],
+                correlation_id=f"{correlation_id}_seg{sub.index}",
+                provider_duration_seconds=SEGMENTED_SEGMENT_SECONDS,
+                first_frame_image=None,
+                seed=shared_seed,
+                creation_mode=creation_mode,
+                character_snapshot=batch.get("character_snapshot"),
+                actor_identity_id=batch.get("actor_identity_id"),
+                canonical_scene_asset=canonical_scene_asset,
+                scene_reference_set=scene_reference_set,
+            )
+        except Exception:
+            if operation_ids:
+                logger.error(
+                    "veo_segmented_fanout_partial_failure_orphaned_ops",
+                    post_id=post["id"],
+                    failed_segment_index=sub.index,
+                    orphaned_operation_ids=operation_ids,
+                    message="PAID segments already submitted before fan-out failed; recover via operation ids.",
+                )
+            raise
+        operation_ids.append(result["operation_id"])
+        results.append(result)
+
+    return {
+        "operation_ids": operation_ids,
+        "results": results,
+        "segment_count": segment_count,
+        "prompts": prompts,
+        "beats": beats,
+        "seed": shared_seed,
+    }
+
+
+def _build_segmented_submission_metadata(
+    *,
+    existing_metadata: Dict[str, Any],
+    submission_plan: Dict[str, Any],
+    segmented_result: Dict[str, Any],
+    creation_mode: str,
+    script_contract: Any,
+    quota_reservation_key: Optional[str],
+    quota_reserved_units: int,
+    quota_consume_error: Optional[str],
+    canonical_scene_asset: Optional[CanonicalSceneAssetRecord],
+    actor_identity_id: Optional[str],
+) -> Dict[str, Any]:
+    """Build the persisted ``video_metadata`` for a segmented post (additive over the base builder)."""
+    metadata = _build_submission_metadata(
+        existing_metadata=existing_metadata,
+        submission_plan=submission_plan,
+        submission_result=segmented_result["results"][0],
+        segment_metadata=None,
+        creation_mode=creation_mode,
+    )
+    operation_ids = segmented_result["operation_ids"]
+    metadata["video_pipeline_route"] = VEO_SEGMENTED_VIDEO_ROUTE
+    metadata["veo_segment_count"] = segmented_result["segment_count"]
+    metadata["veo_segment_ops"] = build_initial_segment_ops(operation_ids)
+    metadata["veo_segment_prompts"] = segmented_result["prompts"]
+    metadata["operation_ids"] = operation_ids
+    metadata["veo_seed"] = segmented_result["seed"]
+    metadata["script_duration_contract"] = script_contract
+    if quota_reservation_key:
+        metadata["quota_reservation_key"] = quota_reservation_key
+        metadata["quota_reserved_units"] = quota_reserved_units
+    if quota_consume_error:
+        metadata["quota_consume_error"] = quota_consume_error
+    if canonical_scene_asset is not None and actor_identity_id:
+        metadata["actor_identity_id"] = actor_identity_id
+    return metadata
+
+
 @router.post("/{post_id}/generate", response_model=SuccessResponse)
 async def generate_video(post_id: str, request: VideoGenerationRequest):
     """
@@ -1718,7 +1979,121 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
         )
         profile = submission_plan.get("profile")
         is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
+        is_segmented = profile is not None and profile.route == VEO_SEGMENTED_VIDEO_ROUTE
         approved_scene_reference_set = None
+
+        if is_segmented:
+            segmented_result = _submit_segmented_post(
+                post=post,
+                batch=batch,
+                submission_plan=submission_plan,
+                video_prompt=video_prompt,
+                seed_data=seed_data,
+                canonical_scene_asset=canonical_scene_asset,
+                scene_reference_set=approved_scene_reference_set,
+                veo_seed=None,
+                correlation_id=correlation_id,
+                model=request.model,
+            )
+            operation_ids = segmented_result["operation_ids"]
+            first_operation_id = operation_ids[0]
+            if quota_reservation_key:
+                quota_consumed = True
+            quota_consume_error = _consume_quota_after_acceptance(
+                reservation_key=quota_reservation_key,
+                operation_id=first_operation_id,
+                units=segmented_result["segment_count"],
+                correlation_id=correlation_id,
+                provider=submission_plan["provider"],
+                post_id=post_id,
+                batch_id=post.get("batch_id"),
+            )
+            for index, op_id in enumerate(operation_ids):
+                record_prompt_audit(
+                    post_id=post_id,
+                    operation_id=op_id,
+                    provider=submission_plan["provider"],
+                    prompt_text=segmented_result["prompts"][index],
+                    negative_prompt=None,
+                    prompt_path="veo_segmented_segment",
+                    aspect_ratio=submission_plan["aspect_ratio"],
+                    resolution=submission_plan["resolution"],
+                    requested_seconds=SEGMENTED_SEGMENT_SECONDS,
+                    correlation_id=correlation_id,
+                    seed=segmented_result["seed"],
+                    reference_image_metadata=_reference_image_audit_metadata(
+                        segmented_result["results"][index].get("provider_metadata")
+                    ),
+                )
+            submission_metadata = _build_segmented_submission_metadata(
+                existing_metadata=post.get("video_metadata") or {},
+                submission_plan=submission_plan,
+                segmented_result=segmented_result,
+                creation_mode=str(batch.get("creation_mode") or "automated"),
+                script_contract=script_contract,
+                quota_reservation_key=quota_reservation_key,
+                quota_reserved_units=0,
+                quota_consume_error=quota_consume_error,
+                canonical_scene_asset=canonical_scene_asset,
+                actor_identity_id=batch.get("actor_identity_id"),
+            )
+            provider_status = segmented_result["results"][0].get("status", "submitted")
+            db_status = get_submission_video_status(VEO_SEGMENTED_VIDEO_ROUTE, provider_status)
+            provider_model = segmented_result["results"][0].get("provider_model")
+            logger.warning(
+                "video_operation_id_paid_request",
+                post_id=post_id,
+                operation_id=first_operation_id,
+                provider=submission_plan["provider"],
+                correlation_id=correlation_id,
+                segment_operation_ids=operation_ids,
+                message="PAID SEGMENTED VIDEO SUBMITTED - segment operation ids logged for recovery",
+            )
+            try:
+                supabase.table("posts").update({
+                    "video_provider": submission_plan["provider"],
+                    "video_format": submission_plan["aspect_ratio"],
+                    "video_operation_id": first_operation_id,
+                    "video_status": db_status,
+                    "video_metadata": submission_metadata,
+                }).eq("id", post_id).execute()
+            except Exception as db_error:
+                logger.error(
+                    "video_db_update_failed_but_video_submitted",
+                    post_id=post_id,
+                    operation_id=first_operation_id,
+                    provider=submission_plan["provider"],
+                    correlation_id=correlation_id,
+                    error=str(db_error),
+                    message="DATABASE UPDATE FAILED - Segmented video operations are processing at provider.",
+                )
+                _write_recovery_record(post_id, first_operation_id, submission_plan["provider"], correlation_id)
+                raise
+            logger.info(
+                "video_generation_submitted",
+                post_id=post_id,
+                correlation_id=correlation_id,
+                provider=submission_plan["provider"],
+                provider_model=provider_model,
+                aspect_ratio=submission_plan["aspect_ratio"],
+                resolution=submission_plan["resolution"],
+                seconds=submission_plan["seconds"],
+                operation_id=first_operation_id,
+                segment_count=segmented_result["segment_count"],
+                video_pipeline_route=VEO_SEGMENTED_VIDEO_ROUTE,
+            )
+            return SuccessResponse(
+                data=VideoGenerationResponse(
+                    post_id=post_id,
+                    operation_id=first_operation_id,
+                    provider=submission_plan["provider"],
+                    provider_model=provider_model,
+                    status=provider_status,
+                    estimated_duration_seconds=segmented_result["results"][0].get("estimated_duration_seconds"),
+                    aspect_ratio=submission_plan["aspect_ratio"],
+                    resolution=submission_plan["resolution"],
+                ).model_dump()
+            )
 
         if is_extended:
             prompt_text, segment_metadata = _build_veo_extended_base_prompt(
@@ -2124,6 +2499,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
 
             profile = submission_plan.get("profile")
             is_extended = profile is not None and profile.route == VEO_EXTENDED_VIDEO_ROUTE
+            is_segmented = profile is not None and profile.route == VEO_SEGMENTED_VIDEO_ROUTE
             approved_scene_reference_set = None
 
             try:
@@ -2178,6 +2554,12 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     if is_character_consistency_mode(batch.get("creation_mode"))
                     else _build_veo_negative_prompt(video_prompt)
                 )
+            elif is_segmented:
+                # Per-segment prompts are built at submit time inside _submit_segmented_post; reference
+                # images are omitted from the negative prompt rule by passing None per segment.
+                prompt_text = ""
+                negative_prompt = None
+                segment_metadata = None
             else:
                 prompt_request = _build_provider_prompt_request(
                     video_prompt,
@@ -2198,6 +2580,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     "model": request.model,
                     "profile": profile,
                     "is_extended": is_extended,
+                    "is_segmented": is_segmented,
+                    "video_prompt": video_prompt,
                     "prompt_text": prompt_text,
                     "negative_prompt": negative_prompt,
                     "segment_metadata": segment_metadata,
@@ -2259,6 +2643,171 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
             script_contract = item["script_contract"]
             quota_reservation_key = item.get("quota_reservation_key")
             quota_consumed = False
+            is_segmented = item.get("is_segmented", False)
+
+            if is_segmented:
+                try:
+                    segmented_result = _submit_segmented_post(
+                        post=post,
+                        batch=batch,
+                        submission_plan=submission_plan,
+                        video_prompt=item.get("video_prompt"),
+                        seed_data=item["seed_data"],
+                        canonical_scene_asset=item.get("canonical_scene_asset"),
+                        scene_reference_set=item.get("scene_reference_set"),
+                        veo_seed=batch_veo_seed,
+                        correlation_id=f"{correlation_id}_{post_id}",
+                        model=item.get("model"),
+                    )
+                    operation_ids = segmented_result["operation_ids"]
+                    first_operation_id = operation_ids[0]
+                    quota_consume_error = _consume_quota_after_acceptance(
+                        reservation_key=quota_reservation_key,
+                        operation_id=first_operation_id,
+                        units=segmented_result["segment_count"],
+                        correlation_id=correlation_id,
+                        provider=submission_plan["provider"],
+                        post_id=post_id,
+                        batch_id=batch_id,
+                    )
+                    if quota_reservation_key:
+                        quota_consumed = True
+                    for seg_index, op_id in enumerate(operation_ids):
+                        record_prompt_audit(
+                            post_id=post_id,
+                            operation_id=op_id,
+                            provider=submission_plan["provider"],
+                            prompt_text=segmented_result["prompts"][seg_index],
+                            negative_prompt=None,
+                            prompt_path="veo_segmented_segment",
+                            aspect_ratio=submission_plan["aspect_ratio"],
+                            resolution=submission_plan["resolution"],
+                            requested_seconds=SEGMENTED_SEGMENT_SECONDS,
+                            correlation_id=f"{correlation_id}_{post_id}",
+                            batch_id=batch_id,
+                            seed=segmented_result["seed"],
+                            reference_image_metadata=_reference_image_audit_metadata(
+                                segmented_result["results"][seg_index].get("provider_metadata")
+                            ),
+                        )
+                    submission_metadata = _build_segmented_submission_metadata(
+                        existing_metadata=post.get("video_metadata") or {},
+                        submission_plan=submission_plan,
+                        segmented_result=segmented_result,
+                        creation_mode=str(batch.get("creation_mode") or "automated"),
+                        script_contract=script_contract,
+                        quota_reservation_key=quota_reservation_key,
+                        quota_reserved_units=item["quota_requested_units"],
+                        quota_consume_error=quota_consume_error,
+                        canonical_scene_asset=item.get("canonical_scene_asset"),
+                        actor_identity_id=batch.get("actor_identity_id"),
+                    )
+                    provider_status = segmented_result["results"][0].get("status", "submitted")
+                    db_status = get_submission_video_status(VEO_SEGMENTED_VIDEO_ROUTE, provider_status)
+                    provider_model = segmented_result["results"][0].get("provider_model")
+                    logger.warning(
+                        "video_operation_id_paid_request",
+                        post_id=post_id,
+                        operation_id=first_operation_id,
+                        provider=submission_plan["provider"],
+                        correlation_id=correlation_id,
+                        segment_operation_ids=operation_ids,
+                        message="PAID SEGMENTED VIDEO SUBMITTED - segment operation ids logged for recovery",
+                    )
+                    try:
+                        supabase.table("posts").update({
+                            "video_provider": submission_plan["provider"],
+                            "video_format": submission_plan["aspect_ratio"],
+                            "video_operation_id": first_operation_id,
+                            "video_status": db_status,
+                            "video_metadata": submission_metadata,
+                        }).eq("id", post_id).execute()
+                    except Exception as db_error:
+                        logger.error(
+                            "batch_video_db_update_failed_but_video_submitted",
+                            post_id=post_id,
+                            operation_id=first_operation_id,
+                            provider=submission_plan["provider"],
+                            batch_id=batch_id,
+                            correlation_id=correlation_id,
+                            error=str(db_error),
+                            message="DATABASE UPDATE FAILED - Segmented video operations processing at provider.",
+                        )
+                        _write_recovery_record(post_id, first_operation_id, submission_plan["provider"], correlation_id)
+                        skipped_count += 1
+                        continue
+
+                    submitted_count += 1
+                    submitted_post_ids.append(post_id)
+                    if provider_model:
+                        last_provider_model = provider_model
+                    logger.info(
+                        "batch_video_submitted",
+                        post_id=post_id,
+                        batch_id=batch_id,
+                        provider=submission_plan["provider"],
+                        provider_model=provider_model,
+                        operation_id=first_operation_id,
+                        segment_count=segmented_result["segment_count"],
+                        video_pipeline_route=VEO_SEGMENTED_VIDEO_ROUTE,
+                    )
+                except FlowForgeException as exc:
+                    if quota_reservation_key and not quota_consumed:
+                        release_quota(
+                            reservation_key=quota_reservation_key,
+                            reason=exc.message,
+                            final_status="released",
+                            error_code=str(exc.code),
+                        )
+                    if exc.code in {ErrorCode.THIRD_PARTY_FAIL, ErrorCode.RATE_LIMIT}:
+                        _persist_submission_failure(
+                            supabase_client=supabase,
+                            post=post,
+                            submission_plan=submission_plan,
+                            error=exc,
+                            correlation_id=f"{correlation_id}_{post_id}",
+                        )
+                    logger.warning(
+                        "batch_video_submission_skipped",
+                        post_id=post_id,
+                        batch_id=batch_id,
+                        code=exc.code,
+                        message=exc.message,
+                        details=exc.details,
+                    )
+                    skipped_count += 1
+                    if (
+                        submission_plan["provider"] == VEO_PROVIDER
+                        and exc.status_code == 429
+                        and not exc.details.get("blocked_before_submit")
+                    ):
+                        maybe_freeze_after_provider_429(provider=VEO_PROVIDER, reason=exc.message)
+                        for pending in prepared_submissions[index + 1:]:
+                            pending_key = pending.get("quota_reservation_key")
+                            if pending_key:
+                                release_quota(
+                                    reservation_key=pending_key,
+                                    reason="Batch stopped after provider quota drift.",
+                                    final_status="released",
+                                    error_code="batch_provider_quota_drift",
+                                )
+                        break
+                except Exception as e:
+                    if quota_reservation_key and not quota_consumed:
+                        release_quota(
+                            reservation_key=quota_reservation_key,
+                            reason=str(e),
+                            final_status="released",
+                            error_code="unexpected_error",
+                        )
+                    logger.exception(
+                        "batch_video_submission_failed",
+                        post_id=post_id,
+                        batch_id=batch_id,
+                        error=str(e),
+                    )
+                    skipped_count += 1
+                continue
 
             try:
                 submission_result = _submit_video_request(

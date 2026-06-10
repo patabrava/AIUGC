@@ -255,6 +255,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("VEO_USE_REFERENCE_IMAGES"),
         description="Attach global Veo subject reference images to base video submissions",
     )
+    veo_enable_segmented_route: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VEO_ENABLE_SEGMENTED_ROUTE"),
+        description=(
+            "Route 16s+ Character-Consistency videos through independent 8s reference-anchored "
+            "segments stitched with ffmpeg instead of Veo extend-chaining. Eliminates cross-hop "
+            "character drift by re-attaching the actor reference bundle to every segment."
+        ),
+    )
     veo_reference_image_paths: str = Field(
         default=(
             "static/images/video-references/front.png,"

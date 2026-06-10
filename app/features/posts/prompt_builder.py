@@ -844,6 +844,52 @@ def build_veo_prompt_segment(
     )
 
 
+def build_segment_prompts(
+    segments: list[str],
+    *,
+    character: Optional[str] = None,
+    action: Optional[str] = None,
+    style: Optional[str] = None,
+    scene: Optional[str] = None,
+    cinematography: Optional[str] = None,
+    audio_block: Optional[str] = None,
+    negative_constraints: Optional[str] = None,
+    legacy_32_visuals: bool = False,
+) -> list[str]:
+    """Build one self-contained Veo prompt per segment for the segmented (stitch) route.
+
+    Unlike the extend route — where every hop says "continue from the previous segment" and relies on
+    the prior clip's tail frame — each segmented prompt carries the FULL character and scene context so
+    every segment is independently anchored to the actor reference bundle. Drift cannot compound
+    because no segment is conditioned on a previous (already-drifted) generation. The ending directive
+    is applied only to the final segment.
+
+    Args:
+        segments: Ordered dialogue beats, one per 8s segment. Must be non-empty.
+
+    Returns:
+        One prompt string per input segment, in order.
+    """
+    if not segments:
+        raise ValueError("build_segment_prompts requires at least one segment")
+    last_index = len(segments) - 1
+    return [
+        build_veo_prompt_segment(
+            dialogue,
+            include_ending=index == last_index,
+            character=character,
+            action=action,
+            style=style,
+            scene=scene,
+            cinematography=cinematography,
+            audio_block=audio_block,
+            negative_constraints=negative_constraints,
+            legacy_32_visuals=legacy_32_visuals,
+        )
+        for index, dialogue in enumerate(segments)
+    ]
+
+
 def build_lean_veo_continuation_prompt(
     dialogue: str,
     *,

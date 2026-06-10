@@ -42,13 +42,25 @@ from app.features.videos.quota_guard import (
 from app.core.video_profiles import (
     get_pollable_video_statuses,
     VEO_EXTENDED_VIDEO_ROUTE,
+    VEO_SEGMENTED_VIDEO_ROUTE,
     VIDEO_STATUS_CAPTION_COMPLETED,
     VIDEO_STATUS_CAPTION_PENDING,
     VIDEO_STATUS_COMPLETED,
     VIDEO_STATUS_FAILED,
+    VIDEO_STATUS_STITCHING,
     get_processing_video_status,
     get_submitted_video_status,
     TRIM_TAIL_MS,
+)
+from app.adapters.video_stitcher import stitch_segments
+from app.features.videos.segmented_pipeline import (
+    SEGMENT_STATUS_COMPLETED,
+    SEGMENT_STATUS_FAILED,
+    any_segment_failed,
+    is_segmented_route,
+    ordered_completed_segment_uris,
+    record_segment_result,
+    segment_stitch_ready,
 )
 
 try:  # pragma: no cover - allow worker to run without google-genai on Python 3.9
@@ -867,6 +879,10 @@ def process_video_operation(post: Dict[str, Any]):
         return
     
     try:
+        if is_segmented_route(post.get("video_metadata") or {}):
+            _handle_segmented_video(post, correlation_id)
+            return
+
         if provider == "veo_3_1":
             if not _veo_available or get_veo_client is None:
                 logger.warning(
@@ -1162,6 +1178,190 @@ def _retry_rai_filtered_video(post: Dict[str, Any], correlation_id: str, rai_rea
         retry_number=retry_num,
         new_operation_id=new_operation_id,
     )
+
+
+def _poll_single_segment(
+    provider: str, operation_id: str, correlation_id: str
+) -> tuple[str, Optional[str]]:
+    """Poll one segment operation. Returns ``(status, video_uri)``.
+
+    status is one of ``"processing"``, ``SEGMENT_STATUS_COMPLETED``, ``SEGMENT_STATUS_FAILED``.
+    A completed operation without a downloadable URI is treated as failed.
+    """
+    if provider == "veo_3_1":
+        veo_client = get_veo_client()
+        result = veo_client.check_operation_status(operation_id=operation_id, correlation_id=correlation_id)
+        if result.get("status") == "failed":
+            return SEGMENT_STATUS_FAILED, None
+        if result.get("done"):
+            uri = (result.get("video_data") or {}).get("video_uri")
+            return (SEGMENT_STATUS_COMPLETED, uri) if uri else (SEGMENT_STATUS_FAILED, None)
+        return "processing", None
+
+    vertex_client = get_vertex_ai_client()
+    result = vertex_client.check_operation_status(operation_id=operation_id, correlation_id=correlation_id)
+    if result.get("done") and result.get("error"):
+        return SEGMENT_STATUS_FAILED, None
+    if result.get("done"):
+        uri = result.get("video_uri")
+        return (SEGMENT_STATUS_COMPLETED, uri) if uri else (SEGMENT_STATUS_FAILED, None)
+    return "processing", None
+
+
+def _download_segment_bytes(provider: str, video_uri: str, correlation_id: str) -> bytes:
+    if provider == "veo_3_1":
+        return get_veo_client().download_video(video_uri=video_uri, correlation_id=correlation_id)
+    return _decode_vertex_video_uri(video_uri)
+
+
+def _persist_segment_metadata(post_id: str, metadata: Dict[str, Any], correlation_id: str) -> None:
+    supabase = get_supabase().client
+    supabase.table("posts").update(
+        {"video_metadata": _clear_transient_polling_errors(metadata)}
+    ).eq("id", post_id).execute()
+
+
+def _fail_segmented_post(post: Dict[str, Any], metadata: Dict[str, Any], correlation_id: str) -> None:
+    post_id = post["id"]
+    supabase = get_supabase().client
+    reservation_key = metadata.get("quota_reservation_key")
+    if reservation_key:
+        try:
+            release_quota(
+                reservation_key=reservation_key,
+                reason="A segment generation failed; releasing reserved units.",
+                final_status="released",
+                error_code="segmented_segment_failed",
+            )
+        except Exception:
+            logger.exception("segmented_quota_release_failed", post_id=post_id, correlation_id=correlation_id)
+    failure_metadata = {
+        **metadata,
+        "error": "One or more segments failed to generate",
+        "error_type": "segmented_segment_failed",
+        "failed_at": _utc_now_iso(),
+    }
+    supabase.table("posts").update(
+        {"video_status": VIDEO_STATUS_FAILED, "video_metadata": failure_metadata}
+    ).eq("id", post_id).execute()
+    logger.error(
+        "segmented_video_failed",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        segment_ops=metadata.get("veo_segment_ops"),
+    )
+
+
+def _stitch_and_store_segments(
+    post: Dict[str, Any], metadata: Dict[str, Any], provider: str, correlation_id: str
+) -> None:
+    post_id = post["id"]
+    # NOTE: we intentionally do NOT persist an intermediate "stitching" video_status. The posts
+    # table's CHECK constraint (posts_video_status_check) does not permit it, and the status is not
+    # needed: the post stays "processing" (still pollable) until _store_completed_video flips it to
+    # caption_pending, so a crash mid-stitch self-heals on the next poll (re-download + re-stitch is
+    # idempotent). We persist the completed segment metadata for observability before stitching.
+    supabase = get_supabase().client
+    supabase.table("posts").update(
+        {"video_metadata": metadata}
+    ).eq("id", post_id).execute()
+
+    uris = ordered_completed_segment_uris(metadata)
+    logger.info(
+        "segmented_video_stitch_start",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        segment_count=len(uris),
+    )
+    segment_videos = [_download_segment_bytes(provider, uri, correlation_id) for uri in uris]
+    final_bytes, stitch_meta = stitch_segments(
+        segment_videos=segment_videos,
+        post_id=post_id,
+        correlation_id=correlation_id,
+    )
+    logger.info(
+        "segmented_video_stitch_complete",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        output_bytes=len(final_bytes),
+    )
+    merged_metadata = {**metadata, **{f"stitch_{key}": value for key, value in stitch_meta.items()}}
+    _store_completed_video(
+        post_id=post_id,
+        provider=provider,
+        video_source=final_bytes,
+        correlation_id=correlation_id,
+        provider_metadata={"segmented": True, **stitch_meta},
+        existing_metadata=merged_metadata,
+    )
+
+
+def _handle_segmented_video(post: Dict[str, Any], correlation_id: str) -> None:
+    """Poll every segment op for a segmented-route post; stitch + store once all complete.
+
+    The extend-hop machinery is never invoked here: segments are independent generations, so this
+    re-anchors instead of chaining. When all segments complete, their clips are concatenated by the
+    stitcher and handed to the existing completion path (→ caption_pending).
+    """
+    post_id = post["id"]
+    provider = post.get("video_provider") or "veo_3_1"
+    metadata = dict(post.get("video_metadata") or {})
+    ops = list(metadata.get("veo_segment_ops") or [])
+    if not ops:
+        logger.warning("segmented_video_no_segment_ops", post_id=post_id, correlation_id=correlation_id)
+        return
+
+    if provider == "veo_3_1" and (not _veo_available or get_veo_client is None):
+        logger.warning("veo_poll_skipped", post_id=post_id, provider=provider, reason="VEO client unavailable on this runtime")
+        return
+    if provider == "vertex_ai" and (not _vertex_ai_available or get_vertex_ai_client is None):
+        logger.warning("vertex_ai_poll_skipped", post_id=post_id, provider=provider, reason="Vertex AI client unavailable on this runtime")
+        return
+
+    changed = False
+    for op in ops:
+        if op.get("status") in (SEGMENT_STATUS_COMPLETED, SEGMENT_STATUS_FAILED):
+            continue
+        op_id = op.get("operation_id")
+        if not op_id:
+            continue
+        seg_status, seg_uri = _poll_single_segment(provider, op_id, f"{correlation_id}_seg{op.get('index')}")
+        if seg_status == SEGMENT_STATUS_FAILED:
+            metadata["veo_segment_ops"] = record_segment_result(
+                metadata, operation_id=op_id, status=SEGMENT_STATUS_FAILED
+            )
+            changed = True
+        elif seg_status == SEGMENT_STATUS_COMPLETED:
+            metadata["veo_segment_ops"] = record_segment_result(
+                metadata, operation_id=op_id, status=SEGMENT_STATUS_COMPLETED, video_uri=seg_uri
+            )
+            changed = True
+
+    if changed:
+        _persist_segment_metadata(post_id, metadata, correlation_id)
+
+    if any_segment_failed(metadata):
+        _fail_segmented_post(post, metadata, correlation_id)
+        return
+
+    if not segment_stitch_ready(metadata):
+        completed = sum(
+            1 for op in (metadata.get("veo_segment_ops") or [])
+            if op.get("status") == SEGMENT_STATUS_COMPLETED
+        )
+        logger.info(
+            "segmented_video_progress",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            completed=completed,
+            total=len(ops),
+        )
+        _mark_processing(
+            post_id, correlation_id, post.get("video_operation_id") or ops[0].get("operation_id") or ""
+        )
+        return
+
+    _stitch_and_store_segments(post, metadata, provider, correlation_id)
 
 
 def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:

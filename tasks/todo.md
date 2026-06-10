@@ -32,3 +32,31 @@ selected actor — tier 16 didn't), and every extension hop hardcoded `LEAN_EXTE
 8s = base only -> fine. Fix scopes the tier-32 override to non-CC modes and makes extension
 hops preserve identity by deferring to the previous segment. Updated one test that pinned the
 old extension text; added two regression tests.
+
+---
+
+# Segmented (drift-free) video route — IO wiring (2026-06-10)
+
+## Goal
+Make `VEO_ENABLE_SEGMENTED_ROUTE=true` run end-to-end: N independent 8s reference-anchored Veo
+generations stitched with ffmpeg, captioned as usual. Eliminates extend-chain character drift by
+re-anchoring the actor reference bundle on every segment instead of chaining off a drifted frame.
+
+## Done
+- [x] `video_profiles.py`: `stitching` added to pollable statuses.
+- [x] `schemas.py`: `stitching` added to `VideoStatusResponse` Literal.
+- [x] `segmented_pipeline.py`: `plan_segment_submissions` accepts pre-built mode-aware prompts.
+- [x] `handlers.py`: `_split_script_into_segments`, `_build_segmented_segment_prompts`
+      (CC → `build_reference_image_scene_base_prompt`; light → `build_lean_veo_base_prompt`;
+      ending only on last), `_submit_segmented_post`, `_build_segmented_submission_metadata`.
+- [x] `handlers.py`: segmented branch in `generate_video` (single) + `generate_all_videos` (batch).
+- [x] `video_poller.py`: `_handle_segmented_video` (+ `_poll_single_segment`,
+      `_download_segment_bytes`, `_stitch_and_store_segments`, `_fail_segmented_post`);
+      early dispatch in `process_video_operation`.
+- [x] Tests: 29 segmented tests pass (5 new IO-wiring). Full sweep 120 passed, 4 pre-existing
+      `veo_client` env failures (identical on `main`). Zero regression to `veo_extended`.
+
+## Not verifiable here (user smoke test)
+- [ ] R1: Veo accepts 9:16 8s `referenceImages` live.
+- [ ] Stitched 9:16 output correct; captions burn across full duration.
+- [ ] Commit + push (awaiting go-ahead).

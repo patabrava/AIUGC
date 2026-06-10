@@ -95,6 +95,7 @@ class VideoStatusResponse(BaseModel):
         "queued",
         "submitted",
         "processing",
+        "stitching",
         "completed",
         "failed",
         "caption_pending",
