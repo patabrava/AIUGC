@@ -108,6 +108,7 @@ jobs:
                       "TRAEFIK_HOST_RULE",
                       "Host(`lippelift.xyz`) || Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)",
                   ),
+                  "VEO_ENABLE_SEGMENTED_ROUTE": "true",
                   "VERTEX_AI_ENABLED": "true",
                   "VERTEX_AI_LOCATION": "us-central1",
                   "VERTEX_AI_OUTPUT_GCS_URI": "gs://project-ad4d28ca-000c-4432-b4f-vertex-output/",
