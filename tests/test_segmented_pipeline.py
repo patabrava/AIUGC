@@ -121,3 +121,75 @@ def test_is_segmented_route_guard():
     assert sp.is_segmented_route({"video_pipeline_route": vp.VEO_SEGMENTED_VIDEO_ROUTE}) is True
     assert sp.is_segmented_route({"video_pipeline_route": vp.VEO_EXTENDED_VIDEO_ROUTE}) is False
     assert sp.is_segmented_route(None) is False
+
+
+# --------------------------------------------------------------------------------------
+# Identity-lock (image-to-video) helpers
+# --------------------------------------------------------------------------------------
+
+def _i2v_metadata(ops, count=4):
+    meta = _metadata(ops, count=count)
+    meta["i2v_lock"] = sp.build_i2v_lock(
+        provider="vertex_ai", aspect_ratio="9:16", provider_aspect_ratio="9:16", resolution="720p",
+        duration_seconds=8, model="veo-3.1-generate-001", output_gcs_uri=None,
+        beats=[f"beat {i}" for i in range(count)],
+    )
+    return meta
+
+
+def test_build_segment_ops_with_anchor_preseeds_pending_rows():
+    ops = sp.build_segment_ops_with_anchor("anchor-op", 4)
+    assert [o["index"] for o in ops] == [0, 1, 2, 3]
+    assert ops[0]["operation_id"] == "anchor-op"
+    assert ops[0]["status"] == sp.SEGMENT_STATUS_SUBMITTED and ops[0]["kind"] == sp.SEGMENT_KIND_ANCHOR
+    assert all(o["operation_id"] is None for o in ops[1:])
+    assert all(o["status"] == sp.SEGMENT_STATUS_PENDING and o["kind"] == sp.SEGMENT_KIND_I2V for o in ops[1:])
+
+
+def test_pending_rows_block_stitch_until_submitted_and_completed():
+    # Anchor completed, the rest still pending → not stitch-ready.
+    ops = sp.build_segment_ops_with_anchor("anchor-op", 4)
+    ops[0]["status"] = sp.SEGMENT_STATUS_COMPLETED
+    ops[0]["video_uri"] = "gs://seg/0.mp4"
+    meta = _i2v_metadata(ops)
+    assert sp.segment_stitch_ready(meta) is False
+    assert sp.any_segment_failed(meta) is False  # pending is not failed
+
+
+def test_i2v_plan_ready_requires_completed_anchor():
+    ops = sp.build_segment_ops_with_anchor("anchor-op", 2)
+    # Anchor still submitted (not done) → not ready.
+    assert sp.i2v_plan_ready(_i2v_metadata(ops, count=2)) is False
+    # Anchor completed + state pending → ready.
+    ops[0]["status"] = sp.SEGMENT_STATUS_COMPLETED
+    ops[0]["video_uri"] = "gs://seg/0.mp4"
+    assert sp.i2v_plan_ready(_i2v_metadata(ops, count=2)) is True
+    # Posts without an i2v_lock (legacy fan-out) are never i2v-ready.
+    assert sp.i2v_plan_ready(_metadata(ops, count=2)) is False
+
+
+def test_i2v_plan_ready_resumes_in_submitting_but_stops_when_submitted():
+    ops = sp.build_segment_ops_with_anchor("anchor-op", 2)
+    ops[0]["status"] = sp.SEGMENT_STATUS_COMPLETED
+    ops[0]["video_uri"] = "gs://seg/0.mp4"
+    meta = _i2v_metadata(ops, count=2)
+    assert sp.i2v_plan_ready(sp.mark_i2v_submitting(meta)) is True   # crash mid-fan-out resumes
+    assert sp.i2v_plan_ready(sp.mark_i2v_submitted(meta)) is False   # done → poller polls/stitches
+
+
+def test_pending_i2v_indexes_and_record_in_place():
+    ops = sp.build_segment_ops_with_anchor("anchor-op", 4)
+    meta = _i2v_metadata(ops)
+    assert sp.pending_i2v_indexes(meta) == [1, 2, 3]
+    meta["veo_segment_ops"] = sp.record_i2v_submitted_op(meta, index=2, operation_id="i2v-2")
+    assert sp.pending_i2v_indexes(meta) == [1, 3]  # 2 now has an op id
+    row = next(o for o in meta["veo_segment_ops"] if o["index"] == 2)
+    assert row["operation_id"] == "i2v-2" and row["status"] == sp.SEGMENT_STATUS_SUBMITTED
+
+
+def test_mark_i2v_state_is_pure():
+    ops = sp.build_segment_ops_with_anchor("anchor-op", 2)
+    meta = _i2v_metadata(ops, count=2)
+    submitting = sp.mark_i2v_submitting(meta)
+    assert submitting["i2v_lock"]["state"] == sp.I2V_STATE_SUBMITTING
+    assert meta["i2v_lock"]["state"] == sp.I2V_STATE_PENDING  # original untouched

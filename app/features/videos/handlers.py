@@ -78,7 +78,9 @@ from app.features.posts.prompt_builder import (
     validate_video_prompt,
 )
 from app.features.videos.segmented_pipeline import (
+    build_i2v_lock,
     build_initial_segment_ops,
+    build_segment_ops_with_anchor,
     plan_segment_submissions,
 )
 from app.features.topics.topic_validation import (
@@ -1766,11 +1768,16 @@ def _submit_segmented_post(
     correlation_id: str,
     model: Optional[str],
 ) -> Dict[str, Any]:
-    """Fan out N independent 8s reference-anchored generations for one segmented-route post.
+    """Submit the segmented-route generations for one post.
 
-    Each segment reuses ``_submit_video_request`` with ``provider_duration_seconds=8`` and the same
-    actor reference context, so the identity bundle attaches to every segment. A single shared seed
-    is threaded through all of them. Returns the operation ids and per-segment submission results.
+    Character-consistency posts submit ONLY the anchor segment (segment 0) here — reference-anchored,
+    ``provider_duration_seconds=8``, shared seed. The remaining segments are submitted later by the
+    poller as image-to-video locked to a frame of the anchor (see ``app.features.videos.segmented_i2v``),
+    which hard-locks the actor instead of relying on reference images (which drift across independent
+    generations). Non-character-consistency posts keep the original all-at-once independent fan-out.
+
+    Returns the submitted operation ids + results plus the i2v plan fields (``i2v_locked``,
+    ``i2v_model``, ``i2v_output_gcs_uri``) that ``_build_segmented_submission_metadata`` persists.
 
     On a mid-fan-out provider failure the exception propagates to the caller's standard failure
     handling; already-accepted segment operations are logged as orphaned (paid but untracked).
@@ -1794,17 +1801,25 @@ def _submit_segmented_post(
         seed=shared_seed,
     )
 
+    # Character-consistency posts submit ONLY the anchor segment now; the poller locks segments
+    # 1..N-1 to a frame of the anchor via image-to-video (see segmented_i2v) so the actor cannot
+    # drift. Non-CC posts keep the original all-at-once independent fan-out.
+    i2v_locked = is_character_consistency_mode(creation_mode)
+    subs_to_submit = subs[:1] if i2v_locked else subs
+
     operation_ids: list[str] = []
     results: list[Dict[str, Any]] = []
     logger.info(
         "veo_segmented_fanout_start",
         post_id=post["id"],
         segment_count=segment_count,
+        submitted_now=len(subs_to_submit),
+        i2v_locked=i2v_locked,
         seed=shared_seed,
         provider=submission_plan["provider"],
         target_length_tier=profile.target_length_tier,
     )
-    for sub in subs:
+    for sub in subs_to_submit:
         try:
             result = _submit_video_request(
                 provider=submission_plan["provider"],
@@ -1840,6 +1855,13 @@ def _submit_segmented_post(
         operation_ids.append(result["operation_id"])
         results.append(result)
 
+    i2v_model: Optional[str] = None
+    i2v_output_gcs_uri: Optional[str] = None
+    if i2v_locked:
+        # Lock the i2v segments to the same model + output sink the anchor used.
+        i2v_model = results[0].get("provider_model") or model
+        i2v_output_gcs_uri = get_settings().vertex_ai_output_gcs_uri or None
+
     return {
         "operation_ids": operation_ids,
         "results": results,
@@ -1847,6 +1869,9 @@ def _submit_segmented_post(
         "prompts": prompts,
         "beats": beats,
         "seed": shared_seed,
+        "i2v_locked": i2v_locked,
+        "i2v_model": i2v_model,
+        "i2v_output_gcs_uri": i2v_output_gcs_uri,
     }
 
 
@@ -1874,7 +1899,24 @@ def _build_segmented_submission_metadata(
     operation_ids = segmented_result["operation_ids"]
     metadata["video_pipeline_route"] = VEO_SEGMENTED_VIDEO_ROUTE
     metadata["veo_segment_count"] = segmented_result["segment_count"]
-    metadata["veo_segment_ops"] = build_initial_segment_ops(operation_ids)
+    if segmented_result.get("i2v_locked"):
+        # Anchor (seg 0) is submitted; segs 1..N-1 are pre-seeded pending rows the poller fills as
+        # image-to-video, plus the plan it needs to do so.
+        metadata["veo_segment_ops"] = build_segment_ops_with_anchor(
+            operation_ids[0], segmented_result["segment_count"]
+        )
+        metadata["i2v_lock"] = build_i2v_lock(
+            provider=submission_plan["provider"],
+            aspect_ratio=submission_plan["aspect_ratio"],
+            provider_aspect_ratio=submission_plan.get("provider_aspect_ratio"),
+            resolution=submission_plan["resolution"],
+            duration_seconds=SEGMENTED_SEGMENT_SECONDS,
+            model=segmented_result.get("i2v_model"),
+            output_gcs_uri=segmented_result.get("i2v_output_gcs_uri"),
+            beats=segmented_result["beats"],
+        )
+    else:
+        metadata["veo_segment_ops"] = build_initial_segment_ops(operation_ids)
     metadata["veo_segment_prompts"] = segmented_result["prompts"]
     metadata["operation_ids"] = operation_ids
     metadata["veo_seed"] = segmented_result["seed"]

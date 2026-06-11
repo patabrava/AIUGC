@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from app.adapters.video_stitcher import _probe_duration, stitch_segments
+from app.adapters.video_stitcher import _probe_duration, extract_anchor_frame, stitch_segments
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
@@ -112,3 +112,44 @@ def test_single_segment_passthrough():
 def test_empty_input_raises():
     with pytest.raises(ValueError):
         stitch_segments(segment_videos=[], post_id="p", correlation_id="c")
+
+
+def test_extract_anchor_frame_returns_jpeg(tmp_path):
+    clip = str(tmp_path / "anchor.mp4")
+    _make_clip(clip, seconds=2, color="red")
+    with open(clip, "rb") as fh:
+        video_bytes = fh.read()
+
+    frame_bytes, mime = extract_anchor_frame(
+        video_bytes=video_bytes, post_id="post_test", correlation_id="corr_test"
+    )
+    assert mime == "image/jpeg"
+    assert len(frame_bytes) > 0
+    assert frame_bytes[:2] == b"\xff\xd8"  # JPEG SOI marker
+
+
+@pytest.mark.parametrize("fraction", [0.1, 0.9])
+def test_extract_anchor_frame_honors_fraction(tmp_path, fraction):
+    clip = str(tmp_path / "anchor.mp4")
+    _make_clip(clip, seconds=2, color="red")
+    with open(clip, "rb") as fh:
+        video_bytes = fh.read()
+
+    frame_bytes, mime = extract_anchor_frame(
+        video_bytes=video_bytes, post_id="post_test", correlation_id="corr_test", at_fraction=fraction
+    )
+    # Solid-color synthetic clips are byte-identical across fractions, so assert only that the seek
+    # runs and returns a valid JPEG (distinctness across fractions is covered in test_segmented_i2v).
+    assert mime == "image/jpeg"
+    assert len(frame_bytes) > 0
+    assert frame_bytes[:2] == b"\xff\xd8"  # JPEG SOI marker
+
+
+def test_extract_anchor_frame_rejects_empty_input():
+    with pytest.raises(ValueError):
+        extract_anchor_frame(video_bytes=b"", post_id="p", correlation_id="c")
+
+
+def test_extract_anchor_frame_rejects_garbage_bytes():
+    with pytest.raises(ValueError):
+        extract_anchor_frame(video_bytes=b"not a video", post_id="p", correlation_id="c")

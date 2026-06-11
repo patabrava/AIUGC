@@ -16,6 +16,12 @@ Metadata contract (stored in ``posts.video_metadata``) for a segmented post:
         ... one entry per segment ...
       ]
     }
+
+Identity-lock variant (character consistency): segment 0 is a text+reference anchor; segments 1..N-1
+are image-to-video locked to a frame from segment 0 so the actor cannot drift. Such posts also carry an
+``i2v_lock`` plan (see ``build_i2v_lock``) and pre-seeded ``pending`` op rows (see
+``build_segment_ops_with_anchor``); the poller submits the i2v segments once the anchor completes. Posts
+without ``i2v_lock`` follow the legacy all-at-once fan-out unchanged.
 """
 
 from __future__ import annotations
@@ -35,6 +41,17 @@ SEGMENT_STATUS_SUBMITTED = "submitted"
 SEGMENT_STATUS_PROCESSING = "processing"
 SEGMENT_STATUS_COMPLETED = "completed"
 SEGMENT_STATUS_FAILED = "failed"
+# A pre-seeded segment whose image-to-video op has not been submitted yet (waits on the anchor).
+SEGMENT_STATUS_PENDING = "pending"
+
+# Per-op "kind" on the segmented-route identity-lock variant (see ``build_segment_ops_with_anchor``).
+SEGMENT_KIND_ANCHOR = "anchor"  # segment 0: text + reference images, establishes the actor
+SEGMENT_KIND_I2V = "i2v"        # segments 1..N-1: image-to-video locked to the anchor frame
+
+# ``i2v_lock.state`` lifecycle for the shared-frame identity lock.
+I2V_STATE_PENDING = "pending"        # anchor in flight; i2v segments not submitted
+I2V_STATE_SUBMITTING = "submitting"  # anchor done; mid-fan-out (resumable)
+I2V_STATE_SUBMITTED = "submitted"    # all i2v segments submitted
 
 
 @dataclass(frozen=True)
@@ -122,6 +139,125 @@ def build_initial_segment_ops(operation_ids: List[str]) -> List[Dict[str, Any]]:
         }
         for index, operation_id in enumerate(operation_ids)
     ]
+
+
+def build_segment_ops_with_anchor(anchor_operation_id: str, segment_count: int) -> List[Dict[str, Any]]:
+    """``veo_segment_ops`` for the identity-lock variant: segment 0 is the submitted anchor; segments
+    1..N-1 are pre-seeded ``pending`` image-to-video placeholders (filled once the anchor completes).
+
+    Pre-seeding all N rows keeps ``ordered_completed_segment_uris`` index-correct and makes
+    ``all_segments_completed`` block the stitch until every i2v segment is submitted and completed.
+    """
+    ops: List[Dict[str, Any]] = [
+        {
+            "index": 0,
+            "operation_id": anchor_operation_id,
+            "status": SEGMENT_STATUS_SUBMITTED,
+            "video_uri": None,
+            "kind": SEGMENT_KIND_ANCHOR,
+        }
+    ]
+    for index in range(1, segment_count):
+        ops.append(
+            {
+                "index": index,
+                "operation_id": None,
+                "status": SEGMENT_STATUS_PENDING,
+                "video_uri": None,
+                "kind": SEGMENT_KIND_I2V,
+            }
+        )
+    return ops
+
+
+def build_i2v_lock(
+    *,
+    provider: str,
+    aspect_ratio: str,
+    provider_aspect_ratio: Optional[str],
+    resolution: str,
+    duration_seconds: int,
+    model: Optional[str],
+    output_gcs_uri: Optional[str],
+    beats: List[str],
+    anchor_segment_index: int = 0,
+) -> Dict[str, Any]:
+    """The pending plan the poller needs to submit segments 1..N-1 as image-to-video once the anchor
+    completes. ``beats`` is the FULL per-segment dialogue list (index i → ``beats[i]``)."""
+    return {
+        "state": I2V_STATE_PENDING,
+        "anchor_segment_index": anchor_segment_index,
+        "provider": provider,
+        "aspect_ratio": aspect_ratio,
+        "provider_aspect_ratio": provider_aspect_ratio,
+        "resolution": resolution,
+        "duration_seconds": duration_seconds,
+        "model": model,
+        "output_gcs_uri": output_gcs_uri,
+        "beats": list(beats),
+    }
+
+
+def _anchor_op(metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    lock = (metadata or {}).get("i2v_lock") or {}
+    anchor_index = int(lock.get("anchor_segment_index", 0))
+    for op in (metadata or {}).get("veo_segment_ops") or []:
+        if int(op.get("index", -1)) == anchor_index:
+            return op
+    return None
+
+
+def i2v_plan_ready(metadata: Optional[Dict[str, Any]]) -> bool:
+    """True when the anchor segment has completed and the i2v fan-out still owes submissions.
+
+    Accepts ``submitting`` (not just ``pending``) so a crash mid-fan-out resumes on the next poll.
+    """
+    lock = (metadata or {}).get("i2v_lock")
+    if not lock or lock.get("state") not in (I2V_STATE_PENDING, I2V_STATE_SUBMITTING):
+        return False
+    anchor = _anchor_op(metadata)
+    return bool(anchor and anchor.get("status") == SEGMENT_STATUS_COMPLETED and anchor.get("video_uri"))
+
+
+def pending_i2v_indexes(metadata: Optional[Dict[str, Any]]) -> List[int]:
+    """Indexes of i2v segments not yet submitted (no operation id), ordered."""
+    return [
+        int(op.get("index"))
+        for op in (metadata or {}).get("veo_segment_ops") or []
+        if op.get("kind") == SEGMENT_KIND_I2V and not op.get("operation_id")
+    ]
+
+
+def _with_i2v_state(metadata: Dict[str, Any], state: str) -> Dict[str, Any]:
+    new_metadata = dict(metadata)
+    lock = dict(new_metadata.get("i2v_lock") or {})
+    lock["state"] = state
+    new_metadata["i2v_lock"] = lock
+    return new_metadata
+
+
+def mark_i2v_submitting(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    return _with_i2v_state(metadata, I2V_STATE_SUBMITTING)
+
+
+def mark_i2v_submitted(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    return _with_i2v_state(metadata, I2V_STATE_SUBMITTED)
+
+
+def record_i2v_submitted_op(
+    metadata: Dict[str, Any], *, index: int, operation_id: str
+) -> List[Dict[str, Any]]:
+    """Return a new ``veo_segment_ops`` with the pending row at ``index`` filled with its op id (pure)."""
+    updated: List[Dict[str, Any]] = []
+    for op in metadata.get("veo_segment_ops") or []:
+        if int(op.get("index", -1)) == index:
+            new_op = dict(op)
+            new_op["operation_id"] = operation_id
+            new_op["status"] = SEGMENT_STATUS_SUBMITTED
+            updated.append(new_op)
+        else:
+            updated.append(dict(op))
+    return updated
 
 
 def is_segmented_route(metadata: Optional[Dict[str, Any]]) -> bool:

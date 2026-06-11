@@ -87,6 +87,72 @@ def _probe_duration(video_path: str) -> float:
     return float(result.stdout.strip())
 
 
+def extract_anchor_frame(
+    *, video_bytes: bytes, post_id: str, correlation_id: str, at_fraction: float = 0.5
+) -> Tuple[bytes, str]:
+    """Extract one frame from a segment video as JPEG bytes, at the given fraction of its duration.
+
+    Used by the identity-lock route: the returned frame anchors the actor for the image-to-video
+    segments. ``at_fraction`` (clamped to [0.05, 0.95]) picks where to seek — the default mid-point
+    avoids fade-in/black (first frame) and end-of-clip settle/blink (last frame); the i2v fan-out
+    passes a distinct fraction per segment so each cut lands on a different pose (natural jump-cut).
+
+    Returns:
+        (jpeg_bytes, "image/jpeg").
+
+    Raises:
+        ValueError: empty input, ffmpeg failure, or empty output.
+    """
+    if not video_bytes:
+        raise ValueError(f"extract_anchor_frame got empty video for post {post_id}")
+
+    fraction = min(0.95, max(0.05, at_fraction))
+
+    with tempfile.TemporaryDirectory(prefix="anchor_frame_") as temp_dir:
+        input_path = os.path.join(temp_dir, "anchor_source.mp4")
+        with open(input_path, "wb") as file_obj:
+            file_obj.write(video_bytes)
+
+        try:
+            seek_seconds = max(0.0, _probe_duration(input_path) * fraction)
+        except ValueError:
+            seek_seconds = 0.0  # unprobeable container → fall back to the first frame
+
+        output_path = os.path.join(temp_dir, "anchor_frame.jpg")
+        command = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{seek_seconds:.3f}",
+            "-i",
+            input_path,
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            output_path,
+        ]
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_SECONDS
+        )
+        if result.returncode != 0:
+            raise ValueError(f"ffmpeg anchor-frame extract failed: {result.stderr[-400:]}")
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise ValueError(f"ffmpeg produced no anchor frame for post {post_id}")
+        with open(output_path, "rb") as file_obj:
+            frame_bytes = file_obj.read()
+
+    logger.info(
+        "anchor_frame_extracted",
+        post_id=post_id,
+        correlation_id=correlation_id,
+        at_fraction=round(fraction, 3),
+        seek_seconds=round(seek_seconds, 3),
+        frame_bytes=len(frame_bytes),
+    )
+    return frame_bytes, "image/jpeg"
+
+
 def stitch_segments(
     *,
     segment_videos: List[bytes],

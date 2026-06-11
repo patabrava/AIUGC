@@ -57,11 +57,16 @@ from app.features.videos.segmented_pipeline import (
     SEGMENT_STATUS_COMPLETED,
     SEGMENT_STATUS_FAILED,
     any_segment_failed,
+    i2v_plan_ready,
     is_segmented_route,
+    mark_i2v_submitted,
+    mark_i2v_submitting,
     ordered_completed_segment_uris,
+    record_i2v_submitted_op,
     record_segment_result,
     segment_stitch_ready,
 )
+from app.features.videos.segmented_i2v import submit_locked_segments
 
 try:  # pragma: no cover - allow worker to run without google-genai on Python 3.9
     from app.adapters.veo_client import get_veo_client  # type: ignore
@@ -1344,6 +1349,13 @@ def _handle_segmented_video(post: Dict[str, Any], correlation_id: str) -> None:
         _fail_segmented_post(post, metadata, correlation_id)
         return
 
+    # Identity-lock route: once the anchor (seg 0) completes, submit the remaining segments as
+    # image-to-video locked to its frame. Posts without an i2v_lock fall straight through (legacy
+    # all-at-once fan-out), so this is a no-op for them.
+    if i2v_plan_ready(metadata):
+        _maybe_submit_i2v_segments(post, metadata, provider, correlation_id)
+        return
+
     if not segment_stitch_ready(metadata):
         completed = sum(
             1 for op in (metadata.get("veo_segment_ops") or [])
@@ -1362,6 +1374,81 @@ def _handle_segmented_video(post: Dict[str, Any], correlation_id: str) -> None:
         return
 
     _stitch_and_store_segments(post, metadata, provider, correlation_id)
+
+
+def _maybe_submit_i2v_segments(
+    post: Dict[str, Any], metadata: Dict[str, Any], provider: str, correlation_id: str
+) -> None:
+    """Lock segments 1..N-1 to a frame of the completed anchor segment via image-to-video.
+
+    Resumable + idempotent: flips ``i2v_lock.state`` to 'submitting' (persisted before any provider
+    call), then submits only the not-yet-submitted indexes, recording each accepted op immediately. A
+    crash or transient error leaves the state 'submitting', so the next poll resumes the remainder
+    (only the null-op rows) without re-paying for already-accepted segments.
+    """
+    post_id = post["id"]
+    lock = metadata.get("i2v_lock") or {}
+    anchor_index = int(lock.get("anchor_segment_index", 0))
+    anchor_uri = next(
+        (
+            op.get("video_uri")
+            for op in (metadata.get("veo_segment_ops") or [])
+            if int(op.get("index", -1)) == anchor_index
+        ),
+        None,
+    )
+    if not anchor_uri:
+        logger.warning(
+            "segmented_video_i2v_anchor_uri_missing", post_id=post_id, correlation_id=correlation_id
+        )
+        return
+
+    metadata = mark_i2v_submitting(metadata)
+    _persist_segment_metadata(post_id, metadata, correlation_id)
+
+    def persist_op(index: int, operation_id: str, prompt: str, result: Dict[str, Any]) -> None:
+        metadata["veo_segment_ops"] = record_i2v_submitted_op(
+            metadata, index=index, operation_id=operation_id
+        )
+        _persist_segment_metadata(post_id, metadata, correlation_id)
+        # Observability only; record_prompt_audit swallows its own errors so it can't break submission.
+        record_prompt_audit(
+            post_id=post_id,
+            operation_id=operation_id,
+            provider=provider,
+            prompt_text=prompt,
+            negative_prompt=None,
+            prompt_path="veo_segmented_i2v",
+            aspect_ratio=str(lock.get("aspect_ratio") or "9:16"),
+            resolution=str(lock.get("resolution") or "720p"),
+            requested_seconds=int(lock.get("duration_seconds") or 8),
+            correlation_id=correlation_id,
+            seed=metadata.get("veo_seed"),
+        )
+
+    try:
+        anchor_bytes = _download_segment_bytes(provider, anchor_uri, correlation_id)
+        submit_locked_segments(
+            post_id=post_id,
+            metadata=metadata,
+            anchor_video_bytes=anchor_bytes,
+            correlation_id=correlation_id,
+            persist_op=persist_op,
+        )
+    except Exception as exc:
+        # State stays 'submitting' → the next poll resumes only the not-yet-submitted indexes.
+        logger.error(
+            "segmented_video_i2v_submit_failed",
+            post_id=post_id,
+            correlation_id=correlation_id,
+            error=str(exc),
+            message="i2v segment submission failed; remaining segments retry on next poll.",
+        )
+        return
+
+    metadata = mark_i2v_submitted(metadata)
+    _persist_segment_metadata(post_id, metadata, correlation_id)
+    _mark_processing(post_id, correlation_id, post.get("video_operation_id") or anchor_uri)
 
 
 def _handle_veo_video(post: Dict[str, Any], operation_id: str, correlation_id: str) -> None:

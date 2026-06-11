@@ -185,3 +185,87 @@ def test_handle_segmented_video_fails_when_any_segment_fails(monkeypatch):
 
     assert any(u.get("video_status") == vp.VIDEO_STATUS_FAILED for u in fake_sb.updates)
     assert released.get("reservation_key") == "resv-1"  # reserved units released on failure
+
+
+# --------------------------------------------------------------------------------------
+# Identity-lock (image-to-video) poller flow
+# --------------------------------------------------------------------------------------
+
+def _i2v_lock(state):
+    lock = sp.build_i2v_lock(
+        provider="vertex_ai", aspect_ratio="9:16", provider_aspect_ratio="9:16", resolution="720p",
+        duration_seconds=8, model="veo-3.1-generate-001", output_gcs_uri=None, beats=["beat 0", "beat 1"],
+    )
+    lock["state"] = state
+    return lock
+
+
+def _i2v_post(*, lock_state, ops):
+    return {
+        "id": "post-1",
+        "video_provider": "veo_3_1",
+        "video_operation_id": "op-0",
+        "video_metadata": {
+            "video_pipeline_route": vp_profiles.VEO_SEGMENTED_VIDEO_ROUTE,
+            "veo_segment_count": 2,
+            "veo_seed": 7,
+            "veo_segment_ops": ops,
+            "i2v_lock": _i2v_lock(lock_state),
+        },
+    }
+
+
+def test_handle_segmented_video_submits_i2v_when_anchor_completes(monkeypatch):
+    fake_sb = _FakeSupabase()
+    _patch_common(monkeypatch, fake_sb)
+    fake_veo = _FakeVeoClient({"op-0": (True, "gs://seg/0.mp4", False)})  # anchor completes this poll
+    monkeypatch.setattr(vp, "get_veo_client", lambda: fake_veo)
+    monkeypatch.setattr(vp, "_download_segment_bytes", lambda *a, **k: b"ANCHOR_BYTES")
+    monkeypatch.setattr(vp, "record_prompt_audit", lambda **kw: None)
+    monkeypatch.setattr(
+        vp, "stitch_segments", lambda **kw: (_ for _ in ()).throw(AssertionError("must not stitch yet"))
+    )
+    marked = {}
+    monkeypatch.setattr(vp, "_mark_processing", lambda pid, cid, op: marked.update({"post": pid}))
+
+    captured = {}
+    def _fake_submit(*, post_id, metadata, anchor_video_bytes, correlation_id, persist_op):
+        captured["anchor_bytes"] = anchor_video_bytes
+        persist_op(1, "i2v-op-1", "i2v-prompt-1", {"provider_metadata": {}})  # simulate one i2v submit
+        return [{"index": 1, "operation_id": "i2v-op-1"}]
+    monkeypatch.setattr(vp, "submit_locked_segments", _fake_submit)
+
+    ops = [
+        {"index": 0, "operation_id": "op-0", "status": "submitted", "video_uri": None, "kind": sp.SEGMENT_KIND_ANCHOR},
+        {"index": 1, "operation_id": None, "status": "pending", "video_uri": None, "kind": sp.SEGMENT_KIND_I2V},
+    ]
+    vp._handle_segmented_video(_i2v_post(lock_state=sp.I2V_STATE_PENDING, ops=ops), "corr")
+
+    assert captured.get("anchor_bytes") == b"ANCHOR_BYTES"  # anchor frame source downloaded
+    final_meta = fake_sb.updates[-1]["video_metadata"]
+    assert final_meta["i2v_lock"]["state"] == sp.I2V_STATE_SUBMITTED  # fan-out marked done
+    assert any(o["index"] == 1 and o["operation_id"] == "i2v-op-1" for o in final_meta["veo_segment_ops"])
+    assert marked.get("post") == "post-1"  # still processing, not stitched
+
+
+def test_handle_segmented_video_stitches_after_i2v_segments_complete(monkeypatch):
+    fake_sb = _FakeSupabase()
+    _patch_common(monkeypatch, fake_sb)
+    # Anchor already done; the submitted i2v segment completes this poll → ready to stitch.
+    fake_veo = _FakeVeoClient({"op-0": (True, "gs://seg/0.mp4", False), "i2v-op-1": (True, "gs://seg/1.mp4", False)})
+    monkeypatch.setattr(vp, "get_veo_client", lambda: fake_veo)
+    monkeypatch.setattr(
+        vp, "submit_locked_segments", lambda **kw: (_ for _ in ()).throw(AssertionError("already submitted"))
+    )
+    monkeypatch.setattr(vp, "stitch_segments", lambda **kw: (b"FINAL", {"output_duration_seconds": 16.0}))
+    stored = {}
+    monkeypatch.setattr(vp, "_store_completed_video", lambda **kw: stored.update(kw))
+
+    ops = [
+        {"index": 0, "operation_id": "op-0", "status": "completed", "video_uri": "gs://seg/0.mp4", "kind": sp.SEGMENT_KIND_ANCHOR},
+        {"index": 1, "operation_id": "i2v-op-1", "status": "submitted", "video_uri": None, "kind": sp.SEGMENT_KIND_I2V},
+    ]
+    vp._handle_segmented_video(_i2v_post(lock_state=sp.I2V_STATE_SUBMITTED, ops=ops), "corr")
+
+    assert fake_veo.downloaded == ["gs://seg/0.mp4", "gs://seg/1.mp4"]  # both segments stitched in order
+    assert stored.get("video_source") == b"FINAL"
