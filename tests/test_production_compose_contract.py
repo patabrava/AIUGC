@@ -61,6 +61,8 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     assert any(".env.production" in entry for entry in web["env_file"])
     assert web["environment"]["DISABLE_BACKGROUND_SCHEDULERS"] == "${DISABLE_BACKGROUND_SCHEDULERS:-true}"
     assert web["environment"]["DISABLE_STARTUP_RECOVERY_CHECKS"] == "${DISABLE_STARTUP_RECOVERY_CHECKS:-true}"
+    assert web["environment"]["VEO_ENABLE_SEGMENTED_ROUTE"] == "${VEO_ENABLE_SEGMENTED_ROUTE:-true}"
+    assert worker["environment"]["VEO_ENABLE_SEGMENTED_ROUTE"] == "${VEO_ENABLE_SEGMENTED_ROUTE:-true}"
     assert "DOCKER_BUILD_CONTEXT" not in compose_text
     assert "/opt/aiugc-prod/.env.production" not in compose_text
     assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
@@ -90,6 +92,8 @@ def test_legacy_compose_files_follow_production_build_contract():
         assert any(".env.production" in entry for entry in web["env_file"])
         assert web["environment"]["DISABLE_BACKGROUND_SCHEDULERS"] == "${DISABLE_BACKGROUND_SCHEDULERS:-true}"
         assert web["environment"]["DISABLE_STARTUP_RECOVERY_CHECKS"] == "${DISABLE_STARTUP_RECOVERY_CHECKS:-true}"
+        assert web["environment"]["VEO_ENABLE_SEGMENTED_ROUTE"] == "${VEO_ENABLE_SEGMENTED_ROUTE:-true}"
+        assert worker["environment"]["VEO_ENABLE_SEGMENTED_ROUTE"] == "${VEO_ENABLE_SEGMENTED_ROUTE:-true}"
         assert "DOCKER_BUILD_CONTEXT" not in compose_text
         assert "git clone" not in compose_text
         assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
@@ -123,6 +127,7 @@ def test_hostinger_runtime_checkout_tracks_remote_main():
     assert 'git reset --hard "origin/$$repo_ref"' in compose_text
     assert "traefik.http.routers.lippelift-prod-web-v4.rule" in compose_text
     assert "TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-production}" in compose_text
+    assert "VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}" in compose_text
     assert "external: true" not in compose_text
 
 
@@ -152,6 +157,9 @@ def test_github_action_deploys_on_push_to_main():
     assert "Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)" in step_text
     assert "Triggered Hostinger action" in step_text
     assert "https://lippelift.xyz/health >/dev/null" in step_text
+    assert "Production video routing verified" in step_text
+    assert "tier_32_route" in step_text
+    assert "veo_segmented" in step_text
     assert "Production readiness is degraded" not in step_text
     assert "appleboy/ssh-action" not in step_text
     assert "scripts/deploy/production.sh" not in step_text

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from types import SimpleNamespace
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -18,6 +19,8 @@ os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
+from app.core.video_profiles import VEO_SEGMENTED_VIDEO_ROUTE
+import app.core.video_profiles as video_profiles
 from app.main import app
 import app.main as main_module
 import app.adapters.supabase_client as supabase_client_module
@@ -212,15 +215,45 @@ def test_app_lifespan_logs_google_ai_context_fingerprint(monkeypatch):
     startup = startup_events[0]
     assert startup["gemini_api_key_present"] is True
     assert startup["gemini_api_key_fingerprint"] == fingerprint_secret("test-google-key")
-    assert startup["google_ai_project_id"] == "unset"
+    assert startup["vertex_ai_project_id"] == "unset"
+    assert startup["video_routes"]["tier_32_route"] in {"veo_extended", VEO_SEGMENTED_VIDEO_ROUTE}
+
+
+def test_livez_exposes_non_secret_video_route_fingerprint(monkeypatch):
+    settings = SimpleNamespace(
+        environment="production",
+        veo_enable_segmented_route=True,
+        veo_enable_efficient_long_route=True,
+    )
+    monkeypatch.setattr(main_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(video_profiles, "get_settings", lambda: settings)
+
+    import asyncio
+
+    response = asyncio.run(main_module.live_check())
+
+    assert response["status"] == "alive"
+    assert response["environment"] == "production"
+    assert response["video_routes"] == {
+        "segmented_route_enabled": True,
+        "tier_16_route": VEO_SEGMENTED_VIDEO_ROUTE,
+        "tier_32_route": VEO_SEGMENTED_VIDEO_ROUTE,
+    }
 
 
 def test_google_ai_context_fingerprint_is_stable_and_redacted():
     from app.core.config import fingerprint_secret, google_ai_context_fingerprint
 
     class DummySettings:
+        gemini_provider = "vertex"
+        gemini_deep_research_provider = "vertex_grounded"
+        gemini_api_fallback_enabled = False
         gemini_api_key = "alpha-key"
-        google_ai_project_id = "project-123"
+        vertex_ai_project_id = "project-123"
+        vertex_ai_location = "us-central1"
+        vertex_grounded_research_location = "global"
+        google_application_credentials = ""
+        google_application_credentials_json = ""
 
     first = google_ai_context_fingerprint(DummySettings())
     second = google_ai_context_fingerprint(DummySettings())
@@ -229,7 +262,7 @@ def test_google_ai_context_fingerprint_is_stable_and_redacted():
     assert first["gemini_api_key_present"] is True
     assert first["gemini_api_key_fingerprint"] == fingerprint_secret("alpha-key")
     assert first["gemini_api_key_fingerprint"] != "alpha-key"
-    assert first["google_ai_project_id"] == "project-123"
+    assert first["vertex_ai_project_id"] == "project-123"
 
 
 def test_supabase_adapter_uses_valid_service_key(monkeypatch):

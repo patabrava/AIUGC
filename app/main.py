@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings, google_ai_context_fingerprint
+from app.core.video_profiles import get_duration_profile_for_creation_mode
 from app.core.logging import configure_logging, get_logger, set_correlation_id
 from app.core.errors import FlowForgeException, ErrorResponse, error_code_for_status
 from app.adapters.supabase_client import get_supabase
@@ -61,6 +62,18 @@ _health_db_cache = {
 settings = get_settings()
 
 
+def _video_route_fingerprint() -> dict:
+    """Expose non-secret video routing state for deployment verification."""
+    current_settings = get_settings()
+    profile_16 = get_duration_profile_for_creation_mode(16, "automated")
+    profile_32 = get_duration_profile_for_creation_mode(32, "automated")
+    return {
+        "segmented_route_enabled": bool(getattr(current_settings, "veo_enable_segmented_route", False)),
+        "tier_16_route": profile_16.route,
+        "tier_32_route": profile_32.route,
+    }
+
+
 def _trusted_hosts_from_settings() -> list[str]:
     hosts = {"localhost", "127.0.0.1", "[::1]", "testserver"}
     if settings.app_url:
@@ -82,6 +95,7 @@ async def lifespan(app: FastAPI):
         environment=settings.environment,
         debug=settings.debug,
         **google_ai_context_fingerprint(settings),
+        video_routes=_video_route_fingerprint(),
     )
     logger.info(
         "gemini_provider_alignment_verified",
@@ -393,6 +407,7 @@ async def live_check():
         "status": "alive",
         "version": "1.0.0",
         "environment": settings.environment,
+        "video_routes": _video_route_fingerprint(),
     }
 
 

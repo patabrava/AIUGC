@@ -9,6 +9,7 @@ services:
     environment:
       DISABLE_BACKGROUND_SCHEDULERS: ${DISABLE_BACKGROUND_SCHEDULERS:-true}
       DISABLE_STARTUP_RECOVERY_CHECKS: ${DISABLE_STARTUP_RECOVERY_CHECKS:-true}
+      VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     expose:
       - "8000"
@@ -28,6 +29,8 @@ services:
     restart: unless-stopped
     env_file:
       - ${APP_ENV_FILE:-.env.production}
+    environment:
+      VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
     command: python workers/video_poller.py
 
   expansion-worker:
@@ -38,6 +41,7 @@ services:
     env_file:
       - ${APP_ENV_FILE:-.env.production}
     environment:
+      VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
       VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION: ${VIDEO_POLLER_ENABLE_SCRIPT_BANK_EXPANSION:-false}
     command: python workers/expansion_worker.py
 
@@ -48,6 +52,8 @@ services:
     restart: unless-stopped
     env_file:
       - ${APP_ENV_FILE:-.env.production}
+    environment:
+      VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
     command: python workers/topic_worker.py
 
   caption-worker:
@@ -57,4 +63,6 @@ services:
     restart: unless-stopped
     env_file:
       - ${APP_ENV_FILE:-.env.production}
+    environment:
+      VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
     command: python -m workers.caption_worker
