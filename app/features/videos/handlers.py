@@ -1063,6 +1063,89 @@ def _persist_submission_failure(
     )
 
 
+def _batch_skip_record(
+    *,
+    post_id: Optional[str],
+    reason: str,
+    stage: str,
+    message: Optional[str] = None,
+    code: Optional[Any] = None,
+) -> Dict[str, Any]:
+    record: Dict[str, Any] = {
+        "post_id": post_id,
+        "reason": reason,
+        "stage": stage,
+    }
+    if code is not None:
+        record["code"] = str(code)
+    if message:
+        record["message"] = str(message)[:500]
+    return record
+
+
+def _persist_unexpected_submission_failure(
+    *,
+    supabase_client: Any,
+    post: Dict[str, Any],
+    submission_plan: Dict[str, Any],
+    error: Exception,
+    correlation_id: str,
+) -> None:
+    metadata = dict(post.get("video_metadata") or {})
+    requested_aspect_ratio = submission_plan.get("requested_aspect_ratio") or submission_plan.get("aspect_ratio")
+    profile = submission_plan.get("profile")
+    metadata.update(
+        {
+            "provider": submission_plan.get("provider"),
+            "provider_status": "failed",
+            "error": str(error)[:1000],
+            "error_type": error.__class__.__name__,
+            "error_code": "unexpected_submission_error",
+            "failed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    )
+    if requested_aspect_ratio:
+        metadata["requested_aspect_ratio"] = requested_aspect_ratio
+    if submission_plan.get("resolution"):
+        metadata["requested_resolution"] = submission_plan["resolution"]
+    if submission_plan.get("seconds") is not None:
+        metadata["requested_seconds"] = submission_plan["seconds"]
+    if submission_plan.get("requested_size"):
+        metadata["requested_size"] = submission_plan["requested_size"]
+    if submission_plan.get("provider_aspect_ratio"):
+        metadata["provider_aspect_ratio"] = submission_plan["provider_aspect_ratio"]
+    if submission_plan.get("provider_requested_size"):
+        metadata["provider_requested_size"] = submission_plan["provider_requested_size"]
+    if profile is not None:
+        metadata["target_length_tier"] = profile.target_length_tier
+        metadata["video_pipeline_route"] = profile.route
+        metadata["provider_target_seconds"] = profile.provider_target_seconds
+
+    supabase_client.table("posts").update(
+        {
+            "video_provider": submission_plan.get("provider"),
+            "video_format": requested_aspect_ratio,
+            "video_status": "failed",
+            "video_metadata": metadata,
+        }
+    ).eq("id", post.get("id")).execute()
+    post["video_status"] = "failed"
+    post["video_metadata"] = metadata
+
+    logger.warning(
+        "video_unexpected_submission_failure_persisted",
+        post_id=post.get("id"),
+        batch_id=post.get("batch_id"),
+        correlation_id=correlation_id,
+        provider=submission_plan.get("provider"),
+        error_type=error.__class__.__name__,
+    )
+
+
+def _is_veo_submission_provider(provider: Optional[str]) -> bool:
+    return provider in {VEO_PROVIDER, "vertex_ai"}
+
+
 def _resolve_poller_scope(settings: Any) -> str:
     app_url = str(getattr(settings, "app_url", "") or "").strip()
     if app_url:
@@ -2498,6 +2581,7 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
         skipped_count = 0
         submitted_post_ids = []
         prepared_submissions = []
+        skipped_posts: list[Dict[str, Any]] = []
         last_provider_model: Optional[str] = None
         batch_submission_provider = "vertex_ai" if uses_duration_routing(batch) else _resolve_non_duration_provider(request.provider)
         batch_veo_seed = (
@@ -2518,6 +2602,13 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     batch_id=batch_id
                 )
                 skipped_count += 1
+                skipped_posts.append(
+                    _batch_skip_record(
+                        post_id=post_id,
+                        reason="removed_or_excluded",
+                        stage="preflight",
+                    )
+                )
                 continue
 
             if post.get("video_status") in ["submitted", "processing", "completed", "extended_submitted", "extended_processing"]:
@@ -2528,6 +2619,14 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     status=post.get("video_status")
                 )
                 skipped_count += 1
+                skipped_posts.append(
+                    _batch_skip_record(
+                        post_id=post_id,
+                        reason="already_submitted",
+                        stage="preflight",
+                        message=f"video_status={post.get('video_status')}",
+                    )
+                )
                 continue
 
             submission_plan = _resolve_video_submission_plan(
@@ -2576,6 +2675,15 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     error=exc.message,
                 )
                 skipped_count += 1
+                skipped_posts.append(
+                    _batch_skip_record(
+                        post_id=post_id,
+                        reason="prompt_unavailable",
+                        stage="load_or_build_prompt",
+                        message=exc.message,
+                        code=exc.code,
+                    )
+                )
                 continue
 
             script_contract = _validate_post_duration_contract_for_video(
@@ -2643,10 +2751,17 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     segments=segment_metadata.get("veo_segment_spoken_budgets") if segment_metadata else None,
                 )
 
-        veo_submissions = [item for item in prepared_submissions if item["submission_plan"]["provider"] == VEO_PROVIDER]
+        veo_submissions = [
+            item
+            for item in prepared_submissions
+            if _is_veo_submission_provider(item["submission_plan"]["provider"])
+        ]
         reserved_keys = []
         if veo_submissions and not quota_controls_bypassed():
-            ensure_immediate_submit_slot(requested_units=len(veo_submissions), provider=VEO_PROVIDER)
+            ensure_immediate_submit_slot(
+                requested_units=sum(int(item["quota_requested_units"] or 0) for item in veo_submissions),
+                provider=VEO_PROVIDER,
+            )
             try:
                 for item in veo_submissions:
                     reservation_key = build_reservation_key(
@@ -2778,6 +2893,15 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         )
                         _write_recovery_record(post_id, first_operation_id, submission_plan["provider"], correlation_id)
                         skipped_count += 1
+                        skipped_posts.append(
+                            _batch_skip_record(
+                                post_id=post_id,
+                                reason="db_update_failed_after_submit",
+                                stage="segmented_db_update",
+                                message=str(db_error),
+                                code=db_error.__class__.__name__,
+                            )
+                        )
                         continue
 
                     submitted_count += 1
@@ -2819,8 +2943,17 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         details=exc.details,
                     )
                     skipped_count += 1
+                    skipped_posts.append(
+                        _batch_skip_record(
+                            post_id=post_id,
+                            reason="submission_error",
+                            stage="segmented_submit",
+                            message=exc.message,
+                            code=exc.code,
+                        )
+                    )
                     if (
-                        submission_plan["provider"] == VEO_PROVIDER
+                        _is_veo_submission_provider(submission_plan["provider"])
                         and exc.status_code == 429
                         and not exc.details.get("blocked_before_submit")
                     ):
@@ -2850,6 +2983,31 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                         error=str(e),
                     )
                     skipped_count += 1
+                    try:
+                        _persist_unexpected_submission_failure(
+                            supabase_client=supabase,
+                            post=post,
+                            submission_plan=submission_plan,
+                            error=e,
+                            correlation_id=f"{correlation_id}_{post_id}",
+                        )
+                    except Exception as persist_error:  # noqa: BLE001
+                        logger.warning(
+                            "batch_video_unexpected_failure_persist_failed",
+                            post_id=post_id,
+                            batch_id=batch_id,
+                            correlation_id=correlation_id,
+                            error=str(persist_error),
+                        )
+                    skipped_posts.append(
+                        _batch_skip_record(
+                            post_id=post_id,
+                            reason="unexpected_submission_error",
+                            stage="segmented_submit",
+                            message=str(e),
+                            code=e.__class__.__name__,
+                        )
+                    )
                 continue
 
             try:
@@ -2978,6 +3136,15 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     )
                     _write_recovery_record(post_id, operation_id, submission_plan["provider"], correlation_id)
                     skipped_count += 1
+                    skipped_posts.append(
+                        _batch_skip_record(
+                            post_id=post_id,
+                            reason="db_update_failed_after_submit",
+                            stage="standard_db_update",
+                            message=str(db_error),
+                            code=db_error.__class__.__name__,
+                        )
+                    )
                     continue
 
                 submitted_count += 1
@@ -3022,8 +3189,17 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     details=exc.details
                 )
                 skipped_count += 1
+                skipped_posts.append(
+                    _batch_skip_record(
+                        post_id=post_id,
+                        reason="submission_error",
+                        stage="standard_submit",
+                        message=exc.message,
+                        code=exc.code,
+                    )
+                )
                 if (
-                    submission_plan["provider"] == VEO_PROVIDER
+                    _is_veo_submission_provider(submission_plan["provider"])
                     and exc.status_code == 429
                     and not exc.details.get("blocked_before_submit")
                 ):
@@ -3053,6 +3229,31 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     error=str(e)
                 )
                 skipped_count += 1
+                try:
+                    _persist_unexpected_submission_failure(
+                        supabase_client=supabase,
+                        post=post,
+                        submission_plan=submission_plan,
+                        error=e,
+                        correlation_id=f"{correlation_id}_{post_id}",
+                    )
+                except Exception as persist_error:  # noqa: BLE001
+                    logger.warning(
+                        "batch_video_unexpected_failure_persist_failed",
+                        post_id=post_id,
+                        batch_id=batch_id,
+                        correlation_id=correlation_id,
+                        error=str(persist_error),
+                    )
+                skipped_posts.append(
+                    _batch_skip_record(
+                        post_id=post_id,
+                        reason="unexpected_submission_error",
+                        stage="standard_submit",
+                        message=str(e),
+                        code=e.__class__.__name__,
+                    )
+                )
         
         logger.info(
             "batch_videos_submitted",
@@ -3080,7 +3281,8 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                 post_ids=submitted_post_ids,
                 provider_model=last_provider_model,
                 seconds=request.seconds,
-                size=request.size or _map_size_from_aspect_ratio(request.aspect_ratio, request.resolution)
+                size=request.size or _map_size_from_aspect_ratio(request.aspect_ratio, request.resolution),
+                skipped_posts=skipped_posts,
             ).model_dump()
         )
     

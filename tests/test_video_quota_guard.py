@@ -281,11 +281,12 @@ def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_brea
 
     request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=16)
 
-    response = asyncio.run(generate_all_videos("batch-1", request))
+    with pytest.raises(FlowForgeException):
+        asyncio.run(generate_all_videos("batch-1", request))
 
-    assert response.data["provider"] == "vertex_ai"
-    assert submit_mock.call_count == 2
-    assert released == []
+    submit_mock.assert_not_called()
+    assert len(reservations) == 2
+    assert released == [reservations[0]]
 
 
 def test_duration_profile_cost_switches_when_experiment_flag_enabled(monkeypatch):
@@ -301,6 +302,7 @@ def test_duration_profile_cost_switches_when_experiment_flag_enabled(monkeypatch
     assert profile_32.veo_base_seconds == 8
     assert chain_cost_units(profile_16, provider="veo_3_1") == 2
     assert chain_cost_units(profile_32, provider="veo_3_1") == 4
+    assert chain_cost_units(profile_32, provider="vertex_ai") == 4
 
 
 def test_generate_video_keeps_text_only_path_for_veo(monkeypatch):
@@ -543,6 +545,60 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
     assert captured["scene_reference_set"] is None
     assert captured["submission_plan"]["profile"].route == "veo_segmented"
     assert posts[0]["video_status"] == "submitted"
+    assert posts[0]["video_metadata"]["video_pipeline_route"] == "veo_segmented"
+
+
+def test_generate_all_videos_persists_unexpected_segmented_submit_failure(monkeypatch):
+    posts = [
+        {
+            "id": "post-segmented-fail",
+            "batch_id": "batch-32",
+            "post_type": "value",
+            "video_prompt_json": {"veo_prompt": "Prompt 32", "audio": {"dialogue": _valid_32s_script()}},
+            "seed_data": {"script": _valid_32s_script(), "script_review_status": "approved"},
+            "video_status": "failed",
+            "video_metadata": {"prior": "value"},
+        },
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr(
+        "app.features.videos.handlers.get_batch_by_id",
+        lambda batch_id: {"id": batch_id, "target_length_tier": 32, "creation_mode": "automated"},
+    )
+    monkeypatch.setattr(
+        "app.core.video_profiles.get_settings",
+        lambda: SimpleNamespace(veo_enable_segmented_route=True, veo_enable_efficient_long_route=True),
+    )
+    monkeypatch.setattr("app.features.videos.handlers.quota_controls_bypassed", lambda: True)
+    monkeypatch.setattr("app.features.videos.handlers.release_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "app.features.videos.handlers._submit_segmented_post",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("Vertex credentials missing")),
+    )
+
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=32)
+    response = asyncio.run(generate_all_videos("batch-32", request))
+
+    assert response.data["submitted_count"] == 0
+    assert response.data["skipped_count"] == 1
+    assert response.data["skipped_posts"] == [
+        {
+            "post_id": "post-segmented-fail",
+            "reason": "unexpected_submission_error",
+            "stage": "segmented_submit",
+            "code": "RuntimeError",
+            "message": "Vertex credentials missing",
+        }
+    ]
+    assert posts[0]["video_status"] == "failed"
+    assert posts[0]["video_provider"] == "vertex_ai"
+    assert posts[0]["video_metadata"]["prior"] == "value"
+    assert posts[0]["video_metadata"]["error"] == "Vertex credentials missing"
+    assert posts[0]["video_metadata"]["error_code"] == "unexpected_submission_error"
     assert posts[0]["video_metadata"]["video_pipeline_route"] == "veo_segmented"
 
 

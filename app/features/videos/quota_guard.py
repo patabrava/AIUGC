@@ -23,6 +23,13 @@ logger = get_logger(__name__)
 
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 VEO_PROVIDER = "veo_3_1"
+VERTEX_AI_PROVIDER_ALIAS = "vertex_ai"
+
+
+def normalize_quota_provider(provider: str) -> str:
+    if provider == VERTEX_AI_PROVIDER_ALIAS:
+        return VEO_PROVIDER
+    return provider
 
 
 def _settings_limits() -> Dict[str, int]:
@@ -68,6 +75,7 @@ def build_quota_day_pt(now: Optional[datetime] = None) -> str:
 
 
 def chain_cost_units(profile: Optional[DurationProfile], *, provider: str) -> int:
+    provider = normalize_quota_provider(provider)
     if provider != VEO_PROVIDER:
         return 0
     if profile is None:
@@ -88,6 +96,7 @@ def _rpc(function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_quota_snapshot(*, provider: str = VEO_PROVIDER) -> Dict[str, Any]:
+    provider = normalize_quota_provider(provider)
     payload = {
         "p_provider": provider,
         **{f"p_{key}": value for key, value in _settings_limits().items()},
@@ -132,6 +141,7 @@ def raise_quota_block(reason: str, snapshot: Dict[str, Any], *, requested_units:
 
 
 def ensure_immediate_submit_slot(*, requested_units: int = 1, provider: str = VEO_PROVIDER) -> Dict[str, Any]:
+    provider = normalize_quota_provider(provider)
     snapshot = get_quota_snapshot(provider=provider)
     if _quota_controls_bypassed():
         logger.warning(
@@ -158,6 +168,7 @@ def reserve_quota(
     require_immediate_slot: bool,
     reservation_kind: str = "video_chain",
 ) -> Dict[str, Any]:
+    provider = normalize_quota_provider(provider)
     if _quota_controls_bypassed():
         logger.warning(
             "quota_reservation_bypassed",
@@ -285,6 +296,7 @@ def release_quota(
 
 
 def freeze_provider_quota(*, provider: str, reason: str) -> Dict[str, Any]:
+    provider = normalize_quota_provider(provider)
     if _quota_controls_bypassed():
         logger.warning(
             "quota_guard_freeze_bypassed",

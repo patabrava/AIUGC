@@ -6,7 +6,7 @@ Per Canon § 5: API Contracts
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from typing import Any, Dict, Optional, Literal
 
 
 class VideoGenerationRequest(BaseModel):
@@ -223,4 +223,8 @@ class BatchVideoGenerationResponse(BaseModel):
     size: Optional[str] = Field(
         default=None,
         description="Pixel dimensions applied to submissions"
+    )
+    skipped_posts: list[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Safe per-post skip diagnostics for failed or skipped submissions"
     )
