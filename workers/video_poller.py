@@ -355,6 +355,10 @@ def _clear_terminal_polling_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]
         "veo_extension_last_retryable_error",
         "veo_extension_rate_limit_retry_count",
         "veo_extension_input_retry_count",
+        "trim_tail_ms",
+        "trim_original_duration_ms",
+        "trim_final_duration_ms",
+        "trim_tail_skipped",
         "last_poll_recovery",
     ):
         cleaned.pop(key, None)

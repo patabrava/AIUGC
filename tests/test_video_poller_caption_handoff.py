@@ -124,6 +124,10 @@ class TestPollerCaptionHandoff:
                 "veo_extension_last_retryable_error": "retry later",
                 "veo_extension_rate_limit_retry_count": 3,
                 "veo_extension_input_retry_count": 2,
+                "trim_tail_ms": 500,
+                "trim_original_duration_ms": 30427,
+                "trim_final_duration_ms": 30125,
+                "trim_tail_skipped": True,
                 "last_poll_recovery": "startup_expired_lease_cleanup",
             },
             "batch_id": "batch_123",
@@ -161,6 +165,10 @@ class TestPollerCaptionHandoff:
                 assert "veo_extension_retry_after" not in metadata
                 assert "veo_extension_last_retryable_error" not in metadata
                 assert "veo_extension_input_retry_count" not in metadata
+                assert "trim_tail_ms" not in metadata
+                assert "trim_original_duration_ms" not in metadata
+                assert "trim_final_duration_ms" not in metadata
+                assert "trim_tail_skipped" not in metadata
         assert found, "No update call set terminal caption_pending cleanup"
 
     @patch("workers.video_poller._trim_tail", return_value=(b"fake_video_bytes", {}))
