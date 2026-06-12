@@ -199,6 +199,42 @@ def test_submit_video_request_threads_selected_vertex_model(monkeypatch):
     assert result["requested_model"] == "veo-3.1-lite-generate-001"
 
 
+def test_submit_video_request_forces_full_vertex_model_for_character_consistency(monkeypatch):
+    captured = {}
+
+    class FakeVertexClient:
+        def submit_text_video(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-cc",
+                "status": "submitted",
+                "provider_model": kwargs["model"],
+            }
+
+    monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
+    monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": ""})())
+
+    result = video_handlers._submit_video_request(
+        provider="vertex_ai",
+        model="veo-3.1-fast-generate-001",
+        prompt_text="Hallo Welt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="720p",
+        seconds=8,
+        size="720x1280",
+        correlation_id="corr-vertex-cc-model",
+        provider_duration_seconds=8,
+        creation_mode="character_consistency",
+    )
+
+    assert captured["model"] == "veo-3.1-generate-001"
+    assert result["provider_model"] == "veo-3.1-generate-001"
+    assert result["requested_model"] == "veo-3.1-generate-001"
+
+
 def test_submit_video_request_translates_vertex_http_errors(monkeypatch):
     request = httpx.Request("POST", "https://vertex.example.test")
     response = httpx.Response(

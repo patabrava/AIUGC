@@ -818,6 +818,38 @@ def test_build_batch_detail_view_defaults_new_batch_to_fast_veo_model():
     assert view["video_submission_ready_count"] == 1
 
 
+def test_build_batch_detail_view_forces_character_consistency_to_full_veo_model():
+    batch_payload = {
+        "state": "S5_PROMPTS_BUILT",
+        "creation_mode": "character_consistency",
+        "target_length_tier": 16,
+        "meta_connection": {},
+        "tiktok_connection": {},
+        "posts": [
+            {
+                "id": "post-ready",
+                "post_type": "value",
+                "topic_title": "Ready",
+                "video_url": None,
+                "video_status": None,
+                "video_prompt_json": {"veo_prompt": "Prompt"},
+                "video_metadata": {
+                    "requested_model": "veo-3.1-fast-generate-001",
+                    "provider_model": "veo-3.1-fast-generate-001",
+                },
+                "seed_data": {
+                    "script_review_status": "approved",
+                },
+            },
+        ],
+    }
+
+    view = batch_handlers._build_batch_detail_view(batch_payload)
+
+    assert view["video_generation_settings"]["initial_model"] == "veo-3.1-generate-001"
+    assert view["video_submission_ready_count"] == 1
+
+
 def test_build_batch_detail_view_excludes_already_submitted_posts_from_video_total():
     batch_payload = {
         "state": "S5_PROMPTS_BUILT",

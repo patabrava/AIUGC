@@ -55,7 +55,7 @@ from app.features.publish.handlers import (
 from app.features.blog.schemas import normalize_blog_content
 from app.features.topics.captions import resolve_display_caption
 from app.features.characters import queries as character_queries
-from app.features.characters.actor_identity import is_manual_creation_mode
+from app.features.characters.actor_identity import is_character_consistency_mode, is_manual_creation_mode
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -504,19 +504,22 @@ def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
 def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: list[Dict[str, Any]]) -> Dict[str, Any]:
     """Derive batch-level video settings so the UI can rehydrate across HTMX rerenders."""
     initial_model = "veo-3.1-fast-generate-001"
+    if is_character_consistency_mode(batch_detail.get("creation_mode")):
+        initial_model = "veo-3.1-generate-001"
 
-    for post in reversed(posts):
-        video_metadata = post.get("video_metadata") or {}
-        if not isinstance(video_metadata, dict):
-            continue
-        requested_model = str(video_metadata.get("requested_model") or "").strip()
-        provider_model = str(video_metadata.get("provider_model") or "").strip()
-        if requested_model:
-            initial_model = requested_model
-            break
-        if provider_model.startswith("veo-"):
-            initial_model = provider_model
-            break
+    if not is_character_consistency_mode(batch_detail.get("creation_mode")):
+        for post in reversed(posts):
+            video_metadata = post.get("video_metadata") or {}
+            if not isinstance(video_metadata, dict):
+                continue
+            requested_model = str(video_metadata.get("requested_model") or "").strip()
+            provider_model = str(video_metadata.get("provider_model") or "").strip()
+            if requested_model:
+                initial_model = requested_model
+                break
+            if provider_model.startswith("veo-"):
+                initial_model = provider_model
+                break
 
     return {
         "initial_model": initial_model,

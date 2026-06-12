@@ -110,6 +110,8 @@ from app.features.videos.schemas import (
 )
 
 logger = get_logger(__name__)
+
+_VERTEX_CHARACTER_CONSISTENCY_MODEL = "veo-3.1-generate-001"
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 _WORDS_PER_SECOND = 2.5
@@ -3760,6 +3762,7 @@ def _submit_video_request(
         vertex_duration = provider_duration_seconds or seconds
         output_gcs_uri = settings.vertex_ai_output_gcs_uri or None
         mode = str(creation_mode or "automated").strip()
+        model_name = _VERTEX_CHARACTER_CONSISTENCY_MODEL if is_character_consistency_mode(mode) else model
         reference_bundle = None
         reference_skip_metadata: Dict[str, Any] = {}
         if is_character_consistency_mode(mode):
@@ -3857,7 +3860,7 @@ def _submit_video_request(
                 aspect_ratio=aspect_ratio,
                 duration_seconds=vertex_duration,
                 output_gcs_uri=output_gcs_uri,
-                model=model,
+                model=model_name,
                 reference_images=reference_images,
                 negative_prompt=negative_prompt,
                 seed=seed,
@@ -3924,8 +3927,8 @@ def _submit_video_request(
         return {
             "operation_id": result["operation_id"],
             "status": result.get("status", "submitted"),
-            "provider_model": result.get("provider_model", "vertex_ai"),
-            "requested_model": model,
+            "provider_model": result.get("provider_model", model_name or "vertex_ai"),
+            "requested_model": model_name,
             "requested_size": requested_size,
             "provider_requested_size": requested_size,
             "estimated_duration_seconds": 180,

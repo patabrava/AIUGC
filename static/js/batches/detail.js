@@ -199,6 +199,7 @@
 
     window.videoSettingsComponent = function (options = {}) {
         const DEFAULT_MODEL = 'veo-3.1-fast-generate-001';
+        const CHARACTER_CONSISTENCY_MODEL = 'veo-3.1-generate-001';
         const supportedModels = {
             'veo-3.1-generate-001': 'Veo 3.1',
             'veo-3.1-fast-generate-001': 'Veo 3.1 Fast',
@@ -221,6 +222,7 @@
             batchId: options.batchId || null,
             targetLengthTier: options.targetLengthTier || null,
             pipelineRoute: options.pipelineRoute || null,
+            isCharacterConsistencyMode: Boolean(options.isCharacterConsistencyMode),
             videoSubmissionReadyCount: Number(options.videoSubmissionReadyCount || 0),
             provider: 'vertex_ai',
             model: DEFAULT_MODEL,
@@ -314,7 +316,7 @@
                     if (persisted?.provider === 'vertex_ai') {
                         this.provider = 'vertex_ai';
                     }
-                    if (persisted?.model && this.modelLabels[persisted.model]) {
+                    if (!this.isCharacterConsistencyMode && persisted?.model && this.modelLabels[persisted.model]) {
                         this.model = persisted.model;
                     }
                     if (!this.isDurationRouted && (persisted?.aspectRatio === '9:16' || persisted?.aspectRatio === '16:9')) {
@@ -420,6 +422,9 @@
                     this.model = options.initialModel;
                 }
                 this.restorePersistedSettings();
+                if (this.isCharacterConsistencyMode) {
+                    this.model = CHARACTER_CONSISTENCY_MODEL;
+                }
                 if (!this.modelLabels[this.model]) {
                     this.model = DEFAULT_MODEL;
                 }

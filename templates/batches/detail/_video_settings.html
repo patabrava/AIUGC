@@ -10,6 +10,7 @@
         pipelineRoute: {{ batch.video_pipeline_route | tojson }},
         initialModel: {{ batch_view.video_generation_settings.initial_model | tojson }},
         pricingTable: {{ batch_view.video_generation_settings.pricing_by_model | tojson }},
+        isCharacterConsistencyMode: {{ is_character_consistency_mode | tojson }},
         videoSubmissionReadyCount: {{ batch_view.video_submission_ready_count | tojson }}
     })'
 >
