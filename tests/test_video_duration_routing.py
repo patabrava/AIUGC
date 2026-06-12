@@ -379,6 +379,55 @@ def test_build_veo_extended_base_prompt_splits_long_unpunctuated_script_for_chai
     assert all(segment.strip() for segment in seg_meta["veo_segments"])
 
 
+def test_segmented_split_keeps_live_character_script_on_sentence_boundaries():
+    script = (
+        "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+        "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter. "
+        "Genau solche Kleinigkeiten entscheiden oft darüber, ob sich ein Weg leicht oder unnötig anstrengend anfühlt. "
+        "Darüber wird selten gesprochen, obwohl es im Rollstuhl-Alltag ständig wieder passiert. "
+        "Wenn du das einmal sauber gelöst hast, sparst du dir später Zeit, Kraft und Nerven."
+    )
+
+    segments = video_handlers._split_script_into_segments(script, 4)
+
+    assert segments == [
+        (
+            "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+            "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter."
+        ),
+        "Genau solche Kleinigkeiten entscheiden oft darüber, ob sich ein Weg leicht oder unnötig anstrengend anfühlt.",
+        "Darüber wird selten gesprochen, obwohl es im Rollstuhl-Alltag ständig wieder passiert.",
+        "Wenn du das einmal sauber gelöst hast, sparst du dir später Zeit, Kraft und Nerven.",
+    ]
+
+
+def test_segmented_non_final_prompts_finish_cleanly_before_cut():
+    script = (
+        "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+        "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter. "
+        "Genau solche Kleinigkeiten entscheiden oft darüber, ob sich ein Weg leicht oder unnötig anstrengend anfühlt. "
+        "Darüber wird selten gesprochen, obwohl es im Rollstuhl-Alltag ständig wieder passiert. "
+        "Wenn du das einmal sauber gelöst hast, sparst du dir später Zeit, Kraft und Nerven."
+    )
+
+    _beats, prompts = video_handlers._build_segmented_segment_prompts(
+        seed_data={"script": script},
+        video_prompt={
+            "audio": {"dialogue": script},
+            "character": "Actor Laura",
+            "scene": "Scene: living room",
+        },
+        segment_count=4,
+        creation_mode="character_consistency",
+        target_length_tier=32,
+    )
+
+    assert "Finish this segment's dialogue cleanly before the clip ends." in prompts[0]
+    assert "Do not start the next word or syllable." in prompts[0]
+    assert "Continue directly into the next segment" not in prompts[0]
+    assert "After the final spoken word, speech stops completely." in prompts[-1]
+
+
 def test_build_veo_extended_base_prompt_packs_to_four_segments_for_legacy_32s():
     seed_data = {
         "script": _valid_32s_script(),

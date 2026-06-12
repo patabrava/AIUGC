@@ -43,6 +43,7 @@ END_LLM_FRIENDLY_PLAN_TEST_DEBUG
 
 2) Specific repo rules
 - Character Consistency Strategy A must not require operator-selected `SceneReferenceImage` rows; normal single/batch VEO submissions use the selected ActorIdentity LoRA anchors plus the Gemini canonical scene anchor, with segmented+i2v stitching for long clips when that route is enabled. Scene-reference preview assets can exist for review/training, but they must not gate normal Character Consistency submission.
+- Segmented VEO long clips must keep spoken beats on sentence/clause boundaries and must not trim default audio at stitch joins or final upload; use prompt-level clean-stop cues for non-final segments instead of deleting head/tail milliseconds, or stitched speech will cut words.
 - Magnific scene-reference image URLs are temporary; rehost every generated/polled SceneReferenceImage into Cloudflare R2 before saving/approving it, or later Character Consistency VEO submissions will fail on expired Freepik/Magnific 403s.
 - Live `lippelift.xyz` deploys must run from a VPS checkout plus `/opt/aiugc-prod/.env.production` through `scripts/deploy/production.sh`; do not rely on Hostinger repo-wrapper env injection or repo `.env`, or pushes to `main` will diverge from the live runtime.
 - Live Supabase bootstrap must validate `SUPABASE_SERVICE_KEY` shape and fall back to `SUPABASE_KEY` when Hostinger env injection corrupts the service-role JWT, or `/health` and background workers will fail with `401 Invalid API key`.

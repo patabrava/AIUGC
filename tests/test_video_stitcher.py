@@ -44,7 +44,7 @@ def _make_clip(path: str, *, seconds: int, color: str, width: int = 360, height:
     assert result.returncode == 0, result.stderr[-300:]
 
 
-def test_stitch_two_segments_softens_cut_duration(tmp_path):
+def test_stitch_two_segments_preserves_audio_at_cut(tmp_path):
     clip_a = str(tmp_path / "a.mp4")
     clip_b = str(tmp_path / "b.mp4")
     _make_clip(clip_a, seconds=2, color="red")
@@ -69,14 +69,14 @@ def test_stitch_two_segments_softens_cut_duration(tmp_path):
         fh.write(final_bytes)
 
     duration = _probe_duration(out_path)
-    # Raw duration is 5s. Cut softening removes the first segment tail and second segment head.
-    assert 4.3 <= duration <= 4.7, duration
+    # Raw duration is 5s. The stitcher must not trim joins because speech can reach the edge.
+    assert 4.9 <= duration <= 5.1, duration
     assert meta["stitch_width"] == 360 and meta["stitch_height"] == 640
-    assert meta["stitch_head_trim_s"] == [0.0, 0.18]
-    assert meta["stitch_tail_trim_s"] == [0.35, 0.0]
+    assert meta["stitch_head_trim_s"] == [0.0, 0.0]
+    assert meta["stitch_tail_trim_s"] == [0.0, 0.0]
 
 
-def test_stitch_softens_i2v_resets_with_trims_and_reframes(tmp_path):
+def test_stitch_softens_i2v_resets_with_reframes_not_audio_trims(tmp_path):
     clip_a = str(tmp_path / "a.mp4")
     clip_b = str(tmp_path / "b.mp4")
     clip_c = str(tmp_path / "c.mp4")
@@ -98,8 +98,8 @@ def test_stitch_softens_i2v_resets_with_trims_and_reframes(tmp_path):
     )
 
     assert meta["stitch_cut_softening_applied"] is True
-    assert meta["stitch_head_trim_s"] == [0.0, 0.18, 0.18]
-    assert meta["stitch_tail_trim_s"] == [0.35, 0.35, 0.0]
+    assert meta["stitch_head_trim_s"] == [0.0, 0.0, 0.0]
+    assert meta["stitch_tail_trim_s"] == [0.0, 0.0, 0.0]
     assert meta["stitch_reframe_profile"] == ["full", "punch_in_center", "punch_in_left"]
 
     out_path = str(tmp_path / "out.mp4")
@@ -107,8 +107,8 @@ def test_stitch_softens_i2v_resets_with_trims_and_reframes(tmp_path):
         fh.write(final_bytes)
 
     duration = _probe_duration(out_path)
-    # Raw duration is 9s. Head/tail softening removes 1.06s before concat.
-    assert 7.5 <= duration <= 8.4, duration
+    # Raw duration is 9s. Reframing may hide a visual reset, but audio remains untrimmed.
+    assert 8.8 <= duration <= 9.2, duration
 
 
 def test_stitch_normalizes_mismatched_resolution(tmp_path):
@@ -132,7 +132,7 @@ def test_stitch_normalizes_mismatched_resolution(tmp_path):
     with open(out_path, "wb") as fh:
         fh.write(final_bytes)
     duration = _probe_duration(out_path)
-    assert 3.3 <= duration <= 3.7, duration
+    assert 3.9 <= duration <= 4.1, duration
 
 
 def test_single_segment_passthrough():

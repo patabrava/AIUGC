@@ -65,13 +65,14 @@ from app.features.posts.prompt_builder import (
     LEGACY_32_STYLE,
     LEGACY_SHORT_CHARACTER,
     LEAN_FINAL_AUDIO_BLOCK,
+    SEGMENTED_NON_FINAL_AUDIO_BLOCK,
+    SEGMENTED_NON_FINAL_ENDING_DIRECTIVE,
     build_reference_image_scene_base_prompt,
     build_segment_prompts,
     build_video_prompt_from_seed,
     build_negative_prompt,
     ensure_scene_plan,
     build_lean_veo_base_prompt,
-    LEAN_FINAL_AUDIO_BLOCK,
     build_veo_prompt_segment,
     split_dialogue_sentences,
     sync_video_prompt_with_seed_data,
@@ -1403,6 +1404,69 @@ def _expand_dialogue_units_for_required_segments(
     )
 
 
+def _partition_dialogue_units_by_word_targets(
+    units: list[str],
+    *,
+    target_words: list[float],
+    required_segments: int,
+) -> list[str]:
+    if required_segments <= 0 or not units:
+        return units
+    if len(units) < required_segments:
+        return units
+
+    segment_targets = list(target_words[:required_segments])
+    if len(segment_targets) < required_segments:
+        fallback_target = segment_targets[-1] if segment_targets else 0.0
+        segment_targets.extend([fallback_target] * (required_segments - len(segment_targets)))
+
+    unit_word_counts = [len(unit.split()) for unit in units]
+    prefix_counts = [0]
+    for count in unit_word_counts:
+        prefix_counts.append(prefix_counts[-1] + count)
+
+    from functools import lru_cache
+
+    @lru_cache(maxsize=None)
+    def _best_cuts(segment_index: int, start_index: int) -> tuple[float, tuple[int, ...]]:
+        if segment_index == required_segments - 1:
+            remaining = len(units) - start_index
+            if remaining < 1:
+                return float("inf"), ()
+            words_in_segment = prefix_counts[len(units)] - prefix_counts[start_index]
+            cost = (words_in_segment - segment_targets[segment_index]) ** 2
+            return cost, (len(units),)
+
+        best_cost = float("inf")
+        best_path: tuple[int, ...] = ()
+        remaining_segments_after_current = required_segments - segment_index - 1
+        min_end = start_index + 1
+        max_end = len(units) - remaining_segments_after_current
+
+        for end_index in range(min_end, max_end + 1):
+            words_in_segment = prefix_counts[end_index] - prefix_counts[start_index]
+            next_cost, next_path = _best_cuts(segment_index + 1, end_index)
+            if next_cost == float("inf"):
+                continue
+            current_cost = (words_in_segment - segment_targets[segment_index]) ** 2 + next_cost
+            if current_cost < best_cost:
+                best_cost = current_cost
+                best_path = (end_index,) + next_path
+
+        return best_cost, best_path
+
+    _cost, cut_points = _best_cuts(0, 0)
+    if not cut_points:
+        return units
+
+    packed_segments: list[str] = []
+    cursor = 0
+    for end_index in cut_points:
+        packed_segments.append(" ".join(units[cursor:end_index]).strip())
+        cursor = end_index
+    return [segment for segment in packed_segments if segment]
+
+
 def _partition_dialogue_units_for_profile(
     units: list[str],
     *,
@@ -1422,54 +1486,11 @@ def _partition_dialogue_units_for_profile(
         target_words=target_words,
         required_segments=required_segments,
     )
-    if len(units) < required_segments:
-        return units
-
-    unit_word_counts = [len(unit.split()) for unit in units]
-    prefix_counts = [0]
-    for count in unit_word_counts:
-        prefix_counts.append(prefix_counts[-1] + count)
-
-    from functools import lru_cache
-
-    @lru_cache(maxsize=None)
-    def _best_cuts(segment_index: int, start_index: int) -> tuple[float, tuple[int, ...]]:
-        if segment_index == required_segments - 1:
-            remaining = len(units) - start_index
-            if remaining < 1:
-                return float("inf"), ()
-            words_in_segment = prefix_counts[len(units)] - prefix_counts[start_index]
-            cost = (words_in_segment - target_words[segment_index]) ** 2
-            return cost, (len(units),)
-
-        best_cost = float("inf")
-        best_path: tuple[int, ...] = ()
-        remaining_segments_after_current = required_segments - segment_index - 1
-        min_end = start_index + 1
-        max_end = len(units) - remaining_segments_after_current
-
-        for end_index in range(min_end, max_end + 1):
-            words_in_segment = prefix_counts[end_index] - prefix_counts[start_index]
-            next_cost, next_path = _best_cuts(segment_index + 1, end_index)
-            if next_cost == float("inf"):
-                continue
-            current_cost = (words_in_segment - target_words[segment_index]) ** 2 + next_cost
-            if current_cost < best_cost:
-                best_cost = current_cost
-                best_path = (end_index,) + next_path
-
-        return best_cost, best_path
-
-    _cost, cut_points = _best_cuts(0, 0)
-    if not cut_points:
-        return units
-
-    packed_segments: list[str] = []
-    cursor = 0
-    for end_index in cut_points:
-        packed_segments.append(" ".join(units[cursor:end_index]).strip())
-        cursor = end_index
-    return [segment for segment in packed_segments if segment]
+    return _partition_dialogue_units_by_word_targets(
+        units,
+        target_words=target_words,
+        required_segments=required_segments,
+    )
 
 
 def _segment_time_budget_seconds(*, profile: Any, segment_index: int) -> int:
@@ -1739,8 +1760,13 @@ def _split_script_into_segments(script: str, segment_count: int) -> list[str]:
     if not raw_segments and cleaned:
         raw_segments = [cleaned]
     target_words = [SEGMENTED_SEGMENT_SECONDS * _WORDS_PER_SECOND] * segment_count
-    beats = _split_dialogue_text_by_word_budget(
-        " ".join(raw_segments),
+    units = _expand_dialogue_units_for_required_segments(
+        raw_segments,
+        target_words=target_words,
+        required_segments=segment_count,
+    )
+    beats = _partition_dialogue_units_by_word_targets(
+        units,
         target_words=target_words,
         required_segments=segment_count,
     )
@@ -1806,6 +1832,8 @@ def _build_segmented_segment_prompts(
     prompts: list[str] = []
     for index, beat in enumerate(beats):
         include_final_ending = index == last_index
+        segment_ending = None if include_final_ending else SEGMENTED_NON_FINAL_ENDING_DIRECTIVE
+        segment_audio_block = None if include_final_ending else SEGMENTED_NON_FINAL_AUDIO_BLOCK
         if mode in {"character_consistency", "manual_character_consistency", "character_consistency_mid"}:
             prompts.append(
                 build_reference_image_scene_base_prompt(
@@ -1814,6 +1842,8 @@ def _build_segmented_segment_prompts(
                     style=prompt_style,
                     scene=prompt_scene,
                     cinematography=prompt_cinematography,
+                    ending=segment_ending,
+                    audio_block=segment_audio_block,
                     legacy_32_visuals=legacy_32,
                     include_final_ending=include_final_ending,
                     segmented_anchor=index == 0,
@@ -1824,6 +1854,8 @@ def _build_segmented_segment_prompts(
                 build_lean_veo_base_prompt(
                     beat,
                     scene=prompt_scene,
+                    ending=segment_ending,
+                    audio_block=segment_audio_block,
                     include_final_ending=include_final_ending,
                 )
             )
@@ -1837,7 +1869,8 @@ def _build_segmented_segment_prompts(
                     style=prompt_style,
                     scene=prompt_scene,
                     cinematography=prompt_cinematography,
-                    audio_block=prompt_audio_block,
+                    ending=segment_ending,
+                    audio_block=prompt_audio_block if include_final_ending else segment_audio_block,
                     legacy_32_visuals=legacy_32,
                 )
             )

@@ -214,8 +214,18 @@ LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE = (
     "Continue directly into the next segment with no concluding pause, no scene-ending hold, and no visual reset."
 )
 
+SEGMENTED_NON_FINAL_ENDING_DIRECTIVE = (
+    "Finish this segment's dialogue cleanly before the clip ends. "
+    "Do not start the next word or syllable. Keep a natural listening expression until the cut."
+)
+
 LEAN_LIGHT_BASE_AUDIO_BLOCK = (
     "Natural single-speaker smartphone room audio. Clear close voice. No music. No background voices."
+)
+
+SEGMENTED_NON_FINAL_AUDIO_BLOCK = (
+    "Natural single-speaker smartphone room audio. Clear close voice. No music. No background voices. "
+    "Let the final syllable of this segment complete cleanly before the clip boundary."
 )
 
 LEAN_EXTENSION_CHARACTER = (
@@ -889,7 +899,8 @@ def build_segment_prompts(
             style=style,
             scene=scene,
             cinematography=cinematography,
-            audio_block=audio_block,
+            ending=None if index == last_index else SEGMENTED_NON_FINAL_ENDING_DIRECTIVE,
+            audio_block=audio_block if index == last_index else SEGMENTED_NON_FINAL_AUDIO_BLOCK,
             negative_constraints=negative_constraints,
             legacy_32_visuals=legacy_32_visuals,
         )
@@ -982,15 +993,20 @@ def build_lean_veo_base_prompt(
     *,
     scene: Optional[str] = None,
     include_final_ending: bool = False,
+    ending: Optional[str] = None,
+    audio_block: Optional[str] = None,
 ) -> str:
-    ending = STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE
-    audio_block = LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_LIGHT_BASE_AUDIO_BLOCK
+    resolved_ending = (
+        ending
+        or (STANDARD_FINAL_ENDING_DIRECTIVE if include_final_ending else LEAN_LIGHT_CONTINUATION_ENDING_DIRECTIVE)
+    )
+    resolved_audio = audio_block or (LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_LIGHT_BASE_AUDIO_BLOCK)
     resolved_scene = _apply_minimal_scene_bible_lock(scene or DEFAULT_SCENE_BODY)
     return LEAN_LIGHT_BASE_PROMPT_TEMPLATE.format(
         scene=resolved_scene,
         dialogue=dialogue.strip(),
-        ending=ending,
-        audio_block=audio_block,
+        ending=resolved_ending.strip(),
+        audio_block=resolved_audio.strip(),
     )
 
 

@@ -48,7 +48,9 @@ VIDEO_STATUS_SUBMITTED = "submitted"
 VIDEO_STATUS_PROCESSING = "processing"
 VIDEO_STATUS_COMPLETED = "completed"
 VIDEO_STATUS_FAILED = "failed"
-TRIM_TAIL_MS = 500
+# Do not trim generated speech by default. VEO can place spoken words near the end of the clip,
+# so tail trimming must be an explicit postprocess choice, not a global upload behavior.
+TRIM_TAIL_MS = 0
 VIDEO_STATUS_EXTENDED_SUBMITTED = "extended_submitted"
 VIDEO_STATUS_EXTENDED_PROCESSING = "extended_processing"
 VIDEO_STATUS_CAPTION_PENDING = "caption_pending"

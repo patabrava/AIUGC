@@ -5,6 +5,8 @@ import tempfile
 import os
 import pytest
 
+from app.core.video_profiles import TRIM_TAIL_MS
+
 
 def _generate_test_video(duration_seconds: float, path: str) -> None:
     """Generate a silent test video with exact duration using ffmpeg."""
@@ -36,6 +38,9 @@ def _get_duration_ms(path: str) -> float:
 
 class TestTrimTail:
     """Tests for _trim_tail function in video_poller."""
+
+    def test_default_tail_trim_is_disabled_for_speech_safe_uploads(self):
+        assert TRIM_TAIL_MS == 0
 
     def test_trim_removes_200ms_from_8s_video(self):
         """An 8-second video should become ~7.8 seconds after trim."""
