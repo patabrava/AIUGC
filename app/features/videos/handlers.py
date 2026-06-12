@@ -1728,6 +1728,7 @@ def _build_segmented_segment_prompts(
                     cinematography=prompt_cinematography,
                     legacy_32_visuals=legacy_32,
                     include_final_ending=include_final_ending,
+                    segmented_anchor=index == 0,
                 )
             )
         elif is_character_consistency_light_mode(mode):

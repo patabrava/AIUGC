@@ -26,6 +26,16 @@ logger = get_logger(__name__)
 _FFMPEG_TIMEOUT_SECONDS = 300
 _FFPROBE_TIMEOUT_SECONDS = 30
 _DEFAULT_FPS = 24.0
+_I2V_HEAD_TRIM_SECONDS = 0.18
+_NON_FINAL_TAIL_TRIM_SECONDS = 0.35
+_MIN_TRIMMED_SEGMENT_SECONDS = 1.0
+_REFRAME_PROFILES: List[Tuple[str, float, float, float]] = [
+    ("full", 1.0, 0.5, 0.5),
+    ("punch_in_center", 1.14, 0.5, 0.5),
+    ("punch_in_left", 1.09, 0.36, 0.5),
+    ("punch_in_right", 1.09, 0.64, 0.5),
+    ("tight_center", 1.17, 0.5, 0.43),
+]
 
 
 def _probe_video_geometry(video_path: str) -> Tuple[int, int, float]:
@@ -85,6 +95,28 @@ def _probe_duration(video_path: str) -> float:
     if result.returncode != 0:
         raise ValueError(f"ffprobe duration failed: {result.stderr[-200:]}")
     return float(result.stdout.strip())
+
+
+def _even_dimension(value: float) -> int:
+    rounded = max(2, int(round(value)))
+    return rounded if rounded % 2 == 0 else rounded + 1
+
+
+def _trim_window(index: int, count: int, duration: float) -> Tuple[float, float]:
+    head = _I2V_HEAD_TRIM_SECONDS if index > 0 else 0.0
+    tail = _NON_FINAL_TAIL_TRIM_SECONDS if index < count - 1 else 0.0
+    start = min(head, max(duration - _MIN_TRIMMED_SEGMENT_SECONDS, 0.0))
+    end = max(start + _MIN_TRIMMED_SEGMENT_SECONDS, duration - tail)
+    return start, min(duration, end)
+
+
+def _reframe_filter(index: int, width: int, height: int) -> Tuple[str, str]:
+    name, zoom, x_anchor, y_anchor = _REFRAME_PROFILES[index % len(_REFRAME_PROFILES)]
+    scaled_width = _even_dimension(width * zoom)
+    scaled_height = _even_dimension(height * zoom)
+    crop_x = max(0, int(round((scaled_width - width) * x_anchor)))
+    crop_y = max(0, int(round((scaled_height - height) * y_anchor)))
+    return name, f"scale={scaled_width}:{scaled_height},crop={width}:{height}:{crop_x}:{crop_y}"
 
 
 def extract_anchor_frame(
@@ -205,11 +237,23 @@ def stitch_segments(
 
         filter_parts: List[str] = []
         concat_inputs: List[str] = []
+        head_trims: List[float] = []
+        tail_trims: List[float] = []
+        reframe_names: List[str] = []
         for index in range(len(input_paths)):
+            start, end = _trim_window(index, len(input_paths), segment_durations[index])
+            head_trims.append(round(start, 3))
+            tail_trims.append(round(max(segment_durations[index] - end, 0.0), 3))
+            reframe_name, reframe = _reframe_filter(index, width, height)
+            reframe_names.append(reframe_name)
             filter_parts.append(
-                f"[{index}:v]scale={width}:{height},setsar=1,fps={fps:.5f},format=yuv420p[v{index}]"
+                f"[{index}:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,"
+                f"{reframe},setsar=1,fps={fps:.5f},format=yuv420p[v{index}]"
             )
-            filter_parts.append(f"[{index}:a]aresample=async=1[a{index}]")
+            filter_parts.append(
+                f"[{index}:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,"
+                f"aresample=async=1[a{index}]"
+            )
             concat_inputs.append(f"[v{index}][a{index}]")
         filter_parts.append(
             "".join(concat_inputs) + f"concat=n={len(input_paths)}:v=1:a=1[vout][aout]"
@@ -256,6 +300,10 @@ def stitch_segments(
         "stitch_width": width,
         "stitch_height": height,
         "stitch_fps": round(fps, 3),
+        "stitch_cut_softening_applied": True,
+        "stitch_head_trim_s": head_trims,
+        "stitch_tail_trim_s": tail_trims,
+        "stitch_reframe_profile": reframe_names,
     }
     logger.info(
         "stitch_segments_completed",

@@ -1636,7 +1636,7 @@ def test_submit_video_request_blocks_actor_identity_when_anchors_cannot_attach(m
             creation_mode="character_consistency",
             actor_identity_id="actor-1",
             character_snapshot=None,
-        )
+    )
 
     assert exc.value.status_code == 422
     assert "actor identity reference anchors" in exc.value.message

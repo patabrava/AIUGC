@@ -1012,6 +1012,14 @@ def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(mon
         "create_scene_reference_candidate",
         lambda **kwargs: captured_candidates.append(kwargs) or kwargs,
     )
+    monkeypatch.setattr(
+        character_handlers,
+        "_store_scene_reference_image_url",
+        lambda *, image_url, file_stem, correlation_id: (
+            f"https://cdn.example.com/durable/{file_stem}.png",
+            {"provider_source_image_rehosted": True, "durable_image_storage": {"storage_key": f"images/{file_stem}.png"}},
+        ),
+    )
 
     response = character_handlers.generate_scene_reference("post-1")
 
@@ -1044,6 +1052,9 @@ def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(mon
         assert metadata["identity_lock_contract"]["prompt_lora_handle_required"] is True
         assert metadata["identity_lock_contract"]["styling_characters_required"] is True
         assert metadata["scene_style_loras"] == [{"name": "bathroom-accessibility-a", "strength": 65}]
+        assert metadata["provider_source_image_rehosted"] is True
+        assert metadata["durable_image_storage"]["storage_key"].startswith("images/scene-reference-")
+        assert str(candidate["image_url"]).startswith("https://cdn.example.com/durable/scene-reference-")
         assert metadata["mystic_request"]["styling"]["characters"] == [{"id": "lora-actor-1", "strength": 100}]
         assert metadata["mystic_request"]["styling"]["styles"] == [{"name": "bathroom-accessibility-a", "strength": 65}]
         assert metadata["mystic_request"]["fixed_generation"] is False
@@ -1107,6 +1118,14 @@ def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
         "create_scene_reference_candidate",
         lambda **kwargs: created.append(kwargs) or kwargs,
     )
+    monkeypatch.setattr(
+        character_handlers,
+        "_store_scene_reference_image_url",
+        lambda *, image_url, file_stem, correlation_id: (
+            f"https://cdn.example.com/durable/{file_stem}.png",
+            {"provider_source_image_rehosted": True, "durable_image_storage": {"storage_key": f"images/{file_stem}.png"}},
+        ),
+    )
     monkeypatch.setattr(character_handlers.character_queries, "record_scene_reference_gate", lambda **_kwargs: None)
     monkeypatch.setattr(character_handlers, "_post_batch_id", lambda post_id: "batch-1")
 
@@ -1128,6 +1147,9 @@ def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
     assert metadata["identity_lock_contract"]["identity_strength"] == 100
     assert metadata["regenerated_from_reference_id"] == "ref-1"
     assert metadata["scene_style_loras"] == [{"name": "bathroom-accessibility-a", "strength": 65}]
+    assert metadata["provider_source_image_rehosted"] is True
+    assert metadata["durable_image_storage"]["storage_key"].startswith("images/scene-reference-set-1-front_mid-task-regenerated")
+    assert created[0]["image_url"].startswith("https://cdn.example.com/durable/scene-reference-set-1-front_mid-task-regenerated")
     assert metadata["mystic_request"]["resolution"] == "2k"
     assert metadata["mystic_request"]["fixed_generation"] is False
     assert metadata["mystic_request"]["engine"] == "magnific_sparkle"
@@ -1278,6 +1300,14 @@ def test_regenerate_scene_reference_accepts_legacy_scene_alias(monkeypatch):
         "create_scene_reference_candidate",
         lambda **kwargs: created.append(kwargs) or kwargs,
     )
+    monkeypatch.setattr(
+        character_handlers,
+        "_store_scene_reference_image_url",
+        lambda *, image_url, file_stem, correlation_id: (
+            f"https://cdn.example.com/durable/{file_stem}.png",
+            {"provider_source_image_rehosted": True, "durable_image_storage": {"storage_key": f"images/{file_stem}.png"}},
+        ),
+    )
     monkeypatch.setattr(character_handlers.character_queries, "record_scene_reference_gate", lambda **_kwargs: None)
     monkeypatch.setattr(character_handlers, "_post_batch_id", lambda post_id: "batch-1")
 
@@ -1287,6 +1317,8 @@ def test_regenerate_scene_reference_accepts_legacy_scene_alias(monkeypatch):
     metadata = created[0]["provider_metadata"]
     assert created[0]["scene_key"] == "bathroom_adaptation"
     assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
+    assert metadata["provider_source_image_rehosted"] is True
+    assert created[0]["image_url"].startswith("https://cdn.example.com/durable/scene-reference-set-1-front_mid-task-regenerated")
     assert "the same compact accessible bathroom" in created[0]["prompt"]
     assert "Accessible bathroom scene A" not in created[0]["prompt"]
 

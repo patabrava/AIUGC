@@ -463,6 +463,89 @@ def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypat
         assert captured["provider"] == "vertex_ai"
 
 
+def test_generate_all_character_consistency_does_not_require_scene_reference_set_for_segmented_submit(monkeypatch):
+    posts = [
+        {
+            "id": "post-1",
+            "batch_id": "batch-1",
+            "post_type": "value",
+            "video_prompt_json": {"veo_prompt": "Prompt 1", "scene": "Bathroom"},
+            "seed_data": {"script": _valid_16s_script(), "script_review_status": "approved"},
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+    batch = {
+        "id": "batch-1",
+        "target_length_tier": 16,
+        "creation_mode": "character_consistency",
+        "actor_identity_id": "actor-1",
+    }
+    captured = {}
+
+    def _fake_segmented_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "operation_ids": ["operations/seg-0"],
+            "results": [
+                {
+                    "operation_id": "operations/seg-0",
+                    "status": "submitted",
+                    "provider_model": "veo-3.1-generate-001",
+                    "provider_metadata": {
+                        "operation_id": "operations/seg-0",
+                        "source": "actor_identity_plus_canonical_scene_anchor",
+                    },
+                }
+            ],
+            "segment_count": 2,
+            "prompts": ["Segment prompt 1", "Segment prompt 2"],
+            "beats": [{"index": 0}, {"index": 1}],
+            "seed": 123,
+            "i2v_locked": True,
+            "i2v_model": "veo-3.1-generate-001",
+            "i2v_output_gcs_uri": "gs://bucket/out/",
+        }
+
+    monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: dict(batch))
+    monkeypatch.setattr("app.features.videos.handlers.sync_character_consistency_batch_actor", lambda row, correlation_id: row)
+    monkeypatch.setattr(
+        "app.features.videos.handlers.character_queries.get_latest_scene_reference_set_for_post",
+        lambda post_id: (_ for _ in ()).throw(AssertionError("normal Strategy A submission must not load scene reference sets")),
+    )
+    monkeypatch.setattr(
+        "app.core.video_profiles.get_settings",
+        lambda: SimpleNamespace(veo_enable_segmented_route=True, veo_enable_efficient_long_route=True),
+    )
+    monkeypatch.setattr(
+        "app.features.videos.handlers._load_or_build_video_prompt",
+        lambda *, post, supabase_client, correlation_id, batch: post["video_prompt_json"],
+    )
+    monkeypatch.setattr("app.features.videos.handlers._resolve_canonical_scene_asset_for_submission", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "app.features.videos.handlers._apply_canonical_scene_to_video_prompt",
+        lambda video_prompt, seed_data, canonical_scene_asset, creation_mode: video_prompt,
+    )
+    monkeypatch.setattr("app.features.videos.handlers.ensure_immediate_submit_slot", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.release_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr("app.features.videos.handlers.record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers.reconcile_batch_video_pipeline_state", lambda **kwargs: None)
+    monkeypatch.setattr("app.features.videos.handlers._submit_segmented_post", _fake_segmented_submit)
+
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=16)
+    response = asyncio.run(generate_all_videos("batch-1", request))
+
+    assert response.data["submitted_count"] == 1
+    assert captured["scene_reference_set"] is None
+    assert captured["submission_plan"]["profile"].route == "veo_segmented"
+    assert posts[0]["video_status"] == "submitted"
+    assert posts[0]["video_metadata"]["video_pipeline_route"] == "veo_segmented"
+
+
 def test_generate_all_videos_routes_32s_vertex_submission_through_duration_profile(monkeypatch):
     posts = [
         {

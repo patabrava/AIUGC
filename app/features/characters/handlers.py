@@ -5,6 +5,7 @@ import re
 from typing import Optional
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -304,6 +305,45 @@ def _mystic_request_payload(task: dict) -> dict:
     return dict(request_payload) if isinstance(request_payload, dict) else {}
 
 
+def _image_extension(content_type: str) -> str:
+    normalized = content_type.split(";", 1)[0].strip().lower()
+    if normalized == "image/jpeg":
+        return "jpg"
+    if normalized == "image/webp":
+        return "webp"
+    return "png"
+
+
+def _store_scene_reference_image_url(
+    *,
+    image_url: Optional[str],
+    file_stem: str,
+    correlation_id: str,
+) -> tuple[Optional[str], dict]:
+    if not image_url:
+        return None, {}
+
+    response = httpx.get(image_url, follow_redirects=True, timeout=60.0)
+    response.raise_for_status()
+    content_type = response.headers.get("content-type", "image/png").split(";", 1)[0].strip() or "image/png"
+    extension = _image_extension(content_type)
+    uploaded = get_storage_client().upload_image(
+        image_bytes=response.content,
+        file_name=f"{file_stem}.{extension}",
+        correlation_id=correlation_id,
+        content_type=content_type,
+    )
+    return uploaded["url"], {
+        "durable_image_storage": {
+            "storage_provider": uploaded.get("storage_provider"),
+            "storage_key": uploaded.get("storage_key"),
+            "file_type": uploaded.get("file_type"),
+            "size": uploaded.get("size"),
+        },
+        "provider_source_image_rehosted": True,
+    }
+
+
 def _scene_reference_identity_contract(actor_identity) -> dict:
     return {
         "actor_identity_id": actor_identity.id,
@@ -491,17 +531,24 @@ def generate_scene_reference(post_id: str):
                 "creative_detailing": SCENE_REFERENCE_CREATIVE_DETAILING,
             },
         )
+        task_id = str(task.get("task_id") or "")
+        durable_image_url, durable_image_metadata = _store_scene_reference_image_url(
+            image_url=_extract_mystic_image_url(task),
+            file_stem=f"scene-reference-{reference_set_id}-{angle.key}-{task_id or 'pending'}",
+            correlation_id=correlation_id,
+        )
         references.append(
             character_queries.create_scene_reference_candidate(
                 actor_identity_id=actor_identity.id,
                 post_id=post_id,
                 scene_key=intent.scene_key,
                 wardrobe_key=intent.wardrobe_key,
-                provider_task_id=str(task.get("task_id") or ""),
-                image_url=_extract_mystic_image_url(task),
+                provider_task_id=task_id,
+                image_url=durable_image_url,
                 prompt=prompt,
                 provider_metadata={
                     **scene_bible_metadata,
+                    **durable_image_metadata,
                     "task": _mystic_task_without_request_payload(task),
                     "mystic_request": _mystic_request_payload(task),
                     "scene_style_loras": scene_style_loras,
@@ -628,10 +675,15 @@ def poll_scene_reference(request: Request, reference_id: str):
     image_url = _extract_mystic_image_url(task)
     if image_url:
         metadata = reference.get("provider_metadata") if isinstance(reference.get("provider_metadata"), dict) else {}
+        durable_image_url, durable_image_metadata = _store_scene_reference_image_url(
+            image_url=image_url,
+            file_stem=f"scene-reference-{reference_id}-{task_id}",
+            correlation_id=correlation_id,
+        )
         character_queries.mark_scene_reference_generated(
             reference_id=reference_id,
-            image_url=image_url,
-            provider_metadata={**metadata, "poll_task": task},
+            image_url=durable_image_url or image_url,
+            provider_metadata={**metadata, **durable_image_metadata, "poll_task": task},
             correlation_id=correlation_id,
         )
         if _is_htmx_request(request):
@@ -704,16 +756,23 @@ def regenerate_scene_reference(reference_id: str):
             "creative_detailing": SCENE_REFERENCE_CREATIVE_DETAILING,
         },
     )
+    task_id = str(task.get("task_id") or "")
+    durable_image_url, durable_image_metadata = _store_scene_reference_image_url(
+        image_url=_extract_mystic_image_url(task),
+        file_stem=f"scene-reference-{reference_set_id}-{angle.key}-{task_id or 'pending'}",
+        correlation_id=correlation_id,
+    )
     character_queries.create_scene_reference_candidate(
         actor_identity_id=actor_identity.id,
         post_id=str(reference["post_id"]),
         scene_key=scene_key,
         wardrobe_key=str(reference.get("wardrobe_key") or ""),
-        provider_task_id=str(task.get("task_id") or ""),
-        image_url=_extract_mystic_image_url(task),
+        provider_task_id=task_id,
+        image_url=durable_image_url,
         prompt=prompt,
         provider_metadata={
             **scene_bible_metadata,
+            **durable_image_metadata,
             "task": _mystic_task_without_request_payload(task),
             "mystic_request": _mystic_request_payload(task),
             "scene_style_loras": scene_style_loras,

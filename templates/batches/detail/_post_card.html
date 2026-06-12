@@ -420,19 +420,19 @@
             <p class="text-sm font-semibold text-amber-900">Character Consistency Strategy A</p>
             <div class="mt-2 grid gap-2 text-xs text-amber-900 sm:grid-cols-3">
                 <div class="rounded-md border border-amber-200 bg-white/70 px-2 py-1.5">
-                    <span class="font-semibold">VEO identity anchors</span>
-                    <span class="mt-0.5 block text-amber-800">3 ActorIdentity images are submitted to VEO.</span>
+                    <span class="font-semibold">Actor LoRA anchors</span>
+                    <span class="mt-0.5 block text-amber-800">The selected actor's saved LoRA reference images are submitted to VEO.</span>
                 </div>
                 <div class="rounded-md border border-amber-200 bg-white/70 px-2 py-1.5">
-                    <span class="font-semibold">Scene control</span>
-                    <span class="mt-0.5 block text-amber-800">The scene is locked by prompt text and the scene Bible.</span>
+                    <span class="font-semibold">Gemini scene anchor</span>
+                    <span class="mt-0.5 block text-amber-800">Gemini generates or reuses the canonical scene image for environment, layout, and lighting.</span>
                 </div>
                 <div class="rounded-md border border-amber-200 bg-white/70 px-2 py-1.5">
-                    <span class="font-semibold">Normal flow</span>
-                    <span class="mt-0.5 block text-amber-800">No separate scene preview generation or approval runs in this mode.</span>
+                    <span class="font-semibold">Long videos</span>
+                    <span class="mt-0.5 block text-amber-800">16s and 32s runs use anchored 8s segments, then stitch when segmented routing is enabled.</span>
                 </div>
             </div>
-            <p class="mt-2 text-xs text-amber-800">The final video uses the actor anchors for identity and the prompt scene contract for background consistency.</p>
+            <p class="mt-2 text-xs text-amber-800">No separate scene-preview selection is required in this mode.</p>
         </div>
     </div>
     {% endif %}

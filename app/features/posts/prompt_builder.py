@@ -184,7 +184,7 @@ REFERENCE_SCENE_BASE_PROMPT_TEMPLATE = (
     "following the canonical scene reference image and Scene block exactly. "
     "The woman remains seated and speaks directly to camera in one continuous natural smartphone "
     "take. Do not invent a new face, hairstyle, or age. Use small natural hand gestures and subtle "
-    "upper-body nods while speaking.\n\n"
+    "upper-body nods while speaking.{anchor_motion_direction}\n\n"
     "Cinematography:\n"
     "{cinematography}\n\n"
     "Dialogue:\n"
@@ -235,6 +235,13 @@ LEAN_EXTENSION_CONTINUITY = (
 
 MID_EXTENSION_CONTINUITY = (
     "Maintain the same environment, lighting, framing, camera position, and wardrobe from the previous segment."
+)
+
+SEGMENTED_ANCHOR_MOTION_DIRECTION = (
+    " For this anchor segment, create distinct pose changes that later cuts can use: lean slightly "
+    "in and back, change hand position naturally, make one brief off-camera glance, then return to "
+    "direct eye contact. Keep the same person, room, wardrobe, and smartphone framing, but avoid a "
+    "frozen talking-head pose."
 )
 
 LEAN_EXTENSION_LANGUAGE = (
@@ -998,6 +1005,7 @@ def build_reference_image_scene_base_prompt(
     audio_block: Optional[str] = None,
     legacy_32_visuals: bool = False,
     include_final_ending: bool = True,
+    segmented_anchor: bool = False,
 ) -> str:
     cleaned_dialogue = dialogue.strip()
     resolved_character = (character or LEGACY_SHORT_CHARACTER).strip()
@@ -1022,6 +1030,7 @@ def build_reference_image_scene_base_prompt(
         dialogue=cleaned_dialogue,
         ending=resolved_ending,
         audio_block=resolved_audio,
+        anchor_motion_direction=SEGMENTED_ANCHOR_MOTION_DIRECTION if segmented_anchor else "",
     )
 
 
@@ -1037,6 +1046,7 @@ def build_character_consistency_mid_base_prompt(
     audio_block: Optional[str] = None,
     legacy_32_visuals: bool = False,
     include_final_ending: bool = True,
+    segmented_anchor: bool = False,
 ) -> str:
     return build_reference_image_scene_base_prompt(
         dialogue,
@@ -1048,6 +1058,7 @@ def build_character_consistency_mid_base_prompt(
         audio_block=audio_block,
         legacy_32_visuals=legacy_32_visuals,
         include_final_ending=include_final_ending,
+        segmented_anchor=segmented_anchor,
     )
 
 

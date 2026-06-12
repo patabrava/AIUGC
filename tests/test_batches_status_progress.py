@@ -908,15 +908,17 @@ def test_batch_detail_template_explains_strategy_a_without_scene_preview_control
     )
 
     assert "Character Consistency Strategy A" in rendered
-    assert "3 ActorIdentity images are submitted to VEO." in rendered
-    assert "No separate scene preview generation or approval runs in this mode." in rendered
-    assert "The final video uses the actor anchors for identity and the prompt scene contract for background consistency." in rendered
-    assert "Mystic scene preview review" not in rendered
-    assert "Generate 3 scene previews" not in rendered
-    assert "Approve scene preview set" not in rendered
-    assert "Reject scene preview set" not in rendered
-    assert 'aria-label="Review Mystic scene preview image"' not in rendered
+    assert "Actor LoRA anchors" in rendered
+    assert "Gemini scene anchor" in rendered
+    assert "No separate scene-preview selection is required in this mode." in rendered
+    assert "selected actor scene stills" not in rendered
+    assert "0/3 approved stills" not in rendered
+    assert "Generate 3 scene stills" not in rendered
+    assert "Approve scene still set" not in rendered
+    assert "Reject scene still set" not in rendered
+    assert 'aria-label="Review selected actor scene still image"' not in rendered
     assert "/settings/character/scene-reference/" not in rendered
+    assert "/settings/character/posts/post-1/scene-reference/" not in rendered
 
 
 def test_batch_detail_template_renders_manual_editor_even_for_blank_scripts():
