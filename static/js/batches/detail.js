@@ -198,7 +198,7 @@
     });
 
     window.videoSettingsComponent = function (options = {}) {
-        const DEFAULT_MODEL = 'veo-3.1-generate-001';
+        const DEFAULT_MODEL = 'veo-3.1-fast-generate-001';
         const supportedModels = {
             'veo-3.1-generate-001': 'Veo 3.1',
             'veo-3.1-fast-generate-001': 'Veo 3.1 Fast',
@@ -284,6 +284,22 @@
             },
             formatCurrency(value) {
                 return numberFormatter.format(Number(value || 0));
+            },
+            formatSkippedSubmitMessage(skippedPosts, providerName, skippedCount) {
+                const firstSkip = Array.isArray(skippedPosts) && skippedPosts.length ? skippedPosts[0] : null;
+                const message = String(firstSkip?.message || '').trim();
+                const stage = String(firstSkip?.stage || '').trim();
+                if (!message) {
+                    return '';
+                }
+                const modelQuota = message.toLowerCase().includes('per_base_model')
+                    || message.toLowerCase().includes('base model:')
+                    || message.toLowerCase().includes('quota exceeded');
+                const prefix = `${providerName} rejected ${skippedCount || 1} post(s)${stage ? ` during ${stage}` : ''}`;
+                if (modelQuota) {
+                    return `${prefix}: ${message} Try Veo 3.1 Fast or Lite, or request quota for the selected model.`;
+                }
+                return `${prefix}: ${message}`;
             },
             restorePersistedSettings() {
                 if (!storageKey) {
@@ -374,6 +390,7 @@
 
                     const submittedCount = payload?.data?.submitted_count ?? 0;
                     const skippedCount = payload?.data?.skipped_count ?? 0;
+                    const skippedPosts = payload?.data?.skipped_posts || [];
                     const providerName = this.provider === 'vertex_ai' ? 'Vertex AI' : 'Veo 3.1';
                     if (submittedCount > 0) {
                         this.submitStatusKind = 'success';
@@ -381,7 +398,9 @@
                         window.setTimeout(() => window.location.reload(), 250);
                     } else {
                         this.submitStatusKind = 'warning';
+                        const skipMessage = this.formatSkippedSubmitMessage(skippedPosts, providerName, skippedCount);
                         this.submitStatusMessage = payload?.message
+                            || skipMessage
                             || `No prompts were submitted to ${providerName}.${skippedCount ? ` ${skippedCount} post(s) were skipped.` : ''} Check the batch details or retry later.`;
                     }
                 } catch (error) {

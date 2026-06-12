@@ -327,8 +327,20 @@ def freeze_provider_quota(*, provider: str, reason: str) -> Dict[str, Any]:
     return result
 
 
+def _is_model_specific_quota_error(reason: str) -> bool:
+    normalized = str(reason or "").lower()
+    return "per_base_model" in normalized or "base model:" in normalized
+
+
 def maybe_freeze_after_provider_429(*, provider: str, reason: str) -> None:
     settings = get_settings()
     if not settings.veo_quota_freeze_on_unexpected_429:
+        return
+    if _is_model_specific_quota_error(reason):
+        logger.info(
+            "quota_guard_model_specific_429_not_frozen",
+            provider=normalize_quota_provider(provider),
+            reason=reason,
+        )
         return
     freeze_provider_quota(provider=provider, reason=reason)

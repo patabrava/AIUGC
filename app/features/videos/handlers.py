@@ -1008,6 +1008,7 @@ def _persist_submission_failure(
 ) -> None:
     metadata = dict(post.get("video_metadata") or {})
     requested_aspect_ratio = submission_plan.get("requested_aspect_ratio") or submission_plan.get("aspect_ratio")
+    profile = submission_plan.get("profile")
     metadata.update(
         {
             "provider": submission_plan.get("provider"),
@@ -1030,6 +1031,10 @@ def _persist_submission_failure(
         metadata["provider_aspect_ratio"] = submission_plan["provider_aspect_ratio"]
     if submission_plan.get("provider_requested_size"):
         metadata["provider_requested_size"] = submission_plan["provider_requested_size"]
+    if profile is not None:
+        metadata["target_length_tier"] = profile.target_length_tier
+        metadata["video_pipeline_route"] = profile.route
+        metadata["provider_target_seconds"] = profile.provider_target_seconds
 
     provider_status_code = error.details.get("status_code")
     if provider_status_code is not None:

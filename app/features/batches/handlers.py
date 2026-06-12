@@ -503,7 +503,7 @@ def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
 
 def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: list[Dict[str, Any]]) -> Dict[str, Any]:
     """Derive batch-level video settings so the UI can rehydrate across HTMX rerenders."""
-    initial_model = "veo-3.1-generate-preview"
+    initial_model = "veo-3.1-fast-generate-001"
 
     for post in reversed(posts):
         video_metadata = post.get("video_metadata") or {}

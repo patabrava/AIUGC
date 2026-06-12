@@ -229,6 +229,24 @@ def test_local_quota_guard_can_be_bypassed_for_multi_key_testing(monkeypatch):
     rpc_mock.assert_not_called()
 
 
+def test_model_specific_quota_error_does_not_freeze_provider(monkeypatch):
+    from app.features.videos import quota_guard
+
+    freeze_mock = MagicMock()
+    monkeypatch.setattr(quota_guard, "freeze_provider_quota", freeze_mock)
+
+    quota_guard.maybe_freeze_after_provider_429(
+        provider="vertex_ai",
+        reason=(
+            "Quota exceeded for aiplatform.googleapis.com/"
+            "long_running_online_prediction_requests_per_base_model "
+            "with base model: veo-3.1-generate-001."
+        ),
+    )
+
+    freeze_mock.assert_not_called()
+
+
 def test_generate_all_videos_releases_prior_reservations_if_batch_preflight_breaks(monkeypatch):
     posts = [
         {
