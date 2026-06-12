@@ -17,11 +17,10 @@ Metadata contract (stored in ``posts.video_metadata``) for a segmented post:
       ]
     }
 
-Identity-lock variant (character consistency): segment 0 is a text+reference anchor; segments 1..N-1
-are image-to-video locked to a frame from segment 0 so the actor cannot drift. Such posts also carry an
-``i2v_lock`` plan (see ``build_i2v_lock``) and pre-seeded ``pending`` op rows (see
-``build_segment_ops_with_anchor``); the poller submits the i2v segments once the anchor completes. Posts
-without ``i2v_lock`` follow the legacy all-at-once fan-out unchanged.
+Legacy identity-lock variant: older in-flight posts may have segment 0 as a text+reference anchor and
+segments 1..N-1 as image-to-video rows with an ``i2v_lock`` plan (see ``build_i2v_lock``). New Character
+Consistency segmented submissions should not use that variant, because i2v cannot carry the three actor
+reference images. New posts use the all-at-once fan-out so every segment re-attaches the references.
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ SEGMENT_STATUS_FAILED = "failed"
 # A pre-seeded segment whose image-to-video op has not been submitted yet (waits on the anchor).
 SEGMENT_STATUS_PENDING = "pending"
 
-# Per-op "kind" on the segmented-route identity-lock variant (see ``build_segment_ops_with_anchor``).
+# Per-op "kind" on the legacy segmented-route identity-lock variant (see ``build_segment_ops_with_anchor``).
 SEGMENT_KIND_ANCHOR = "anchor"  # segment 0: text + reference images, establishes the actor
 SEGMENT_KIND_I2V = "i2v"        # segments 1..N-1: image-to-video locked to the anchor frame
 

@@ -1894,14 +1894,13 @@ def _submit_segmented_post(
 ) -> Dict[str, Any]:
     """Submit the segmented-route generations for one post.
 
-    Character-consistency posts submit ONLY the anchor segment (segment 0) here — reference-anchored,
-    ``provider_duration_seconds=8``, shared seed. The remaining segments are submitted later by the
-    poller as image-to-video locked to a frame of the anchor (see ``app.features.videos.segmented_i2v``),
-    which hard-locks the actor instead of relying on reference images (which drift across independent
-    generations). Non-character-consistency posts keep the original all-at-once independent fan-out.
+    Every segment is submitted here as an independent 8s generation with the same seed and the same
+    provider reference-image context. For Character Consistency this means the selected actor/canonical
+    scene reference bundle is re-attached to every segment; do not route new CC batches through the
+    legacy i2v lock path, because image-to-video continuations cannot also carry the three actor refs.
 
-    Returns the submitted operation ids + results plus the i2v plan fields (``i2v_locked``,
-    ``i2v_model``, ``i2v_output_gcs_uri``) that ``_build_segmented_submission_metadata`` persists.
+    Returns the submitted operation ids + results plus legacy i2v plan fields kept only so old in-flight
+    metadata can still be read by shared builders.
 
     On a mid-fan-out provider failure the exception propagates to the caller's standard failure
     handling; already-accepted segment operations are logged as orphaned (paid but untracked).
@@ -1925,11 +1924,10 @@ def _submit_segmented_post(
         seed=shared_seed,
     )
 
-    # Character-consistency posts submit ONLY the anchor segment now; the poller locks segments
-    # 1..N-1 to a frame of the anchor via image-to-video (see segmented_i2v) so the actor cannot
-    # drift. Non-CC posts keep the original all-at-once independent fan-out.
-    i2v_locked = is_character_consistency_mode(creation_mode)
-    subs_to_submit = subs[:1] if i2v_locked else subs
+    # New segmented submissions always fan out every segment now. Character Consistency relies on
+    # _submit_video_request to attach the actor/canonical-scene references to each 8s segment.
+    i2v_locked = False
+    subs_to_submit = subs
 
     operation_ids: list[str] = []
     results: list[Dict[str, Any]] = []

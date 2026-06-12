@@ -5,6 +5,8 @@ construction in handlers and the poller's poll → record → stitch / fail / wa
 external IO (Veo/Vertex clients, Supabase, the stitcher, the completion store) is faked.
 """
 
+from dataclasses import replace
+
 import app.core.video_profiles as vp_profiles
 import app.features.videos.handlers as h
 import workers.video_poller as vp
@@ -48,6 +50,104 @@ def test_build_segmented_segment_prompts_reanchors_character_consistency():
     assert all("stairwell" in p for p in prompts)
     # Only the final segment should differ (it carries the ending directive).
     assert prompts[0] != prompts[1]
+
+
+def test_submit_segmented_character_consistency_fans_out_reference_anchored_segments(monkeypatch):
+    calls = []
+
+    def _fake_submit_video_request(**kwargs):
+        calls.append(kwargs)
+        index = len(calls) - 1
+        return {
+            "operation_id": f"op-{index}",
+            "status": "submitted",
+            "provider_model": kwargs.get("model") or "veo-3.1-generate-001",
+            "provider_metadata": {
+                "source": "actor_identity_plus_canonical_scene_anchor",
+                "reference_image_count": 3,
+                "reference_image_roles": [
+                    "actor_identity_anchor",
+                    "actor_identity_anchor",
+                    "canonical_scene_anchor",
+                ],
+            },
+        }
+
+    monkeypatch.setattr(h, "_submit_video_request", _fake_submit_video_request)
+    profile = replace(
+        vp_profiles._BASE_PROFILES[16],
+        route=vp_profiles.VEO_SEGMENTED_VIDEO_ROUTE,
+        provider_target_seconds=16,
+        veo_base_seconds=vp_profiles.SEGMENTED_SEGMENT_SECONDS,
+        veo_extension_seconds=0,
+        veo_extension_hops=1,
+    )
+    video_prompt = {
+        "character": "Laura, a 38-year-old German woman with shoulder-length brown hair",
+        "scene": "a sunlit residential stairwell",
+        "style": "handheld vertical UGC",
+        "cinematography": "eye-level selfie framing",
+        "audio": {"dialogue": "Erstens spare ich Geld. Zweitens ist es sicherer. Drittens lohnt es sich."},
+    }
+
+    result = h._submit_segmented_post(
+        post={"id": "post-1", "video_metadata": {}},
+        batch={"id": "batch-1", "creation_mode": "character_consistency", "actor_identity_id": "actor-1"},
+        submission_plan={
+            "profile": profile,
+            "provider": "vertex_ai",
+            "aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "requested_aspect_ratio": "9:16",
+            "resolution": "720p",
+            "seconds": 16,
+            "size": None,
+        },
+        video_prompt=video_prompt,
+        seed_data={},
+        canonical_scene_asset=None,
+        scene_reference_set=None,
+        veo_seed=777,
+        correlation_id="corr",
+        model="veo-3.1-generate-001",
+    )
+
+    assert result["operation_ids"] == ["op-0", "op-1"]
+    assert result["segment_count"] == 2
+    assert result["i2v_locked"] is False
+    assert len(calls) == 2
+    assert [c["correlation_id"] for c in calls] == ["corr_seg0", "corr_seg1"]
+    for call in calls:
+        assert call["provider"] == "vertex_ai"
+        assert call["model"] == "veo-3.1-generate-001"
+        assert call["provider_duration_seconds"] == vp_profiles.SEGMENTED_SEGMENT_SECONDS
+        assert call["first_frame_image"] is None
+        assert call["creation_mode"] == "character_consistency"
+        assert call["actor_identity_id"] == "actor-1"
+
+    metadata = h._build_segmented_submission_metadata(
+        existing_metadata={},
+        submission_plan={
+            "profile": profile,
+            "provider": "vertex_ai",
+            "aspect_ratio": "9:16",
+            "provider_aspect_ratio": "9:16",
+            "resolution": "720p",
+            "seconds": 16,
+            "size": None,
+        },
+        segmented_result=result,
+        creation_mode="character_consistency",
+        script_contract={"target_length_tier": 16},
+        quota_reservation_key="quota-1",
+        quota_reserved_units=2,
+        quota_consume_error=None,
+        canonical_scene_asset=None,
+        actor_identity_id="actor-1",
+    )
+    assert "i2v_lock" not in metadata
+    assert [op["operation_id"] for op in metadata["veo_segment_ops"]] == ["op-0", "op-1"]
+    assert all(op["status"] == sp.SEGMENT_STATUS_SUBMITTED for op in metadata["veo_segment_ops"])
 
 
 # --------------------------------------------------------------------------------------

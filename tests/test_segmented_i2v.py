@@ -111,9 +111,11 @@ def test_submits_one_i2v_per_pending_segment_with_distinct_seg0_frames(fake_vert
     frames = [c["image_bytes"] for c in fake_vertex.image_calls]
     # Each i2v segment locks to a DISTINCT frame of seg 0 → no identical-reset glitch at the cuts.
     assert len(set(frames)) == len(frames)
-    # The first pending segment anchors near seg 0's end (highest fraction) → seg0→seg1 near-seamless.
     fractions = [float(f.decode().split("@")[1]) for f in frames]
-    assert fractions[0] == max(fractions)
+    # The first pending segment must not anchor near the end of seg 0. A near-end anchor made the
+    # stitch look like failed seamless continuity: same shot, but a fresh generated body state.
+    assert 0.35 <= fractions[0] <= 0.6
+    assert fractions[0] != max(fractions)
     assert all(c["duration_seconds"] == 8 for c in fake_vertex.image_calls)
     assert [r["index"] for r in recorded] == [1, 2, 3]
 

@@ -247,6 +247,26 @@ MID_EXTENSION_CONTINUITY = (
     "Maintain the same environment, lighting, framing, camera position, and wardrobe from the previous segment."
 )
 
+SEGMENTED_I2V_CONTINUITY = (
+    "Treat this clip as an intentional UGC jump cut into a fresh 8-second take, not as a "
+    "same-shot seamless continuation. Preserve the exact same person, room, wardrobe, lighting, "
+    "and smartphone selfie setup from the supplied first frame, but restart the performance naturally "
+    "from a settled pose. Do not continue the previous hand or mouth motion. Use a subtle editorial "
+    "change in energy: a small posture reset, fresh hand position, or direct-to-camera re-engagement."
+)
+
+SEGMENTED_I2V_NON_FINAL_ENDING_DIRECTIVE = (
+    "Finish this take's dialogue cleanly before the clip ends. Do not start the next word or "
+    "syllable. Her mouth closes fully, her face rests naturally, and she holds a brief listening "
+    "expression so the next cut can land cleanly."
+)
+
+SEGMENTED_I2V_AUDIO_BLOCK = (
+    "Natural single-speaker smartphone room audio. No music. No background voices. Keep the voice "
+    "clear and close. Let the final syllable complete cleanly before a tiny room-tone beat at the "
+    "clip boundary."
+)
+
 SEGMENTED_ANCHOR_MOTION_DIRECTION = (
     " For this anchor segment, create distinct pose changes that later cuts can use: lean slightly "
     "in and back, change hand position naturally, make one brief off-camera glance, then return to "
@@ -925,14 +945,20 @@ def _build_character_consistency_continuation_prompt(
     *,
     continuity: str,
     include_final_ending: bool = False,
+    non_final_ending: Optional[str] = None,
+    non_final_audio_block: Optional[str] = None,
 ) -> str:
     cleaned_dialogue = dialogue.strip()
     ending = (
         EXTENDED_FINAL_ENDING_DIRECTIVE
         if include_final_ending
-        else EXTENDED_CONTINUATION_ENDING_DIRECTIVE
+        else (non_final_ending or EXTENDED_CONTINUATION_ENDING_DIRECTIVE)
     )
-    audio_block = LEAN_FINAL_AUDIO_BLOCK if include_final_ending else LEAN_CONTINUATION_AUDIO_BLOCK
+    audio_block = (
+        LEAN_FINAL_AUDIO_BLOCK
+        if include_final_ending
+        else (non_final_audio_block or LEAN_CONTINUATION_AUDIO_BLOCK)
+    )
     return LEAN_CONTINUATION_PROMPT_TEMPLATE.format(
         character=LEAN_EXTENSION_CHARACTER,
         style=LEAN_EXTENSION_STYLE,
@@ -1085,8 +1111,10 @@ def build_character_consistency_mid_continuation_prompt(
 ) -> str:
     return _build_character_consistency_continuation_prompt(
         dialogue,
-        continuity=MID_EXTENSION_CONTINUITY,
+        continuity=SEGMENTED_I2V_CONTINUITY,
         include_final_ending=include_final_ending,
+        non_final_ending=SEGMENTED_I2V_NON_FINAL_ENDING_DIRECTIVE,
+        non_final_audio_block=SEGMENTED_I2V_AUDIO_BLOCK,
     )
 
 

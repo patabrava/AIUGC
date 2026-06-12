@@ -95,6 +95,41 @@ class TestRecordPromptAudit:
             correlation_id="gen_video_xyz",
         )
 
+    @patch("app.features.videos.prompt_audit.get_supabase")
+    def test_retries_without_optional_columns_when_live_schema_lags(self, mock_get_supabase):
+        """Audit still records the prompt when optional metadata columns are not migrated yet."""
+        mock_client = MagicMock()
+        mock_get_supabase.return_value.client = mock_client
+        mock_client.table.return_value.insert.return_value.execute.side_effect = [
+            Exception("Could not find the 'reference_image_metadata' column of 'video_prompt_audit' in the schema cache"),
+            MagicMock(),
+        ]
+
+        record_prompt_audit(
+            post_id=str(uuid.uuid4()),
+            operation_id="op_999",
+            provider="vertex_ai",
+            prompt_text="prompt",
+            negative_prompt=None,
+            prompt_path="veo_segmented_segment",
+            aspect_ratio="9:16",
+            resolution="720p",
+            requested_seconds=8,
+            correlation_id="corr",
+            seed=123,
+            reference_image_metadata={"reference_image_count": 3},
+        )
+
+        insert_calls = mock_client.table.return_value.insert.call_args_list
+        assert len(insert_calls) == 2
+        first_row = insert_calls[0][0][0]
+        fallback_row = insert_calls[1][0][0]
+        assert first_row["reference_image_metadata"] == {"reference_image_count": 3}
+        assert first_row["seed"] == 123
+        assert "reference_image_metadata" not in fallback_row
+        assert "seed" not in fallback_row
+        assert fallback_row["prompt_text"] == "prompt"
+
 
 from app.features.videos.handlers import _build_provider_prompt_request
 

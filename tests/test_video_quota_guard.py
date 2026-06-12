@@ -507,7 +507,7 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
     def _fake_segmented_submit(**kwargs):
         captured.update(kwargs)
         return {
-            "operation_ids": ["operations/seg-0"],
+            "operation_ids": ["operations/seg-0", "operations/seg-1"],
             "results": [
                 {
                     "operation_id": "operations/seg-0",
@@ -517,15 +517,24 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
                         "operation_id": "operations/seg-0",
                         "source": "actor_identity_plus_canonical_scene_anchor",
                     },
-                }
+                },
+                {
+                    "operation_id": "operations/seg-1",
+                    "status": "submitted",
+                    "provider_model": "veo-3.1-generate-001",
+                    "provider_metadata": {
+                        "operation_id": "operations/seg-1",
+                        "source": "actor_identity_plus_canonical_scene_anchor",
+                    },
+                },
             ],
             "segment_count": 2,
             "prompts": ["Segment prompt 1", "Segment prompt 2"],
             "beats": [{"index": 0}, {"index": 1}],
             "seed": 123,
-            "i2v_locked": True,
-            "i2v_model": "veo-3.1-generate-001",
-            "i2v_output_gcs_uri": "gs://bucket/out/",
+            "i2v_locked": False,
+            "i2v_model": None,
+            "i2v_output_gcs_uri": None,
         }
 
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
@@ -564,6 +573,8 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
     assert captured["submission_plan"]["profile"].route == "veo_segmented"
     assert posts[0]["video_status"] == "submitted"
     assert posts[0]["video_metadata"]["video_pipeline_route"] == "veo_segmented"
+    assert "i2v_lock" not in posts[0]["video_metadata"]
+    assert posts[0]["video_metadata"]["operation_ids"] == ["operations/seg-0", "operations/seg-1"]
 
 
 def test_generate_all_videos_persists_unexpected_segmented_submit_failure(monkeypatch):

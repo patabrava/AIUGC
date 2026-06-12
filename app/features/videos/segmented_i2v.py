@@ -33,10 +33,11 @@ PersistOp = Callable[[int, str, str, Dict[str, Any]], None]
 
 _SUPPORTED_I2V_PROVIDER = "vertex_ai"
 
-# Where in seg 0 each i2v segment is anchored, so cuts read as natural jump-cuts rather than an
-# identical reset. The first pending segment locks near seg 0's end (the seg0->seg1 cut is then
-# near-seamless); the rest spread across the clip so every segment starts from a different pose.
-_SEAMLESS_FRACTION = 0.9
+# Where in seg 0 each i2v segment is anchored, so cuts read as intentional UGC jump-cuts rather than
+# an identical reset. The first pending segment avoids the near-end frame: anchoring near the seam
+# made VEO start a fresh generated body state inside almost identical framing, which looked like
+# failed seamless continuity instead of an edit.
+_FIRST_JUMP_CUT_FRACTION = 0.5
 _SPREAD_LOW = 0.2
 _SPREAD_HIGH = 0.7
 
@@ -44,22 +45,22 @@ _SPREAD_HIGH = 0.7
 def _anchor_fractions(count: int) -> List[float]:
     """Distinct seg-0 frame fractions for ``count`` pending i2v segments, in pending order.
 
-    Index 0 (the first pending segment) -> ~0.9 so the cut into it is near-seamless; the remaining
-    ``count - 1`` fractions are evenly spread across [0.2, 0.7]. All values are distinct, so each
-    i2v segment locks to a different frame of seg 0 (still one hop from seg 0 -> zero compounding
-    drift). ``count`` is small (N <= 8), so per-fraction frame extraction is cheap.
+    Index 0 (the first pending segment) uses a mid-anchor frame so the cut reads as a new creator
+    take. The remaining ``count - 1`` fractions are evenly spread across [0.2, 0.7]. All values are
+    distinct, so each i2v segment locks to a different frame of seg 0 (still one hop from seg 0 ->
+    zero compounding drift). ``count`` is small (N <= 8), so per-fraction frame extraction is cheap.
     """
     if count <= 0:
         return []
     if count == 1:
-        return [_SEAMLESS_FRACTION]
+        return [_FIRST_JUMP_CUT_FRACTION]
     rest = count - 1
     if rest == 1:
         spread = [(_SPREAD_LOW + _SPREAD_HIGH) / 2.0]
     else:
         step = (_SPREAD_HIGH - _SPREAD_LOW) / (rest - 1)
         spread = [_SPREAD_LOW + step * i for i in range(rest)]
-    return [_SEAMLESS_FRACTION, *spread]
+    return [_FIRST_JUMP_CUT_FRACTION, *spread]
 
 
 def submit_locked_segments(
@@ -99,8 +100,8 @@ def submit_locked_segments(
     segment_count = int(metadata.get("veo_segment_count") or len(beats))
     last_index = segment_count - 1
 
-    # A distinct seg-0 frame per pending segment (first -> near seg-0 end, rest spread out), so every
-    # segment locks to the same actor but starts from a different pose -> natural jump-cuts, no reset.
+    # A distinct seg-0 frame per pending segment (first -> mid-anchor, rest spread out), so every
+    # segment locks to the same actor but starts from a different pose -> intentional jump-cuts.
     fractions = _anchor_fractions(len(indexes))
 
     client = get_vertex_ai_client()

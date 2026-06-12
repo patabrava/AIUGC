@@ -10,6 +10,21 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+_OPTIONAL_AUDIT_COLUMNS = ("reference_image_metadata", "seed")
+
+
+def _fallback_row_for_missing_optional_audit_columns(row: dict[str, Any], error: Exception) -> Optional[dict[str, Any]]:
+    message = str(error)
+    if not any(column in message for column in _OPTIONAL_AUDIT_COLUMNS) and "schema cache" not in message:
+        return None
+    fallback = dict(row)
+    removed = False
+    for column in _OPTIONAL_AUDIT_COLUMNS:
+        if column in fallback:
+            fallback.pop(column)
+            removed = True
+    return fallback if removed else None
+
 
 def record_prompt_audit(
     *,
@@ -58,6 +73,19 @@ def record_prompt_audit(
             prompt_length=len(prompt_text),
         )
     except Exception as e:
+        fallback_row = _fallback_row_for_missing_optional_audit_columns(row, e)
+        if fallback_row is not None:
+            try:
+                supabase.table("video_prompt_audit").insert(fallback_row).execute()
+                logger.warning(
+                    "prompt_audit_recorded_without_optional_columns",
+                    post_id=post_id,
+                    operation_id=operation_id,
+                    missing_optional_columns=list(_OPTIONAL_AUDIT_COLUMNS),
+                )
+                return
+            except Exception as fallback_error:
+                e = fallback_error
         logger.warning(
             "prompt_audit_failed",
             post_id=post_id,
