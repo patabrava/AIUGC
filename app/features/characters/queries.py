@@ -774,6 +774,13 @@ def get_approved_scene_reference_set_for_post(post_id: str) -> Optional[SceneRef
     return summary
 
 
+def get_approved_video_actor_scene_reference_set_for_post(post_id: str) -> Optional[SceneReferenceSetSummary]:
+    summary = get_latest_scene_reference_set_for_post(post_id)
+    if summary is None or not summary.is_video_actor_ready:
+        return None
+    return summary
+
+
 def get_approved_scene_reference_for_post(post_id: str) -> Optional[dict[str, Any]]:
     summary = get_approved_scene_reference_set_for_post(post_id)
     if summary is None:

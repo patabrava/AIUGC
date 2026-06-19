@@ -639,7 +639,7 @@ def test_generate_all_character_consistency_uses_approved_scene_reference_set_fo
     monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: dict(batch))
     monkeypatch.setattr("app.features.videos.handlers.sync_character_consistency_batch_actor", lambda row, correlation_id: row)
     monkeypatch.setattr(
-        "app.features.videos.handlers.character_queries.get_approved_scene_reference_set_for_post",
+        "app.features.videos.handlers.character_queries.get_approved_video_actor_scene_reference_set_for_post",
         lambda post_id: reference_set,
     )
     monkeypatch.setattr(

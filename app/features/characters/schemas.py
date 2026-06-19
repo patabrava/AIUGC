@@ -101,6 +101,7 @@ class SceneReferenceImageRecord(BaseModel):
 
 
 REQUIRED_SCENE_REFERENCE_ANGLE_KEYS = ("front_mid", "left_three_quarter", "right_profile")
+VIDEO_ACTOR_REFERENCE_ANGLE_KEYS = ("front_mid", "left_three_quarter")
 
 
 class SceneReferenceSetSummary(BaseModel):
@@ -110,6 +111,9 @@ class SceneReferenceSetSummary(BaseModel):
     approved_rows: list[dict[str, Any]] = Field(default_factory=list)
     missing_angle_keys: list[str] = Field(default_factory=list)
     is_ready: bool = False
+    video_actor_rows: list[dict[str, Any]] = Field(default_factory=list)
+    missing_video_actor_angle_keys: list[str] = Field(default_factory=list)
+    is_video_actor_ready: bool = False
 
     @classmethod
     def from_rows(
@@ -138,6 +142,12 @@ class SceneReferenceSetSummary(BaseModel):
             if key in approved_by_angle
         ]
         missing = [key for key in REQUIRED_SCENE_REFERENCE_ANGLE_KEYS if key not in approved_by_angle]
+        video_actor_rows = [
+            approved_by_angle[key]
+            for key in VIDEO_ACTOR_REFERENCE_ANGLE_KEYS
+            if key in approved_by_angle
+        ]
+        missing_video_actor = [key for key in VIDEO_ACTOR_REFERENCE_ANGLE_KEYS if key not in approved_by_angle]
         return cls(
             post_id=post_id,
             reference_set_id=reference_set_id,
@@ -145,4 +155,10 @@ class SceneReferenceSetSummary(BaseModel):
             approved_rows=approved_rows,
             missing_angle_keys=missing,
             is_ready=len(missing) == 0 and len(approved_rows) == len(REQUIRED_SCENE_REFERENCE_ANGLE_KEYS),
+            video_actor_rows=video_actor_rows,
+            missing_video_actor_angle_keys=missing_video_actor,
+            is_video_actor_ready=(
+                len(missing_video_actor) == 0
+                and len(video_actor_rows) == len(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS)
+            ),
         )

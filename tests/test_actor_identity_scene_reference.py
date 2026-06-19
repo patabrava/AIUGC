@@ -233,6 +233,34 @@ def test_scene_reference_set_summary_requires_three_approved_images():
     assert summary.missing_angle_keys == ["right_profile"]
 
 
+def test_scene_reference_set_summary_marks_two_actor_lora_refs_video_ready():
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
+    rows = [
+        {
+            "id": "ref-front",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/front.png",
+            "provider_metadata": _lora_metadata("front_mid", "set-1"),
+            "identity_gate_result": _set_gate(),
+        },
+        {
+            "id": "ref-left",
+            "status": "approved",
+            "image_url": "https://cdn.example.com/left.png",
+            "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
+            "identity_gate_result": _set_gate(),
+        },
+    ]
+
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+
+    assert summary.is_ready is False
+    assert summary.is_video_actor_ready is True
+    assert [row["id"] for row in summary.video_actor_rows] == ["ref-front", "ref-left"]
+    assert summary.missing_video_actor_angle_keys == []
+
+
 def test_scene_reference_set_summary_requires_full_set_gate_details():
     from app.features.characters.schemas import SceneReferenceSetSummary
 
@@ -1140,6 +1168,7 @@ def test_auto_approved_scene_reference_set_for_video_uses_actor_lora_and_gate(mo
     monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_identity_id: actor)
     monkeypatch.setattr(character_handlers.character_queries, "get_active_actor_identity", lambda: actor)
     monkeypatch.setattr(character_handlers.character_queries, "get_approved_scene_reference_set_for_post", lambda post_id: None)
+    monkeypatch.setattr(character_handlers.character_queries, "get_approved_video_actor_scene_reference_set_for_post", lambda post_id: None)
     monkeypatch.setattr(character_handlers.character_queries, "create_scene_reference_candidate", _create_candidate)
     monkeypatch.setattr(
         character_handlers.character_queries,
@@ -1180,18 +1209,19 @@ def test_auto_approved_scene_reference_set_for_video_uses_actor_lora_and_gate(mo
         correlation_id="corr-auto-scene-set",
     )
 
-    assert summary.is_ready is True
-    assert len(captured_tasks) == 3
+    assert summary.is_ready is False
+    assert summary.is_video_actor_ready is True
+    assert len(captured_tasks) == 2
     assert all(task["lora_id"] == "lora-actor-1" for task in captured_tasks)
     assert all(task["strength"] == 100 for task in captured_tasks)
-    assert [row["id"] for row in summary.approved_rows] == [
+    assert [row["id"] for row in summary.video_actor_rows] == [
         "ref-front_mid",
         "ref-left_three_quarter",
-        "ref-right_profile",
     ]
     assert gate_calls[0]["status"] == "approved"
     assert gate_calls[0]["gate_result"].details["auto_approved_for_video_submission"] is True
     assert gate_calls[0]["gate_result"].details["actor_identity_match_confirmed"] is True
+    assert gate_calls[0]["gate_result"].details["hybrid_reference_bundle_approved"] is True
     assert attach_calls[0]["reference_id"] == "ref-front_mid"
 
 

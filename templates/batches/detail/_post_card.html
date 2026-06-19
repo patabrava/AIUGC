@@ -420,19 +420,19 @@
             <p class="text-sm font-semibold text-amber-900">Character Consistency Strategy A</p>
             <div class="mt-2 grid gap-2 text-xs text-amber-900 sm:grid-cols-3">
                 <div class="rounded-md border border-amber-200 bg-white/70 px-2 py-1.5">
-                    <span class="font-semibold">LoRA scene set</span>
-                    <span class="mt-0.5 block text-amber-800">Three Magnific actor-in-scene stills are required for the VEO reference bundle.</span>
+                    <span class="font-semibold">Hybrid reference set</span>
+                    <span class="mt-0.5 block text-amber-800">Two Magnific Laura actor-in-scene stills plus one scene-only plate are sent to VEO.</span>
                 </div>
                 <div class="rounded-md border border-amber-200 bg-white/70 px-2 py-1.5">
                     <span class="font-semibold">Fallback blocked</span>
-                    <span class="mt-0.5 block text-amber-800">Raw actor training images and empty room plates are not sent to VEO.</span>
+                    <span class="mt-0.5 block text-amber-800">Raw actor training images and single scene stills are not sent to VEO.</span>
                 </div>
                 <div class="rounded-md border border-amber-200 bg-white/70 px-2 py-1.5">
                     <span class="font-semibold">Long videos</span>
                     <span class="mt-0.5 block text-amber-800">16s and 32s runs use anchored 8s segments, then stitch when segmented routing is enabled.</span>
                 </div>
             </div>
-            <p class="mt-2 text-xs text-amber-800">If no approved set exists, the video submit path prepares the Magnific scene set before VEO submission.</p>
+            <p class="mt-2 text-xs text-amber-800">If no approved actor set exists, the video submit path prepares two Magnific Laura references and reuses the canonical scene plate before VEO submission.</p>
         </div>
     </div>
     {% endif %}

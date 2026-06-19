@@ -23,7 +23,11 @@ from app.features.characters.actor_identity import (
     pending_manual_gate,
 )
 from app.features.characters import queries as character_queries
-from app.features.characters.schemas import ActorTrainingSet, SceneReferenceSetSummary
+from app.features.characters.schemas import (
+    ActorTrainingSet,
+    SceneReferenceSetSummary,
+    VIDEO_ACTOR_REFERENCE_ANGLE_KEYS,
+)
 from app.features.characters.scene_reference import (
     REQUIRED_SCENE_REFERENCE_ANGLES,
     SCENE_REFERENCE_CREATIVE_DETAILING,
@@ -408,28 +412,28 @@ def _validate_video_scene_reference_rows(
     reference_set_id: str,
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    if len(rows) != len(REQUIRED_SCENE_REFERENCE_ANGLES):
+    if len(rows) != len(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS):
         raise _video_scene_reference_validation_error(
-            message="Character Consistency VEO submission requires exactly three Magnific actor-in-scene reference images.",
+            message="Character Consistency VEO submission requires exactly two approved Magnific actor-in-scene reference images plus one canonical scene plate.",
             post_id=post_id,
             reference_set_id=reference_set_id,
             rows=rows,
         )
     if any(not row.get("image_url") for row in rows):
         raise _video_scene_reference_validation_error(
-            message="Character Consistency VEO submission requires all three Magnific actor-in-scene reference images to have durable image URLs.",
+            message="Character Consistency VEO submission requires both Magnific actor-in-scene reference images to have durable image URLs.",
             post_id=post_id,
             reference_set_id=reference_set_id,
             rows=rows,
         )
-    expected_angles = {angle.key for angle in REQUIRED_SCENE_REFERENCE_ANGLES}
+    expected_angles = set(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS)
     actual_angles = {
         str((row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}).get("angle_key") or "")
         for row in rows
     }
     if actual_angles != expected_angles:
         raise _video_scene_reference_validation_error(
-            message="Character Consistency VEO submission requires one Magnific actor-in-scene reference for each required angle.",
+            message="Character Consistency VEO submission requires one front and one three-quarter Magnific actor-in-scene reference.",
             post_id=post_id,
             reference_set_id=reference_set_id,
             rows=rows,
@@ -442,6 +446,7 @@ def _create_scene_reference_candidates(
     post: dict[str, Any],
     batch: dict[str, Any],
     correlation_id: str,
+    angle_keys: Optional[tuple[str, ...]] = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     post_id = str(post.get("id") or "")
     actor_identity = _ready_actor_identity_for_batch(batch)
@@ -468,7 +473,10 @@ def _create_scene_reference_candidates(
         intent.scene_key,
         get_settings().scene_reference_style_loras,
     )
+    requested_angle_keys = set(angle_keys or tuple(angle.key for angle in REQUIRED_SCENE_REFERENCE_ANGLES))
     for angle in REQUIRED_SCENE_REFERENCE_ANGLES:
+        if angle.key not in requested_angle_keys:
+            continue
         prompt = build_scene_reference_prompt_for_angle(
             actor_name=actor_identity.name,
             scene_key=intent.scene_key,
@@ -536,7 +544,7 @@ def create_auto_approved_scene_reference_set_for_video(
     correlation_id: str,
 ) -> SceneReferenceSetSummary:
     post_id = str(post.get("id") or "")
-    existing = character_queries.get_approved_scene_reference_set_for_post(post_id)
+    existing = character_queries.get_approved_video_actor_scene_reference_set_for_post(post_id)
     if existing:
         return existing
 
@@ -545,6 +553,7 @@ def create_auto_approved_scene_reference_set_for_video(
             post=post,
             batch=batch,
             correlation_id=correlation_id,
+            angle_keys=VIDEO_ACTOR_REFERENCE_ANGLE_KEYS,
         )
         stored_rows = character_queries.list_scene_references_for_set(
             post_id=post_id,
@@ -561,13 +570,15 @@ def create_auto_approved_scene_reference_set_for_video(
     rows = [_row_dict(row) for row in (stored_rows or created_rows)]
     _validate_video_scene_reference_rows(post_id=post_id, reference_set_id=reference_set_id, rows=rows)
 
-    gate = passed_manual_gate("Automatically approved Magnific actor LoRA scene reference set for VEO submission")
+    gate = passed_manual_gate("Automatically approved two Magnific actor LoRA scene references for hybrid VEO submission")
     gate.details.update(
         {
             "scene_consistency_set_approved": True,
             "actor_identity_match_confirmed": True,
             "reference_set_id": reference_set_id,
             "auto_approved_for_video_submission": True,
+            "hybrid_reference_bundle_approved": True,
+            "actor_scene_reference_count": len(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS),
         }
     )
     gated_rows = [
@@ -587,7 +598,7 @@ def create_auto_approved_scene_reference_set_for_video(
         correlation_id=correlation_id,
     )
 
-    approved = character_queries.get_approved_scene_reference_set_for_post(post_id)
+    approved = character_queries.get_approved_video_actor_scene_reference_set_for_post(post_id)
     if approved:
         return approved
 
@@ -609,10 +620,10 @@ def create_auto_approved_scene_reference_set_for_video(
         reference_set_id=reference_set_id,
         rows=fallback_rows,
     )
-    if summary.is_ready:
+    if summary.is_video_actor_ready:
         return summary
     raise _video_scene_reference_validation_error(
-        message="Generated Magnific actor-in-scene reference set could not be approved for Character Consistency VEO submission.",
+        message="Generated Magnific actor-in-scene references could not be approved for hybrid Character Consistency VEO submission.",
         post_id=post_id,
         reference_set_id=reference_set_id,
         rows=fallback_rows,

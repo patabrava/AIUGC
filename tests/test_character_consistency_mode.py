@@ -1024,7 +1024,7 @@ def test_actor_identity_batch_blocks_video_without_complete_reference_set():
     with pytest.raises(FlowForgeException) as exc:
         ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=summary, route="short")
 
-    assert "three approved SceneReferenceImages" in exc.value.message
+    assert "two approved actor LoRA SceneReferenceImages" in exc.value.message
 
 
 def test_light_actor_identity_batch_blocks_video_without_complete_reference_set():
@@ -1036,7 +1036,7 @@ def test_light_actor_identity_batch_blocks_video_without_complete_reference_set(
     with pytest.raises(FlowForgeException) as exc:
         ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=None, route="extended")
 
-    assert "three approved SceneReferenceImages" in exc.value.message
+    assert "two approved actor LoRA SceneReferenceImages" in exc.value.message
 
 
 def test_mid_actor_identity_batch_blocks_video_without_complete_reference_set():
@@ -1048,7 +1048,7 @@ def test_mid_actor_identity_batch_blocks_video_without_complete_reference_set():
     with pytest.raises(FlowForgeException) as exc:
         ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=None, route="extended")
 
-    assert "three approved SceneReferenceImages" in exc.value.message
+    assert "two approved actor LoRA SceneReferenceImages" in exc.value.message
 
 
 def test_character_consistency_32s_blocks_lora_backed_video_route():
@@ -1134,7 +1134,7 @@ def test_submit_video_request_rejects_single_scene_reference_without_lora_refere
         )
 
     assert exc.value.status_code == 422
-    assert "three approved Magnific actor-in-scene reference images" in exc.value.message
+    assert "two approved Magnific actor-in-scene reference images plus one canonical scene plate" in exc.value.message
     assert exc.value.details["scene_reference_image_id"] == "scene-1"
 
 
@@ -1187,7 +1187,7 @@ def test_submit_video_request_rejects_unverified_scene_reference_set(monkeypatch
     assert "LoRA identity lock metadata" in exc.value.message
 
 
-def test_submit_video_request_uses_lora_scene_reference_set_to_vertex(monkeypatch):
+def test_submit_video_request_uses_two_lora_refs_plus_scene_plate_to_vertex(monkeypatch):
     from app.features.characters.schemas import SceneReferenceSetSummary
     from app.features.videos import handlers as video_handlers
 
@@ -1232,16 +1232,6 @@ def test_submit_video_request_uses_lora_scene_reference_set_to_vertex(monkeypatc
                 "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
-            {
-                "id": "scene-profile",
-                "actor_identity_id": "actor-1",
-                "status": "approved",
-                "image_url": "https://cdn/profile.png",
-                "scene_key": "bathroom_adaptation",
-                "wardrobe_key": "everyday_sweater",
-                "provider_metadata": _lora_metadata("right_profile", "set-1"),
-                "identity_gate_result": _set_gate(),
-            },
         ],
     )
 
@@ -1265,20 +1255,22 @@ def test_submit_video_request_uses_lora_scene_reference_set_to_vertex(monkeypatc
     assert len(captured["reference_images"]) == 3
     assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn/front.png"
     assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn/left.png"
-    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn/profile.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_scene_reference_set"
+    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/canonical-bathroom.png"
+    assert result["provider_metadata"]["source"] == "actor_identity_scene_reference_set_plus_canonical_scene"
     assert result["provider_metadata"]["scene_reference_set_id"] == "set-1"
-    assert result["provider_metadata"]["scene_reference_image_ids"] == ["scene-front", "scene-left", "scene-profile"]
-    assert result["provider_metadata"]["scene_reference_image_count"] == 3
+    assert result["provider_metadata"]["scene_reference_image_ids"] == ["scene-front", "scene-left"]
+    assert result["provider_metadata"]["scene_reference_image_count"] == 2
     assert result["provider_metadata"]["scene_reference_images_used_for_video"] is True
     assert result["provider_metadata"].get("scene_reference_images_approval_only") is not True
     assert result["provider_metadata"]["reference_image_roles"] == [
         "actor_identity_scene_reference",
         "actor_identity_scene_reference",
-        "actor_identity_scene_reference",
+        "canonical_scene_reference",
     ]
     assert result["provider_metadata"]["reference_image_count"] == 3
     assert result["provider_metadata"]["scene_key"] == "bathroom_adaptation"
+    assert result["provider_metadata"]["canonical_scene_reference_used_for_video"] is True
+    assert result["provider_metadata"]["canonical_scene_key"] == "bathroom_accessibility_a"
 
 
 def test_submit_video_request_rejects_actor_identity_training_fallback_without_scene_reference_set(monkeypatch):
@@ -1320,7 +1312,7 @@ def test_submit_video_request_rejects_actor_identity_training_fallback_without_s
         )
 
     assert exc.value.status_code == 422
-    assert "three approved Magnific actor-in-scene reference images" in exc.value.message
+    assert "two approved Magnific actor-in-scene reference images plus one canonical scene plate" in exc.value.message
     assert exc.value.details["actor_identity_id"] == "actor-1"
 
 
@@ -1391,32 +1383,27 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
         },
     )
 
-    scene_reference_set = SceneReferenceSetSummary(
+    scene_reference_set = SceneReferenceSetSummary.from_rows(
         post_id="post-1",
         reference_set_id="set-1",
-        actor_identity_id="actor-1",
-        approved_rows=[
+        rows=[
             {
                 "id": "ref-1",
                 "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/front.png",
                 "provider_metadata": _lora_metadata("front_mid", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
             {
                 "id": "ref-2",
                 "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/left.png",
                 "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
-            {
-                "id": "ref-3",
-                "actor_identity_id": "actor-1",
-                "provider_metadata": _lora_metadata("right_profile", "set-1"),
-                "identity_gate_result": _set_gate(),
-            },
         ],
-        missing_angle_keys=[],
-        is_ready=True,
     )
 
     result = video_handlers._submit_video_request(
@@ -1636,6 +1623,6 @@ def test_submit_video_request_blocks_actor_identity_when_anchors_cannot_attach(m
     )
 
     assert exc.value.status_code == 422
-    assert "three approved Magnific actor-in-scene reference images" in exc.value.message
+    assert "two approved Magnific actor-in-scene reference images plus one canonical scene plate" in exc.value.message
     assert exc.value.details["actor_identity_id"] == "actor-1"
     assert exc.value.details["provider_duration_seconds"] == 4

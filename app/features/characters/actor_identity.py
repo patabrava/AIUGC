@@ -155,7 +155,8 @@ def ensure_video_scene_reference_ready(
 
 
 def _scene_reference_set_has_actor_identity_confirmation(scene_reference_set: SceneReferenceSetSummary) -> bool:
-    for row in scene_reference_set.approved_rows:
+    rows = scene_reference_set.video_actor_rows or scene_reference_set.approved_rows
+    for row in rows:
         gate = row.get("identity_gate_result") if isinstance(row.get("identity_gate_result"), dict) else {}
         details = gate.get("details") if isinstance(gate.get("details"), dict) else {}
         if details.get("actor_identity_match_confirmed") is not True:
@@ -211,9 +212,10 @@ def _scene_reference_set_has_lora_identity_lock(
     *,
     batch_actor_identity_id: Any,
 ) -> bool:
+    rows = scene_reference_set.video_actor_rows or scene_reference_set.approved_rows
     return all(
         _scene_reference_row_has_lora_identity_lock(row, batch_actor_identity_id=batch_actor_identity_id)
-        for row in scene_reference_set.approved_rows
+        for row in rows
     )
 
 
@@ -223,8 +225,9 @@ def scene_reference_set_has_lora_identity_lock(
     batch_actor_identity_id: Any = None,
 ) -> bool:
     resolved_actor_identity_id = batch_actor_identity_id or getattr(scene_reference_set, "actor_identity_id", None)
-    if not resolved_actor_identity_id and scene_reference_set.approved_rows:
-        resolved_actor_identity_id = scene_reference_set.approved_rows[0].get("actor_identity_id")
+    rows = scene_reference_set.video_actor_rows or scene_reference_set.approved_rows
+    if not resolved_actor_identity_id and rows:
+        resolved_actor_identity_id = rows[0].get("actor_identity_id")
     return _scene_reference_set_has_lora_identity_lock(
         scene_reference_set,
         batch_actor_identity_id=resolved_actor_identity_id,
@@ -253,21 +256,21 @@ def ensure_video_scene_reference_set_ready(
             details={"batch_id": batch.get("id")},
             status_code=422,
         )
-    if scene_reference_set is None or not scene_reference_set.is_ready:
+    if scene_reference_set is None or not scene_reference_set.is_video_actor_ready:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires three approved SceneReferenceImages before submit.",
+            message="ActorIdentity video generation requires two approved actor LoRA SceneReferenceImages before submit.",
             details={
                 "post_id": post.get("id"),
                 "batch_id": batch.get("id"),
-                "missing_angle_keys": scene_reference_set.missing_angle_keys if scene_reference_set else [],
+                "missing_angle_keys": scene_reference_set.missing_video_actor_angle_keys if scene_reference_set else [],
             },
             status_code=422,
         )
     if not scene_reference_set_has_actor_identity_confirmation(scene_reference_set):
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires operator-confirmed actor identity match for all three approved SceneReferenceImages.",
+            message="ActorIdentity video generation requires operator-confirmed actor identity match for approved actor LoRA SceneReferenceImages.",
             details={
                 "post_id": post.get("id"),
                 "batch_id": batch.get("id"),
@@ -281,7 +284,7 @@ def ensure_video_scene_reference_set_ready(
     ):
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires LoRA identity lock metadata on all three approved SceneReferenceImages.",
+            message="ActorIdentity video generation requires LoRA identity lock metadata on approved actor LoRA SceneReferenceImages.",
             details={
                 "post_id": post.get("id"),
                 "batch_id": batch.get("id"),

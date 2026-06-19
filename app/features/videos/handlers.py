@@ -363,17 +363,28 @@ def _canonical_scene_context_metadata(
 def _load_scene_reference_set_assets(
     *,
     scene_reference_set: Optional[SceneReferenceSetSummary],
+    canonical_scene_asset: Optional[CanonicalSceneAssetRecord],
     correlation_id: str,
 ) -> Optional[Dict[str, Any]]:
     if not scene_reference_set:
         return None
-    if not scene_reference_set.is_ready:
+    if not scene_reference_set.is_video_actor_ready:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires three approved SceneReferenceImages before submit.",
+            message="ActorIdentity video generation requires two approved actor LoRA SceneReferenceImages before submit.",
             details={
                 "reference_set_id": scene_reference_set.reference_set_id,
-                "missing_angle_keys": scene_reference_set.missing_angle_keys,
+                "missing_angle_keys": scene_reference_set.missing_video_actor_angle_keys,
+            },
+            status_code=422,
+        )
+    if canonical_scene_asset is None or not canonical_scene_asset.image_url:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="ActorIdentity video generation requires a generated canonical scene plate as the third VEO reference image.",
+            details={
+                "reference_set_id": scene_reference_set.reference_set_id,
+                "canonical_scene_asset_id": canonical_scene_asset.id if canonical_scene_asset else None,
             },
             status_code=422,
         )
@@ -381,7 +392,7 @@ def _load_scene_reference_set_assets(
     reference_images: list[Dict[str, str]] = []
     scene_reference_ids: list[str] = []
     angle_keys: list[str] = []
-    for row in scene_reference_set.approved_rows:
+    for row in scene_reference_set.video_actor_rows:
         image_url = str(row.get("image_url") or "").strip()
         if not image_url:
             raise FlowForgeException(
@@ -394,31 +405,36 @@ def _load_scene_reference_set_assets(
         reference_images.append(_reference_image_payload_from_url(image_url))
         scene_reference_ids.append(str(row.get("id") or ""))
         angle_keys.append(str(metadata.get("angle_key") or ""))
+    reference_images.append(_reference_image_payload_from_url(str(canonical_scene_asset.image_url)))
 
     logger.info(
-        "actor_scene_reference_set_loaded_for_veo",
+        "hybrid_actor_scene_reference_set_loaded_for_veo",
         correlation_id=correlation_id,
         reference_set_id=scene_reference_set.reference_set_id,
         reference_image_count=len(reference_images),
     )
-    first_row = scene_reference_set.approved_rows[0] if scene_reference_set.approved_rows else {}
+    first_row = scene_reference_set.video_actor_rows[0] if scene_reference_set.video_actor_rows else {}
     return {
         "reference_images": reference_images,
         "metadata": {
             "reference_images_enabled": True,
             "reference_image_count": len(reference_images),
-            "reference_image_roles": ["actor_identity_scene_reference" for _ in reference_images],
+            "reference_image_roles": [
+                *["actor_identity_scene_reference" for _ in scene_reference_ids],
+                "canonical_scene_reference",
+            ],
             "actor_identity_id": first_row.get("actor_identity_id"),
-            "actor_identity_anchor_source": "actor_identity_scene_reference_set",
-            "actor_identity_anchor_image_count": len(reference_images),
+            "actor_identity_anchor_source": "actor_identity_scene_reference_set_plus_canonical_scene",
+            "actor_identity_anchor_image_count": len(scene_reference_ids),
             "scene_reference_set_id": scene_reference_set.reference_set_id,
             "scene_reference_image_ids": scene_reference_ids,
             "scene_reference_angle_keys": angle_keys,
-            "scene_reference_image_count": len(reference_images),
+            "scene_reference_image_count": len(scene_reference_ids),
             "scene_reference_images_used_for_video": True,
             "scene_key": first_row.get("scene_key"),
             "wardrobe_key": first_row.get("wardrobe_key"),
-            "source": "actor_identity_scene_reference_set",
+            "source": "actor_identity_scene_reference_set_plus_canonical_scene",
+            **_canonical_scene_context_metadata(canonical_scene_asset),
         },
     }
 
@@ -462,6 +478,7 @@ def _load_actor_identity_anchor_assets(
 ) -> Dict[str, Any]:
     scene_reference_bundle = _load_scene_reference_set_assets(
         scene_reference_set=scene_reference_set,
+        canonical_scene_asset=canonical_scene_asset,
         correlation_id=correlation_id,
     )
     if scene_reference_bundle:
@@ -470,8 +487,8 @@ def _load_actor_identity_anchor_assets(
     raise FlowForgeException(
         code=ErrorCode.VALIDATION_ERROR,
         message=(
-            "Character Consistency VEO submission requires three approved Magnific actor-in-scene reference images. "
-            "Raw ActorIdentity training images and single scene stills are not valid VEO reference bundles."
+            "Character Consistency VEO submission requires two approved Magnific actor-in-scene reference images "
+            "plus one canonical scene plate. Raw ActorIdentity training images and single scene stills are not valid VEO reference bundles."
         ),
         details={
             "actor_identity_id": actor_identity_id,
@@ -493,8 +510,8 @@ def _missing_actor_lora_scene_reference_set_error(
     return FlowForgeException(
         code=ErrorCode.VALIDATION_ERROR,
         message=(
-            "Character Consistency VEO submission requires three approved Magnific actor-in-scene reference images. "
-            "Raw ActorIdentity training images, single scene stills, and empty canonical room plates are blocked."
+            "Character Consistency VEO submission requires two approved Magnific actor-in-scene reference images "
+            "plus one canonical scene plate. Raw ActorIdentity training images and single scene stills are blocked."
         ),
         details={
             "creation_mode": mode,
@@ -514,7 +531,7 @@ def _ensure_actor_lora_scene_reference_set_for_video(
     correlation_id: str,
 ) -> SceneReferenceSetSummary:
     post_id = str(post.get("id") or "")
-    approved = character_queries.get_approved_scene_reference_set_for_post(post_id)
+    approved = character_queries.get_approved_video_actor_scene_reference_set_for_post(post_id)
     if approved:
         return approved
 
@@ -3694,13 +3711,13 @@ def _reference_image_audit_metadata(provider_metadata: Optional[Dict[str, Any]])
 
 
 def _ensure_scene_reference_set_provider_ready(scene_reference_set: SceneReferenceSetSummary) -> None:
-    if not scene_reference_set.is_ready:
+    if not scene_reference_set.is_video_actor_ready:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video submission requires three approved SceneReferenceImages before submit.",
+            message="ActorIdentity video submission requires two approved actor LoRA SceneReferenceImages before submit.",
             details={
                 "reference_set_id": scene_reference_set.reference_set_id,
-                "missing_angle_keys": scene_reference_set.missing_angle_keys,
+                "missing_angle_keys": scene_reference_set.missing_video_actor_angle_keys,
             },
             status_code=422,
         )
