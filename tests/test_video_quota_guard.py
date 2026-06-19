@@ -614,7 +614,7 @@ def test_generate_all_character_consistency_uses_approved_scene_reference_set_fo
     def _fake_segmented_submit(**kwargs):
         captured.update(kwargs)
         return {
-            "operation_ids": ["operations/seg-0", "operations/seg-1"],
+            "operation_ids": ["operations/seg-0"],
             "results": [
                 {
                     "operation_id": "operations/seg-0",
@@ -624,24 +624,15 @@ def test_generate_all_character_consistency_uses_approved_scene_reference_set_fo
                         "operation_id": "operations/seg-0",
                         "source": "actor_identity_scene_reference_set",
                     },
-                },
-                {
-                    "operation_id": "operations/seg-1",
-                    "status": "submitted",
-                    "provider_model": "veo-3.1-generate-001",
-                    "provider_metadata": {
-                        "operation_id": "operations/seg-1",
-                        "source": "actor_identity_scene_reference_set",
-                    },
-                },
+                }
             ],
             "segment_count": 2,
             "prompts": ["Segment prompt 1", "Segment prompt 2"],
-            "beats": [{"index": 0}, {"index": 1}],
+            "beats": ["Segment beat 1", "Segment beat 2"],
             "seed": 123,
-            "i2v_locked": False,
-            "i2v_model": None,
-            "i2v_output_gcs_uri": None,
+            "i2v_locked": True,
+            "i2v_model": "veo-3.1-generate-001",
+            "i2v_output_gcs_uri": "gs://bucket/out/",
         }
 
     monkeypatch.setattr("app.features.videos.handlers.get_supabase", lambda: fake_supabase)
@@ -680,8 +671,12 @@ def test_generate_all_character_consistency_uses_approved_scene_reference_set_fo
     assert captured["submission_plan"]["profile"].route == "veo_segmented"
     assert posts[0]["video_status"] == "submitted"
     assert posts[0]["video_metadata"]["video_pipeline_route"] == "veo_segmented"
-    assert "i2v_lock" not in posts[0]["video_metadata"]
-    assert posts[0]["video_metadata"]["operation_ids"] == ["operations/seg-0", "operations/seg-1"]
+    assert posts[0]["video_metadata"]["operation_ids"] == ["operations/seg-0"]
+    assert posts[0]["video_metadata"]["i2v_lock"]["state"] == "pending"
+    assert posts[0]["video_metadata"]["i2v_lock"]["beats"] == ["Segment beat 1", "Segment beat 2"]
+    assert posts[0]["video_metadata"]["veo_segment_ops"][0]["kind"] == "anchor"
+    assert posts[0]["video_metadata"]["veo_segment_ops"][1]["kind"] == "i2v"
+    assert posts[0]["video_metadata"]["veo_segment_ops"][1]["operation_id"] is None
 
 
 def test_generate_all_videos_persists_unexpected_segmented_submit_failure(monkeypatch):

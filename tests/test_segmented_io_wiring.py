@@ -52,7 +52,7 @@ def test_build_segmented_segment_prompts_reanchors_character_consistency():
     assert prompts[0] != prompts[1]
 
 
-def test_submit_segmented_character_consistency_fans_out_reference_anchored_segments(monkeypatch):
+def test_submit_segmented_character_consistency_uses_anchor_i2v_lock(monkeypatch):
     calls = []
 
     def _fake_submit_video_request(**kwargs):
@@ -112,11 +112,12 @@ def test_submit_segmented_character_consistency_fans_out_reference_anchored_segm
         model="veo-3.1-generate-001",
     )
 
-    assert result["operation_ids"] == ["op-0", "op-1"]
+    assert result["operation_ids"] == ["op-0"]
     assert result["segment_count"] == 2
-    assert result["i2v_locked"] is False
-    assert len(calls) == 2
-    assert [c["correlation_id"] for c in calls] == ["corr_seg0", "corr_seg1"]
+    assert result["i2v_locked"] is True
+    assert result["i2v_model"] == "veo-3.1-generate-001"
+    assert len(calls) == 1
+    assert [c["correlation_id"] for c in calls] == ["corr_seg0"]
     for call in calls:
         assert call["provider"] == "vertex_ai"
         assert call["model"] == "veo-3.1-generate-001"
@@ -146,9 +147,26 @@ def test_submit_segmented_character_consistency_fans_out_reference_anchored_segm
         actor_identity_id="actor-1",
         scene_reference_set=None,
     )
-    assert "i2v_lock" not in metadata
-    assert [op["operation_id"] for op in metadata["veo_segment_ops"]] == ["op-0", "op-1"]
-    assert all(op["status"] == sp.SEGMENT_STATUS_SUBMITTED for op in metadata["veo_segment_ops"])
+    assert metadata["i2v_lock"]["state"] == sp.I2V_STATE_PENDING
+    assert metadata["i2v_lock"]["model"] == "veo-3.1-generate-001"
+    assert metadata["i2v_lock"]["beats"] == result["beats"]
+    assert metadata["operation_ids"] == ["op-0"]
+    assert metadata["veo_segment_ops"] == [
+        {
+            "index": 0,
+            "operation_id": "op-0",
+            "status": sp.SEGMENT_STATUS_SUBMITTED,
+            "video_uri": None,
+            "kind": sp.SEGMENT_KIND_ANCHOR,
+        },
+        {
+            "index": 1,
+            "operation_id": None,
+            "status": sp.SEGMENT_STATUS_PENDING,
+            "video_uri": None,
+            "kind": sp.SEGMENT_KIND_I2V,
+        },
+    ]
 
 
 # --------------------------------------------------------------------------------------

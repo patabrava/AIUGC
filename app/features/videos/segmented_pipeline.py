@@ -17,10 +17,10 @@ Metadata contract (stored in ``posts.video_metadata``) for a segmented post:
       ]
     }
 
-Legacy identity-lock variant: older in-flight posts may have segment 0 as a text+reference anchor and
-segments 1..N-1 as image-to-video rows with an ``i2v_lock`` plan (see ``build_i2v_lock``). New Character
-Consistency segmented submissions should not use that variant, because i2v cannot carry the three actor
-reference images. New posts use the all-at-once fan-out so every segment re-attaches the references.
+Character Consistency identity-lock variant: segment 0 is the text+reference anchor and segments
+1..N-1 are image-to-video rows with an ``i2v_lock`` plan (see ``build_i2v_lock``). The later segments
+do not carry reference images directly; they inherit the actor, wardrobe, and room from anchor frames.
+Non-Character Consistency segmented posts use the all-at-once independent fan-out.
 """
 
 from __future__ import annotations

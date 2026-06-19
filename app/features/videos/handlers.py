@@ -1966,13 +1966,12 @@ def _submit_segmented_post(
 ) -> Dict[str, Any]:
     """Submit the segmented-route generations for one post.
 
-    Every segment is submitted here as an independent 8s generation with the same seed and the same
-    provider reference-image context. For Character Consistency this means the selected actor/canonical
-    scene reference bundle is re-attached to every segment; do not route new CC batches through the
-    legacy i2v lock path, because image-to-video continuations cannot also carry the three actor refs.
+    Character Consistency submits only segment 0 here as the reference-anchored visual source of truth.
+    The poller submits segments 1..N-1 later as image-to-video jobs locked to frames from segment 0,
+    which preserves the actor, wardrobe, and room across the stitched clip. Non-CC segmented posts keep
+    the independent all-at-once fan-out.
 
-    Returns the submitted operation ids + results plus legacy i2v plan fields kept only so old in-flight
-    metadata can still be read by shared builders.
+    Returns the submitted operation ids + results plus i2v plan fields for Character Consistency.
 
     On a mid-fan-out provider failure the exception propagates to the caller's standard failure
     handling; already-accepted segment operations are logged as orphaned (paid but untracked).
@@ -1996,10 +1995,10 @@ def _submit_segmented_post(
         seed=shared_seed,
     )
 
-    # New segmented submissions always fan out every segment now. Character Consistency relies on
-    # _submit_video_request to attach the actor/canonical-scene references to each 8s segment.
-    i2v_locked = False
-    subs_to_submit = subs
+    # Character Consistency keeps one reference-anchored anchor and lets the poller submit i2v segments
+    # from anchor frames. Submitting all segments independently re-rolls the room/wardrobe too often.
+    i2v_locked = is_character_consistency_mode(creation_mode)
+    subs_to_submit = subs[:1] if i2v_locked else subs
 
     operation_ids: list[str] = []
     results: list[Dict[str, Any]] = []
