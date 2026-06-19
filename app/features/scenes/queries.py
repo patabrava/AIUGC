@@ -38,6 +38,7 @@ def resolve_canonical_scene_key(
     post_type: Optional[str] = None,
     seed_data: Optional[dict[str, Any]] = None,
     target_length_tier: int = 8,
+    prefer_scene_text: bool = False,
 ) -> str:
     # An explicit, valid scene key/alias in scene_text is authoritative.
     direct_scene_key = str(scene_text or "").strip()
@@ -46,6 +47,26 @@ def resolve_canonical_scene_key(
             return get_scene_bible(direct_scene_key).scene_id
         except KeyError:
             pass
+
+    def _scene_key_from_text() -> Optional[str]:
+        normalized_scene = _normalize_scene_text(scene_text)
+        if not normalized_scene and prompt_text:
+            prompt_text_value = str(prompt_text)
+            if "Scene:" in prompt_text_value:
+                scene_block = prompt_text_value.split("Scene:", 1)[1].split("\n\n", 1)[0]
+                normalized_scene = _normalize_scene_text(scene_block)
+
+        if normalized_scene:
+            for bible in SCENE_BIBLES.values():
+                normalized_identity = " ".join(str(bible.scene_identity).split())
+                if normalized_scene == normalized_identity or normalized_identity in normalized_scene:
+                    return bible.scene_id
+        return None
+
+    if prefer_scene_text:
+        scene_key = _scene_key_from_text()
+        if scene_key:
+            return scene_key
 
     # The per-post script/topic is the only per-video discriminator under the canon's scene
     # model. When the post carries real content, the content router decides (a specialized
@@ -68,18 +89,9 @@ def resolve_canonical_scene_key(
 
     # No per-post content (internal fallback callers): honor a canonical scene named in the
     # scene/prompt text if present, otherwise the content router's default.
-    normalized_scene = _normalize_scene_text(scene_text)
-    if not normalized_scene and prompt_text:
-        prompt_text_value = str(prompt_text)
-        if "Scene:" in prompt_text_value:
-            scene_block = prompt_text_value.split("Scene:", 1)[1].split("\n\n", 1)[0]
-            normalized_scene = _normalize_scene_text(scene_block)
-
-    if normalized_scene:
-        for bible in SCENE_BIBLES.values():
-            normalized_identity = " ".join(str(bible.scene_identity).split())
-            if normalized_scene == normalized_identity or normalized_identity in normalized_scene:
-                return bible.scene_id
+    scene_key = _scene_key_from_text()
+    if scene_key:
+        return scene_key
 
     return intent.scene_key
 

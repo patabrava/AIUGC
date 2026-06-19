@@ -144,6 +144,7 @@ def test_submit_segmented_character_consistency_fans_out_reference_anchored_segm
         quota_consume_error=None,
         canonical_scene_asset=None,
         actor_identity_id="actor-1",
+        scene_reference_set=None,
     )
     assert "i2v_lock" not in metadata
     assert [op["operation_id"] for op in metadata["veo_segment_ops"]] == ["op-0", "op-1"]

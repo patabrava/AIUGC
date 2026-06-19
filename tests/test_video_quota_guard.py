@@ -483,7 +483,9 @@ def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypat
         assert captured["provider"] == "vertex_ai"
 
 
-def test_generate_all_character_consistency_does_not_require_scene_reference_set_for_segmented_submit(monkeypatch):
+def test_generate_all_character_consistency_uses_approved_scene_reference_set_for_segmented_submit(monkeypatch):
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
     posts = [
         {
             "id": "post-1",
@@ -502,6 +504,111 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
         "creation_mode": "character_consistency",
         "actor_identity_id": "actor-1",
     }
+    reference_set = SceneReferenceSetSummary.from_rows(
+        post_id="post-1",
+        reference_set_id="set-1",
+        rows=[
+            {
+                "id": "scene-front",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/front.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": {
+                    "reference_set_id": "set-1",
+                    "angle_key": "front_mid",
+                    "identity_lock_contract": {
+                        "provider": "magnific",
+                        "provider_lora_id": "1786946",
+                        "provider_lora_name": "ayra-actor-longchar-20260521",
+                        "actor_identity_id": "actor-1",
+                        "identity_strength": 100,
+                        "prompt_lora_handle_required": True,
+                        "styling_characters_required": True,
+                    },
+                    "mystic_request": {
+                        "prompt": "Photorealistic still of @ayra-actor-longchar-20260521::100.",
+                        "styling": {"characters": [{"id": "1786946", "strength": 100}]},
+                    },
+                },
+                "identity_gate_result": {
+                    "status": "passed",
+                    "details": {
+                        "scene_consistency_set_approved": True,
+                        "actor_identity_match_confirmed": True,
+                        "reference_set_id": "set-1",
+                    },
+                },
+            },
+            {
+                "id": "scene-left",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/left.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": {
+                    "reference_set_id": "set-1",
+                    "angle_key": "left_three_quarter",
+                    "identity_lock_contract": {
+                        "provider": "magnific",
+                        "provider_lora_id": "1786946",
+                        "provider_lora_name": "ayra-actor-longchar-20260521",
+                        "actor_identity_id": "actor-1",
+                        "identity_strength": 100,
+                        "prompt_lora_handle_required": True,
+                        "styling_characters_required": True,
+                    },
+                    "mystic_request": {
+                        "prompt": "Photorealistic still of @ayra-actor-longchar-20260521::100.",
+                        "styling": {"characters": [{"id": "1786946", "strength": 100}]},
+                    },
+                },
+                "identity_gate_result": {
+                    "status": "passed",
+                    "details": {
+                        "scene_consistency_set_approved": True,
+                        "actor_identity_match_confirmed": True,
+                        "reference_set_id": "set-1",
+                    },
+                },
+            },
+            {
+                "id": "scene-profile",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/profile.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": {
+                    "reference_set_id": "set-1",
+                    "angle_key": "right_profile",
+                    "identity_lock_contract": {
+                        "provider": "magnific",
+                        "provider_lora_id": "1786946",
+                        "provider_lora_name": "ayra-actor-longchar-20260521",
+                        "actor_identity_id": "actor-1",
+                        "identity_strength": 100,
+                        "prompt_lora_handle_required": True,
+                        "styling_characters_required": True,
+                    },
+                    "mystic_request": {
+                        "prompt": "Photorealistic still of @ayra-actor-longchar-20260521::100.",
+                        "styling": {"characters": [{"id": "1786946", "strength": 100}]},
+                    },
+                },
+                "identity_gate_result": {
+                    "status": "passed",
+                    "details": {
+                        "scene_consistency_set_approved": True,
+                        "actor_identity_match_confirmed": True,
+                        "reference_set_id": "set-1",
+                    },
+                },
+            },
+        ],
+    )
     captured = {}
 
     def _fake_segmented_submit(**kwargs):
@@ -515,7 +622,7 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
                     "provider_model": "veo-3.1-generate-001",
                     "provider_metadata": {
                         "operation_id": "operations/seg-0",
-                        "source": "actor_identity_plus_canonical_scene_anchor",
+                        "source": "actor_identity_scene_reference_set",
                     },
                 },
                 {
@@ -524,7 +631,7 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
                     "provider_model": "veo-3.1-generate-001",
                     "provider_metadata": {
                         "operation_id": "operations/seg-1",
-                        "source": "actor_identity_plus_canonical_scene_anchor",
+                        "source": "actor_identity_scene_reference_set",
                     },
                 },
             ],
@@ -541,8 +648,8 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
     monkeypatch.setattr("app.features.videos.handlers.get_batch_by_id", lambda batch_id: dict(batch))
     monkeypatch.setattr("app.features.videos.handlers.sync_character_consistency_batch_actor", lambda row, correlation_id: row)
     monkeypatch.setattr(
-        "app.features.videos.handlers.character_queries.get_latest_scene_reference_set_for_post",
-        lambda post_id: (_ for _ in ()).throw(AssertionError("normal Strategy A submission must not load scene reference sets")),
+        "app.features.videos.handlers.character_queries.get_approved_scene_reference_set_for_post",
+        lambda post_id: reference_set,
     )
     monkeypatch.setattr(
         "app.core.video_profiles.get_settings",
@@ -569,7 +676,7 @@ def test_generate_all_character_consistency_does_not_require_scene_reference_set
     response = asyncio.run(generate_all_videos("batch-1", request))
 
     assert response.data["submitted_count"] == 1
-    assert captured["scene_reference_set"] is None
+    assert captured["scene_reference_set"].reference_set_id == "set-1"
     assert captured["submission_plan"]["profile"].route == "veo_segmented"
     assert posts[0]["video_status"] == "submitted"
     assert posts[0]["video_metadata"]["video_pipeline_route"] == "veo_segmented"

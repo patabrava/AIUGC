@@ -781,6 +781,25 @@ def test_resolve_canonical_scene_key_generic_and_explicit_fallbacks():
     )
 
 
+def test_resolve_canonical_scene_key_can_prefer_scene_plan_prose_for_actor_fallback():
+    from app.features.scenes import queries as scene_queries
+
+    living_room_scene_text = f"Scene: {get_scene_bible('home_living_room_advice_a').scene_identity}"
+
+    assert (
+        scene_queries.resolve_canonical_scene_key(
+            scene_text=living_room_scene_text,
+            post_type="product",
+            seed_data={
+                "script": "Der Vario Plus wird ruhig am Tisch erklaert.",
+                "topic_title": "VARIO PLUS Gebrauch und Bedienung",
+            },
+            prefer_scene_text=True,
+        )
+        == "home_living_room_advice_a"
+    )
+
+
 def test_neutral_pool_rotation_is_deterministic_and_varied():
     from app.features.scenes import queries as scene_queries
 
