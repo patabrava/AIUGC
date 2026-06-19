@@ -1424,6 +1424,43 @@ def _tiktok_job_result_status(tiktok_job: Dict[str, Any]) -> str:
     return "publishing"
 
 
+def _tiktok_direct_post_ready(tiktok_connection: Dict[str, Any]) -> bool:
+    """Use TikTok direct posting only after creator info confirms publish readiness."""
+    return (
+        str(tiktok_connection.get("readiness_status") or "") == "publish_ready"
+        or bool(tiktok_connection.get("publish_ready"))
+    )
+
+
+async def _dispatch_tiktok_post(
+    post: Dict[str, Any],
+    tiktok_connection: Dict[str, Any],
+    *,
+    tiktok_settings: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], str]:
+    """Dispatch one TikTok post through direct-post when approved settings are present."""
+    settings = _load_json_object(tiktok_settings)
+    if _tiktok_direct_post_ready(tiktok_connection) and settings:
+        job = await publish_tiktok_direct_for_post(
+            post["id"],
+            caption=post["publish_caption"],
+            title=str(settings.get("title") or ""),
+            privacy_level=str(settings.get("privacy_level") or ""),
+            allow_comment=bool(settings.get("allow_comment")),
+            allow_duet=bool(settings.get("allow_duet")),
+            allow_stitch=bool(settings.get("allow_stitch")),
+            your_brand=bool(settings.get("your_brand")),
+            branded_content=bool(settings.get("branded_content")),
+        )
+        return job, "direct"
+
+    job = await upload_tiktok_draft_for_post(
+        post["id"],
+        caption=post["publish_caption"],
+    )
+    return job, "draft"
+
+
 async def _resolve_confirm_publish_request(
     http_request: Request,
     batch_id: str,
@@ -1513,7 +1550,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
     now = datetime.utcnow().isoformat()
     supabase = get_supabase().client
     due_response = supabase.table("posts").select(
-        "id, batch_id, post_type, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids"
+        "id, batch_id, post_type, video_url, video_metadata, seed_data, scheduled_at, publish_caption, social_networks, publish_status, publish_results, platform_ids, tiktok_settings"
     ).eq("publish_status", "scheduled").lte("scheduled_at", now).order("scheduled_at").limit(limit).execute()
 
     due_posts = due_response.data or []
@@ -1577,9 +1614,10 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
                     elif network == SocialNetwork.INSTAGRAM.value:
                         remote_id = await _publish_instagram_reel(post, meta_connection)
                     elif network == SocialNetwork.TIKTOK.value:
-                        tiktok_job = await upload_tiktok_draft_for_post(
-                            post["id"],
-                            caption=post["publish_caption"],
+                        tiktok_job, post_mode = await _dispatch_tiktok_post(
+                            post,
+                            tiktok_connection,
+                            tiktok_settings=_load_json_object(post.get("tiktok_settings")),
                         )
                         tiktok_payload = _load_json_object(tiktok_job.get("response_payload_json"))
                         provider_post_ids = tiktok_payload.get("publicaly_available_post_id") or []
@@ -1587,7 +1625,7 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
                         provider_status = str(tiktok_payload.get("provider_status") or tiktok_job.get("status") or "").upper()
                         publish_results[network] = {
                             "status": _tiktok_job_result_status(tiktok_job),
-                            "post_mode": "draft",
+                            "post_mode": post_mode,
                             "provider_status": provider_status,
                             "publish_id": tiktok_job.get("tiktok_publish_id"),
                             "remote_id": remote_id,
@@ -1801,26 +1839,11 @@ async def publish_post_now(
                 elif network == SocialNetwork.INSTAGRAM.value:
                     remote_id = await _publish_instagram_reel(post, meta_connection)
                 elif network == SocialNetwork.TIKTOK.value:
-                    readiness = str(tiktok_connection.get("readiness_status") or "")
-                    if readiness == "publish_ready" and tiktok_settings:
-                        tiktok_job = await publish_tiktok_direct_for_post(
-                            post["id"],
-                            caption=post["publish_caption"],
-                            title=tiktok_settings["title"],
-                            privacy_level=tiktok_settings["privacy_level"],
-                            allow_comment=bool(tiktok_settings.get("allow_comment")),
-                            allow_duet=bool(tiktok_settings.get("allow_duet")),
-                            allow_stitch=bool(tiktok_settings.get("allow_stitch")),
-                            your_brand=bool(tiktok_settings.get("your_brand")),
-                            branded_content=bool(tiktok_settings.get("branded_content")),
-                        )
-                        post_mode = "direct"
-                    else:
-                        tiktok_job = await upload_tiktok_draft_for_post(
-                            post["id"],
-                            caption=post["publish_caption"],
-                        )
-                        post_mode = "draft"
+                    tiktok_job, post_mode = await _dispatch_tiktok_post(
+                        post,
+                        tiktok_connection,
+                        tiktok_settings=tiktok_settings,
+                    )
                     tiktok_payload = _load_json_object(tiktok_job.get("response_payload_json"))
                     provider_post_ids = tiktok_payload.get("publicaly_available_post_id") or []
                     remote_id = str(provider_post_ids[0]) if provider_post_ids else str(tiktok_job.get("tiktok_publish_id") or tiktok_job.get("id"))

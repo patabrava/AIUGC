@@ -634,7 +634,7 @@ def _map_tiktok_publish_job_status(provider_status: str, post_mode: str) -> str:
     if normalized == "FAILED":
         return "failed"
     if normalized == "PUBLISH_COMPLETE":
-        return "published"
+        return "submitted"
     if normalized == "SEND_TO_USER_INBOX":
         return "submitted"
     if post_mode in {"draft", "direct"}:

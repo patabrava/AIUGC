@@ -393,6 +393,105 @@ def test_dispatch_due_posts_uploads_tiktok_draft(monkeypatch):
     assert post["publish_results"]["tiktok"]["post_mode"] == "draft"
 
 
+def test_dispatch_due_posts_routes_tiktok_to_direct_when_publish_ready(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "video_url": "https://cdn.example.com/video.mp4",
+                "seed_data": {"script_review_status": "approved"},
+                "scheduled_at": "2026-03-17T08:00:00",
+                "publish_caption": "Shared caption",
+                "social_networks": ["tiktok"],
+                "publish_status": "scheduled",
+                "publish_results": {},
+                "platform_ids": {},
+                "tiktok_settings": {
+                    "title": "Direct post",
+                    "privacy_level": "PUBLIC_TO_EVERYONE",
+                    "allow_comment": True,
+                    "allow_duet": False,
+                    "allow_stitch": False,
+                    "commercial_disclosure": False,
+                    "your_brand": False,
+                    "branded_content": False,
+                    "consent_acknowledged": True,
+                },
+            }
+        ]
+    }
+
+    monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(publish_handlers, "_list_batch_rows", lambda fields="id,meta_connection": [])
+    monkeypatch.setattr(
+        publish_handlers,
+        "_load_batch",
+        lambda batch_id, fields="id,state,meta_connection": {
+            "id": batch_id,
+            "state": BatchState.S7_PUBLISH_PLAN.value,
+            "meta_connection": {},
+        },
+    )
+    monkeypatch.setattr(publish_handlers, "_reconcile_completed_batches", lambda batch_ids: None)
+    monkeypatch.setattr(
+        publish_handlers,
+        "get_tiktok_publish_state",
+        lambda: asyncio.sleep(
+            0,
+            result={
+                "status": "connected",
+                "environment": "production",
+                "readiness_status": "publish_ready",
+                "publish_ready": True,
+                "creator_info": {"privacy_level_options": ["PUBLIC_TO_EVERYONE"]},
+            },
+        ),
+    )
+
+    captured = {}
+
+    async def _direct_tiktok_publish(post_id, **kwargs):
+        captured["called"] = "direct"
+        captured["post_id"] = post_id
+        captured["kwargs"] = kwargs
+        return {
+            "id": "job-1",
+            "status": "submitted",
+            "tiktok_publish_id": "tt-publish-1",
+            "response_payload_json": {
+                "provider_status": "PUBLISH_COMPLETE",
+                "publicaly_available_post_id": ["tt-post-1"],
+            },
+            "error_message": "",
+        }
+
+    async def _draft_tiktok_publish(post_id, *, caption=None):
+        captured["called"] = "draft"
+        return {}
+
+    monkeypatch.setattr(publish_handlers, "publish_tiktok_direct_for_post", _direct_tiktok_publish)
+    monkeypatch.setattr(publish_handlers, "upload_tiktok_draft_for_post", _draft_tiktok_publish)
+
+    result = asyncio.run(publish_handlers.dispatch_due_posts())
+
+    assert result["processed"] == 1
+    assert result["published"] == 1
+    assert captured["called"] == "direct"
+    assert captured["post_id"] == "post-1"
+    assert captured["kwargs"]["caption"] == "Shared caption"
+    assert captured["kwargs"]["title"] == "Direct post"
+    assert captured["kwargs"]["privacy_level"] == "PUBLIC_TO_EVERYONE"
+    assert captured["kwargs"]["allow_comment"] is True
+
+    post = storage["posts"][0]
+    assert post["publish_status"] == "published"
+    assert post["platform_ids"] == {"tiktok": "tt-post-1"}
+    assert post["publish_results"]["tiktok"]["status"] == "published"
+    assert post["publish_results"]["tiktok"]["provider_status"] == "PUBLISH_COMPLETE"
+    assert post["publish_results"]["tiktok"]["post_mode"] == "direct"
+
+
 def test_dispatch_due_posts_tracks_tiktok_draft_as_user_action(monkeypatch):
     storage = {
         "posts": [
