@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 import httpx
@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from app.adapters.magnific_client import get_magnific_client
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
-from app.core.errors import FlowForgeException
+from app.core.errors import ErrorCode, FlowForgeException
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.characters.actor_identity import (
@@ -23,7 +23,7 @@ from app.features.characters.actor_identity import (
     pending_manual_gate,
 )
 from app.features.characters import queries as character_queries
-from app.features.characters.schemas import ActorTrainingSet
+from app.features.characters.schemas import ActorTrainingSet, SceneReferenceSetSummary
 from app.features.characters.scene_reference import (
     REQUIRED_SCENE_REFERENCE_ANGLES,
     SCENE_REFERENCE_CREATIVE_DETAILING,
@@ -375,6 +375,250 @@ def _provider_safe_name(name: str, actor_identity_id: str) -> str:
     return f"{base}_{suffix}"
 
 
+def _row_dict(row: Any) -> dict[str, Any]:
+    if isinstance(row, dict):
+        return row
+    if hasattr(row, "model_dump"):
+        return row.model_dump(mode="json")
+    return dict(row)
+
+
+def _video_scene_reference_validation_error(
+    *,
+    message: str,
+    post_id: str,
+    reference_set_id: Optional[str] = None,
+    rows: Optional[list[dict[str, Any]]] = None,
+) -> FlowForgeException:
+    return FlowForgeException(
+        code=ErrorCode.VALIDATION_ERROR,
+        message=message,
+        details={
+            "post_id": post_id,
+            "reference_set_id": reference_set_id,
+            "row_count": len(rows or []),
+        },
+        status_code=422,
+    )
+
+
+def _validate_video_scene_reference_rows(
+    *,
+    post_id: str,
+    reference_set_id: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(rows) != len(REQUIRED_SCENE_REFERENCE_ANGLES):
+        raise _video_scene_reference_validation_error(
+            message="Character Consistency VEO submission requires exactly three Magnific actor-in-scene reference images.",
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+            rows=rows,
+        )
+    if any(not row.get("image_url") for row in rows):
+        raise _video_scene_reference_validation_error(
+            message="Character Consistency VEO submission requires all three Magnific actor-in-scene reference images to have durable image URLs.",
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+            rows=rows,
+        )
+    expected_angles = {angle.key for angle in REQUIRED_SCENE_REFERENCE_ANGLES}
+    actual_angles = {
+        str((row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}).get("angle_key") or "")
+        for row in rows
+    }
+    if actual_angles != expected_angles:
+        raise _video_scene_reference_validation_error(
+            message="Character Consistency VEO submission requires one Magnific actor-in-scene reference for each required angle.",
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+            rows=rows,
+        )
+    return rows
+
+
+def _create_scene_reference_candidates(
+    *,
+    post: dict[str, Any],
+    batch: dict[str, Any],
+    correlation_id: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    post_id = str(post.get("id") or "")
+    actor_identity = _ready_actor_identity_for_batch(batch)
+
+    seed_data = _load_json_object(post.get("seed_data"))
+    script = str(seed_data.get("script") or seed_data.get("dialog_script") or post.get("topic_title") or "")
+    target_length_tier = int(seed_data.get("target_length_tier") or batch.get("target_length_tier") or 8)
+    intent_seed_data = {
+        **seed_data,
+        "topic_title": seed_data.get("topic_title") or post.get("topic_title") or "",
+        "topic": seed_data.get("topic") or post.get("topic_title") or "",
+    }
+    intent = map_script_to_scene_intent(
+        script=script,
+        post_type=str(post.get("post_type") or ""),
+        target_length_tier=target_length_tier,
+        seed_data=intent_seed_data,
+    )
+    client = get_magnific_client()
+    reference_set_id = str(uuid4())
+    references: list[dict[str, Any]] = []
+    scene_bible_metadata = build_scene_bible_provider_metadata(intent.scene_key)
+    scene_style_loras = scene_reference_style_loras_for(
+        intent.scene_key,
+        get_settings().scene_reference_style_loras,
+    )
+    for angle in REQUIRED_SCENE_REFERENCE_ANGLES:
+        prompt = build_scene_reference_prompt_for_angle(
+            actor_name=actor_identity.name,
+            scene_key=intent.scene_key,
+            wardrobe_key=intent.wardrobe_key,
+            post_type=str(post.get("post_type") or ""),
+            angle_key=angle.key,
+            provider_lora_name=actor_identity.provider_lora_name,
+        )
+        task = client.create_mystic_scene_reference(
+            prompt=prompt,
+            lora_id=str(actor_identity.provider_lora_id),
+            strength=SCENE_REFERENCE_IDENTITY_STRENGTH,
+            correlation_id=correlation_id,
+            resolution=SCENE_REFERENCE_RESOLUTION,
+            fixed_generation=SCENE_REFERENCE_FIXED_GENERATION,
+            style_loras=scene_style_loras,
+            extra_options={
+                "engine": SCENE_REFERENCE_ENGINE,
+                "creative_detailing": SCENE_REFERENCE_CREATIVE_DETAILING,
+            },
+        )
+        task_id = str(task.get("task_id") or "")
+        durable_image_url, durable_image_metadata = _store_scene_reference_image_url(
+            image_url=_extract_mystic_image_url(task),
+            file_stem=f"scene-reference-{reference_set_id}-{angle.key}-{task_id or 'pending'}",
+            correlation_id=correlation_id,
+        )
+        references.append(
+            _row_dict(
+                character_queries.create_scene_reference_candidate(
+                    actor_identity_id=actor_identity.id,
+                    post_id=post_id,
+                    scene_key=intent.scene_key,
+                    wardrobe_key=intent.wardrobe_key,
+                    provider_task_id=task_id,
+                    image_url=durable_image_url,
+                    prompt=prompt,
+                    provider_metadata={
+                        **scene_bible_metadata,
+                        **durable_image_metadata,
+                        "task": _mystic_task_without_request_payload(task),
+                        "mystic_request": _mystic_request_payload(task),
+                        "scene_style_loras": scene_style_loras,
+                        "identity_lock_contract": _scene_reference_identity_contract(actor_identity),
+                        "reason_code": intent.reason_code,
+                        "angle_key": angle.key,
+                        "angle_label": angle.label,
+                        "reference_set_id": reference_set_id,
+                        "reference_set_status": "pending_review",
+                    },
+                    reference_set_id=reference_set_id,
+                    angle_key=angle.key,
+                    correlation_id=correlation_id,
+                )
+            )
+        )
+    logger.info("scene_reference_generation_submitted", correlation_id=correlation_id, post_id=post_id, count=len(references))
+    return reference_set_id, references
+
+
+def create_auto_approved_scene_reference_set_for_video(
+    *,
+    post: dict[str, Any],
+    batch: dict[str, Any],
+    correlation_id: str,
+) -> SceneReferenceSetSummary:
+    post_id = str(post.get("id") or "")
+    existing = character_queries.get_approved_scene_reference_set_for_post(post_id)
+    if existing:
+        return existing
+
+    try:
+        reference_set_id, created_rows = _create_scene_reference_candidates(
+            post=post,
+            batch=batch,
+            correlation_id=correlation_id,
+        )
+        stored_rows = character_queries.list_scene_references_for_set(
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+        )
+    except HTTPException as exc:
+        raise FlowForgeException(
+            code=ErrorCode.VALIDATION_ERROR,
+            message=str(exc.detail),
+            details={"post_id": post_id, "batch_id": batch.get("id")},
+            status_code=exc.status_code,
+        ) from exc
+
+    rows = [_row_dict(row) for row in (stored_rows or created_rows)]
+    _validate_video_scene_reference_rows(post_id=post_id, reference_set_id=reference_set_id, rows=rows)
+
+    gate = passed_manual_gate("Automatically approved Magnific actor LoRA scene reference set for VEO submission")
+    gate.details.update(
+        {
+            "scene_consistency_set_approved": True,
+            "actor_identity_match_confirmed": True,
+            "reference_set_id": reference_set_id,
+            "auto_approved_for_video_submission": True,
+        }
+    )
+    gated_rows = [
+        _row_dict(row)
+        for row in character_queries.record_scene_reference_set_gate(
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+            gate_result=gate,
+            status="approved",
+            correlation_id=correlation_id,
+        )
+    ] or rows
+    character_queries.attach_scene_reference_to_post(
+        post_id=post_id,
+        reference_id=_front_reference_id(rows),
+        gate_result=gate,
+        correlation_id=correlation_id,
+    )
+
+    approved = character_queries.get_approved_scene_reference_set_for_post(post_id)
+    if approved:
+        return approved
+
+    gate_payload = gate.model_dump(mode="json")
+    fallback_rows = [
+        {
+            **row,
+            "status": "approved",
+            "identity_gate_result": gate_payload,
+            "provider_metadata": {
+                **(row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}),
+                "reference_set_status": "approved",
+            },
+        }
+        for row in (gated_rows or rows)
+    ]
+    summary = SceneReferenceSetSummary.from_rows(
+        post_id=post_id,
+        reference_set_id=reference_set_id,
+        rows=fallback_rows,
+    )
+    if summary.is_ready:
+        return summary
+    raise _video_scene_reference_validation_error(
+        message="Generated Magnific actor-in-scene reference set could not be approved for Character Consistency VEO submission.",
+        post_id=post_id,
+        reference_set_id=reference_set_id,
+        rows=fallback_rows,
+    )
+
+
 @router.post("/actor")
 async def train_actor_identity(
     request: Request,
@@ -485,86 +729,7 @@ def generate_scene_reference(post_id: str):
     post = _single_row(supabase.table("posts").select("*").eq("id", post_id).execute(), label="Post")
     batch = _single_row(supabase.table("batches").select("*").eq("id", post.get("batch_id")).execute(), label="Batch")
 
-    actor_identity = _ready_actor_identity_for_batch(batch)
-
-    seed_data = _load_json_object(post.get("seed_data"))
-    script = str(seed_data.get("script") or seed_data.get("dialog_script") or post.get("topic_title") or "")
-    target_length_tier = int(seed_data.get("target_length_tier") or batch.get("target_length_tier") or 8)
-    intent_seed_data = {
-        **seed_data,
-        "topic_title": seed_data.get("topic_title") or post.get("topic_title") or "",
-        "topic": seed_data.get("topic") or post.get("topic_title") or "",
-    }
-    intent = map_script_to_scene_intent(
-        script=script,
-        post_type=str(post.get("post_type") or ""),
-        target_length_tier=target_length_tier,
-        seed_data=intent_seed_data,
-    )
-    client = get_magnific_client()
-    reference_set_id = str(uuid4())
-    references = []
-    scene_bible_metadata = build_scene_bible_provider_metadata(intent.scene_key)
-    scene_style_loras = scene_reference_style_loras_for(
-        intent.scene_key,
-        get_settings().scene_reference_style_loras,
-    )
-    for angle in REQUIRED_SCENE_REFERENCE_ANGLES:
-        prompt = build_scene_reference_prompt_for_angle(
-            actor_name=actor_identity.name,
-            scene_key=intent.scene_key,
-            wardrobe_key=intent.wardrobe_key,
-            post_type=str(post.get("post_type") or ""),
-            angle_key=angle.key,
-            provider_lora_name=actor_identity.provider_lora_name,
-        )
-        task = client.create_mystic_scene_reference(
-            prompt=prompt,
-            lora_id=str(actor_identity.provider_lora_id),
-            strength=SCENE_REFERENCE_IDENTITY_STRENGTH,
-            correlation_id=correlation_id,
-            resolution=SCENE_REFERENCE_RESOLUTION,
-            fixed_generation=SCENE_REFERENCE_FIXED_GENERATION,
-            style_loras=scene_style_loras,
-            extra_options={
-                "engine": SCENE_REFERENCE_ENGINE,
-                "creative_detailing": SCENE_REFERENCE_CREATIVE_DETAILING,
-            },
-        )
-        task_id = str(task.get("task_id") or "")
-        durable_image_url, durable_image_metadata = _store_scene_reference_image_url(
-            image_url=_extract_mystic_image_url(task),
-            file_stem=f"scene-reference-{reference_set_id}-{angle.key}-{task_id or 'pending'}",
-            correlation_id=correlation_id,
-        )
-        references.append(
-            character_queries.create_scene_reference_candidate(
-                actor_identity_id=actor_identity.id,
-                post_id=post_id,
-                scene_key=intent.scene_key,
-                wardrobe_key=intent.wardrobe_key,
-                provider_task_id=task_id,
-                image_url=durable_image_url,
-                prompt=prompt,
-                provider_metadata={
-                    **scene_bible_metadata,
-                    **durable_image_metadata,
-                    "task": _mystic_task_without_request_payload(task),
-                    "mystic_request": _mystic_request_payload(task),
-                    "scene_style_loras": scene_style_loras,
-                    "identity_lock_contract": _scene_reference_identity_contract(actor_identity),
-                    "reason_code": intent.reason_code,
-                    "angle_key": angle.key,
-                    "angle_label": angle.label,
-                    "reference_set_id": reference_set_id,
-                    "reference_set_status": "pending_review",
-                },
-                reference_set_id=reference_set_id,
-                angle_key=angle.key,
-                correlation_id=correlation_id,
-            )
-        )
-    logger.info("scene_reference_generation_submitted", correlation_id=correlation_id, post_id=post_id, count=len(references))
+    _create_scene_reference_candidates(post=post, batch=batch, correlation_id=correlation_id)
     return RedirectResponse(url=f"/batches/{post.get('batch_id')}", status_code=303)
 
 

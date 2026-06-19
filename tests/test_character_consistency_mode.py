@@ -1086,19 +1086,13 @@ def test_character_consistency_32s_blocks_lora_backed_video_route():
     assert "8-second VEO base request" in exc.value.message
 
 
-def test_submit_video_request_uses_actor_identity_anchors_for_single_scene_reference(monkeypatch):
+def test_submit_video_request_rejects_single_scene_reference_without_lora_reference_set(monkeypatch):
+    from app.core.errors import FlowForgeException
     from app.features.videos import handlers as video_handlers
-
-    captured = {}
 
     class FakeVertexClient:
         def submit_text_video(self, **kwargs):
-            captured.update(kwargs)
-            return {
-                "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/actor-ref",
-                "status": "submitted",
-                "provider_model": kwargs.get("model") or "veo-3.1-generate-001",
-            }
+            raise AssertionError("provider should not receive a single scene-reference fallback")
 
     monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
     monkeypatch.setattr(
@@ -1106,49 +1100,42 @@ def test_submit_video_request_uses_actor_identity_anchors_for_single_scene_refer
         "get_settings",
         lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})(),
     )
-    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
-    monkeypatch.setattr(video_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: _ready_actor_identity())
+    monkeypatch.setattr(
+        video_handlers,
+        "_download_image_bytes",
+        lambda url: pytest.fail("single scene-reference fallback must not download any reference images"),
+    )
     canonical_asset = _canonical_scene_asset(scene_key="bathroom_accessibility_a", image_url="https://cdn.example.com/canonical-bathroom.png")
 
-    result = video_handlers._submit_video_request(
-        provider="vertex_ai",
-        prompt_text="Prompt",
-        negative_prompt=None,
-        aspect_ratio="9:16",
-        provider_aspect_ratio="9:16",
-        requested_aspect_ratio="9:16",
-        resolution="720p",
-        seconds=8,
-        size=None,
-        correlation_id="corr-actor-ref",
-        provider_duration_seconds=8,
-        creation_mode="character_consistency",
-        canonical_scene_asset=canonical_asset,
-        scene_reference={
-            "id": "scene-1",
-            "actor_identity_id": "actor-1",
-            "image_url": "https://cdn/scene.png",
-            "scene_key": "bathroom_adaptation",
-            "wardrobe_key": "everyday_sweater",
-            "identity_gate_result": {"status": "passed"},
-            "status": "approved",
-        },
-    )
+    with pytest.raises(FlowForgeException) as exc:
+        video_handlers._submit_video_request(
+            provider="vertex_ai",
+            prompt_text="Prompt",
+            negative_prompt=None,
+            aspect_ratio="9:16",
+            provider_aspect_ratio="9:16",
+            requested_aspect_ratio="9:16",
+            resolution="720p",
+            seconds=8,
+            size=None,
+            correlation_id="corr-actor-ref",
+            provider_duration_seconds=8,
+            creation_mode="character_consistency",
+            canonical_scene_asset=canonical_asset,
+            scene_reference={
+                "id": "scene-1",
+                "actor_identity_id": "actor-1",
+                "image_url": "https://cdn/scene.png",
+                "scene_key": "bathroom_adaptation",
+                "wardrobe_key": "everyday_sweater",
+                "identity_gate_result": {"status": "passed"},
+                "status": "approved",
+            },
+        )
 
-    assert len(captured["reference_images"]) == 3
-    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
-    assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn.example.com/1.png"
-    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/canonical-bathroom.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_plus_canonical_scene_anchor"
-    assert result["provider_metadata"]["scene_reference_image_id"] == "scene-1"
-    assert result["provider_metadata"]["scene_reference_images_used_for_video"] is False
-    assert result["provider_metadata"]["scene_reference_images_approval_only"] is True
-    assert result["provider_metadata"]["reference_image_roles"] == [
-        "actor_identity_anchor",
-        "actor_identity_anchor",
-        "canonical_scene_anchor",
-    ]
-    assert result["provider_metadata"]["canonical_scene_key"] == "bathroom_accessibility_a"
+    assert exc.value.status_code == 422
+    assert "three approved Magnific actor-in-scene reference images" in exc.value.message
+    assert exc.value.details["scene_reference_image_id"] == "scene-1"
 
 
 def test_submit_video_request_rejects_unverified_scene_reference_set(monkeypatch):
@@ -1294,58 +1281,47 @@ def test_submit_video_request_uses_lora_scene_reference_set_to_vertex(monkeypatc
     assert result["provider_metadata"]["scene_key"] == "bathroom_adaptation"
 
 
-def test_submit_video_request_uses_actor_identity_anchors_without_scene_reference_set(monkeypatch):
+def test_submit_video_request_rejects_actor_identity_training_fallback_without_scene_reference_set(monkeypatch):
+    from app.core.errors import FlowForgeException
     from app.features.videos import handlers as video_handlers
-
-    captured = {}
 
     class FakeVertexClient:
         def submit_text_video(self, **kwargs):
-            captured.update(kwargs)
-            return {
-                "operation_id": "projects/test/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/actor-only",
-                "status": "submitted",
-                "provider_model": kwargs.get("model") or "veo-3.1-generate-001",
-            }
+            raise AssertionError("provider should not receive raw ActorIdentity training-image fallback")
 
     monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
     monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})())
-    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
+    monkeypatch.setattr(
+        video_handlers,
+        "_download_image_bytes",
+        lambda url: pytest.fail("raw actor training images must not be downloaded for Character Consistency"),
+    )
     monkeypatch.setattr(video_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: _ready_actor_identity())
     canonical_asset = _canonical_scene_asset()
 
-    result = video_handlers._submit_video_request(
-        provider="vertex_ai",
-        prompt_text="Prompt with scene text only",
-        negative_prompt=None,
-        aspect_ratio="9:16",
-        provider_aspect_ratio="9:16",
-        requested_aspect_ratio="9:16",
-        resolution="720p",
-        seconds=8,
-        size=None,
-        correlation_id="corr-actor-only",
-        provider_duration_seconds=8,
-        creation_mode="character_consistency_mid",
-        actor_identity_id="actor-1",
-        canonical_scene_asset=canonical_asset,
-        character_snapshot=None,
-        scene_reference_set=None,
-    )
+    with pytest.raises(FlowForgeException) as exc:
+        video_handlers._submit_video_request(
+            provider="vertex_ai",
+            prompt_text="Prompt with scene text only",
+            negative_prompt=None,
+            aspect_ratio="9:16",
+            provider_aspect_ratio="9:16",
+            requested_aspect_ratio="9:16",
+            resolution="720p",
+            seconds=8,
+            size=None,
+            correlation_id="corr-actor-only",
+            provider_duration_seconds=8,
+            creation_mode="character_consistency_mid",
+            actor_identity_id="actor-1",
+            canonical_scene_asset=canonical_asset,
+            character_snapshot=None,
+            scene_reference_set=None,
+        )
 
-    assert len(captured["reference_images"]) == 3
-    assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn.example.com/0.png"
-    assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/canonical-scene.png"
-    assert result["provider_metadata"]["source"] == "actor_identity_plus_canonical_scene_anchor"
-    assert result["provider_metadata"]["actor_identity_id"] == "actor-1"
-    assert result["provider_metadata"]["reference_image_roles"] == [
-        "actor_identity_anchor",
-        "actor_identity_anchor",
-        "canonical_scene_anchor",
-    ]
-    assert result["provider_metadata"]["reference_image_count"] == 3
-    assert "scene_reference_set_id" not in result["provider_metadata"]
-    assert result["provider_metadata"]["canonical_scene_key"] == "home_living_room_advice_a"
+    assert exc.value.status_code == 422
+    assert "three approved Magnific actor-in-scene reference images" in exc.value.message
+    assert exc.value.details["actor_identity_id"] == "actor-1"
 
 
 def test_batch_prompt_audit_receives_scene_reference_metadata():
@@ -1660,7 +1636,6 @@ def test_submit_video_request_blocks_actor_identity_when_anchors_cannot_attach(m
     )
 
     assert exc.value.status_code == 422
-    assert "actor identity reference anchors" in exc.value.message
+    assert "three approved Magnific actor-in-scene reference images" in exc.value.message
     assert exc.value.details["actor_identity_id"] == "actor-1"
     assert exc.value.details["provider_duration_seconds"] == 4
-    assert exc.value.details["reference_images_skipped_reason"] == "vertex_reference_images_support_only_8s_base"

@@ -679,6 +679,136 @@ def test_generate_all_character_consistency_uses_approved_scene_reference_set_fo
     assert posts[0]["video_metadata"]["veo_segment_ops"][1]["operation_id"] is None
 
 
+def test_generate_all_character_consistency_prepares_lora_scene_reference_set_when_missing(monkeypatch):
+    from app.features.characters.schemas import SceneReferenceSetSummary
+    from app.features.videos import handlers as video_handlers
+
+    posts = [
+        {
+            "id": "post-1",
+            "batch_id": "batch-1",
+            "post_type": "value",
+            "video_prompt_json": {"veo_prompt": "Prompt 1", "scene": "Bathroom"},
+            "seed_data": {"script": _valid_16s_script(), "script_review_status": "approved"},
+            "video_status": "pending",
+            "video_metadata": {},
+        },
+    ]
+    fake_supabase = SimpleNamespace(client=_MutableSupabaseClient(posts))
+    batch = {
+        "id": "batch-1",
+        "target_length_tier": 16,
+        "creation_mode": "character_consistency",
+        "actor_identity_id": "actor-1",
+    }
+    reference_set = SceneReferenceSetSummary.from_rows(
+        post_id="post-1",
+        reference_set_id="set-prepared",
+        rows=[
+            {
+                "id": f"scene-{angle_key}",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": f"https://cdn/{angle_key}.png",
+                "scene_key": "home_living_room_advice_a",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": {
+                    "reference_set_id": "set-prepared",
+                    "angle_key": angle_key,
+                    "identity_lock_contract": {
+                        "provider": "magnific",
+                        "provider_lora_id": "1786946",
+                        "provider_lora_name": "ayra-actor-longchar-20260521",
+                        "actor_identity_id": "actor-1",
+                        "identity_strength": 100,
+                        "prompt_lora_handle_required": True,
+                        "styling_characters_required": True,
+                    },
+                    "mystic_request": {
+                        "prompt": "Photorealistic still of @ayra-actor-longchar-20260521::100.",
+                        "styling": {"characters": [{"id": "1786946", "strength": 100}]},
+                    },
+                },
+                "identity_gate_result": {
+                    "status": "passed",
+                    "details": {
+                        "scene_consistency_set_approved": True,
+                        "actor_identity_match_confirmed": True,
+                        "reference_set_id": "set-prepared",
+                    },
+                },
+            }
+            for angle_key in ("front_mid", "left_three_quarter", "right_profile")
+        ],
+    )
+    prepared = []
+    captured = {}
+
+    def _fake_prepare(**kwargs):
+        prepared.append(kwargs)
+        return reference_set
+
+    def _fake_segmented_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "operation_ids": ["operations/seg-0"],
+            "results": [
+                {
+                    "operation_id": "operations/seg-0",
+                    "status": "submitted",
+                    "provider_model": "veo-3.1-generate-001",
+                    "provider_metadata": {
+                        "operation_id": "operations/seg-0",
+                        "source": "actor_identity_scene_reference_set",
+                    },
+                }
+            ],
+            "segment_count": 2,
+            "prompts": ["Segment prompt 1", "Segment prompt 2"],
+            "beats": ["Segment beat 1", "Segment beat 2"],
+            "seed": 123,
+            "i2v_locked": True,
+            "i2v_model": "veo-3.1-generate-001",
+            "i2v_output_gcs_uri": "gs://bucket/out/",
+        }
+
+    monkeypatch.setattr(video_handlers, "get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr(video_handlers, "get_batch_by_id", lambda batch_id: dict(batch))
+    monkeypatch.setattr(video_handlers, "sync_character_consistency_batch_actor", lambda row, correlation_id: row)
+    monkeypatch.setattr(video_handlers.character_queries, "get_approved_scene_reference_set_for_post", lambda post_id: None)
+    monkeypatch.setattr(video_handlers, "_ensure_actor_lora_scene_reference_set_for_video", _fake_prepare, raising=False)
+    monkeypatch.setattr(
+        "app.core.video_profiles.get_settings",
+        lambda: SimpleNamespace(veo_enable_segmented_route=True, veo_enable_efficient_long_route=True),
+    )
+    monkeypatch.setattr(
+        video_handlers,
+        "_load_or_build_video_prompt",
+        lambda *, post, supabase_client, correlation_id, batch: post["video_prompt_json"],
+    )
+    monkeypatch.setattr(video_handlers, "_resolve_canonical_scene_asset_for_submission", lambda **kwargs: None)
+    monkeypatch.setattr(
+        video_handlers,
+        "_apply_canonical_scene_to_video_prompt",
+        lambda video_prompt, seed_data, canonical_scene_asset, creation_mode: video_prompt,
+    )
+    monkeypatch.setattr(video_handlers, "ensure_immediate_submit_slot", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(video_handlers, "reserve_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(video_handlers, "consume_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(video_handlers, "release_quota", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(video_handlers, "record_prompt_audit", lambda **kwargs: None)
+    monkeypatch.setattr(video_handlers, "reconcile_batch_video_pipeline_state", lambda **kwargs: None)
+    monkeypatch.setattr(video_handlers, "_submit_segmented_post", _fake_segmented_submit)
+
+    request = BatchVideoGenerationRequest(provider="vertex_ai", aspect_ratio="9:16", resolution="720p", seconds=16)
+    response = asyncio.run(generate_all_videos("batch-1", request))
+
+    assert response.data["submitted_count"] == 1
+    assert prepared and prepared[0]["post"]["id"] == "post-1"
+    assert prepared[0]["batch"]["actor_identity_id"] == "actor-1"
+    assert captured["scene_reference_set"].reference_set_id == "set-prepared"
+
+
 def test_generate_all_videos_persists_unexpected_segmented_submit_failure(monkeypatch):
     posts = [
         {

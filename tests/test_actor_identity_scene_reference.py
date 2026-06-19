@@ -1084,6 +1084,117 @@ def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(mon
         assert "_request_payload" not in metadata["task"]
 
 
+def test_auto_approved_scene_reference_set_for_video_uses_actor_lora_and_gate(monkeypatch):
+    from app.core.config import Settings
+    from app.features.characters import handlers as character_handlers
+
+    actor = _ready_actor("actor-1", is_active=True)
+    captured_tasks = []
+    created_rows = []
+    gate_calls = []
+    attach_calls = []
+
+    class _MysticClient:
+        def create_mystic_scene_reference(self, **kwargs):
+            captured_tasks.append(kwargs)
+            return {
+                "task_id": f"task-{len(captured_tasks)}",
+                "generated": [f"https://cdn.example.com/{len(captured_tasks)}.png"],
+                "_request_payload": {
+                    "prompt": kwargs["prompt"],
+                    "styling": {"characters": [{"id": kwargs["lora_id"], "strength": kwargs["strength"]}]},
+                    "fixed_generation": kwargs["fixed_generation"],
+                    "engine": kwargs["extra_options"]["engine"],
+                    "creative_detailing": kwargs["extra_options"]["creative_detailing"],
+                },
+            }
+
+    def _create_candidate(**kwargs):
+        row = {
+            "id": f"ref-{kwargs['angle_key']}",
+            "actor_identity_id": kwargs["actor_identity_id"],
+            "post_id": kwargs["post_id"],
+            "scene_key": kwargs["scene_key"],
+            "wardrobe_key": kwargs["wardrobe_key"],
+            "status": "generated",
+            "image_url": kwargs["image_url"],
+            "prompt": kwargs["prompt"],
+            "provider_metadata": kwargs["provider_metadata"],
+            "identity_gate_result": None,
+        }
+        created_rows.append(row)
+        return row
+
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _MysticClient())
+    monkeypatch.setattr(
+        character_handlers,
+        "get_settings",
+        lambda: Settings(
+            supabase_url="https://supabase.example.com",
+            supabase_key="test-key",
+            supabase_service_key="test-service-key",
+            cloudflare_r2_public_base_url="https://cdn.example.com",
+            scene_reference_style_loras="bathroom_accessibility_a=bathroom-accessibility-a:65",
+        ),
+    )
+    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_identity_id: actor)
+    monkeypatch.setattr(character_handlers.character_queries, "get_active_actor_identity", lambda: actor)
+    monkeypatch.setattr(character_handlers.character_queries, "get_approved_scene_reference_set_for_post", lambda post_id: None)
+    monkeypatch.setattr(character_handlers.character_queries, "create_scene_reference_candidate", _create_candidate)
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "list_scene_references_for_set",
+        lambda *, post_id, reference_set_id: created_rows,
+    )
+    monkeypatch.setattr(
+        character_handlers,
+        "_store_scene_reference_image_url",
+        lambda *, image_url, file_stem, correlation_id: (
+            f"https://cdn.example.com/durable/{file_stem}.png",
+            {"provider_source_image_rehosted": True, "durable_image_storage": {"storage_key": f"images/{file_stem}.png"}},
+        ),
+    )
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "record_scene_reference_set_gate",
+        lambda **kwargs: gate_calls.append(kwargs) or created_rows,
+    )
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "attach_scene_reference_to_post",
+        lambda **kwargs: attach_calls.append(kwargs) or None,
+    )
+
+    summary = character_handlers.create_auto_approved_scene_reference_set_for_video(
+        post={
+            "id": "post-1",
+            "batch_id": "batch-1",
+            "post_type": "value",
+            "topic_title": "WC-Fiasko im Bad",
+            "seed_data": {
+                "script": "Ein klarer Alltagstipp, der nicht frei in die Szene kopiert wird.",
+                "target_length_tier": 8,
+            },
+        },
+        batch={"id": "batch-1", "actor_identity_id": "actor-1", "target_length_tier": 8},
+        correlation_id="corr-auto-scene-set",
+    )
+
+    assert summary.is_ready is True
+    assert len(captured_tasks) == 3
+    assert all(task["lora_id"] == "lora-actor-1" for task in captured_tasks)
+    assert all(task["strength"] == 100 for task in captured_tasks)
+    assert [row["id"] for row in summary.approved_rows] == [
+        "ref-front_mid",
+        "ref-left_three_quarter",
+        "ref-right_profile",
+    ]
+    assert gate_calls[0]["status"] == "approved"
+    assert gate_calls[0]["gate_result"].details["auto_approved_for_video_submission"] is True
+    assert gate_calls[0]["gate_result"].details["actor_identity_match_confirmed"] is True
+    assert attach_calls[0]["reference_id"] == "ref-front_mid"
+
+
 def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
     from app.core.config import Settings
     from app.features.characters import handlers as character_handlers

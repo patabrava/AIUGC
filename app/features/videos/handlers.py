@@ -467,88 +467,64 @@ def _load_actor_identity_anchor_assets(
     if scene_reference_bundle:
         return scene_reference_bundle
 
-    resolved_actor_identity_id = str(actor_identity_id or "").strip()
-    if not resolved_actor_identity_id and scene_reference_set and scene_reference_set.approved_rows:
-        resolved_actor_identity_id = str(scene_reference_set.approved_rows[0].get("actor_identity_id") or "").strip()
-    if not resolved_actor_identity_id and scene_reference:
-        resolved_actor_identity_id = str(scene_reference.get("actor_identity_id") or "").strip()
-    if not resolved_actor_identity_id:
-        raise FlowForgeException(
-            code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires an actor identity id for reference anchors.",
-            details={
-                "scene_reference_set_id": scene_reference_set.reference_set_id if scene_reference_set else None,
-                "scene_reference_image_id": scene_reference.get("id") if scene_reference else None,
-            },
-            status_code=422,
-        )
+    raise FlowForgeException(
+        code=ErrorCode.VALIDATION_ERROR,
+        message=(
+            "Character Consistency VEO submission requires three approved Magnific actor-in-scene reference images. "
+            "Raw ActorIdentity training images and single scene stills are not valid VEO reference bundles."
+        ),
+        details={
+            "actor_identity_id": actor_identity_id,
+            "scene_reference_set_id": scene_reference_set.reference_set_id if scene_reference_set else None,
+            "scene_reference_image_id": scene_reference.get("id") if scene_reference else None,
+        },
+        status_code=422,
+    )
 
-    actor_identity = character_queries.get_actor_identity_by_id(resolved_actor_identity_id)
-    if actor_identity is None:
-        raise FlowForgeException(
-            code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation could not load the selected actor identity anchors.",
-            details={"actor_identity_id": resolved_actor_identity_id},
-            status_code=422,
-        )
 
-    anchor_urls = _actor_identity_anchor_urls(actor_identity)
-    if len(anchor_urls) < 2:
-        raise FlowForgeException(
-            code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires at least two actor identity anchor images.",
-            details={"actor_identity_id": resolved_actor_identity_id, "anchor_image_count": len(anchor_urls)},
-            status_code=422,
-        )
-    if canonical_scene_asset is None or not canonical_scene_asset.image_url:
-        raise FlowForgeException(
-            code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires a generated canonical scene image URL.",
-            details={
-                "actor_identity_id": resolved_actor_identity_id,
-                "canonical_scene_asset_id": canonical_scene_asset.id if canonical_scene_asset else None,
-                "canonical_scene_key": canonical_scene_asset.scene_key if canonical_scene_asset else None,
-            },
-            status_code=422,
-        )
+def _missing_actor_lora_scene_reference_set_error(
+    *,
+    mode: str,
+    provider: str,
+    actor_identity_id: Optional[str],
+    provider_duration_seconds: int,
+    scene_reference: Optional[Dict[str, Any]] = None,
+) -> FlowForgeException:
+    return FlowForgeException(
+        code=ErrorCode.VALIDATION_ERROR,
+        message=(
+            "Character Consistency VEO submission requires three approved Magnific actor-in-scene reference images. "
+            "Raw ActorIdentity training images, single scene stills, and empty canonical room plates are blocked."
+        ),
+        details={
+            "creation_mode": mode,
+            "provider": provider,
+            "actor_identity_id": actor_identity_id,
+            "provider_duration_seconds": provider_duration_seconds,
+            "scene_reference_image_id": scene_reference.get("id") if scene_reference else None,
+        },
+        status_code=422,
+    )
 
-    actor_anchor_urls = anchor_urls[:2]
-    reference_images = [_reference_image_payload_from_url(url) for url in actor_anchor_urls]
-    reference_images.append(_reference_image_payload_from_url(canonical_scene_asset.image_url))
-    logger.info(
-        "actor_identity_anchors_loaded_for_veo",
+
+def _ensure_actor_lora_scene_reference_set_for_video(
+    *,
+    post: Dict[str, Any],
+    batch: Dict[str, Any],
+    correlation_id: str,
+) -> SceneReferenceSetSummary:
+    post_id = str(post.get("id") or "")
+    approved = character_queries.get_approved_scene_reference_set_for_post(post_id)
+    if approved:
+        return approved
+
+    from app.features.characters import handlers as character_handlers
+
+    return character_handlers.create_auto_approved_scene_reference_set_for_video(
+        post=post,
+        batch=batch,
         correlation_id=correlation_id,
-        actor_identity_id=resolved_actor_identity_id,
-        reference_image_count=len(reference_images),
-        canonical_scene_key=canonical_scene_asset.scene_key,
-        scene_reference_set_id=scene_reference_set.reference_set_id if scene_reference_set else None,
-        scene_reference_image_id=scene_reference.get("id") if scene_reference else None,
     )
-
-    metadata = {
-        "reference_images_enabled": True,
-        "reference_image_count": len(reference_images),
-        "reference_image_roles": [
-            "actor_identity_anchor",
-            "actor_identity_anchor",
-            "canonical_scene_anchor",
-        ],
-        "actor_identity_id": resolved_actor_identity_id,
-        "actor_identity_anchor_source": "actor_identity_training_images",
-        "actor_identity_anchor_image_count": len(actor_anchor_urls),
-        "source": "actor_identity_plus_canonical_scene_anchor",
-    }
-    metadata.update(_canonical_scene_context_metadata(canonical_scene_asset))
-    metadata.update(
-        _scene_reference_context_metadata(
-            scene_reference=scene_reference,
-            scene_reference_set=scene_reference_set,
-        )
-    )
-    return {
-        "reference_images": reference_images,
-        "metadata": metadata,
-    }
 
 
 def _require_reference_images_for_character_consistency(
@@ -2201,7 +2177,11 @@ async def generate_video(post_id: str, request: VideoGenerationRequest):
             batch=batch,
         )
         approved_scene_reference_set = (
-            character_queries.get_approved_scene_reference_set_for_post(post_id)
+            _ensure_actor_lora_scene_reference_set_for_video(
+                post=post,
+                batch=batch,
+                correlation_id=correlation_id,
+            )
             if is_character_consistency_mode(batch.get("creation_mode"))
             else None
         )
@@ -2803,7 +2783,11 @@ async def generate_all_videos(batch_id: str, request: BatchVideoGenerationReques
                     batch=batch,
                 )
                 approved_scene_reference_set = (
-                    character_queries.get_approved_scene_reference_set_for_post(post_id)
+                    _ensure_actor_lora_scene_reference_set_for_video(
+                        post=post,
+                        batch=batch,
+                        correlation_id=f"{correlation_id}_{post_id}",
+                    )
                     if is_character_consistency_mode(batch.get("creation_mode"))
                     else None
                 )
@@ -3787,42 +3771,13 @@ def _submit_video_request(
                     scene_reference_set=scene_reference_set,
                     correlation_id=correlation_id,
                 )
-            elif scene_reference:
-                if veo_duration_seconds != 8:
-                    raise FlowForgeException(
-                        code=ErrorCode.VALIDATION_ERROR,
-                        message="ActorIdentity video route cannot consume actor identity reference anchors unless the base request is 8 seconds.",
-                        details={
-                            "scene_reference_image_id": scene_reference.get("id"),
-                            "provider_duration_seconds": veo_duration_seconds,
-                        },
-                        status_code=422,
-                    )
-                reference_bundle = _load_actor_identity_anchor_assets(
+            elif actor_identity_id or scene_reference:
+                raise _missing_actor_lora_scene_reference_set_error(
+                    mode=mode,
+                    provider=provider,
                     actor_identity_id=actor_identity_id,
-                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
-                        prompt_text=prompt_text,
-                        scene_text=str(scene_reference.get("scene_key") or ""),
-                        post_type=None,
-                        seed_data=None,
-                        correlation_id=correlation_id,
-                        prefer_scene_text=True,
-                    ),
+                    provider_duration_seconds=veo_duration_seconds,
                     scene_reference=scene_reference,
-                    correlation_id=correlation_id,
-                )
-            elif actor_identity_id and veo_duration_seconds == 8:
-                reference_bundle = _load_actor_identity_anchor_assets(
-                    actor_identity_id=actor_identity_id,
-                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
-                        prompt_text=prompt_text,
-                        scene_text=None,
-                        post_type=None,
-                        seed_data=None,
-                        correlation_id=correlation_id,
-                        prefer_scene_text=True,
-                    ),
-                    correlation_id=correlation_id,
                 )
             else:
                 reference_bundle = _load_character_snapshot_assets(
@@ -3927,42 +3882,13 @@ def _submit_video_request(
                     scene_reference_set=scene_reference_set,
                     correlation_id=correlation_id,
                 )
-            elif scene_reference:
-                if vertex_duration != 8:
-                    raise FlowForgeException(
-                        code=ErrorCode.VALIDATION_ERROR,
-                        message="ActorIdentity video route cannot consume actor identity reference anchors unless the base request is 8 seconds.",
-                        details={
-                            "scene_reference_image_id": scene_reference.get("id"),
-                            "provider_duration_seconds": vertex_duration,
-                        },
-                        status_code=422,
-                    )
-                reference_bundle = _load_actor_identity_anchor_assets(
+            elif actor_identity_id or scene_reference:
+                raise _missing_actor_lora_scene_reference_set_error(
+                    mode=mode,
+                    provider=provider,
                     actor_identity_id=actor_identity_id,
-                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
-                        prompt_text=prompt_text,
-                        scene_text=str(scene_reference.get("scene_key") or ""),
-                        post_type=None,
-                        seed_data=None,
-                        correlation_id=correlation_id,
-                        prefer_scene_text=True,
-                    ),
+                    provider_duration_seconds=vertex_duration,
                     scene_reference=scene_reference,
-                    correlation_id=correlation_id,
-                )
-            elif actor_identity_id and vertex_duration == 8:
-                reference_bundle = _load_actor_identity_anchor_assets(
-                    actor_identity_id=actor_identity_id,
-                    canonical_scene_asset=canonical_scene_asset or _resolve_canonical_scene_asset_for_submission(
-                        prompt_text=prompt_text,
-                        scene_text=None,
-                        post_type=None,
-                        seed_data=None,
-                        correlation_id=correlation_id,
-                        prefer_scene_text=True,
-                    ),
-                    correlation_id=correlation_id,
                 )
             elif vertex_duration == 8:
                 reference_bundle = _load_character_snapshot_assets(
