@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -348,6 +349,70 @@ def _store_scene_reference_image_url(
     }
 
 
+def _poll_scene_reference_rows_until_generated(
+    *,
+    rows: list[dict[str, Any]],
+    correlation_id: str,
+) -> list[dict[str, Any]]:
+    pending = [
+        row
+        for row in rows
+        if not row.get("image_url") and str(row.get("provider_task_id") or "").strip()
+    ]
+    if not pending:
+        return rows
+
+    settings = get_settings()
+    timeout_seconds = max(1, int(settings.magnific_timeout_seconds or 60))
+    poll_seconds = max(1, int(settings.magnific_poll_seconds or 3))
+    deadline = time.monotonic() + timeout_seconds
+    client = get_magnific_client()
+    resolved_by_id = {str(row.get("id") or ""): dict(row) for row in rows}
+
+    while pending and time.monotonic() <= deadline:
+        next_pending: list[dict[str, Any]] = []
+        for row in pending:
+            reference_id = str(row.get("id") or "")
+            task_id = str(row.get("provider_task_id") or "").strip()
+            task = client.get_mystic_task(task_id=task_id, correlation_id=correlation_id)
+            image_url = _extract_mystic_image_url(task)
+            if not image_url:
+                next_pending.append(row)
+                continue
+
+            metadata = row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}
+            durable_image_url, durable_image_metadata = _store_scene_reference_image_url(
+                image_url=image_url,
+                file_stem=f"scene-reference-{reference_id}-{task_id}",
+                correlation_id=correlation_id,
+            )
+            updated_metadata = {
+                **metadata,
+                **durable_image_metadata,
+                "poll_task": _mystic_task_without_request_payload(task),
+                "auto_polled_for_video_submission": True,
+            }
+            stored_image_url = durable_image_url or image_url
+            character_queries.mark_scene_reference_generated(
+                reference_id=reference_id,
+                image_url=stored_image_url,
+                provider_metadata=updated_metadata,
+                correlation_id=correlation_id,
+            )
+            resolved_by_id[reference_id] = {
+                **row,
+                "status": "generated",
+                "image_url": stored_image_url,
+                "provider_metadata": updated_metadata,
+            }
+
+        pending = next_pending
+        if pending and time.monotonic() <= deadline:
+            time.sleep(poll_seconds)
+
+    return [resolved_by_id.get(str(row.get("id") or ""), row) for row in rows]
+
+
 def _scene_reference_identity_contract(actor_identity) -> dict:
     return {
         "actor_identity_id": actor_identity.id,
@@ -568,6 +633,7 @@ def create_auto_approved_scene_reference_set_for_video(
         ) from exc
 
     rows = [_row_dict(row) for row in (stored_rows or created_rows)]
+    rows = _poll_scene_reference_rows_until_generated(rows=rows, correlation_id=correlation_id)
     _validate_video_scene_reference_rows(post_id=post_id, reference_set_id=reference_set_id, rows=rows)
 
     gate = passed_manual_gate("Automatically approved two Magnific actor LoRA scene references for hybrid VEO submission")

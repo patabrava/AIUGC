@@ -1225,6 +1225,139 @@ def test_auto_approved_scene_reference_set_for_video_uses_actor_lora_and_gate(mo
     assert attach_calls[0]["reference_id"] == "ref-front_mid"
 
 
+def test_auto_approved_scene_reference_set_for_video_polls_async_mystic_tasks(monkeypatch):
+    from app.core.config import Settings
+    from app.features.characters import handlers as character_handlers
+
+    actor = _ready_actor("actor-1", is_active=True)
+    captured_tasks = []
+    polled_task_ids = []
+    created_rows = []
+    gate_calls = []
+    attach_calls = []
+
+    class _MysticClient:
+        def create_mystic_scene_reference(self, **kwargs):
+            captured_tasks.append(kwargs)
+            return {
+                "task_id": f"task-{len(captured_tasks)}",
+                "generated": [],
+                "_request_payload": {
+                    "prompt": kwargs["prompt"],
+                    "styling": {"characters": [{"id": kwargs["lora_id"], "strength": kwargs["strength"]}]},
+                    "fixed_generation": kwargs["fixed_generation"],
+                    "engine": kwargs["extra_options"]["engine"],
+                    "creative_detailing": kwargs["extra_options"]["creative_detailing"],
+                },
+            }
+
+        def get_mystic_task(self, *, task_id, correlation_id):
+            polled_task_ids.append(task_id)
+            return {
+                "task_id": task_id,
+                "generated": [f"https://cdn.example.com/{task_id}.png"],
+            }
+
+    def _create_candidate(**kwargs):
+        row = {
+            "id": f"ref-{kwargs['angle_key']}",
+            "actor_identity_id": kwargs["actor_identity_id"],
+            "post_id": kwargs["post_id"],
+            "scene_key": kwargs["scene_key"],
+            "wardrobe_key": kwargs["wardrobe_key"],
+            "status": "generated" if kwargs["image_url"] else "submitted",
+            "provider_task_id": kwargs["provider_task_id"],
+            "image_url": kwargs["image_url"],
+            "prompt": kwargs["prompt"],
+            "provider_metadata": kwargs["provider_metadata"],
+            "identity_gate_result": None,
+        }
+        created_rows.append(row)
+        return row
+
+    def _mark_generated(**kwargs):
+        for row in created_rows:
+            if row["id"] == kwargs["reference_id"]:
+                row["status"] = "generated"
+                row["image_url"] = kwargs["image_url"]
+                row["provider_metadata"] = kwargs["provider_metadata"]
+
+    def _store_image(*, image_url, file_stem, correlation_id):
+        if not image_url:
+            return None, {}
+        return (
+            f"https://cdn.example.com/durable/{file_stem}.png",
+            {"provider_source_image_rehosted": True, "durable_image_storage": {"storage_key": f"images/{file_stem}.png"}},
+        )
+
+    monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _MysticClient())
+    monkeypatch.setattr(
+        character_handlers,
+        "get_settings",
+        lambda: Settings(
+            supabase_url="https://supabase.example.com",
+            supabase_key="test-key",
+            supabase_service_key="test-service-key",
+            cloudflare_r2_public_base_url="https://cdn.example.com",
+            scene_reference_style_loras="bathroom_accessibility_a=bathroom-accessibility-a:65",
+            magnific_timeout_seconds=5,
+            magnific_poll_seconds=2,
+        ),
+    )
+    monkeypatch.setattr(character_handlers.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_identity_id: actor)
+    monkeypatch.setattr(character_handlers.character_queries, "get_active_actor_identity", lambda: actor)
+    monkeypatch.setattr(character_handlers.character_queries, "get_approved_video_actor_scene_reference_set_for_post", lambda post_id: None)
+    monkeypatch.setattr(character_handlers.character_queries, "create_scene_reference_candidate", _create_candidate)
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "list_scene_references_for_set",
+        lambda *, post_id, reference_set_id: created_rows,
+    )
+    monkeypatch.setattr(
+        character_handlers,
+        "_store_scene_reference_image_url",
+        _store_image,
+    )
+    monkeypatch.setattr(character_handlers.character_queries, "mark_scene_reference_generated", _mark_generated)
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "record_scene_reference_set_gate",
+        lambda **kwargs: gate_calls.append(kwargs) or created_rows,
+    )
+    monkeypatch.setattr(
+        character_handlers.character_queries,
+        "attach_scene_reference_to_post",
+        lambda **kwargs: attach_calls.append(kwargs) or None,
+    )
+
+    summary = character_handlers.create_auto_approved_scene_reference_set_for_video(
+        post={
+            "id": "post-1",
+            "batch_id": "batch-1",
+            "post_type": "value",
+            "topic_title": "WC-Fiasko im Bad",
+            "seed_data": {
+                "script": "Ein klarer Alltagstipp, der nicht frei in die Szene kopiert wird.",
+                "target_length_tier": 8,
+            },
+        },
+        batch={"id": "batch-1", "actor_identity_id": "actor-1", "target_length_tier": 8},
+        correlation_id="corr-auto-scene-set",
+    )
+
+    assert len(captured_tasks) == 2
+    assert polled_task_ids == ["task-1", "task-2"]
+    assert summary.is_video_actor_ready is True
+    assert [row["image_url"] for row in summary.video_actor_rows] == [
+        "https://cdn.example.com/durable/scene-reference-ref-front_mid-task-1.png",
+        "https://cdn.example.com/durable/scene-reference-ref-left_three_quarter-task-2.png",
+    ]
+    assert all(row["provider_metadata"]["auto_polled_for_video_submission"] is True for row in summary.video_actor_rows)
+    assert gate_calls[0]["status"] == "approved"
+    assert attach_calls[0]["reference_id"] == "ref-front_mid"
+
+
 def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
     from app.core.config import Settings
     from app.features.characters import handlers as character_handlers
