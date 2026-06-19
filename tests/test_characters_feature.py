@@ -598,6 +598,36 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
     assert sync_calls
 
 
+def test_actor_settings_selector_layout_handles_long_actor_metadata(monkeypatch):
+    long_source = "Magnific training_result.json longchar_nanobananapro_20260521T000318Z"
+    active_payload = _actor_row(
+        "active",
+        is_active=True,
+        image_url="https://cdn.example.com/active.png",
+    )
+    active_payload["name"] = "AYRA Actor Long Character"
+    active_payload["consent_source"] = long_source
+    active = ActorIdentityRecord.model_validate(active_payload)
+    ready_payload = _actor_row(
+        "ready",
+        is_active=False,
+        image_url="https://cdn.example.com/ready.png",
+    )
+    ready_payload["name"] = "Degura Laura Actor (superseded hyphen handle)"
+    ready_payload["consent_source"] = "Generated fictional actor references via Nano Banana / Vertex Gemini from Degura brand reference"
+    ready = ActorIdentityRecord.model_validate(ready_payload)
+    _patch_actor_settings_context(monkeypatch, active=active, actors=[active, ready])
+
+    response = TestClient(app, base_url="http://localhost").get("/settings/actor")
+
+    assert response.status_code == 200
+    assert "lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]" in response.text
+    assert 'class="min-w-0 rounded-2xl bg-white/70 p-4"' in response.text
+    assert 'class="group block min-w-0 cursor-pointer"' in response.text
+    assert 'class="flex h-full min-w-0 gap-3 rounded-2xl' in response.text
+    assert long_source in response.text
+
+
 def test_actor_settings_active_post_calls_activation_helper(monkeypatch):
     captured = {}
 
