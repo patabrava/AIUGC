@@ -154,6 +154,7 @@ def test_github_action_deploys_on_push_to_main():
     assert "HOSTINGER_API_TOKEN" in step_text
     assert "/api/vps/v1/virtual-machines/{vps_id}/docker" in step_text
     assert "\"project_name\": os.environ[\"HOSTINGER_PROJECT_NAME\"]" in step_text
+    assert '"TIKTOK_ENVIRONMENT": "production"' in step_text
     assert "Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)" in step_text
     assert "Triggered Hostinger action" in step_text
     assert "https://lippelift.xyz/health >/dev/null" in step_text

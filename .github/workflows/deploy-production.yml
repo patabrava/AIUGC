@@ -102,6 +102,7 @@ jobs:
                   "GOOGLE_APPLICATION_CREDENTIALS": "",
                   "MAGNIFIC_API_KEY": os.environ["PROD_MAGNIFIC_API_KEY"].strip(),
                   "SCENE_REFERENCE_STYLE_LORAS": "bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65",
+                  "TIKTOK_ENVIRONMENT": "production",
                   "TRAEFIK_CERTRESOLVER": env_map.get("TRAEFIK_CERTRESOLVER", "letsencrypt"),
                   "TRAEFIK_ENTRYPOINTS": env_map.get("TRAEFIK_ENTRYPOINTS", "websecure"),
                   "TRAEFIK_HOST_RULE": env_map.get(

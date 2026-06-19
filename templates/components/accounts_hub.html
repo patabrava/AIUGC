@@ -122,7 +122,7 @@
                                 <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">TikTok</p>
                                 <h4 class="mt-1 text-lg font-semibold text-gray-900">TikTok</h4>
                                 <p class="mt-2 text-sm text-gray-600">
-                                    Connect the TikTok account you use for direct posts and draft exports.
+                                    Connect the TikTok account you use for direct posts.
                                 </p>
                             </div>
                         </div>
@@ -283,8 +283,7 @@
                 }
                 if (provider === 'tiktok') {
                     if (this.tiktokConnection?.status === 'reconnect_required') return 'Reconnect';
-                    if (this.tiktokConnection?.publish_ready) return 'Publish ready';
-                    if (this.tiktokConnection?.draft_ready) return 'Draft only';
+                    if (this.tiktokDirectPostAvailable()) return 'Publish ready';
                     if (this.tiktokConnection?.status === 'connected') return 'Connected';
                     return 'Not connected';
                 }
@@ -299,8 +298,21 @@
 
             isProviderPublishReady(provider) {
                 if (provider === 'meta') return Boolean(this.metaConnection?.publish_ready);
-                if (provider === 'tiktok') return Boolean(this.tiktokConnection?.publish_ready);
+                if (provider === 'tiktok') return this.tiktokDirectPostAvailable();
                 return false;
+            },
+
+            tiktokDirectPostAvailable() {
+                const scopes = String(this.tiktokConnection?.scope || '')
+                    .split(',')
+                    .map((scope) => scope.trim())
+                    .filter(Boolean);
+                return this.tiktokConnection?.status === 'connected'
+                    && (
+                        Boolean(this.tiktokConnection?.publish_ready)
+                        || Boolean(this.tiktokConnection?.scope_flags?.video_publish)
+                        || scopes.includes('video.publish')
+                    );
             },
 
             providerNeedsAttention(provider) {
@@ -373,7 +385,7 @@
                 if (this.tiktokConnection?.status === 'reconnect_required') {
                     return 'The TikTok token expired and needs to be reconnected.';
                 }
-                return 'Use the authorized TikTok account for draft uploads.';
+                return 'Use the authorized TikTok account for direct posts.';
             },
 
             providerReadinessCopy(provider) {
@@ -381,7 +393,15 @@
                     return this.metaConnection?.readiness_reason || 'Meta publish readiness is unavailable.';
                 }
                 if (provider === 'tiktok') {
-                    return this.tiktokConnection?.readiness_reason || 'TikTok publish readiness is unavailable.';
+                    if (this.tiktokDirectPostAvailable()) {
+                        return 'This TikTok login can post directly from Lippe Lift Studio.';
+                    }
+                    const reason = this.tiktokConnection?.readiness_reason || '';
+                    const normalizedReason = reason.toLowerCase();
+                    if (normalizedReason.includes('draft upload')) {
+                        return 'Reconnect TikTok if direct posting is unavailable.';
+                    }
+                    return reason || 'TikTok publish readiness is unavailable.';
                 }
                 return '';
             },
@@ -391,7 +411,7 @@
                     return this.metaConnection?.publish_ready ? 'text-green-700' : 'text-amber-700';
                 }
                 if (provider === 'tiktok') {
-                    return this.tiktokConnection?.publish_ready ? 'text-green-700' : 'text-amber-700';
+                    return this.tiktokDirectPostAvailable() ? 'text-green-700' : 'text-amber-700';
                 }
                 return 'text-gray-600';
             },
