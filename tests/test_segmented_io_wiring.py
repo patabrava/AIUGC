@@ -11,6 +11,7 @@ import app.core.video_profiles as vp_profiles
 import app.features.videos.handlers as h
 import workers.video_poller as vp
 from app.features.videos import segmented_pipeline as sp
+from app.adapters.deepgram_client import Word, WordLevelTranscript
 
 
 # --------------------------------------------------------------------------------------
@@ -36,7 +37,7 @@ def test_build_segmented_segment_prompts_reanchors_character_consistency():
         "cinematography": "eye-level selfie framing",
         "audio": {"dialogue": "Erstens spare ich Geld. Zweitens ist es sicherer. Drittens lohnt es sich."},
     }
-    beats, prompts = h._build_segmented_segment_prompts(
+    beats, prompts, spoken_windows = h._build_segmented_segment_prompts(
         seed_data={},
         video_prompt=video_prompt,
         segment_count=2,
@@ -45,11 +46,38 @@ def test_build_segmented_segment_prompts_reanchors_character_consistency():
     )
     assert len(beats) == 2
     assert len(prompts) == 2
+    assert len(spoken_windows) == 2
     # Every segment re-anchors the full character + scene (the drift fix), not "continue from prev".
     assert all("Laura" in p for p in prompts)
     assert all("stairwell" in p for p in prompts)
     # Only the final segment should differ (it carries the ending directive).
     assert prompts[0] != prompts[1]
+
+
+def test_segmented_prompts_include_spoken_window_timing_not_full_8s_budget():
+    video_prompt = {
+        "character": "Laura",
+        "scene": "Wohnzimmer",
+        "style": "handheld vertical UGC",
+        "cinematography": "eye-level selfie framing",
+        "audio": {"dialogue": "Kurzer erster Satz. Noch ein kurzer zweiter Satz."},
+    }
+
+    beats, prompts, spoken_windows = h._build_segmented_segment_prompts(
+        seed_data={},
+        video_prompt=video_prompt,
+        segment_count=2,
+        creation_mode="character_consistency",
+        target_length_tier=16,
+    )
+
+    assert len(beats) == 2
+    assert len(prompts) == 2
+    assert [window["provider_duration_seconds"] for window in spoken_windows] == [8, 8]
+    assert all(window["estimated_spoken_seconds"] < 8 for window in spoken_windows)
+    assert all(window["fallback_trim_end_seconds"] < 8 for window in spoken_windows)
+    assert "about 1." in prompts[0] or "about 2." in prompts[0]
+    assert "remaining 8-second generation window" in prompts[0]
 
 
 def test_submit_segmented_character_consistency_uses_anchor_i2v_lock(monkeypatch):
@@ -116,6 +144,7 @@ def test_submit_segmented_character_consistency_uses_anchor_i2v_lock(monkeypatch
     assert result["segment_count"] == 2
     assert result["i2v_locked"] is True
     assert result["i2v_model"] == "veo-3.1-generate-001"
+    assert result["spoken_windows"]
     assert len(calls) == 1
     assert [c["correlation_id"] for c in calls] == ["corr_seg0"]
     for call in calls:
@@ -150,6 +179,7 @@ def test_submit_segmented_character_consistency_uses_anchor_i2v_lock(monkeypatch
     assert metadata["i2v_lock"]["state"] == sp.I2V_STATE_PENDING
     assert metadata["i2v_lock"]["model"] == "veo-3.1-generate-001"
     assert metadata["i2v_lock"]["beats"] == result["beats"]
+    assert metadata["veo_segment_spoken_windows"] == result["spoken_windows"]
     assert metadata["operation_ids"] == ["op-0"]
     assert metadata["veo_segment_ops"] == [
         {
@@ -255,7 +285,10 @@ def test_handle_segmented_video_stitches_when_all_complete(monkeypatch):
     monkeypatch.setattr(vp, "get_veo_client", lambda: fake_veo)
 
     stitched = {}
-    monkeypatch.setattr(vp, "stitch_segments", lambda **kw: (b"FINAL", {"output_duration_seconds": 16.0}))
+    def _fake_stitch(**kwargs):
+        stitched.update(kwargs)
+        return b"FINAL", {"output_duration_seconds": 16.0}
+    monkeypatch.setattr(vp, "stitch_segments", _fake_stitch)
 
     stored = {}
     def _fake_store(**kwargs):
@@ -267,11 +300,53 @@ def test_handle_segmented_video_stitches_when_all_complete(monkeypatch):
 
     # Both segments downloaded in index order, stitched bytes handed to the completion store.
     assert fake_veo.downloaded == ["gs://seg/0.mp4", "gs://seg/1.mp4"]
+    assert stitched["trim_windows"] is None
     assert stored["video_source"] == b"FINAL"
     assert stored["provider_metadata"]["segmented"] is True
     # We never persist a "stitching" status (the posts CHECK constraint forbids it); the post stays
     # processing until the completion store flips it to caption_pending.
     assert not any(u.get("video_status") == vp.VIDEO_STATUS_STITCHING for u in fake_sb.updates)
+
+
+def test_handle_segmented_video_uses_actual_transcript_windows_for_stitching(monkeypatch):
+    fake_sb = _FakeSupabase()
+    _patch_common(monkeypatch, fake_sb)
+    fake_veo = _FakeVeoClient({"op-0": (True, "gs://seg/0.mp4", False), "op-1": (True, "gs://seg/1.mp4", False)})
+    monkeypatch.setattr(vp, "get_veo_client", lambda: fake_veo)
+    monkeypatch.setattr(vp, "get_settings", lambda: type("S", (), {"deepgram_api_key": "key"})())
+
+    class _FakeDeepgram:
+        def __init__(self):
+            self.calls = 0
+
+        def transcribe(self, *, audio_bytes, correlation_id):
+            self.calls += 1
+            return WordLevelTranscript(
+                words=[Word(word="Hallo", start=0.2, end=1.3 + self.calls)],
+                full_text="Hallo",
+            )
+
+    monkeypatch.setattr(vp, "get_deepgram_client", lambda: _FakeDeepgram())
+
+    stitched = {}
+    def _fake_stitch(**kwargs):
+        stitched.update(kwargs)
+        return b"FINAL", {"output_duration_seconds": 5.0}
+    monkeypatch.setattr(vp, "stitch_segments", _fake_stitch)
+    monkeypatch.setattr(vp, "_store_completed_video", lambda **_kwargs: None)
+
+    post = _segmented_post(_ops(["submitted", "submitted"]))
+    post["video_metadata"]["veo_segment_spoken_windows"] = [
+        {"segment_index": 0, "fallback_trim_end_seconds": 4.0},
+        {"segment_index": 1, "fallback_trim_end_seconds": 5.0},
+    ]
+
+    vp._handle_segmented_video(post, "corr")
+
+    assert stitched["trim_windows"] == [
+        {"start_seconds": 0.0, "end_seconds": 2.65, "source": "transcript"},
+        {"start_seconds": 0.0, "end_seconds": 3.65, "source": "transcript"},
+    ]
 
 
 def test_handle_segmented_video_waits_when_partial(monkeypatch):

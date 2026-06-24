@@ -53,6 +53,7 @@ from app.core.video_profiles import (
     TRIM_TAIL_MS,
 )
 from app.adapters.video_stitcher import stitch_segments
+from app.adapters.deepgram_client import DeepgramError, get_deepgram_client
 from app.features.videos.segmented_pipeline import (
     SEGMENT_STATUS_COMPLETED,
     SEGMENT_STATUS_FAILED,
@@ -89,6 +90,8 @@ except Exception as import_error:  # noqa: BLE001
 # Configure logging
 configure_logging()
 logger = get_logger(__name__)
+
+_SEGMENT_TRANSCRIPT_TAIL_PAD_SECONDS = 0.35
 
 logger.info(
     "video_poller_startup_context",
@@ -1261,6 +1264,130 @@ def _fail_segmented_post(post: Dict[str, Any], metadata: Dict[str, Any], correla
     )
 
 
+def _coerce_positive_seconds(value: Any) -> Optional[float]:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _fallback_segment_trim_windows(
+    *,
+    metadata: Dict[str, Any],
+    segment_count: int,
+) -> Optional[List[Dict[str, Any]]]:
+    raw_windows = metadata.get("veo_segment_spoken_windows") or []
+    if not isinstance(raw_windows, list) or not raw_windows:
+        return None
+
+    by_index: Dict[int, Dict[str, Any]] = {}
+    for raw in raw_windows:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            index = int(raw.get("segment_index"))
+        except (TypeError, ValueError):
+            continue
+        by_index[index] = raw
+
+    windows: List[Dict[str, Any]] = []
+    for index in range(segment_count):
+        fallback = by_index.get(index)
+        end = _coerce_positive_seconds((fallback or {}).get("fallback_trim_end_seconds"))
+        if end is None:
+            return None
+        windows.append(
+            {
+                "start_seconds": 0.0,
+                "end_seconds": round(end, 2),
+                "source": "script_estimate",
+            }
+        )
+    return windows
+
+
+def _resolve_segment_trim_windows(
+    *,
+    segment_videos: List[bytes],
+    metadata: Dict[str, Any],
+    correlation_id: str,
+) -> Optional[List[Dict[str, Any]]]:
+    fallback_windows = _fallback_segment_trim_windows(
+        metadata=metadata,
+        segment_count=len(segment_videos),
+    )
+    if not fallback_windows:
+        return None
+    deepgram_key = str(getattr(get_settings(), "deepgram_api_key", "") or "").strip()
+    if not deepgram_key:
+        return fallback_windows
+
+    try:
+        deepgram = get_deepgram_client()
+    except Exception as exc:  # noqa: BLE001 - stitch timing must fall back, not fail completion.
+        logger.warning(
+            "segmented_trim_transcriber_unavailable",
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+        return fallback_windows
+
+    resolved: List[Dict[str, Any]] = []
+    for index, video_bytes in enumerate(segment_videos):
+        fallback = fallback_windows[index] if fallback_windows and index < len(fallback_windows) else None
+        try:
+            transcript = deepgram.transcribe(
+                audio_bytes=video_bytes,
+                correlation_id=f"{correlation_id}_seg{index}_trim",
+            )
+        except DeepgramError as exc:
+            logger.warning(
+                "segmented_trim_transcription_failed",
+                correlation_id=correlation_id,
+                segment_index=index,
+                transient=exc.transient,
+                error=str(exc),
+            )
+            if fallback is None:
+                return fallback_windows
+            resolved.append(fallback)
+            continue
+        except Exception as exc:  # noqa: BLE001 - completion should fall back to script timing.
+            logger.warning(
+                "segmented_trim_transcription_unexpected_error",
+                correlation_id=correlation_id,
+                segment_index=index,
+                error=str(exc),
+            )
+            if fallback is None:
+                return fallback_windows
+            resolved.append(fallback)
+            continue
+
+        word_ends = [
+            _coerce_positive_seconds(getattr(word, "end", None))
+            for word in getattr(transcript, "words", []) or []
+        ]
+        word_ends = [value for value in word_ends if value is not None]
+        if not word_ends:
+            if fallback is None:
+                return fallback_windows
+            resolved.append(fallback)
+            continue
+
+        end = max(word_ends) + _SEGMENT_TRANSCRIPT_TAIL_PAD_SECONDS
+        resolved.append(
+            {
+                "start_seconds": 0.0,
+                "end_seconds": round(end, 2),
+                "source": "transcript",
+            }
+        )
+
+    return resolved or fallback_windows
+
+
 def _stitch_and_store_segments(
     post: Dict[str, Any], metadata: Dict[str, Any], provider: str, correlation_id: str
 ) -> None:
@@ -1283,10 +1410,16 @@ def _stitch_and_store_segments(
         segment_count=len(uris),
     )
     segment_videos = [_download_segment_bytes(provider, uri, correlation_id) for uri in uris]
+    trim_windows = _resolve_segment_trim_windows(
+        segment_videos=segment_videos,
+        metadata=metadata,
+        correlation_id=correlation_id,
+    )
     final_bytes, stitch_meta = stitch_segments(
         segment_videos=segment_videos,
         post_id=post_id,
         correlation_id=correlation_id,
+        trim_windows=trim_windows,
     )
     logger.info(
         "segmented_video_stitch_complete",
@@ -1295,6 +1428,8 @@ def _stitch_and_store_segments(
         output_bytes=len(final_bytes),
     )
     merged_metadata = {**metadata, **{f"stitch_{key}": value for key, value in stitch_meta.items()}}
+    if trim_windows:
+        merged_metadata["veo_segment_effective_trim_windows"] = trim_windows
     _store_completed_video(
         post_id=post_id,
         provider=provider,

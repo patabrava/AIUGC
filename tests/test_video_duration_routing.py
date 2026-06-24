@@ -446,7 +446,7 @@ def test_segmented_non_final_prompts_finish_cleanly_before_cut():
         "Wenn du das einmal sauber gelöst hast, sparst du dir später Zeit, Kraft und Nerven."
     )
 
-    _beats, prompts = video_handlers._build_segmented_segment_prompts(
+    _beats, prompts, _spoken_windows = video_handlers._build_segmented_segment_prompts(
         seed_data={"script": script},
         video_prompt={
             "audio": {"dialogue": script},

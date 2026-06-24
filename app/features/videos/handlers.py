@@ -115,6 +115,11 @@ _VERTEX_CHARACTER_CONSISTENCY_MODEL = "veo-3.1-generate-001"
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 _WORDS_PER_SECOND = 2.5
+_SEGMENTED_PROVIDER_SECONDS = SEGMENTED_SEGMENT_SECONDS
+_SEGMENTED_SHORT_SPEECH_MIN_SECONDS = 1.0
+_SEGMENTED_PROMPT_MAX_SPEECH_SECONDS = SEGMENTED_SEGMENT_SECONDS - 0.75
+_SEGMENTED_FALLBACK_TAIL_PAD_SECONDS = 0.45
+_SEGMENTED_FINAL_FALLBACK_TAIL_PAD_SECONDS = 0.8
 
 
 def _resolve_non_duration_provider(requested_provider: Optional[str]) -> str:
@@ -1840,6 +1845,45 @@ def _split_script_into_segments(script: str, segment_count: int) -> list[str]:
     return [beat for beat in beats if beat.strip()]
 
 
+def _build_segmented_spoken_windows(beats: list[str]) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    last_index = len(beats) - 1
+    for index, beat in enumerate(beats):
+        estimated_spoken = max(_SEGMENTED_SHORT_SPEECH_MIN_SECONDS, _estimate_spoken_seconds(beat))
+        prompt_target = min(estimated_spoken, _SEGMENTED_PROMPT_MAX_SPEECH_SECONDS)
+        tail_pad = (
+            _SEGMENTED_FINAL_FALLBACK_TAIL_PAD_SECONDS
+            if index == last_index
+            else _SEGMENTED_FALLBACK_TAIL_PAD_SECONDS
+        )
+        fallback_end = min(float(_SEGMENTED_PROVIDER_SECONDS), estimated_spoken + tail_pad)
+        windows.append(
+            {
+                "segment_index": index,
+                "provider_duration_seconds": _SEGMENTED_PROVIDER_SECONDS,
+                "estimated_spoken_seconds": round(estimated_spoken, 2),
+                "prompt_target_seconds": round(prompt_target, 2),
+                "fallback_trim_end_seconds": round(fallback_end, 2),
+                "trim_pad_seconds": round(tail_pad, 2),
+                "source": "script_estimate",
+            }
+        )
+    return windows
+
+
+def _apply_segmented_speech_timing(prompt: str, window: dict[str, Any]) -> str:
+    target = float(window.get("prompt_target_seconds") or window.get("estimated_spoken_seconds") or 0.0)
+    provider = int(window.get("provider_duration_seconds") or SEGMENTED_SEGMENT_SECONDS)
+    return (
+        f"{prompt.rstrip()}\n\n"
+        "Speech timing:\n"
+        f"Deliver only this segment's dialogue in about {target:.1f} seconds. "
+        f"This is a {provider}-second generation window, but the spoken performance should end "
+        "when the line ends. Do not fill the remaining 8-second generation window with extra "
+        "words, repeated mouth movement, filler silence, music, or room-tone padding."
+    )
+
+
 def _build_segmented_segment_prompts(
     *,
     seed_data: Dict[str, Any],
@@ -1847,8 +1891,8 @@ def _build_segmented_segment_prompts(
     segment_count: int,
     creation_mode: str,
     target_length_tier: Optional[int],
-) -> tuple[list[str], list[str]]:
-    """Return ``(beats, prompts)`` for a segmented post.
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """Return ``(beats, prompts, spoken_windows)`` for a segmented post.
 
     Every segment is a self-contained generation: the FULL character + scene context is rebuilt for
     each beat using the same mode-appropriate builder the extend route uses for its *base* clip, so
@@ -1892,6 +1936,7 @@ def _build_segmented_segment_prompts(
             },
         )
 
+    spoken_windows = _build_segmented_spoken_windows(beats)
     mode = str(creation_mode or "").strip()
     last_index = segment_count - 1
     legacy_32 = bool(target_length_tier == 32)
@@ -1902,7 +1947,7 @@ def _build_segmented_segment_prompts(
         segment_ending = None if include_final_ending else SEGMENTED_NON_FINAL_ENDING_DIRECTIVE
         segment_audio_block = None if include_final_ending else SEGMENTED_NON_FINAL_AUDIO_BLOCK
         if mode in {"character_consistency", "manual_character_consistency", "character_consistency_mid"}:
-            prompts.append(
+            prompt = (
                 build_reference_image_scene_base_prompt(
                     beat,
                     character=prompt_character,
@@ -1917,7 +1962,7 @@ def _build_segmented_segment_prompts(
                 )
             )
         elif is_character_consistency_light_mode(mode):
-            prompts.append(
+            prompt = (
                 build_lean_veo_base_prompt(
                     beat,
                     scene=prompt_scene,
@@ -1927,7 +1972,7 @@ def _build_segmented_segment_prompts(
                 )
             )
         else:
-            prompts.append(
+            prompt = (
                 build_veo_prompt_segment(
                     beat,
                     include_ending=include_final_ending,
@@ -1941,7 +1986,8 @@ def _build_segmented_segment_prompts(
                     legacy_32_visuals=legacy_32,
                 )
             )
-    return beats, prompts
+        prompts.append(_apply_segmented_speech_timing(prompt, spoken_windows[index]))
+    return beats, prompts, spoken_windows
 
 
 def _submit_segmented_post(
@@ -1974,7 +2020,7 @@ def _submit_segmented_post(
     segment_count = segment_count_for_tier(profile.target_length_tier)
     shared_seed = veo_seed if veo_seed is not None else random.randint(0, 2**32 - 1)
 
-    beats, prompts = _build_segmented_segment_prompts(
+    beats, prompts, spoken_windows = _build_segmented_segment_prompts(
         seed_data=seed_data,
         video_prompt=video_prompt,
         segment_count=segment_count,
@@ -2054,6 +2100,7 @@ def _submit_segmented_post(
         "segment_count": segment_count,
         "prompts": prompts,
         "beats": beats,
+        "spoken_windows": spoken_windows,
         "seed": shared_seed,
         "i2v_locked": i2v_locked,
         "i2v_model": i2v_model,
@@ -2105,6 +2152,8 @@ def _build_segmented_submission_metadata(
     else:
         metadata["veo_segment_ops"] = build_initial_segment_ops(operation_ids)
     metadata["veo_segment_prompts"] = segmented_result["prompts"]
+    metadata["veo_segment_beats"] = segmented_result["beats"]
+    metadata["veo_segment_spoken_windows"] = segmented_result["spoken_windows"]
     metadata["operation_ids"] = operation_ids
     metadata["veo_seed"] = segmented_result["seed"]
     metadata["script_duration_contract"] = script_contract

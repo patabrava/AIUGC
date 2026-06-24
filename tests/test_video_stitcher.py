@@ -76,6 +76,39 @@ def test_stitch_two_segments_preserves_audio_at_cut(tmp_path):
     assert meta["stitch_tail_trim_s"] == [0.0, 0.0]
 
 
+def test_stitch_trims_segments_to_spoken_windows(tmp_path):
+    clip_a = str(tmp_path / "a.mp4")
+    clip_b = str(tmp_path / "b.mp4")
+    _make_clip(clip_a, seconds=4, color="red")
+    _make_clip(clip_b, seconds=4, color="blue")
+
+    with open(clip_a, "rb") as fh:
+        bytes_a = fh.read()
+    with open(clip_b, "rb") as fh:
+        bytes_b = fh.read()
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=[bytes_a, bytes_b],
+        post_id="post_test",
+        correlation_id="corr_test",
+        trim_windows=[
+            {"start_seconds": 0.0, "end_seconds": 1.5, "source": "test"},
+            {"start_seconds": 0.0, "end_seconds": 2.25, "source": "test"},
+        ],
+    )
+
+    out_path = str(tmp_path / "out.mp4")
+    with open(out_path, "wb") as fh:
+        fh.write(final_bytes)
+
+    duration = _probe_duration(out_path)
+    assert 3.6 <= duration <= 3.95, duration
+    assert meta["stitch_head_trim_s"] == [0.0, 0.0]
+    assert meta["stitch_tail_trim_s"][0] >= 2.4
+    assert meta["stitch_tail_trim_s"][1] >= 1.6
+    assert meta["stitch_trim_window_source"] == ["test", "test"]
+
+
 def test_stitch_softens_i2v_resets_with_reframes_not_audio_trims(tmp_path):
     clip_a = str(tmp_path / "a.mp4")
     clip_b = str(tmp_path / "b.mp4")

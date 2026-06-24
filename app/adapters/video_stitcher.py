@@ -17,7 +17,7 @@ import json
 import os
 import subprocess
 import tempfile
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.logging import get_logger
 
@@ -102,12 +102,35 @@ def _even_dimension(value: float) -> int:
     return rounded if rounded % 2 == 0 else rounded + 1
 
 
-def _trim_window(index: int, count: int, duration: float) -> Tuple[float, float]:
+def _coerce_seconds(value: Any) -> Optional[float]:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _trim_window(
+    index: int,
+    count: int,
+    duration: float,
+    *,
+    trim_windows: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[float, float, str]:
+    if trim_windows and index < len(trim_windows) and isinstance(trim_windows[index], dict):
+        window = trim_windows[index]
+        start = _coerce_seconds(window.get("start_seconds"))
+        end = _coerce_seconds(window.get("end_seconds"))
+        if end is not None:
+            resolved_start = min(start or 0.0, max(duration - _MIN_TRIMMED_SEGMENT_SECONDS, 0.0))
+            resolved_end = min(duration, max(resolved_start + _MIN_TRIMMED_SEGMENT_SECONDS, end))
+            return resolved_start, resolved_end, str(window.get("source") or "provided")
+
     head = _I2V_HEAD_TRIM_SECONDS if index > 0 else 0.0
     tail = _NON_FINAL_TAIL_TRIM_SECONDS if index < count - 1 else 0.0
     start = min(head, max(duration - _MIN_TRIMMED_SEGMENT_SECONDS, 0.0))
     end = max(start + _MIN_TRIMMED_SEGMENT_SECONDS, duration - tail)
-    return start, min(duration, end)
+    return start, min(duration, end), "default"
 
 
 def _reframe_filter(index: int, width: int, height: int) -> Tuple[str, str]:
@@ -190,6 +213,7 @@ def stitch_segments(
     segment_videos: List[bytes],
     post_id: str,
     correlation_id: str,
+    trim_windows: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """Concatenate ordered segment videos into one mp4.
 
@@ -197,6 +221,8 @@ def stitch_segments(
         segment_videos: Ordered raw mp4 bytes, one per segment. Must be non-empty.
         post_id: Owning post id for logging.
         correlation_id: Correlation id for structured logging.
+        trim_windows: Optional per-segment start/end seconds. When present, each segment is
+            trimmed to its spoken window before concatenation.
 
     Returns:
         (final_video_bytes, stitch_metadata).
@@ -239,11 +265,18 @@ def stitch_segments(
         concat_inputs: List[str] = []
         head_trims: List[float] = []
         tail_trims: List[float] = []
+        trim_sources: List[str] = []
         reframe_names: List[str] = []
         for index in range(len(input_paths)):
-            start, end = _trim_window(index, len(input_paths), segment_durations[index])
+            start, end, trim_source = _trim_window(
+                index,
+                len(input_paths),
+                segment_durations[index],
+                trim_windows=trim_windows,
+            )
             head_trims.append(round(start, 3))
             tail_trims.append(round(max(segment_durations[index] - end, 0.0), 3))
+            trim_sources.append(trim_source)
             reframe_name, reframe = _reframe_filter(index, width, height)
             reframe_names.append(reframe_name)
             filter_parts.append(
@@ -303,6 +336,7 @@ def stitch_segments(
         "stitch_cut_softening_applied": True,
         "stitch_head_trim_s": head_trims,
         "stitch_tail_trim_s": tail_trims,
+        "stitch_trim_window_source": trim_sources,
         "stitch_reframe_profile": reframe_names,
     }
     logger.info(
