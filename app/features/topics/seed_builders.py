@@ -337,7 +337,7 @@ def build_product_seed_payload(topic_data: Dict[str, Any]) -> Dict[str, Any]:
     }
     payload: Dict[str, Any] = {
         "script": script,
-        "canonical_topic": str(topic_data.get("product_name") or topic_data.get("title") or "").strip(),
+        "canonical_topic": str(topic_data.get("angle") or topic_data.get("title") or "").strip(),
         "research_title": str(topic_data.get("title") or "").strip(),
         "product_name": str(topic_data.get("product_name") or "").strip(),
         "product_angle": str(topic_data.get("angle") or "").strip(),

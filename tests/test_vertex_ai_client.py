@@ -125,6 +125,34 @@ def test_submit_image_video_accepts_image_bytes():
     assert call_kwargs["json"]["instances"][0]["image"]["mimeType"] == "image/jpeg"
 
 
+def test_submit_image_video_accepts_negative_prompt():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"name": "operation-456"}
+    mock_response.raise_for_status.return_value = None
+
+    mock_credentials = SimpleNamespace(token="token", expired=False)
+    mock_http = MagicMock()
+    mock_http.post.return_value = mock_response
+
+    with patch("app.adapters.vertex_ai_client.VertexSettings", return_value=_settings()), \
+        patch("app.adapters.vertex_ai_client.google.auth.default", return_value=(mock_credentials, None)), \
+        patch("app.adapters.vertex_ai_client.Request"), \
+        patch("app.adapters.vertex_ai_client.httpx.Client", return_value=mock_http):
+        client = _fresh_client()
+        client.submit_image_video(
+            prompt="A locked talking-head continuation.",
+            image_bytes=b"fake-bytes",
+            mime_type="image/jpeg",
+            correlation_id="corr-2",
+            aspect_ratio="9:16",
+            duration_seconds=8,
+            negative_prompt="different room, camera zoom, changed wardrobe",
+        )
+
+    params = mock_http.post.call_args.kwargs["json"]["parameters"]
+    assert params["negativePrompt"] == "different room, camera zoom, changed wardrobe"
+
+
 def test_submit_text_video_accepts_reference_images():
     mock_response = MagicMock()
     mock_response.json.return_value = {"name": "operation-reference-images"}

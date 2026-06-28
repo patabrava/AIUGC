@@ -91,13 +91,14 @@ def test_submit_segmented_character_consistency_uses_anchor_i2v_lock(monkeypatch
             "status": "submitted",
             "provider_model": kwargs.get("model") or "veo-3.1-generate-001",
             "provider_metadata": {
-                "source": "actor_identity_plus_canonical_scene_anchor",
+                "source": "actor_identity_scene_reference_set_plus_canonical_scene",
                 "reference_image_count": 3,
                 "reference_image_roles": [
-                    "actor_identity_anchor",
-                    "actor_identity_anchor",
-                    "canonical_scene_anchor",
+                    "actor_identity_scene_reference",
+                    "actor_identity_scene_reference",
+                    "canonical_scene_reference",
                 ],
+                "canonical_scene_reference_used_for_video": True,
             },
         }
 

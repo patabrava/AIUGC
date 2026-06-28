@@ -6,7 +6,11 @@ from app.core.video_profiles import get_duration_profile
 from app.core.errors import ThirdPartyError, ValidationError
 from app.features.topics.product_knowledge import parse_product_knowledge_base, plan_product_mix
 from app.features.topics.prompts import build_prompt3
-from app.features.topics.prompt3_runtime import generate_product_topics
+from app.features.topics.prompt3_runtime import (
+    _build_product_fallback_topic,
+    _strip_user_facing_product_markers,
+    generate_product_topics,
+)
 from app.features.topics.response_parsers import parse_prompt3_response
 from app.features.topics.schemas import ProductKnowledgeEntry
 
@@ -376,6 +380,8 @@ Fakten:
     assert "VARIO PLUS" not in generated[0]["angle"]
     assert "VARIO PLUS" not in generated[0]["script"]
     assert "VARIO PLUS" not in generated[0]["cta"]
+    assert "VARIO PLUS" not in generated[0]["title"]
+    assert "PLATTFORMTREPPENLIFT T80" not in generated[0]["title"]
     assert len(fake_llm.text_prompts) == 2
     assert "nicht in Winkel, Sprechtext oder Schlusssatz" in fake_llm.text_prompts[1][0]
 
@@ -708,3 +714,36 @@ def test_generate_product_topics_disables_thinking_budget(monkeypatch):
 
     assert generated[0]["product_name"] == "VARIO PLUS"
     assert fake_llm.text_prompts[0][2]["thinking_budget"] == 0
+
+
+def test_strip_user_facing_product_markers_removes_all_name_variants():
+    leaked = "Mit VARIO PLUS und dem PLATTFORMTREPPENLIFT T80 von LIPPE Lift bleibst du flexibel."
+    cleaned = _strip_user_facing_product_markers(
+        leaked,
+        product_name="VARIO PLUS",
+        aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+    )
+    assert "VARIO PLUS" not in cleaned
+    assert "PLATTFORMTREPPENLIFT" not in cleaned
+    assert "T80" not in cleaned
+    assert "LIPPE Lift" not in cleaned
+    # The generic, non-name remainder survives without leaving double spaces.
+    assert "bleibst du flexibel." in cleaned
+    assert "  " not in cleaned
+
+
+def test_product_fallback_topic_never_exposes_product_name():
+    entry = ProductKnowledgeEntry(
+        product_name="VARIO PLUS",
+        source_label="PLATTFORMTREPPENLIFT T80",
+        aliases=["VARIO PLUS", "PLATTFORMTREPPENLIFT T80"],
+        summary="Plattform oder Sitzlift auf derselben Schiene.",
+        facts=["Plattform oder Sitzlift auf derselben Schiene", "Tragfaehigkeit bis 300 kg"],
+        support_facts=["in Deutschland gefertigt"],
+    )
+    topic = _build_product_fallback_topic(entry, target_length_tier=8, reason="provider_retry_exhausted")
+    for field in ("title", "angle", "script", "rotation", "cta"):
+        assert "VARIO PLUS" not in topic[field]
+        assert "PLATTFORMTREPPENLIFT" not in topic[field]
+        assert "T80" not in topic[field]
+    assert topic["product_name"] == "VARIO PLUS"

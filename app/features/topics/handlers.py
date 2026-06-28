@@ -1491,7 +1491,9 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
                     post_type=post_type,
                     seed_payload=seed_payload,
                     script_fallback=topic_data["rotation"],
-                    canonical_topic=str(seed_payload.get("canonical_topic") or topic_data["product_name"]),
+                    canonical_topic=str(
+                        seed_payload.get("canonical_topic") or topic_data.get("angle") or topic_data["title"]
+                    ),
                 )
 
                 try:

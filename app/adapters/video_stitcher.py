@@ -134,7 +134,7 @@ def _trim_window(
 
 
 def _reframe_filter(index: int, width: int, height: int) -> Tuple[str, str]:
-    name, zoom, x_anchor, y_anchor = _REFRAME_PROFILES[index % len(_REFRAME_PROFILES)]
+    name, zoom, x_anchor, y_anchor = _REFRAME_PROFILES[0]
     scaled_width = _even_dimension(width * zoom)
     scaled_height = _even_dimension(height * zoom)
     crop_x = max(0, int(round((scaled_width - width) * x_anchor)))
@@ -333,7 +333,7 @@ def stitch_segments(
         "stitch_width": width,
         "stitch_height": height,
         "stitch_fps": round(fps, 3),
-        "stitch_cut_softening_applied": True,
+        "stitch_cut_softening_applied": False,
         "stitch_head_trim_s": head_trims,
         "stitch_tail_trim_s": tail_trims,
         "stitch_trim_window_source": trim_sources,

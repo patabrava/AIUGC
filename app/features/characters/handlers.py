@@ -477,28 +477,34 @@ def _validate_video_scene_reference_rows(
     reference_set_id: str,
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    if len(rows) != len(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS):
-        raise _video_scene_reference_validation_error(
-            message="Character Consistency VEO submission requires exactly two approved Magnific actor-in-scene reference images plus one canonical scene plate.",
-            post_id=post_id,
-            reference_set_id=reference_set_id,
-            rows=rows,
-        )
-    if any(not row.get("image_url") for row in rows):
-        raise _video_scene_reference_validation_error(
-            message="Character Consistency VEO submission requires both Magnific actor-in-scene reference images to have durable image URLs.",
-            post_id=post_id,
-            reference_set_id=reference_set_id,
-            rows=rows,
-        )
     expected_angles = set(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS)
+    video_rows = [
+        row
+        for row in rows
+        if str((row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}).get("angle_key") or "")
+        in expected_angles
+    ]
+    if len(video_rows) != len(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS):
+        raise _video_scene_reference_validation_error(
+            message="Character Consistency VEO submission requires exactly two generated matched Magnific character reference images.",
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+            rows=rows,
+        )
+    if any(not row.get("image_url") for row in video_rows):
+        raise _video_scene_reference_validation_error(
+            message="Character Consistency VEO submission requires both matched Magnific character reference images to have durable image URLs.",
+            post_id=post_id,
+            reference_set_id=reference_set_id,
+            rows=rows,
+        )
     actual_angles = {
         str((row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}).get("angle_key") or "")
-        for row in rows
+        for row in video_rows
     }
     if actual_angles != expected_angles:
         raise _video_scene_reference_validation_error(
-            message="Character Consistency VEO submission requires one front and one three-quarter Magnific actor-in-scene reference.",
+            message="Character Consistency VEO submission requires one front and one slight-left matched Magnific character reference.",
             post_id=post_id,
             reference_set_id=reference_set_id,
             rows=rows,
@@ -602,7 +608,7 @@ def _create_scene_reference_candidates(
     return reference_set_id, references
 
 
-def create_auto_approved_scene_reference_set_for_video(
+def create_scene_reference_set_for_video_review(
     *,
     post: dict[str, Any],
     batch: dict[str, Any],
@@ -618,7 +624,6 @@ def create_auto_approved_scene_reference_set_for_video(
             post=post,
             batch=batch,
             correlation_id=correlation_id,
-            angle_keys=VIDEO_ACTOR_REFERENCE_ANGLE_KEYS,
         )
         stored_rows = character_queries.list_scene_references_for_set(
             post_id=post_id,
@@ -636,14 +641,17 @@ def create_auto_approved_scene_reference_set_for_video(
     rows = _poll_scene_reference_rows_until_generated(rows=rows, correlation_id=correlation_id)
     _validate_video_scene_reference_rows(post_id=post_id, reference_set_id=reference_set_id, rows=rows)
 
-    gate = passed_manual_gate("Automatically approved two Magnific actor LoRA scene references for hybrid VEO submission")
+    gate = pending_manual_gate(
+        "Generated a three-angle Magnific character reference set. Operator visual approval is required before VEO submission; VEO uses two approved character references plus the plain scene image."
+    )
     gate.details.update(
         {
-            "scene_consistency_set_approved": True,
-            "actor_identity_match_confirmed": True,
+            "scene_consistency_set_approved": False,
+            "actor_identity_match_confirmed": False,
             "reference_set_id": reference_set_id,
-            "auto_approved_for_video_submission": True,
-            "hybrid_reference_bundle_approved": True,
+            "auto_approved_for_video_submission": False,
+            "requires_operator_visual_review": True,
+            "hybrid_reference_bundle_approved": False,
             "actor_scene_reference_count": len(VIDEO_ACTOR_REFERENCE_ANGLE_KEYS),
         }
     )
@@ -653,16 +661,10 @@ def create_auto_approved_scene_reference_set_for_video(
             post_id=post_id,
             reference_set_id=reference_set_id,
             gate_result=gate,
-            status="approved",
+            status="generated",
             correlation_id=correlation_id,
         )
     ] or rows
-    character_queries.attach_scene_reference_to_post(
-        post_id=post_id,
-        reference_id=_front_reference_id(rows),
-        gate_result=gate,
-        correlation_id=correlation_id,
-    )
 
     approved = character_queries.get_approved_video_actor_scene_reference_set_for_post(post_id)
     if approved:
@@ -672,11 +674,11 @@ def create_auto_approved_scene_reference_set_for_video(
     fallback_rows = [
         {
             **row,
-            "status": "approved",
+            "status": "generated",
             "identity_gate_result": gate_payload,
             "provider_metadata": {
                 **(row.get("provider_metadata") if isinstance(row.get("provider_metadata"), dict) else {}),
-                "reference_set_status": "approved",
+                "reference_set_status": "pending_review",
             },
         }
         for row in (gated_rows or rows)
@@ -686,14 +688,7 @@ def create_auto_approved_scene_reference_set_for_video(
         reference_set_id=reference_set_id,
         rows=fallback_rows,
     )
-    if summary.is_video_actor_ready:
-        return summary
-    raise _video_scene_reference_validation_error(
-        message="Generated Magnific actor-in-scene references could not be approved for hybrid Character Consistency VEO submission.",
-        post_id=post_id,
-        reference_set_id=reference_set_id,
-        rows=fallback_rows,
-    )
+    return summary
 
 
 @router.post("/actor")

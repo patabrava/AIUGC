@@ -109,6 +109,7 @@ def submit_locked_segments(
     duration_seconds = int(lock.get("duration_seconds") or SEGMENTED_SEGMENT_SECONDS)
     model = lock.get("model")
     output_gcs_uri = lock.get("output_gcs_uri")
+    negative_prompt = str(lock.get("negative_prompt") or "").strip() or None
 
     logger.info(
         "segmented_video_i2v_submit",
@@ -144,6 +145,7 @@ def submit_locked_segments(
             duration_seconds=duration_seconds,
             output_gcs_uri=output_gcs_uri,
             model=model,
+            negative_prompt=negative_prompt,
         )
         operation_id = result["operation_id"]
         # Persist before the next submit so a crash leaves only the not-yet-recorded tail to resume.

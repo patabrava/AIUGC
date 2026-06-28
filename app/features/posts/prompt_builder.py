@@ -88,6 +88,8 @@ VEO_NEGATIVE_PROMPT = (
     "unwanted objects, character inconsistency, lip-sync drift, cartoon styling, unrealistic proportions, "
     "distorted hands, artificial lighting, oversaturation, excessive camera shake, background voices, "
     "music bed, audio hiss, static, clipping, abrupt cuts, angle changes, "
+    "camera zoom, camera push-in, reframing, posture reset, changed wardrobe, business blazer, blue blouse, "
+    "different hairstyle, face change, "
     "mirror appearing or disappearing, layout changes, background drift, new furniture, extra plants, wall color change, "
     "bedding color change, different room, lighting shift"
 )
@@ -103,7 +105,8 @@ _VEO_BASE_NEGATIVES = (
     "readable typography, UI text, logos, branding, poor lighting, blurry footage, low resolution, "
     "unwanted objects, character inconsistency, lip-sync drift, cartoon styling, unrealistic proportions, "
     "distorted hands, artificial lighting, oversaturation, excessive camera shake, background voices, "
-    "music bed, audio hiss, static, clipping, abrupt cuts, angle changes"
+    "music bed, audio hiss, static, clipping, abrupt cuts, angle changes, camera zoom, camera push-in, "
+    "reframing, posture reset, changed wardrobe, business blazer, blue blouse, different hairstyle, face change"
 )
 
 
@@ -153,7 +156,7 @@ LEAN_LIGHT_BASE_PROMPT_TEMPLATE = (
     "Scene:\n"
     "{scene}\n\n"
     "Action:\n"
-    "Use the submitted approved LoRA-generated reference images as the visual source for the same woman, wardrobe, "
+    "Use the submitted approved matched reference images as the visual source for the same woman, wardrobe, "
     "wheelchair framing, and room layout. Preserve the same face, facial proportions, skin texture, hair identity, "
     "age, cream sweater, neutral trousers, room anchors, and lighting from the reference images while following the "
     "Scene block exactly. "
@@ -178,7 +181,7 @@ REFERENCE_SCENE_BASE_PROMPT_TEMPLATE = (
     "Scene:\n"
     "{scene}\n\n"
     "Action:\n"
-    "Use the submitted approved LoRA-generated reference images as the visual source for the same woman, wardrobe, "
+    "Use the submitted approved matched reference images as the visual source for the same woman, wardrobe, "
     "wheelchair framing, and room layout. Preserve the same face, facial proportions, skin texture, hair identity, "
     "age, cream sweater, neutral trousers, room anchors, and lighting from the reference images while following the "
     "Scene block exactly. "
@@ -236,7 +239,7 @@ LEAN_EXTENSION_CHARACTER = (
 )
 
 LEAN_EXTENSION_STYLE = (
-    "Maintain the same realistic smartphone selfie video look from the previous segment."
+    "Maintain the same realistic smartphone video look and stable seated framing from the previous segment."
 )
 
 LEAN_EXTENSION_CONTINUITY = (
@@ -248,11 +251,11 @@ MID_EXTENSION_CONTINUITY = (
 )
 
 SEGMENTED_I2V_CONTINUITY = (
-    "Treat this clip as an intentional UGC jump cut into a fresh 8-second take, not as a "
-    "same-shot seamless continuation. Preserve the exact same person, room, wardrobe, lighting, "
-    "and smartphone selfie setup from the supplied first frame, but restart the performance naturally "
-    "from a settled pose. Do not continue the previous hand or mouth motion. Use a subtle editorial "
-    "change in energy: a small posture reset, fresh hand position, or direct-to-camera re-engagement."
+    "Continue from the supplied first frame as the same seated woman in the same room, wardrobe, "
+    "lighting, same camera distance, and same medium vertical smartphone composition. Maintain the "
+    "established body scale, seated posture, table position, window position, face, hair, and clothing. "
+    "Deliver the dialogue with small natural mouth movement, subtle head movement, and restrained hand "
+    "movement while keeping the frame stable."
 )
 
 SEGMENTED_I2V_NON_FINAL_ENDING_DIRECTIVE = (
@@ -268,10 +271,10 @@ SEGMENTED_I2V_AUDIO_BLOCK = (
 )
 
 SEGMENTED_ANCHOR_MOTION_DIRECTION = (
-    " For this anchor segment, create distinct pose changes that later cuts can use: lean slightly "
-    "in and back, change hand position naturally, make one brief off-camera glance, then return to "
-    "direct eye contact. Keep the same person, room, wardrobe, and smartphone framing, but avoid a "
-    "frozen talking-head pose."
+    " For this anchor segment, maintain a stable seated posture, same camera distance, same body scale, "
+    "and same medium vertical smartphone composition. Use only small natural mouth movement, subtle head "
+    "movement, and restrained hand movement. End in a neutral forward-facing pose suitable for a clean "
+    "continuation."
 )
 
 LEAN_EXTENSION_LANGUAGE = (
@@ -303,15 +306,15 @@ LEGACY_SHORT_CHARACTER = (
 )
 
 DEFAULT_STYLE = (
-    "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
+    "Natural, photorealistic UGC smartphone video with authentic influencer-style delivery, "
     "soft flattering indoor light, and natural skin texture."
 )
 
 DEFAULT_CINEMATOGRAPHY = (
-    "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
-    "distance. The camera is stable, with only minimal natural movement. The "
-    "framing remains consistent throughout the shot without noticeable camera drift or "
-    "reframing."
+    "Vertical smartphone video, stable waist-up seated framing at the same camera distance as the "
+    "approved reference images. Keep the full head, torso, hands, and wheelchair context visible. "
+    "The camera is stable, with only minimal natural movement. The framing remains consistent "
+    "throughout the shot without noticeable camera drift, zoom, or reframing."
 )
 
 LEGACY_32_CHARACTER = (
@@ -327,15 +330,15 @@ LEGACY_32_CHARACTER = (
 )
 
 LEGACY_32_STYLE = (
-    "Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, "
+    "Natural, photorealistic UGC smartphone video with authentic influencer-style delivery, "
     "soft flattering indoor light, and natural skin texture."
 )
 
 LEGACY_32_CINEMATOGRAPHY = (
-    "Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie "
-    "distance. The camera is handheld but stable, with only minimal natural movement. The "
-    "framing remains consistent throughout the shot without noticeable camera drift or "
-    "reframing."
+    "Vertical smartphone video, stable waist-up seated framing at the same camera distance as the "
+    "approved reference images. Keep the full head, torso, hands, and wheelchair context visible. "
+    "The camera is handheld but stable, with only minimal natural movement. The framing remains "
+    "consistent throughout the shot without noticeable camera drift, zoom, or reframing."
 )
 
 CHARACTER_SOURCE_KEYS = (

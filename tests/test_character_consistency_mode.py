@@ -415,7 +415,7 @@ def test_character_consistency_prompt_keeps_scene_text_with_canonical_scene_refe
     assert "A generated kitchen scene" in prompt["veo_prompt"]
     assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
     assert prompt_builder.LEGACY_SCENE_BODY not in prompt["veo_prompt"]
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt["veo_prompt"]
+    assert "submitted approved matched reference images as the visual source" in prompt["veo_prompt"]
     assert "wardrobe, wheelchair framing, and room layout" in prompt["veo_prompt"]
     assert "Ein ruhiger Satz fuer den Test." in prompt["veo_prompt"]
 
@@ -429,7 +429,7 @@ def test_character_consistency_prompt_treats_lora_scene_stills_as_visual_source(
         scene="Home living room advice scene A. Keep this exact room identity.",
     )
 
-    assert "approved LoRA-generated reference images" in prompt
+    assert "approved matched reference images" in prompt
     assert "visual source for the same woman, wardrobe, wheelchair framing, and room layout" in prompt
     assert "only as the woman identity source" not in prompt
     assert "canonical scene reference image" not in prompt
@@ -450,7 +450,7 @@ def test_manual_character_consistency_prompt_keeps_manual_scene_text_with_lora_r
     assert "Scene:\n" in prompt["veo_prompt"]
     assert "A manually entered bedroom scene" in prompt["veo_prompt"]
     assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt["veo_prompt"]
+    assert "submitted approved matched reference images as the visual source" in prompt["veo_prompt"]
     assert "Ein manueller Satz fuer den Test." in prompt["veo_prompt"]
 
 
@@ -467,7 +467,7 @@ def test_character_consistency_mid_prompt_includes_default_scene_with_lora_refer
     assert "Scene:\n" in prompt["veo_prompt"]
     assert "Match the approved reference images" not in prompt["veo_prompt"]
     assert prompt_builder.DEFAULT_SCENE_BODY in prompt["veo_prompt"]
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt["veo_prompt"]
+    assert "submitted approved matched reference images as the visual source" in prompt["veo_prompt"]
     assert "Ein Mid Satz fuer den Test." in prompt["veo_prompt"]
 
 
@@ -489,7 +489,7 @@ def test_character_consistency_mid_prompt_uses_scene_plan_text():
     assert prompt["prompt_style"] == "character_consistency_mid"
     assert "A quiet living room advice scene" in prompt["veo_prompt"]
     assert prompt_builder.DEFAULT_SCENE_BODY not in prompt["veo_prompt"]
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt["veo_prompt"]
+    assert "submitted approved matched reference images as the visual source" in prompt["veo_prompt"]
 
 
 def test_character_consistency_scene_plan_fallback_uses_scene_bible(monkeypatch):
@@ -627,7 +627,7 @@ def test_character_consistency_prompt_uses_lora_scene_stills_as_reference_roles(
         scene="Home living room advice scene A. Keep this exact room identity.",
     )
 
-    assert "approved LoRA-generated reference images" in prompt
+    assert "approved matched reference images" in prompt
     assert "visual source for the same woman, wardrobe, wheelchair framing, and room layout" in prompt
     assert "canonical scene reference image" not in prompt
     assert "Home living room advice scene A" in prompt
@@ -677,7 +677,7 @@ def test_character_consistency_prompt_sync_removes_legacy_scene_text():
     assert synced["prompt_style"] == "character_consistency"
     assert "Scene:\n" in synced["veo_prompt"]
     assert "legacy bedroom scene" in synced["veo_prompt"]
-    assert "submitted approved LoRA-generated reference images as the visual source" in synced["veo_prompt"]
+    assert "submitted approved matched reference images as the visual source" in synced["veo_prompt"]
     assert "Ein neuer Satz fuer den Test." in synced["veo_prompt"]
 
 
@@ -696,7 +696,7 @@ def test_character_consistency_light_prompt_uses_reference_image_motion_prompt()
     )
 
     assert prompt["prompt_style"] == "character_consistency_light"
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt["veo_prompt"]
+    assert "submitted approved matched reference images as the visual source" in prompt["veo_prompt"]
     assert "Do not invent a new face, hairstyle, or age" in prompt["veo_prompt"]
     assert "38-year-old German woman" not in prompt["veo_prompt"]
     assert "Scene:" in prompt["veo_prompt"]
@@ -722,7 +722,7 @@ def test_character_consistency_mid_prompt_uses_stripped_scene_block():
     assert "Character:" in prompt["veo_prompt"]
     assert prompt_builder.LEGACY_SHORT_CHARACTER in prompt["veo_prompt"]
     assert "Scene:\n" in prompt["veo_prompt"]
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt["veo_prompt"]
+    assert "submitted approved matched reference images as the visual source" in prompt["veo_prompt"]
     assert "A modern, tidy bedroom with blush-pink walls" in prompt["veo_prompt"]
     assert "Dialogue:\nEin erster Satz. Ein zweiter Satz." in prompt["veo_prompt"]
 
@@ -766,7 +766,7 @@ def test_light_extended_base_prompt_uses_reference_image_motion_prompt():
         creation_mode="character_consistency_light",
     )
 
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt_text
+    assert "submitted approved matched reference images as the visual source" in prompt_text
     assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
     assert "So bleibt dein Tag klarer und planbarer." not in prompt_text
     assert "Scene:" in prompt_text
@@ -793,7 +793,7 @@ def test_mid_extended_base_prompt_uses_stripped_scene_block():
 
     assert "Character:" in prompt_text
     assert "Scene:\n" in prompt_text
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt_text
+    assert "submitted approved matched reference images as the visual source" in prompt_text
     assert "A modern, tidy bedroom with blush-pink walls" in prompt_text
     assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
     assert "So bleibt dein Tag klarer und planbarer." not in prompt_text
@@ -827,7 +827,7 @@ def test_character_consistency_extended_base_prompt_keeps_scene_text():
     assert metadata["veo_segments_total"] >= 2
     assert "Scene:\n" in prompt_text
     assert "stored scene" in prompt_text
-    assert "submitted approved LoRA-generated reference images as the visual source" in prompt_text
+    assert "submitted approved matched reference images as the visual source" in prompt_text
     assert "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht." in prompt_text
 
 
@@ -1024,7 +1024,7 @@ def test_actor_identity_batch_blocks_video_without_complete_reference_set():
     with pytest.raises(FlowForgeException) as exc:
         ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=summary, route="short")
 
-    assert "two approved actor LoRA SceneReferenceImages" in exc.value.message
+    assert "two approved matched character reference images" in exc.value.message
 
 
 def test_light_actor_identity_batch_blocks_video_without_complete_reference_set():
@@ -1036,7 +1036,7 @@ def test_light_actor_identity_batch_blocks_video_without_complete_reference_set(
     with pytest.raises(FlowForgeException) as exc:
         ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=None, route="extended")
 
-    assert "two approved actor LoRA SceneReferenceImages" in exc.value.message
+    assert "two approved matched character reference images" in exc.value.message
 
 
 def test_mid_actor_identity_batch_blocks_video_without_complete_reference_set():
@@ -1048,7 +1048,7 @@ def test_mid_actor_identity_batch_blocks_video_without_complete_reference_set():
     with pytest.raises(FlowForgeException) as exc:
         ensure_video_scene_reference_set_ready(batch=batch, post=post, scene_reference_set=None, route="extended")
 
-    assert "two approved actor LoRA SceneReferenceImages" in exc.value.message
+    assert "two approved matched character reference images" in exc.value.message
 
 
 def test_character_consistency_32s_blocks_lora_backed_video_route():
@@ -1134,20 +1134,23 @@ def test_submit_video_request_rejects_single_scene_reference_without_lora_refere
         )
 
     assert exc.value.status_code == 422
-    assert "two approved Magnific actor-in-scene reference images plus one canonical scene plate" in exc.value.message
+    assert "two approved matched character reference images plus one plain canonical scene reference image" in exc.value.message
     assert exc.value.details["scene_reference_image_id"] == "scene-1"
 
 
-def test_submit_video_request_rejects_unverified_scene_reference_set(monkeypatch):
-    from app.core.errors import FlowForgeException
+def test_submit_video_request_accepts_manual_refs_plus_plain_scene_without_lora_metadata(monkeypatch):
     from app.features.characters.schemas import SceneReferenceSetSummary
     from app.features.videos import handlers as video_handlers
 
+    captured = {}
+
     class FakeVeoClient:
         def submit_video_generation(self, **kwargs):
-            raise AssertionError("provider should not be called")
+            captured.update(kwargs)
+            return {"operation_id": "op-manual-refs", "status": "queued", "provider_model": "veo-test"}
 
     monkeypatch.setattr(video_handlers, "get_veo_client", lambda: FakeVeoClient())
+    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
     reference_set = SceneReferenceSetSummary.from_rows(
         post_id="post-1",
         reference_set_id="set-1",
@@ -1166,28 +1169,38 @@ def test_submit_video_request_rejects_unverified_scene_reference_set(monkeypatch
         ],
     )
 
-    with pytest.raises(FlowForgeException) as exc:
-        video_handlers._submit_video_request(
-            provider="veo_3_1",
-            model=None,
-            prompt_text="Prompt",
-            negative_prompt=None,
-            aspect_ratio="9:16",
-            provider_aspect_ratio="9:16",
-            requested_aspect_ratio="9:16",
-            resolution="1080p",
-            seconds=8,
-            size=None,
-            correlation_id="test-unverified-reference-scene",
-            provider_duration_seconds=8,
-            creation_mode="character_consistency",
-            scene_reference_set=reference_set,
-        )
+    result = video_handlers._submit_video_request(
+        provider="veo_3_1",
+        model=None,
+        prompt_text="Prompt",
+        negative_prompt=None,
+        aspect_ratio="9:16",
+        provider_aspect_ratio="9:16",
+        requested_aspect_ratio="9:16",
+        resolution="1080p",
+        seconds=8,
+        size=None,
+        correlation_id="test-manual-reference-scene",
+        provider_duration_seconds=8,
+        creation_mode="character_consistency",
+        canonical_scene_asset=_canonical_scene_asset(scene_key="bathroom_accessibility_a", image_url="https://cdn.example.com/canonical-bathroom.png"),
+        scene_reference_set=reference_set,
+    )
 
-    assert "LoRA identity lock metadata" in exc.value.message
+    assert result["operation_id"] == "op-manual-refs"
+    assert len(captured["reference_images"]) == 3
+    assert result["provider_metadata"]["scene_reference_image_count"] == 2
+    assert result["provider_metadata"]["reference_image_roles"] == [
+        "actor_identity_scene_reference",
+        "actor_identity_scene_reference",
+        "canonical_scene_reference",
+    ]
+    assert result["provider_metadata"]["source"] == "actor_identity_scene_reference_set_plus_canonical_scene"
+    assert result["provider_metadata"]["canonical_scene_reference_used_for_video"] is True
+    assert result["provider_metadata"]["canonical_scene_key"] == "bathroom_accessibility_a"
 
 
-def test_submit_video_request_uses_two_lora_refs_plus_scene_plate_to_vertex(monkeypatch):
+def test_submit_video_request_uses_two_lora_refs_plus_plain_scene_to_vertex(monkeypatch):
     from app.features.characters.schemas import SceneReferenceSetSummary
     from app.features.videos import handlers as video_handlers
 
@@ -1204,9 +1217,13 @@ def test_submit_video_request_uses_two_lora_refs_plus_scene_plate_to_vertex(monk
 
     monkeypatch.setattr(video_handlers, "get_vertex_ai_client", lambda: FakeVertexClient())
     monkeypatch.setattr(video_handlers, "get_settings", lambda: type("S", (), {"vertex_ai_output_gcs_uri": "gs://bucket/out/"})())
-    monkeypatch.setattr(video_handlers, "_download_image_bytes", lambda url: b"image-" + url.encode("utf-8"))
+    fetched = []
+    monkeypatch.setattr(
+        video_handlers,
+        "_download_image_bytes",
+        lambda url: fetched.append(url) or b"image-" + url.encode("utf-8"),
+    )
     monkeypatch.setattr(video_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: _ready_actor_identity())
-    canonical_asset = _canonical_scene_asset(scene_key="bathroom_accessibility_a", image_url="https://cdn.example.com/canonical-bathroom.png")
 
     reference_set = SceneReferenceSetSummary.from_rows(
         post_id="post-1",
@@ -1232,6 +1249,16 @@ def test_submit_video_request_uses_two_lora_refs_plus_scene_plate_to_vertex(monk
                 "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
+            {
+                "id": "scene-right",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/right.png",
+                "scene_key": "bathroom_adaptation",
+                "wardrobe_key": "everyday_sweater",
+                "provider_metadata": _lora_metadata("right_profile", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
         ],
     )
 
@@ -1248,7 +1275,7 @@ def test_submit_video_request_uses_two_lora_refs_plus_scene_plate_to_vertex(monk
         correlation_id="corr-actor-ref-set",
         provider_duration_seconds=8,
         creation_mode="character_consistency",
-        canonical_scene_asset=canonical_asset,
+        canonical_scene_asset=_canonical_scene_asset(scene_key="bathroom_accessibility_a", image_url="https://cdn.example.com/canonical-bathroom.png"),
         scene_reference_set=reference_set,
     )
 
@@ -1256,6 +1283,7 @@ def test_submit_video_request_uses_two_lora_refs_plus_scene_plate_to_vertex(monk
     assert base64.b64decode(captured["reference_images"][0]["data_base64"]) == b"image-https://cdn/front.png"
     assert base64.b64decode(captured["reference_images"][1]["data_base64"]) == b"image-https://cdn/left.png"
     assert base64.b64decode(captured["reference_images"][2]["data_base64"]) == b"image-https://cdn.example.com/canonical-bathroom.png"
+    assert fetched == ["https://cdn/front.png", "https://cdn/left.png", "https://cdn.example.com/canonical-bathroom.png"]
     assert result["provider_metadata"]["source"] == "actor_identity_scene_reference_set_plus_canonical_scene"
     assert result["provider_metadata"]["scene_reference_set_id"] == "set-1"
     assert result["provider_metadata"]["scene_reference_image_ids"] == ["scene-front", "scene-left"]
@@ -1312,7 +1340,7 @@ def test_submit_video_request_rejects_actor_identity_training_fallback_without_s
         )
 
     assert exc.value.status_code == 422
-    assert "two approved Magnific actor-in-scene reference images plus one canonical scene plate" in exc.value.message
+    assert "two approved matched character reference images plus one plain canonical scene reference image" in exc.value.message
     assert exc.value.details["actor_identity_id"] == "actor-1"
 
 
@@ -1332,14 +1360,16 @@ def test_batch_prompt_audit_receives_scene_reference_metadata():
         correlation_id="corr",
         batch_id="batch-1",
         reference_image_metadata={
-            "source": "actor_identity_plus_canonical_scene_anchor",
-            "scene_reference_image_ids": ["front", "left", "profile"],
-            "reference_image_roles": ["actor_identity_anchor", "actor_identity_anchor", "canonical_scene_anchor"],
-            "canonical_scene_asset_id": "canonical-home_living_room_advice_a",
-            "canonical_scene_key": "home_living_room_advice_a",
+            "source": "actor_identity_scene_reference_set_plus_canonical_scene",
+            "scene_reference_image_ids": ["front", "left"],
+            "reference_image_roles": [
+                "actor_identity_scene_reference",
+                "actor_identity_scene_reference",
+                "canonical_scene_reference",
+            ],
+            "scene_reference_images_used_for_video": True,
+            "scene_reference_images_approval_only": False,
             "canonical_scene_reference_used_for_video": True,
-            "scene_reference_images_used_for_video": False,
-            "scene_reference_images_approval_only": True,
         },
     )
 
@@ -1367,7 +1397,7 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
             "reference_images": [
                 {"mime_type": "image/png", "data": "aaa", "description": "front"},
                 {"mime_type": "image/png", "data": "bbb", "description": "left"},
-                {"mime_type": "image/png", "data": "ccc", "description": "right"},
+                {"mime_type": "image/png", "data": "ccc", "description": "canonical scene"},
             ],
             "metadata": {
                 "reference_images_enabled": True,
@@ -1375,10 +1405,11 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
                 "reference_image_roles": [
                     "actor_identity_scene_reference",
                     "actor_identity_scene_reference",
-                    "actor_identity_scene_reference",
+                    "canonical_scene_reference",
                 ],
                 "scene_reference_images_used_for_video": True,
-                "source": "actor_identity_scene_reference_set",
+                "source": "actor_identity_scene_reference_set_plus_canonical_scene",
+                "canonical_scene_reference_used_for_video": True,
             },
         },
     )
@@ -1403,6 +1434,14 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
                 "provider_metadata": _lora_metadata("left_three_quarter", "set-1"),
                 "identity_gate_result": _set_gate(),
             },
+            {
+                "id": "ref-3",
+                "actor_identity_id": "actor-1",
+                "status": "approved",
+                "image_url": "https://cdn/right.png",
+                "provider_metadata": _lora_metadata("right_profile", "set-1"),
+                "identity_gate_result": _set_gate(),
+            },
         ],
     )
 
@@ -1410,7 +1449,7 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
         provider="veo_3_1",
         model=None,
         prompt_text=(
-            "Action:\nUse the submitted approved LoRA-generated reference images as the visual source.\n\n"
+            "Action:\nUse the submitted approved matched reference images as the visual source.\n\n"
             "Dialogue:\nEin Satz."
         ),
         negative_prompt=None,
@@ -1432,7 +1471,7 @@ def test_character_consistency_provider_payload_keeps_reference_images_with_no_s
     assert result["operation_id"] == "op-reference-scene"
     assert captured["reference_images"] and len(captured["reference_images"]) == 3
     assert "Scene:\n" not in captured["prompt"]
-    assert "approved LoRA-generated reference images" in captured["prompt"]
+    assert "approved matched reference images" in captured["prompt"]
 
 
 def test_submit_veo_rejects_scene_reference_set_unless_eight_second_base(monkeypatch):
@@ -1623,6 +1662,6 @@ def test_submit_video_request_blocks_actor_identity_when_anchors_cannot_attach(m
     )
 
     assert exc.value.status_code == 422
-    assert "two approved Magnific actor-in-scene reference images plus one canonical scene plate" in exc.value.message
+    assert "two approved matched character reference images plus one plain canonical scene reference image" in exc.value.message
     assert exc.value.details["actor_identity_id"] == "actor-1"
     assert exc.value.details["provider_duration_seconds"] == 4

@@ -17,7 +17,8 @@ class _FakeVertex:
         self.image_calls = []
 
     def submit_image_video(self, *, prompt, image_bytes, mime_type, correlation_id, aspect_ratio,
-                           duration_seconds, output_gcs_uri=None, model=None, use_fast_model=False):
+                           duration_seconds, output_gcs_uri=None, model=None, use_fast_model=False,
+                           negative_prompt=None):
         self.image_calls.append(
             {
                 "prompt": prompt,
@@ -26,6 +27,7 @@ class _FakeVertex:
                 "aspect_ratio": aspect_ratio,
                 "duration_seconds": duration_seconds,
                 "model": model,
+                "negative_prompt": negative_prompt,
             }
         )
         op = f"i2v-op-{len(self.image_calls)}"
@@ -52,7 +54,7 @@ def _meta(*, segment_count=2, provider="vertex_ai", anchor_completed=True, fille
         else:
             ops.append({"index": index, "operation_id": None, "status": sp.SEGMENT_STATUS_PENDING,
                         "video_uri": None, "kind": sp.SEGMENT_KIND_I2V})
-    return {
+    meta = {
         "video_pipeline_route": vp.VEO_SEGMENTED_VIDEO_ROUTE,
         "veo_segment_count": segment_count,
         "veo_seed": 123,
@@ -68,6 +70,8 @@ def _meta(*, segment_count=2, provider="vertex_ai", anchor_completed=True, fille
             beats=[f"beat {i}" for i in range(segment_count)],
         ),
     }
+    meta["i2v_lock"]["negative_prompt"] = "different room, camera zoom, changed wardrobe"
+    return meta
 
 
 @pytest.fixture
@@ -118,6 +122,18 @@ def test_submits_one_i2v_per_pending_segment_with_distinct_seg0_frames(fake_vert
     assert fractions[0] != max(fractions)
     assert all(c["duration_seconds"] == 8 for c in fake_vertex.image_calls)
     assert [r["index"] for r in recorded] == [1, 2, 3]
+
+
+def test_i2v_segments_receive_negative_prompt(fake_vertex):
+    meta = _meta(segment_count=2)
+    _recorded, persist_op = _recording_persist(meta)
+
+    i2v.submit_locked_segments(
+        post_id="post-1", metadata=meta, anchor_video_bytes=b"ANCHOR_VIDEO",
+        correlation_id="corr", persist_op=persist_op,
+    )
+
+    assert fake_vertex.image_calls[0]["negative_prompt"] == "different room, camera zoom, changed wardrobe"
 
 
 def test_prompt_per_segment_and_only_last_carries_ending(fake_vertex):

@@ -85,6 +85,42 @@ def _find_sales_copy_marker(*, angle: str, script: str, cta: str) -> str:
     return ""
 
 
+_USER_FACING_TOPIC_FIELDS = ("title", "angle", "script", "rotation", "cta")
+
+
+def _strip_user_facing_product_markers(text: str, *, product_name: str, aliases: List[str]) -> str:
+    """Remove every product, model, marketing and brand name from user-facing text."""
+    cleaned = str(text or "")
+    if not cleaned.strip():
+        return ""
+    # Remove longest markers first so multi-word names go before their sub-tokens.
+    for marker in sorted(_user_facing_product_markers(product_name, aliases), key=len, reverse=True):
+        marker = marker.strip()
+        if not marker:
+            continue
+        cleaned = re.sub(rf"(?<!\w){re.escape(marker)}(?!\w)", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip(" :-,–—;").strip()
+
+
+def _enforce_product_name_privacy(
+    topic: Dict[str, object], *, product_name: str, aliases: List[str]
+) -> Dict[str, object]:
+    """Guarantee that no user-facing field ever exposes a product name, whatever the source path."""
+    for field in _USER_FACING_TOPIC_FIELDS:
+        value = topic.get(field)
+        if isinstance(value, str) and value:
+            topic[field] = _strip_user_facing_product_markers(
+                value, product_name=product_name, aliases=aliases
+            )
+    if not str(topic.get("angle") or "").strip():
+        topic["angle"] = "verlässliche Lösung für zuhause"
+    if not str(topic.get("title") or "").strip():
+        topic["title"] = "Verlässliche Lösung für zuhause"
+    return topic
+
+
 def _is_retryable_provider_error(exc: ThirdPartyError) -> bool:
     details = exc.details if isinstance(exc.details, dict) else {}
     status_code = details.get("status_code")
@@ -134,21 +170,25 @@ def _build_product_fallback_topic(entry, *, target_length_tier: int, reason: str
     validate_german_only_text(script, field_name="script", context="prompt3_fallback")
     validate_german_only_text(cta, field_name="cta", context="prompt3_fallback")
     rotation = strip_cta_from_script(script, cta) or script
-    return {
-        "title": f"{entry.product_name}: verlässliche Lösung für zuhause",
-        "rotation": rotation,
-        "cta": cta,
-        "spoken_duration": max(1, int(estimate_script_duration_seconds(script) or math.ceil(len(script.split()) / 2.6))),
-        "script": script,
-        "framework": "PAL",
-        "product_name": entry.product_name,
-        "angle": "verlässliche Lösung für zuhause",
-        "facts": list(entry.facts[:5]),
-        "source_summary": entry.summary,
-        "support_facts": entry.support_facts,
-        "generation_mode": "synthetic_fallback",
-        "fallback_reason": reason,
-    }
+    return _enforce_product_name_privacy(
+        {
+            "title": "Verlässliche Lösung für zuhause",
+            "rotation": rotation,
+            "cta": cta,
+            "spoken_duration": max(1, int(estimate_script_duration_seconds(script) or math.ceil(len(script.split()) / 2.6))),
+            "script": script,
+            "framework": "PAL",
+            "product_name": entry.product_name,
+            "angle": "verlässliche Lösung für zuhause",
+            "facts": list(entry.facts[:5]),
+            "source_summary": entry.summary,
+            "support_facts": entry.support_facts,
+            "generation_mode": "synthetic_fallback",
+            "fallback_reason": reason,
+        },
+        product_name=entry.product_name,
+        aliases=entry.aliases,
+    )
 
 
 def generate_product_topics(
@@ -285,22 +325,26 @@ def generate_product_topics(
 
             rotation = strip_cta_from_script(candidate.script, candidate.cta) or candidate.script.strip()
             results.append(
-                {
-                    "title": f"{entry.product_name}: {candidate.angle}",
-                    "rotation": rotation,
-                    "cta": candidate.cta,
-                    "spoken_duration": max(
-                        1,
-                        int(candidate.estimated_duration_s or math.ceil(len(candidate.script.split()) / 2.6)),
-                    ),
-                    "script": candidate.script,
-                    "framework": candidate.framework,
-                    "product_name": entry.product_name,
-                    "angle": candidate.angle,
-                    "facts": candidate.facts,
-                    "source_summary": entry.summary,
-                    "support_facts": entry.support_facts,
-                }
+                _enforce_product_name_privacy(
+                    {
+                        "title": candidate.angle,
+                        "rotation": rotation,
+                        "cta": candidate.cta,
+                        "spoken_duration": max(
+                            1,
+                            int(candidate.estimated_duration_s or math.ceil(len(candidate.script.split()) / 2.6)),
+                        ),
+                        "script": candidate.script,
+                        "framework": candidate.framework,
+                        "product_name": entry.product_name,
+                        "angle": candidate.angle,
+                        "facts": candidate.facts,
+                        "source_summary": entry.summary,
+                        "support_facts": entry.support_facts,
+                    },
+                    product_name=entry.product_name,
+                    aliases=entry.aliases,
+                )
             )
             break
         else:

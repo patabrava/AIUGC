@@ -27,7 +27,10 @@ def test_build_product_seed_payload_keeps_product_context():
         }
     )
 
-    assert payload["canonical_topic"] == "VARIO PLUS"
+    # canonical_topic is user-facing, so it must never carry the product name.
+    assert "VARIO PLUS" not in payload["canonical_topic"]
+    assert payload["canonical_topic"] == "Eine Schiene fuer heute und spaeter"
+    # Product context is preserved on internal-only fields.
     assert payload["product_name"] == "VARIO PLUS"
     assert payload["product_angle"] == "Eine Schiene fuer heute und spaeter"
     assert payload["strict_seed"]["facts"][0] == "Plattform oder Sitzlift auf derselben Schiene"

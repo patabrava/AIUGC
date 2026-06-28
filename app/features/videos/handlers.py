@@ -48,7 +48,6 @@ from app.features.characters.actor_identity import (
     is_character_consistency_mode,
     is_manual_creation_mode,
     scene_reference_set_has_actor_identity_confirmation,
-    scene_reference_set_has_lora_identity_lock,
 )
 from app.features.characters import queries as character_queries
 from app.features.characters.scene_reference import get_scene_bible
@@ -376,7 +375,7 @@ def _load_scene_reference_set_assets(
     if not scene_reference_set.is_video_actor_ready:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires two approved actor LoRA SceneReferenceImages before submit.",
+            message="ActorIdentity video generation requires two approved matched character reference images before submit.",
             details={
                 "reference_set_id": scene_reference_set.reference_set_id,
                 "missing_angle_keys": scene_reference_set.missing_video_actor_angle_keys,
@@ -386,7 +385,7 @@ def _load_scene_reference_set_assets(
     if canonical_scene_asset is None or not canonical_scene_asset.image_url:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires a generated canonical scene plate as the third VEO reference image.",
+            message="ActorIdentity video generation requires a generated plain canonical scene reference image before submit.",
             details={
                 "reference_set_id": scene_reference_set.reference_set_id,
                 "canonical_scene_asset_id": canonical_scene_asset.id if canonical_scene_asset else None,
@@ -413,7 +412,7 @@ def _load_scene_reference_set_assets(
     reference_images.append(_reference_image_payload_from_url(str(canonical_scene_asset.image_url)))
 
     logger.info(
-        "hybrid_actor_scene_reference_set_loaded_for_veo",
+        "character_scene_reference_bundle_loaded_for_veo",
         correlation_id=correlation_id,
         reference_set_id=scene_reference_set.reference_set_id,
         reference_image_count=len(reference_images),
@@ -492,8 +491,8 @@ def _load_actor_identity_anchor_assets(
     raise FlowForgeException(
         code=ErrorCode.VALIDATION_ERROR,
         message=(
-            "Character Consistency VEO submission requires two approved Magnific actor-in-scene reference images "
-            "plus one canonical scene plate. Raw ActorIdentity training images and single scene stills are not valid VEO reference bundles."
+            "Character Consistency VEO submission requires two approved matched character reference images "
+            "plus one plain canonical scene reference image. Raw ActorIdentity training images and single scene stills are not valid VEO reference bundles."
         ),
         details={
             "actor_identity_id": actor_identity_id,
@@ -515,8 +514,8 @@ def _missing_actor_lora_scene_reference_set_error(
     return FlowForgeException(
         code=ErrorCode.VALIDATION_ERROR,
         message=(
-            "Character Consistency VEO submission requires two approved Magnific actor-in-scene reference images "
-            "plus one canonical scene plate. Raw ActorIdentity training images and single scene stills are blocked."
+            "Character Consistency VEO submission requires two approved matched character reference images "
+            "plus one plain canonical scene reference image. Raw ActorIdentity training images and single scene stills are blocked."
         ),
         details={
             "creation_mode": mode,
@@ -542,10 +541,25 @@ def _ensure_actor_lora_scene_reference_set_for_video(
 
     from app.features.characters import handlers as character_handlers
 
-    return character_handlers.create_auto_approved_scene_reference_set_for_video(
+    generated = character_handlers.create_scene_reference_set_for_video_review(
         post=post,
         batch=batch,
         correlation_id=correlation_id,
+    )
+    if generated.is_video_actor_ready:
+        return generated
+    raise FlowForgeException(
+        code=ErrorCode.VALIDATION_ERROR,
+        message=(
+            "Generated character reference images require operator visual approval before VEO submission."
+        ),
+        details={
+            "post_id": post_id,
+            "batch_id": batch.get("id"),
+            "reference_set_id": generated.reference_set_id,
+            "missing_video_actor_angle_keys": generated.missing_video_actor_angle_keys,
+        },
+        status_code=422,
     )
 
 
@@ -2033,6 +2047,7 @@ def _submit_segmented_post(
         prompts=prompts,
         seed=shared_seed,
     )
+    segmented_negative_prompt = build_negative_prompt(creation_mode=creation_mode, is_extension=False)
 
     # Character Consistency keeps one reference-anchored anchor and lets the poller submit i2v segments
     # from anchor frames. Submitting all segments independently re-rolls the room/wardrobe too often.
@@ -2057,7 +2072,7 @@ def _submit_segmented_post(
                 provider=submission_plan["provider"],
                 model=model,
                 prompt_text=sub.prompt,
-                negative_prompt=None,
+                negative_prompt=segmented_negative_prompt,
                 aspect_ratio=submission_plan["aspect_ratio"],
                 provider_aspect_ratio=submission_plan.get("provider_aspect_ratio"),
                 requested_aspect_ratio=submission_plan.get("requested_aspect_ratio"),
@@ -2105,6 +2120,7 @@ def _submit_segmented_post(
         "i2v_locked": i2v_locked,
         "i2v_model": i2v_model,
         "i2v_output_gcs_uri": i2v_output_gcs_uri,
+        "negative_prompt": segmented_negative_prompt,
     }
 
 
@@ -2148,6 +2164,7 @@ def _build_segmented_submission_metadata(
             model=segmented_result.get("i2v_model"),
             output_gcs_uri=segmented_result.get("i2v_output_gcs_uri"),
             beats=segmented_result["beats"],
+            negative_prompt=segmented_result.get("negative_prompt"),
         )
     else:
         metadata["veo_segment_ops"] = build_initial_segment_ops(operation_ids)
@@ -3763,7 +3780,7 @@ def _ensure_scene_reference_set_provider_ready(scene_reference_set: SceneReferen
     if not scene_reference_set.is_video_actor_ready:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video submission requires two approved actor LoRA SceneReferenceImages before submit.",
+            message="ActorIdentity video submission requires two approved matched character reference images before submit.",
             details={
                 "reference_set_id": scene_reference_set.reference_set_id,
                 "missing_angle_keys": scene_reference_set.missing_video_actor_angle_keys,
@@ -3774,13 +3791,6 @@ def _ensure_scene_reference_set_provider_ready(scene_reference_set: SceneReferen
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
             message="ActorIdentity video submission requires operator-confirmed actor identity match for approved SceneReferenceImages.",
-            details={"reference_set_id": scene_reference_set.reference_set_id},
-            status_code=422,
-        )
-    if not scene_reference_set_has_lora_identity_lock(scene_reference_set):
-        raise FlowForgeException(
-            code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video submission requires LoRA identity lock metadata on approved SceneReferenceImages.",
             details={"reference_set_id": scene_reference_set.reference_set_id},
             status_code=422,
         )

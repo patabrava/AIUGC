@@ -179,6 +179,7 @@ def build_i2v_lock(
     model: Optional[str],
     output_gcs_uri: Optional[str],
     beats: List[str],
+    negative_prompt: Optional[str] = None,
     anchor_segment_index: int = 0,
 ) -> Dict[str, Any]:
     """The pending plan the poller needs to submit segments 1..N-1 as image-to-video once the anchor
@@ -194,6 +195,7 @@ def build_i2v_lock(
         "model": model,
         "output_gcs_uri": output_gcs_uri,
         "beats": list(beats),
+        "negative_prompt": negative_prompt,
     }
 
 

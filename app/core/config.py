@@ -415,12 +415,26 @@ def google_ai_context_fingerprint(settings: Optional[Settings] = None) -> dict[s
     }
 
 
+def _safe_is_file(path: Path) -> bool:
+    """Return True only for a regular file, treating access denials as absence.
+
+    Restricted environments (sandboxes, hardened CI/containers) may deny ``stat()``
+    on credential paths such as ``~/.config/gcloud``. ``Path.is_file()`` swallows
+    "not found" but re-raises ``PermissionError``; a credential probe must degrade
+    to "not configured" instead of crashing application startup.
+    """
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def resolve_google_application_credentials_path(settings: Optional[Settings] = None) -> Optional[str]:
     """Return a usable ADC path when one is configured or present in the standard Cloud SDK location."""
     resolved = settings or get_settings()
 
     explicit = (getattr(resolved, "google_application_credentials", "") or "").strip() or os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
-    if explicit and Path(explicit).expanduser().is_file():
+    if explicit and _safe_is_file(Path(explicit).expanduser()):
         return str(Path(explicit).expanduser())
 
     inline_json = (
@@ -436,7 +450,7 @@ def resolve_google_application_credentials_path(settings: Optional[Settings] = N
             return materialized_path
 
     default_adc = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
-    if default_adc.is_file():
+    if _safe_is_file(default_adc):
         return str(default_adc)
 
     return None

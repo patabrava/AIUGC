@@ -588,22 +588,22 @@ REQUIRED_SCENE_REFERENCE_ANGLES = (
     SceneReferenceAngle(
         key="front_mid",
         label="Front",
-        instruction="front-facing medium close-up, shoulders square to camera, direct eye contact",
-        motion_instruction="natural forward-facing pause within the same motion",
+        instruction="front-facing waist-up seated smartphone reference, shoulders square to camera, direct eye contact, same body scale as the other references",
+        motion_instruction="quiet forward-facing seated pause with lap, hands, scene anchors, and wheelchair armrest visible",
         seed_offset=101,
     ),
     SceneReferenceAngle(
         key="left_three_quarter",
         label="Left three-quarter",
-        instruction="left three-quarter angle, body turned slightly away, face still clearly recognizable",
-        motion_instruction="natural turn through the scene toward actor left",
+        instruction="slight left three-quarter waist-up seated smartphone reference, face clearly recognizable, same body scale and camera distance as the front reference",
+        motion_instruction="quiet seated pause with only a subtle left angle change, lap, hands, scene anchors, and wheelchair armrest visible",
         seed_offset=202,
     ),
     SceneReferenceAngle(
         key="right_profile",
         label="Right profile",
-        instruction="right-side profile angle, same person and same scene, face contour clearly visible",
-        motion_instruction="natural side-profile continuation of the same motion",
+        instruction="slight right three-quarter waist-up seated smartphone reference, face clearly recognizable, same body scale and camera distance as the front reference",
+        motion_instruction="quiet seated pause with only a subtle right angle change, lap, hands, scene anchors, and wheelchair armrest visible",
         seed_offset=303,
     ),
 )
@@ -617,20 +617,20 @@ def get_scene_reference_angle(angle_key: str) -> SceneReferenceAngle:
 
 
 # Specialized scenes are selected when the script/topic explicitly names them. Order is
-# priority: the first scene whose pattern matches the lowercased script+topic text wins
-# (most product-specific first). Tokens are regex fragments: plain stems behave as
-# substring matches (German is heavily compounded, e.g. "Treppenlift" contains "treppe"),
-# while a few use negative lookaheads / word-start boundaries to dodge German false friends
-# (e.g. "auto" must not catch "Automat"/"automatisch"; "reise" must not catch "Preise";
-# "transfer" must not catch "Transferleistungen").
+# priority: the first scene whose pattern matches the lowercased "{script} {topic}" text
+# wins. entryway is checked before stairlift so "Treppenrampe vor der Haustür" routes to
+# the ramp scene rather than the staircase. Tokens are regex fragments hardened against
+# German compound false friends (verified against a red-team corpus): word-start boundaries
+# (_WORD_START) and negative look-arounds keep e.g. "Pflegestufen", "Bad Kissingen",
+# "Mobilitätshilfe", "Autonomie", "Kindergarten" and "Wintergarten" out of these scenes.
 _WORD_START = r"(?<![a-zà-ÿ])"  # token sits at the start of a (possibly compound) word
 SPECIALIZED_SCENE_ROUTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("hallway_stairlift_a", "stairlift_terms", ("treppenlift", "treppe", "stufen", "stiege", "handlauf", "geländer", "gelaender", "stairlift", "stairs")),
-    ("bathroom_accessibility_a", "bathroom_terms", ("badezimmer", "bad", "dusche", "toilette", "bathroom", "haltegriff", "wc")),
-    ("bedroom_accessibility_a", "bedroom_terms", ("schlafzimmer", "schlafraum", "pflegebett", "bettkante", "matratze", "nachttisch", "aufsteh", "bedroom", "nightstand")),
-    ("entryway_ramp_a", "entryway_terms", ("hauseingang", "eingang", "haustür", "haustuer", "türschwelle", "tuerschwelle", "rampe", "auffahrrampe", "rollstuhlrampe", "threshold", "doorstep")),
-    ("car_transfer_residential_a", "mobility_terms", (r"auto(?!mat)", "autotransfer", "ins auto", "im auto", "pkw", "fahrzeug", r"car(?!e)", "mobilität", "mobilitaet", "mobility", _WORD_START + "reise")),
-    ("garden_patio_a", "garden_terms", ("garten", "terrasse", "balkon", "hinterhof", "backyard", "draußen", "draussen", "frische luft", "fresh air", "outdoor", _WORD_START + "patio")),
+    ("entryway_ramp_a", "entryway_terms", ("hauseingang", "eingang", "haustür", "haustuer", "türschwelle", "tuerschwelle", "türverbreiterung", "tuerverbreiterung", "rampe", "auffahrrampe", "rollstuhlrampe", "threshold", "doorstep")),
+    ("hallway_stairlift_a", "stairlift_terms", ("treppenlift", _WORD_START + "treppe", "treppenstufe", "stiege", "handlauf", "geländer", "gelaender", "stairlift", "stairs", "stuhllift", "sitzlift", "plattformlift", "hublift", "senkrechtlift", "etagenlift", _WORD_START + "lift", "etage")),
+    ("bathroom_accessibility_a", "bathroom_terms", ("badezimmer", "badewanne", "badumbau", "barrierefreies bad", "dusch", "toilette", "bathroom", "haltegriff", "wc", "sanitär", "sanitaer", "nasszelle", "waschtisch", "waschbecken")),
+    ("bedroom_accessibility_a", "bedroom_terms", ("schlafzimmer", "schlafraum", "pflegebett", "krankenbett", "bettkante", "bettgalgen", "matratze", "nachttisch", "aufstehhilfe", "aufrichthilfe", "dekubitus", "wundliegen", "lagerung", "bedroom", "nightstand")),
+    ("car_transfer_residential_a", "mobility_terms", (_WORD_START + r"auto(?![a-zà-ÿ])", "autotransfer", "autositz", "ins auto", "im auto", "aus dem auto", "pkw", "fahrzeug", r"car(?!e)", "beifahrersitz", "schwenksitz", "einstiegshilfe", "umsetzhilfe", "rutschbrett")),
+    ("garden_patio_a", "garden_terms", (_WORD_START + r"garten(?!zwerg)(?!center)", "terrasse", "hinterhof", "backyard", "fresh air", "outdoor", _WORD_START + "patio")),
 )
 
 _SPECIALIZED_SCENE_MATCHERS = tuple(
@@ -693,18 +693,20 @@ def build_scene_reference_prompt(
     wardrobe = WARDROBE_SET[wardrobe_key]
     actor_ref = f"@{provider_lora_name}::{SCENE_REFERENCE_IDENTITY_STRENGTH}" if provider_lora_name else actor_name
     return (
-        f"Photorealistic vertical UGC smartphone still of {actor_ref}, one recognizable adult woman, "
-        "large face identity lock, chest-up seated portrait framing, "
-        "face occupying 35 to 45 percent of image height, full head visible, eyes and facial features sharp, "
-        f"wearing {wardrobe}. "
+        "Photorealistic vertical UGC smartphone still, waist-up seated wheelchair-user reference "
+        f"in {scene.generation_anchor}. "
+        "Mandatory composition: camera 1.8 meters from subject at chest height, top of head through lap visible, "
+        "full torso visible, lap, hands, scene anchors, and wheelchair armrest visible in the lower frame, "
+        "face occupying 10 to 16 percent of image height, eyes and facial features sharp. "
         f"Background is the same supporting scene: {scene.generation_anchor}. "
+        f"{actor_ref}, one recognizable adult woman, is seated in this scene wearing {wardrobe}. "
         f"{actor_ref} is the dominant identity signal and the only visible adult person in the frame. "
-        "Keep the scene recognizable but secondary behind the actor. "
-        "Do not show the full wheelchair, full legs, full-body pose, distant shot, wide establishing shot, tiny face, or scene-dominant composition. "
+        "Keep the scene recognizable and consistent behind the actor, with lap, hands, scene anchors, and wheelchair armrest visible. "
+        "Do not use a headshot, passport photo, corporate headshot, business portrait, suit jacket, blazer, collared white blouse, white shirt, blue blouse, close-up crop, face-only crop, shoulders-only crop, glamour portrait, full-body pose, distant shot, wide establishing shot, tiny face, or scene-dominant composition. "
         "Keep the same wardrobe across all angles: same cream crewneck sweater and neutral trousers. "
         f"Keep the same supporting location details across every angle: {scene.consistency_anchor}. "
         f"Do not add {_human_join_rejectors(scene.scene_specific_rejectors)}. "
-        "Medium close-up, direct-to-camera friendly expression when angle allows, natural skin texture, soft realistic lighting, no text, no logo."
+        "Casual accessibility UGC still, direct-to-camera friendly expression when angle allows, natural skin texture, soft realistic lighting, no text, no logo."
     )
 
 
@@ -729,5 +731,5 @@ def build_scene_reference_prompt_for_angle(
         f"{base_prompt}\n\n"
         "Keep the exact same background location, wardrobe, lighting, and actor identity. "
         f"Camera angle requirement: {angle.instruction}. "
-        f"Motion requirement: {angle.motion_instruction}."
+        f"Pose requirement: {angle.motion_instruction}."
     )

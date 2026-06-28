@@ -109,7 +109,7 @@ def test_stitch_trims_segments_to_spoken_windows(tmp_path):
     assert meta["stitch_trim_window_source"] == ["test", "test"]
 
 
-def test_stitch_softens_i2v_resets_with_reframes_not_audio_trims(tmp_path):
+def test_stitch_preserves_full_framing_for_character_consistency_segments(tmp_path):
     clip_a = str(tmp_path / "a.mp4")
     clip_b = str(tmp_path / "b.mp4")
     clip_c = str(tmp_path / "c.mp4")
@@ -130,17 +130,17 @@ def test_stitch_softens_i2v_resets_with_reframes_not_audio_trims(tmp_path):
         correlation_id="corr_test",
     )
 
-    assert meta["stitch_cut_softening_applied"] is True
+    assert meta["stitch_cut_softening_applied"] is False
     assert meta["stitch_head_trim_s"] == [0.0, 0.0, 0.0]
     assert meta["stitch_tail_trim_s"] == [0.0, 0.0, 0.0]
-    assert meta["stitch_reframe_profile"] == ["full", "punch_in_center", "punch_in_left"]
+    assert meta["stitch_reframe_profile"] == ["full", "full", "full"]
 
     out_path = str(tmp_path / "out.mp4")
     with open(out_path, "wb") as fh:
         fh.write(final_bytes)
 
     duration = _probe_duration(out_path)
-    # Raw duration is 9s. Reframing may hide a visual reset, but audio remains untrimmed.
+    # Raw duration is 9s. Framing must stay stable and audio remains untrimmed.
     assert 8.8 <= duration <= 9.2, duration
 
 

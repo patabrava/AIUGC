@@ -259,7 +259,7 @@ def ensure_video_scene_reference_set_ready(
     if scene_reference_set is None or not scene_reference_set.is_video_actor_ready:
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires two approved actor LoRA SceneReferenceImages before submit.",
+            message="ActorIdentity video generation requires two approved matched character reference images before submit.",
             details={
                 "post_id": post.get("id"),
                 "batch_id": batch.get("id"),
@@ -270,21 +270,7 @@ def ensure_video_scene_reference_set_ready(
     if not scene_reference_set_has_actor_identity_confirmation(scene_reference_set):
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires operator-confirmed actor identity match for approved actor LoRA SceneReferenceImages.",
-            details={
-                "post_id": post.get("id"),
-                "batch_id": batch.get("id"),
-                "reference_set_id": scene_reference_set.reference_set_id,
-            },
-            status_code=422,
-        )
-    if not scene_reference_set_has_lora_identity_lock(
-        scene_reference_set,
-        batch_actor_identity_id=batch.get("actor_identity_id"),
-    ):
-        raise FlowForgeException(
-            code=ErrorCode.VALIDATION_ERROR,
-            message="ActorIdentity video generation requires LoRA identity lock metadata on approved actor LoRA SceneReferenceImages.",
+            message="ActorIdentity video generation requires operator-confirmed actor identity match for approved matched SceneReferenceImages.",
             details={
                 "post_id": post.get("id"),
                 "batch_id": batch.get("id"),

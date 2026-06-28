@@ -30,7 +30,7 @@ class VideoPrompt(BaseModel):
         description="Action description"
     )
     style: str = Field(
-        default="Style: Natural, photorealistic UGC smartphone selfie video with authentic influencer-style delivery, soft flattering indoor light, natural skin texture, and direct-to-camera delivery.",
+        default="Style: Natural, photorealistic UGC smartphone video with authentic influencer-style delivery, soft flattering indoor light, natural skin texture, and direct-to-camera delivery.",
         description="Visual style"
     )
     scene: str = Field(
@@ -38,7 +38,7 @@ class VideoPrompt(BaseModel):
         description="Scene setup"
     )
     cinematography: str = Field(
-        default="Cinematography: Vertical smartphone video, medium close-up framing, front-facing camera at natural selfie distance. The camera is stable, with only minimal natural movement. The framing remains consistent throughout the shot without noticeable camera drift or reframing.",
+        default="Cinematography: Vertical smartphone video, stable waist-up seated framing at the same camera distance as the approved reference images. Keep the full head, torso, hands, and wheelchair context visible. The camera is stable, with only minimal natural movement. The framing remains consistent throughout the shot without noticeable camera drift, zoom, or reframing.",
         description="Cinematography notes"
     )
     lighting: str = Field(
@@ -54,11 +54,11 @@ class VideoPrompt(BaseModel):
         description="Resolution and aspect ratio"
     )
     camera_positioning_and_motion: str = Field(
-        default="Camera positioning & movement: Front-facing smartphone camera at natural selfie distance, stable. Minor natural movement typical of a person holding a phone, without noticeable drift or framing changes.",
+        default="Camera positioning & movement: Front-facing smartphone camera at the approved reference distance, stable. Minor natural movement is allowed, without noticeable drift, zoom, or framing changes.",
         description="Camera positioning"
     )
     composition: str = Field(
-        default="Composition: Head-and-shoulders centered composition with wheelchair visible in frame and the modern bedroom environment apparent behind her. Pink walls and clean, minimal décor remain visible; natural daylight camera-right provides directional fill while soft ambient lights even out the scene. Background kept legible and consistent, not distracting from the subject.",
+        default="Composition: Waist-up centered seated composition with full head, torso, hands, wheelchair context, and the room environment visible. Pink walls and clean, minimal décor remain visible; natural daylight camera-right provides directional fill while soft ambient lights even out the scene. Background kept legible and consistent, not distracting from the subject.",
         description="Composition details"
     )
     focus_and_lens_effects: str = Field(
@@ -70,7 +70,7 @@ class VideoPrompt(BaseModel):
         description="Atmospheric notes"
     )
     authenticity_modifiers: str = Field(
-        default="Authenticity/UGC Modifiers: smartphone selfie, handheld realism, direct-to-camera delivery, real voice, seamless one-take, natural movement.",
+        default="Authenticity/UGC Modifiers: smartphone UGC realism, stable seated framing, direct-to-camera delivery, real voice, seamless one-take, natural movement.",
         description="Authenticity modifiers"
     )
     universal_negatives: str = Field(

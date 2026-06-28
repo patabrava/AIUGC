@@ -141,14 +141,16 @@ def test_script_intent_maps_only_to_catalog_values():
     assert result.reason_code == "bathroom_terms"
 
 
-def test_ambiguous_script_uses_conservative_default():
+def test_ambiguous_script_rotates_within_neutral_pool():
     result = map_script_to_scene_intent(
         script="Ein kurzer Tipp fuer heute.",
         post_type="value",
         target_length_tier=8,
         seed_data={},
     )
-    assert result.scene_key == "home_living_room_advice_a"
+    # Content with no scene keyword lands on a neutral talking-head plate (deterministically).
+    assert result.scene_key in NEUTRAL_SCENE_POOL
+    assert result.reason_code == "neutral_rotation"
     assert result.wardrobe_key == "everyday_sweater"
 
 
@@ -233,7 +235,7 @@ def test_scene_reference_set_summary_requires_three_approved_images():
     assert summary.missing_angle_keys == ["right_profile"]
 
 
-def test_scene_reference_set_summary_marks_two_actor_lora_refs_video_ready():
+def test_scene_reference_set_summary_marks_two_actor_refs_video_ready_before_full_review_ready():
     from app.features.characters.schemas import SceneReferenceSetSummary
 
     rows = [
@@ -258,6 +260,31 @@ def test_scene_reference_set_summary_marks_two_actor_lora_refs_video_ready():
     assert summary.is_ready is False
     assert summary.is_video_actor_ready is True
     assert [row["id"] for row in summary.video_actor_rows] == ["ref-front", "ref-left"]
+    assert summary.missing_video_actor_angle_keys == []
+
+
+def test_scene_reference_set_summary_marks_full_review_set_and_two_video_refs_ready():
+    from app.features.characters.schemas import SceneReferenceSetSummary
+
+    rows = [
+        {
+            "id": f"ref-{angle}",
+            "status": "approved",
+            "image_url": f"https://cdn.example.com/{angle}.png",
+            "provider_metadata": _lora_metadata(angle, "set-1"),
+            "identity_gate_result": _set_gate(),
+        }
+        for angle in ("front_mid", "left_three_quarter", "right_profile")
+    ]
+
+    summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
+
+    assert summary.is_ready is True
+    assert summary.is_video_actor_ready is True
+    assert [row["id"] for row in summary.video_actor_rows] == [
+        "ref-front_mid",
+        "ref-left_three_quarter",
+    ]
     assert summary.missing_video_actor_angle_keys == []
 
 
@@ -359,8 +386,7 @@ def test_video_scene_reference_set_gate_requires_actor_identity_confirmation():
     assert "actor identity match" in exc.value.message
 
 
-def test_video_scene_reference_set_gate_requires_lora_lock_metadata():
-    from app.core.errors import FlowForgeException
+def test_video_scene_reference_set_gate_accepts_manual_matched_refs_without_lora_metadata():
     from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
     from app.features.characters.schemas import SceneReferenceSetSummary
 
@@ -380,15 +406,15 @@ def test_video_scene_reference_set_gate_requires_lora_lock_metadata():
         )
     summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
 
-    with pytest.raises(FlowForgeException) as exc:
-        ensure_video_scene_reference_set_ready(
-            batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
-            post={"id": "post-1", "batch_id": "batch-1"},
-            scene_reference_set=summary,
-            route="short",
-        )
+    result = ensure_video_scene_reference_set_ready(
+        batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
+        post={"id": "post-1", "batch_id": "batch-1"},
+        scene_reference_set=summary,
+        route="short",
+    )
 
-    assert "LoRA identity lock metadata" in exc.value.message
+    assert result["source"] == "actor_identity_scene_reference_set"
+    assert result["scene_reference_set"].is_video_actor_ready is True
 
 
 @pytest.mark.parametrize(
@@ -404,8 +430,7 @@ def test_video_scene_reference_set_gate_requires_lora_lock_metadata():
         ("model", None),
     ],
 )
-def test_video_scene_reference_set_gate_rejects_lora_unsafe_mystic_references(field, value):
-    from app.core.errors import FlowForgeException
+def test_video_scene_reference_set_gate_accepts_manual_matched_refs_with_legacy_mystic_metadata(field, value):
     from app.features.characters.actor_identity import ensure_video_scene_reference_set_ready
     from app.features.characters.schemas import SceneReferenceSetSummary
 
@@ -427,15 +452,14 @@ def test_video_scene_reference_set_gate_rejects_lora_unsafe_mystic_references(fi
         )
     summary = SceneReferenceSetSummary.from_rows(post_id="post-1", reference_set_id="set-1", rows=rows)
 
-    with pytest.raises(FlowForgeException) as exc:
-        ensure_video_scene_reference_set_ready(
-            batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
-            post={"id": "post-1", "batch_id": "batch-1"},
-            scene_reference_set=summary,
-            route="short",
-        )
+    result = ensure_video_scene_reference_set_ready(
+        batch={"id": "batch-1", "creation_mode": "character_consistency_mid", "actor_identity_id": "actor-1"},
+        post={"id": "post-1", "batch_id": "batch-1"},
+        scene_reference_set=summary,
+        route="short",
+    )
 
-    assert "LoRA identity lock metadata" in exc.value.message
+    assert result["compatible"] is True
 
 
 def test_video_scene_reference_set_gate_blocks_extended_lora_route():
@@ -566,7 +590,7 @@ def test_record_scene_reference_set_gate_updates_only_requested_set(monkeypatch)
     assert all(item["status"] == "approved" for item in recorded)
 
 
-def test_angle_specific_prompts_keep_same_background_and_distinct_angles():
+def test_angle_specific_prompts_keep_same_background_and_matched_framing():
     from app.features.characters.scene_reference import (
         REQUIRED_SCENE_REFERENCE_ANGLES,
         build_scene_reference_prompt_for_angle,
@@ -585,9 +609,16 @@ def test_angle_specific_prompts_keep_same_background_and_distinct_angles():
     ]
 
     assert all("same background" in prompt.lower() for prompt in prompts)
+    assert all("waist-up seated smartphone reference" in prompt for prompt in prompts)
+    assert all("lap, hands, scene anchors, and wheelchair armrest visible" in prompt for prompt in prompts)
+    assert all("face occupying 10 to 16 percent of image height" in prompt for prompt in prompts)
+    assert all("headshot" in prompt.lower() for prompt in prompts)
+    assert all("business portrait" in prompt.lower() for prompt in prompts)
+    assert all("medium close-up" not in prompt.lower() for prompt in prompts)
     assert any("front-facing" in prompt for prompt in prompts)
-    assert any("left three-quarter" in prompt for prompt in prompts)
-    assert any("right-side profile" in prompt for prompt in prompts)
+    assert any("slight left three-quarter" in prompt for prompt in prompts)
+    assert any("slight right three-quarter" in prompt for prompt in prompts)
+    assert all("right-side profile" not in prompt for prompt in prompts)
     assert all("@ayra_actor::100" in prompt for prompt in prompts)
 
 
@@ -655,11 +686,12 @@ def test_scene_bible_prompt_reuses_exact_scene_identity_across_angles():
         assert "room surfaces" not in prompt
 
     assert any("front-facing" in prompt for prompt in prompts)
-    assert any("left three-quarter" in prompt for prompt in prompts)
-    assert any("right-side profile" in prompt for prompt in prompts)
+    assert any("slight left three-quarter" in prompt for prompt in prompts)
+    assert any("slight right three-quarter" in prompt for prompt in prompts)
+    assert all("right-side profile" not in prompt for prompt in prompts)
 
 
-def test_scene_bible_prompt_keeps_actor_handle_first():
+def test_scene_bible_prompt_prioritizes_scene_composition_before_actor_handle():
     prompt = build_scene_reference_prompt_for_angle(
         actor_name="AYRA",
         scene_key="bathroom_accessibility_a",
@@ -669,17 +701,20 @@ def test_scene_bible_prompt_keeps_actor_handle_first():
         provider_lora_name="ayra_actor",
     )
 
-    assert prompt.startswith("Photorealistic vertical UGC smartphone still of @ayra_actor::100")
-    assert prompt.index("@ayra_actor::100") < prompt.index("the same compact accessible bathroom")
+    assert prompt.startswith("Photorealistic vertical UGC smartphone still, waist-up seated wheelchair-user reference")
+    assert prompt.index("the same compact accessible bathroom") < prompt.index("@ayra_actor::100")
     assert "Actor Identity:" not in prompt
     assert "Primary Subject:" not in prompt
     assert "@ayra_actor::100 is the dominant identity signal" in prompt
     assert "only visible adult person in the frame" in prompt
-    assert "large face identity lock" in prompt
-    assert "face occupying 35 to 45 percent of image height" in prompt
+    assert "waist-up seated smartphone reference" in prompt
+    assert "face occupying 10 to 16 percent of image height" in prompt
     assert "Background is the same supporting scene" in prompt
-    assert "Do not show the full wheelchair" in prompt
+    assert "lap, hands, scene anchors, and wheelchair armrest visible" in prompt
     assert "wide establishing shot" in prompt
+    assert "headshot" in prompt.lower()
+    assert "white blouse" in prompt.lower()
+    assert "suit jacket" in prompt.lower()
     assert "natural skin texture" in prompt
     assert "texture-only frame" not in prompt
     assert "Scene Bible:" not in prompt
@@ -706,12 +741,36 @@ def test_scene_reference_prompts_share_same_location_lock_without_labels():
     )
     assert all(shared_sentence in prompt for prompt in prompts)
     assert all("@ayra_actor::100" in prompt for prompt in prompts)
-    assert all(prompt.index("@ayra_actor::100") < prompt.index("quiet residential curb") for prompt in prompts)
+    assert all(prompt.index("quiet residential curb") < prompt.index("@ayra_actor::100") for prompt in prompts)
     assert all("Scene Consistency:" not in prompt for prompt in prompts)
     assert all("Background Anchor:" not in prompt for prompt in prompts)
     assert all("Scene Bible:" not in prompt for prompt in prompts)
     assert all("texture-only" not in prompt for prompt in prompts)
     assert all("room surfaces" not in prompt for prompt in prompts)
+
+
+def test_all_canonical_scenes_build_valid_person_free_prompts():
+    # Guards future scene additions: every SceneBible must produce a person-free image plate
+    # prompt and a complete provider metadata / consistency contract.
+    from app.features.characters.scene_reference import (
+        SCENE_BIBLES,
+        build_scene_bible_provider_metadata,
+        build_scene_consistency_contract,
+    )
+    from app.features.scenes.handlers import _build_canonical_scene_prompt
+
+    assert len(SCENE_BIBLES) >= 10
+    for scene_id, bible in SCENE_BIBLES.items():
+        prompt = _build_canonical_scene_prompt(scene_id)
+        assert "no person in frame" in prompt, scene_id
+        assert "people, hands, wheelchair" in prompt, scene_id
+        assert bible.generation_anchor[:25] in prompt, scene_id
+
+        metadata = build_scene_bible_provider_metadata(scene_id)
+        assert metadata["scene_bible_id"] == scene_id
+        contract = build_scene_consistency_contract(scene_id)
+        for key in ("layout_lock", "anchor_lock", "wardrobe_lock", "must_match", "acceptance_checklist"):
+            assert contract.get(key), f"{scene_id}: empty {key}"
 
 
 def test_script_intent_routes_specialized_and_neutral_scenes():
@@ -749,6 +808,42 @@ def test_script_intent_routes_specialized_and_neutral_scenes():
     empty = map_script_to_scene_intent(script="", post_type="value", target_length_tier=8, seed_data={})
     assert empty.scene_key == "home_living_room_advice_a"
     assert empty.reason_code == "default"
+
+
+def test_script_intent_dodges_german_false_friends():
+    # Realistic German care/welfare vocabulary that must NOT be forced onto a specialized
+    # scene by an over-broad substring token (verified against a red-team corpus).
+    neutral_traps = [
+        "Autonomie und Selbstbestimmung in der Pflege",   # 'auto' in 'autonomie'
+        "Mobilitaetshilfe beantragen welche Zuschuesse",  # 'mobilität' funding topic
+        "Die fuenf Pflegestufen im Ueberblick",            # 'stufen' in 'Pflegestufen'
+        "Kururlaub in Bad Kissingen",                      # 'bad' spa-town name
+        "Reisekosten zur Reha steuerlich absetzen",        # 'reise' travel topic
+        "Kindergarten-Aktion fuer Senioren",               # 'garten' in 'Kindergarten'
+        "Wintergarten als barrierefreier Wohnraum",        # 'garten' in 'Wintergarten' (indoor)
+        "Morgens leichter aufstehen mit Gelenkschmerzen",  # generic 'aufstehen' advice
+    ]
+    for topic in neutral_traps:
+        result = map_script_to_scene_intent(
+            script="", post_type="value", target_length_tier=8, seed_data={"topic_title": topic}
+        )
+        assert result.scene_key in NEUTRAL_SCENE_POOL, f"{topic!r} -> {result.scene_key}"
+
+    # Real product / Hilfsmittel vocabulary that must route to its specialized scene even
+    # when only the topic names it (empty script).
+    specialized_vocab = [
+        ("Plattformlift fuer den Rollstuhl", "hallway_stairlift_a"),
+        ("Duschhocker und Duschsitz im Test", "bathroom_accessibility_a"),
+        ("Krankenbett fuer zu Hause mieten", "bedroom_accessibility_a"),
+        ("Tuerverbreiterung fuer den Rollstuhl", "entryway_ramp_a"),
+        ("Beifahrersitz drehbar machen fuer leichteren Einstieg", "car_transfer_residential_a"),
+        ("Treppenrampe vor der Haustuer", "entryway_ramp_a"),  # ramp at the door beats stairs
+    ]
+    for topic, expected in specialized_vocab:
+        result = map_script_to_scene_intent(
+            script="", post_type="value", target_length_tier=8, seed_data={"topic_title": topic}
+        )
+        assert result.scene_key == expected, f"{topic!r} -> {result.scene_key}"
 
 
 def test_resolve_canonical_scene_key_per_post_intent_wins_over_scene_plan_prose():
@@ -1112,7 +1207,7 @@ def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(mon
         assert "_request_payload" not in metadata["task"]
 
 
-def test_auto_approved_scene_reference_set_for_video_uses_actor_lora_and_gate(monkeypatch):
+def test_video_scene_reference_set_generation_requires_operator_review(monkeypatch):
     from app.core.config import Settings
     from app.features.characters import handlers as character_handlers
 
@@ -1194,7 +1289,7 @@ def test_auto_approved_scene_reference_set_for_video_uses_actor_lora_and_gate(mo
         lambda **kwargs: attach_calls.append(kwargs) or None,
     )
 
-    summary = character_handlers.create_auto_approved_scene_reference_set_for_video(
+    summary = character_handlers.create_scene_reference_set_for_video_review(
         post={
             "id": "post-1",
             "batch_id": "batch-1",
@@ -1210,22 +1305,26 @@ def test_auto_approved_scene_reference_set_for_video_uses_actor_lora_and_gate(mo
     )
 
     assert summary.is_ready is False
-    assert summary.is_video_actor_ready is True
-    assert len(captured_tasks) == 2
+    assert summary.is_video_actor_ready is False
+    assert len(summary.rows) == 3
+    assert len(captured_tasks) == 3
     assert all(task["lora_id"] == "lora-actor-1" for task in captured_tasks)
     assert all(task["strength"] == 100 for task in captured_tasks)
-    assert [row["id"] for row in summary.video_actor_rows] == [
+    assert [row["id"] for row in summary.rows] == [
         "ref-front_mid",
         "ref-left_three_quarter",
+        "ref-right_profile",
     ]
-    assert gate_calls[0]["status"] == "approved"
-    assert gate_calls[0]["gate_result"].details["auto_approved_for_video_submission"] is True
-    assert gate_calls[0]["gate_result"].details["actor_identity_match_confirmed"] is True
-    assert gate_calls[0]["gate_result"].details["hybrid_reference_bundle_approved"] is True
-    assert attach_calls[0]["reference_id"] == "ref-front_mid"
+    assert gate_calls[0]["status"] == "generated"
+    assert gate_calls[0]["gate_result"].status == "manual_required"
+    assert gate_calls[0]["gate_result"].details["auto_approved_for_video_submission"] is False
+    assert gate_calls[0]["gate_result"].details["requires_operator_visual_review"] is True
+    assert gate_calls[0]["gate_result"].details["actor_identity_match_confirmed"] is False
+    assert gate_calls[0]["gate_result"].details["hybrid_reference_bundle_approved"] is False
+    assert attach_calls == []
 
 
-def test_auto_approved_scene_reference_set_for_video_polls_async_mystic_tasks(monkeypatch):
+def test_scene_reference_set_for_video_review_polls_async_mystic_tasks(monkeypatch):
     from app.core.config import Settings
     from app.features.characters import handlers as character_handlers
 
@@ -1331,7 +1430,7 @@ def test_auto_approved_scene_reference_set_for_video_polls_async_mystic_tasks(mo
         lambda **kwargs: attach_calls.append(kwargs) or None,
     )
 
-    summary = character_handlers.create_auto_approved_scene_reference_set_for_video(
+    summary = character_handlers.create_scene_reference_set_for_video_review(
         post={
             "id": "post-1",
             "batch_id": "batch-1",
@@ -1346,16 +1445,19 @@ def test_auto_approved_scene_reference_set_for_video_polls_async_mystic_tasks(mo
         correlation_id="corr-auto-scene-set",
     )
 
-    assert len(captured_tasks) == 2
-    assert polled_task_ids == ["task-1", "task-2"]
-    assert summary.is_video_actor_ready is True
-    assert [row["image_url"] for row in summary.video_actor_rows] == [
+    assert len(captured_tasks) == 3
+    assert polled_task_ids == ["task-1", "task-2", "task-3"]
+    assert summary.is_video_actor_ready is False
+    assert [row["image_url"] for row in summary.rows] == [
         "https://cdn.example.com/durable/scene-reference-ref-front_mid-task-1.png",
         "https://cdn.example.com/durable/scene-reference-ref-left_three_quarter-task-2.png",
+        "https://cdn.example.com/durable/scene-reference-ref-right_profile-task-3.png",
     ]
-    assert all(row["provider_metadata"]["auto_polled_for_video_submission"] is True for row in summary.video_actor_rows)
-    assert gate_calls[0]["status"] == "approved"
-    assert attach_calls[0]["reference_id"] == "ref-front_mid"
+    assert all(row["provider_metadata"]["auto_polled_for_video_submission"] is True for row in summary.rows)
+    assert gate_calls[0]["status"] == "generated"
+    assert gate_calls[0]["gate_result"].status == "manual_required"
+    assert gate_calls[0]["gate_result"].details["requires_operator_visual_review"] is True
+    assert attach_calls == []
 
 
 def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
