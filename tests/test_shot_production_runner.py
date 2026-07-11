@@ -610,15 +610,35 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
     payload["caption"] = {"path": "old-caption"}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    reset_failed_take(manifest_path, index=2, reason="identity drift")
+    original_contract = payload["request_contract_sha256"]
+    original_seed = payload["takes"][2]["seed"]
+    reset_failed_take(
+        manifest_path,
+        index=2,
+        reason="transcript merged two distinct German words",
+        retry_guidance=(
+            "Pronounce every written word distinctly. Keep Zentimeter and Steigung as two separate words."
+        ),
+    )
     reset = _read(manifest_path)
     take = reset["takes"][2]
     assert take["attempt"] == 2
     assert len(take["attempt_history"]) == 1
-    assert take["attempt_history"][0]["reason"] == "identity drift"
+    assert take["attempt_history"][0]["reason"] == "transcript merged two distinct German words"
+    assert take["seed"] == original_seed + 1000
+    assert "Keep Zentimeter and Steigung as two separate words." in take["prompt"]
+    assert reset["request_contract_history"][-1]["sha256"] == original_contract
+    assert reset["request_contract_sha256"] != original_contract
     assert take["operation"] is None
     assert take["submission"] is None
     assert take["raw"] is None
     assert take["transcript_qa"] is None
     assert reset["takes"][0]["raw"] is not None
     assert "visual_qa" not in reset and "stitch" not in reset and "caption" not in reset
+
+    retry_client = _SubmitClient()
+    from app.features.shot_production.runner import submit_pending_takes
+
+    submit_pending_takes(manifest_path, retry_client, max_inflight=2)
+    assert len(retry_client.calls) == 1
+    assert retry_client.calls[0]["seed"] == original_seed + 1000

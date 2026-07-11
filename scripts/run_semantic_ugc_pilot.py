@@ -38,6 +38,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retry-take", type=int, action="append", default=[])
     parser.add_argument("--retry-reason", default="manual failed-take retry")
+    parser.add_argument(
+        "--retry-guidance",
+        help="Optional narrow delivery correction for explicitly retried takes.",
+    )
     parser.add_argument("--poll-interval", type=float, default=10.0)
     parser.add_argument("--timeout", type=float, default=1800.0)
     parser.add_argument("--visual-model")
@@ -67,7 +71,12 @@ def main() -> int:
             )
 
         for take_index in args.retry_take:
-            reset_failed_take(manifest_path, index=take_index, reason=args.retry_reason)
+            reset_failed_take(
+                manifest_path,
+                index=take_index,
+                reason=args.retry_reason,
+                retry_guidance=args.retry_guidance,
+            )
 
         planned = json.loads(manifest_path.read_text(encoding="utf-8"))
         pending = [take["index"] for take in planned["takes"] if not take.get("operation")]

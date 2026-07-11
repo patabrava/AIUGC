@@ -939,7 +939,13 @@ def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> D
     return result
 
 
-def reset_failed_take(manifest_path: Path, *, index: int, reason: str) -> Dict[str, Any]:
+def reset_failed_take(
+    manifest_path: Path,
+    *,
+    index: int,
+    reason: str,
+    retry_guidance: Optional[str] = None,
+) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     matches = [take for take in payload["takes"] if take["index"] == index]
@@ -966,16 +972,33 @@ def reset_failed_take(manifest_path: Path, *, index: int, reason: str) -> Dict[s
             "Take is not in a retryable failed state; refusing to orphan an existing paid operation.",
             {"take_index": index, "take_status": take_status, "run_status": payload.get("status")},
         )
-    if not str(reason or "").strip():
+    reason_text = str(reason or "").strip()
+    if not reason_text:
         raise ValidationError("Retry requires an operator reason.", {"take_index": index})
+    guidance = " ".join(str(retry_guidance or "").split())
+    if len(guidance) > 500:
+        raise ValidationError("Retry guidance must be 500 characters or fewer.", {"take_index": index})
+    original_contract_sha = str(payload.get("request_contract_sha256") or "")
     archived = json.loads(json.dumps(take))
     archived.pop("attempt_history", None)
-    archived["reason"] = str(reason or "manual retry")
+    archived["reason"] = reason_text
     archived["archived_at"] = _utc_now()
     history = list(take.get("attempt_history") or [])
     history.append(archived)
-    take["attempt"] = int(take.get("attempt") or 1) + 1
+    next_attempt = int(take.get("attempt") or 1) + 1
+    base_prompt = str((history[0] if history else take).get("prompt") or take["prompt"])
+    next_prompt = base_prompt
+    if guidance:
+        next_prompt = f"{base_prompt} Retry delivery correction: {guidance}"
+    if next_prompt.count(take["beat"]["text"]) != 1:
+        raise ValidationError(
+            "Retry guidance must not repeat or alter the exact scripted beat.",
+            {"take_index": index},
+        )
+    take["attempt"] = next_attempt
     take["attempt_history"] = history
+    take["seed"] = int(payload["base_seed"]) + int(take["index"]) + (next_attempt - 1) * 1000
+    take["prompt"] = next_prompt
     take["status"] = "planned"
     take["submission"] = None
     take["operation"] = None
@@ -984,6 +1007,18 @@ def reset_failed_take(manifest_path: Path, *, index: int, reason: str) -> Dict[s
     take["transcript_qa"] = None
     take["trim_window"] = None
     _clear_downstream_artifacts(payload)
+    contract_history = list(payload.get("request_contract_history") or [])
+    contract_history.append(
+        {
+            "sha256": original_contract_sha,
+            "take_index": index,
+            "reason": reason_text,
+            "retry_guidance": guidance or None,
+            "archived_at": _utc_now(),
+        }
+    )
+    payload["request_contract_history"] = contract_history
+    payload["request_contract_sha256"] = _canonical_sha256(_request_contract_payload(payload))
     payload["status"] = "retry_planned"
     payload["updated_at"] = _utc_now()
     _atomic_write_json(manifest_path, payload)
