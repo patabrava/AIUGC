@@ -43,6 +43,7 @@ MANIFEST_VERSION = 2
 APP_SCRIPT_SOURCE = "app.features.topics.agents.generate_dialog_scripts"
 TARGET_LENGTH_TIER = 16
 EXPECTED_PROVIDER_DURATIONS = [4, 6, 6, 4]
+DEFAULT_MAX_INFLIGHT = 2
 
 
 def _utc_now() -> str:
@@ -253,6 +254,12 @@ def _validate_paid_request_contract(payload: Dict[str, Any]) -> None:
         )
 
 
+def _is_definitive_provider_rejection(exc: Exception) -> bool:
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return False
+    return exc.response.status_code in {400, 401, 403, 404, 422, 429}
+
+
 def initialize_pilot(
     *,
     manifest_path: Path,
@@ -367,18 +374,33 @@ def _correlation_id(manifest: Dict[str, Any], take: Dict[str, Any]) -> str:
     return f"semantic_ugc_{manifest['run_id']}_take_{take['index']}_attempt_{take['attempt']}"
 
 
-def submit_pending_takes(manifest_path: Path, vertex_client: Any) -> Dict[str, Any]:
+def submit_pending_takes(
+    manifest_path: Path,
+    vertex_client: Any,
+    *,
+    max_inflight: int = DEFAULT_MAX_INFLIGHT,
+) -> Dict[str, Any]:
     """Submit only unaccepted takes and persist each paid operation immediately."""
     manifest_path = Path(manifest_path)
+    if max_inflight < 1:
+        raise ValidationError("Vertex max_inflight must be at least one.")
     submission_lock = manifest_path.with_name(f".{manifest_path.name}.submit.lock")
     with _exclusive_file_lock(submission_lock, label="Pilot paid submission"):
         payload = _load_manifest(manifest_path)
         _validate_paid_request_contract(payload)
+        inflight = sum(
+            1
+            for take in payload["takes"]
+            if take.get("operation") and not _artifact_matches(take.get("raw") or {})
+        )
+        available_slots = max(0, max_inflight - inflight)
         for take in payload["takes"]:
             if take.get("operation"):
                 continue
+            if available_slots <= 0:
+                break
             prior_submission = take.get("submission") or {}
-            if prior_submission.get("state") in {"submitting", "unknown"}:
+            if prior_submission.get("state") in {"submitting", "unknown", "rejected"}:
                 raise ValidationError(
                     "Take has an unresolved Vertex submission; automatic paid retry is blocked.",
                     {
@@ -418,11 +440,16 @@ def submit_pending_takes(manifest_path: Path, vertex_client: Any) -> Dict[str, A
                 if not operation_id:
                     raise ValidationError("Vertex response is missing an operation id.")
             except Exception as exc:
+                rejected = _is_definitive_provider_rejection(exc)
                 take["submission"].update(
-                    {"state": "unknown", "failed_at": _utc_now(), "error": str(exc)}
+                    {
+                        "state": "rejected" if rejected else "unknown",
+                        "failed_at": _utc_now(),
+                        "error": str(exc),
+                    }
                 )
-                take["status"] = "submission_unknown"
-                payload["status"] = "submission_unknown"
+                take["status"] = "submission_rejected" if rejected else "submission_unknown"
+                payload["status"] = take["status"]
                 payload["last_error"] = {
                     "stage": "submit",
                     "take_index": take["index"],
@@ -446,6 +473,7 @@ def submit_pending_takes(manifest_path: Path, vertex_client: Any) -> Dict[str, A
             payload["updated_at"] = _utc_now()
             # This write deliberately happens before the next provider call.
             _atomic_write_json(manifest_path, payload)
+            available_slots -= 1
         return payload
 
 
@@ -512,7 +540,13 @@ def poll_and_download_takes(
             operation = take.get("operation") or {}
             operation_id = operation.get("operation_id")
             if not operation_id:
-                raise ValidationError("Cannot poll a take without an accepted operation.", {"take_index": take["index"]})
+                submission_state = (take.get("submission") or {}).get("state")
+                if submission_state in {"submitting", "unknown", "rejected"}:
+                    raise ValidationError(
+                        "Cannot continue while a take submission is unresolved or rejected.",
+                        {"take_index": take["index"], "submission_state": submission_state},
+                    )
+                continue
             result = vertex_client.check_operation_status(
                 operation_id=operation_id,
                 correlation_id=_correlation_id(payload, take),
@@ -551,7 +585,8 @@ def poll_and_download_takes(
 
         if not pending:
             payload = _load_manifest(manifest_path)
-            payload["status"] = "raw_completed"
+            all_raw = all(_artifact_matches(take.get("raw") or {}) for take in payload["takes"])
+            payload["status"] = "raw_completed" if all_raw else "wave_completed"
             payload["updated_at"] = _utc_now()
             _atomic_write_json(manifest_path, payload)
             return payload
@@ -561,6 +596,38 @@ def poll_and_download_takes(
             _atomic_write_json(manifest_path, payload)
             raise TimeoutError(f"Pilot take polling exceeded {timeout_seconds} seconds.")
         sleep_fn(max(0.0, poll_interval_seconds))
+
+
+def generate_raw_takes_in_waves(
+    manifest_path: Path,
+    vertex_client: Any,
+    *,
+    max_inflight: int = DEFAULT_MAX_INFLIGHT,
+    uri_loader: Callable[[str], bytes] = load_video_uri,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    poll_interval_seconds: float = 10.0,
+    timeout_seconds: float = 1800.0,
+) -> Dict[str, Any]:
+    """Generate every raw take while respecting Vertex concurrent-operation quota."""
+    manifest_path = Path(manifest_path)
+    while True:
+        payload = _load_manifest(manifest_path)
+        if all(_artifact_matches(take.get("raw") or {}) for take in payload["takes"]):
+            payload["status"] = "raw_completed"
+            payload["updated_at"] = _utc_now()
+            _atomic_write_json(manifest_path, payload)
+            return payload
+        submit_pending_takes(manifest_path, vertex_client, max_inflight=max_inflight)
+        payload = poll_and_download_takes(
+            manifest_path,
+            vertex_client,
+            uri_loader=uri_loader,
+            sleep_fn=sleep_fn,
+            poll_interval_seconds=poll_interval_seconds,
+            timeout_seconds=timeout_seconds,
+        )
+        if payload.get("status") == "raw_completed":
+            return payload
 
 
 def _serialize_transcript(transcript: WordLevelTranscript) -> Dict[str, Any]:
@@ -880,7 +947,12 @@ def reset_failed_take(manifest_path: Path, *, index: int, reason: str) -> Dict[s
         raise ValidationError("Retry take index does not exist.", {"take_index": index})
     take = matches[0]
     take_status = str(take.get("status") or "")
-    terminal_take_failure = take_status in {"submission_unknown", "failed", "transcript_failed"}
+    terminal_take_failure = take_status in {
+        "submission_unknown",
+        "submission_rejected",
+        "failed",
+        "transcript_failed",
+    }
     failed_visual_gate = (
         take_status == "transcribed" and (payload.get("visual_qa") or {}).get("passed") is False
     )
@@ -921,6 +993,7 @@ def reset_failed_take(manifest_path: Path, *, index: int, reason: str) -> Dict[s
 __all__ = [
     "build_contact_sheet",
     "compose_and_caption",
+    "generate_raw_takes_in_waves",
     "initialize_pilot",
     "load_video_uri",
     "poll_and_download_takes",

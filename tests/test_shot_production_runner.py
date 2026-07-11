@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 
+import httpx
 from PIL import Image
 import pytest
 
@@ -188,7 +189,7 @@ def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
         index=1,
         reason="operator confirmed no recoverable operation id; explicit retry approved",
     )
-    submit_pending_takes(manifest_path, resumed_client)
+    submit_pending_takes(manifest_path, resumed_client, max_inflight=4)
     completed = _read(manifest_path)
 
     assert [call["correlation_id"].split("_take_")[1].split("_")[0] for call in resumed_client.calls] == [
@@ -206,7 +207,7 @@ def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
     assert all("video" not in call and "last_frame" not in call for call in first_client.calls + resumed_client.calls)
 
     no_op_client = _SubmitClient()
-    submit_pending_takes(manifest_path, no_op_client)
+    submit_pending_takes(manifest_path, no_op_client, max_inflight=4)
     assert no_op_client.calls == []
 
 
@@ -239,7 +240,7 @@ def test_retry_refuses_to_orphan_a_nonfailed_paid_operation(tmp_path):
     from app.features.shot_production.runner import reset_failed_take, submit_pending_takes
 
     manifest_path, _ = _initialize(tmp_path)
-    submit_pending_takes(manifest_path, _SubmitClient())
+    submit_pending_takes(manifest_path, _SubmitClient(), max_inflight=4)
 
     with pytest.raises(ValidationError, match="not in a retryable failed state"):
         reset_failed_take(manifest_path, index=0, reason="unsafe duplicate attempt")
@@ -264,11 +265,86 @@ class _PollClient:
         }
 
 
+class _WaveClient(_SubmitClient, _PollClient):
+    def __init__(self):
+        _SubmitClient.__init__(self)
+        self.events = []
+
+    def submit_image_video(self, **kwargs):
+        index = int(kwargs["correlation_id"].split("_take_")[1].split("_")[0])
+        self.events.append(("submit", index))
+        return super().submit_image_video(**kwargs)
+
+    def check_operation_status(self, **kwargs):
+        index = int(kwargs["operation_id"].rsplit("-", 1)[1])
+        self.events.append(("poll", index))
+        encoded = base64.b64encode(f"raw-{index}".encode()).decode()
+        return {
+            "done": True,
+            "status": "completed",
+            "video_uri": f"data:video/mp4;base64,{encoded}",
+        }
+
+
+def test_generation_runs_in_two_operation_vertex_quota_waves(tmp_path):
+    from app.features.shot_production.runner import generate_raw_takes_in_waves
+
+    manifest_path, _ = _initialize(tmp_path)
+    client = _WaveClient()
+
+    generate_raw_takes_in_waves(
+        manifest_path,
+        client,
+        max_inflight=2,
+        sleep_fn=lambda _seconds: None,
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+
+    assert client.events == [
+        ("submit", 0),
+        ("submit", 1),
+        ("poll", 0),
+        ("poll", 1),
+        ("submit", 2),
+        ("submit", 3),
+        ("poll", 2),
+        ("poll", 3),
+    ]
+    payload = _read(manifest_path)
+    assert payload["status"] == "raw_completed"
+    assert all(take["raw"] for take in payload["takes"])
+
+
+def test_http_429_is_recorded_as_definitive_rejection_before_explicit_retry(tmp_path):
+    from app.features.shot_production.runner import reset_failed_take, submit_pending_takes
+
+    class _QuotaRejectedClient:
+        def submit_image_video(self, **_kwargs):
+            request = httpx.Request("POST", "https://vertex.example/predictLongRunning")
+            response = httpx.Response(429, request=request, json={"error": {"status": "RESOURCE_EXHAUSTED"}})
+            raise httpx.HTTPStatusError("quota rejected", request=request, response=response)
+
+    manifest_path, _ = _initialize(tmp_path)
+    with pytest.raises(httpx.HTTPStatusError):
+        submit_pending_takes(manifest_path, _QuotaRejectedClient())
+
+    rejected = _read(manifest_path)["takes"][0]
+    assert rejected["status"] == "submission_rejected"
+    assert rejected["submission"]["state"] == "rejected"
+    assert rejected["operation"] is None
+
+    reset_failed_take(manifest_path, index=0, reason="Vertex explicitly rejected the request with HTTP 429")
+    reset = _read(manifest_path)["takes"][0]
+    assert reset["status"] == "planned"
+    assert reset["attempt"] == 2
+
+
 def test_poll_downloads_all_raw_takes_in_index_order_and_resumes(tmp_path):
     from app.features.shot_production.runner import poll_and_download_takes, submit_pending_takes
 
     manifest_path, _ = _initialize(tmp_path)
-    submit_pending_takes(manifest_path, _SubmitClient())
+    submit_pending_takes(manifest_path, _SubmitClient(), max_inflight=4)
     client = _PollClient()
     poll_and_download_takes(
         manifest_path,
@@ -324,7 +400,7 @@ def _manifest_with_raw_takes(tmp_path: Path) -> Path:
     from app.features.shot_production.runner import submit_pending_takes
 
     manifest_path, _ = _initialize(tmp_path)
-    submit_pending_takes(manifest_path, _SubmitClient())
+    submit_pending_takes(manifest_path, _SubmitClient(), max_inflight=4)
     payload = _read(manifest_path)
     raw_dir = manifest_path.parent / "raw"
     raw_dir.mkdir()

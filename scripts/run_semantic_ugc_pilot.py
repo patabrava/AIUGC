@@ -16,12 +16,11 @@ from app.adapters.vertex_ai_client import get_vertex_ai_client  # noqa: E402
 from app.features.shot_production.runner import (  # noqa: E402
     build_contact_sheet,
     compose_and_caption,
+    generate_raw_takes_in_waves,
     initialize_pilot,
     pilot_run_lock,
-    poll_and_download_takes,
     reset_failed_take,
     run_visual_qa,
-    submit_pending_takes,
     transcribe_and_validate_takes,
     upload_final,
 )
@@ -81,10 +80,10 @@ def main() -> int:
 
         vertex = get_vertex_ai_client()
         deepgram = get_deepgram_client()
-        submit_pending_takes(manifest_path, vertex)
-        poll_and_download_takes(
+        generate_raw_takes_in_waves(
             manifest_path,
             vertex,
+            max_inflight=2,
             poll_interval_seconds=args.poll_interval,
             timeout_seconds=args.timeout,
         )
