@@ -119,6 +119,31 @@ def test_vertex_settings_resolve_google_application_credentials_from_env_file(mo
     assert resolve_google_application_credentials_path(settings) == str(adc_path)
 
 
+def test_vertex_settings_respect_app_env_file_override(monkeypatch, tmp_path: Path):
+    shared_env = tmp_path / "shared.env"
+    shared_env.write_text(
+        "\n".join(
+            [
+                "VERTEX_AI_ENABLED=true",
+                "VERTEX_AI_PROJECT_ID=shared-project",
+                "VERTEX_AI_LOCATION=us-central1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    empty_worktree = tmp_path / "empty-worktree"
+    empty_worktree.mkdir()
+    monkeypatch.chdir(empty_worktree)
+    monkeypatch.setenv("APP_ENV_FILE", str(shared_env))
+
+    settings = VertexSettings()
+
+    assert settings.vertex_ai_enabled is True
+    assert settings.vertex_ai_project_id == "shared-project"
+    assert settings.vertex_ai_location == "us-central1"
+
+
 def test_vertex_settings_materialize_google_application_credentials_json(monkeypatch, tmp_path: Path):
     adc_json = '{"type":"authorized_user","client_id":"abc","client_secret":"def","refresh_token":"ghi"}'
     monkeypatch.chdir(tmp_path)

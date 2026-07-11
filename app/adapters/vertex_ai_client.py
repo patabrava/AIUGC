@@ -39,6 +39,10 @@ class VertexSettings(BaseSettings):
         extra="ignore",
     )
 
+    def __init__(self, **values: Any):
+        values.setdefault("_env_file", os.getenv("APP_ENV_FILE", ".env"))
+        super().__init__(**values)
+
     vertex_ai_enabled: bool = Field(default=False, validation_alias=AliasChoices("VERTEX_AI_ENABLED"))
     vertex_ai_project_id: str = Field(
         default="",
