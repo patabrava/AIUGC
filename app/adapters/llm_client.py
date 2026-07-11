@@ -5,6 +5,7 @@ Per Constitution § VI: Adapterize Specialists
 """
 
 from typing import Optional, Dict, Any, List, Iterator, Tuple
+import base64
 import httpx
 import json
 import re
@@ -24,14 +25,14 @@ from app.adapters.grounding_url_resolver import (
 logger = get_logger(__name__)
 
 GEMINI_IMAGE_MODEL_ALIASES = {
-    "nanobanana-2": "gemini-2.5-flash-image",
-    "nano-banana-2": "gemini-2.5-flash-image",
-    "nano banana 2": "gemini-2.5-flash-image",
-    "nanobanana2": "gemini-2.5-flash-image",
+    "nanobanana-2": "gemini-3.1-flash-image",
+    "nano-banana-2": "gemini-3.1-flash-image",
+    "nano banana 2": "gemini-3.1-flash-image",
+    "nanobanana2": "gemini-3.1-flash-image",
     "nanobananapro": "gemini-3-pro-image-preview",
     "nano-banana-pro": "gemini-3-pro-image-preview",
     "nano banana pro": "gemini-3-pro-image-preview",
-    "gemini-3.1-flash-image-preview": "gemini-2.5-flash-image",
+    "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
 }
 
 
@@ -709,6 +710,7 @@ class LLMClient:
         temperature: Optional[float] = None,
         aspect_ratio: str = "1:1",
         image_size: str = "1K",
+        input_images: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Generate a single image using Gemini and return image bytes plus mime type."""
         if self.gemini_provider == "vertex":
@@ -721,15 +723,33 @@ class LLMClient:
                 temperature=temperature,
                 aspect_ratio=aspect_ratio,
                 image_size=image_size,
+                input_images=input_images,
             )
 
         target_model = self._resolve_gemini_image_model(model)
         full_prompt = self._merge_prompts(system_prompt, prompt)
+        parts: List[Dict[str, Any]] = [{"text": full_prompt}]
+        for index, image in enumerate(input_images or [], start=1):
+            mime_type = str(image.get("mime_type") or "").strip()
+            image_bytes = image.get("image_bytes")
+            if not mime_type.startswith("image/") or not isinstance(image_bytes, bytes) or not image_bytes:
+                raise ValidationError(
+                    message="Gemini input images require non-empty bytes and an image MIME type.",
+                    details={"image_index": index, "mime_type": mime_type},
+                )
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": mime_type,
+                        "data": base64.b64encode(image_bytes).decode("ascii"),
+                    }
+                }
+            )
         payload: Dict[str, Any] = {
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": full_prompt}],
+                    "parts": parts,
                 }
             ],
             "generationConfig": {

@@ -8,7 +8,7 @@ import os
 import threading
 import time
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import google.auth
 import google.auth.exceptions
@@ -165,6 +165,7 @@ class VertexGeminiClient:
         temperature: Optional[float] = None,
         aspect_ratio: str = "1:1",
         image_size: str = "1K",
+        input_images: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         target_model = model or self._settings.vertex_gemini_image_model
         payload = self._build_generate_content_payload(
@@ -172,6 +173,7 @@ class VertexGeminiClient:
             system_prompt=system_prompt,
             max_tokens=max_tokens,
             temperature=temperature,
+            input_images=input_images,
         )
         payload.setdefault("generationConfig", {})
         payload["generationConfig"]["responseModalities"] = ["IMAGE"]
@@ -352,12 +354,30 @@ class VertexGeminiClient:
         max_tokens: Optional[int],
         temperature: Optional[float],
         thinking_budget: Optional[int] = None,
+        input_images: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
+        parts: List[Dict[str, Any]] = [{"text": self._merge_prompts(system_prompt, prompt)}]
+        for index, image in enumerate(input_images or [], start=1):
+            mime_type = str(image.get("mime_type") or "").strip()
+            image_bytes = image.get("image_bytes")
+            if not mime_type.startswith("image/") or not isinstance(image_bytes, bytes) or not image_bytes:
+                raise ValidationError(
+                    "Gemini input images require non-empty bytes and an image MIME type.",
+                    {"image_index": index, "mime_type": mime_type},
+                )
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": mime_type,
+                        "data": base64.b64encode(image_bytes).decode("ascii"),
+                    }
+                }
+            )
         payload: Dict[str, Any] = {
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": self._merge_prompts(system_prompt, prompt)}],
+                    "parts": parts,
                 }
             ]
         }

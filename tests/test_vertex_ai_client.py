@@ -420,3 +420,67 @@ def test_generate_grounded_research_returns_text_and_chunks(monkeypatch):
         "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/BBB",
         "title": "BMAS",
     }
+
+
+def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monkeypatch):
+    import base64
+
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    captured = {}
+    client = VertexGeminiClient()
+
+    def _fake_post_generate_content(**kwargs):
+        captured.update(kwargs)
+        return {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/png",
+                                    "data": base64.b64encode(b"output").decode("ascii"),
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(client, "_post_generate_content", _fake_post_generate_content)
+
+    client.generate_image(
+        prompt="Compose the actor in the room.",
+        model="gemini-3-pro-image-preview",
+        aspect_ratio="9:16",
+        input_images=[
+            {"mime_type": "image/png", "image_bytes": b"actor-front"},
+            {"mime_type": "image/jpeg", "image_bytes": b"actor-three-quarter"},
+            {"mime_type": "image/png", "image_bytes": b"location"},
+        ],
+    )
+
+    parts = captured["payload"]["contents"][0]["parts"]
+    assert parts == [
+        {"text": "Compose the actor in the room."},
+        {
+            "inlineData": {
+                "mimeType": "image/png",
+                "data": base64.b64encode(b"actor-front").decode("ascii"),
+            }
+        },
+        {
+            "inlineData": {
+                "mimeType": "image/jpeg",
+                "data": base64.b64encode(b"actor-three-quarter").decode("ascii"),
+            }
+        },
+        {
+            "inlineData": {
+                "mimeType": "image/png",
+                "data": base64.b64encode(b"location").decode("ascii"),
+            }
+        },
+    ]

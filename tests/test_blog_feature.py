@@ -152,12 +152,18 @@ def test_gemini_image_generation_maps_nanobanana_alias():
     with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
         result = client.generate_gemini_image(prompt="Quadratisches Coverbild", model="nanobanana-2")
 
-    assert result["model"] == "gemini-2.5-flash-image"
+    assert result["model"] == "gemini-3.1-flash-image"
     assert result["image_bytes"] == b"png-bytes"
     call = mock_post.call_args
-    assert call.args[0] == "/models/gemini-2.5-flash-image:generateContent"
+    assert call.args[0] == "/models/gemini-3.1-flash-image:generateContent"
     assert call.kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
     assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
+
+
+def test_gemini_image_generation_maps_stale_31_preview_alias_to_current_model():
+    client = LLMClient()
+
+    assert client._resolve_gemini_image_model("gemini-3.1-flash-image-preview") == "gemini-3.1-flash-image"
 
 
 def test_gemini_image_generation_maps_nanobananapro_alias():
@@ -192,6 +198,53 @@ def test_gemini_image_generation_maps_nanobananapro_alias():
     assert call.args[0] == "/models/gemini-3-pro-image-preview:generateContent"
     assert call.kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
     assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
+
+
+def test_gemini_image_generation_accepts_ordered_reference_images():
+    client = LLMClient()
+    client.gemini_provider = "gemini_api"
+    client.gemini_api_fallback_enabled = True
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64.b64encode(b"png-bytes").decode("ascii"),
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
+        client.generate_gemini_image(
+            prompt="Compose the actor in the room.",
+            model="nanobananapro",
+            input_images=[
+                {"mime_type": "image/png", "image_bytes": b"actor-front"},
+                {"mime_type": "image/jpeg", "image_bytes": b"actor-three-quarter"},
+                {"mime_type": "image/png", "image_bytes": b"location"},
+            ],
+        )
+
+    parts = mock_post.call_args.kwargs["json"]["contents"][0]["parts"]
+    assert [part.get("inlineData", {}).get("mimeType") for part in parts[1:]] == [
+        "image/png",
+        "image/jpeg",
+        "image/png",
+    ]
+    assert [base64.b64decode(part["inlineData"]["data"]) for part in parts[1:]] == [
+        b"actor-front",
+        b"actor-three-quarter",
+        b"location",
+    ]
 
 
 def test_blog_content_from_llm_requires_real_intro_and_closing():
