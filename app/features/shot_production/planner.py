@@ -20,6 +20,7 @@ SPEECH_WORDS_PER_SECOND = 2.5
 PACING_ALLOWANCE_SECONDS = 0.25
 TARGET_MIN_SECONDS = 3.0
 TARGET_MAX_SECONDS = 5.0
+CONCISE_FINAL_MIN_SECONDS = 2.0
 MIN_BEAT_WORDS = 7
 MIN_BEAT_COUNT = 3
 MAX_BEAT_COUNT = 4
@@ -105,7 +106,10 @@ def _partition_text(tokens: Sequence[str], boundaries: Iterable[int]) -> List[st
 
 
 def _best_partition(
-    tokens: Sequence[str], boundary_costs: Dict[int, float]
+    tokens: Sequence[str],
+    boundary_costs: Dict[int, float],
+    *,
+    allow_concise_final: bool = False,
 ) -> Optional[List[str]]:
     positions = sorted(boundary_costs)
     for beat_count in range(MAX_BEAT_COUNT, MIN_BEAT_COUNT - 1, -1):
@@ -117,7 +121,19 @@ def _best_partition(
             parts = _partition_text(tokens, selected)
             counts = [script_word_count(part) for part in parts]
             estimates = [estimate_speech_seconds(count) for count in counts]
-            if not all(TARGET_MIN_SECONDS <= estimate <= TARGET_MAX_SECONDS for estimate in estimates):
+            all_on_target = all(
+                TARGET_MIN_SECONDS <= estimate <= TARGET_MAX_SECONDS for estimate in estimates
+            )
+            concise_final = (
+                allow_concise_final
+                and all(
+                    TARGET_MIN_SECONDS <= estimate <= TARGET_MAX_SECONDS
+                    for estimate in estimates[:-1]
+                )
+                and CONCISE_FINAL_MIN_SECONDS <= estimates[-1] < TARGET_MIN_SECONDS
+                and _terminal_mark(parts[-1].split()[-1]) in ".!?"
+            )
+            if not (all_on_target or concise_final):
                 continue
 
             boundary_penalty = sum(boundary_costs[position] for position in selected)
@@ -132,18 +148,34 @@ def _best_partition(
 def _semantic_parts(tokens: Sequence[str]) -> Optional[List[str]]:
     strong, commas, coordinating = _boundary_groups(tokens)
 
-    boundary_costs = dict(strong)
-    partition = _best_partition(tokens, boundary_costs)
-    if partition is not None:
-        return partition
+    for allow_concise_final in (False, True):
+        boundary_costs = dict(strong)
+        partition = _best_partition(
+            tokens,
+            boundary_costs,
+            allow_concise_final=allow_concise_final,
+        )
+        if partition is not None:
+            return partition
 
-    boundary_costs.update({position: 1.0 for position in commas})
-    partition = _best_partition(tokens, boundary_costs)
-    if partition is not None:
-        return partition
+        boundary_costs.update({position: 1.0 for position in commas})
+        partition = _best_partition(
+            tokens,
+            boundary_costs,
+            allow_concise_final=allow_concise_final,
+        )
+        if partition is not None:
+            return partition
 
-    boundary_costs.update({position: 2.0 for position in coordinating})
-    return _best_partition(tokens, boundary_costs)
+        boundary_costs.update({position: 2.0 for position in coordinating})
+        partition = _best_partition(
+            tokens,
+            boundary_costs,
+            allow_concise_final=allow_concise_final,
+        )
+        if partition is not None:
+            return partition
+    return None
 
 
 def plan_editorial_beats(script: str) -> List[EditorialBeat]:

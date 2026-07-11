@@ -88,6 +88,28 @@ def test_does_not_treat_german_example_abbreviations_as_terminal_boundaries(exam
     assert [beat.text for beat in plan_editorial_beats(script)] == sentences
 
 
+def test_allows_one_complete_concise_final_beat_from_a_generated_script():
+    script = (
+        "Jeder, der einen Rollstuhl nutzt, weiß genau: "
+        "Normgerechte Rampen sind oft trotzdem eine echte Qual. "
+        "Manchmal fühlt sich jeder Zentimeter Steigung wie ein unnötiger Kampf an. "
+        "Das zehrt an den Kräften."
+    )
+
+    beats = plan_editorial_beats(script)
+
+    assert [beat.text for beat in beats] == [
+        "Jeder, der einen Rollstuhl nutzt, weiß genau:",
+        "Normgerechte Rampen sind oft trotzdem eine echte Qual.",
+        "Manchmal fühlt sich jeder Zentimeter Steigung wie ein unnötiger Kampf an.",
+        "Das zehrt an den Kräften.",
+    ]
+    assert all(3.0 <= beat.estimated_speech_seconds <= 5.0 for beat in beats[:-1])
+    assert beats[-1].estimated_speech_seconds == 2.25
+    assert beats[-1].provider_duration_seconds == 4
+    assert " ".join(beat.text for beat in beats) == script
+
+
 @pytest.mark.parametrize("script", [SENTENCE_SCRIPT, CLAUSE_SCRIPT])
 def test_preserves_every_word_once_and_in_order(script):
     beats = plan_editorial_beats(script)
