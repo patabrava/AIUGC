@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -31,25 +32,19 @@ def _approved_png(path: Path) -> str:
         ]
     )
     image.save(path, format="PNG")
-    from hashlib import sha256
-
     return sha256(path.read_bytes()).hexdigest()
 
 
-def _script_input(path: Path) -> None:
-    path.write_text(
-        json.dumps(
-            {
-                "source": "app.features.topics.agents.generate_dialog_scripts",
-                "target_length_tier": 16,
-                "category": "problem_agitate_solution",
-                "script": SCRIPT,
-                "generator_output": {"problem_agitate_solution": [SCRIPT]},
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+def _script_input(path: Path, **overrides) -> None:
+    payload = {
+        "source": "app.features.topics.agents.generate_dialog_scripts",
+        "target_length_tier": 16,
+        "category": "problem_agitate_solution",
+        "script": SCRIPT,
+        "generator_output": {"problem_agitate_solution": [SCRIPT]},
+    }
+    payload.update(overrides)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def _initialize(tmp_path: Path):
@@ -98,7 +93,7 @@ def test_initialize_pilot_records_real_script_four_takes_and_complete_request_au
     manifest_path, payload = _initialize(tmp_path)
 
     assert payload == _read(manifest_path)
-    assert payload["version"] == 1
+    assert payload["version"] == 2
     assert payload["status"] == "planned"
     assert payload["script"]["text"] == SCRIPT
     assert payload["script"]["source"] == "app.features.topics.agents.generate_dialog_scripts"
@@ -115,11 +110,40 @@ def test_initialize_pilot_records_real_script_four_takes_and_complete_request_au
     assert all(take["aspect_ratio"] == "9:16" for take in payload["takes"])
     assert all(take["negative_prompt"] for take in payload["takes"])
     assert all(take["prompt"].count(take["beat"]["text"]) == 1 for take in payload["takes"])
+    assert all(take["submission"] is None for take in payload["takes"])
+    assert len(payload["request_contract_sha256"]) == 64
+    assert len(payload["script"]["input_sha256"]) == 64
+    assert payload["script"]["planned_provider_durations"] == [4, 6, 6, 4]
     assert len({take["shot"]["sha256"] for take in payload["takes"]}) == 4
     assert all(Path(take["shot"]["path"]).is_file() for take in payload["takes"])
 
     with pytest.raises(ValidationError, match="already exists"):
         _initialize(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"source": "manual"}, "app-generated"),
+        ({"target_length_tier": 8}, "16-second"),
+    ],
+)
+def test_initialize_pilot_rejects_unapproved_script_provenance_or_tier(tmp_path, override, message):
+    from app.features.shot_production.runner import initialize_pilot
+
+    approved = tmp_path / "approved.png"
+    approved_hash = _approved_png(approved)
+    script_input = tmp_path / "script.json"
+    _script_input(script_input, **override)
+
+    with pytest.raises(ValidationError, match=message):
+        initialize_pilot(
+            manifest_path=tmp_path / "run" / "manifest.json",
+            approved_frame_path=approved,
+            expected_sha256=approved_hash,
+            script_input_path=script_input,
+            base_seed=240711,
+        )
 
 
 class _SubmitClient:
@@ -138,8 +162,8 @@ class _SubmitClient:
         }
 
 
-def test_submission_persists_each_paid_operation_and_resume_never_duplicates(tmp_path):
-    from app.features.shot_production.runner import submit_pending_takes
+def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
+    from app.features.shot_production.runner import reset_failed_take, submit_pending_takes
 
     manifest_path, _ = _initialize(tmp_path)
     first_client = _SubmitClient(fail_on_call=2)
@@ -150,9 +174,20 @@ def test_submission_persists_each_paid_operation_and_resume_never_duplicates(tmp
     after_failure = _read(manifest_path)
     assert after_failure["takes"][0]["operation"]["operation_id"] == "operations/op-0"
     assert after_failure["takes"][1]["operation"] is None
+    assert after_failure["takes"][1]["submission"]["state"] == "unknown"
+    assert after_failure["takes"][1]["submission"]["correlation_id"].endswith("_take_1_attempt_1")
     assert len(first_client.calls) == 2
 
     resumed_client = _SubmitClient()
+    with pytest.raises(ValidationError, match="unresolved Vertex submission"):
+        submit_pending_takes(manifest_path, resumed_client)
+    assert resumed_client.calls == []
+
+    reset_failed_take(
+        manifest_path,
+        index=1,
+        reason="operator confirmed no recoverable operation id; explicit retry approved",
+    )
     submit_pending_takes(manifest_path, resumed_client)
     completed = _read(manifest_path)
 
@@ -173,6 +208,45 @@ def test_submission_persists_each_paid_operation_and_resume_never_duplicates(tmp
     no_op_client = _SubmitClient()
     submit_pending_takes(manifest_path, no_op_client)
     assert no_op_client.calls == []
+
+
+def test_pilot_run_lock_rejects_a_second_cli_for_the_same_manifest(tmp_path):
+    from app.features.shot_production.runner import pilot_run_lock
+
+    manifest_path, _ = _initialize(tmp_path)
+    with pilot_run_lock(manifest_path):
+        with pytest.raises(ValidationError, match="already active"):
+            with pilot_run_lock(manifest_path):
+                raise AssertionError("a second runner must never enter the critical section")
+
+
+def test_submission_blocks_a_tampered_paid_request_contract(tmp_path):
+    from app.features.shot_production.runner import submit_pending_takes
+
+    manifest_path, _ = _initialize(tmp_path)
+    payload = _read(manifest_path)
+    payload["takes"][0]["prompt"] += " changed after approval"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    client = _SubmitClient()
+
+    with pytest.raises(ValidationError, match="request contract changed"):
+        submit_pending_takes(manifest_path, client)
+
+    assert client.calls == []
+
+
+def test_retry_refuses_to_orphan_a_nonfailed_paid_operation(tmp_path):
+    from app.features.shot_production.runner import reset_failed_take, submit_pending_takes
+
+    manifest_path, _ = _initialize(tmp_path)
+    submit_pending_takes(manifest_path, _SubmitClient())
+
+    with pytest.raises(ValidationError, match="not in a retryable failed state"):
+        reset_failed_take(manifest_path, index=0, reason="unsafe duplicate attempt")
+
+    unchanged = _read(manifest_path)["takes"][0]
+    assert unchanged["attempt"] == 1
+    assert unchanged["operation"]["operation_id"] == "operations/op-0"
 
 
 class _PollClient:
@@ -218,6 +292,13 @@ def test_poll_downloads_all_raw_takes_in_index_order_and_resumes(tmp_path):
     poll_and_download_takes(manifest_path, second_client, timeout_seconds=1)
     assert second_client.calls == []
 
+    Path(payload["takes"][0]["raw"]["path"]).write_bytes(b"corrupt")
+    repair_client = _PollClient()
+    poll_and_download_takes(manifest_path, repair_client, timeout_seconds=1)
+    repaired = _read(manifest_path)
+    assert repair_client.calls == ["operations/op-0"]
+    assert Path(repaired["takes"][0]["raw"]["path"]).read_bytes() == b"raw-0"
+
 
 def _timed_transcript(text: str) -> WordLevelTranscript:
     words = []
@@ -249,8 +330,13 @@ def _manifest_with_raw_takes(tmp_path: Path) -> Path:
     raw_dir.mkdir()
     for take in payload["takes"]:
         path = raw_dir / f"take-{take['index']}.mp4"
-        path.write_bytes(f"clip-{take['index']}".encode())
-        take["raw"] = {"path": str(path), "sha256": "test", "bytes": path.stat().st_size}
+        video_bytes = f"clip-{take['index']}".encode()
+        path.write_bytes(video_bytes)
+        take["raw"] = {
+            "path": str(path),
+            "sha256": sha256(video_bytes).hexdigest(),
+            "bytes": path.stat().st_size,
+        }
         take["status"] = "completed"
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     return manifest_path
@@ -313,8 +399,11 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     payload = _read(manifest_path)
     video = manifest_path.parent / "tiny.mp4"
     _tiny_video(video)
+    video_sha = sha256(video.read_bytes()).hexdigest()
     for take in payload["takes"]:
         take["raw"]["path"] = str(video)
+        take["raw"]["sha256"] = video_sha
+        take["raw"]["bytes"] = video.stat().st_size
         take["transcript_qa"] = {"final_word_end_seconds": 0.8, "passed": True}
         take["trim_window"] = {"start_seconds": 0.0, "end_seconds": 1.0, "source": "deepgram_word_end"}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -334,6 +423,10 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     assert report["passed"] is True
     assert calls[0][0]["image_bytes"] == Path(_read(manifest_path)["approved_master"]["path"]).read_bytes()
     assert calls[0][1]["image_bytes"] == Path(contact["path"]).read_bytes()
+
+    Path(contact["path"]).write_bytes(b"corrupt contact sheet")
+    rebuilt = build_contact_sheet(manifest_path)
+    assert rebuilt["sha256"] != contact["sha256"] or Path(rebuilt["path"]).read_bytes() != b"corrupt contact sheet"
 
     failing_manifest = _manifest_with_raw_takes(tmp_path / "visual-fail")
     failing_payload = _read(failing_manifest)
@@ -395,6 +488,39 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
     assert saved["stitch"]["metadata"]["stitch_segment_count"] == 4
     assert saved["caption"]["sha256"]
 
+    Path(saved["caption"]["captioned_path"]).write_bytes(b"corrupt caption")
+    repaired = compose_and_caption(
+        manifest_path,
+        _DeepgramByCall([SCRIPT]),
+        stitch_fn=stitch_fn,
+        caption_fn=caption_fn,
+    )
+    assert len(stitch_calls) == 2
+    assert len(caption_calls) == 2
+    assert Path(repaired["captioned_path"]).read_bytes() == b"captioned-video"
+
+
+def test_visual_qa_rechecks_approved_master_hash(tmp_path):
+    from app.features.shot_production.runner import build_contact_sheet, run_visual_qa
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    video = manifest_path.parent / "tiny.mp4"
+    _tiny_video(video)
+    for take in payload["takes"]:
+        take["raw"]["path"] = str(video)
+        take["raw"]["sha256"] = sha256(video.read_bytes()).hexdigest()
+        take["raw"]["bytes"] = video.stat().st_size
+        take["transcript_qa"] = {"final_word_end_seconds": 0.8, "passed": True}
+        take["trim_window"] = {"start_seconds": 0.0, "end_seconds": 1.0, "source": "deepgram_word_end"}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    build_contact_sheet(manifest_path)
+    master_path = Path(payload["approved_master"]["path"])
+    master_path.write_bytes(b"not the approved master")
+
+    with pytest.raises(ValidationError, match="approved master changed"):
+        run_visual_qa(manifest_path, evaluator=lambda *_args, **_kwargs: None)
+
 
 def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tmp_path):
     from app.features.shot_production.runner import reset_failed_take
@@ -402,6 +528,7 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
     manifest_path = _manifest_with_raw_takes(tmp_path)
     payload = _read(manifest_path)
     payload["takes"][2]["transcript_qa"] = {"passed": False}
+    payload["takes"][2]["status"] = "transcript_failed"
     payload["visual_qa"] = {"passed": False}
     payload["stitch"] = {"path": "old"}
     payload["caption"] = {"path": "old-caption"}
@@ -414,6 +541,7 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
     assert len(take["attempt_history"]) == 1
     assert take["attempt_history"][0]["reason"] == "identity drift"
     assert take["operation"] is None
+    assert take["submission"] is None
     assert take["raw"] is None
     assert take["transcript_qa"] is None
     assert reset["takes"][0]["raw"] is not None

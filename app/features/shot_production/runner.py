@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
+import fcntl
 from hashlib import sha256
 import json
 import os
@@ -13,7 +15,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 from urllib.parse import quote
 
 import google.auth
@@ -37,7 +39,10 @@ from app.features.shot_production.shot_deck import derive_shot_deck
 from app.features.shot_production.visual_qa import evaluate_visual_consistency
 
 
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
+APP_SCRIPT_SOURCE = "app.features.topics.agents.generate_dialog_scripts"
+TARGET_LENGTH_TIER = 16
+EXPECTED_PROVIDER_DURATIONS = [4, 6, 6, 4]
 
 
 def _utc_now() -> str:
@@ -46,6 +51,52 @@ def _utc_now() -> str:
 
 def _file_sha256(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
+
+
+def _canonical_sha256(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
+
+
+def _artifact_matches(record: Dict[str, Any], *, path_key: str = "path") -> bool:
+    path_value = record.get(path_key)
+    expected_sha = str(record.get("sha256") or "")
+    if not path_value or not expected_sha:
+        return False
+    path = Path(path_value)
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    expected_bytes = record.get("bytes")
+    if expected_bytes is not None:
+        try:
+            if stat.st_size != int(expected_bytes):
+                return False
+        except (TypeError, ValueError):
+            return False
+    try:
+        return _file_sha256(path) == expected_sha
+    except OSError:
+        return False
+
+
+def _clear_downstream_artifacts(payload: Dict[str, Any]) -> None:
+    for key in (
+        "contact_sheet",
+        "visual_qa",
+        "stitch",
+        "final_transcript",
+        "final_transcript_qa",
+        "caption",
+        "upload",
+    ):
+        payload.pop(key, None)
 
 
 def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
@@ -75,6 +126,39 @@ def _load_manifest(path: Path) -> Dict[str, Any]:
     return payload
 
 
+@contextmanager
+def _exclusive_file_lock(lock_path: Path, *, label: str) -> Iterator[None]:
+    """Hold a crash-safe, process-scoped lock without trusting stale lock-file contents."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValidationError(
+                f"{label} is already active for this manifest.",
+                {"lock_path": str(lock_path)},
+            ) from exc
+        try:
+            handle.seek(0)
+            handle.truncate()
+            json.dump({"pid": os.getpid(), "locked_at": _utc_now()}, handle)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def pilot_run_lock(manifest_path: Path) -> Iterator[None]:
+    """Prevent two CLI processes from mutating one paid run concurrently."""
+    manifest_path = Path(manifest_path)
+    lock_path = manifest_path.with_name(f".{manifest_path.name}.run.lock")
+    with _exclusive_file_lock(lock_path, label="Pilot run"):
+        yield
+
+
 def _beat_from_payload(payload: Dict[str, Any]) -> EditorialBeat:
     return EditorialBeat(
         index=int(payload["index"]),
@@ -83,6 +167,90 @@ def _beat_from_payload(payload: Dict[str, Any]) -> EditorialBeat:
         estimated_speech_seconds=float(payload["estimated_speech_seconds"]),
         provider_duration_seconds=int(payload["provider_duration_seconds"]),
     )
+
+
+def _script_is_in_generator_output(script_source: Dict[str, Any], script_text: str) -> bool:
+    generator_output = script_source.get("generator_output")
+    if not isinstance(generator_output, dict):
+        return False
+    return any(
+        candidate == script_text
+        for values in generator_output.values()
+        if isinstance(values, list)
+        for candidate in values
+        if isinstance(candidate, str)
+    )
+
+
+def _validate_approved_pilot_plan(
+    *,
+    script_source: Dict[str, Any],
+    script_text: str,
+    beats: list[EditorialBeat],
+) -> None:
+    if script_source.get("source") != APP_SCRIPT_SOURCE or not _script_is_in_generator_output(
+        script_source, script_text
+    ):
+        raise ValidationError("Pilot requires an app-generated script with intact generator provenance.")
+    if script_source.get("target_length_tier") != TARGET_LENGTH_TIER:
+        raise ValidationError("Pilot requires the approved 16-second script tier.")
+    durations = [beat.provider_duration_seconds for beat in beats]
+    if durations != EXPECTED_PROVIDER_DURATIONS:
+        raise ValidationError(
+            "Pilot script does not compile to the approved four-take duration plan.",
+            {"expected": EXPECTED_PROVIDER_DURATIONS, "actual": durations},
+        )
+
+
+def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    script = payload["script"]
+    master = payload["approved_master"]
+    return {
+        "approved_master": {
+            "sha256": master["sha256"],
+            "mime_type": master["mime_type"],
+        },
+        "script": {
+            "input_sha256": script["input_sha256"],
+            "text_sha256": script["text_sha256"],
+            "source": script["source"],
+            "target_length_tier": script["target_length_tier"],
+            "text": script["text"],
+            "planned_provider_durations": script["planned_provider_durations"],
+        },
+        "takes": [
+            {
+                "index": take["index"],
+                "beat": take["beat"],
+                "shot_sha256": take["shot"]["sha256"],
+                "model": take["model"],
+                "aspect_ratio": take["aspect_ratio"],
+                "duration_seconds": take["duration_seconds"],
+                "seed": take["seed"],
+                "prompt": take["prompt"],
+                "negative_prompt": take["negative_prompt"],
+            }
+            for take in payload["takes"]
+        ],
+    }
+
+
+def _validate_paid_request_contract(payload: Dict[str, Any]) -> None:
+    script = payload.get("script") or {}
+    if script.get("source") != APP_SCRIPT_SOURCE or script.get("target_length_tier") != TARGET_LENGTH_TIER:
+        raise ValidationError("Pilot paid request is no longer the approved app-generated 16-second plan.")
+    if script.get("planned_provider_durations") != EXPECTED_PROVIDER_DURATIONS:
+        raise ValidationError("Pilot paid request duration plan changed after approval.")
+    source_path = Path(script.get("path") or "")
+    if not source_path.is_file() or _file_sha256(source_path) != script.get("input_sha256"):
+        raise ValidationError("Pilot script input changed after approval.")
+    expected = str(payload.get("request_contract_sha256") or "")
+    actual = _canonical_sha256(_request_contract_payload(payload))
+    if not expected or actual != expected:
+        raise ValidationError(
+            "Pilot request contract changed after approval; no paid calls were made.",
+            {"expected_sha256": expected, "actual_sha256": actual},
+        )
 
 
 def initialize_pilot(
@@ -102,8 +270,9 @@ def initialize_pilot(
     script_input_path = Path(script_input_path).resolve()
     try:
         approved_bytes = approved_frame_path.read_bytes()
-        script_source = json.loads(script_input_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        script_input_bytes = script_input_path.read_bytes()
+        script_source = json.loads(script_input_bytes.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValidationError("Pilot input could not be loaded.", {"error": str(exc)}) from exc
     if not isinstance(script_source, dict):
         raise ValidationError("Pilot script input must be one JSON object.")
@@ -118,6 +287,11 @@ def initialize_pilot(
         mime_type="image/png",
     )
     beats = plan_editorial_beats(script_text)
+    _validate_approved_pilot_plan(
+        script_source=script_source,
+        script_text=script_text,
+        beats=beats,
+    )
     requests = compile_veo_take_requests(beats=beats, shot_deck=deck, base_seed=base_seed)
 
     run_dir = manifest_path.parent.resolve()
@@ -150,6 +324,7 @@ def initialize_pilot(
                 "seed": request.seed,
                 "prompt": request.prompt,
                 "negative_prompt": request.negative_prompt,
+                "submission": None,
                 "operation": None,
                 "raw": None,
                 "transcript": None,
@@ -172,14 +347,18 @@ def initialize_pilot(
         },
         "script": {
             "path": str(script_input_path),
+            "input_sha256": sha256(script_input_bytes).hexdigest(),
+            "text_sha256": sha256(script_text.encode("utf-8")).hexdigest(),
             "source": script_source.get("source"),
             "category": script_source.get("category"),
             "target_length_tier": script_source.get("target_length_tier"),
             "text": script_text,
+            "planned_provider_durations": [beat.provider_duration_seconds for beat in beats],
             "source_payload": script_source,
         },
         "takes": takes,
     }
+    payload["request_contract_sha256"] = _canonical_sha256(_request_contract_payload(payload))
     _atomic_write_json(manifest_path, payload)
     return payload
 
@@ -191,46 +370,83 @@ def _correlation_id(manifest: Dict[str, Any], take: Dict[str, Any]) -> str:
 def submit_pending_takes(manifest_path: Path, vertex_client: Any) -> Dict[str, Any]:
     """Submit only unaccepted takes and persist each paid operation immediately."""
     manifest_path = Path(manifest_path)
-    payload = _load_manifest(manifest_path)
-    for take in payload["takes"]:
-        if take.get("operation"):
-            continue
-        shot_path = Path(take["shot"]["path"])
-        if _file_sha256(shot_path) != take["shot"]["sha256"]:
-            raise ValidationError("Approved take frame hash changed before submission.", {"take_index": take["index"]})
-        try:
-            result = vertex_client.submit_image_video(
-                prompt=take["prompt"],
-                image_bytes=shot_path.read_bytes(),
-                mime_type=take["shot"]["mime_type"],
-                correlation_id=_correlation_id(payload, take),
-                aspect_ratio=take["aspect_ratio"],
-                duration_seconds=take["duration_seconds"],
-                model=take["model"],
-                negative_prompt=take["negative_prompt"],
-                seed=take["seed"],
-            )
-        except Exception as exc:
-            payload["status"] = "submit_failed"
-            payload["last_error"] = {"stage": "submit", "take_index": take["index"], "message": str(exc)}
+    submission_lock = manifest_path.with_name(f".{manifest_path.name}.submit.lock")
+    with _exclusive_file_lock(submission_lock, label="Pilot paid submission"):
+        payload = _load_manifest(manifest_path)
+        _validate_paid_request_contract(payload)
+        for take in payload["takes"]:
+            if take.get("operation"):
+                continue
+            prior_submission = take.get("submission") or {}
+            if prior_submission.get("state") in {"submitting", "unknown"}:
+                raise ValidationError(
+                    "Take has an unresolved Vertex submission; automatic paid retry is blocked.",
+                    {
+                        "take_index": take["index"],
+                        "correlation_id": prior_submission.get("correlation_id"),
+                        "required_action": "reconcile the provider operation or explicitly reset this failed take",
+                    },
+                )
+            shot_path = Path(take["shot"]["path"])
+            if not shot_path.is_file() or _file_sha256(shot_path) != take["shot"]["sha256"]:
+                raise ValidationError("Approved take frame hash changed before submission.", {"take_index": take["index"]})
+            correlation_id = _correlation_id(payload, take)
+            take["submission"] = {
+                "state": "submitting",
+                "correlation_id": correlation_id,
+                "started_at": _utc_now(),
+            }
+            take["status"] = "submitting"
+            payload["status"] = "submitting"
             payload["updated_at"] = _utc_now()
+            # Persist intent before crossing the paid boundary. A lost response then fails
+            # closed instead of being guessed safe to resubmit.
             _atomic_write_json(manifest_path, payload)
-            raise
-        operation_id = str(result.get("operation_id") or "").strip()
-        if not operation_id:
-            raise ValidationError("Vertex accepted response is missing an operation id.")
-        take["operation"] = {
-            "operation_id": operation_id,
-            "provider_model": result.get("provider_model") or take["model"],
-            "status": result.get("status") or "submitted",
-            "submitted_at": _utc_now(),
-        }
-        take["status"] = "submitted"
-        payload["status"] = "submitted"
-        payload["updated_at"] = _utc_now()
-        # This write deliberately happens before the next provider call.
-        _atomic_write_json(manifest_path, payload)
-    return payload
+            try:
+                result = vertex_client.submit_image_video(
+                    prompt=take["prompt"],
+                    image_bytes=shot_path.read_bytes(),
+                    mime_type=take["shot"]["mime_type"],
+                    correlation_id=correlation_id,
+                    aspect_ratio=take["aspect_ratio"],
+                    duration_seconds=take["duration_seconds"],
+                    model=take["model"],
+                    negative_prompt=take["negative_prompt"],
+                    seed=take["seed"],
+                )
+                operation_id = str(result.get("operation_id") or "").strip()
+                if not operation_id:
+                    raise ValidationError("Vertex response is missing an operation id.")
+            except Exception as exc:
+                take["submission"].update(
+                    {"state": "unknown", "failed_at": _utc_now(), "error": str(exc)}
+                )
+                take["status"] = "submission_unknown"
+                payload["status"] = "submission_unknown"
+                payload["last_error"] = {
+                    "stage": "submit",
+                    "take_index": take["index"],
+                    "message": str(exc),
+                }
+                payload["updated_at"] = _utc_now()
+                _atomic_write_json(manifest_path, payload)
+                raise
+            accepted_at = _utc_now()
+            take["operation"] = {
+                "operation_id": operation_id,
+                "provider_model": result.get("provider_model") or take["model"],
+                "status": result.get("status") or "submitted",
+                "submitted_at": accepted_at,
+            }
+            take["submission"].update(
+                {"state": "accepted", "operation_id": operation_id, "accepted_at": accepted_at}
+            )
+            take["status"] = "submitted"
+            payload["status"] = "submitted"
+            payload["updated_at"] = _utc_now()
+            # This write deliberately happens before the next provider call.
+            _atomic_write_json(manifest_path, payload)
+        return payload
 
 
 def load_video_uri(video_uri: str) -> bytes:
@@ -284,8 +500,15 @@ def poll_and_download_takes(
         pending = []
         for take in payload["takes"]:
             raw = take.get("raw") or {}
-            if raw.get("path") and Path(raw["path"]).is_file():
+            if raw and _artifact_matches(raw):
                 continue
+            if raw:
+                take["raw"] = None
+                take["transcript"] = None
+                take["transcript_qa"] = None
+                take["trim_window"] = None
+                take["status"] = "submitted"
+                _clear_downstream_artifacts(payload)
             operation = take.get("operation") or {}
             operation_id = operation.get("operation_id")
             if not operation_id:
@@ -353,14 +576,18 @@ def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> 
     beats = [_beat_from_payload(take["beat"]) for take in payload["takes"]]
     failed = []
     for take, beat in zip(payload["takes"], beats):
+        raw = take.get("raw") or {}
+        if not _artifact_matches(raw):
+            raise ValidationError(
+                "Raw take artifact failed its recorded checksum; rerun polling to recover it.",
+                {"take_index": take["index"]},
+            )
         existing_qa = take.get("transcript_qa") or {}
         if existing_qa:
             if not existing_qa.get("passed"):
                 failed.append(take["index"])
             continue
-        raw_path = Path((take.get("raw") or {}).get("path") or "")
-        if not raw_path.is_file():
-            raise ValidationError("Raw take is missing before transcription.", {"take_index": take["index"]})
+        raw_path = Path(raw["path"])
         transcript = deepgram_client.transcribe(
             audio_bytes=raw_path.read_bytes(),
             correlation_id=f"{_correlation_id(payload, take)}_transcript",
@@ -408,11 +635,20 @@ def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     existing = payload.get("contact_sheet") or {}
-    if existing.get("path") and Path(existing["path"]).is_file():
+    if existing and _artifact_matches(existing):
         return existing
+    if existing:
+        payload.pop("contact_sheet", None)
+        payload.pop("visual_qa", None)
+        payload.pop("upload", None)
     frame_dir = manifest_path.parent / "qa" / "frames"
     per_take_frames = []
     for take in payload["takes"]:
+        if not _artifact_matches(take.get("raw") or {}):
+            raise ValidationError(
+                "Contact sheet requires checksum-verified raw takes.",
+                {"take_index": take["index"]},
+            )
         qa = take.get("transcript_qa") or {}
         if not qa.get("passed"):
             raise ValidationError("Contact sheet requires transcript-passed takes.", {"take_index": take["index"]})
@@ -452,6 +688,7 @@ def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
     contact = {
         "path": str(contact_path),
         "sha256": _file_sha256(contact_path),
+        "bytes": contact_path.stat().st_size,
         "frames": frame_records,
         "created_at": _utc_now(),
     }
@@ -471,6 +708,12 @@ def run_visual_qa(
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
+    master_path = Path(payload["approved_master"]["path"])
+    if not master_path.is_file() or _file_sha256(master_path) != payload["approved_master"]["sha256"]:
+        raise ValidationError("Pilot approved master changed after approval.")
+    contact = payload.get("contact_sheet") or {}
+    if not _artifact_matches(contact):
+        raise ValidationError("Pilot contact sheet failed its recorded checksum; rebuild it before visual QA.")
     existing_report = payload.get("visual_qa") or {}
     if existing_report:
         if existing_report.get("passed"):
@@ -479,11 +722,7 @@ def run_visual_qa(
             "Pilot visual QA failed.",
             {"blocking_reasons": list(existing_report.get("blocking_reasons") or [])},
         )
-    contact = payload.get("contact_sheet") or {}
     contact_path = Path(contact.get("path") or "")
-    master_path = Path(payload["approved_master"]["path"])
-    if not contact_path.is_file() or not master_path.is_file():
-        raise ValidationError("Visual QA inputs are missing.")
     report = evaluator(
         {"mime_type": payload["approved_master"]["mime_type"], "image_bytes": master_path.read_bytes()},
         {"mime_type": "image/jpeg", "image_bytes": contact_path.read_bytes()},
@@ -529,13 +768,21 @@ def compose_and_caption(
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     existing_caption = payload.get("caption") or {}
-    if existing_caption.get("captioned_path") and Path(existing_caption["captioned_path"]).is_file():
+    if existing_caption and _artifact_matches(existing_caption, path_key="captioned_path"):
         return existing_caption
+    if existing_caption:
+        payload.pop("caption", None)
+        payload.pop("upload", None)
+        payload["status"] = "caption_rebuild_required"
+        payload["updated_at"] = _utc_now()
+        _atomic_write_json(manifest_path, payload)
     if not (payload.get("visual_qa") or {}).get("passed"):
         raise ValidationError("Composition requires a passed visual QA gate.")
     ordered = sorted(payload["takes"], key=lambda take: take["index"])
     if any(not (take.get("transcript_qa") or {}).get("passed") or not take.get("trim_window") for take in ordered):
         raise ValidationError("Composition requires transcript-passed takes and trim windows.")
+    if any(not _artifact_matches(take.get("raw") or {}) for take in ordered):
+        raise ValidationError("Composition requires checksum-verified raw takes.")
     segment_videos = [Path(take["raw"]["path"]).read_bytes() for take in ordered]
     trim_windows = [take["trim_window"] for take in ordered]
     stitched_bytes, stitch_metadata = stitch_fn(
@@ -604,9 +851,11 @@ def compose_and_caption(
 def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
+    caption = payload.get("caption") or {}
+    if not _artifact_matches(caption, path_key="captioned_path"):
+        raise ValidationError("Captioned pilot artifact failed its recorded checksum before upload.")
     if payload.get("upload"):
         return payload["upload"]
-    caption = payload.get("caption") or {}
     captioned_path = Path(caption.get("captioned_path") or "")
     if not captioned_path.is_file():
         raise ValidationError("Captioned pilot video is missing before upload.")
@@ -630,6 +879,23 @@ def reset_failed_take(manifest_path: Path, *, index: int, reason: str) -> Dict[s
     if len(matches) != 1:
         raise ValidationError("Retry take index does not exist.", {"take_index": index})
     take = matches[0]
+    take_status = str(take.get("status") or "")
+    terminal_take_failure = take_status in {"submission_unknown", "failed", "transcript_failed"}
+    failed_visual_gate = (
+        take_status == "transcribed" and (payload.get("visual_qa") or {}).get("passed") is False
+    )
+    failed_final_transcript = (
+        take_status == "transcribed"
+        and payload.get("status") == "final_transcript_failed"
+        and (payload.get("final_transcript_qa") or {}).get("passed") is False
+    )
+    if not (terminal_take_failure or failed_visual_gate or failed_final_transcript):
+        raise ValidationError(
+            "Take is not in a retryable failed state; refusing to orphan an existing paid operation.",
+            {"take_index": index, "take_status": take_status, "run_status": payload.get("status")},
+        )
+    if not str(reason or "").strip():
+        raise ValidationError("Retry requires an operator reason.", {"take_index": index})
     archived = json.loads(json.dumps(take))
     archived.pop("attempt_history", None)
     archived["reason"] = str(reason or "manual retry")
@@ -639,15 +905,13 @@ def reset_failed_take(manifest_path: Path, *, index: int, reason: str) -> Dict[s
     take["attempt"] = int(take.get("attempt") or 1) + 1
     take["attempt_history"] = history
     take["status"] = "planned"
+    take["submission"] = None
     take["operation"] = None
     take["raw"] = None
     take["transcript"] = None
     take["transcript_qa"] = None
     take["trim_window"] = None
-    for downstream_key in (
-        "contact_sheet", "visual_qa", "stitch", "final_transcript", "final_transcript_qa", "caption", "upload"
-    ):
-        payload.pop(downstream_key, None)
+    _clear_downstream_artifacts(payload)
     payload["status"] = "retry_planned"
     payload["updated_at"] = _utc_now()
     _atomic_write_json(manifest_path, payload)
@@ -660,6 +924,7 @@ __all__ = [
     "initialize_pilot",
     "load_video_uri",
     "poll_and_download_takes",
+    "pilot_run_lock",
     "reset_failed_take",
     "run_visual_qa",
     "submit_pending_takes",

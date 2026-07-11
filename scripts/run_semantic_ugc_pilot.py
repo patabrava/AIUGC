@@ -17,6 +17,7 @@ from app.features.shot_production.runner import (  # noqa: E402
     build_contact_sheet,
     compose_and_caption,
     initialize_pilot,
+    pilot_run_lock,
     poll_and_download_takes,
     reset_failed_take,
     run_visual_qa,
@@ -42,41 +43,56 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=1800.0)
     parser.add_argument("--visual-model")
     parser.add_argument("--upload", action="store_true")
+    parser.add_argument(
+        "--confirm-paid-plan",
+        action="store_true",
+        help="Explicitly approve submission of every still-pending Veo take in this manifest.",
+    )
     return parser
 
 
 def main() -> int:
     args = _parser().parse_args()
     manifest_path = args.manifest.resolve()
-    if manifest_path.exists():
-        if not args.resume:
-            raise SystemExit(f"Manifest already exists; rerun with --resume: {manifest_path}")
-    else:
-        initialize_pilot(
-            manifest_path=manifest_path,
-            approved_frame_path=args.approved_frame.resolve(),
-            expected_sha256=args.approved_sha,
-            script_input_path=args.script_input.resolve(),
-            base_seed=args.base_seed,
+    with pilot_run_lock(manifest_path):
+        if manifest_path.exists():
+            if not args.resume:
+                raise SystemExit(f"Manifest already exists; rerun with --resume: {manifest_path}")
+        else:
+            initialize_pilot(
+                manifest_path=manifest_path,
+                approved_frame_path=args.approved_frame.resolve(),
+                expected_sha256=args.approved_sha,
+                script_input_path=args.script_input.resolve(),
+                base_seed=args.base_seed,
+            )
+
+        for take_index in args.retry_take:
+            reset_failed_take(manifest_path, index=take_index, reason=args.retry_reason)
+
+        planned = json.loads(manifest_path.read_text(encoding="utf-8"))
+        pending = [take["index"] for take in planned["takes"] if not take.get("operation")]
+        if pending and not args.confirm_paid_plan:
+            raise SystemExit(
+                "Paid Veo submission is paused for explicit approval. "
+                f"Review {manifest_path}; pending take indexes are {pending}. "
+                "Resume with --confirm-paid-plan when approved."
+            )
+
+        vertex = get_vertex_ai_client()
+        deepgram = get_deepgram_client()
+        submit_pending_takes(manifest_path, vertex)
+        poll_and_download_takes(
+            manifest_path,
+            vertex,
+            poll_interval_seconds=args.poll_interval,
+            timeout_seconds=args.timeout,
         )
-
-    for take_index in args.retry_take:
-        reset_failed_take(manifest_path, index=take_index, reason=args.retry_reason)
-
-    vertex = get_vertex_ai_client()
-    deepgram = get_deepgram_client()
-    submit_pending_takes(manifest_path, vertex)
-    poll_and_download_takes(
-        manifest_path,
-        vertex,
-        poll_interval_seconds=args.poll_interval,
-        timeout_seconds=args.timeout,
-    )
-    transcribe_and_validate_takes(manifest_path, deepgram)
-    build_contact_sheet(manifest_path)
-    run_visual_qa(manifest_path, model=args.visual_model)
-    caption = compose_and_caption(manifest_path, deepgram)
-    upload = upload_final(manifest_path) if args.upload else None
+        transcribe_and_validate_takes(manifest_path, deepgram)
+        build_contact_sheet(manifest_path)
+        run_visual_qa(manifest_path, model=args.visual_model)
+        caption = compose_and_caption(manifest_path, deepgram)
+        upload = upload_final(manifest_path) if args.upload else None
     print(
         json.dumps(
             {

@@ -29,11 +29,14 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "music",
     "background voices",
     "extra speech",
+    "hands entering frame",
+    "repeated dialogue",
+    "english speech",
 )
 EFFECTIVE_NEGATIVE_PROMPT = (
     "face change, age change, hair change, wardrobe change, room change, extra person, "
     "camera zoom, push-in, reframe, posture reset, generated text, subtitles, music, "
-    "background voices, extra speech"
+    "background voices, extra speech, hands entering frame, repeated dialogue, English speech"
 )
 
 
@@ -70,9 +73,10 @@ def build_veo_take_prompt(beat: EditorialBeat) -> str:
         "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's identity and hair, "
         "cream knit sweater, room, posture, camera position, and framing exactly as shown. Continue as "
         "restrained, natural phone-camera UGC with a subtle conversational expression, subtle blinking, and "
-        "minimal head movement. "
-        f"She says this exact German beat once in her native German voice: {dialogue} "
-        "After the final word, naturally stop speaking and hold the unchanged frame with quiet room tone."
+        "minimal head movement. Use the same warm adult German female voice across every take, speaking native German "
+        "with natural conversational pacing and close smartphone microphone sound. She says exactly this German beat once: "
+        f"“{dialogue}” Do not speak any other words or any English. After the final word, naturally stop speaking, "
+        "close her mouth, and keep quiet eye contact. Do not freeze or perform an artificial end pose."
     )
 
 

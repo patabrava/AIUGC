@@ -184,6 +184,10 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         assert "gestures" not in request.prompt.lower()
         assert "subtle blinking" in request.prompt.lower()
         assert "minimal head movement" in request.prompt.lower()
+        assert "same warm adult german female voice" in request.prompt.lower()
+        assert "do not speak any other words" in request.prompt.lower()
+        assert "do not freeze" in request.prompt.lower()
+        assert "hold the unchanged frame" not in request.prompt.lower()
         assert request.negative_prompt == EFFECTIVE_NEGATIVE_PROMPT
         assert request.negative_prompt.strip()
 
@@ -216,6 +220,9 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         "music",
         "background voices",
         "extra speech",
+        "hands entering frame",
+        "repeated dialogue",
+        "english speech",
     )
     negative = EFFECTIVE_NEGATIVE_PROMPT.lower()
     assert all(change in negative for change in blocked_changes)
