@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from pydantic import ValidationError as PydanticValidationError
 
-from app.core.errors import FlowForgeException, ThirdPartyError
+from app.core.errors import FlowForgeException, ThirdPartyError, ValidationError
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -245,6 +245,62 @@ def test_gemini_image_generation_accepts_ordered_reference_images():
         b"actor-three-quarter",
         b"location",
     ]
+
+
+def test_gemini_text_generation_accepts_ordered_input_images():
+    client = LLMClient()
+    client.gemini_provider = "gemini_api"
+    client.gemini_api_fallback_enabled = True
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [{"content": {"parts": [{"text": "accepted"}]}}]
+    }
+
+    with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
+        assert client.generate_gemini_text(
+            prompt="Compare Image 1 with Image 2.",
+            input_images=[
+                {"mime_type": "image/png", "image_bytes": b"approved-master"},
+                {"mime_type": "image/jpeg", "image_bytes": b"contact-sheet"},
+            ],
+        ) == "accepted"
+
+    parts = mock_post.call_args.kwargs["json"]["contents"][0]["parts"]
+    assert parts == [
+        {"text": "Compare Image 1 with Image 2."},
+        {
+            "inlineData": {
+                "mimeType": "image/png",
+                "data": base64.b64encode(b"approved-master").decode("ascii"),
+            }
+        },
+        {
+            "inlineData": {
+                "mimeType": "image/jpeg",
+                "data": base64.b64encode(b"contact-sheet").decode("ascii"),
+            }
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "invalid_image",
+    [
+        {"mime_type": "application/octet-stream", "image_bytes": b"master"},
+        {"mime_type": "image/png", "image_bytes": b""},
+    ],
+)
+def test_gemini_text_generation_rejects_invalid_input_images(invalid_image):
+    client = LLMClient()
+    client.gemini_provider = "gemini_api"
+    client.gemini_api_fallback_enabled = True
+
+    with pytest.raises(ValidationError, match="input images"):
+        client.generate_gemini_text(
+            prompt="Compare Image 1 with Image 2.",
+            input_images=[invalid_image],
+        )
 
 
 def test_blog_content_from_llm_requires_real_intro_and_closing():

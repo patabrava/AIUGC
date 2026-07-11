@@ -441,6 +441,66 @@ def test_generate_grounded_research_returns_text_and_chunks(monkeypatch):
     }
 
 
+def test_vertex_gemini_text_generation_preserves_ordered_input_images(monkeypatch):
+    import base64
+
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    captured = {}
+    client = VertexGeminiClient()
+
+    def _fake_post_generate_content(**kwargs):
+        captured.update(kwargs)
+        return {
+            "candidates": [
+                {"content": {"parts": [{"text": "accepted"}]}}
+            ]
+        }
+
+    monkeypatch.setattr(client, "_post_generate_content", _fake_post_generate_content)
+
+    assert client.generate_text(
+        prompt="Compare Image 1 with Image 2.",
+        input_images=[
+            {"mime_type": "image/png", "image_bytes": b"approved-master"},
+            {"mime_type": "image/jpeg", "image_bytes": b"contact-sheet"},
+        ],
+    ) == "accepted"
+
+    assert captured["payload"]["contents"][0]["parts"] == [
+        {"text": "Compare Image 1 with Image 2."},
+        {
+            "inlineData": {
+                "mimeType": "image/png",
+                "data": base64.b64encode(b"approved-master").decode("ascii"),
+            }
+        },
+        {
+            "inlineData": {
+                "mimeType": "image/jpeg",
+                "data": base64.b64encode(b"contact-sheet").decode("ascii"),
+            }
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "invalid_image",
+    [
+        {"mime_type": "application/octet-stream", "image_bytes": b"master"},
+        {"mime_type": "image/png", "image_bytes": b""},
+    ],
+)
+def test_vertex_gemini_text_generation_rejects_invalid_input_images(invalid_image):
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    with pytest.raises(ValidationError, match="input images"):
+        VertexGeminiClient().generate_text(
+            prompt="Compare Image 1 with Image 2.",
+            input_images=[invalid_image],
+        )
+
+
 def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monkeypatch):
     import base64
 
@@ -503,6 +563,37 @@ def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monke
             }
         },
     ]
+
+
+def test_llm_vertex_text_route_forwards_ordered_input_images(monkeypatch):
+    from app.adapters.llm_client import LLMClient
+
+    ordered_inputs = [
+        {"mime_type": "image/png", "image_bytes": b"approved-master"},
+        {"mime_type": "image/jpeg", "image_bytes": b"contact-sheet"},
+    ]
+    vertex_client = MagicMock()
+    vertex_client.generate_text.return_value = "accepted"
+    monkeypatch.setattr("app.adapters.llm_client.get_vertex_gemini_client", lambda: vertex_client)
+
+    client = LLMClient()
+    client.gemini_provider = "vertex"
+
+    assert client.generate_gemini_text(
+        prompt="Compare Image 1 with Image 2.",
+        model="gemini-2.5-flash",
+        temperature=0,
+        input_images=ordered_inputs,
+    ) == "accepted"
+    vertex_client.generate_text.assert_called_once_with(
+        prompt="Compare Image 1 with Image 2.",
+        system_prompt=None,
+        model="gemini-2.5-flash",
+        max_tokens=None,
+        temperature=0,
+        thinking_budget=None,
+        input_images=ordered_inputs,
+    )
 
 
 def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):

@@ -125,6 +125,31 @@ class LLMClient:
         if not raw_model:
             return "gemini-2.5-flash-image"
         return GEMINI_IMAGE_MODEL_ALIASES.get(raw_model.lower(), raw_model)
+
+    def _build_gemini_content_parts(
+        self,
+        *,
+        text: str,
+        input_images: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        parts: List[Dict[str, Any]] = [{"text": text}]
+        for index, image in enumerate(input_images or [], start=1):
+            mime_type = str(image.get("mime_type") or "").strip()
+            image_bytes = image.get("image_bytes")
+            if not mime_type.startswith("image/") or not isinstance(image_bytes, bytes) or not image_bytes:
+                raise ValidationError(
+                    message="Gemini input images require non-empty bytes and an image MIME type.",
+                    details={"image_index": index, "mime_type": mime_type},
+                )
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": mime_type,
+                        "data": base64.b64encode(image_bytes).decode("ascii"),
+                    }
+                }
+            )
+        return parts
     
     def generate_openai(
         self,
@@ -536,6 +561,7 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         thinking_budget: Optional[int] = None,
+        input_images: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Generate plain text using Gemini generateContent."""
         if self.gemini_provider == "vertex":
@@ -546,6 +572,7 @@ class LLMClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 thinking_budget=thinking_budget,
+                input_images=input_images,
             )
 
         target_model = model or self.default_gemini_model
@@ -554,7 +581,10 @@ class LLMClient:
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": full_prompt}],
+                    "parts": self._build_gemini_content_parts(
+                        text=full_prompt,
+                        input_images=input_images,
+                    ),
                 }
             ]
         }
@@ -728,23 +758,10 @@ class LLMClient:
 
         target_model = self._resolve_gemini_image_model(model)
         full_prompt = self._merge_prompts(system_prompt, prompt)
-        parts: List[Dict[str, Any]] = [{"text": full_prompt}]
-        for index, image in enumerate(input_images or [], start=1):
-            mime_type = str(image.get("mime_type") or "").strip()
-            image_bytes = image.get("image_bytes")
-            if not mime_type.startswith("image/") or not isinstance(image_bytes, bytes) or not image_bytes:
-                raise ValidationError(
-                    message="Gemini input images require non-empty bytes and an image MIME type.",
-                    details={"image_index": index, "mime_type": mime_type},
-                )
-            parts.append(
-                {
-                    "inlineData": {
-                        "mimeType": mime_type,
-                        "data": base64.b64encode(image_bytes).decode("ascii"),
-                    }
-                }
-            )
+        parts = self._build_gemini_content_parts(
+            text=full_prompt,
+            input_images=input_images,
+        )
         payload: Dict[str, Any] = {
             "contents": [
                 {

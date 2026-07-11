@@ -101,6 +101,7 @@ class VertexGeminiClient:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         thinking_budget: Optional[int] = None,
+        input_images: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         target_model = model or self._settings.vertex_gemini_model
         payload = self._build_generate_content_payload(
@@ -109,6 +110,7 @@ class VertexGeminiClient:
             max_tokens=max_tokens,
             temperature=temperature,
             thinking_budget=thinking_budget,
+            input_images=input_images,
         )
         data = self._post_generate_content(
             model=target_model,
