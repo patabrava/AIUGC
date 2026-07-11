@@ -25,10 +25,10 @@ from app.adapters.grounding_url_resolver import (
 logger = get_logger(__name__)
 
 GEMINI_IMAGE_MODEL_ALIASES = {
-    "nanobanana-2": "gemini-3.1-flash-image",
-    "nano-banana-2": "gemini-3.1-flash-image",
-    "nano banana 2": "gemini-3.1-flash-image",
-    "nanobanana2": "gemini-3.1-flash-image",
+    "nanobanana-2": "gemini-2.5-flash-image",
+    "nano-banana-2": "gemini-2.5-flash-image",
+    "nano banana 2": "gemini-2.5-flash-image",
+    "nanobanana2": "gemini-2.5-flash-image",
     "nanobananapro": "gemini-3-pro-image-preview",
     "nano-banana-pro": "gemini-3-pro-image-preview",
     "nano banana pro": "gemini-3-pro-image-preview",

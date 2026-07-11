@@ -141,16 +141,35 @@ def test_submit_image_video_accepts_negative_prompt():
         client = _fresh_client()
         client.submit_image_video(
             prompt="A locked talking-head continuation.",
-            image_bytes=b"fake-bytes",
-            mime_type="image/jpeg",
+            image_bytes=b"approved-frame",
+            mime_type="image/png",
             correlation_id="corr-2",
             aspect_ratio="9:16",
-            duration_seconds=8,
+            duration_seconds=6,
             negative_prompt="different room, camera zoom, changed wardrobe",
+            seed=240712,
         )
 
-    params = mock_http.post.call_args.kwargs["json"]["parameters"]
-    assert params["negativePrompt"] == "different room, camera zoom, changed wardrobe"
+    payload = mock_http.post.call_args.kwargs["json"]
+    assert payload == {
+        "instances": [
+            {
+                "prompt": "A locked talking-head continuation.",
+                "image": {
+                    "bytesBase64Encoded": "YXBwcm92ZWQtZnJhbWU=",
+                    "mimeType": "image/png",
+                },
+            }
+        ],
+        "parameters": {
+            "aspectRatio": "9:16",
+            "durationSeconds": 6,
+            "negativePrompt": "different room, camera zoom, changed wardrobe",
+            "seed": 240712,
+        },
+    }
+    instance = payload["instances"][0]
+    assert not ({"referenceImages", "video", "lastFrame"} & set(instance))
 
 
 def test_submit_text_video_accepts_reference_images():
@@ -453,7 +472,7 @@ def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monke
 
     client.generate_image(
         prompt="Compose the actor in the room.",
-        model="gemini-3-pro-image-preview",
+        model="gemini-3.1-flash-image",
         aspect_ratio="9:16",
         input_images=[
             {"mime_type": "image/png", "image_bytes": b"actor-front"},
@@ -484,3 +503,42 @@ def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monke
             }
         },
     ]
+
+
+def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):
+    from app.adapters.llm_client import LLMClient
+
+    ordered_inputs = [
+        {"mime_type": "image/png", "image_bytes": b"actor-front"},
+        {"mime_type": "image/jpeg", "image_bytes": b"actor-three-quarter"},
+        {"mime_type": "image/png", "image_bytes": b"location"},
+    ]
+    vertex_client = MagicMock()
+    vertex_client.generate_image.return_value = {
+        "image_bytes": b"output",
+        "mime_type": "image/png",
+        "model": "gemini-3.1-flash-image",
+    }
+    monkeypatch.setattr("app.adapters.llm_client.get_vertex_gemini_client", lambda: vertex_client)
+
+    client = LLMClient()
+    client.gemini_provider = "vertex"
+    result = client.generate_gemini_image(
+        prompt="Compose the actor in the room.",
+        model="gemini-3.1-flash-image",
+        aspect_ratio="9:16",
+        image_size="2K",
+        input_images=ordered_inputs,
+    )
+
+    assert result["model"] == "gemini-3.1-flash-image"
+    vertex_client.generate_image.assert_called_once_with(
+        prompt="Compose the actor in the room.",
+        system_prompt=None,
+        model="gemini-3.1-flash-image",
+        max_tokens=None,
+        temperature=None,
+        aspect_ratio="9:16",
+        image_size="2K",
+        input_images=ordered_inputs,
+    )

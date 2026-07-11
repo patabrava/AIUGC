@@ -131,6 +131,7 @@ class VertexAIClient:
         model: Optional[str] = None,
         use_fast_model: bool = False,
         negative_prompt: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         model_name = model or (_DEFAULT_VERTEX_FAST_MODEL if use_fast_model else _DEFAULT_VERTEX_MODEL)
@@ -145,6 +146,7 @@ class VertexAIClient:
             image_base64=image_b64,
             image_mime_type=mime_type,
             negative_prompt=negative_prompt,
+            seed=seed,
         )
 
         self._log_request(

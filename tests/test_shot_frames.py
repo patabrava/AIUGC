@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from hashlib import sha256
 
 import pytest
 
@@ -33,16 +33,16 @@ class FakeLLMClient:
         return {
             "image_bytes": f"candidate-{index}".encode(),
             "mime_type": "image/png",
-            "model": "gemini-3-pro-image-preview",
+            "model": "gemini-3.1-flash-image",
             "aspect_ratio": kwargs["aspect_ratio"],
             "image_size": kwargs["image_size"],
         }
 
 
-def _reference(role: str, payload: bytes):
+def _reference(role: str, payload: bytes, mime_type: str = "image/png"):
     from app.features.shot_frames.service import ShotFrameReference
 
-    return ShotFrameReference(role=role, mime_type="image/png", image_bytes=payload)
+    return ShotFrameReference(role=role, mime_type=mime_type, image_bytes=payload)
 
 
 def test_raw_camera_system_prompt_is_preserved_as_prompt_writer_instruction():
@@ -138,13 +138,74 @@ def test_generate_shot_frame_candidates_requires_exactly_two_actor_references(ac
         )
 
 
-def test_attached_prompt_matches_repo_copy_byte_for_byte():
-    attachment = Path(
-        "/Users/camiloecheverri/.codex/attachments/b7fdc676-8c1c-47e0-a2ab-4cf93efad6c5/pasted-text.txt"
-    )
-    if not attachment.exists():
-        pytest.skip("Codex attachment is not present outside the authoring environment")
+@pytest.mark.parametrize(
+    ("actor_roles", "location_role"),
+    [
+        (("actor_three_quarter", "actor_front"), "location"),
+        (("actor_front", "location"), "actor_three_quarter"),
+        (("actor_front", "actor_three_quarter"), "actor_front"),
+    ],
+)
+def test_generate_shot_frame_candidates_rejects_swapped_or_wrong_reference_roles(
+    actor_roles,
+    location_role,
+):
+    from app.features.shot_frames.service import generate_shot_frame_candidates
+
+    client = FakeLLMClient()
+    with pytest.raises(ValidationError, match="roles must be explicit and ordered"):
+        generate_shot_frame_candidates(
+            script="Script",
+            actor_name="Actor",
+            character_description=LONG_CHARACTER_DESCRIPTION,
+            scene_description="Room",
+            wardrobe_description="Sweater",
+            actor_references=[
+                _reference(actor_roles[0], b"front"),
+                _reference(actor_roles[1], b"three-quarter"),
+            ],
+            location_reference=_reference(location_role, b"location"),
+            candidate_count=1,
+            llm_client=client,
+        )
+    assert client.text_calls == []
+    assert client.image_calls == []
+
+
+@pytest.mark.parametrize(
+    "bad_reference",
+    [
+        _reference("actor_front", b"front", mime_type="text/plain"),
+        _reference("actor_front", b""),
+    ],
+)
+def test_generate_shot_frame_candidates_rejects_invalid_mime_or_empty_bytes(bad_reference):
+    from app.features.shot_frames.service import generate_shot_frame_candidates
+
+    client = FakeLLMClient()
+    with pytest.raises(ValidationError, match="non-empty image bytes"):
+        generate_shot_frame_candidates(
+            script="Script",
+            actor_name="Actor",
+            character_description=LONG_CHARACTER_DESCRIPTION,
+            scene_description="Room",
+            wardrobe_description="Sweater",
+            actor_references=[
+                bad_reference,
+                _reference("actor_three_quarter", b"three-quarter"),
+            ],
+            location_reference=_reference("location", b"location"),
+            candidate_count=1,
+            llm_client=client,
+        )
+    assert client.text_calls == []
+    assert client.image_calls == []
+
+
+def test_raw_camera_prompt_matches_checked_in_sha256():
 
     from app.features.shot_frames.service import RAW_CAMERA_SYSTEM_PROMPT_PATH
 
-    assert RAW_CAMERA_SYSTEM_PROMPT_PATH.read_bytes().rstrip(b"\n") == attachment.read_bytes().rstrip(b"\n")
+    assert sha256(RAW_CAMERA_SYSTEM_PROMPT_PATH.read_bytes()).hexdigest() == (
+        "7f01564d97e45cec5acf2aa661841e52952a96e7e0eb04550de2b649a9ebb120"
+    )
