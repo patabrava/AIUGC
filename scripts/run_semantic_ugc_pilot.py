@@ -20,6 +20,7 @@ from app.features.shot_production.runner import (  # noqa: E402
     initialize_pilot,
     pilot_run_lock,
     reset_failed_take,
+    reset_visual_failed_takes,
     revise_failed_beat,
     run_visual_qa,
     transcribe_and_validate_takes,
@@ -84,13 +85,22 @@ def main() -> int:
                 reason=args.revision_reason,
             )
 
-        for take_index in args.retry_take:
-            reset_failed_take(
+        retry_snapshot = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if len(args.retry_take) > 1 and (retry_snapshot.get("visual_qa") or {}).get("passed") is False:
+            reset_visual_failed_takes(
                 manifest_path,
-                index=take_index,
+                indexes=args.retry_take,
                 reason=args.retry_reason,
                 retry_guidance=args.retry_guidance,
             )
+        else:
+            for take_index in args.retry_take:
+                reset_failed_take(
+                    manifest_path,
+                    index=take_index,
+                    reason=args.retry_reason,
+                    retry_guidance=args.retry_guidance,
+                )
 
         planned = json.loads(manifest_path.read_text(encoding="utf-8"))
         pending = [take["index"] for take in planned["takes"] if not take.get("operation")]

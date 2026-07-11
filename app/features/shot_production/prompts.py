@@ -32,11 +32,15 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "hands entering frame",
     "repeated dialogue",
     "english speech",
+    "logos",
+    "watermarks",
+    "gibberish text",
 )
 EFFECTIVE_NEGATIVE_PROMPT = (
     "face change, age change, hair change, wardrobe change, room change, extra person, "
     "camera zoom, push-in, reframe, posture reset, generated text, subtitles, music, "
-    "background voices, extra speech, hands entering frame, repeated dialogue, English speech"
+    "background voices, extra speech, hands entering frame, repeated dialogue, English speech, "
+    "logos, watermarks, gibberish text"
 )
 
 
@@ -76,7 +80,8 @@ def build_veo_take_prompt(beat: EditorialBeat) -> str:
         "minimal head movement. Use the same warm adult German female voice across every take, speaking native German "
         "with natural conversational pacing and close smartphone microphone sound. She says exactly this German beat once: "
         f"“{dialogue}” Do not speak any other words or any English. After the final word, naturally stop speaking, "
-        "close her mouth, and keep quiet eye contact. Do not freeze or perform an artificial end pose."
+        "close her mouth, and keep quiet eye contact. Do not freeze or perform an artificial end pose. Keep every frame "
+        "completely free of on-screen text: no captions, subtitles, logos, watermarks, letters, symbols, or gibberish glyphs."
     )
 
 

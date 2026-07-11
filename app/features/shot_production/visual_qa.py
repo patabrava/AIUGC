@@ -29,9 +29,16 @@ _VISUAL_QA_PROMPT = """Image 1 is the approved master reference.
 Image 2 is the labeled multi-frame contact sheet extracted from the generated takes.
 
 Compare only the supplied references and judge whether they show the same person with consistent apparent age,
-hair, cream sweater wardrobe, room and daylight, stable framing, and no visual artifacts. Report every observed
-difference, including non-blocking natural expression or pose changes. This is visual continuity comparison only:
-make no face-recognition identification beyond the supplied references.
+hair, cream sweater wardrobe, room and daylight, stable UGC framing, and no visual artifacts. Inspect every labeled
+frame carefully, especially the lower third. Set no_artifacts=false if any raw frame contains baked-in captions,
+subtitles, logos, watermarks, letters, symbols, malformed glyphs, or gibberish text; identify the take and frame label
+in blocking_reasons. The contact-sheet labels above each frame are QA metadata and are not artifacts inside the video.
+
+For framing_stable, allow small fixed crop differences between takes plus natural speaking head movement, blinking,
+and expression changes. Fail framing only for a material composition change or continuous camera zoom, push-in,
+pull-back, pan, or reframe within a take. Report every observed difference, including non-blocking natural expression
+or pose changes. This is visual continuity comparison only: make no face-recognition identification beyond the
+supplied references.
 
 Return JSON only, without Markdown or commentary, using exactly this shape:
 {
@@ -125,9 +132,9 @@ def evaluate_visual_consistency(
             {"unexpected_fields": unexpected_fields},
         )
     invalid_boolean_fields = [
-        field for field in _COMPONENT_FIELDS if type(payload[field]) is not bool
+        field for field in _COMPONENT_FIELDS if not isinstance(payload[field], bool)
     ]
-    if "passed" in payload and type(payload["passed"]) is not bool:
+    if "passed" in payload and not isinstance(payload["passed"], bool):
         invalid_boolean_fields.append("passed")
     if invalid_boolean_fields:
         raise ValidationError(
@@ -135,7 +142,7 @@ def evaluate_visual_consistency(
             {"invalid_fields": invalid_boolean_fields},
         )
     raw_confidence = payload["confidence"]
-    if type(raw_confidence) not in {int, float}:
+    if not isinstance(raw_confidence, (int, float)) or isinstance(raw_confidence, bool):
         raise ValidationError("Visual QA confidence must be a finite number from 0 through 1.")
     confidence = float(raw_confidence)
     if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
@@ -147,7 +154,7 @@ def evaluate_visual_consistency(
         field
         for field in ("blocking_reasons", "observed_differences")
         if not isinstance(payload[field], list)
-        or any(type(item) is not str for item in payload[field])
+        or any(not isinstance(item, str) for item in payload[field])
     ]
     if invalid_list_fields:
         raise ValidationError(

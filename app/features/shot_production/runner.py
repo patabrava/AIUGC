@@ -960,6 +960,7 @@ def reset_failed_take(
         "submission_rejected",
         "failed",
         "transcript_failed",
+        "visual_failed",
     }
     failed_visual_gate = (
         take_status == "transcribed" and (payload.get("visual_qa") or {}).get("passed") is False
@@ -988,7 +989,7 @@ def reset_failed_take(
     history = list(take.get("attempt_history") or [])
     history.append(archived)
     next_attempt = int(take.get("attempt") or 1) + 1
-    base_prompt = str((history[0] if history else take).get("prompt") or take["prompt"])
+    base_prompt = str(take["prompt"]).split(" Retry delivery correction:", 1)[0]
     next_prompt = base_prompt
     if guidance:
         next_prompt = f"{base_prompt} Retry delivery correction: {guidance}"
@@ -1024,6 +1025,53 @@ def reset_failed_take(
     payload["status"] = "retry_planned"
     payload["updated_at"] = _utc_now()
     _atomic_write_json(manifest_path, payload)
+    return payload
+
+
+def reset_visual_failed_takes(
+    manifest_path: Path,
+    *,
+    indexes: list[int],
+    reason: str,
+    retry_guidance: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Mark and reset several visually failed takes against one preserved QA report."""
+    manifest_path = Path(manifest_path)
+    payload = _load_manifest(manifest_path)
+    selected = list(dict.fromkeys(indexes))
+    if not selected or len(selected) != len(indexes):
+        raise ValidationError("Visual retry indexes must be a non-empty unique list.")
+    visual_report = payload.get("visual_qa") or {}
+    if visual_report.get("passed") is not False:
+        raise ValidationError("Batch visual retry requires a failed visual QA report.")
+    by_index = {take["index"]: take for take in payload["takes"]}
+    for index in selected:
+        take = by_index.get(index)
+        if take is None or take.get("status") != "transcribed":
+            raise ValidationError(
+                "Batch visual retry requires transcript-passed selected takes.",
+                {"take_index": index, "take_status": (take or {}).get("status")},
+            )
+        take["status"] = "visual_failed"
+    failure_history = list(payload.get("qa_failure_history") or [])
+    failure_history.append(
+        {
+            "stage": "visual_qa",
+            "selected_take_indexes": selected,
+            "report": visual_report,
+            "archived_at": _utc_now(),
+        }
+    )
+    payload["qa_failure_history"] = failure_history
+    payload["updated_at"] = _utc_now()
+    _atomic_write_json(manifest_path, payload)
+    for index in selected:
+        payload = reset_failed_take(
+            manifest_path,
+            index=index,
+            reason=reason,
+            retry_guidance=retry_guidance,
+        )
     return payload
 
 
@@ -1143,6 +1191,7 @@ __all__ = [
     "poll_and_download_takes",
     "pilot_run_lock",
     "reset_failed_take",
+    "reset_visual_failed_takes",
     "revise_failed_beat",
     "run_visual_qa",
     "submit_pending_takes",

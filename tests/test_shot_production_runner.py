@@ -687,3 +687,38 @@ def test_revise_failed_beat_preserves_other_takes_and_exact_duration_plan(tmp_pa
     submit_pending_takes(manifest_path, client, max_inflight=2)
     assert len(client.calls) == 1
     assert replacement in client.calls[0]["prompt"]
+
+
+def test_reset_visual_failed_takes_retries_only_selected_indexes_as_one_batch(tmp_path):
+    from app.features.shot_production.runner import reset_visual_failed_takes
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    before = _read(manifest_path)
+    for take in before["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {"passed": True}
+    before["status"] = "visual_qa_failed"
+    before["visual_qa"] = {
+        "passed": False,
+        "no_artifacts": False,
+        "blocking_reasons": ["Baked-in gibberish text appears in takes 1 and 2."],
+    }
+    manifest_path.write_text(json.dumps(before), encoding="utf-8")
+    guidance = "Keep every frame completely free of on-screen text, captions, logos, and watermarks."
+
+    reset = reset_visual_failed_takes(
+        manifest_path,
+        indexes=[1, 2],
+        reason="manual contact-sheet review found baked-in generated subtitle artifacts",
+        retry_guidance=guidance,
+    )
+
+    assert reset["takes"][0]["raw"] == before["takes"][0]["raw"]
+    assert reset["takes"][3]["raw"] == before["takes"][3]["raw"]
+    for index in (1, 2):
+        assert reset["takes"][index]["status"] == "planned"
+        assert reset["takes"][index]["raw"] is None
+        assert reset["takes"][index]["operation"] is None
+        assert reset["takes"][index]["seed"] == before["takes"][index]["seed"] + 1000
+        assert guidance in reset["takes"][index]["prompt"]
+    assert "visual_qa" not in reset

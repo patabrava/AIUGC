@@ -96,6 +96,12 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     assert "room" in prompt
     assert "framing" in prompt
     assert "artifacts" in prompt
+    assert "baked-in captions" in prompt
+    assert "gibberish" in prompt
+    assert "lower third" in prompt
+    assert "small fixed crop differences" in prompt
+    assert "natural speaking head movement" in prompt
+    assert "continuous camera zoom" in prompt
     assert "no face-recognition identification" in prompt
     assert "JSON only" in prompt
     with pytest.raises(FrozenInstanceError):
