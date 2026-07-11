@@ -642,3 +642,48 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
     submit_pending_takes(manifest_path, retry_client, max_inflight=2)
     assert len(retry_client.calls) == 1
     assert retry_client.calls[0]["seed"] == original_seed + 1000
+
+
+def test_revise_failed_beat_preserves_other_takes_and_exact_duration_plan(tmp_path):
+    from app.features.shot_production.runner import revise_failed_beat, submit_pending_takes
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    before = _read(manifest_path)
+    before["takes"][2]["status"] = "transcript_failed"
+    before["takes"][2]["transcript_qa"] = {"passed": False, "word_error_rate": 0.18}
+    before["status"] = "transcript_failed"
+    manifest_path.write_text(json.dumps(before), encoding="utf-8")
+    replacement = "Manchmal wird schon eine leichte Steigung zu einem unnötigen Kampf."
+
+    revised = revise_failed_beat(
+        manifest_path,
+        index=2,
+        replacement_text=replacement,
+        reason="Repeated Veo delivery merged the original phrase into the wrong German compound",
+    )
+
+    assert revised["script"]["text"] == (
+        "Jeder, der einen Rollstuhl nutzt, weiß genau: "
+        "Normgerechte Rampen sind oft trotzdem eine echte Qual. "
+        f"{replacement} Das zehrt an den Kräften."
+    )
+    assert revised["script"]["source"] == "app.features.topics.agents.generate_dialog_scripts"
+    assert revised["script"]["source_payload"]["script"] == SCRIPT
+    assert revised["script"]["editorial_revisions"][-1]["original_text"] == before["takes"][2]["beat"]["text"]
+    assert [take["duration_seconds"] for take in revised["takes"]] == [4, 6, 6, 4]
+    assert [take["beat"]["text"] for take in revised["takes"]][2] == replacement
+    assert revised["takes"][2]["attempt"] == 2
+    assert revised["takes"][2]["seed"] == before["takes"][2]["seed"] + 1000
+    assert replacement in revised["takes"][2]["prompt"]
+    assert before["takes"][2]["beat"]["text"] not in revised["takes"][2]["prompt"]
+    assert revised["takes"][2]["raw"] is None
+    assert revised["takes"][2]["operation"] is None
+    assert revised["takes"][0]["raw"] == before["takes"][0]["raw"]
+    assert revised["takes"][1]["raw"] == before["takes"][1]["raw"]
+    assert revised["takes"][3]["raw"] == before["takes"][3]["raw"]
+    assert revised["request_contract_sha256"] != before["request_contract_sha256"]
+
+    client = _SubmitClient()
+    submit_pending_takes(manifest_path, client, max_inflight=2)
+    assert len(client.calls) == 1
+    assert replacement in client.calls[0]["prompt"]

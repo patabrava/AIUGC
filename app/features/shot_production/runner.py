@@ -34,7 +34,7 @@ from app.features.shot_production.composer import (
     evaluate_take_transcript,
 )
 from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
-from app.features.shot_production.prompts import compile_veo_take_requests
+from app.features.shot_production.prompts import build_veo_take_prompt, compile_veo_take_requests
 from app.features.shot_production.shot_deck import derive_shot_deck
 from app.features.shot_production.visual_qa import evaluate_visual_consistency
 
@@ -242,6 +242,8 @@ def _validate_paid_request_contract(payload: Dict[str, Any]) -> None:
         raise ValidationError("Pilot paid request is no longer the approved app-generated 16-second plan.")
     if script.get("planned_provider_durations") != EXPECTED_PROVIDER_DURATIONS:
         raise ValidationError("Pilot paid request duration plan changed after approval.")
+    if sha256(str(script.get("text") or "").encode("utf-8")).hexdigest() != script.get("text_sha256"):
+        raise ValidationError("Pilot script text changed without an audited contract update.")
     source_path = Path(script.get("path") or "")
     if not source_path.is_file() or _file_sha256(source_path) != script.get("input_sha256"):
         raise ValidationError("Pilot script input changed after approval.")
@@ -1025,6 +1027,113 @@ def reset_failed_take(
     return payload
 
 
+def revise_failed_beat(
+    manifest_path: Path,
+    *,
+    index: int,
+    replacement_text: str,
+    reason: str,
+) -> Dict[str, Any]:
+    """Audit and replace one repeatedly undeliverable beat without touching passed takes."""
+    manifest_path = Path(manifest_path)
+    payload = _load_manifest(manifest_path)
+    ordered = sorted(payload["takes"], key=lambda take: take["index"])
+    matches = [take for take in ordered if take["index"] == index]
+    if len(matches) != 1:
+        raise ValidationError("Editorial revision take index does not exist.", {"take_index": index})
+    take = matches[0]
+    if take.get("status") != "transcript_failed" or (take.get("transcript_qa") or {}).get("passed") is not False:
+        raise ValidationError(
+            "Editorial revision requires a transcript-failed take.",
+            {"take_index": index, "take_status": take.get("status")},
+        )
+    reason_text = " ".join(str(reason or "").split())
+    replacement = " ".join(str(replacement_text or "").split())
+    if not reason_text:
+        raise ValidationError("Editorial revision requires an operator reason.", {"take_index": index})
+    if not replacement or replacement == take["beat"]["text"]:
+        raise ValidationError("Editorial revision requires a different non-empty beat.", {"take_index": index})
+
+    prior_script = str(payload["script"]["text"])
+    parts = [str(candidate["beat"]["text"]) for candidate in ordered]
+    parts[index] = replacement
+    revised_script = " ".join(parts)
+    revised_beats = plan_editorial_beats(revised_script)
+    revised_durations = [beat.provider_duration_seconds for beat in revised_beats]
+    if len(revised_beats) != len(ordered) or revised_durations != EXPECTED_PROVIDER_DURATIONS:
+        raise ValidationError(
+            "Editorial revision must preserve the approved four-take duration plan.",
+            {"expected": EXPECTED_PROVIDER_DURATIONS, "actual": revised_durations},
+        )
+    for candidate, beat in zip(ordered, revised_beats):
+        if beat.index != index and beat.text != candidate["beat"]["text"]:
+            raise ValidationError(
+                "Editorial revision changed a passed semantic beat boundary.",
+                {"take_index": beat.index},
+            )
+    revised_beat = revised_beats[index]
+    if revised_beat.text != replacement:
+        raise ValidationError("Editorial revision did not remain one complete semantic beat.")
+
+    original_contract_sha = str(payload.get("request_contract_sha256") or "")
+    archived_take = json.loads(json.dumps(take))
+    archived_take.pop("attempt_history", None)
+    archived_take["reason"] = reason_text
+    archived_take["archived_at"] = _utc_now()
+    attempt_history = list(take.get("attempt_history") or [])
+    attempt_history.append(archived_take)
+    next_attempt = int(take.get("attempt") or 1) + 1
+    take["attempt"] = next_attempt
+    take["attempt_history"] = attempt_history
+    take["beat"] = asdict(revised_beat)
+    take["duration_seconds"] = revised_beat.provider_duration_seconds
+    take["seed"] = int(payload["base_seed"]) + index + (next_attempt - 1) * 1000
+    take["prompt"] = build_veo_take_prompt(revised_beat)
+    take["status"] = "planned"
+    take["submission"] = None
+    take["operation"] = None
+    take["raw"] = None
+    take["transcript"] = None
+    take["transcript_qa"] = None
+    take["trim_window"] = None
+
+    script = payload["script"]
+    revisions = list(script.get("editorial_revisions") or [])
+    revisions.append(
+        {
+            "take_index": index,
+            "original_text": ordered[index]["attempt_history"][-1]["beat"]["text"],
+            "replacement_text": replacement,
+            "prior_script_sha256": sha256(prior_script.encode("utf-8")).hexdigest(),
+            "reason": reason_text,
+            "revised_at": _utc_now(),
+        }
+    )
+    script["original_text"] = script.get("original_text") or prior_script
+    script["editorial_revisions"] = revisions
+    script["text"] = revised_script
+    script["text_sha256"] = sha256(revised_script.encode("utf-8")).hexdigest()
+    script["planned_provider_durations"] = revised_durations
+
+    _clear_downstream_artifacts(payload)
+    contract_history = list(payload.get("request_contract_history") or [])
+    contract_history.append(
+        {
+            "sha256": original_contract_sha,
+            "take_index": index,
+            "reason": reason_text,
+            "editorial_replacement": replacement,
+            "archived_at": _utc_now(),
+        }
+    )
+    payload["request_contract_history"] = contract_history
+    payload["request_contract_sha256"] = _canonical_sha256(_request_contract_payload(payload))
+    payload["status"] = "editorial_revision_planned"
+    payload["updated_at"] = _utc_now()
+    _atomic_write_json(manifest_path, payload)
+    return payload
+
+
 __all__ = [
     "build_contact_sheet",
     "compose_and_caption",
@@ -1034,6 +1143,7 @@ __all__ = [
     "poll_and_download_takes",
     "pilot_run_lock",
     "reset_failed_take",
+    "revise_failed_beat",
     "run_visual_qa",
     "submit_pending_takes",
     "transcribe_and_validate_takes",

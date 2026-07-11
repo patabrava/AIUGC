@@ -20,6 +20,7 @@ from app.features.shot_production.runner import (  # noqa: E402
     initialize_pilot,
     pilot_run_lock,
     reset_failed_take,
+    revise_failed_beat,
     run_visual_qa,
     transcribe_and_validate_takes,
     upload_final,
@@ -42,6 +43,9 @@ def _parser() -> argparse.ArgumentParser:
         "--retry-guidance",
         help="Optional narrow delivery correction for explicitly retried takes.",
     )
+    parser.add_argument("--revise-take", type=int)
+    parser.add_argument("--replacement-beat")
+    parser.add_argument("--revision-reason", default="audited failed-beat editorial revision")
     parser.add_argument("--poll-interval", type=float, default=10.0)
     parser.add_argument("--timeout", type=float, default=1800.0)
     parser.add_argument("--visual-model")
@@ -68,6 +72,16 @@ def main() -> int:
                 expected_sha256=args.approved_sha,
                 script_input_path=args.script_input.resolve(),
                 base_seed=args.base_seed,
+            )
+
+        if args.revise_take is not None:
+            if not args.replacement_beat:
+                raise SystemExit("--revise-take requires --replacement-beat")
+            revise_failed_beat(
+                manifest_path,
+                index=args.revise_take,
+                replacement_text=args.replacement_beat,
+                reason=args.revision_reason,
             )
 
         for take_index in args.retry_take:
