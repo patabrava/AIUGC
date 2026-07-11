@@ -60,15 +60,27 @@ def _terminal_mark(token: str) -> str:
     return token.rstrip(_TRAILING_CLOSERS)[-1:]
 
 
+def _is_example_abbreviation(tokens: Sequence[str], index: int) -> bool:
+    token = tokens[index].rstrip(_TRAILING_CLOSERS).lower()
+    if token == "z.b.":
+        return True
+    if token == "z." and index + 1 < len(tokens):
+        return tokens[index + 1].rstrip(_TRAILING_CLOSERS).lower() == "b."
+    if token == "b." and index > 0:
+        return tokens[index - 1].rstrip(_TRAILING_CLOSERS).lower() == "z."
+    return False
+
+
 def _boundary_groups(tokens: Sequence[str]) -> Tuple[Dict[int, float], List[int], List[int]]:
     """Return strong boundary costs, comma positions, and conjunction positions."""
     strong: Dict[int, float] = {}
     commas: List[int] = []
     coordinating: List[int] = []
 
-    for position, token in enumerate(tokens[:-1], start=1):
+    for index, token in enumerate(tokens[:-1]):
+        position = index + 1
         mark = _terminal_mark(token)
-        if mark in ".!?":
+        if mark in ".!?" and not (mark == "." and _is_example_abbreviation(tokens, index)):
             strong[position] = 0.0
         elif mark in ":;":
             strong[position] = 0.25

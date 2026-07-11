@@ -68,6 +68,26 @@ def test_uses_a_coordinating_boundary_only_when_strong_boundaries_are_not_enough
     ]
 
 
+@pytest.mark.parametrize(
+    "example_sentence",
+    [
+        "Fachleute nennen verschiedene praktische Hilfen wie z. B. Treppenlifte.",
+        "Fachleute nennen heute verschiedene praktische Hilfen wie z.B. Treppenlifte.",
+    ],
+)
+def test_does_not_treat_german_example_abbreviations_as_terminal_boundaries(example_sentence):
+    sentences = [
+        "Viele Menschen warten lange mit ihrer Entscheidung.",
+        "Frühe Beratung kann den Alltag anschließend deutlich erleichtern.",
+        example_sentence,
+        "So bleibt dein Zuhause langfristig sicher nutzbar.",
+    ]
+    script = " ".join(sentences)
+
+    assert len(script.split()) == 31
+    assert [beat.text for beat in plan_editorial_beats(script)] == sentences
+
+
 @pytest.mark.parametrize("script", [SENTENCE_SCRIPT, CLAUSE_SCRIPT])
 def test_preserves_every_word_once_and_in_order(script):
     beats = plan_editorial_beats(script)
