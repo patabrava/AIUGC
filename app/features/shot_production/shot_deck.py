@@ -17,6 +17,8 @@ from app.core.errors import ValidationError
 _CROP_ZOOM = 1.05
 _PNG_MIME_TYPE = "image/png"
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+_TARGET_ASPECT_RATIO = 9 / 16
+_ASPECT_RATIO_RELATIVE_TOLERANCE = 0.01
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,18 @@ def _load_approved_png(
         raise ValidationError(
             "Approved shot master must be a vertical image.",
             {"width": width, "height": height},
+        )
+    aspect_ratio = width / height
+    relative_ratio_error = abs(aspect_ratio - _TARGET_ASPECT_RATIO) / _TARGET_ASPECT_RATIO
+    if relative_ratio_error > _ASPECT_RATIO_RELATIVE_TOLERANCE:
+        raise ValidationError(
+            "Approved shot master must use a 9:16 aspect ratio.",
+            {
+                "width": width,
+                "height": height,
+                "aspect_ratio": aspect_ratio,
+                "relative_tolerance": _ASPECT_RATIO_RELATIVE_TOLERANCE,
+            },
         )
     return image, source_sha256
 

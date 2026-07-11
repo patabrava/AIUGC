@@ -69,7 +69,8 @@ def build_veo_take_prompt(beat: EditorialBeat) -> str:
     return (
         "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's identity and hair, "
         "cream knit sweater, room, posture, camera position, and framing exactly as shown. Continue as "
-        "restrained, natural phone-camera UGC with only subtle conversational expression and gestures. "
+        "restrained, natural phone-camera UGC with a subtle conversational expression, subtle blinking, and "
+        "minimal head movement. "
         f"She says this exact German beat once in her native German voice: {dialogue} "
         "After the final word, naturally stop speaking and hold the unchanged frame with quiet room tone."
     )

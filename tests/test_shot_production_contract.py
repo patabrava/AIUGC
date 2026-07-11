@@ -108,6 +108,7 @@ def test_derive_shot_deck_returns_four_deterministic_immutable_png_variants():
         (b"", "image/png", sha256(b"").hexdigest(), "non-empty"),
         (b"not-an-image", "image/png", sha256(b"not-an-image").hexdigest(), "valid PNG"),
         (_png_bytes(160, 90), "image/png", sha256(_png_bytes(160, 90)).hexdigest(), "vertical"),
+        (_png_bytes(100, 120), "image/png", sha256(_png_bytes(100, 120)).hexdigest(), "9:16"),
     ],
 )
 def test_derive_shot_deck_fails_closed_for_unapproved_or_invalid_master(
@@ -124,6 +125,22 @@ def test_derive_shot_deck_fails_closed_for_unapproved_or_invalid_master(
             expected_sha256=expected_hash,
             mime_type=mime_type,
         )
+
+
+def test_derive_shot_deck_accepts_approved_master_aspect_ratio_tolerance():
+    from app.features.shot_production.shot_deck import derive_shot_deck
+
+    # 24:43 is the approved master's 1536:2752 ratio reduced by their common divisor.
+    source = _png_bytes(24, 43)
+
+    deck = derive_shot_deck(
+        approved_master_bytes=source,
+        expected_sha256=sha256(source).hexdigest(),
+        mime_type="image/png",
+    )
+
+    assert len(deck) == 4
+    assert {(variant.width, variant.height) for variant in deck} == {(24, 43)}
 
 
 def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministically():
@@ -164,6 +181,9 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         assert "terracotta" not in request.prompt
         assert "seated" not in request.prompt.lower()
         assert "hands" not in request.prompt.lower()
+        assert "gestures" not in request.prompt.lower()
+        assert "subtle blinking" in request.prompt.lower()
+        assert "minimal head movement" in request.prompt.lower()
         assert request.negative_prompt == EFFECTIVE_NEGATIVE_PROMPT
         assert request.negative_prompt.strip()
 
