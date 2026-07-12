@@ -1486,6 +1486,60 @@ def test_acoustic_duration_failure_persists_provider_diagnostic_retry_indexes(tm
     assert reset["qa_failure_history"][-1]["stage"] == "acoustic_plan"
 
 
+def test_transcript_safe_planning_failure_persists_adjacent_retry_indexes(tmp_path):
+    from app.features.shot_production.runner import compose_and_caption, reset_failed_take
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.5,
+            "final_word_end_seconds": 6.8,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 7.0,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def fail_plan(_evidence, **_kwargs):
+        raise ValidationError(
+            "No transcript-safe acoustic seam candidate exists.",
+            {"seam_index": 0, "rejected_candidate_count": 252},
+        )
+
+    with pytest.raises(ValidationError, match="transcript-safe"):
+        compose_and_caption(
+            manifest_path,
+            _DeepgramByCall([]),
+            acoustic_seams=True,
+            analyze_audio_fn=lambda _path: (),
+            plan_acoustic_fn=fail_plan,
+        )
+
+    failed = _read(manifest_path)
+    assert failed["status"] == "acoustic_plan_failed"
+    assert failed["acoustic_plan_failure"]["failed_seam_indexes"] == [0]
+    assert failed["acoustic_plan_failure"]["seam_retry_map"] == [
+        {"seam_index": 0, "adjacent_take_indexes": [0, 1]},
+    ]
+    assert failed["acoustic_plan_failure"]["recommended_retry_take_indexes"] == [0, 1]
+
+    reset = reset_failed_take(
+        manifest_path,
+        index=1,
+        reason="incoming take begins inside a retained breath",
+        retry_guidance="Begin cleanly without an inhale before the first scripted word.",
+    )
+    assert reset["takes"][1]["status"] == "planned"
+    assert reset["qa_failure_history"][-1]["stage"] == "acoustic_plan"
+
+
 @pytest.mark.parametrize(
     ("probe", "reason"),
     [

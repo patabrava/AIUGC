@@ -345,7 +345,7 @@ def test_planner_fails_when_final_take_cannot_reach_duration_floor():
 
 def test_planner_distributes_long_form_duration_floor_across_take_windows():
     takes = tuple(
-        _evidence(index, duration=8.0, first_word=0.5, final_word=6.8)
+        _evidence(index, duration=8.0, first_word=0.5, final_word=7.0)
         for index in range(7)
     )
     baseline = plan_acoustic_seams(
@@ -368,6 +368,38 @@ def test_planner_distributes_long_form_duration_floor_across_take_windows():
     ]
     assert len(extended_indexes) >= 2
     assert all(window.audio_end_seconds <= 8.0 for window in plan.takes)
+    for index, seam in enumerate(plan.seams):
+        rendered_gap = (
+            plan.takes[index].audio_end_seconds
+            - takes[index].final_word_end_seconds
+            + takes[index + 1].first_word_start_seconds
+            - plan.takes[index + 1].audio_start_seconds
+            - seam.overlap_seconds
+        )
+        assert seam.previous_audio_end_seconds == pytest.approx(
+            plan.takes[index].audio_end_seconds
+        )
+        assert seam.final_word_gap_seconds == pytest.approx(rendered_gap)
+        assert 0.10 <= seam.final_word_gap_seconds <= 0.32
+
+
+def test_planner_rejects_long_form_padding_that_would_exceed_the_word_gap_ceiling():
+    takes = tuple(
+        _evidence(index, duration=8.0, first_word=0.5, final_word=6.8)
+        for index in range(7)
+    )
+
+    with pytest.raises(ValidationError, match="duration envelope") as exc_info:
+        plan_acoustic_seams(
+            takes,
+            min_duration_seconds=48.5,
+            max_duration_seconds=50.5,
+        )
+
+    assert exc_info.value.details["required_seconds"] > exc_info.value.details[
+        "cadence_safe_available_seconds"
+    ]
+    assert exc_info.value.details["under_capacity_take_indexes"]
 
 
 def test_planner_preserves_two_take_final_outro_when_it_has_capacity():

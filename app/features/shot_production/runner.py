@@ -1467,24 +1467,41 @@ def compose_and_caption(
                 max_duration_seconds=maximum_duration,
             )
         except ValidationError as exc:
-            if "duration envelope" not in exc.message.lower():
+            duration_failure = "duration envelope" in exc.message.lower()
+            raw_seam_index = (exc.details or {}).get("seam_index")
+            localized_seam_failure = (
+                not isinstance(raw_seam_index, bool)
+                and isinstance(raw_seam_index, int)
+            )
+            if not duration_failure and not localized_seam_failure:
                 raise
             available_take_indexes = {int(take["index"]) for take in ordered}
-            diagnostic_indexes = (exc.details or {}).get("under_capacity_take_indexes") or []
-            recommended_retry_take_indexes = sorted(
-                {
-                    int(index)
-                    for index in diagnostic_indexes
-                    if not isinstance(index, bool)
-                    and isinstance(index, int)
-                    and int(index) in available_take_indexes
-                }
-            )
-            if not recommended_retry_take_indexes:
-                recommended_retry_take_indexes = [int(ordered[-1]["index"])]
+            failed_seam_indexes = []
+            seam_retry_map = []
+            if localized_seam_failure:
+                failed_seam_indexes = [int(raw_seam_index)]
+                seam_retry_map, recommended_retry_take_indexes = _acoustic_retry_map(
+                    failed_seam_indexes,
+                    take_count=len(ordered),
+                )
+            else:
+                diagnostic_indexes = (exc.details or {}).get("under_capacity_take_indexes") or []
+                recommended_retry_take_indexes = sorted(
+                    {
+                        int(index)
+                        for index in diagnostic_indexes
+                        if not isinstance(index, bool)
+                        and isinstance(index, int)
+                        and int(index) in available_take_indexes
+                    }
+                )
+                if not recommended_retry_take_indexes:
+                    recommended_retry_take_indexes = [int(ordered[-1]["index"])]
             payload["acoustic_plan_failure"] = {
                 "message": exc.message,
                 "details": exc.details,
+                "failed_seam_indexes": failed_seam_indexes,
+                "seam_retry_map": seam_retry_map,
                 "recommended_retry_take_indexes": recommended_retry_take_indexes,
                 "created_at": _utc_now(),
             }

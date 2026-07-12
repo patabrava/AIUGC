@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 import math
@@ -16,6 +16,7 @@ from app.core.errors import ValidationError
 
 ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v1"
 _ANALYSIS_TIMEOUT_SECONDS = 120
+_MAX_SEAM_WORD_GAP_SECONDS = 0.320
 _FRAME_TAGS = {
     "rms_dbfs": "lavfi.astats.1.RMS_level",
     "peak_dbfs": "lavfi.astats.1.Peak_level",
@@ -387,7 +388,7 @@ def _select_seam(
                     "retained_island_duration_seconds": round(island_duration, 6),
                 }
                 reasons = []
-                if not 0.100 - 1e-9 <= word_gap <= 0.320 + 1e-9:
+                if not 0.100 - 1e-9 <= word_gap <= _MAX_SEAM_WORD_GAP_SECONDS + 1e-9:
                     reasons.append("word_gap_out_of_range")
                 if previous_end - previous.final_word_end_seconds - overlap < 0.100 - 1e-9:
                     reasons.append("post_word_crossfade_guard")
@@ -501,27 +502,42 @@ def _extend_delivery_windows(
     *,
     min_duration_seconds: float,
     max_duration_seconds: float,
-) -> Tuple[PlannedTakeWindow, ...]:
+) -> Tuple[Tuple[PlannedTakeWindow, ...], Tuple[PlannedSeam, ...]]:
     result = list(planned)
+    adjusted_seams = list(seams)
     current_duration = _planned_duration(result, seams)
     if current_duration > max_duration_seconds + 1e-9:
         raise ValidationError("Acoustic plan exceeds the duration envelope.")
     if current_duration >= min_duration_seconds - 1e-9:
-        return tuple(result)
+        return tuple(result), tuple(adjusted_seams)
     required = min_duration_seconds - current_duration
-    capacities = [
+    raw_capacities = [
         max(0.0, take.provider_duration_seconds - window.audio_end_seconds)
         for window, take in zip(result, evidence)
     ]
-    total_available = sum(capacities)
-    if total_available + 1e-9 < required:
+    capacities = [
+        min(
+            raw_capacity,
+            max(0.0, _MAX_SEAM_WORD_GAP_SECONDS - seams[index].final_word_gap_seconds),
+        )
+        if index < len(seams)
+        else raw_capacity
+        for index, raw_capacity in enumerate(raw_capacities)
+    ]
+    cadence_safe_available = sum(capacities)
+    if cadence_safe_available + 1e-9 < required:
         fair_share = required / len(result)
         raise ValidationError(
             "Acoustic plan cannot satisfy the duration envelope.",
             {
                 "required_seconds": required,
-                "total_available_seconds": total_available,
+                "total_available_seconds": sum(raw_capacities),
                 "available_seconds_by_take": {
+                    str(window.take_index): capacity
+                    for window, capacity in zip(result, raw_capacities)
+                },
+                "cadence_safe_available_seconds": cadence_safe_available,
+                "cadence_safe_available_seconds_by_take": {
                     str(window.take_index): capacity
                     for window, capacity in zip(result, capacities)
                 },
@@ -564,7 +580,57 @@ def _extend_delivery_windows(
             video_end_seconds=window.video_end_seconds + extension,
             gain_db=window.gain_db,
         )
-    return tuple(result)
+        if index >= len(adjusted_seams):
+            continue
+        seam = adjusted_seams[index]
+        new_end = result[index].audio_end_seconds
+        retained_island = max(
+            seam.retained_island_duration_seconds,
+            _maximum_breath_island_duration(
+                _frames_between(
+                    evidence[index],
+                    evidence[index].final_word_end_seconds,
+                    new_end,
+                )
+            ),
+        )
+        try:
+            energy_delta = abs(
+                _boundary_rms(evidence[index], new_end, before=True)
+                + result[index].gain_db
+                - _boundary_rms(
+                    evidence[index + 1],
+                    seam.next_audio_start_seconds,
+                    before=False,
+                )
+                - result[index + 1].gain_db
+            )
+        except ValidationError as exc:
+            raise ValidationError(
+                "Acoustic duration extension has insufficient boundary evidence.",
+                {"seam_index": index, "extended_audio_end_seconds": new_end},
+            ) from exc
+        if retained_island > 0.080 + 1e-9:
+            raise ValidationError(
+                "Acoustic duration extension retains an unsafe breath island.",
+                {
+                    "seam_index": index,
+                    "retained_island_duration_seconds": retained_island,
+                },
+            )
+        if energy_delta > 6.0 + 1e-9:
+            raise ValidationError(
+                "Acoustic duration extension exceeds the seam energy limit.",
+                {"seam_index": index, "short_window_energy_delta_db": energy_delta},
+            )
+        adjusted_seams[index] = replace(
+            seam,
+            previous_audio_end_seconds=new_end,
+            final_word_gap_seconds=seam.final_word_gap_seconds + extension,
+            short_window_energy_delta_db=energy_delta,
+            retained_island_duration_seconds=retained_island,
+        )
+    return tuple(result), tuple(adjusted_seams)
 
 
 def plan_acoustic_seams(
@@ -596,7 +662,7 @@ def plan_acoustic_seams(
         for index in range(len(ordered) - 1)
     )
     planned = _derive_video_windows(ordered, seams, gains)
-    planned = _extend_delivery_windows(
+    planned, seams = _extend_delivery_windows(
         planned,
         ordered,
         seams,
