@@ -185,6 +185,51 @@ def test_initialize_pilot_plans_seven_shots_for_fifty_second_script(tmp_path):
     assert payload["script"]["delivery_duration_seconds"] == {"requested": 50.0, "minimum": 48.5, "maximum": 50.5}
 
 
+def test_initialize_pilot_accepts_audited_revision_of_generator_output(tmp_path):
+    from app.features.shot_production.runner import initialize_pilot
+
+    original = SCRIPT
+    original_beat = "Manchmal fühlt sich jeder Zentimeter Steigung wie ein unnötiger Kampf an."
+    replacement_beat = "Manchmal wird schon eine leichte Steigung zu einem unnötigen Kampf."
+    revised = original.replace(original_beat, replacement_beat)
+    approved = tmp_path / "approved.png"
+    approved_hash = _approved_png(approved)
+    script_input = tmp_path / "script.json"
+    script_input.write_text(
+        json.dumps(
+            {
+                "source": "app.features.topics.agents.generate_dialog_scripts",
+                "target_length_tier": 16,
+                "category": "problem_agitate_solution",
+                "script": revised,
+                "original_script": original,
+                "generator_output": {"problem_agitate_solution": [original]},
+                "editorial_revisions": [
+                    {
+                        "take_index": 2,
+                        "original_text": original_beat,
+                        "replacement_text": replacement_beat,
+                        "reason": "audited Veo pronunciation correction",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = initialize_pilot(
+        manifest_path=tmp_path / "run" / "manifest.json",
+        approved_frame_path=approved,
+        expected_sha256=approved_hash,
+        script_input_path=script_input,
+        base_seed=240712,
+    )
+
+    assert payload["script"]["text"] == revised
+    assert len(payload["takes"]) == 2
+
+
 class _SubmitClient:
     def __init__(self, *, fail_on_call: int | None = None):
         self.calls = []

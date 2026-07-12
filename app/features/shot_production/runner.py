@@ -252,6 +252,28 @@ def _script_is_in_generator_output(script_source: Dict[str, Any], script_text: s
     )
 
 
+def _script_is_audited_generator_revision(
+    script_source: Dict[str, Any], script_text: str
+) -> bool:
+    original_script = str(script_source.get("original_script") or "").strip()
+    revisions = script_source.get("editorial_revisions")
+    if not original_script or not isinstance(revisions, list) or not revisions:
+        return False
+    if not _script_is_in_generator_output(script_source, original_script):
+        return False
+    revised = original_script
+    for revision in revisions:
+        if not isinstance(revision, dict):
+            return False
+        original = str(revision.get("original_text") or "").strip()
+        replacement = str(revision.get("replacement_text") or "").strip()
+        reason = str(revision.get("reason") or "").strip()
+        if not original or not replacement or not reason or revised.count(original) != 1:
+            return False
+        revised = revised.replace(original, replacement, 1)
+    return revised == script_text
+
+
 def _delivery_duration_contract(requested_seconds: Any) -> Dict[str, float]:
     if isinstance(requested_seconds, bool):
         raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.")
@@ -274,9 +296,10 @@ def _validate_approved_pilot_plan(
     script_text: str,
     beats: list[EditorialBeat],
 ) -> Dict[str, float]:
-    if script_source.get("source") != APP_SCRIPT_SOURCE or not _script_is_in_generator_output(
+    has_generator_provenance = _script_is_in_generator_output(
         script_source, script_text
-    ):
+    ) or _script_is_audited_generator_revision(script_source, script_text)
+    if script_source.get("source") != APP_SCRIPT_SOURCE or not has_generator_provenance:
         raise ValidationError("Pilot requires an app-generated script with intact generator provenance.")
     duration_contract = _delivery_duration_contract(script_source.get("target_length_tier"))
     durations = [beat.provider_duration_seconds for beat in beats]
