@@ -1,4 +1,4 @@
-"""Compile one German 16-second-tier script into semantic Veo takes.
+"""Compile a German script into the minimum number of semantic Veo takes.
 
 Speech estimates use 2.5 spoken words per second plus a 0.25-second allowance
 for natural beat-level pacing. Provider capacity is deliberately compiled
@@ -8,7 +8,7 @@ separately from the estimated spoken duration.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import combinations
+from functools import lru_cache
 import math
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -18,13 +18,9 @@ from app.core.video_profiles import script_word_count
 
 SPEECH_WORDS_PER_SECOND = 2.5
 PACING_ALLOWANCE_SECONDS = 0.25
-TARGET_MIN_SECONDS = 3.0
-TARGET_MAX_SECONDS = 5.0
-CONCISE_FINAL_MIN_SECONDS = 2.0
-MIN_BEAT_WORDS = 7
-MIN_BEAT_COUNT = 3
-MAX_BEAT_COUNT = 4
-MIN_SCRIPT_WORDS = MIN_BEAT_WORDS * MIN_BEAT_COUNT
+MAX_BEAT_SPEECH_SECONDS = 7.5
+MIN_BEAT_WORDS = 4
+MIN_SCRIPT_WORDS = 4
 
 _TRAILING_CLOSERS = "\"'»”’)]}"
 _COORDINATING_WORDS = frozenset({"aber", "denn", "doch", "oder", "sondern", "und"})
@@ -105,81 +101,57 @@ def _partition_text(tokens: Sequence[str], boundaries: Iterable[int]) -> List[st
     return parts
 
 
-def _best_partition(
-    tokens: Sequence[str],
-    boundary_costs: Dict[int, float],
-    *,
-    allow_concise_final: bool = False,
-) -> Optional[List[str]]:
-    positions = sorted(boundary_costs)
-    for beat_count in range(MAX_BEAT_COUNT, MIN_BEAT_COUNT - 1, -1):
-        if len(positions) < beat_count - 1:
-            continue
-
-        candidates = []
-        for selected in combinations(positions, beat_count - 1):
-            parts = _partition_text(tokens, selected)
-            counts = [script_word_count(part) for part in parts]
-            estimates = [estimate_speech_seconds(count) for count in counts]
-            all_on_target = all(
-                TARGET_MIN_SECONDS <= estimate <= TARGET_MAX_SECONDS for estimate in estimates
-            )
-            concise_final = (
-                allow_concise_final
-                and all(
-                    TARGET_MIN_SECONDS <= estimate <= TARGET_MAX_SECONDS
-                    for estimate in estimates[:-1]
-                )
-                and CONCISE_FINAL_MIN_SECONDS <= estimates[-1] < TARGET_MIN_SECONDS
-                and _terminal_mark(parts[-1].split()[-1]) in ".!?"
-            )
-            if not (all_on_target or concise_final):
-                continue
-
-            boundary_penalty = sum(boundary_costs[position] for position in selected)
-            pacing_penalty = sum((estimate - 4.0) ** 2 for estimate in estimates)
-            candidates.append(((boundary_penalty, pacing_penalty, selected), parts))
-
-        if candidates:
-            return min(candidates, key=lambda item: item[0])[1]
-    return None
-
-
 def _semantic_parts(tokens: Sequence[str]) -> Optional[List[str]]:
     strong, commas, coordinating = _boundary_groups(tokens)
+    word_count = len(tokens)
+    max_words = max(
+        count
+        for count in range(1, word_count + 1)
+        if estimate_speech_seconds(count) <= MAX_BEAT_SPEECH_SECONDS
+    )
+    minimum_count = max(1, math.ceil(word_count / max_words))
+    boundary_costs = {position: 4.0 for position in range(1, word_count)}
+    boundary_costs.update({position: 2.0 for position in coordinating})
+    boundary_costs.update({position: 1.0 for position in commas})
+    boundary_costs.update(strong)
 
-    for allow_concise_final in (False, True):
-        boundary_costs = dict(strong)
-        partition = _best_partition(
-            tokens,
-            boundary_costs,
-            allow_concise_final=allow_concise_final,
-        )
-        if partition is not None:
-            return partition
+    for beat_count in range(minimum_count, math.ceil(word_count / MIN_BEAT_WORDS) + 1):
+        target_words = word_count / beat_count
 
-        boundary_costs.update({position: 1.0 for position in commas})
-        partition = _best_partition(
-            tokens,
-            boundary_costs,
-            allow_concise_final=allow_concise_final,
-        )
-        if partition is not None:
-            return partition
+        @lru_cache(maxsize=None)
+        def best(start: int, remaining: int) -> Optional[Tuple[float, float, Tuple[int, ...]]]:
+            if remaining == 1:
+                final_count = word_count - start
+                if not MIN_BEAT_WORDS <= final_count <= max_words:
+                    return None
+                return (0.0, (final_count - target_words) ** 2, ())
+            minimum_end = start + MIN_BEAT_WORDS
+            maximum_end = min(start + max_words, word_count - MIN_BEAT_WORDS * (remaining - 1))
+            candidates = []
+            for end in range(minimum_end, maximum_end + 1):
+                words_left = word_count - end
+                if not MIN_BEAT_WORDS * (remaining - 1) <= words_left <= max_words * (remaining - 1):
+                    continue
+                tail = best(end, remaining - 1)
+                if tail is None:
+                    continue
+                candidates.append(
+                    (
+                        boundary_costs[end] + tail[0],
+                        (end - start - target_words) ** 2 + tail[1],
+                        (end, *tail[2]),
+                    )
+                )
+            return min(candidates) if candidates else None
 
-        boundary_costs.update({position: 2.0 for position in coordinating})
-        partition = _best_partition(
-            tokens,
-            boundary_costs,
-            allow_concise_final=allow_concise_final,
-        )
-        if partition is not None:
-            return partition
+        selected = best(0, beat_count)
+        if selected is not None:
+            return _partition_text(tokens, selected[2])
     return None
 
 
 def plan_editorial_beats(script: str) -> List[EditorialBeat]:
-    """Plan three or four ordered, complete semantic beats from a spoken script."""
+    """Plan the minimum number of ordered semantic beats that fit Veo's 8-second ceiling."""
     cleaned = " ".join(str(script or "").split())
     if not cleaned:
         raise ValueError("Editorial beat planning requires a non-empty script.")
@@ -194,7 +166,7 @@ def plan_editorial_beats(script: str) -> List[EditorialBeat]:
     parts = _semantic_parts(tokens)
     if parts is None:
         raise ValueError(
-            "Script cannot form three or four complete 3-5 second beats at semantic boundaries."
+            "Script cannot form complete semantic beats inside the eight-second Veo limit."
         )
 
     beats = []
