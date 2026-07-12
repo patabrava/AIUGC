@@ -10,7 +10,7 @@ def _clips(count=3):
     return [{"mime_type": "audio/wav", "media_bytes": b"wav"} for _ in range(count)]
 
 
-def _response(**overrides):
+def _response(seam_count=3, **overrides):
     payload = {
         "no_breath_restart": True,
         "no_duplicated_breath": True,
@@ -22,6 +22,10 @@ def _response(**overrides):
         "confidence": 0.94,
         "blocking_reasons": [],
         "observed_differences": [],
+        "seam_verdicts": [
+            {"seam_index": index, "passed": True, "blocking_reasons": []}
+            for index in range(seam_count)
+        ],
     }
     payload.update(overrides)
     return json.dumps(payload)
@@ -48,7 +52,7 @@ def test_acoustic_qa_passes_only_clean_three_seam_review():
 
 @pytest.mark.parametrize("seam_count", [1, 6])
 def test_acoustic_qa_accepts_every_adjacent_seam_count(seam_count):
-    client = _Client(_response())
+    client = _Client(_response(seam_count=seam_count))
     report = evaluate_acoustic_seam_continuity(_clips(seam_count), llm_client=client)
     assert report.passed is True
     assert f"ordered by jump-cut seam 0 through {seam_count - 1}" in client.calls[0]["prompt"]
@@ -57,9 +61,32 @@ def test_acoustic_qa_accepts_every_adjacent_seam_count(seam_count):
 def test_acoustic_qa_fails_closed_on_breath_restart():
     report = evaluate_acoustic_seam_continuity(
         _clips(),
-        llm_client=_Client(_response(no_breath_restart=False, blocking_reasons=["seam 2 restarts on an inhale"])),
+        llm_client=_Client(
+            _response(
+                no_breath_restart=False,
+                blocking_reasons=["seam 2 restarts on an inhale"],
+                seam_verdicts=[
+                    {"seam_index": 0, "passed": True, "blocking_reasons": []},
+                    {"seam_index": 1, "passed": True, "blocking_reasons": []},
+                    {
+                        "seam_index": 2,
+                        "passed": False,
+                        "blocking_reasons": ["restarts on an inhale"],
+                    },
+                ],
+            )
+        ),
     )
     assert report.passed is False
+    assert [verdict.seam_index for verdict in report.seam_verdicts if not verdict.passed] == [2]
+
+
+def test_acoustic_qa_requires_one_structured_verdict_per_supplied_seam():
+    with pytest.raises(ValidationError, match="seam verdict"):
+        evaluate_acoustic_seam_continuity(
+            _clips(3),
+            llm_client=_Client(_response(seam_count=2)),
+        )
 
 
 def test_acoustic_qa_requires_exact_schema_and_sufficient_confidence():

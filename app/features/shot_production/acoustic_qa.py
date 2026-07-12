@@ -22,7 +22,9 @@ _BOOLEAN_FIELDS = (
     "speaker_continuous",
     "evidence_sufficient",
 )
-_REQUIRED_FIELDS = frozenset((*_BOOLEAN_FIELDS, "confidence", "blocking_reasons", "observed_differences"))
+_REQUIRED_FIELDS = frozenset(
+    (*_BOOLEAN_FIELDS, "confidence", "blocking_reasons", "observed_differences", "seam_verdicts")
+)
 
 _PROMPT = """Three 1.5-second audio clips follow, ordered by jump-cut seam 0, 1, 2. Each clip is centered on one visual cut in a synthetic German AIUGC performance. Judge only the acoustic transition at the center of each clip. Fail any audible breath restart, duplicated inhale or exhale, click/pop, abrupt room-tone reset, broken speech cadence, speaker discontinuity, or insufficient evidence. Natural continuous breathing and intentional UGC jump-cut timing are acceptable. Do not identify a real person.
 
@@ -37,9 +39,19 @@ Return JSON only with exactly this shape:
   "evidence_sufficient": true,
   "confidence": 0.0,
   "blocking_reasons": [],
-  "observed_differences": []
+  "observed_differences": [],
+  "seam_verdicts": [
+    {"seam_index": 0, "passed": true, "blocking_reasons": []}
+  ]
 }
-Use booleans, confidence from 0 through 1, and arrays of specific strings."""
+Use booleans, confidence from 0 through 1, and arrays of specific strings. Return exactly one seam_verdicts item for every supplied seam index, in order. A seam verdict passes only when its blocking_reasons is empty."""
+
+
+@dataclass(frozen=True)
+class AcousticSeamVerdict:
+    seam_index: int
+    passed: bool
+    blocking_reasons: Tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -55,6 +67,7 @@ class AcousticQAReport:
     blocking_reasons: Tuple[str, ...]
     observed_differences: Tuple[str, ...]
     passed: bool
+    seam_verdicts: Tuple[AcousticSeamVerdict, ...] = ()
 
 
 def _validate_clips(clips: Sequence[Dict[str, Any]]) -> None:
@@ -102,14 +115,48 @@ def evaluate_acoustic_seam_continuity(
     for field in ("blocking_reasons", "observed_differences"):
         if not isinstance(payload[field], list) or any(not isinstance(item, str) for item in payload[field]):
             raise ValidationError("Acoustic seam QA reason fields must be lists of strings.")
+    raw_verdicts = payload["seam_verdicts"]
+    if not isinstance(raw_verdicts, list) or len(raw_verdicts) != seam_count:
+        raise ValidationError("Acoustic seam QA requires one seam verdict per supplied clip.")
+    verdicts = []
+    for expected_index, raw_verdict in enumerate(raw_verdicts):
+        if not isinstance(raw_verdict, dict) or set(raw_verdict) != {
+            "seam_index",
+            "passed",
+            "blocking_reasons",
+        }:
+            raise ValidationError("Acoustic seam QA seam verdict does not match the required schema.")
+        reasons = raw_verdict["blocking_reasons"]
+        if (
+            isinstance(raw_verdict["seam_index"], bool)
+            or raw_verdict["seam_index"] != expected_index
+            or not isinstance(raw_verdict["passed"], bool)
+            or not isinstance(reasons, list)
+            or any(not isinstance(reason, str) for reason in reasons)
+            or raw_verdict["passed"] != (not reasons)
+        ):
+            raise ValidationError("Acoustic seam QA seam verdict is invalid or out of order.")
+        verdicts.append(
+            AcousticSeamVerdict(
+                seam_index=expected_index,
+                passed=raw_verdict["passed"],
+                blocking_reasons=tuple(reasons),
+            )
+        )
     blocking = tuple(payload["blocking_reasons"])
-    passed = all(payload[field] for field in _BOOLEAN_FIELDS) and float(confidence) >= 0.85 and not blocking
+    passed = (
+        all(payload[field] for field in _BOOLEAN_FIELDS)
+        and float(confidence) >= 0.85
+        and not blocking
+        and all(verdict.passed for verdict in verdicts)
+    )
     return AcousticQAReport(
         **{field: payload[field] for field in _BOOLEAN_FIELDS},
         confidence=float(confidence),
         blocking_reasons=blocking,
         observed_differences=tuple(payload["observed_differences"]),
         passed=passed,
+        seam_verdicts=tuple(verdicts),
     )
 
 
@@ -117,5 +164,6 @@ __all__ = [
     "ACOUSTIC_QA_RUBRIC_VERSION",
     "DEFAULT_ACOUSTIC_QA_MODEL",
     "AcousticQAReport",
+    "AcousticSeamVerdict",
     "evaluate_acoustic_seam_continuity",
 ]

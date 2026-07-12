@@ -142,6 +142,24 @@ def test_keeps_a_complete_concise_ending_inside_the_minimum_shot_plan():
     assert " ".join(beat.text for beat in beats) == script
 
 
+def test_preserves_a_three_word_final_sentence_as_a_four_second_semantic_beat():
+    script = (
+        "Diese Rampe kostet jeden Morgen unnötig viel Kraft und verlangt trotz Planung volle Konzentration bei jeder einzelnen Nutzung. "
+        "Schon kleine Steigungen belasten Schultern und Hände deutlich und machen den vertrauten Weg am Ende wieder unnötig anstrengend. "
+        "Das kostet Kraft."
+    )
+
+    beats = plan_editorial_beats(script)
+
+    assert [beat.word_count for beat in beats] == [18, 18, 3]
+    assert [beat.provider_duration_seconds for beat in beats] == [8, 8, 4]
+    assert [beat.text for beat in beats] == [
+        "Diese Rampe kostet jeden Morgen unnötig viel Kraft und verlangt trotz Planung volle Konzentration bei jeder einzelnen Nutzung.",
+        "Schon kleine Steigungen belasten Schultern und Hände deutlich und machen den vertrauten Weg am Ende wieder unnötig anstrengend.",
+        "Das kostet Kraft.",
+    ]
+
+
 @pytest.mark.parametrize("script", [SENTENCE_SCRIPT, CLAUSE_SCRIPT])
 def test_preserves_every_word_once_and_in_order(script):
     beats = plan_editorial_beats(script)

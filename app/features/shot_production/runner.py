@@ -19,7 +19,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from typing import Any, Callable, Dict, Iterator, Optional
+from typing import Any, Callable, Dict, Iterator, Optional, Sequence
 from urllib.parse import quote
 
 import google.auth
@@ -64,7 +64,8 @@ from app.features.shot_production.voice_qa import (
 )
 
 
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3
+SUPPORTED_MANIFEST_VERSIONS = frozenset({2, MANIFEST_VERSION})
 APP_SCRIPT_SOURCE = "app.features.topics.agents.generate_dialog_scripts"
 PLANNING_PROFILE = "minimum-eight-second-shots-v1"
 DEFAULT_MAX_INFLIGHT = 2
@@ -160,7 +161,7 @@ def _load_manifest(path: Path) -> Dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValidationError("Pilot manifest could not be loaded.", {"path": str(path), "error": str(exc)}) from exc
-    if not isinstance(payload, dict) or payload.get("version") != MANIFEST_VERSION:
+    if not isinstance(payload, dict) or payload.get("version") not in SUPPORTED_MANIFEST_VERSIONS:
         raise ValidationError("Pilot manifest has an unsupported schema version.")
     return payload
 
@@ -328,19 +329,27 @@ def _validate_approved_pilot_plan(
 def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     script = payload["script"]
     master = payload["approved_master"]
+    script_contract = {
+        "input_sha256": script["input_sha256"],
+        "text_sha256": script["text_sha256"],
+        "source": script["source"],
+        "target_length_tier": script["target_length_tier"],
+        "text": script["text"],
+        "planned_provider_durations": script["planned_provider_durations"],
+    }
+    if int(payload.get("version") or 0) >= 3:
+        script_contract.update(
+            {
+                "planning_profile": script["planning_profile"],
+                "delivery_duration_seconds": script["delivery_duration_seconds"],
+            }
+        )
     return {
         "approved_master": {
             "sha256": master["sha256"],
             "mime_type": master["mime_type"],
         },
-        "script": {
-            "input_sha256": script["input_sha256"],
-            "text_sha256": script["text_sha256"],
-            "source": script["source"],
-            "target_length_tier": script["target_length_tier"],
-            "text": script["text"],
-            "planned_provider_durations": script["planned_provider_durations"],
-        },
+        "script": script_contract,
         "takes": [
             {
                 "index": take["index"],
@@ -358,11 +367,38 @@ def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _validate_duration_planning_contract(payload: Dict[str, Any]) -> Dict[str, float]:
+    script = payload.get("script") or {}
+    derived = _delivery_duration_contract(script.get("target_length_tier"))
+    stored_profile = script.get("planning_profile")
+    stored_duration = script.get("delivery_duration_seconds")
+    requires_duration_fields = int(payload.get("version") or 0) >= 3
+    if requires_duration_fields or stored_profile is not None or stored_duration is not None:
+        if stored_profile != PLANNING_PROFILE or stored_duration != derived:
+            raise ValidationError(
+                "Pilot duration planning contract changed after approval.",
+                {
+                    "expected_planning_profile": PLANNING_PROFILE,
+                    "actual_planning_profile": stored_profile,
+                    "expected_delivery_duration_seconds": derived,
+                    "actual_delivery_duration_seconds": stored_duration,
+                },
+            )
+    expected = str(payload.get("request_contract_sha256") or "")
+    actual = _canonical_sha256(_request_contract_payload(payload))
+    if not expected or actual != expected:
+        raise ValidationError(
+            "Pilot request contract changed after approval; no paid calls were made.",
+            {"expected_sha256": expected, "actual_sha256": actual},
+        )
+    return derived
+
+
 def _validate_paid_request_contract(payload: Dict[str, Any]) -> None:
     script = payload.get("script") or {}
     if script.get("source") != APP_SCRIPT_SOURCE:
         raise ValidationError("Pilot paid request is no longer an approved app-generated plan.")
-    duration_contract = _delivery_duration_contract(script.get("target_length_tier"))
+    duration_contract = _validate_duration_planning_contract(payload)
     durations = script.get("planned_provider_durations")
     take_durations = [take.get("duration_seconds") for take in payload.get("takes") or []]
     if (
@@ -377,13 +413,6 @@ def _validate_paid_request_contract(payload: Dict[str, Any]) -> None:
     source_path = Path(script.get("path") or "")
     if not source_path.is_file() or _file_sha256(source_path) != script.get("input_sha256"):
         raise ValidationError("Pilot script input changed after approval.")
-    expected = str(payload.get("request_contract_sha256") or "")
-    actual = _canonical_sha256(_request_contract_payload(payload))
-    if not expected or actual != expected:
-        raise ValidationError(
-            "Pilot request contract changed after approval; no paid calls were made.",
-            {"expected_sha256": expected, "actual_sha256": actual},
-        )
 
 
 def _is_definitive_provider_rejection(exc: Exception) -> bool:
@@ -1273,28 +1302,84 @@ def evaluate_final_media_probe(
     }
 
 
+def _evaluate_acoustic_plan_contract_details(
+    acoustic_plan: Any,
+    stitch_metadata: Dict[str, Any],
+    *,
+    fps: float,
+) -> tuple[list[str], list[int]]:
+    reasons = []
+    failed_seam_indexes = set()
+    all_seam_indexes = set(range(len(acoustic_plan.seams)))
+    if acoustic_plan.active_speech_rms_range_db > 1.5:
+        reasons.append("active_speech_rms_range_exceeded")
+        failed_seam_indexes.update(all_seam_indexes)
+    seam_rules = (
+        ("audio_overlap_out_of_range", lambda seam: not 0.04 <= seam.overlap_seconds <= 0.07),
+        ("word_gap_out_of_range", lambda seam: not 0.10 <= seam.final_word_gap_seconds <= 0.32),
+        ("retained_breath_island_too_long", lambda seam: seam.retained_island_duration_seconds > 0.08),
+        ("seam_energy_delta_exceeded", lambda seam: seam.short_window_energy_delta_db > 6.0),
+        ("speech_overlap_detected", lambda seam: seam.speech_overlap),
+    )
+    for reason, failed in seam_rules:
+        matching = [index for index, seam in enumerate(acoustic_plan.seams) if failed(seam)]
+        if matching:
+            reasons.append(reason)
+            failed_seam_indexes.update(matching)
+    if float(stitch_metadata.get("stitch_audio_video_duration_delta_s") or 0) > 1 / fps + 1e-6:
+        reasons.append("audio_video_duration_drift")
+        failed_seam_indexes.update(all_seam_indexes)
+    return reasons, sorted(failed_seam_indexes)
+
+
 def _evaluate_acoustic_plan_contract(
     acoustic_plan: Any,
     stitch_metadata: Dict[str, Any],
     *,
     fps: float,
 ) -> list[str]:
-    reasons = []
-    if acoustic_plan.active_speech_rms_range_db > 1.5:
-        reasons.append("active_speech_rms_range_exceeded")
-    if any(not 0.04 <= seam.overlap_seconds <= 0.07 for seam in acoustic_plan.seams):
-        reasons.append("audio_overlap_out_of_range")
-    if any(not 0.10 <= seam.final_word_gap_seconds <= 0.32 for seam in acoustic_plan.seams):
-        reasons.append("word_gap_out_of_range")
-    if any(seam.retained_island_duration_seconds > 0.08 for seam in acoustic_plan.seams):
-        reasons.append("retained_breath_island_too_long")
-    if any(seam.short_window_energy_delta_db > 6.0 for seam in acoustic_plan.seams):
-        reasons.append("seam_energy_delta_exceeded")
-    if any(seam.speech_overlap for seam in acoustic_plan.seams):
-        reasons.append("speech_overlap_detected")
-    if float(stitch_metadata.get("stitch_audio_video_duration_delta_s") or 0) > 1 / fps + 1e-6:
-        reasons.append("audio_video_duration_drift")
+    reasons, _failed_seam_indexes = _evaluate_acoustic_plan_contract_details(
+        acoustic_plan,
+        stitch_metadata,
+        fps=fps,
+    )
     return reasons
+
+
+def _acoustic_retry_map(
+    failed_seam_indexes: Sequence[int],
+    *,
+    take_count: int,
+) -> tuple[list[Dict[str, Any]], list[int]]:
+    if take_count < 2:
+        raise ValidationError("Acoustic seam retry mapping requires at least two takes.")
+    normalized = []
+    for seam_index in failed_seam_indexes:
+        if isinstance(seam_index, bool) or not isinstance(seam_index, int):
+            raise ValidationError("Acoustic failed seam indexes must be integers.")
+        if not 0 <= seam_index < take_count - 1:
+            raise ValidationError(
+                "Acoustic failed seam index is outside the take range.",
+                {"seam_index": seam_index, "take_count": take_count},
+            )
+        if seam_index not in normalized:
+            normalized.append(seam_index)
+    normalized.sort()
+    mapping = [
+        {
+            "seam_index": seam_index,
+            "adjacent_take_indexes": [seam_index, seam_index + 1],
+        }
+        for seam_index in normalized
+    ]
+    recommended = sorted(
+        {
+            take_index
+            for item in mapping
+            for take_index in item["adjacent_take_indexes"]
+        }
+    )
+    return mapping, recommended
 
 
 @_manifest_locked
@@ -1315,9 +1400,7 @@ def compose_and_caption(
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
-    duration_contract = (payload.get("script") or {}).get("delivery_duration_seconds") or _delivery_duration_contract(
-        (payload.get("script") or {}).get("target_length_tier")
-    )
+    duration_contract = _validate_duration_planning_contract(payload)
     minimum_duration = float(duration_contract["minimum"])
     maximum_duration = float(duration_contract["maximum"])
     if not (payload.get("visual_qa") or {}).get("passed"):
@@ -1386,10 +1469,23 @@ def compose_and_caption(
         except ValidationError as exc:
             if "duration envelope" not in exc.message.lower():
                 raise
+            available_take_indexes = {int(take["index"]) for take in ordered}
+            diagnostic_indexes = (exc.details or {}).get("under_capacity_take_indexes") or []
+            recommended_retry_take_indexes = sorted(
+                {
+                    int(index)
+                    for index in diagnostic_indexes
+                    if not isinstance(index, bool)
+                    and isinstance(index, int)
+                    and int(index) in available_take_indexes
+                }
+            )
+            if not recommended_retry_take_indexes:
+                recommended_retry_take_indexes = [int(ordered[-1]["index"])]
             payload["acoustic_plan_failure"] = {
                 "message": exc.message,
                 "details": exc.details,
-                "recommended_retry_take_indexes": [ordered[-1]["index"]],
+                "recommended_retry_take_indexes": recommended_retry_take_indexes,
                 "created_at": _utc_now(),
             }
             payload["status"] = "acoustic_plan_failed"
@@ -1488,7 +1584,7 @@ def compose_and_caption(
                     "bytes": len(audio_bytes),
                 }
             )
-        deterministic_reasons = _evaluate_acoustic_plan_contract(
+        deterministic_reasons, deterministic_failed_seam_indexes = _evaluate_acoustic_plan_contract_details(
             acoustic_plan,
             stitch_metadata,
             fps=float(stitch_metadata.get("stitch_fps") or 24.0),
@@ -1505,6 +1601,23 @@ def compose_and_caption(
         report_payload["model"] = str(acoustic_model or DEFAULT_ACOUSTIC_QA_MODEL)
         report_payload["rubric_version"] = ACOUSTIC_QA_RUBRIC_VERSION
         report_payload["passed"] = bool(report.passed and not deterministic_reasons)
+        qualitative_failed_seam_indexes = [
+            int(verdict.seam_index)
+            for verdict in (getattr(report, "seam_verdicts", ()) or ())
+            if not verdict.passed
+        ]
+        if not report.passed and not qualitative_failed_seam_indexes:
+            qualitative_failed_seam_indexes = list(range(len(clips)))
+        failed_seam_indexes = sorted(
+            set(deterministic_failed_seam_indexes) | set(qualitative_failed_seam_indexes)
+        )
+        seam_retry_map, recommended_retry_take_indexes = _acoustic_retry_map(
+            failed_seam_indexes,
+            take_count=len(ordered),
+        )
+        report_payload["failed_seam_indexes"] = failed_seam_indexes
+        report_payload["seam_retry_map"] = seam_retry_map
+        report_payload["recommended_retry_take_indexes"] = recommended_retry_take_indexes
         payload["acoustic_seam_qa"] = report_payload
         _atomic_write_json(manifest_path, payload)
         if not report_payload["passed"]:
@@ -1560,6 +1673,7 @@ def compose_and_caption(
 def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
+    _validate_duration_planning_contract(payload)
     caption = payload.get("caption") or {}
     if not _artifact_matches(caption, path_key="captioned_path"):
         raise ValidationError("Captioned pilot artifact failed its recorded checksum before upload.")
@@ -2070,6 +2184,13 @@ def reset_failed_take(
         and payload.get("status") == "acoustic_plan_failed"
         and index in (acoustic_plan_failure.get("recommended_retry_take_indexes") or [])
     )
+    acoustic_seam_report = payload.get("acoustic_seam_qa") or {}
+    failed_acoustic_seam_qa = (
+        take_status == "transcribed"
+        and payload.get("status") == "acoustic_seam_qa_failed"
+        and acoustic_seam_report.get("passed") is False
+        and index in (acoustic_seam_report.get("recommended_retry_take_indexes") or [])
+    )
     voice_report = payload.get("voice_qa") or {}
     failed_voice_gate = (
         take_status == "transcribed"
@@ -2082,6 +2203,7 @@ def reset_failed_take(
         or failed_voice_gate
         or failed_final_transcript
         or failed_acoustic_plan
+        or failed_acoustic_seam_qa
     ):
         raise ValidationError(
             "Take is not in a retryable failed state; refusing to orphan an existing paid operation.",
@@ -2140,6 +2262,17 @@ def reset_failed_take(
                 "stage": "acoustic_plan",
                 "selected_take_indexes": [index],
                 "report": acoustic_plan_failure,
+                "archived_at": _utc_now(),
+            }
+        )
+        payload["qa_failure_history"] = failure_history
+    if failed_acoustic_seam_qa:
+        failure_history = list(payload.get("qa_failure_history") or [])
+        failure_history.append(
+            {
+                "stage": "acoustic_seam_qa",
+                "selected_take_indexes": [index],
+                "report": acoustic_seam_report,
                 "archived_at": _utc_now(),
             }
         )

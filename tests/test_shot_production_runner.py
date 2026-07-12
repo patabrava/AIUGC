@@ -109,7 +109,7 @@ def test_initialize_pilot_records_minimum_two_shots_and_complete_request_audit(t
     manifest_path, payload = _initialize(tmp_path)
 
     assert payload == _read(manifest_path)
-    assert payload["version"] == 2
+    assert payload["version"] == 3
     assert payload["status"] == "planned"
     assert payload["script"]["text"] == SCRIPT
     assert payload["script"]["source"] == "app.features.topics.agents.generate_dialog_scripts"
@@ -390,6 +390,49 @@ def test_submission_blocks_a_tampered_paid_request_contract(tmp_path):
         submit_pending_takes(manifest_path, client)
 
     assert client.calls == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("planning_profile", "tampered-planner-v9"),
+        (
+            "delivery_duration_seconds",
+            {"requested": 16.0, "minimum": 4.0, "maximum": 99.0},
+        ),
+    ],
+)
+def test_submission_contract_binds_duration_planning_fields(tmp_path, field, value):
+    from app.features.shot_production.runner import submit_pending_takes
+
+    manifest_path, _ = _initialize(tmp_path)
+    payload = _read(manifest_path)
+    payload["script"][field] = value
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    client = _SubmitClient()
+
+    with pytest.raises(ValidationError, match="planning contract|request contract changed"):
+        submit_pending_takes(manifest_path, client)
+
+    assert client.calls == []
+
+
+def test_legacy_v2_manifest_keeps_its_original_hash_shape_and_remains_resumable(tmp_path):
+    from app.features.shot_production.runner import (
+        _canonical_sha256,
+        _request_contract_payload,
+        submit_pending_takes,
+    )
+
+    manifest_path, payload = _initialize(tmp_path)
+    payload["version"] = 2
+    payload["request_contract_sha256"] = _canonical_sha256(_request_contract_payload(payload))
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    client = _SubmitClient()
+
+    submit_pending_takes(manifest_path, client, max_inflight=2)
+
+    assert len(client.calls) == 2
 
 
 def test_retry_refuses_to_orphan_a_nonfailed_paid_operation(tmp_path):
@@ -1127,6 +1170,42 @@ def test_compose_requires_passed_voice_qa(tmp_path):
         compose_and_caption(manifest_path, _DeepgramByCall([SCRIPT]))
 
 
+def test_composition_rederives_and_rejects_a_mutated_duration_envelope(tmp_path):
+    from app.features.shot_production.runner import (
+        _canonical_sha256,
+        _request_contract_payload,
+        compose_and_caption,
+    )
+
+    manifest_path, payload = _initialize(tmp_path)
+    payload["script"]["delivery_duration_seconds"] = {
+        "requested": 16.0,
+        "minimum": 4.0,
+        "maximum": 99.0,
+    }
+    payload["request_contract_sha256"] = _canonical_sha256(_request_contract_payload(payload))
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="duration planning contract"):
+        compose_and_caption(manifest_path, _DeepgramByCall([]))
+
+
+def test_upload_rejects_a_mutated_planning_profile_even_with_a_rehashed_manifest(tmp_path):
+    from app.features.shot_production.runner import (
+        _canonical_sha256,
+        _request_contract_payload,
+        upload_final,
+    )
+
+    manifest_path, payload = _initialize(tmp_path)
+    payload["script"]["planning_profile"] = "tampered-planner-v9"
+    payload["request_contract_sha256"] = _canonical_sha256(_request_contract_payload(payload))
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="duration planning contract"):
+        upload_final(manifest_path)
+
+
 def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_path):
     from app.features.shot_production.acoustic_qa import AcousticQAReport
     from app.features.shot_production.audio_seams import (
@@ -1139,7 +1218,6 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     manifest_path = _manifest_with_raw_takes(tmp_path)
     payload = _read(manifest_path)
     for take in payload["takes"]:
-        take["duration_seconds"] = 8.0
         take["transcript_qa"] = {
             "passed": True,
             "first_word_start_seconds": 0.2,
@@ -1228,7 +1306,134 @@ def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
     ) == ["seam_energy_delta_exceeded"]
 
 
-def test_acoustic_duration_failure_persists_targeted_final_take_retry(tmp_path):
+def test_acoustic_retry_map_targets_only_takes_adjacent_to_failed_seams():
+    from app.features.shot_production.runner import _acoustic_retry_map
+
+    mapping, take_indexes = _acoustic_retry_map([2, 5], take_count=7)
+
+    assert mapping == [
+        {"seam_index": 2, "adjacent_take_indexes": [2, 3]},
+        {"seam_index": 5, "adjacent_take_indexes": [5, 6]},
+    ]
+    assert take_indexes == [2, 3, 5, 6]
+
+
+def test_reset_failed_take_supports_a_localized_acoustic_seam_qa_failure(tmp_path):
+    from app.features.shot_production.runner import reset_failed_take
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {"passed": True}
+    payload["status"] = "acoustic_seam_qa_failed"
+    payload["acoustic_seam_qa"] = {
+        "passed": False,
+        "failed_seam_indexes": [0],
+        "seam_retry_map": [
+            {"seam_index": 0, "adjacent_take_indexes": [0, 1]},
+        ],
+        "recommended_retry_take_indexes": [0, 1],
+        "blocking_reasons": ["breath restarts at seam 0"],
+    }
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    reset = reset_failed_take(
+        manifest_path,
+        index=1,
+        reason="incoming take restarts the breath at seam 0",
+        retry_guidance="Continue the prior breath and cadence without a fresh inhale.",
+    )
+
+    assert reset["takes"][1]["status"] == "planned"
+    assert reset["qa_failure_history"][-1]["stage"] == "acoustic_seam_qa"
+    assert reset["qa_failure_history"][-1]["report"]["failed_seam_indexes"] == [0]
+
+
+def test_composition_persists_failed_seam_verdict_and_adjacent_retry_indexes(tmp_path):
+    from app.features.shot_production.acoustic_qa import (
+        AcousticQAReport,
+        AcousticSeamVerdict,
+    )
+    from app.features.shot_production.audio_seams import (
+        AcousticSeamPlan,
+        PlannedSeam,
+        PlannedTakeWindow,
+    )
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.2,
+            "final_word_end_seconds": 6.8,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 7.26,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    plan = AcousticSeamPlan(
+        "test-v1",
+        tuple(PlannedTakeWindow(i, 0.0, 7.26, 0.0, 7.26, 0.0) for i in range(2)),
+        (PlannedSeam(0, 7.26, 0.0, 0.04, 0.02, 0.16, 0.2, 0.0, False, ()),),
+        0.8,
+        14.48,
+    )
+
+    def extract_fn(_source, destination, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"wav")
+
+    report = AcousticQAReport(
+        False,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        0.96,
+        ("seam 0 restarts on an inhale",),
+        (),
+        False,
+        (AcousticSeamVerdict(0, False, ("restarts on an inhale",)),),
+    )
+
+    with pytest.raises(ValidationError, match="acoustic seam QA failed"):
+        compose_and_caption(
+            manifest_path,
+            _DeepgramByCall([SCRIPT]),
+            acoustic_seams=True,
+            analyze_audio_fn=lambda _path: (),
+            plan_acoustic_fn=lambda _evidence, **_kwargs: plan,
+            extract_seam_audio_fn=extract_fn,
+            acoustic_evaluator=lambda _clips, **_kwargs: report,
+            stitch_fn=lambda **_kwargs: (
+                b"stitched-video",
+                {
+                    "stitch_segment_count": 2,
+                    "stitch_fps": 24.0,
+                    "stitch_audio_video_duration_delta_s": 0.02,
+                },
+            ),
+        )
+
+    saved = _read(manifest_path)
+    assert saved["status"] == "acoustic_seam_qa_failed"
+    assert saved["acoustic_seam_qa"]["failed_seam_indexes"] == [0]
+    assert saved["acoustic_seam_qa"]["seam_retry_map"] == [
+        {"seam_index": 0, "adjacent_take_indexes": [0, 1]},
+    ]
+    assert saved["acoustic_seam_qa"]["recommended_retry_take_indexes"] == [0, 1]
+
+
+def test_acoustic_duration_failure_persists_provider_diagnostic_retry_indexes(tmp_path):
     from app.features.shot_production.runner import compose_and_caption, reset_failed_take
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
@@ -1252,7 +1457,11 @@ def test_acoustic_duration_failure_persists_targeted_final_take_retry(tmp_path):
     def fail_plan(_evidence, **_kwargs):
         raise ValidationError(
             "Acoustic plan cannot satisfy the duration envelope.",
-            {"required_seconds": 0.4, "available_seconds": 0.2},
+            {
+                "required_seconds": 0.4,
+                "total_available_seconds": 0.2,
+                "under_capacity_take_indexes": [0, 1],
+            },
         )
 
     with pytest.raises(ValidationError, match="cannot satisfy"):
@@ -1266,9 +1475,7 @@ def test_acoustic_duration_failure_persists_targeted_final_take_retry(tmp_path):
 
     failed = _read(manifest_path)
     assert failed["status"] == "acoustic_plan_failed"
-    assert failed["acoustic_plan_failure"]["recommended_retry_take_indexes"] == [1]
-    with pytest.raises(ValidationError, match="retryable failed state"):
-        reset_failed_take(manifest_path, index=0, reason="wrong take")
+    assert failed["acoustic_plan_failure"]["recommended_retry_take_indexes"] == [0, 1]
     reset = reset_failed_take(
         manifest_path,
         index=1,

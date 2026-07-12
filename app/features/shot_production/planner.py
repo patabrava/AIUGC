@@ -122,15 +122,24 @@ def _semantic_parts(tokens: Sequence[str]) -> Optional[List[str]]:
         def best(start: int, remaining: int) -> Optional[Tuple[float, float, Tuple[int, ...]]]:
             if remaining == 1:
                 final_count = word_count - start
-                if not MIN_BEAT_WORDS <= final_count <= max_words:
+                concise_final_sentence = (
+                    1 <= final_count < MIN_BEAT_WORDS
+                    and strong.get(start) == 0.0
+                    and _terminal_mark(tokens[-1]) in ".!?"
+                )
+                if not (
+                    MIN_BEAT_WORDS <= final_count <= max_words
+                    or concise_final_sentence
+                ):
                     return None
                 return (0.0, (final_count - target_words) ** 2, ())
             minimum_end = start + MIN_BEAT_WORDS
-            maximum_end = min(start + max_words, word_count - MIN_BEAT_WORDS * (remaining - 1))
+            minimum_tail_words = MIN_BEAT_WORDS * (remaining - 2) + 1
+            maximum_end = min(start + max_words, word_count - minimum_tail_words)
             candidates = []
             for end in range(minimum_end, maximum_end + 1):
                 words_left = word_count - end
-                if not MIN_BEAT_WORDS * (remaining - 1) <= words_left <= max_words * (remaining - 1):
+                if not minimum_tail_words <= words_left <= max_words * (remaining - 1):
                     continue
                 tail = best(end, remaining - 1)
                 if tail is None:
