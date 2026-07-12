@@ -1228,6 +1228,57 @@ def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
     ) == ["seam_energy_delta_exceeded"]
 
 
+def test_acoustic_duration_failure_persists_targeted_final_take_retry(tmp_path):
+    from app.features.shot_production.runner import compose_and_caption, reset_failed_take
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.5,
+            "final_word_end_seconds": 6.2,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 6.45,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def fail_plan(_evidence, **_kwargs):
+        raise ValidationError(
+            "Acoustic plan cannot satisfy the duration envelope.",
+            {"required_seconds": 0.4, "available_seconds": 0.2},
+        )
+
+    with pytest.raises(ValidationError, match="cannot satisfy"):
+        compose_and_caption(
+            manifest_path,
+            _DeepgramByCall([]),
+            acoustic_seams=True,
+            analyze_audio_fn=lambda _path: (),
+            plan_acoustic_fn=fail_plan,
+        )
+
+    failed = _read(manifest_path)
+    assert failed["status"] == "acoustic_plan_failed"
+    assert failed["acoustic_plan_failure"]["recommended_retry_take_indexes"] == [1]
+    with pytest.raises(ValidationError, match="retryable failed state"):
+        reset_failed_take(manifest_path, index=0, reason="wrong take")
+    reset = reset_failed_take(
+        manifest_path,
+        index=1,
+        reason="final take ended too early for the delivery duration",
+        retry_guidance="Use natural measured pacing and place the final spoken word near 7.0 seconds.",
+    )
+    assert reset["takes"][1]["status"] == "planned"
+    assert reset["qa_failure_history"][-1]["stage"] == "acoustic_plan"
+
+
 @pytest.mark.parametrize(
     ("probe", "reason"),
     [
@@ -1272,10 +1323,12 @@ def test_upload_persists_remote_head_verification_and_rechecks_without_reupload(
     class FakeStorage:
         def __init__(self, *, verified):
             self.verified = verified
+            self.prepare_calls = []
             self.upload_calls = []
             self.verify_calls = []
 
         def prepare_video_upload(self, **kwargs):
+            self.prepare_calls.append(kwargs)
             return {
                 "storage_provider": "fake_r2",
                 "storage_key": "videos/content-addressed-final.mp4",
@@ -1332,6 +1385,7 @@ def test_upload_persists_remote_head_verification_and_rechecks_without_reupload(
     saved = _read(manifest_path)
     assert saved["upload_verification"]["passed"] is True
     assert saved["upload_intent"]["storage_key"] == "videos/content-addressed-final.mp4"
+    assert storage.prepare_calls[0]["file_name"].endswith("-minimum-shots-captioned.mp4")
     assert len(storage.upload_calls) == 1
     assert storage.upload_calls[0]["object_key"] == "videos/content-addressed-final.mp4"
     assert len(storage.verify_calls) == 2

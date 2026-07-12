@@ -188,7 +188,7 @@ def test_planner_limits_unavoidable_boundary_breath_tail_to_crossfade_window():
         _evidence(
             1,
             first_word=0.56,
-            room_rms=-60.0,
+            room_rms=-42.0,
             breath_start=0.36,
             breath_end=0.46,
         ),
@@ -232,7 +232,7 @@ def test_planner_does_not_treat_word_adjacent_fricative_as_isolated_breath():
     assert plan.seams[0].retained_island_duration_seconds == 0.0
 
 
-def test_planner_prefers_target_cadence_before_raw_room_tone_delta():
+def test_planner_prefers_energy_safe_candidate_then_target_cadence():
     previous = _evidence(0, final_word=3.0, room_rms=-42.0)
     next_take = _evidence(1, first_word=0.56, room_rms=-60.0)
     frames = tuple(
@@ -262,8 +262,9 @@ def test_planner_prefers_target_cadence_before_raw_room_tone_delta():
         max_duration_seconds=10.0,
     )
 
-    assert plan.takes[1].audio_start_seconds >= 0.42
-    assert plan.seams[0].final_word_gap_seconds == pytest.approx(0.16, abs=0.02)
+    assert plan.takes[1].audio_start_seconds < 0.42
+    assert 0.10 <= plan.seams[0].final_word_gap_seconds <= 0.32
+    assert plan.seams[0].short_window_energy_delta_db <= 6.0
 
 
 def test_planner_keeps_word_guards_and_never_crossfades_speech():
@@ -271,8 +272,19 @@ def test_planner_keeps_word_guards_and_never_crossfades_speech():
 
     plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
 
-    assert plan.takes[0].audio_end_seconds >= takes[0].final_word_end_seconds + 0.060
-    assert plan.takes[1].audio_start_seconds <= takes[1].first_word_start_seconds - 0.060
+    seam = plan.seams[0]
+    untouched_tail = (
+        plan.takes[0].audio_end_seconds
+        - takes[0].final_word_end_seconds
+        - seam.overlap_seconds
+    )
+    untouched_head = (
+        takes[1].first_word_start_seconds
+        - plan.takes[1].audio_start_seconds
+        - seam.overlap_seconds
+    )
+    assert untouched_tail >= 0.100 - 1e-9
+    assert untouched_head >= 0.060 - 1e-9
     assert plan.seams[0].speech_overlap is False
 
 

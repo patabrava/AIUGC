@@ -123,6 +123,7 @@ def _clear_downstream_artifacts(payload: Dict[str, Any]) -> None:
         "seam_qa",
         "acoustic_seam_plan",
         "acoustic_seam_qa",
+        "acoustic_plan_failure",
         "caption",
         "media_qa",
         "upload_intent",
@@ -1376,11 +1377,25 @@ def compose_and_caption(
             )
             for take in ordered
         )
-        acoustic_plan = plan_acoustic_fn(
-            evidence,
-            min_duration_seconds=minimum_duration,
-            max_duration_seconds=maximum_duration,
-        )
+        try:
+            acoustic_plan = plan_acoustic_fn(
+                evidence,
+                min_duration_seconds=minimum_duration,
+                max_duration_seconds=maximum_duration,
+            )
+        except ValidationError as exc:
+            if "duration envelope" not in exc.message.lower():
+                raise
+            payload["acoustic_plan_failure"] = {
+                "message": exc.message,
+                "details": exc.details,
+                "recommended_retry_take_indexes": [ordered[-1]["index"]],
+                "created_at": _utc_now(),
+            }
+            payload["status"] = "acoustic_plan_failed"
+            payload["updated_at"] = _utc_now()
+            _atomic_write_json(manifest_path, payload)
+            raise
         payload["acoustic_seam_plan"] = asdict(acoustic_plan)
         _atomic_write_json(manifest_path, payload)
     stitched_bytes, stitch_metadata = stitch_fn(
@@ -1560,7 +1575,13 @@ def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> D
     if not captioned_path.is_file():
         raise ValidationError("Captioned pilot video is missing before upload.")
     storage = storage_client or get_storage_client()
-    suffix = "acoustic-preview-captioned" if payload.get("acoustic_seam_plan") else "captioned"
+    suffix_parts = []
+    if (payload.get("script") or {}).get("planning_profile") == PLANNING_PROFILE:
+        suffix_parts.append("minimum-shots")
+    if payload.get("acoustic_seam_plan"):
+        suffix_parts.append("acoustic-preview")
+    suffix_parts.append("captioned")
+    suffix = "-".join(suffix_parts)
     file_name = f"semantic-ugc-{payload['run_id']}-{suffix}.mp4"
     intent = payload.get("upload_intent") or {}
     result = payload.get("upload") or {}
@@ -2043,13 +2064,25 @@ def reset_failed_take(
         and payload.get("status") == "final_transcript_failed"
         and (payload.get("final_transcript_qa") or {}).get("passed") is False
     )
+    acoustic_plan_failure = payload.get("acoustic_plan_failure") or {}
+    failed_acoustic_plan = (
+        take_status == "transcribed"
+        and payload.get("status") == "acoustic_plan_failed"
+        and index in (acoustic_plan_failure.get("recommended_retry_take_indexes") or [])
+    )
     voice_report = payload.get("voice_qa") or {}
     failed_voice_gate = (
         take_status == "transcribed"
         and voice_report.get("passed") is False
         and index in (voice_report.get("outlier_take_indexes") or [])
     )
-    if not (terminal_take_failure or failed_visual_gate or failed_voice_gate or failed_final_transcript):
+    if not (
+        terminal_take_failure
+        or failed_visual_gate
+        or failed_voice_gate
+        or failed_final_transcript
+        or failed_acoustic_plan
+    ):
         raise ValidationError(
             "Take is not in a retryable failed state; refusing to orphan an existing paid operation.",
             {"take_index": index, "take_status": take_status, "run_status": payload.get("status")},
@@ -2096,6 +2129,17 @@ def reset_failed_take(
                 "stage": "voice_qa",
                 "selected_take_indexes": [index],
                 "report": voice_report,
+                "archived_at": _utc_now(),
+            }
+        )
+        payload["qa_failure_history"] = failure_history
+    if failed_acoustic_plan:
+        failure_history = list(payload.get("qa_failure_history") or [])
+        failure_history.append(
+            {
+                "stage": "acoustic_plan",
+                "selected_take_indexes": [index],
+                "report": acoustic_plan_failure,
                 "archived_at": _utc_now(),
             }
         )

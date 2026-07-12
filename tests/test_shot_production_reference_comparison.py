@@ -27,6 +27,7 @@ def test_comparison_marks_two_shot_candidate_closer_than_four_take_control():
     assert report["candidate"]["cut_count"] == 1
     assert report["closer_to_reference_than_control"] is True
     assert report["candidate_reference_distance"] < report["control_reference_distance"]
+    assert report["candidate_two_shot_gate"] == {"passed": True, "failure_reasons": []}
 
 
 def derive(duration, cuts):

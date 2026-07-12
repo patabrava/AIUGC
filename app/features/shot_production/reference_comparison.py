@@ -61,6 +61,23 @@ def compare_edit_profiles(
 ) -> Dict[str, Any]:
     candidate_distance = _profile_distance(candidate, reference)
     control_distance = _profile_distance(control, reference)
+    closer = candidate_distance < control_distance
+    failures = []
+    duration = float(candidate["duration_seconds"])
+    cuts = candidate["cut_timestamps_seconds"]
+    shots = candidate["shot_durations_seconds"]
+    if not 14.5 <= duration <= 16.5:
+        failures.append("candidate_duration_out_of_range")
+    if int(candidate["cut_count"]) != 1:
+        failures.append("candidate_must_have_exactly_one_cut")
+    if len(cuts) == 1 and not 0.44 <= float(cuts[0]) / duration <= 0.56:
+        failures.append("candidate_cut_position_out_of_range")
+    if any(not 6.3 <= float(shot) <= 9.3 for shot in shots):
+        failures.append("candidate_shot_duration_out_of_range")
+    if float(candidate["shot_duration_cv"]) > 0.12:
+        failures.append("candidate_shot_duration_variation_exceeded")
+    if not closer:
+        failures.append("candidate_not_closer_to_reference_than_control")
     return {
         "schema": REFERENCE_COMPARISON_SCHEMA,
         "reference": reference,
@@ -68,7 +85,11 @@ def compare_edit_profiles(
         "candidate": candidate,
         "candidate_reference_distance": candidate_distance,
         "control_reference_distance": control_distance,
-        "closer_to_reference_than_control": candidate_distance < control_distance,
+        "closer_to_reference_than_control": closer,
+        "candidate_two_shot_gate": {
+            "passed": not failures,
+            "failure_reasons": failures,
+        },
     }
 
 

@@ -350,16 +350,17 @@ def _select_seam(
     previous_gain_db: float,
     next_gain_db: float,
 ) -> PlannedSeam:
-    contexts = (0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22)
+    tail_contexts = (0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22)
+    head_contexts = (0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22)
     overlaps = (0.04, 0.05, 0.06, 0.07)
     valid = []
     rejected: List[Dict[str, object]] = []
-    for tail_context in contexts:
+    for tail_context in tail_contexts:
         previous_end = min(
             previous.provider_duration_seconds,
             previous.final_word_end_seconds + tail_context,
         )
-        for head_context in contexts:
+        for head_context in head_contexts:
             next_start = max(0.0, next_take.first_word_start_seconds - head_context)
             previous_margin = _frames_between(
                 previous, previous.final_word_end_seconds, previous_end
@@ -387,6 +388,10 @@ def _select_seam(
                 reasons = []
                 if not 0.100 - 1e-9 <= word_gap <= 0.320 + 1e-9:
                     reasons.append("word_gap_out_of_range")
+                if previous_end - previous.final_word_end_seconds - overlap < 0.100 - 1e-9:
+                    reasons.append("post_word_crossfade_guard")
+                if next_take.first_word_start_seconds - next_start - overlap < 0.060 - 1e-9:
+                    reasons.append("pre_word_crossfade_guard")
                 if island_duration > 0.080 + 1e-9:
                     reasons.append("retained_breath_island")
                 if _boundary_starts_inside_isolated_breath(next_take, next_start):
@@ -401,6 +406,8 @@ def _select_seam(
                 except ValidationError:
                     reasons.append("insufficient_boundary_evidence")
                     energy_delta = math.inf
+                if energy_delta > 6.0 + 1e-9:
+                    reasons.append("energy_delta_exceeded")
                 if reasons:
                     rejected.append({**candidate, "reasons": reasons})
                     continue
