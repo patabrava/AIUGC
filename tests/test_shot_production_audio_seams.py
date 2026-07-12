@@ -182,6 +182,90 @@ def test_planner_removes_pause_breath_pause_from_next_take_head():
     assert 0.040 <= plan.seams[0].overlap_seconds <= 0.070
 
 
+def test_planner_limits_unavoidable_boundary_breath_tail_to_crossfade_window():
+    takes = (
+        _evidence(0, final_word=3.0, room_rms=-42.0),
+        _evidence(
+            1,
+            first_word=0.56,
+            room_rms=-60.0,
+            breath_start=0.36,
+            breath_end=0.46,
+        ),
+    )
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+    assert 0.46 - plan.takes[1].audio_start_seconds <= 0.032
+    assert plan.seams[0].retained_island_duration_seconds == 0.0
+
+
+def test_planner_does_not_treat_word_adjacent_fricative_as_isolated_breath():
+    previous = _evidence(0, final_word=3.0)
+    frames = tuple(
+        AudioFrameMetrics(
+            frame.timestamp_seconds,
+            -42.0,
+            -34.0,
+            0.12,
+            3600.0,
+            0.62,
+        )
+        if 3.0 <= frame.timestamp_seconds <= 3.05
+        else frame
+        for frame in previous.frames
+    )
+    previous = TakeAudioEvidence(
+        take_index=previous.take_index,
+        provider_duration_seconds=previous.provider_duration_seconds,
+        first_word_start_seconds=previous.first_word_start_seconds,
+        final_word_end_seconds=previous.final_word_end_seconds,
+        frames=frames,
+    )
+
+    plan = plan_acoustic_seams(
+        (previous, _evidence(1)),
+        min_duration_seconds=0.0,
+        max_duration_seconds=10.0,
+    )
+
+    assert plan.seams[0].retained_island_duration_seconds == 0.0
+
+
+def test_planner_prefers_target_cadence_before_raw_room_tone_delta():
+    previous = _evidence(0, final_word=3.0, room_rms=-42.0)
+    next_take = _evidence(1, first_word=0.56, room_rms=-60.0)
+    frames = tuple(
+        AudioFrameMetrics(
+            frame.timestamp_seconds,
+            -42.0,
+            -34.0,
+            0.04,
+            1200.0,
+            0.12,
+        )
+        if 0.20 <= frame.timestamp_seconds < 0.42
+        else frame
+        for frame in next_take.frames
+    )
+    next_take = TakeAudioEvidence(
+        take_index=next_take.take_index,
+        provider_duration_seconds=next_take.provider_duration_seconds,
+        first_word_start_seconds=next_take.first_word_start_seconds,
+        final_word_end_seconds=next_take.final_word_end_seconds,
+        frames=frames,
+    )
+
+    plan = plan_acoustic_seams(
+        (previous, next_take),
+        min_duration_seconds=0.0,
+        max_duration_seconds=10.0,
+    )
+
+    assert plan.takes[1].audio_start_seconds >= 0.42
+    assert plan.seams[0].final_word_gap_seconds == pytest.approx(0.16, abs=0.02)
+
+
 def test_planner_keeps_word_guards_and_never_crossfades_speech():
     takes = (_evidence(0), _evidence(1))
 

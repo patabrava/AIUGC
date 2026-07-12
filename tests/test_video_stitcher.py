@@ -18,7 +18,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _make_clip(path: str, *, seconds: int, color: str, width: int = 360, height: int = 640) -> None:
+def _make_clip(
+    path: str,
+    *,
+    seconds: int,
+    color: str,
+    width: int = 360,
+    height: int = 640,
+    frequency: int = 440,
+    sample_rate: int = 44100,
+) -> None:
     """Render a solid-color clip with a sine tone so it has both a video and an audio stream."""
     command = [
         "ffmpeg",
@@ -30,7 +39,7 @@ def _make_clip(path: str, *, seconds: int, color: str, width: int = 360, height:
         "-f",
         "lavfi",
         "-i",
-        f"sine=frequency=440:duration={seconds}",
+        f"sine=frequency={frequency}:sample_rate={sample_rate}:duration={seconds}",
         "-c:v",
         "libx264",
         "-pix_fmt",
@@ -107,6 +116,157 @@ def test_stitch_trims_segments_to_spoken_windows(tmp_path):
     assert meta["stitch_tail_trim_s"][0] >= 2.4
     assert meta["stitch_tail_trim_s"][1] >= 1.6
     assert meta["stitch_trim_window_source"] == ["test", "test"]
+
+
+def test_stitch_acoustic_plan_hard_cuts_video_and_crossfades_audio(tmp_path):
+    clip_a = str(tmp_path / "a.mp4")
+    clip_b = str(tmp_path / "b.mp4")
+    _make_clip(clip_a, seconds=2, color="red", frequency=440, sample_rate=44100)
+    _make_clip(clip_b, seconds=2, color="blue", frequency=660, sample_rate=48000)
+
+    with open(clip_a, "rb") as fh:
+        bytes_a = fh.read()
+    with open(clip_b, "rb") as fh:
+        bytes_b = fh.read()
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=[bytes_a, bytes_b],
+        post_id="post_test",
+        correlation_id="corr_test",
+        acoustic_plan={
+            "takes": [
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 1.8,
+                    "video_start_seconds": 0.0,
+                    "video_end_seconds": 1.775,
+                    "gain_db": 0.0,
+                },
+                {
+                    "audio_start_seconds": 0.2,
+                    "audio_end_seconds": 2.0,
+                    "video_start_seconds": 0.225,
+                    "video_end_seconds": 2.0,
+                    "gain_db": -0.5,
+                },
+            ],
+            "seams": [
+                {
+                    "overlap_seconds": 0.05,
+                    "visual_cut_position_seconds": 0.025,
+                }
+            ],
+        },
+    )
+
+    out_path = str(tmp_path / "acoustic.mp4")
+    with open(out_path, "wb") as fh:
+        fh.write(final_bytes)
+
+    assert _probe_duration(out_path) == pytest.approx(3.55, abs=0.06)
+    assert meta["stitch_cut_softening_applied"] is True
+    assert meta["stitch_audio_overlap_s"] == [0.05]
+    assert meta["stitch_visual_cut_position_s"] == [0.025]
+    assert meta["stitch_gain_db"] == [0.0, -0.5]
+    assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
+
+
+def test_stitch_acoustic_plan_rejects_out_of_contract_overlap(tmp_path):
+    clip_a = str(tmp_path / "a.mp4")
+    clip_b = str(tmp_path / "b.mp4")
+    _make_clip(clip_a, seconds=2, color="red")
+    _make_clip(clip_b, seconds=2, color="blue")
+
+    with open(clip_a, "rb") as fh:
+        bytes_a = fh.read()
+    with open(clip_b, "rb") as fh:
+        bytes_b = fh.read()
+
+    with pytest.raises(ValueError, match="overlap"):
+        stitch_segments(
+            segment_videos=[bytes_a, bytes_b],
+            post_id="post_test",
+            correlation_id="corr_test",
+            acoustic_plan={
+                "takes": [
+                    {"audio_start_seconds": 0.0, "audio_end_seconds": 1.8,
+                     "video_start_seconds": 0.0, "video_end_seconds": 1.75, "gain_db": 0.0},
+                    {"audio_start_seconds": 0.2, "audio_end_seconds": 2.0,
+                     "video_start_seconds": 0.25, "video_end_seconds": 2.0, "gain_db": 0.0},
+                ],
+                "seams": [{"overlap_seconds": 0.1, "visual_cut_position_seconds": 0.05}],
+            },
+        )
+
+
+def test_stitch_accepts_dataclass_serialized_tuple_plan(tmp_path):
+    clip_a = str(tmp_path / "a.mp4")
+    clip_b = str(tmp_path / "b.mp4")
+    _make_clip(clip_a, seconds=2, color="red")
+    _make_clip(clip_b, seconds=2, color="blue")
+
+    with open(clip_a, "rb") as fh:
+        bytes_a = fh.read()
+    with open(clip_b, "rb") as fh:
+        bytes_b = fh.read()
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=[bytes_a, bytes_b],
+        post_id="post_test",
+        correlation_id="corr_test",
+        acoustic_plan={
+            "takes": (
+                {"audio_start_seconds": 0.0, "audio_end_seconds": 1.8,
+                 "video_start_seconds": 0.0, "video_end_seconds": 1.775, "gain_db": 0.0},
+                {"audio_start_seconds": 0.2, "audio_end_seconds": 2.0,
+                 "video_start_seconds": 0.225, "video_end_seconds": 2.0, "gain_db": 0.0},
+            ),
+            "seams": ({"overlap_seconds": 0.05, "visual_cut_position_seconds": 0.025},),
+        },
+    )
+
+    assert final_bytes
+    assert meta["stitch_audio_overlap_s"] == [0.05]
+
+
+def test_stitch_acoustic_plan_caps_accumulated_frame_rounding(tmp_path):
+    paths = []
+    colors = ("red", "blue", "green", "black")
+    durations = (4, 6, 6, 4)
+    for index, (color, seconds) in enumerate(zip(colors, durations)):
+        path = str(tmp_path / f"take-{index}.mp4")
+        _make_clip(path, seconds=seconds, color=color, width=90, height=160)
+        paths.append(path)
+    segment_videos = []
+    for path in paths:
+        with open(path, "rb") as fh:
+            segment_videos.append(fh.read())
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=segment_videos,
+        post_id="post_test",
+        correlation_id="corr_test",
+        acoustic_plan={
+            "takes": [
+                {"audio_start_seconds": 0.0, "audio_end_seconds": 3.62,
+                 "video_start_seconds": 0.0, "video_end_seconds": 3.6, "gain_db": -2.0},
+                {"audio_start_seconds": 0.34, "audio_end_seconds": 4.16,
+                 "video_start_seconds": 0.36, "video_end_seconds": 4.14, "gain_db": 1.422},
+                {"audio_start_seconds": 0.5, "audio_end_seconds": 4.56,
+                 "video_start_seconds": 0.52, "video_end_seconds": 4.525, "gain_db": -1.422},
+                {"audio_start_seconds": 0.34, "audio_end_seconds": 3.49,
+                 "video_start_seconds": 0.375, "video_end_seconds": 3.49, "gain_db": 1.429},
+            ],
+            "seams": [
+                {"overlap_seconds": 0.04, "visual_cut_position_seconds": 0.02},
+                {"overlap_seconds": 0.04, "visual_cut_position_seconds": 0.02},
+                {"overlap_seconds": 0.07, "visual_cut_position_seconds": 0.035},
+            ],
+        },
+    )
+
+    assert final_bytes
+    assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
 
 
 def test_stitch_preserves_full_framing_for_character_consistency_segments(tmp_path):

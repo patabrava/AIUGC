@@ -271,19 +271,23 @@ def _maximum_breath_island_duration(frames: Sequence[AudioFrameMetrics]) -> floa
     longest = 0.0
     current_start: Optional[float] = None
     previous_timestamp: Optional[float] = None
+    bounded_on_left = False
+    saw_low_energy = False
     frame_step = 0.016
     for frame in frames:
         if _is_breath_like(frame):
             if current_start is None:
                 current_start = frame.timestamp_seconds
+                bounded_on_left = saw_low_energy
             previous_timestamp = frame.timestamp_seconds
             continue
         if current_start is not None and previous_timestamp is not None:
-            longest = max(longest, previous_timestamp - current_start + frame_step)
+            if bounded_on_left:
+                longest = max(longest, previous_timestamp - current_start + frame_step)
         current_start = None
         previous_timestamp = None
-    if current_start is not None and previous_timestamp is not None:
-        longest = max(longest, previous_timestamp - current_start + frame_step)
+        bounded_on_left = False
+        saw_low_energy = True
     return max(0.0, longest)
 
 
@@ -302,6 +306,41 @@ def _boundary_rms(
             {"take_index": take.take_index, "boundary_seconds": boundary_seconds},
         )
     return float(median(frame.rms_dbfs for frame in frames))
+
+
+def _boundary_starts_inside_isolated_breath(
+    take: TakeAudioEvidence,
+    boundary_seconds: float,
+) -> bool:
+    frames = _frames_between(
+        take,
+        max(0.0, boundary_seconds - 0.128),
+        min(take.first_word_start_seconds, boundary_seconds + 0.128),
+    )
+    saw_low_energy = False
+    group_start: Optional[float] = None
+    group_end: Optional[float] = None
+    bounded_on_left = False
+    for frame in frames:
+        if _is_breath_like(frame):
+            if group_start is None:
+                group_start = frame.timestamp_seconds
+                bounded_on_left = saw_low_energy
+            group_end = frame.timestamp_seconds + 0.016
+            continue
+        if group_start is not None and group_end is not None:
+            if (
+                bounded_on_left
+                and group_start <= boundary_seconds + 0.016
+                and group_end >= boundary_seconds
+                and group_end - boundary_seconds > 0.032 + 1e-9
+            ):
+                return True
+        group_start = None
+        group_end = None
+        bounded_on_left = False
+        saw_low_energy = True
+    return False
 
 
 def _select_seam(
@@ -350,6 +389,8 @@ def _select_seam(
                     reasons.append("word_gap_out_of_range")
                 if island_duration > 0.080 + 1e-9:
                     reasons.append("retained_breath_island")
+                if _boundary_starts_inside_isolated_breath(next_take, next_start):
+                    reasons.append("boundary_inside_breath")
                 try:
                     energy_delta = abs(
                         _boundary_rms(previous, previous_end, before=True)
@@ -365,9 +406,9 @@ def _select_seam(
                     continue
                 valid.append(
                     (
-                        energy_delta,
-                        abs(word_gap - 0.160),
                         island_duration,
+                        abs(word_gap - 0.160),
+                        energy_delta,
                         next_start,
                         previous_end,
                         overlap,
@@ -379,7 +420,7 @@ def _select_seam(
             "No transcript-safe acoustic seam candidate exists.",
             {"seam_index": seam_index, "rejected_candidate_count": len(rejected)},
         )
-    energy_delta, _, island_duration, next_start, previous_end, overlap, _ = min(valid)
+    island_duration, _, energy_delta, next_start, previous_end, overlap, _ = min(valid)
     visual_position = overlap / 2.0
     word_gap = (
         previous_end

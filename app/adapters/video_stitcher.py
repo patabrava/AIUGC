@@ -14,6 +14,7 @@ System ffmpeg/ffprobe are assumed in PATH (already required by the trim/crop/cap
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -97,6 +98,34 @@ def _probe_duration(video_path: str) -> float:
     return float(result.stdout.strip())
 
 
+def _probe_av_stream_durations(video_path: str) -> Tuple[float, float]:
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=codec_type,duration:format=duration",
+        "-of",
+        "json",
+        video_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=_FFPROBE_TIMEOUT_SECONDS)
+    if result.returncode != 0:
+        raise ValueError(f"ffprobe stream duration failed: {result.stderr[-200:]}")
+    payload = json.loads(result.stdout)
+    fallback = float((payload.get("format") or {})["duration"])
+    durations: Dict[str, float] = {}
+    for stream in payload.get("streams") or []:
+        stream_type = str(stream.get("codec_type") or "")
+        try:
+            duration = float(stream.get("duration"))
+        except (TypeError, ValueError):
+            duration = fallback
+        if stream_type in {"video", "audio"} and duration > 0:
+            durations.setdefault(stream_type, duration)
+    return durations.get("video", fallback), durations.get("audio", fallback)
+
+
 def _even_dimension(value: float) -> int:
     rounded = max(2, int(round(value)))
     return rounded if rounded % 2 == 0 else rounded + 1
@@ -140,6 +169,73 @@ def _reframe_filter(index: int, width: int, height: int) -> Tuple[str, str]:
     crop_x = max(0, int(round((scaled_width - width) * x_anchor)))
     crop_y = max(0, int(round((scaled_height - height) * y_anchor)))
     return name, f"scale={scaled_width}:{scaled_height},crop={width}:{height}:{crop_x}:{crop_y}"
+
+
+def _finite_plan_seconds(value: Any, *, field: str) -> float:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Acoustic plan {field} must be finite") from exc
+    if not math.isfinite(seconds):
+        raise ValueError(f"Acoustic plan {field} must be finite")
+    return seconds
+
+
+def _validate_acoustic_plan(
+    acoustic_plan: Dict[str, Any],
+    *,
+    count: int,
+    durations: List[float],
+) -> Tuple[List[Dict[str, float]], List[Dict[str, float]]]:
+    if not isinstance(acoustic_plan, dict):
+        raise ValueError("Acoustic plan must be a mapping")
+    raw_takes = acoustic_plan.get("takes")
+    raw_seams = acoustic_plan.get("seams")
+    if not isinstance(raw_takes, (list, tuple)) or len(raw_takes) != count:
+        raise ValueError("Acoustic plan take count must match segment count")
+    if not isinstance(raw_seams, (list, tuple)) or len(raw_seams) != count - 1:
+        raise ValueError("Acoustic plan seam count must match segment count")
+    takes: List[Dict[str, float]] = []
+    for index, raw_take in enumerate(raw_takes):
+        if not isinstance(raw_take, dict):
+            raise ValueError("Acoustic plan takes must be mappings")
+        take = {
+            field: _finite_plan_seconds(raw_take.get(field), field=field)
+            for field in (
+                "audio_start_seconds",
+                "audio_end_seconds",
+                "video_start_seconds",
+                "video_end_seconds",
+                "gain_db",
+            )
+        }
+        if not (
+            0 <= take["audio_start_seconds"] < take["audio_end_seconds"] <= durations[index] + 0.05
+            and 0 <= take["video_start_seconds"] < take["video_end_seconds"] <= durations[index] + 0.05
+        ):
+            raise ValueError(f"Acoustic plan take {index} windows are outside the source duration")
+        if not -2.0 <= take["gain_db"] <= 2.0:
+            raise ValueError(f"Acoustic plan take {index} gain exceeds the allowed clamp")
+        takes.append(take)
+    seams: List[Dict[str, float]] = []
+    for index, raw_seam in enumerate(raw_seams):
+        if not isinstance(raw_seam, dict):
+            raise ValueError("Acoustic plan seams must be mappings")
+        overlap = _finite_plan_seconds(raw_seam.get("overlap_seconds"), field="overlap")
+        visual_position = _finite_plan_seconds(
+            raw_seam.get("visual_cut_position_seconds"), field="visual cut position"
+        )
+        if not 0.04 - 1e-9 <= overlap <= 0.07 + 1e-9:
+            raise ValueError(f"Acoustic plan seam {index} overlap is outside 40-70 ms")
+        if not 0 <= visual_position <= overlap:
+            raise ValueError(f"Acoustic plan seam {index} visual cut must sit inside overlap")
+        seams.append(
+            {
+                "overlap_seconds": overlap,
+                "visual_cut_position_seconds": visual_position,
+            }
+        )
+    return takes, seams
 
 
 def extract_anchor_frame(
@@ -214,6 +310,7 @@ def stitch_segments(
     post_id: str,
     correlation_id: str,
     trim_windows: Optional[List[Dict[str, Any]]] = None,
+    acoustic_plan: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """Concatenate ordered segment videos into one mp4.
 
@@ -223,6 +320,7 @@ def stitch_segments(
         correlation_id: Correlation id for structured logging.
         trim_windows: Optional per-segment start/end seconds. When present, each segment is
             trimmed to its spoken window before concatenation.
+        acoustic_plan: Optional validated native-audio plan with independent audio/video windows.
 
     Returns:
         (final_video_bytes, stitch_metadata).
@@ -256,6 +354,14 @@ def stitch_segments(
         # encoder differences between independent generations cannot break the concat filter.
         width, height, fps = _probe_video_geometry(input_paths[0])
         segment_durations = [_probe_duration(path) for path in input_paths]
+        planned_takes: Optional[List[Dict[str, float]]] = None
+        planned_seams: Optional[List[Dict[str, float]]] = None
+        if acoustic_plan is not None:
+            planned_takes, planned_seams = _validate_acoustic_plan(
+                acoustic_plan,
+                count=len(input_paths),
+                durations=segment_durations,
+            )
 
         command: List[str] = ["ffmpeg", "-y"]
         for path in input_paths:
@@ -268,29 +374,62 @@ def stitch_segments(
         trim_sources: List[str] = []
         reframe_names: List[str] = []
         for index in range(len(input_paths)):
-            start, end, trim_source = _trim_window(
-                index,
-                len(input_paths),
-                segment_durations[index],
-                trim_windows=trim_windows,
-            )
-            head_trims.append(round(start, 3))
-            tail_trims.append(round(max(segment_durations[index] - end, 0.0), 3))
+            if planned_takes is not None:
+                plan_take = planned_takes[index]
+                audio_start = plan_take["audio_start_seconds"]
+                audio_end = plan_take["audio_end_seconds"]
+                video_start = plan_take["video_start_seconds"]
+                video_end = plan_take["video_end_seconds"]
+                gain_db = plan_take["gain_db"]
+                trim_source = "acoustic_seam_plan"
+            else:
+                start, end, trim_source = _trim_window(
+                    index,
+                    len(input_paths),
+                    segment_durations[index],
+                    trim_windows=trim_windows,
+                )
+                audio_start = video_start = start
+                audio_end = video_end = end
+                gain_db = 0.0
+            head_trims.append(round(audio_start, 3))
+            tail_trims.append(round(max(segment_durations[index] - audio_end, 0.0), 3))
             trim_sources.append(trim_source)
             reframe_name, reframe = _reframe_filter(index, width, height)
             reframe_names.append(reframe_name)
             filter_parts.append(
-                f"[{index}:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,"
+                f"[{index}:v]trim=start={video_start:.3f}:end={video_end:.3f},setpts=PTS-STARTPTS,"
                 f"{reframe},setsar=1,fps={fps:.5f},format=yuv420p[v{index}]"
             )
             filter_parts.append(
-                f"[{index}:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,"
-                f"aresample=async=1[a{index}]"
+                f"[{index}:a]atrim=start={audio_start:.3f}:end={audio_end:.3f},asetpts=PTS-STARTPTS,"
+                f"volume={gain_db:.3f}dB,aresample=48000:async=1[a{index}]"
             )
             concat_inputs.append(f"[v{index}][a{index}]")
-        filter_parts.append(
-            "".join(concat_inputs) + f"concat=n={len(input_paths)}:v=1:a=1[vout][aout]"
-        )
+        if planned_seams is None:
+            filter_parts.append(
+                "".join(concat_inputs) + f"concat=n={len(input_paths)}:v=1:a=1[vout][aout]"
+            )
+            final_audio_label = "aout"
+        else:
+            video_inputs = "".join(f"[v{index}]" for index in range(len(input_paths)))
+            planned_audio_duration = sum(
+                take["audio_end_seconds"] - take["audio_start_seconds"]
+                for take in planned_takes
+            ) - sum(seam["overlap_seconds"] for seam in planned_seams)
+            filter_parts.append(f"{video_inputs}concat=n={len(input_paths)}:v=1:a=0[vcat]")
+            filter_parts.append(
+                f"[vcat]trim=duration={planned_audio_duration:.6f},setpts=PTS-STARTPTS[vout]"
+            )
+            final_audio_label = "a0"
+            for index in range(1, len(input_paths)):
+                output_label = f"ax{index}"
+                overlap = planned_seams[index - 1]["overlap_seconds"]
+                filter_parts.append(
+                    f"[{final_audio_label}][a{index}]acrossfade=d={overlap:.3f}:o=1:"
+                    f"c1=qsin:c2=qsin[{output_label}]"
+                )
+                final_audio_label = output_label
         filter_complex = ";".join(filter_parts)
 
         output_path = os.path.join(temp_dir, "stitched.mp4")
@@ -300,7 +439,7 @@ def stitch_segments(
             "-map",
             "[vout]",
             "-map",
-            "[aout]",
+            f"[{final_audio_label}]",
             "-c:v",
             "libx264",
             "-preset",
@@ -322,6 +461,12 @@ def stitch_segments(
             raise ValueError(f"ffmpeg concat failed: {result.stderr[-400:]}")
 
         final_duration = _probe_duration(output_path)
+        video_duration, audio_duration = _probe_av_stream_durations(output_path)
+        duration_delta = abs(video_duration - audio_duration)
+        if planned_seams is not None and duration_delta > 1.0 / fps + 1e-6:
+            raise ValueError(
+                f"Acoustic stitch audio/video duration drift exceeded one frame: {duration_delta:.6f}s"
+            )
         with open(output_path, "rb") as file_obj:
             final_bytes = file_obj.read()
 
@@ -333,11 +478,23 @@ def stitch_segments(
         "stitch_width": width,
         "stitch_height": height,
         "stitch_fps": round(fps, 3),
-        "stitch_cut_softening_applied": False,
+        "stitch_cut_softening_applied": planned_seams is not None,
         "stitch_head_trim_s": head_trims,
         "stitch_tail_trim_s": tail_trims,
         "stitch_trim_window_source": trim_sources,
         "stitch_reframe_profile": reframe_names,
+        "stitch_audio_overlap_s": [
+            round(seam["overlap_seconds"], 3) for seam in (planned_seams or [])
+        ],
+        "stitch_visual_cut_position_s": [
+            round(seam["visual_cut_position_seconds"], 3) for seam in (planned_seams or [])
+        ],
+        "stitch_gain_db": [
+            round(take["gain_db"], 3) for take in (planned_takes or [])
+        ],
+        "stitch_audio_duration_s": round(audio_duration, 3),
+        "stitch_video_duration_s": round(video_duration, 3),
+        "stitch_audio_video_duration_delta_s": round(duration_delta, 6),
     }
     logger.info(
         "stitch_segments_completed",
