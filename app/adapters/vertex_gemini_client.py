@@ -22,6 +22,8 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+_MAX_GEMINI_INLINE_MEDIA_BYTES = 12 * 1024 * 1024
+
 # Cap on simultaneous in-flight Vertex requests across the process.
 # Prevents HTTP/2 stream collisions that crash the shared connection
 # under bursts (observed as RemoteProtocolError / LocalProtocolError).
@@ -102,6 +104,7 @@ class VertexGeminiClient:
         temperature: Optional[float] = None,
         thinking_budget: Optional[int] = None,
         input_images: Optional[List[Dict[str, Any]]] = None,
+        input_media: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         target_model = model or self._settings.vertex_gemini_model
         payload = self._build_generate_content_payload(
@@ -111,6 +114,7 @@ class VertexGeminiClient:
             temperature=temperature,
             thinking_budget=thinking_budget,
             input_images=input_images,
+            input_media=input_media,
         )
         data = self._post_generate_content(
             model=target_model,
@@ -357,6 +361,7 @@ class VertexGeminiClient:
         temperature: Optional[float],
         thinking_budget: Optional[int] = None,
         input_images: Optional[List[Dict[str, Any]]] = None,
+        input_media: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         parts: List[Dict[str, Any]] = [{"text": self._merge_prompts(system_prompt, prompt)}]
         for index, image in enumerate(input_images or [], start=1):
@@ -372,6 +377,37 @@ class VertexGeminiClient:
                     "inlineData": {
                         "mimeType": mime_type,
                         "data": base64.b64encode(image_bytes).decode("ascii"),
+                    }
+                }
+            )
+        inline_media_bytes = 0
+        for index, media in enumerate(input_media or [], start=1):
+            mime_type = str(media.get("mime_type") or "").strip()
+            media_bytes = media.get("media_bytes")
+            if (
+                not mime_type.startswith(("audio/", "video/"))
+                or not isinstance(media_bytes, bytes)
+                or not media_bytes
+            ):
+                raise ValidationError(
+                    "Gemini input media require non-empty bytes and an audio or video MIME type.",
+                    {"media_index": index, "mime_type": mime_type},
+                )
+            inline_media_bytes += len(media_bytes)
+            if inline_media_bytes > _MAX_GEMINI_INLINE_MEDIA_BYTES:
+                raise ValidationError(
+                    "Gemini inline media payload size exceeds the safe request limit.",
+                    {
+                        "media_index": index,
+                        "inline_media_bytes": inline_media_bytes,
+                        "maximum_bytes": _MAX_GEMINI_INLINE_MEDIA_BYTES,
+                    },
+                )
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": mime_type,
+                        "data": base64.b64encode(media_bytes).decode("ascii"),
                     }
                 }
             )

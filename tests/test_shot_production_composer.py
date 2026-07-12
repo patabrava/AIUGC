@@ -9,6 +9,7 @@ from app.adapters.deepgram_client import Word, WordLevelTranscript
 from app.features.shot_production.composer import (
     TakeTranscriptQA,
     build_take_trim_window,
+    evaluate_seam_gaps,
     evaluate_take_transcript,
     merge_take_transcripts,
     normalize_german_words,
@@ -57,6 +58,7 @@ def test_exact_transcript_returns_complete_immutable_qa_evidence():
         "foreign_words",
         "passed",
         "failure_reasons",
+        "first_word_start_seconds",
         "final_word_end_seconds",
     ]
     assert qa == TakeTranscriptQA(
@@ -71,6 +73,7 @@ def test_exact_transcript_returns_complete_immutable_qa_evidence():
         foreign_words=(),
         passed=True,
         failure_reasons=(),
+        first_word_start_seconds=0.10,
         final_word_end_seconds=1.60,
     )
     with pytest.raises(FrozenInstanceError):
@@ -98,6 +101,7 @@ def test_normalizes_german_case_punctuation_umlauts_and_eszett():
 
     assert qa.passed is True
     assert qa.word_error_rate == 0.0
+    assert qa.first_word_start_seconds == 0.0
     assert qa.final_word_end_seconds == 1.3
 
 
@@ -240,14 +244,35 @@ def test_trim_window_uses_real_final_word_timestamp_plus_tail_pad_and_clamps():
 
     assert build_take_trim_window(qa, provider_duration_seconds=4.0) == {
         "start_seconds": 0.0,
-        "end_seconds": 2.15,
-        "source": "deepgram_word_end",
+        "end_seconds": 2.05,
+        "source": "deepgram_word_window",
     }
     assert build_take_trim_window(qa, provider_duration_seconds=2.0) == {
         "start_seconds": 0.0,
         "end_seconds": 2.0,
-        "source": "deepgram_word_end",
+        "source": "deepgram_word_window",
     }
+
+    late_start = evaluate_take_transcript(
+        _beat(1, "Viele Menschen warten heute."),
+        _transcript(
+            ("Viele", 0.8, 1.0),
+            ("Menschen", 1.1, 1.4),
+            ("warten", 1.5, 1.8),
+            ("heute", 1.9, 2.2),
+        ),
+        other_beats=[],
+    )
+    assert build_take_trim_window(late_start, provider_duration_seconds=4.0) == {
+        "start_seconds": 0.55,
+        "end_seconds": 2.45,
+        "source": "deepgram_word_window",
+    }
+    assert build_take_trim_window(
+        late_start,
+        provider_duration_seconds=4.0,
+        trim_head=False,
+    )["start_seconds"] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -343,6 +368,22 @@ def test_merge_take_transcripts_rejects_count_mismatch_and_negative_durations():
         merge_take_transcripts([transcript], effective_take_durations=[-0.1])
     with pytest.raises(ValueError, match="finite"):
         merge_take_transcripts([transcript], effective_take_durations=[math.inf])
+
+
+def test_seam_gap_qa_enforces_each_semantic_cut_at_six_tenths_or_less():
+    transcript = _transcript(
+        ("eins", 0.0, 0.3),
+        ("zwei", 0.4, 0.8),
+        ("drei", 1.4, 1.8),
+        ("vier", 1.9, 2.2),
+        ("fünf", 2.81, 3.1),
+    )
+
+    report = evaluate_seam_gaps(transcript, beat_word_counts=[2, 2, 1], max_gap_seconds=0.6)
+
+    assert report["gaps_seconds"] == [0.6, 0.61]
+    assert report["passed"] is False
+    assert report["failed_seam_indexes"] == [1]
 
 
 def test_offset_and_merge_reject_non_monotonic_word_timings():

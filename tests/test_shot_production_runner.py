@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 
 import httpx
 from PIL import Image
@@ -164,7 +166,11 @@ class _SubmitClient:
 
 
 def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
-    from app.features.shot_production.runner import reset_failed_take, submit_pending_takes
+    from app.features.shot_production.runner import (
+        reconcile_unknown_submission,
+        reset_failed_take,
+        submit_pending_takes,
+    )
 
     manifest_path, _ = _initialize(tmp_path)
     first_client = _SubmitClient(fail_on_call=2)
@@ -184,22 +190,30 @@ def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
         submit_pending_takes(manifest_path, resumed_client)
     assert resumed_client.calls == []
 
-    reset_failed_take(
+    with pytest.raises(ValidationError, match="reconciled"):
+        reset_failed_take(
+            manifest_path,
+            index=1,
+            reason="generic retry must not erase an ambiguous paid operation",
+        )
+
+    reconcile_unknown_submission(
         manifest_path,
         index=1,
-        reason="operator confirmed no recoverable operation id; explicit retry approved",
+        resolution="accepted",
+        evidence="Recovered the accepted operation id from the provider request log.",
+        operation_id="operations/recovered-1",
     )
     submit_pending_takes(manifest_path, resumed_client, max_inflight=4)
     completed = _read(manifest_path)
 
     assert [call["correlation_id"].split("_take_")[1].split("_")[0] for call in resumed_client.calls] == [
-        "1",
         "2",
         "3",
     ]
     assert [take["operation"]["operation_id"] for take in completed["takes"]] == [
         "operations/op-0",
-        "operations/op-1",
+        "operations/recovered-1",
         "operations/op-2",
         "operations/op-3",
     ]
@@ -211,14 +225,80 @@ def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
     assert no_op_client.calls == []
 
 
-def test_pilot_run_lock_rejects_a_second_cli_for_the_same_manifest(tmp_path):
+def test_unknown_submission_requires_not_accepted_reconciliation_before_retry(tmp_path):
+    from app.features.shot_production.runner import (
+        reconcile_unknown_submission,
+        reset_failed_take,
+        submit_pending_takes,
+    )
+
+    manifest_path, _ = _initialize(tmp_path)
+    with pytest.raises(RuntimeError, match="simulated"):
+        submit_pending_takes(manifest_path, _SubmitClient(fail_on_call=1))
+
+    with pytest.raises(ValidationError, match="reconciled"):
+        reset_failed_take(manifest_path, index=0, reason="unsafe generic retry")
+
+    reconcile_unknown_submission(
+        manifest_path,
+        index=0,
+        resolution="not_accepted",
+        evidence="Local configuration validation failed before the adapter issued any HTTP request.",
+    )
+    reset_failed_take(manifest_path, index=0, reason="confirmed pre-HTTP rejection")
+    client = _SubmitClient()
+    submit_pending_takes(manifest_path, client, max_inflight=1)
+
+    saved = _read(manifest_path)["takes"][0]
+    assert len(client.calls) == 1
+    assert saved["attempt"] == 2
+    assert saved["operation"]["operation_id"] == "operations/op-0"
+    assert saved["attempt_history"][0]["submission"]["reconciliation"]["resolution"] == "not_accepted"
+
+
+def test_pilot_run_lock_is_reentrant_but_rejects_a_second_process(tmp_path):
     from app.features.shot_production.runner import pilot_run_lock
 
     manifest_path, _ = _initialize(tmp_path)
     with pilot_run_lock(manifest_path):
-        with pytest.raises(ValidationError, match="already active"):
-            with pilot_run_lock(manifest_path):
-                raise AssertionError("a second runner must never enter the critical section")
+        with pilot_run_lock(manifest_path):
+            pass
+        code = (
+            "from pathlib import Path; "
+            "from app.features.shot_production.runner import pilot_run_lock; "
+            f"p=Path({str(manifest_path)!r}); "
+            "ctx=pilot_run_lock(p); ctx.__enter__()"
+        )
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+    assert result.returncode != 0
+    assert "already active" in result.stderr
+
+
+def test_atomic_manifest_write_fsyncs_file_and_parent_directory(monkeypatch, tmp_path):
+    from app.features.shot_production.runner import _atomic_write_json
+
+    real_fsync = os.fsync
+    fsync_calls = []
+
+    def recording_fsync(fd):
+        fsync_calls.append(fd)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    path = tmp_path / "run" / "manifest.json"
+    _atomic_write_json(path, {"version": 2})
+
+    assert len(fsync_calls) == 2
+    assert _read(path) == {"version": 2}
 
 
 def test_submission_blocks_a_tampered_paid_request_contract(tmp_path):
@@ -427,7 +507,7 @@ def test_take_transcription_records_real_word_windows_and_blocks_failed_take(tmp
     payload = _read(manifest_path)
     assert all(take["transcript_qa"]["passed"] for take in payload["takes"])
     assert all(take["trim_window"]["start_seconds"] == 0.0 for take in payload["takes"])
-    assert all(take["trim_window"]["source"] == "deepgram_word_end" for take in payload["takes"])
+    assert all(take["trim_window"]["source"] == "deepgram_word_window" for take in payload["takes"])
 
     failed_manifest = _manifest_with_raw_takes(tmp_path / "failed")
     wrong = list(beats)
@@ -437,6 +517,42 @@ def test_take_transcription_records_real_word_windows_and_blocks_failed_take(tmp
     failed = _read(failed_manifest)
     assert failed["takes"][2]["transcript_qa"]["passed"] is False
     assert "stitch" not in failed
+
+
+def test_take_timing_migration_invalidates_cached_audio_and_delivery_without_retranscribing(tmp_path):
+    from app.features.shot_production.runner import transcribe_and_validate_takes
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    beats = [take["beat"]["text"] for take in _read(manifest_path)["takes"]]
+    transcribe_and_validate_takes(manifest_path, _DeepgramByCall(beats))
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["transcript_qa"].pop("first_word_start_seconds", None)
+        take["trim_window"]["source"] = "deepgram_word_end"
+    payload["voice_qa"] = {"passed": True}
+    payload["stitch"] = {"sha256": "stale"}
+    payload["seam_qa"] = {"passed": True}
+    payload["caption"] = {"sha256": "stale"}
+    payload["media_qa"] = {"passed": True}
+    payload["upload"] = {"url": "https://example.test/stale.mp4"}
+    payload["upload_verification"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    deepgram = _DeepgramByCall([])
+
+    migrated = transcribe_and_validate_takes(manifest_path, deepgram)
+
+    assert deepgram.calls == []
+    assert all(take["trim_window"]["source"] == "deepgram_word_window" for take in migrated["takes"])
+    for key in (
+        "voice_qa",
+        "stitch",
+        "seam_qa",
+        "caption",
+        "media_qa",
+        "upload",
+        "upload_verification",
+    ):
+        assert key not in migrated
 
 
 def _tiny_video(path: Path) -> None:
@@ -465,6 +581,33 @@ def _tiny_video(path: Path) -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def _valid_final_probe(duration: str = "16.0") -> dict:
+    return {
+        "streams": [
+            {
+                "index": 0,
+                "codec_name": "h264",
+                "codec_type": "video",
+                "width": 720,
+                "height": 1280,
+                "r_frame_rate": "24/1",
+            },
+            {
+                "index": 1,
+                "codec_name": "aac",
+                "codec_type": "audio",
+                "sample_rate": "48000",
+                "channels": 2,
+                "r_frame_rate": "0/0",
+            },
+        ],
+        "format": {
+            "duration": duration,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        },
+    }
 
 
 def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_path):
@@ -517,6 +660,240 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     assert _read(failing_manifest)["visual_qa"]["passed"] is False
 
 
+def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure(tmp_path, monkeypatch):
+    import app.features.shot_production.runner as runner_module
+    from app.features.shot_production.runner import run_voice_qa
+    from app.features.shot_production.voice_qa import VoiceQAReport
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for index, take in enumerate(payload["takes"]):
+        take["transcript_qa"] = {"passed": True}
+        take["trim_window"] = {
+            "start_seconds": round(index * 0.1, 3),
+            "end_seconds": round(1.0 + index * 0.1, 3),
+            "source": "deepgram_word_window",
+        }
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    extraction_calls = []
+
+    def extract_audio(source, destination, *, start_seconds, end_seconds):
+        extraction_calls.append((source, destination, start_seconds, end_seconds))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(f"voice-{len(extraction_calls) - 1}".encode())
+
+    evaluator_calls = []
+
+    def evaluator(clips, **kwargs):
+        evaluator_calls.append((clips, kwargs))
+        return VoiceQAReport(
+            same_speaker_across_takes=True,
+            vocal_timbre_consistent=True,
+            apparent_vocal_age_consistent=True,
+            german_accent_consistent=True,
+            evidence_sufficient=True,
+            delivery_style_consistent=True,
+            single_speaker_each_clip=True,
+            no_music=True,
+            no_background_voices=True,
+            outlier_take_indexes=(),
+            confidence=0.97,
+            blocking_reasons=(),
+            observed_differences=(),
+            passed=True,
+        )
+
+    report = run_voice_qa(
+        manifest_path,
+        evaluator=evaluator,
+        extract_audio_fn=extract_audio,
+        model="gemini-2.5-flash",
+    )
+
+    assert report["passed"] is True
+    assert [call[2:] for call in extraction_calls] == [
+        (0.0, float(take["duration_seconds"])) for take in payload["takes"]
+    ]
+    assert [clip["media_bytes"] for clip in evaluator_calls[0][0]] == [
+        b"voice-0",
+        b"voice-1",
+        b"voice-2",
+        b"voice-3",
+    ]
+    assert evaluator_calls[0][1]["model"] == "gemini-2.5-flash"
+    saved = _read(manifest_path)
+    assert saved["voice_qa"]["passed"] is True
+    assert saved["voice_qa"]["model"] == "gemini-2.5-flash"
+    assert saved["voice_qa"]["rubric_version"] == "voice-continuity-v1"
+    assert len(saved["voice_qa"]["clips"]) == 4
+    assert all(Path(clip["path"]).is_file() for clip in saved["voice_qa"]["clips"])
+
+    run_voice_qa(
+        manifest_path,
+        evaluator=evaluator,
+        extract_audio_fn=extract_audio,
+        model="gemini-2.5-flash",
+    )
+    assert len(extraction_calls) == 4
+    assert len(evaluator_calls) == 1
+
+    Path(saved["voice_qa"]["clips"][0]["path"]).write_bytes(b"corrupt")
+    run_voice_qa(
+        manifest_path,
+        evaluator=evaluator,
+        extract_audio_fn=extract_audio,
+        model="gemini-2.5-flash",
+    )
+    assert len(extraction_calls) == 8
+    assert len(evaluator_calls) == 2
+
+    monkeypatch.setattr(runner_module, "VOICE_QA_RUBRIC_VERSION", "voice-continuity-v2")
+    revised_report = run_voice_qa(
+        manifest_path,
+        evaluator=evaluator,
+        extract_audio_fn=extract_audio,
+        model="gemini-2.5-flash",
+    )
+    assert len(extraction_calls) == 12
+    assert len(evaluator_calls) == 3
+    assert revised_report["rubric_version"] == "voice-continuity-v2"
+
+    failing_manifest = _manifest_with_raw_takes(tmp_path / "voice-fail")
+    failing_payload = _read(failing_manifest)
+    for take in failing_payload["takes"]:
+        take["transcript_qa"] = {"passed": True}
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 1.0,
+            "source": "deepgram_word_window",
+        }
+    failing_manifest.write_text(json.dumps(failing_payload), encoding="utf-8")
+
+    def fail_evaluator(*_args, **_kwargs):
+        return VoiceQAReport(
+            same_speaker_across_takes=False,
+            vocal_timbre_consistent=False,
+            apparent_vocal_age_consistent=True,
+            german_accent_consistent=True,
+            evidence_sufficient=True,
+            delivery_style_consistent=True,
+            single_speaker_each_clip=True,
+            no_music=True,
+            no_background_voices=True,
+            outlier_take_indexes=(2,),
+            confidence=0.99,
+            blocking_reasons=("Take 2 has a different vocal timbre.",),
+            observed_differences=(),
+            passed=False,
+        )
+
+    with pytest.raises(ValidationError, match="voice QA"):
+        run_voice_qa(
+            failing_manifest,
+            evaluator=fail_evaluator,
+            extract_audio_fn=extract_audio,
+        )
+    assert _read(failing_manifest)["voice_qa"]["passed"] is False
+
+
+def test_default_voice_extractor_creates_mono_16khz_pcm_wav(tmp_path):
+    from app.features.shot_production.runner import _extract_voice_clip
+
+    source = tmp_path / "source.mp4"
+    destination = tmp_path / "qa" / "voice.wav"
+    _tiny_video(source)
+
+    _extract_voice_clip(source, destination, start_seconds=0.0, end_seconds=1.0)
+
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name,sample_rate,channels",
+            "-of",
+            "json",
+            str(destination),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stderr
+    stream = json.loads(probe.stdout)["streams"][0]
+    assert stream == {"codec_name": "pcm_s16le", "sample_rate": "16000", "channels": 1}
+
+
+def test_voice_failed_outlier_requires_explicit_targeted_retry_and_archives_report(tmp_path):
+    from app.features.shot_production.runner import reset_failed_take
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {"passed": True}
+    payload["status"] = "voice_qa_failed"
+    payload["voice_qa"] = {
+        "passed": False,
+        "outlier_take_indexes": [2],
+        "blocking_reasons": ["Take 2 has a different vocal timbre."],
+    }
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="retryable failed state"):
+        reset_failed_take(manifest_path, index=1, reason="operator selected the wrong take")
+
+    reset = reset_failed_take(
+        manifest_path,
+        index=2,
+        reason="voice QA identified take 2 as the vocal outlier",
+    )
+
+    assert reset["takes"][2]["status"] == "planned"
+    assert "voice_qa" not in reset
+    assert reset["qa_failure_history"][-1]["stage"] == "voice_qa"
+    assert reset["qa_failure_history"][-1]["selected_take_indexes"] == [2]
+
+
+def test_batch_voice_retry_archives_one_report_and_plans_only_selected_outliers(tmp_path):
+    from app.features.shot_production.runner import reset_voice_failed_takes
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    original_raw = [take["raw"] for take in payload["takes"]]
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {"passed": True}
+    payload["status"] = "voice_qa_failed"
+    payload["voice_qa"] = {
+        "passed": False,
+        "outlier_take_indexes": [1, 3],
+        "blocking_reasons": ["Takes 1 and 3 do not match the reference vocal timbre."],
+    }
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    reset = reset_voice_failed_takes(
+        manifest_path,
+        indexes=[1, 3],
+        reason="operator approved retry of both voice outliers",
+    )
+
+    assert reset["takes"][0]["raw"] == original_raw[0]
+    assert reset["takes"][2]["raw"] == original_raw[2]
+    assert reset["takes"][1]["status"] == "planned"
+    assert reset["takes"][3]["status"] == "planned"
+    assert reset["takes"][1]["raw"] is None
+    assert reset["takes"][3]["raw"] is None
+    voice_history = [
+        item for item in reset["qa_failure_history"] if item["stage"] == "voice_qa"
+    ]
+    assert len(voice_history) == 1
+    assert voice_history[0]["selected_take_indexes"] == [1, 3]
+
+
 def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
     from app.features.shot_production.runner import compose_and_caption
 
@@ -528,9 +905,18 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
             "full_text": beat,
             "words": [word.__dict__ for word in _timed_transcript(beat).words],
         }
-        take["transcript_qa"] = {"passed": True, "final_word_end_seconds": 1.0}
-        take["trim_window"] = {"start_seconds": 0.0, "end_seconds": 1.35, "source": "deepgram_word_end"}
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.2,
+            "final_word_end_seconds": 1.0,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 1.25,
+            "source": "deepgram_word_window",
+        }
     payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     stitch_calls = []
@@ -552,6 +938,7 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
         _DeepgramByCall([SCRIPT]),
         stitch_fn=stitch_fn,
         caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe(),
     )
 
     assert stitch_calls[0]["segment_videos"] == [b"clip-0", b"clip-1", b"clip-2", b"clip-3"]
@@ -570,10 +957,334 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
         _DeepgramByCall([SCRIPT]),
         stitch_fn=stitch_fn,
         caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe(),
     )
     assert len(stitch_calls) == 2
     assert len(caption_calls) == 2
     assert Path(repaired["captioned_path"]).read_bytes() == b"captioned-video"
+    repair_history = _read(manifest_path)["composition_history"]
+    assert repair_history[-1]["reason"] == "automatic rebuild of invalid cached caption delivery"
+
+
+def test_compose_rejects_legacy_trim_windows_from_direct_callers(tmp_path):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["transcript_qa"] = {"passed": True, "final_word_end_seconds": 1.0}
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 1.3,
+            "source": "deepgram_word_end",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="current Deepgram speech windows"):
+        compose_and_caption(manifest_path, _DeepgramByCall([SCRIPT]))
+
+
+@pytest.mark.parametrize(
+    "final_text",
+    [
+        SCRIPT.replace("echte Qual", "echte Belastung"),
+        SCRIPT.replace("echte Qual", "echte große Qual"),
+        SCRIPT.replace("echte Qual", "Qual"),
+    ],
+)
+def test_compose_requires_exact_final_dialogue_without_substitution_insertion_or_deletion(
+    tmp_path,
+    final_text,
+):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.2,
+            "final_word_end_seconds": 1.0,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 1.25,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="Final stitched transcript QA failed"):
+        compose_and_caption(
+            manifest_path,
+            _DeepgramByCall([final_text]),
+            stitch_fn=lambda **_kwargs: (b"stitched-video", {"stitch_segment_count": 4}),
+        )
+
+    saved = _read(manifest_path)
+    assert saved["status"] == "final_transcript_failed"
+    assert saved["final_transcript_qa"]["word_error_rate"] > 0
+
+
+def test_compose_requires_passed_voice_qa(tmp_path):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["transcript_qa"] = {"passed": True}
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 1.0,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="voice QA"):
+        compose_and_caption(manifest_path, _DeepgramByCall([SCRIPT]))
+
+
+@pytest.mark.parametrize(
+    ("probe", "reason"),
+    [
+        (_valid_final_probe("13.9"), "duration_out_of_range"),
+        ({"probe_error": "bad file"}, "probe_failed"),
+        (
+            {
+                "streams": [{"codec_type": "video", "codec_name": "vp9", "width": 720, "height": 1280}],
+                "format": {"duration": "16.0"},
+            },
+            "video_must_be_h264",
+        ),
+        (
+            {
+                "streams": [
+                    {
+                        "codec_type": "video",
+                        "codec_name": "h264",
+                        "width": 720,
+                        "height": 1280,
+                    },
+                    {"codec_type": "audio", "codec_name": "aac"},
+                ],
+                "format": {"duration": "16.0", "format_name": "matroska,webm"},
+            },
+            "container_must_be_mp4",
+        ),
+    ],
+)
+def test_final_media_probe_fails_closed_for_invalid_delivery_contract(probe, reason):
+    from app.features.shot_production.runner import evaluate_final_media_probe
+
+    report = evaluate_final_media_probe(probe)
+
+    assert report["passed"] is False
+    assert reason in report["failure_reasons"]
+
+
+def test_upload_persists_remote_head_verification_and_rechecks_without_reupload(tmp_path):
+    from app.features.shot_production.runner import upload_final
+
+    class FakeStorage:
+        def __init__(self, *, verified):
+            self.verified = verified
+            self.upload_calls = []
+            self.verify_calls = []
+
+        def prepare_video_upload(self, **kwargs):
+            return {
+                "storage_provider": "fake_r2",
+                "storage_key": "videos/content-addressed-final.mp4",
+                "url": "https://cdn.example.test/videos/content-addressed-final.mp4",
+                "file_path": "videos/content-addressed-final.mp4",
+                "size": kwargs["expected_size"],
+                "sha256": kwargs["expected_sha256"],
+                "file_type": "video/mp4",
+            }
+
+        def upload_video(self, **kwargs):
+            self.upload_calls.append(kwargs)
+            return {
+                "storage_key": kwargs["object_key"],
+                "url": "https://cdn.example.test/videos/content-addressed-final.mp4",
+                "size": len(kwargs["video_bytes"]),
+                "sha256": sha256(kwargs["video_bytes"]).hexdigest(),
+            }
+
+        def verify_video_upload(self, **kwargs):
+            self.verify_calls.append(kwargs)
+            if not self.upload_calls:
+                return {
+                    "passed": False,
+                    "failure_reasons": ["not_found"],
+                    "storage_key": kwargs["storage_key"],
+                }
+            return {
+                "passed": self.verified,
+                "failure_reasons": [] if self.verified else ["sha256_mismatch"],
+                "storage_key": kwargs["storage_key"],
+            }
+
+    def ready_manifest(root: Path) -> Path:
+        manifest_path = _manifest_with_raw_takes(root)
+        payload = _read(manifest_path)
+        captioned = manifest_path.parent / "final-captioned.mp4"
+        captioned.write_bytes(b"captioned-video")
+        payload["caption"] = {
+            "captioned_path": str(captioned),
+            "sha256": sha256(captioned.read_bytes()).hexdigest(),
+            "bytes": captioned.stat().st_size,
+        }
+        payload["seam_qa"] = {"passed": True}
+        payload["media_qa"] = {"passed": True}
+        payload["voice_qa"] = {"passed": True}
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        return manifest_path
+
+    manifest_path = ready_manifest(tmp_path / "pass")
+    storage = FakeStorage(verified=True)
+    upload = upload_final(manifest_path, storage)
+    assert upload["url"].startswith("https://cdn.example.test/")
+    saved = _read(manifest_path)
+    assert saved["upload_verification"]["passed"] is True
+    assert saved["upload_intent"]["storage_key"] == "videos/content-addressed-final.mp4"
+    assert len(storage.upload_calls) == 1
+    assert storage.upload_calls[0]["object_key"] == "videos/content-addressed-final.mp4"
+    assert len(storage.verify_calls) == 2
+
+    failed_manifest = ready_manifest(tmp_path / "recover")
+    recovering_storage = FakeStorage(verified=False)
+    with pytest.raises(ValidationError, match="remote verification"):
+        upload_final(failed_manifest, recovering_storage)
+    failed = _read(failed_manifest)
+    assert failed["upload"]
+    assert failed["upload_verification"]["passed"] is False
+    assert len(recovering_storage.upload_calls) == 1
+
+    recovering_storage.verified = True
+    recovered = upload_final(failed_manifest, recovering_storage)
+    assert recovered["url"].startswith("https://cdn.example.test/")
+    assert len(recovering_storage.upload_calls) == 1
+    assert len(recovering_storage.verify_calls) == 3
+    assert _read(failed_manifest)["status"] == "uploaded"
+
+
+def test_upload_resume_reconciles_committed_put_after_lost_response_without_second_upload(tmp_path):
+    from app.features.shot_production.runner import upload_final
+
+    class AcceptedThenLostStorage:
+        def __init__(self):
+            self.remote_exists = False
+            self.upload_calls = 0
+
+        def prepare_video_upload(self, **kwargs):
+            return {
+                "storage_provider": "fake_r2",
+                "storage_key": "videos/content-addressed-final.mp4",
+                "url": "https://cdn.example.test/videos/content-addressed-final.mp4",
+                "file_path": "videos/content-addressed-final.mp4",
+                "size": kwargs["expected_size"],
+                "sha256": kwargs["expected_sha256"],
+                "file_type": "video/mp4",
+            }
+
+        def upload_video(self, **_kwargs):
+            self.upload_calls += 1
+            self.remote_exists = True
+            raise TimeoutError("R2 committed the object but the response was lost")
+
+        def verify_video_upload(self, **kwargs):
+            return {
+                "passed": self.remote_exists,
+                "failure_reasons": [] if self.remote_exists else ["not_found"],
+                "storage_key": kwargs["storage_key"],
+            }
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    captioned = manifest_path.parent / "final-captioned.mp4"
+    captioned.write_bytes(b"captioned-video")
+    payload["caption"] = {
+        "captioned_path": str(captioned),
+        "sha256": sha256(captioned.read_bytes()).hexdigest(),
+        "bytes": captioned.stat().st_size,
+    }
+    payload["seam_qa"] = {"passed": True}
+    payload["media_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    storage = AcceptedThenLostStorage()
+
+    with pytest.raises(TimeoutError, match="response was lost"):
+        upload_final(manifest_path, storage)
+    after_loss = _read(manifest_path)
+    assert after_loss["upload_intent"]["storage_key"] == "videos/content-addressed-final.mp4"
+    assert "upload" not in after_loss
+
+    recovered = upload_final(manifest_path, storage)
+
+    assert storage.upload_calls == 1
+    assert recovered["url"] == "https://cdn.example.test/videos/content-addressed-final.mp4"
+    assert _read(manifest_path)["upload_verification"]["passed"] is True
+
+
+def test_invalidate_composition_preserves_passed_takes_and_archives_delivery(tmp_path):
+    from app.features.shot_production.runner import invalidate_composition
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {"passed": True}
+        take["trim_window"] = {"start_seconds": 0.0, "end_seconds": 1.0}
+    payload["visual_qa"] = {"passed": True}
+    old_stitch = manifest_path.parent / "stitched.mp4"
+    old_caption = manifest_path.parent / "final-captioned.mp4"
+    old_stitch.write_bytes(b"old-stitched-video")
+    old_caption.write_bytes(b"old-captioned-video")
+    payload["stitch"] = {
+        "path": str(old_stitch),
+        "sha256": sha256(old_stitch.read_bytes()).hexdigest(),
+        "metadata": {"stitch_segment_count": 4},
+        "probe": {"format": {"duration": "16.04"}},
+    }
+    payload["final_transcript"] = {"full_text": SCRIPT, "words": []}
+    payload["final_transcript_qa"] = {"passed": True, "word_error_rate": 0.0}
+    payload["seam_qa"] = {"passed": False, "gaps_seconds": [0.94, 0.981, 1.1]}
+    payload["caption"] = {
+        "captioned_path": str(old_caption),
+        "sha256": sha256(old_caption.read_bytes()).hexdigest(),
+        "bytes": old_caption.stat().st_size,
+    }
+    payload["media_qa"] = {"passed": True, "duration_seconds": 16.04}
+    payload["upload"] = {"url": "https://example.test/old.mp4"}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    reset = invalidate_composition(
+        manifest_path,
+        reason="rebuild trim windows to enforce seam-gap acceptance",
+    )
+
+    assert reset["status"] == "recompose_planned"
+    assert all(take["raw"] for take in reset["takes"])
+    assert all(take["transcript_qa"]["passed"] for take in reset["takes"])
+    assert reset["visual_qa"]["passed"] is True
+    assert "stitch" not in reset and "caption" not in reset and "upload" not in reset
+    archived = reset["composition_history"][-1]
+    assert archived["snapshot"]["seam_qa"]["gaps_seconds"] == [0.94, 0.981, 1.1]
+    assert archived["snapshot"]["final_transcript"]["full_text"] == SCRIPT
+    archived_stitch = Path(archived["artifacts"]["stitch"]["path"])
+    archived_caption = Path(archived["artifacts"]["caption"]["path"])
+    assert archived_stitch.read_bytes() == b"old-stitched-video"
+    assert archived_caption.read_bytes() == b"old-captioned-video"
+    old_stitch.write_bytes(b"replacement-stitch")
+    old_caption.write_bytes(b"replacement-caption")
+    assert archived_stitch.read_bytes() == b"old-stitched-video"
+    assert archived_caption.read_bytes() == b"old-captioned-video"
 
 
 def test_visual_qa_rechecks_approved_master_hash(tmp_path):
@@ -607,7 +1318,10 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
     payload["takes"][2]["status"] = "transcript_failed"
     payload["visual_qa"] = {"passed": False}
     payload["stitch"] = {"path": "old"}
+    payload["seam_qa"] = {"passed": True}
     payload["caption"] = {"path": "old-caption"}
+    payload["media_qa"] = {"passed": True}
+    payload["upload_verification"] = {"passed": True}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     original_contract = payload["request_contract_sha256"]
@@ -634,7 +1348,16 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
     assert take["raw"] is None
     assert take["transcript_qa"] is None
     assert reset["takes"][0]["raw"] is not None
-    assert "visual_qa" not in reset and "stitch" not in reset and "caption" not in reset
+    for key in (
+        "visual_qa",
+        "voice_qa",
+        "stitch",
+        "seam_qa",
+        "caption",
+        "media_qa",
+        "upload_verification",
+    ):
+        assert key not in reset
 
     retry_client = _SubmitClient()
     from app.features.shot_production.runner import submit_pending_takes

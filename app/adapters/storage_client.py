@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any, Dict, Optional
 from urllib.parse import quote
 
@@ -74,9 +75,11 @@ class StorageClient:
         file_name: str,
         correlation_id: Optional[str] = None,
         content_type: str = "video/mp4",
+        object_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Upload raw video bytes to Cloudflare R2."""
-        object_key = self._build_object_key(file_name)
+        object_key = _strip_slashes(object_key) if object_key else self._build_object_key(file_name)
+        video_sha256 = sha256(video_bytes).hexdigest()
 
         try:
             logger.info(
@@ -94,6 +97,7 @@ class StorageClient:
                 Body=video_bytes,
                 ContentType=content_type,
                 CacheControl="public, max-age=31536000, immutable",
+                Metadata={"sha256": video_sha256},
             )
 
             result = {
@@ -103,6 +107,7 @@ class StorageClient:
                 "thumbnail_url": None,
                 "file_path": object_key,
                 "size": len(video_bytes),
+                "sha256": video_sha256,
                 "file_type": content_type,
             }
 
@@ -127,6 +132,99 @@ class StorageClient:
                 error=str(exc),
             )
             raise
+
+    def prepare_video_upload(
+        self,
+        *,
+        file_name: str,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> Dict[str, Any]:
+        """Build a deterministic content-addressed target before any upload side effect."""
+        normalized_sha256 = str(expected_sha256 or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized_sha256):
+            raise ValueError("Expected video SHA-256 must contain 64 lowercase hexadecimal characters.")
+        normalized_size = int(expected_size)
+        if normalized_size <= 0:
+            raise ValueError("Expected video size must be positive.")
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", file_name).strip("-") or "video.mp4"
+        key_prefix = f"{self.object_prefix}/" if self.object_prefix else ""
+        object_key = f"{key_prefix}{normalized_sha256[:16]}_{safe_name}"
+        return {
+            "storage_provider": "cloudflare_r2",
+            "storage_key": object_key,
+            "url": self._build_public_url(object_key),
+            "thumbnail_url": None,
+            "file_path": object_key,
+            "size": normalized_size,
+            "sha256": normalized_sha256,
+            "file_type": "video/mp4",
+        }
+
+    def verify_video_upload(
+        self,
+        *,
+        storage_key: str,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> Dict[str, Any]:
+        """Verify an uploaded object through R2 HEAD metadata before publishing it."""
+        normalized_key = _strip_slashes(storage_key)
+        try:
+            head = self.client.head_object(Bucket=self.bucket_name, Key=normalized_key)
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code") or "")
+            if error_code in {"404", "NoSuchKey", "NotFound"}:
+                return {
+                    "passed": False,
+                    "failure_reasons": ["not_found"],
+                    "storage_key": normalized_key,
+                }
+            logger.exception(
+                "storage_video_verification_failed",
+                storage_provider="cloudflare_r2",
+                object_key=normalized_key,
+                error=str(exc),
+            )
+            return {
+                "passed": False,
+                "failure_reasons": ["head_failed"],
+                "storage_key": normalized_key,
+                "error": str(exc)[:300],
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "storage_video_verification_failed",
+                storage_provider="cloudflare_r2",
+                object_key=normalized_key,
+                error=str(exc),
+            )
+            return {
+                "passed": False,
+                "failure_reasons": ["head_failed"],
+                "storage_key": normalized_key,
+                "error": str(exc)[:300],
+            }
+        actual_size = int(head.get("ContentLength") or 0)
+        actual_sha256 = str((head.get("Metadata") or {}).get("sha256") or "")
+        content_type = str(head.get("ContentType") or "")
+        reasons = []
+        if actual_size != int(expected_size):
+            reasons.append("size_mismatch")
+        if actual_sha256 != str(expected_sha256):
+            reasons.append("sha256_mismatch")
+        if content_type != "video/mp4":
+            reasons.append("content_type_mismatch")
+        return {
+            "passed": not reasons,
+            "failure_reasons": reasons,
+            "storage_key": normalized_key,
+            "expected_size": int(expected_size),
+            "actual_size": actual_size,
+            "expected_sha256": str(expected_sha256),
+            "actual_sha256": actual_sha256,
+            "content_type": content_type,
+        }
 
     def upload_image(
         self,

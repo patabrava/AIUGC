@@ -484,6 +484,74 @@ def test_vertex_gemini_text_generation_preserves_ordered_input_images(monkeypatc
     ]
 
 
+def test_vertex_gemini_text_generation_preserves_ordered_input_media(monkeypatch):
+    import base64
+
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    captured = {}
+    client = VertexGeminiClient()
+
+    def _fake_post_generate_content(**kwargs):
+        captured.update(kwargs)
+        return {"candidates": [{"content": {"parts": [{"text": "consistent"}]}}]}
+
+    monkeypatch.setattr(client, "_post_generate_content", _fake_post_generate_content)
+
+    assert client.generate_text(
+        prompt="Compare the four audio clips in take order.",
+        input_media=[
+            {"mime_type": "audio/mpeg", "media_bytes": b"take-zero"},
+            {"mime_type": "audio/wav", "media_bytes": b"take-one"},
+        ],
+    ) == "consistent"
+
+    assert captured["payload"]["contents"][0]["parts"] == [
+        {"text": "Compare the four audio clips in take order."},
+        {
+            "inlineData": {
+                "mimeType": "audio/mpeg",
+                "data": base64.b64encode(b"take-zero").decode("ascii"),
+            }
+        },
+        {
+            "inlineData": {
+                "mimeType": "audio/wav",
+                "data": base64.b64encode(b"take-one").decode("ascii"),
+            }
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "invalid_media",
+    [
+        {"mime_type": "image/png", "media_bytes": b"not-audio"},
+        {"mime_type": "audio/mpeg", "media_bytes": b""},
+    ],
+)
+def test_vertex_gemini_text_generation_rejects_invalid_input_media(invalid_media):
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    with pytest.raises(ValidationError, match="input media"):
+        VertexGeminiClient().generate_text(
+            prompt="Compare the supplied audio clips.",
+            input_media=[invalid_media],
+        )
+
+
+def test_vertex_gemini_text_generation_rejects_oversized_inline_media():
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    with pytest.raises(ValidationError, match="inline media.*size"):
+        VertexGeminiClient().generate_text(
+            prompt="Compare the supplied audio clips.",
+            input_media=[
+                {"mime_type": "audio/wav", "media_bytes": b"x" * (12 * 1024 * 1024 + 1)}
+            ],
+        )
+
+
 @pytest.mark.parametrize(
     "invalid_image",
     [
@@ -594,6 +662,79 @@ def test_llm_vertex_text_route_forwards_ordered_input_images(monkeypatch):
         thinking_budget=None,
         input_images=ordered_inputs,
     )
+
+
+def test_llm_vertex_text_route_forwards_ordered_input_media(monkeypatch):
+    from app.adapters.llm_client import LLMClient
+
+    ordered_inputs = [
+        {"mime_type": "audio/mpeg", "media_bytes": b"take-zero"},
+        {"mime_type": "audio/mpeg", "media_bytes": b"take-one"},
+    ]
+    vertex_client = MagicMock()
+    vertex_client.generate_text.return_value = "consistent"
+    monkeypatch.setattr("app.adapters.llm_client.get_vertex_gemini_client", lambda: vertex_client)
+
+    client = LLMClient()
+    client.gemini_provider = "vertex"
+
+    assert client.generate_gemini_text(
+        prompt="Compare the supplied audio clips.",
+        model="gemini-2.5-flash",
+        temperature=0,
+        input_media=ordered_inputs,
+    ) == "consistent"
+    vertex_client.generate_text.assert_called_once_with(
+        prompt="Compare the supplied audio clips.",
+        system_prompt=None,
+        model="gemini-2.5-flash",
+        max_tokens=None,
+        temperature=0,
+        thinking_budget=None,
+        input_images=None,
+        input_media=ordered_inputs,
+    )
+
+
+def test_llm_gemini_api_text_route_builds_ordered_input_media_payload():
+    import base64
+
+    from app.adapters.llm_client import LLMClient
+
+    client = LLMClient()
+    client.gemini_provider = "gemini_api"
+    client.gemini_api_fallback_enabled = True
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {
+        "candidates": [{"content": {"parts": [{"text": "consistent"}]}}]
+    }
+    client.gemini_http_client.post = MagicMock(return_value=response)
+
+    assert client.generate_gemini_text(
+        prompt="Compare the supplied audio clips.",
+        input_media=[
+            {"mime_type": "audio/wav", "media_bytes": b"take-zero"},
+            {"mime_type": "audio/wav", "media_bytes": b"take-one"},
+        ],
+    ) == "consistent"
+
+    parts = client.gemini_http_client.post.call_args.kwargs["json"]["contents"][0]["parts"]
+    assert parts == [
+        {"text": "Compare the supplied audio clips."},
+        {
+            "inlineData": {
+                "mimeType": "audio/wav",
+                "data": base64.b64encode(b"take-zero").decode("ascii"),
+            }
+        },
+        {
+            "inlineData": {
+                "mimeType": "audio/wav",
+                "data": base64.b64encode(b"take-one").decode("ascii"),
+            }
+        },
+    ]
 
 
 def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):

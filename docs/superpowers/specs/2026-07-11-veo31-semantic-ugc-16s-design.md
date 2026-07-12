@@ -16,12 +16,12 @@ The pilot does not add database migrations, production UI, automatic publishing,
 ## Inputs
 
 - The approved Gemini 3.1 Flash Image Candidate 2 generated from two actor references, the actor-free canonical room, the attached Raw Camera system instruction, and the full long character description.
-- A German script produced at runtime by `generate_dialog_scripts(..., profile=get_duration_profile(16))`.
+- A German script produced at runtime by `generate_dialog_scripts(..., profile=get_duration_profile(16))`. If repeated exact-word Veo attempts prove one beat undeliverable, one narrowly scoped editorial replacement may be recorded with the original text, reason, hashes, and unchanged surrounding beats; the result is described as app-generated with an audited editorial revision.
 - Full Vertex model `veo-3.1-generate-001`, vertical `9:16` output, and native German dialogue.
 
 ## Semantic Beat Contract
 
-The 16-second script must satisfy the existing application word envelope. The planner splits it at sentences and strong clause boundaries, then rebalances adjacent fragments into three or four complete spoken beats. A beat targets 3-5 seconds and must never end inside a word or incomplete thought.
+The 16-second script must satisfy the existing application word envelope. The planner splits it at sentences and strong clause boundaries, then rebalances adjacent fragments into three or four complete spoken beats. A beat targets 3-5 seconds and must never end inside a word or incomplete thought. One complete terminal coda may estimate 2-3 seconds when merging it would create an overlong or semantically weaker preceding beat; it still receives a 4-second provider take and the final edit must remain inside the 14.5-16.5-second acceptance envelope.
 
 Provider duration is compiled separately:
 
@@ -58,31 +58,35 @@ The prompt does not repeat the long phenotype or legacy hard-coded character con
 
 ## Recovery and Paid-Operation Safety
 
-The runner persists its manifest immediately after every accepted operation and every completed download. Rerunning with `--resume` reuses accepted and completed operations instead of submitting duplicates. Provider failure stops the run and retains all evidence. Only a failed take may be resubmitted explicitly.
+The runner persists paid intent before submission, then persists every accepted operation and completed download. Rerunning with `--resume` reuses accepted and completed operations instead of submitting duplicates. A lost or ambiguous submission response is never reset through the normal retry path: an operator must record provider evidence that either recovers the accepted operation ID or proves the request was not accepted. Provider failure stops the run and retains all evidence. Only a failed take may be resubmitted explicitly, and Gemini-suggested voice outliers never trigger automatic paid work.
 
 ## Speech, Trim, Stitch, and Captions
 
-Deepgram transcribes every raw take. A take passes when it contains its first and last expected words, does not contain another beat, and stays within the configured normalized word-error threshold. Its trim window starts at zero and ends 0.35 seconds after the final detected word, clamped to the provider duration.
+Deepgram transcribes every raw take. A take passes when it contains its first and last expected words, does not contain another beat, and stays within the configured normalized word-error threshold. The first take preserves its opening lead-in. Later takes begin 0.25 seconds before the first detected word, and every take ends 0.25 seconds after the final detected word, clamped to the provider duration. The 0.50-second combined seam padding leaves 0.10 seconds of headroom under the hard 0.60-second seam limit.
 
-The existing stitcher joins the ordered windows with hard cuts and no crossfade or synthetic reframing. Deepgram then transcribes the stitched video once, the caption aligner maps timings to the known complete script, and the existing renderer burns one-word captions into the final video.
+The existing stitcher joins the ordered windows with hard cuts and no crossfade or synthetic reframing. Deepgram then transcribes the stitched video once. Final dialogue acceptance uses exact normalized ordered words with zero allowed word error before seam indexing. The caption aligner maps those timings to the known complete script, and the existing renderer burns one-word captions into the final video.
 
 ## Visual and Audio QA
 
 The runner preserves each raw take and extracts start, middle, and final-spoken frames into a contact sheet. A Gemini vision pass receives the approved master and contact sheet through the model-neutral LLM adapter and reports structured dimensions: identity, apparent age, hair, wardrobe, room, framing stability, and artifacts. A hard mismatch blocks a pass regardless of average score. The contact sheet remains available for human review because model scoring is evidence, not a substitute for looking at the result.
+
+Before composition, FFmpeg extracts every complete raw take as mono 16 kHz PCM WAV. Gemini 2.5 Flash receives the four clips in take order and evaluates same-speaker continuity, timbre, apparent vocal age, German accent, evidence sufficiency, extra speakers, music, and background voices. Confidence must be at least 0.85, every blocking dimension must pass, and no outlier take may remain. Expected changes in wording, emphasis, pace, loudness, cadence, and emotion are recorded but do not block by themselves. The report is qualitative continuity evidence rather than biometric identification; model and rubric versions plus clip/source hashes control cache reuse.
 
 Final media acceptance requires:
 
 - same actor, hair, cream sweater, room geometry, and daylight across every take;
 - no extra person, blazer, scene mutation, generated captions, zoom, or face replacement;
 - exact ordered dialogue with no duplicated or missing beat;
+- same synthetic speaker profile across all four takes, with sufficient audio evidence and no music or background voice;
 - no clipped final phoneme or silence gap over 0.6 seconds at a seam;
 - monotonic captions generated only after stitching;
 - final duration within the existing 16-second tier's spoken-performance envelope, targeting 14.5-16.5 seconds;
-- valid 9:16 H.264 video with AAC audio.
+- valid MP4 container with 9:16 H.264 video and AAC audio;
+- successful R2 HEAD readback matching final byte size, SHA-256 metadata, and `video/mp4` content type.
 
 ## Audit Artifact
 
-`manifest.json` records the app-generated script, script profile, beat plan, master and derivative hashes, effective model/payload parameters, prompts and negatives, operation IDs, raw media paths, transcripts, word-error scores, trim windows, stitch metadata, caption metadata, QA results, and final file hashes.
+`manifest.json` records the app-generated script and any audited editorial revision, script profile, beat plan, master and derivative hashes, effective model/payload parameters, prompts and negatives, operation IDs, raw media paths, transcripts, word-error scores, trim windows, voice clips and report, stitch metadata, caption metadata, QA results, upload verification, and final file hashes. Recomposition first copies the previous stitched and captioned files into a versioned history directory and snapshots the complete prior delivery evidence before overwriting working paths.
 
 ## Production Follow-Up Boundary
 

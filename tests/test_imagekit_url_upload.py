@@ -1,6 +1,7 @@
 """Tests for Cloudflare R2 storage uploads."""
 
 from types import SimpleNamespace
+from hashlib import sha256
 
 from app.adapters import storage_client as storage_client_module
 
@@ -11,6 +12,16 @@ class FakeS3Client:
 
     def put_object(self, **kwargs):
         self.calls.append(kwargs)
+
+    def head_object(self, *, Bucket, Key):
+        uploaded = next(
+            call for call in reversed(self.calls) if call["Bucket"] == Bucket and call["Key"] == Key
+        )
+        return {
+            "ContentLength": len(uploaded["Body"]),
+            "ContentType": uploaded["ContentType"],
+            "Metadata": uploaded.get("Metadata") or {},
+        }
 
 
 class FakeHttpResponse:
@@ -67,9 +78,53 @@ def test_upload_video_to_cloudflare_r2(monkeypatch):
     uploaded = fake_s3.calls[0]
     assert uploaded["Bucket"] == "ugc-videos"
     assert uploaded["ContentType"] == "video/mp4"
+    assert uploaded["Metadata"]["sha256"] == sha256(b"video-bytes").hexdigest()
     assert result["storage_provider"] == "cloudflare_r2"
     assert result["storage_key"].startswith("Lippe Lift Studio/videos/")
     assert result["url"].startswith("https://cdn.example.com/Lippe%20Lift%20Studio/videos/")
+    assert result["sha256"] == sha256(b"video-bytes").hexdigest()
+
+    verification = client.verify_video_upload(
+        storage_key=result["storage_key"],
+        expected_size=len(b"video-bytes"),
+        expected_sha256=sha256(b"video-bytes").hexdigest(),
+    )
+    assert verification["passed"] is True
+
+
+def test_verify_video_upload_fails_closed_for_remote_metadata_mismatch(monkeypatch):
+    fake_s3 = FakeS3Client()
+    client = _build_client(monkeypatch, fake_s3)
+    result = client.upload_video(video_bytes=b"video-bytes", file_name="mismatch.mp4")
+    fake_s3.calls[-1]["Metadata"]["sha256"] = "0" * 64
+
+    verification = client.verify_video_upload(
+        storage_key=result["storage_key"],
+        expected_size=len(b"video-bytes"),
+        expected_sha256=sha256(b"video-bytes").hexdigest(),
+    )
+
+    assert verification["passed"] is False
+    assert verification["failure_reasons"] == ["sha256_mismatch"]
+
+
+def test_prepare_video_upload_is_content_addressed_and_stable(monkeypatch):
+    client = _build_client(monkeypatch, FakeS3Client())
+
+    first = client.prepare_video_upload(
+        file_name="semantic ugc final.mp4",
+        expected_size=123,
+        expected_sha256="a" * 64,
+    )
+    second = client.prepare_video_upload(
+        file_name="semantic ugc final.mp4",
+        expected_size=123,
+        expected_sha256="a" * 64,
+    )
+
+    assert first == second
+    assert first["storage_key"].endswith("aaaaaaaaaaaaaaaa_semantic-ugc-final.mp4")
+    assert first["sha256"] == "a" * 64
 
 
 def test_ingest_video_from_public_url(monkeypatch):

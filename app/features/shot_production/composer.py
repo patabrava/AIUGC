@@ -116,6 +116,7 @@ class TakeTranscriptQA:
     foreign_words: Tuple[str, ...]
     passed: bool
     failure_reasons: Tuple[str, ...]
+    first_word_start_seconds: Optional[float]
     final_word_end_seconds: Optional[float]
 
 
@@ -209,6 +210,13 @@ def evaluate_take_transcript(
                 for last_index in last_indexes
             )
 
+    first_word_start_seconds = None
+    if first_expected is not None:
+        for actual_word, source_word in zip(actual_words, source_words):
+            if actual_word == first_expected:
+                first_word_start_seconds = _finite_non_negative_seconds(source_word.start)
+                break
+
     final_word_end_seconds = None
     if last_expected is not None:
         for actual_word, source_word in zip(reversed(actual_words), reversed(source_words)):
@@ -255,6 +263,7 @@ def evaluate_take_transcript(
         foreign_words=foreign_words,
         passed=not reasons,
         failure_reasons=reasons,
+        first_word_start_seconds=first_word_start_seconds,
         final_word_end_seconds=final_word_end_seconds,
     )
 
@@ -262,9 +271,11 @@ def evaluate_take_transcript(
 def build_take_trim_window(
     qa: TakeTranscriptQA,
     provider_duration_seconds: float,
-    tail_pad_seconds: float = 0.35,
+    head_pad_seconds: float = 0.25,
+    tail_pad_seconds: float = 0.25,
+    trim_head: bool = True,
 ) -> Dict[str, object]:
-    """Build a zero-head-trim window from the accepted Deepgram final-word timing."""
+    """Build a speech-window trim with 0.1 seconds of encoder/timestamp seam headroom."""
     if not qa.passed:
         raise ValueError("Cannot trim a take that failed transcript QA.")
 
@@ -274,14 +285,58 @@ def build_take_trim_window(
     tail_pad = _finite_non_negative_seconds(tail_pad_seconds)
     if tail_pad is None:
         raise ValueError("Tail padding must be a finite non-negative number of seconds.")
+    head_pad = _finite_non_negative_seconds(head_pad_seconds)
+    if head_pad is None:
+        raise ValueError("Head padding must be a finite non-negative number of seconds.")
+    if head_pad + tail_pad > 0.6 + 1e-9:
+        raise ValueError("Combined head and tail padding must not exceed 0.6 seconds.")
+    first_word_start = _finite_non_negative_seconds(qa.first_word_start_seconds)
+    if first_word_start is None:
+        raise ValueError("Accepted transcript QA requires a real Deepgram first-word timestamp.")
     final_word_end = _finite_non_negative_seconds(qa.final_word_end_seconds)
     if final_word_end is None:
         raise ValueError("Accepted transcript QA requires a real Deepgram final-word timestamp.")
 
     return {
-        "start_seconds": 0.0,
+        "start_seconds": max(0.0, first_word_start - head_pad) if trim_head else 0.0,
         "end_seconds": min(provider_duration, final_word_end + tail_pad),
-        "source": "deepgram_word_end",
+        "source": "deepgram_word_window",
+    }
+
+
+def evaluate_seam_gaps(
+    transcript: WordLevelTranscript,
+    *,
+    beat_word_counts: Sequence[int],
+    max_gap_seconds: float = 0.6,
+) -> Dict[str, object]:
+    """Measure silence between semantic beats in the final stitched transcript."""
+    threshold = _finite_non_negative_seconds(max_gap_seconds)
+    if threshold is None:
+        raise ValueError("Maximum seam gap must be a finite non-negative number.")
+    counts = tuple(int(count) for count in beat_word_counts)
+    if len(counts) < 2 or any(count <= 0 for count in counts):
+        raise ValueError("Seam QA requires at least two positive beat word counts.")
+    timed_words = _validated_word_timings(transcript)
+    if len(timed_words) != sum(counts):
+        raise ValueError("Final transcript word count must match semantic beat word counts.")
+    boundary_indexes = []
+    cumulative = 0
+    for count in counts[:-1]:
+        cumulative += count
+        boundary_indexes.append(cumulative)
+    gaps = []
+    for boundary in boundary_indexes:
+        previous_end = timed_words[boundary - 1][2]
+        next_start = timed_words[boundary][1]
+        gaps.append(round(max(0.0, next_start - previous_end), 3))
+    failed = [index for index, gap in enumerate(gaps) if gap > threshold + 1e-9]
+    return {
+        "max_allowed_seconds": threshold,
+        "gaps_seconds": gaps,
+        "max_observed_seconds": max(gaps, default=0.0),
+        "failed_seam_indexes": failed,
+        "passed": not failed,
     }
 
 
@@ -357,6 +412,7 @@ def merge_take_transcripts(
 __all__ = [
     "TakeTranscriptQA",
     "build_take_trim_window",
+    "evaluate_seam_gaps",
     "evaluate_take_transcript",
     "merge_take_transcripts",
     "normalize_german_words",

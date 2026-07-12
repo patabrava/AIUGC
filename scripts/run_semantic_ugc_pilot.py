@@ -18,11 +18,15 @@ from app.features.shot_production.runner import (  # noqa: E402
     compose_and_caption,
     generate_raw_takes_in_waves,
     initialize_pilot,
+    invalidate_composition,
     pilot_run_lock,
+    reconcile_unknown_submission,
     reset_failed_take,
+    reset_voice_failed_takes,
     reset_visual_failed_takes,
     revise_failed_beat,
     run_visual_qa,
+    run_voice_qa,
     transcribe_and_validate_takes,
     upload_final,
 )
@@ -47,9 +51,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--revise-take", type=int)
     parser.add_argument("--replacement-beat")
     parser.add_argument("--revision-reason", default="audited failed-beat editorial revision")
+    parser.add_argument("--resolve-unknown-take", type=int)
+    parser.add_argument("--unknown-resolution", choices=("accepted", "not_accepted"))
+    parser.add_argument("--unknown-evidence")
+    parser.add_argument("--recovered-operation-id")
+    parser.add_argument("--recompose", action="store_true")
+    parser.add_argument(
+        "--recompose-reason",
+        default="explicit delivery recompose",
+    )
     parser.add_argument("--poll-interval", type=float, default=10.0)
     parser.add_argument("--timeout", type=float, default=1800.0)
     parser.add_argument("--visual-model")
+    parser.add_argument("--voice-model", default="gemini-2.5-flash")
     parser.add_argument("--upload", action="store_true")
     parser.add_argument(
         "--confirm-paid-plan",
@@ -85,8 +99,31 @@ def main() -> int:
                 reason=args.revision_reason,
             )
 
+        if args.resolve_unknown_take is not None:
+            if not args.unknown_resolution or not args.unknown_evidence:
+                raise SystemExit(
+                    "--resolve-unknown-take requires --unknown-resolution and --unknown-evidence"
+                )
+            reconcile_unknown_submission(
+                manifest_path,
+                index=args.resolve_unknown_take,
+                resolution=args.unknown_resolution,
+                evidence=args.unknown_evidence,
+                operation_id=args.recovered_operation_id,
+            )
+
+        if args.recompose:
+            invalidate_composition(manifest_path, reason=args.recompose_reason)
+
         retry_snapshot = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if len(args.retry_take) > 1 and (retry_snapshot.get("visual_qa") or {}).get("passed") is False:
+        if len(args.retry_take) > 1 and (retry_snapshot.get("voice_qa") or {}).get("passed") is False:
+            reset_voice_failed_takes(
+                manifest_path,
+                indexes=args.retry_take,
+                reason=args.retry_reason,
+                retry_guidance=args.retry_guidance,
+            )
+        elif len(args.retry_take) > 1 and (retry_snapshot.get("visual_qa") or {}).get("passed") is False:
             reset_visual_failed_takes(
                 manifest_path,
                 indexes=args.retry_take,
@@ -121,6 +158,7 @@ def main() -> int:
             timeout_seconds=args.timeout,
         )
         transcribe_and_validate_takes(manifest_path, deepgram)
+        run_voice_qa(manifest_path, model=args.voice_model)
         build_contact_sheet(manifest_path)
         run_visual_qa(manifest_path, model=args.visual_model)
         caption = compose_and_caption(manifest_path, deepgram)

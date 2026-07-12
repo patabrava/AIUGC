@@ -4,7 +4,7 @@ Wrapper for OpenAI and Gemini clients.
 Per Constitution § VI: Adapterize Specialists
 """
 
-from typing import Optional, Dict, Any, List, Iterator, Tuple
+from typing import Optional, Dict, Any, List, Iterator
 import base64
 import httpx
 import json
@@ -34,6 +34,8 @@ GEMINI_IMAGE_MODEL_ALIASES = {
     "nano banana pro": "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
 }
+
+_MAX_GEMINI_INLINE_MEDIA_BYTES = 12 * 1024 * 1024
 
 
 class LLMClient:
@@ -131,6 +133,7 @@ class LLMClient:
         *,
         text: str,
         input_images: Optional[List[Dict[str, Any]]] = None,
+        input_media: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         parts: List[Dict[str, Any]] = [{"text": text}]
         for index, image in enumerate(input_images or [], start=1):
@@ -146,6 +149,37 @@ class LLMClient:
                     "inlineData": {
                         "mimeType": mime_type,
                         "data": base64.b64encode(image_bytes).decode("ascii"),
+                    }
+                }
+            )
+        inline_media_bytes = 0
+        for index, media in enumerate(input_media or [], start=1):
+            mime_type = str(media.get("mime_type") or "").strip()
+            media_bytes = media.get("media_bytes")
+            if (
+                not mime_type.startswith(("audio/", "video/"))
+                or not isinstance(media_bytes, bytes)
+                or not media_bytes
+            ):
+                raise ValidationError(
+                    message="Gemini input media require non-empty bytes and an audio or video MIME type.",
+                    details={"media_index": index, "mime_type": mime_type},
+                )
+            inline_media_bytes += len(media_bytes)
+            if inline_media_bytes > _MAX_GEMINI_INLINE_MEDIA_BYTES:
+                raise ValidationError(
+                    message="Gemini inline media payload size exceeds the safe request limit.",
+                    details={
+                        "media_index": index,
+                        "inline_media_bytes": inline_media_bytes,
+                        "maximum_bytes": _MAX_GEMINI_INLINE_MEDIA_BYTES,
+                    },
+                )
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": mime_type,
+                        "data": base64.b64encode(media_bytes).decode("ascii"),
                     }
                 }
             )
@@ -562,17 +596,23 @@ class LLMClient:
         temperature: Optional[float] = None,
         thinking_budget: Optional[int] = None,
         input_images: Optional[List[Dict[str, Any]]] = None,
+        input_media: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Generate plain text using Gemini generateContent."""
         if self.gemini_provider == "vertex":
+            vertex_kwargs: Dict[str, Any] = {
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "thinking_budget": thinking_budget,
+                "input_images": input_images,
+            }
+            if input_media is not None:
+                vertex_kwargs["input_media"] = input_media
             return get_vertex_gemini_client().generate_text(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                thinking_budget=thinking_budget,
-                input_images=input_images,
+                **vertex_kwargs,
             )
 
         target_model = model or self.default_gemini_model
@@ -584,6 +624,7 @@ class LLMClient:
                     "parts": self._build_gemini_content_parts(
                         text=full_prompt,
                         input_images=input_images,
+                        input_media=input_media,
                     ),
                 }
             ]

@@ -8,12 +8,16 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 import fcntl
+from functools import wraps
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from typing import Any, Callable, Dict, Iterator, Optional
 from urllib.parse import quote
@@ -25,18 +29,28 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from app.adapters.caption_aligner import align_transcript_to_script
 from app.adapters.caption_renderer import burn_captions
-from app.adapters.deepgram_client import WordLevelTranscript
+from app.adapters.deepgram_client import Word, WordLevelTranscript
 from app.adapters.storage_client import get_storage_client
 from app.adapters.video_stitcher import stitch_segments
 from app.core.errors import ValidationError
 from app.features.shot_production.composer import (
     build_take_trim_window,
+    evaluate_seam_gaps,
     evaluate_take_transcript,
 )
 from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
-from app.features.shot_production.prompts import build_veo_take_prompt, compile_veo_take_requests
+from app.features.shot_production.prompts import (
+    EFFECTIVE_NEGATIVE_PROMPT,
+    build_veo_take_prompt,
+    compile_veo_take_requests,
+)
 from app.features.shot_production.shot_deck import derive_shot_deck
 from app.features.shot_production.visual_qa import evaluate_visual_consistency
+from app.features.shot_production.voice_qa import (
+    DEFAULT_VOICE_QA_MODEL,
+    VOICE_QA_RUBRIC_VERSION,
+    evaluate_voice_consistency,
+)
 
 
 MANIFEST_VERSION = 2
@@ -44,6 +58,7 @@ APP_SCRIPT_SOURCE = "app.features.topics.agents.generate_dialog_scripts"
 TARGET_LENGTH_TIER = 16
 EXPECTED_PROVIDER_DURATIONS = [4, 6, 6, 4]
 DEFAULT_MAX_INFLIGHT = 2
+_RUN_LOCKS = threading.local()
 
 
 def _utc_now() -> str:
@@ -91,11 +106,16 @@ def _clear_downstream_artifacts(payload: Dict[str, Any]) -> None:
     for key in (
         "contact_sheet",
         "visual_qa",
+        "voice_qa",
         "stitch",
         "final_transcript",
         "final_transcript_qa",
+        "seam_qa",
         "caption",
+        "media_qa",
+        "upload_intent",
         "upload",
+        "upload_verification",
     ):
         payload.pop(key, None)
 
@@ -112,6 +132,11 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_name, path)
+        directory_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -154,10 +179,42 @@ def _exclusive_file_lock(lock_path: Path, *, label: str) -> Iterator[None]:
 @contextmanager
 def pilot_run_lock(manifest_path: Path) -> Iterator[None]:
     """Prevent two CLI processes from mutating one paid run concurrently."""
-    manifest_path = Path(manifest_path)
+    manifest_path = Path(manifest_path).resolve()
+    held = getattr(_RUN_LOCKS, "depth_by_manifest", None)
+    if held is None:
+        held = {}
+        _RUN_LOCKS.depth_by_manifest = held
+    key = str(manifest_path)
+    if key in held:
+        held[key] += 1
+        try:
+            yield
+        finally:
+            held[key] -= 1
+        return
     lock_path = manifest_path.with_name(f".{manifest_path.name}.run.lock")
     with _exclusive_file_lock(lock_path, label="Pilot run"):
-        yield
+        held[key] = 1
+        try:
+            yield
+        finally:
+            held.pop(key, None)
+
+
+def _manifest_locked(function: Callable[..., Any]) -> Callable[..., Any]:
+    """Serialize every exported manifest mutator, including direct Python callers."""
+
+    @wraps(function)
+    def locked(*args: Any, **kwargs: Any) -> Any:
+        manifest_path = kwargs.get("manifest_path")
+        if manifest_path is None:
+            if not args:
+                raise TypeError("Manifest-mutating calls require manifest_path.")
+            manifest_path = args[0]
+        with pilot_run_lock(Path(manifest_path)):
+            return function(*args, **kwargs)
+
+    return locked
 
 
 def _beat_from_payload(payload: Dict[str, Any]) -> EditorialBeat:
@@ -262,6 +319,7 @@ def _is_definitive_provider_rejection(exc: Exception) -> bool:
     return exc.response.status_code in {400, 401, 403, 404, 422, 429}
 
 
+@_manifest_locked
 def initialize_pilot(
     *,
     manifest_path: Path,
@@ -376,6 +434,7 @@ def _correlation_id(manifest: Dict[str, Any], take: Dict[str, Any]) -> str:
     return f"semantic_ugc_{manifest['run_id']}_take_{take['index']}_attempt_{take['attempt']}"
 
 
+@_manifest_locked
 def submit_pending_takes(
     manifest_path: Path,
     vertex_client: Any,
@@ -514,6 +573,7 @@ def load_video_uri(video_uri: str) -> bytes:
     raise ValidationError("Vertex video URI uses an unsupported scheme.", {"uri_prefix": uri[:20]})
 
 
+@_manifest_locked
 def poll_and_download_takes(
     manifest_path: Path,
     vertex_client: Any,
@@ -600,6 +660,7 @@ def poll_and_download_takes(
         sleep_fn(max(0.0, poll_interval_seconds))
 
 
+@_manifest_locked
 def generate_raw_takes_in_waves(
     manifest_path: Path,
     vertex_client: Any,
@@ -639,10 +700,46 @@ def _serialize_transcript(transcript: WordLevelTranscript) -> Dict[str, Any]:
     }
 
 
+def _deserialize_transcript(payload: Dict[str, Any]) -> WordLevelTranscript:
+    try:
+        words = [
+            Word(word=str(word["word"]), start=float(word["start"]), end=float(word["end"]))
+            for word in payload["words"]
+        ]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValidationError("Stored take transcript is malformed.") from exc
+    return WordLevelTranscript(words=words, full_text=str(payload.get("full_text") or ""))
+
+
+@_manifest_locked
 def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     beats = [_beat_from_payload(take["beat"]) for take in payload["takes"]]
+    timing_migration_planned = any(
+        (take.get("transcript_qa") or {}).get("passed")
+        and (
+            (take.get("transcript_qa") or {}).get("first_word_start_seconds") is None
+            or (take.get("trim_window") or {}).get("source") != "deepgram_word_window"
+        )
+        for take in payload["takes"]
+    )
+    if timing_migration_planned:
+        for key in (
+            "voice_qa",
+            "stitch",
+            "final_transcript",
+            "final_transcript_qa",
+            "seam_qa",
+            "caption",
+            "media_qa",
+            "upload",
+            "upload_verification",
+        ):
+            payload.pop(key, None)
+        payload["status"] = "timing_migration_planned"
+        payload["updated_at"] = _utc_now()
+        _atomic_write_json(manifest_path, payload)
     failed = []
     for take, beat in zip(payload["takes"], beats):
         raw = take.get("raw") or {}
@@ -652,14 +749,27 @@ def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> 
                 {"take_index": take["index"]},
             )
         existing_qa = take.get("transcript_qa") or {}
-        if existing_qa:
+        trim_window = take.get("trim_window") or {}
+        needs_timing_migration = (
+            existing_qa.get("passed")
+            and (
+                existing_qa.get("first_word_start_seconds") is None
+                or trim_window.get("source") != "deepgram_word_window"
+            )
+        )
+        if existing_qa and not needs_timing_migration:
             if not existing_qa.get("passed"):
                 failed.append(take["index"])
             continue
         raw_path = Path(raw["path"])
-        transcript = deepgram_client.transcribe(
-            audio_bytes=raw_path.read_bytes(),
-            correlation_id=f"{_correlation_id(payload, take)}_transcript",
+        stored_transcript = take.get("transcript") or {}
+        transcript = (
+            _deserialize_transcript(stored_transcript)
+            if needs_timing_migration and stored_transcript
+            else deepgram_client.transcribe(
+                audio_bytes=raw_path.read_bytes(),
+                correlation_id=f"{_correlation_id(payload, take)}_transcript",
+            )
         )
         qa = evaluate_take_transcript(
             beat,
@@ -669,7 +779,13 @@ def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> 
         take["transcript"] = _serialize_transcript(transcript)
         take["transcript_qa"] = asdict(qa)
         take["trim_window"] = (
-            build_take_trim_window(qa, take["duration_seconds"]) if qa.passed else None
+            build_take_trim_window(
+                qa,
+                take["duration_seconds"],
+                trim_head=beat.index > 0,
+            )
+            if qa.passed
+            else None
         )
         take["status"] = "transcribed" if qa.passed else "transcript_failed"
         if not qa.passed:
@@ -700,6 +816,7 @@ def _extract_frame(video_path: Path, output_path: Path, seconds: float) -> None:
         raise ValidationError("FFmpeg could not extract a pilot QA frame.", {"error": result.stderr[-400:]})
 
 
+@_manifest_locked
 def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
@@ -710,6 +827,7 @@ def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
         payload.pop("contact_sheet", None)
         payload.pop("visual_qa", None)
         payload.pop("upload", None)
+        payload.pop("upload_verification", None)
     frame_dir = manifest_path.parent / "qa" / "frames"
     per_take_frames = []
     for take in payload["takes"]:
@@ -768,6 +886,7 @@ def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
     return contact
 
 
+@_manifest_locked
 def run_visual_qa(
     manifest_path: Path,
     *,
@@ -808,11 +927,194 @@ def run_visual_qa(
     return report_payload
 
 
+def _extract_voice_clip(
+    source: Path,
+    destination: Path,
+    *,
+    start_seconds: float,
+    end_seconds: float,
+) -> None:
+    """Extract one complete raw take as mono 16 kHz PCM WAV for audio QA."""
+    duration_seconds = end_seconds - start_seconds
+    if start_seconds < 0 or duration_seconds <= 0:
+        raise ValidationError(
+            "Voice QA trim window is invalid.",
+            {"start_seconds": start_seconds, "end_seconds": end_seconds},
+        )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(source),
+            "-ss",
+            f"{start_seconds:.3f}",
+            "-t",
+            f"{duration_seconds:.3f}",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            str(destination),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0 or not destination.is_file() or destination.stat().st_size <= 0:
+        raise ValidationError(
+            "Voice QA audio extraction failed.",
+            {"source": str(source), "error": result.stderr[-300:]},
+        )
+
+
+@_manifest_locked
+def run_voice_qa(
+    manifest_path: Path,
+    *,
+    evaluator: Callable[..., Any] = evaluate_voice_consistency,
+    extract_audio_fn: Callable[..., None] = _extract_voice_clip,
+    llm_client: Optional[Any] = None,
+    model: Optional[str] = DEFAULT_VOICE_QA_MODEL,
+) -> Dict[str, Any]:
+    """Compare all four complete raw-take audio tracks before composition."""
+    manifest_path = Path(manifest_path)
+    payload = _load_manifest(manifest_path)
+    ordered = sorted(payload["takes"], key=lambda take: take["index"])
+    if len(ordered) != 4:
+        raise ValidationError("Pilot voice QA requires exactly four semantic takes.")
+    voice_inputs = []
+    for take in ordered:
+        if not (take.get("transcript_qa") or {}).get("passed"):
+            raise ValidationError(
+                "Pilot voice QA requires transcript-passed takes.",
+                {"take_index": take["index"]},
+            )
+        raw = take.get("raw") or {}
+        if not _artifact_matches(raw):
+            raise ValidationError(
+                "Pilot voice QA requires checksum-verified raw takes.",
+                {"take_index": take["index"]},
+            )
+        start_seconds = 0.0
+        end_seconds = float(take["duration_seconds"])
+        voice_inputs.append(
+            {
+                "take_index": take["index"],
+                "raw_sha256": raw["sha256"],
+                "start_seconds": start_seconds,
+                "end_seconds": end_seconds,
+            }
+        )
+    effective_model = str(model or DEFAULT_VOICE_QA_MODEL)
+    input_sha256 = _canonical_sha256(
+        {
+            "model": effective_model,
+            "rubric_version": VOICE_QA_RUBRIC_VERSION,
+            "takes": voice_inputs,
+        }
+    )
+    existing_report = payload.get("voice_qa") or {}
+    existing_clips = existing_report.get("clips") or []
+    if (
+        existing_report
+        and existing_report.get("input_sha256") == input_sha256
+        and existing_report.get("model") == effective_model
+        and existing_report.get("rubric_version") == VOICE_QA_RUBRIC_VERSION
+        and len(existing_clips) == 4
+        and all(_artifact_matches(clip) for clip in existing_clips)
+    ):
+        if existing_report.get("passed"):
+            return existing_report
+        raise ValidationError(
+            "Pilot voice QA failed.",
+            {"blocking_reasons": list(existing_report.get("blocking_reasons") or [])},
+        )
+    if existing_report:
+        payload.pop("voice_qa", None)
+        for key in (
+            "stitch",
+            "final_transcript",
+            "final_transcript_qa",
+            "seam_qa",
+            "caption",
+            "media_qa",
+            "upload",
+            "upload_verification",
+        ):
+            payload.pop(key, None)
+    voice_dir = manifest_path.parent / "qa" / "voice"
+    clips = []
+    clip_records = []
+    for take, voice_input in zip(ordered, voice_inputs):
+        raw = take["raw"]
+        start_seconds = voice_input["start_seconds"]
+        end_seconds = voice_input["end_seconds"]
+        destination = voice_dir / f"take-{take['index']}-attempt-{take['attempt']}.wav"
+        extract_audio_fn(
+            Path(raw["path"]),
+            destination,
+            start_seconds=start_seconds,
+            end_seconds=end_seconds,
+        )
+        if not destination.is_file() or destination.stat().st_size <= 0:
+            raise ValidationError(
+                "Voice QA extractor did not create a non-empty audio clip.",
+                {"take_index": take["index"], "path": str(destination)},
+            )
+        audio_bytes = destination.read_bytes()
+        clips.append({"mime_type": "audio/wav", "media_bytes": audio_bytes})
+        clip_records.append(
+            {
+                "take_index": take["index"],
+                "attempt": take["attempt"],
+                "path": str(destination),
+                "mime_type": "audio/wav",
+                "sha256": sha256(audio_bytes).hexdigest(),
+                "bytes": len(audio_bytes),
+                "source_raw_sha256": raw["sha256"],
+                "start_seconds": start_seconds,
+                "end_seconds": end_seconds,
+            }
+        )
+    report = evaluator(
+        clips,
+        llm_client=llm_client,
+        model=effective_model,
+    )
+    report_payload = asdict(report)
+    report_payload["clips"] = clip_records
+    report_payload["input_sha256"] = input_sha256
+    report_payload["model"] = effective_model
+    report_payload["rubric_version"] = VOICE_QA_RUBRIC_VERSION
+    report_payload["created_at"] = _utc_now()
+    payload["voice_qa"] = report_payload
+    payload["status"] = "voice_qa_passed" if report.passed else "voice_qa_failed"
+    payload["updated_at"] = _utc_now()
+    _atomic_write_json(manifest_path, payload)
+    if not report.passed:
+        raise ValidationError(
+            "Pilot voice QA failed.",
+            {
+                "blocking_reasons": list(report.blocking_reasons),
+                "outlier_take_indexes": list(report.outlier_take_indexes),
+            },
+        )
+    return report_payload
+
+
 def _probe_media(path: Path) -> Dict[str, Any]:
     result = subprocess.run(
         [
             "ffprobe", "-v", "error", "-show_entries",
-            "format=duration:stream=index,codec_type,codec_name,width,height,r_frame_rate",
+            "format=duration,size,bit_rate,format_name:stream=index,codec_type,codec_name,width,height,"
+            "r_frame_rate,sample_rate,channels",
             "-of", "json", str(path),
         ],
         capture_output=True,
@@ -827,29 +1129,101 @@ def _probe_media(path: Path) -> Dict[str, Any]:
         return {"probe_error": "ffprobe returned invalid JSON"}
 
 
+def evaluate_final_media_probe(
+    probe: Dict[str, Any],
+    *,
+    min_duration_seconds: float = 14.5,
+    max_duration_seconds: float = 16.5,
+) -> Dict[str, Any]:
+    """Fail closed unless the captioned delivery satisfies the pilot media contract."""
+    reasons = []
+    if not isinstance(probe, dict) or probe.get("probe_error"):
+        reasons.append("probe_failed")
+        return {"passed": False, "failure_reasons": reasons, "probe": probe}
+    streams = probe.get("streams") or []
+    format_payload = probe.get("format") or {}
+    format_names = {
+        name.strip().lower()
+        for name in str(format_payload.get("format_name") or "").split(",")
+        if name.strip()
+    }
+    if "mp4" not in format_names:
+        reasons.append("container_must_be_mp4")
+    video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    if not video_streams or video_streams[0].get("codec_name") != "h264":
+        reasons.append("video_must_be_h264")
+    if video_streams:
+        width = int(video_streams[0].get("width") or 0)
+        height = int(video_streams[0].get("height") or 0)
+        if width <= 0 or height <= 0 or width * 16 != height * 9:
+            reasons.append("video_must_be_9_16")
+    if not audio_streams or audio_streams[0].get("codec_name") != "aac":
+        reasons.append("audio_must_be_aac")
+    try:
+        duration = float(format_payload["duration"])
+    except (KeyError, TypeError, ValueError):
+        duration = math.nan
+    if not math.isfinite(duration) or not min_duration_seconds <= duration <= max_duration_seconds:
+        reasons.append("duration_out_of_range")
+    return {
+        "passed": not reasons,
+        "failure_reasons": reasons,
+        "duration_seconds": duration if math.isfinite(duration) else None,
+        "min_duration_seconds": min_duration_seconds,
+        "max_duration_seconds": max_duration_seconds,
+        "video_stream": video_streams[0] if video_streams else None,
+        "audio_stream": audio_streams[0] if audio_streams else None,
+    }
+
+
+@_manifest_locked
 def compose_and_caption(
     manifest_path: Path,
     deepgram_client: Any,
     *,
     stitch_fn: Callable[..., Any] = stitch_segments,
     caption_fn: Callable[..., str] = burn_captions,
+    probe_fn: Callable[[Path], Dict[str, Any]] = _probe_media,
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
-    existing_caption = payload.get("caption") or {}
-    if existing_caption and _artifact_matches(existing_caption, path_key="captioned_path"):
-        return existing_caption
-    if existing_caption:
-        payload.pop("caption", None)
-        payload.pop("upload", None)
-        payload["status"] = "caption_rebuild_required"
-        payload["updated_at"] = _utc_now()
-        _atomic_write_json(manifest_path, payload)
     if not (payload.get("visual_qa") or {}).get("passed"):
         raise ValidationError("Composition requires a passed visual QA gate.")
+    if not (payload.get("voice_qa") or {}).get("passed"):
+        raise ValidationError("Composition requires a passed voice QA gate.")
+    existing_caption = payload.get("caption") or {}
+    cached_delivery_invalid = bool(existing_caption)
+    if existing_caption and _artifact_matches(existing_caption, path_key="captioned_path"):
+        captioned_path = Path(existing_caption["captioned_path"])
+        fresh_probe = probe_fn(captioned_path)
+        media_qa = evaluate_final_media_probe(fresh_probe)
+        payload["media_qa"] = media_qa
+        payload["caption"]["probe"] = fresh_probe
+        payload["updated_at"] = _utc_now()
+        _atomic_write_json(manifest_path, payload)
+        if (payload.get("seam_qa") or {}).get("passed") and media_qa["passed"]:
+            return existing_caption
+    if cached_delivery_invalid:
+        invalidate_composition(
+            manifest_path,
+            reason="automatic rebuild of invalid cached caption delivery",
+        )
+        payload = _load_manifest(manifest_path)
     ordered = sorted(payload["takes"], key=lambda take: take["index"])
     if any(not (take.get("transcript_qa") or {}).get("passed") or not take.get("trim_window") for take in ordered):
         raise ValidationError("Composition requires transcript-passed takes and trim windows.")
+    invalid_timing_indexes = [
+        take["index"]
+        for take in ordered
+        if (take.get("trim_window") or {}).get("source") != "deepgram_word_window"
+        or (take.get("transcript_qa") or {}).get("first_word_start_seconds") is None
+    ]
+    if invalid_timing_indexes:
+        raise ValidationError(
+            "Composition requires current Deepgram speech windows; rerun transcript migration first.",
+            {"take_indexes": invalid_timing_indexes},
+        )
     if any(not _artifact_matches(take.get("raw") or {}) for take in ordered):
         raise ValidationError("Composition requires checksum-verified raw takes.")
     segment_videos = [Path(take["raw"]["path"]).read_bytes() for take in ordered]
@@ -882,7 +1256,12 @@ def compose_and_caption(
         estimated_speech_seconds=0.0,
         provider_duration_seconds=4,
     )
-    final_qa = evaluate_take_transcript(expected, final_transcript, other_beats=[])
+    final_qa = evaluate_take_transcript(
+        expected,
+        final_transcript,
+        other_beats=[],
+        max_wer=0.0,
+    )
     payload["final_transcript"] = _serialize_transcript(final_transcript)
     payload["final_transcript_qa"] = asdict(final_qa)
     _atomic_write_json(manifest_path, payload)
@@ -890,6 +1269,21 @@ def compose_and_caption(
         payload["status"] = "final_transcript_failed"
         _atomic_write_json(manifest_path, payload)
         raise ValidationError("Final stitched transcript QA failed.", {"reasons": list(final_qa.failure_reasons)})
+
+    seam_qa = evaluate_seam_gaps(
+        final_transcript,
+        beat_word_counts=[take["beat"]["word_count"] for take in ordered],
+        max_gap_seconds=0.6,
+    )
+    payload["seam_qa"] = seam_qa
+    _atomic_write_json(manifest_path, payload)
+    if not seam_qa["passed"]:
+        payload["status"] = "seam_qa_failed"
+        _atomic_write_json(manifest_path, payload)
+        raise ValidationError(
+            "Final stitched seam-gap QA failed.",
+            {"gaps_seconds": seam_qa["gaps_seconds"]},
+        )
 
     aligned = align_transcript_to_script(transcript=final_transcript, script=script)
     rendered_path = Path(
@@ -902,45 +1296,347 @@ def compose_and_caption(
     captioned_path = manifest_path.parent / "final-captioned.mp4"
     captioned_bytes = rendered_path.read_bytes()
     captioned_path.write_bytes(captioned_bytes)
+    caption_probe = probe_fn(captioned_path)
+    media_qa = evaluate_final_media_probe(caption_probe)
     payload["caption"] = {
         "captioned_path": str(captioned_path),
         "sha256": sha256(captioned_bytes).hexdigest(),
         "bytes": len(captioned_bytes),
         "word_count": len(aligned.words),
         "aligned_transcript": _serialize_transcript(aligned),
-        "probe": _probe_media(captioned_path),
+        "probe": caption_probe,
         "created_at": _utc_now(),
     }
+    payload["media_qa"] = media_qa
+    if not media_qa["passed"]:
+        payload["status"] = "media_qa_failed"
+        payload["updated_at"] = _utc_now()
+        _atomic_write_json(manifest_path, payload)
+        raise ValidationError(
+            "Captioned final media failed delivery QA.",
+            {"reasons": media_qa["failure_reasons"]},
+        )
     payload["status"] = "captioned"
     payload["updated_at"] = _utc_now()
     _atomic_write_json(manifest_path, payload)
     return payload["caption"]
 
 
+@_manifest_locked
 def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     caption = payload.get("caption") or {}
     if not _artifact_matches(caption, path_key="captioned_path"):
         raise ValidationError("Captioned pilot artifact failed its recorded checksum before upload.")
-    if payload.get("upload"):
-        return payload["upload"]
+    if not (payload.get("seam_qa") or {}).get("passed"):
+        raise ValidationError("Captioned pilot has not passed seam-gap QA before upload.")
+    if not (payload.get("media_qa") or {}).get("passed"):
+        raise ValidationError("Captioned pilot has not passed final media QA before upload.")
+    if not (payload.get("voice_qa") or {}).get("passed"):
+        raise ValidationError("Captioned pilot has not passed voice QA before upload.")
     captioned_path = Path(caption.get("captioned_path") or "")
     if not captioned_path.is_file():
         raise ValidationError("Captioned pilot video is missing before upload.")
     storage = storage_client or get_storage_client()
-    result = storage.upload_video(
-        video_bytes=captioned_path.read_bytes(),
-        file_name=f"semantic-ugc-{payload['run_id']}-captioned.mp4",
-        correlation_id=f"semantic_ugc_{payload['run_id']}_upload",
-    )
-    payload["upload"] = result
+    file_name = f"semantic-ugc-{payload['run_id']}-captioned.mp4"
+    intent = payload.get("upload_intent") or {}
+    result = payload.get("upload") or {}
+    if not intent:
+        if result:
+            intent = {
+                **result,
+                "state": "legacy_receipt_recovered",
+                "created_at": _utc_now(),
+            }
+        else:
+            preparer = getattr(storage, "prepare_video_upload", None)
+            if not callable(preparer):
+                raise ValidationError(
+                    "Storage adapter cannot persist a deterministic upload intent."
+                )
+            prepared = preparer(
+                file_name=file_name,
+                expected_size=int(caption["bytes"]),
+                expected_sha256=str(caption["sha256"]),
+            )
+            if not isinstance(prepared, dict):
+                raise ValidationError("Storage adapter returned an invalid upload intent.")
+            intent = {
+                **prepared,
+                "state": "prepared",
+                "created_at": _utc_now(),
+            }
+        if (
+            not intent.get("storage_key")
+            or int(intent.get("size") or 0) != int(caption["bytes"])
+            or str(intent.get("sha256") or "") != str(caption["sha256"])
+            or str(intent.get("file_type") or "") != "video/mp4"
+        ):
+            raise ValidationError("Storage upload intent does not match the captioned artifact.")
+        payload["upload_intent"] = intent
+        payload["status"] = "upload_intent_persisted"
+        payload["updated_at"] = _utc_now()
+        _atomic_write_json(manifest_path, payload)
+    elif (
+        int(intent.get("size") or 0) != int(caption["bytes"])
+        or str(intent.get("sha256") or "") != str(caption["sha256"])
+    ):
+        raise ValidationError("Persisted upload intent does not match the captioned artifact.")
+
+    verifier = getattr(storage, "verify_video_upload", None)
+    if not callable(verifier):
+        raise ValidationError("Storage adapter cannot reconcile or verify the upload intent.")
+
+    def verify_remote() -> Dict[str, Any]:
+        try:
+            verification_result = verifier(
+                storage_key=str(intent["storage_key"]),
+                expected_size=int(caption["bytes"]),
+                expected_sha256=str(caption["sha256"]),
+            )
+        except Exception as exc:  # noqa: BLE001
+            verification_result = {
+                "passed": False,
+                "failure_reasons": ["storage_verifier_failed"],
+                "error": str(exc)[:300],
+            }
+        if not isinstance(verification_result, dict):
+            verification_result = {
+                "passed": False,
+                "failure_reasons": ["storage_verifier_invalid_response"],
+            }
+        return verification_result
+
+    if not result:
+        reconciliation = verify_remote()
+        payload["upload_verification"] = reconciliation
+        if reconciliation.get("passed"):
+            result = {
+                key: intent.get(key)
+                for key in (
+                    "storage_provider",
+                    "storage_key",
+                    "url",
+                    "thumbnail_url",
+                    "file_path",
+                    "size",
+                    "sha256",
+                    "file_type",
+                )
+            }
+            payload["upload"] = result
+            intent["state"] = "reconciled_existing_object"
+            intent["reconciled_at"] = _utc_now()
+            payload["upload_intent"] = intent
+        elif set(reconciliation.get("failure_reasons") or []) == {"not_found"}:
+            payload["status"] = "upload_ready"
+            payload["updated_at"] = _utc_now()
+            _atomic_write_json(manifest_path, payload)
+            result = storage.upload_video(
+                video_bytes=captioned_path.read_bytes(),
+                file_name=file_name,
+                correlation_id=f"semantic_ugc_{payload['run_id']}_upload",
+                object_key=str(intent["storage_key"]),
+            )
+            payload["upload"] = result
+            intent["state"] = "receipt_recorded"
+            intent["receipt_recorded_at"] = _utc_now()
+            payload["upload_intent"] = intent
+            payload["status"] = "upload_verification_pending"
+            payload["updated_at"] = _utc_now()
+            _atomic_write_json(manifest_path, payload)
+        else:
+            payload["status"] = "upload_reconciliation_failed"
+            payload["updated_at"] = _utc_now()
+            _atomic_write_json(manifest_path, payload)
+            raise ValidationError(
+                "Captioned pilot upload intent could not be safely reconciled.",
+                {"reasons": list(reconciliation.get("failure_reasons") or [])},
+            )
+
+    if (
+        str(result.get("storage_key") or "") != str(intent["storage_key"])
+        or int(result.get("size") or 0) != int(caption["bytes"])
+        or str(result.get("sha256") or "") != str(caption["sha256"])
+    ):
+        payload["upload"] = result
+        payload["status"] = "upload_receipt_invalid"
+        payload["updated_at"] = _utc_now()
+        _atomic_write_json(manifest_path, payload)
+        raise ValidationError("Storage upload receipt does not match the persisted intent.")
+
+    verification = verify_remote()
+    if not isinstance(verification, dict):
+        verification = {
+            "passed": False,
+            "failure_reasons": ["storage_verifier_invalid_response"],
+        }
+    payload["upload_verification"] = verification
+    if not verification.get("passed"):
+        payload["status"] = "upload_verification_failed"
+        payload["updated_at"] = _utc_now()
+        _atomic_write_json(manifest_path, payload)
+        raise ValidationError(
+            "Captioned pilot remote verification failed after upload.",
+            {"reasons": list(verification.get("failure_reasons") or [])},
+        )
     payload["status"] = "uploaded"
     payload["updated_at"] = _utc_now()
     _atomic_write_json(manifest_path, payload)
     return result
 
 
+@_manifest_locked
+def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any]:
+    """Archive delivery metadata and rebuild from checksum-verified passed raw takes."""
+    manifest_path = Path(manifest_path)
+    payload = _load_manifest(manifest_path)
+    if not str(reason or "").strip():
+        raise ValidationError("Composition invalidation requires an operator reason.")
+    if not (payload.get("visual_qa") or {}).get("passed"):
+        raise ValidationError("Composition invalidation requires passed visual QA.")
+    if any(not (take.get("transcript_qa") or {}).get("passed") for take in payload["takes"]):
+        raise ValidationError("Composition invalidation requires transcript-passed takes.")
+    caption = payload.get("caption") or {}
+    history = list(payload.get("composition_history") or [])
+    snapshot_keys = (
+        "status",
+        "stitch",
+        "final_transcript",
+        "final_transcript_qa",
+        "seam_qa",
+        "caption",
+        "media_qa",
+        "upload_intent",
+        "upload",
+        "upload_verification",
+        "updated_at",
+    )
+    snapshot = {
+        key: json.loads(json.dumps(payload[key]))
+        for key in snapshot_keys
+        if key in payload
+    }
+    archive_dir = manifest_path.parent / "history" / f"delivery-{len(history) + 1:03d}"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archived_artifacts = {}
+    for label, record, path_key in (
+        ("stitch", payload.get("stitch") or {}, "path"),
+        ("caption", caption, "captioned_path"),
+    ):
+        source_value = record.get(path_key)
+        source = Path(source_value) if source_value else None
+        if source is None or not source.is_file():
+            continue
+        destination = archive_dir / source.name
+        shutil.copy2(source, destination)
+        archived_artifacts[label] = {
+            "path": str(destination),
+            "sha256": _file_sha256(destination),
+            "bytes": destination.stat().st_size,
+            "source_path": str(source),
+            "recorded_sha256": record.get("sha256"),
+        }
+    history.append(
+        {
+            "reason": " ".join(str(reason).split()),
+            "stitch_sha256": (payload.get("stitch") or {}).get("sha256"),
+            "caption_sha256": caption.get("sha256"),
+            "upload_url": (payload.get("upload") or {}).get("url"),
+            "snapshot": snapshot,
+            "artifacts": archived_artifacts,
+            "archived_at": _utc_now(),
+        }
+    )
+    payload["composition_history"] = history
+    for key in (
+        "stitch",
+        "final_transcript",
+        "final_transcript_qa",
+        "seam_qa",
+        "caption",
+        "media_qa",
+        "upload",
+        "upload_verification",
+    ):
+        payload.pop(key, None)
+    payload["status"] = "recompose_planned"
+    payload["updated_at"] = _utc_now()
+    _atomic_write_json(manifest_path, payload)
+    return payload
+
+
+@_manifest_locked
+def reconcile_unknown_submission(
+    manifest_path: Path,
+    *,
+    index: int,
+    resolution: str,
+    evidence: str,
+    operation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve an ambiguous paid boundary without permitting a guessed resubmission."""
+    manifest_path = Path(manifest_path)
+    payload = _load_manifest(manifest_path)
+    matches = [take for take in payload["takes"] if take["index"] == index]
+    if len(matches) != 1:
+        raise ValidationError("Unknown-submission take index does not exist.", {"take_index": index})
+    take = matches[0]
+    submission = take.get("submission") or {}
+    if take.get("status") != "submission_unknown" or submission.get("state") != "unknown":
+        raise ValidationError(
+            "Submission reconciliation requires one unresolved unknown take.",
+            {"take_index": index, "take_status": take.get("status")},
+        )
+    resolved = str(resolution or "").strip().lower()
+    proof = " ".join(str(evidence or "").split())
+    recovered_operation_id = str(operation_id or "").strip()
+    if resolved not in {"accepted", "not_accepted"}:
+        raise ValidationError("Unknown submission resolution must be accepted or not_accepted.")
+    if len(proof) < 20:
+        raise ValidationError("Unknown submission reconciliation requires concrete provider evidence.")
+    if resolved == "accepted" and not recovered_operation_id:
+        raise ValidationError("Accepted reconciliation requires the recovered provider operation id.")
+    if resolved == "not_accepted" and recovered_operation_id:
+        raise ValidationError("Not-accepted reconciliation must not include an operation id.")
+
+    reconciled_at = _utc_now()
+    submission["reconciliation"] = {
+        "resolution": resolved,
+        "evidence": proof,
+        "operation_id": recovered_operation_id or None,
+        "reconciled_at": reconciled_at,
+    }
+    if resolved == "accepted":
+        submission.update(
+            {
+                "state": "accepted",
+                "operation_id": recovered_operation_id,
+                "accepted_at": reconciled_at,
+            }
+        )
+        take["operation"] = {
+            "operation_id": recovered_operation_id,
+            "provider_model": take["model"],
+            "status": "submitted",
+            "submitted_at": reconciled_at,
+            "reconciled": True,
+        }
+        take["status"] = "submitted"
+        payload["status"] = "submitted"
+    else:
+        submission["state"] = "rejected"
+        submission["rejected_at"] = reconciled_at
+        take["status"] = "submission_rejected"
+        payload["status"] = "submission_rejected"
+    take["submission"] = submission
+    payload["updated_at"] = reconciled_at
+    _atomic_write_json(manifest_path, payload)
+    return payload
+
+
+@_manifest_locked
 def reset_failed_take(
     manifest_path: Path,
     *,
@@ -955,12 +1651,17 @@ def reset_failed_take(
         raise ValidationError("Retry take index does not exist.", {"take_index": index})
     take = matches[0]
     take_status = str(take.get("status") or "")
+    if take_status == "submission_unknown":
+        raise ValidationError(
+            "Unknown paid submission must be reconciled before any retry.",
+            {"take_index": index},
+        )
     terminal_take_failure = take_status in {
-        "submission_unknown",
         "submission_rejected",
         "failed",
         "transcript_failed",
         "visual_failed",
+        "voice_failed",
     }
     failed_visual_gate = (
         take_status == "transcribed" and (payload.get("visual_qa") or {}).get("passed") is False
@@ -970,7 +1671,13 @@ def reset_failed_take(
         and payload.get("status") == "final_transcript_failed"
         and (payload.get("final_transcript_qa") or {}).get("passed") is False
     )
-    if not (terminal_take_failure or failed_visual_gate or failed_final_transcript):
+    voice_report = payload.get("voice_qa") or {}
+    failed_voice_gate = (
+        take_status == "transcribed"
+        and voice_report.get("passed") is False
+        and index in (voice_report.get("outlier_take_indexes") or [])
+    )
+    if not (terminal_take_failure or failed_visual_gate or failed_voice_gate or failed_final_transcript):
         raise ValidationError(
             "Take is not in a retryable failed state; refusing to orphan an existing paid operation.",
             {"take_index": index, "take_status": take_status, "run_status": payload.get("status")},
@@ -989,7 +1696,7 @@ def reset_failed_take(
     history = list(take.get("attempt_history") or [])
     history.append(archived)
     next_attempt = int(take.get("attempt") or 1) + 1
-    base_prompt = str(take["prompt"]).split(" Retry delivery correction:", 1)[0]
+    base_prompt = build_veo_take_prompt(_beat_from_payload(take["beat"]))
     next_prompt = base_prompt
     if guidance:
         next_prompt = f"{base_prompt} Retry delivery correction: {guidance}"
@@ -1002,6 +1709,7 @@ def reset_failed_take(
     take["attempt_history"] = history
     take["seed"] = int(payload["base_seed"]) + int(take["index"]) + (next_attempt - 1) * 1000
     take["prompt"] = next_prompt
+    take["negative_prompt"] = EFFECTIVE_NEGATIVE_PROMPT
     take["status"] = "planned"
     take["submission"] = None
     take["operation"] = None
@@ -1009,6 +1717,17 @@ def reset_failed_take(
     take["transcript"] = None
     take["transcript_qa"] = None
     take["trim_window"] = None
+    if failed_voice_gate:
+        failure_history = list(payload.get("qa_failure_history") or [])
+        failure_history.append(
+            {
+                "stage": "voice_qa",
+                "selected_take_indexes": [index],
+                "report": voice_report,
+                "archived_at": _utc_now(),
+            }
+        )
+        payload["qa_failure_history"] = failure_history
     _clear_downstream_artifacts(payload)
     contract_history = list(payload.get("request_contract_history") or [])
     contract_history.append(
@@ -1028,6 +1747,7 @@ def reset_failed_take(
     return payload
 
 
+@_manifest_locked
 def reset_visual_failed_takes(
     manifest_path: Path,
     *,
@@ -1075,6 +1795,61 @@ def reset_visual_failed_takes(
     return payload
 
 
+@_manifest_locked
+def reset_voice_failed_takes(
+    manifest_path: Path,
+    *,
+    indexes: list[int],
+    reason: str,
+    retry_guidance: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Archive one failed voice report and explicitly reset selected model outliers."""
+    manifest_path = Path(manifest_path)
+    payload = _load_manifest(manifest_path)
+    selected = list(dict.fromkeys(indexes))
+    if not selected or len(selected) != len(indexes):
+        raise ValidationError("Voice retry indexes must be a non-empty unique list.")
+    voice_report = payload.get("voice_qa") or {}
+    if voice_report.get("passed") is not False:
+        raise ValidationError("Batch voice retry requires a failed voice QA report.")
+    reported_outliers = set(voice_report.get("outlier_take_indexes") or [])
+    if not set(selected).issubset(reported_outliers):
+        raise ValidationError(
+            "Voice retry may target only model-reported outlier takes.",
+            {"selected": selected, "reported_outliers": sorted(reported_outliers)},
+        )
+    by_index = {take["index"]: take for take in payload["takes"]}
+    for index in selected:
+        take = by_index.get(index)
+        if take is None or take.get("status") != "transcribed":
+            raise ValidationError(
+                "Batch voice retry requires transcript-passed selected takes.",
+                {"take_index": index, "take_status": (take or {}).get("status")},
+            )
+        take["status"] = "voice_failed"
+    failure_history = list(payload.get("qa_failure_history") or [])
+    failure_history.append(
+        {
+            "stage": "voice_qa",
+            "selected_take_indexes": selected,
+            "report": voice_report,
+            "archived_at": _utc_now(),
+        }
+    )
+    payload["qa_failure_history"] = failure_history
+    payload["updated_at"] = _utc_now()
+    _atomic_write_json(manifest_path, payload)
+    for index in selected:
+        payload = reset_failed_take(
+            manifest_path,
+            index=index,
+            reason=reason,
+            retry_guidance=retry_guidance,
+        )
+    return payload
+
+
+@_manifest_locked
 def revise_failed_beat(
     manifest_path: Path,
     *,
@@ -1185,15 +1960,20 @@ def revise_failed_beat(
 __all__ = [
     "build_contact_sheet",
     "compose_and_caption",
+    "evaluate_final_media_probe",
     "generate_raw_takes_in_waves",
     "initialize_pilot",
+    "invalidate_composition",
     "load_video_uri",
     "poll_and_download_takes",
     "pilot_run_lock",
+    "reconcile_unknown_submission",
     "reset_failed_take",
+    "reset_voice_failed_takes",
     "reset_visual_failed_takes",
     "revise_failed_beat",
     "run_visual_qa",
+    "run_voice_qa",
     "submit_pending_takes",
     "transcribe_and_validate_takes",
     "upload_final",
