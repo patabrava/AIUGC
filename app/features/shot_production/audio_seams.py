@@ -288,6 +288,8 @@ def _maximum_breath_island_duration(frames: Sequence[AudioFrameMetrics]) -> floa
         previous_timestamp = None
         bounded_on_left = False
         saw_low_energy = True
+    if current_start is not None and previous_timestamp is not None and bounded_on_left:
+        longest = max(longest, previous_timestamp - current_start + frame_step)
     return max(0.0, longest)
 
 
@@ -317,30 +319,29 @@ def _boundary_starts_inside_isolated_breath(
         max(0.0, boundary_seconds - 0.128),
         min(take.first_word_start_seconds, boundary_seconds + 0.128),
     )
-    saw_low_energy = False
     group_start: Optional[float] = None
     group_end: Optional[float] = None
-    bounded_on_left = False
+
+    def group_crosses_boundary() -> bool:
+        return bool(
+            group_start is not None
+            and group_end is not None
+            and group_start <= boundary_seconds + 0.016
+            and group_end >= boundary_seconds
+            and group_end - boundary_seconds > 0.032 + 1e-9
+        )
+
     for frame in frames:
         if _is_breath_like(frame):
             if group_start is None:
                 group_start = frame.timestamp_seconds
-                bounded_on_left = saw_low_energy
             group_end = frame.timestamp_seconds + 0.016
             continue
-        if group_start is not None and group_end is not None:
-            if (
-                bounded_on_left
-                and group_start <= boundary_seconds + 0.016
-                and group_end >= boundary_seconds
-                and group_end - boundary_seconds > 0.032 + 1e-9
-            ):
-                return True
+        if group_crosses_boundary():
+            return True
         group_start = None
         group_end = None
-        bounded_on_left = False
-        saw_low_energy = True
-    return False
+    return group_crosses_boundary()
 
 
 def _select_seam(
@@ -493,7 +494,7 @@ def _planned_duration(
     )
 
 
-def _extend_final_outro(
+def _extend_delivery_windows(
     planned: Sequence[PlannedTakeWindow],
     evidence: Sequence[TakeAudioEvidence],
     seams: Sequence[PlannedSeam],
@@ -508,21 +509,61 @@ def _extend_final_outro(
     if current_duration >= min_duration_seconds - 1e-9:
         return tuple(result)
     required = min_duration_seconds - current_duration
-    final = result[-1]
-    capacity = evidence[-1].provider_duration_seconds - final.audio_end_seconds
-    if capacity + 1e-9 < required:
+    capacities = [
+        max(0.0, take.provider_duration_seconds - window.audio_end_seconds)
+        for window, take in zip(result, evidence)
+    ]
+    total_available = sum(capacities)
+    if total_available + 1e-9 < required:
+        fair_share = required / len(result)
         raise ValidationError(
             "Acoustic plan cannot satisfy the duration envelope.",
-            {"required_seconds": required, "available_seconds": capacity},
+            {
+                "required_seconds": required,
+                "total_available_seconds": total_available,
+                "available_seconds_by_take": {
+                    str(window.take_index): capacity
+                    for window, capacity in zip(result, capacities)
+                },
+                "under_capacity_take_indexes": [
+                    window.take_index
+                    for window, capacity in zip(result, capacities)
+                    if capacity + 1e-9 < fair_share
+                ],
+            },
         )
-    result[-1] = PlannedTakeWindow(
-        take_index=final.take_index,
-        audio_start_seconds=final.audio_start_seconds,
-        audio_end_seconds=final.audio_end_seconds + required,
-        video_start_seconds=final.video_start_seconds,
-        video_end_seconds=final.video_end_seconds + required,
-        gain_db=final.gain_db,
-    )
+
+    if capacities[-1] + 1e-9 >= required:
+        extensions = [0.0] * len(result)
+        extensions[-1] = required
+    else:
+        extensions = [0.0] * len(result)
+        remaining = required
+        active = {index for index, capacity in enumerate(capacities) if capacity > 1e-9}
+        while remaining > 1e-9 and active:
+            fair_share = remaining / len(active)
+            allocated = 0.0
+            for index in tuple(active):
+                available = capacities[index] - extensions[index]
+                addition = min(available, fair_share)
+                extensions[index] += addition
+                allocated += addition
+                if available - addition <= 1e-9:
+                    active.remove(index)
+            remaining -= allocated
+
+    for index, extension in enumerate(extensions):
+        if extension <= 1e-9:
+            continue
+        window = result[index]
+        result[index] = PlannedTakeWindow(
+            take_index=window.take_index,
+            audio_start_seconds=window.audio_start_seconds,
+            audio_end_seconds=window.audio_end_seconds + extension,
+            video_start_seconds=window.video_start_seconds,
+            video_end_seconds=window.video_end_seconds + extension,
+            gain_db=window.gain_db,
+        )
     return tuple(result)
 
 
@@ -555,7 +596,7 @@ def plan_acoustic_seams(
         for index in range(len(ordered) - 1)
     )
     planned = _derive_video_windows(ordered, seams, gains)
-    planned = _extend_final_outro(
+    planned = _extend_delivery_windows(
         planned,
         ordered,
         seams,

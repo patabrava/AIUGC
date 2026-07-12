@@ -332,5 +332,82 @@ def test_planner_reports_boundary_energy_after_gain_matching():
 def test_planner_fails_when_final_take_cannot_reach_duration_floor():
     takes = (_evidence(0, duration=2.0, final_word=1.5), _evidence(1, duration=2.0, final_word=1.5))
 
-    with pytest.raises(ValidationError, match="duration envelope"):
+    with pytest.raises(ValidationError, match="duration envelope") as exc_info:
         plan_acoustic_seams(takes, min_duration_seconds=10.0, max_duration_seconds=12.0)
+
+    assert exc_info.value.details["required_seconds"] > exc_info.value.details["total_available_seconds"]
+    assert exc_info.value.details["available_seconds_by_take"] == {
+        "0": pytest.approx(0.36),
+        "1": pytest.approx(0.42),
+    }
+    assert exc_info.value.details["under_capacity_take_indexes"] == [0, 1]
+
+
+def test_planner_distributes_long_form_duration_floor_across_take_windows():
+    takes = tuple(
+        _evidence(index, duration=8.0, first_word=0.5, final_word=6.8)
+        for index in range(7)
+    )
+    baseline = plan_acoustic_seams(
+        takes,
+        min_duration_seconds=0.0,
+        max_duration_seconds=50.5,
+    )
+
+    plan = plan_acoustic_seams(
+        takes,
+        min_duration_seconds=48.5,
+        max_duration_seconds=50.5,
+    )
+
+    assert plan.final_duration_seconds == pytest.approx(48.5)
+    extended_indexes = [
+        index
+        for index, (window, baseline_window) in enumerate(zip(plan.takes, baseline.takes))
+        if window.audio_end_seconds > baseline_window.audio_end_seconds + 1e-9
+    ]
+    assert len(extended_indexes) >= 2
+    assert all(window.audio_end_seconds <= 8.0 for window in plan.takes)
+
+
+def test_planner_preserves_two_take_final_outro_when_it_has_capacity():
+    takes = (_evidence(0), _evidence(1))
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=6.0, max_duration_seconds=10.0)
+
+    assert plan.takes[0].audio_end_seconds == pytest.approx(
+        plan.seams[0].previous_audio_end_seconds
+    )
+    assert plan.takes[1].audio_end_seconds > takes[1].final_word_end_seconds + 0.08
+
+
+def test_planner_rejects_breath_crossing_truncated_head_analysis_windows():
+    takes = (
+        _evidence(0, final_word=3.0, room_rms=-42.0),
+        _evidence(
+            1,
+            first_word=0.5,
+            room_rms=-42.0,
+            breath_start=0.18,
+            breath_end=0.48,
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="No transcript-safe acoustic seam candidate"):
+        plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+
+def test_planner_rejects_isolated_breath_open_at_tail_analysis_window_end():
+    takes = (
+        _evidence(
+            0,
+            final_word=3.0,
+            room_rms=-42.0,
+            breath_start=3.04,
+            breath_end=3.40,
+        ),
+        _evidence(1, room_rms=-42.0),
+    )
+
+    with pytest.raises(ValidationError, match="No transcript-safe acoustic seam candidate"):
+        plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
