@@ -21,6 +21,7 @@ from app.features.shot_production.runner import (  # noqa: E402
     invalidate_composition,
     pilot_run_lock,
     reconcile_unknown_submission,
+    repair_failed_seam_windows,
     reset_failed_take,
     reset_voice_failed_takes,
     reset_visual_failed_takes,
@@ -59,6 +60,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--recompose-reason",
         default="explicit delivery recompose",
+    )
+    parser.add_argument("--repair-seams", action="store_true")
+    parser.add_argument(
+        "--seam-repair-reason",
+        default="explicit measured seam-gap repair",
     )
     parser.add_argument("--poll-interval", type=float, default=10.0)
     parser.add_argument("--timeout", type=float, default=1800.0)
@@ -114,6 +120,12 @@ def main() -> int:
 
         if args.recompose:
             invalidate_composition(manifest_path, reason=args.recompose_reason)
+
+        if args.repair_seams:
+            repair_failed_seam_windows(
+                manifest_path,
+                reason=args.seam_repair_reason,
+            )
 
         retry_snapshot = json.loads(manifest_path.read_text(encoding="utf-8"))
         if len(args.retry_take) > 1 and (retry_snapshot.get("voice_qa") or {}).get("passed") is False:

@@ -66,6 +66,8 @@ Deepgram transcribes every raw take. A take passes when it contains its first an
 
 The existing stitcher joins the ordered windows with hard cuts and no crossfade or synthetic reframing. Deepgram then transcribes the stitched video once. Final dialogue acceptance uses exact normalized ordered words with zero allowed word error before seam indexing. The caption aligner maps those timings to the known complete script, and the existing renderer burns one-word captions into the final video.
 
+If exact dialogue passes but a measured seam still exceeds 0.6 seconds, an explicit non-generative repair may tighten only the failed cut. It reduces leading silence first, preserves at least 0.08 seconds on both sides of spoken words, targets 0.45 seconds for timing margin, and moves the removed pause time to the final outro when the last provider take has capacity. The failed stitch and its complete QA evidence are archived before the repaired windows are persisted. This repair never submits or regenerates a Veo take.
+
 ## Visual and Audio QA
 
 The runner preserves each raw take and extracts start, middle, and final-spoken frames into a contact sheet. A Gemini vision pass receives the approved master and contact sheet through the model-neutral LLM adapter and reports structured dimensions: identity, apparent age, hair, wardrobe, room, framing stability, and artifacts. A hard mismatch blocks a pass regardless of average score. The contact sheet remains available for human review because model scoring is evidence, not a substitute for looking at the result.

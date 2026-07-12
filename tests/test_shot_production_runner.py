@@ -1287,6 +1287,81 @@ def test_invalidate_composition_preserves_passed_takes_and_archives_delivery(tmp
     assert archived_caption.read_bytes() == b"old-captioned-video"
 
 
+def test_repair_failed_seam_windows_tightens_only_failed_cut_and_moves_pause_to_outro(tmp_path):
+    from app.features.shot_production.runner import repair_failed_seam_windows
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    timings = [
+        (0.56, 3.54, 0.0, 3.79),
+        (0.40, 4.02, 0.15, 4.27),
+        (0.56, 4.50, 0.31, 4.75),
+        (0.56, 2.50, 0.31, 2.75),
+    ]
+    for take, (first_start, final_end, trim_start, trim_end) in zip(payload["takes"], timings):
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": first_start,
+            "final_word_end_seconds": final_end,
+        }
+        take["trim_window"] = {
+            "start_seconds": trim_start,
+            "end_seconds": trim_end,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    payload["final_transcript_qa"] = {"passed": True, "word_error_rate": 0.0}
+    payload["final_transcript"] = {"full_text": SCRIPT, "words": []}
+    payload["seam_qa"] = {
+        "passed": False,
+        "gaps_seconds": [0.54, 0.38, 0.78],
+        "failed_seam_indexes": [2],
+        "max_allowed_seconds": 0.6,
+    }
+    stitched = manifest_path.parent / "stitched.mp4"
+    stitched.write_bytes(b"failed-seam-stitch")
+    payload["stitch"] = {
+        "path": str(stitched),
+        "sha256": sha256(stitched.read_bytes()).hexdigest(),
+    }
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    original_windows = [dict(take["trim_window"]) for take in payload["takes"]]
+    original_total = sum(
+        window["end_seconds"] - window["start_seconds"] for window in original_windows
+    )
+
+    repaired = repair_failed_seam_windows(
+        manifest_path,
+        reason="final hard cut measured 0.78 seconds of silence",
+        target_gap_seconds=0.45,
+    )
+
+    new_windows = [take["trim_window"] for take in repaired["takes"]]
+    assert new_windows[0] == original_windows[0]
+    assert new_windows[1] == original_windows[1]
+    assert new_windows[2]["start_seconds"] == original_windows[2]["start_seconds"]
+    assert new_windows[2]["end_seconds"] == pytest.approx(4.59)
+    assert new_windows[3]["start_seconds"] == pytest.approx(0.48)
+    assert new_windows[3]["end_seconds"] == pytest.approx(3.08)
+    repaired_total = sum(
+        window["end_seconds"] - window["start_seconds"] for window in new_windows
+    )
+    assert repaired_total == pytest.approx(original_total)
+    assert repaired["status"] == "seam_repair_planned"
+    assert "seam_qa" not in repaired and "stitch" not in repaired
+    assert repaired["composition_history"][-1]["snapshot"]["seam_qa"]["gaps_seconds"] == [
+        0.54,
+        0.38,
+        0.78,
+    ]
+    audit = repaired["seam_repair_history"][-1]
+    assert audit["failed_seam_indexes"] == [2]
+    assert audit["duration_compensation_seconds"] == pytest.approx(0.33)
+    assert audit["target_gap_seconds"] == 0.45
+
+
 def test_visual_qa_rechecks_approved_master_hash(tmp_path):
     from app.features.shot_production.runner import build_contact_sheet, run_visual_qa
 

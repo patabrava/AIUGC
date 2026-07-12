@@ -1568,6 +1568,151 @@ def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any
 
 
 @_manifest_locked
+def repair_failed_seam_windows(
+    manifest_path: Path,
+    *,
+    reason: str,
+    target_gap_seconds: float = 0.45,
+    minimum_context_seconds: float = 0.08,
+) -> Dict[str, Any]:
+    """Tighten only measured failed cuts and move removed pause time to the outro."""
+    manifest_path = Path(manifest_path)
+    payload = _load_manifest(manifest_path)
+    reason_text = " ".join(str(reason or "").split())
+    if not reason_text:
+        raise ValidationError("Seam repair requires an operator reason.")
+    try:
+        target_gap = float(target_gap_seconds)
+        minimum_context = float(minimum_context_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Seam repair timing values must be finite numbers.") from exc
+    if (
+        not math.isfinite(target_gap)
+        or not 0 <= target_gap < 0.6
+        or not math.isfinite(minimum_context)
+        or minimum_context < 0
+    ):
+        raise ValidationError(
+            "Seam repair requires a target below 0.6 seconds and non-negative context."
+        )
+    seam_report = payload.get("seam_qa") or {}
+    failed_indexes = list(seam_report.get("failed_seam_indexes") or [])
+    gaps = list(seam_report.get("gaps_seconds") or [])
+    if seam_report.get("passed") is not False or not failed_indexes:
+        raise ValidationError("Seam repair requires a persisted failed seam QA report.")
+    if not (payload.get("final_transcript_qa") or {}).get("passed"):
+        raise ValidationError("Seam repair requires exact final transcript QA to have passed.")
+    ordered = sorted(payload["takes"], key=lambda take: take["index"])
+    if len(gaps) != len(ordered) - 1:
+        raise ValidationError("Seam repair report does not match the semantic take count.")
+    old_windows = [json.loads(json.dumps(take.get("trim_window") or {})) for take in ordered]
+    new_windows = [json.loads(json.dumps(window)) for window in old_windows]
+    repairs = []
+    total_removed = 0.0
+    for seam_index in failed_indexes:
+        if not isinstance(seam_index, int) or not 0 <= seam_index < len(ordered) - 1:
+            raise ValidationError("Seam repair contains an invalid failed seam index.")
+        observed_gap = float(gaps[seam_index])
+        required_reduction = max(0.0, observed_gap - target_gap)
+        previous_take = ordered[seam_index]
+        next_take = ordered[seam_index + 1]
+        previous_qa = previous_take.get("transcript_qa") or {}
+        next_qa = next_take.get("transcript_qa") or {}
+        previous_final_end = float(previous_qa.get("final_word_end_seconds"))
+        next_first_start = float(next_qa.get("first_word_start_seconds"))
+        previous_tail = max(
+            0.0,
+            float(new_windows[seam_index]["end_seconds"]) - previous_final_end,
+        )
+        next_head = max(
+            0.0,
+            next_first_start - float(new_windows[seam_index + 1]["start_seconds"]),
+        )
+        reducible_head = max(0.0, next_head - minimum_context)
+        head_reduction = min(required_reduction, reducible_head)
+        remaining = required_reduction - head_reduction
+        reducible_tail = max(0.0, previous_tail - minimum_context)
+        tail_reduction = min(remaining, reducible_tail)
+        remaining -= tail_reduction
+        if remaining > 1e-6:
+            raise ValidationError(
+                "Failed seam cannot be tightened without violating spoken-word context.",
+                {
+                    "seam_index": seam_index,
+                    "required_reduction_seconds": required_reduction,
+                    "available_reduction_seconds": reducible_head + reducible_tail,
+                },
+            )
+        new_windows[seam_index + 1]["start_seconds"] = (
+            float(new_windows[seam_index + 1]["start_seconds"]) + head_reduction
+        )
+        new_windows[seam_index]["end_seconds"] = (
+            float(new_windows[seam_index]["end_seconds"]) - tail_reduction
+        )
+        removed = head_reduction + tail_reduction
+        total_removed += removed
+        repairs.append(
+            {
+                "seam_index": seam_index,
+                "observed_gap_seconds": observed_gap,
+                "head_reduction_seconds": head_reduction,
+                "tail_reduction_seconds": tail_reduction,
+                "total_reduction_seconds": removed,
+            }
+        )
+    final_window = new_windows[-1]
+    final_take = ordered[-1]
+    compensation_capacity = float(final_take["duration_seconds"]) - float(final_window["end_seconds"])
+    if compensation_capacity + 1e-6 < total_removed:
+        raise ValidationError(
+            "Seam repair cannot preserve final duration inside the last provider take.",
+            {
+                "required_seconds": total_removed,
+                "available_seconds": compensation_capacity,
+            },
+        )
+    final_window["end_seconds"] = float(final_window["end_seconds"]) + total_removed
+    for index, window in enumerate(new_windows):
+        if (
+            window.get("source") != "deepgram_word_window"
+            or float(window["start_seconds"]) < 0
+            or float(window["end_seconds"]) <= float(window["start_seconds"])
+            or float(window["end_seconds"]) > float(ordered[index]["duration_seconds"]) + 1e-6
+        ):
+            raise ValidationError(
+                "Seam repair produced an invalid trim window.",
+                {"take_index": ordered[index]["index"], "trim_window": window},
+            )
+
+    invalidate_composition(manifest_path, reason=reason_text)
+    payload = _load_manifest(manifest_path)
+    ordered_payload = sorted(payload["takes"], key=lambda take: take["index"])
+    for take, window in zip(ordered_payload, new_windows):
+        take["trim_window"] = window
+    repair_history = list(payload.get("seam_repair_history") or [])
+    repair_history.append(
+        {
+            "reason": reason_text,
+            "failed_seam_indexes": failed_indexes,
+            "observed_gaps_seconds": gaps,
+            "target_gap_seconds": target_gap,
+            "minimum_context_seconds": minimum_context,
+            "duration_compensation_seconds": total_removed,
+            "old_trim_windows": old_windows,
+            "new_trim_windows": new_windows,
+            "repairs": repairs,
+            "archived_delivery_index": len(payload.get("composition_history") or []),
+            "repaired_at": _utc_now(),
+        }
+    )
+    payload["seam_repair_history"] = repair_history
+    payload["status"] = "seam_repair_planned"
+    payload["updated_at"] = _utc_now()
+    _atomic_write_json(manifest_path, payload)
+    return payload
+
+
+@_manifest_locked
 def reconcile_unknown_submission(
     manifest_path: Path,
     *,
@@ -1968,6 +2113,7 @@ __all__ = [
     "poll_and_download_takes",
     "pilot_run_lock",
     "reconcile_unknown_submission",
+    "repair_failed_seam_windows",
     "reset_failed_take",
     "reset_voice_failed_takes",
     "reset_visual_failed_takes",
