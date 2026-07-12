@@ -7,8 +7,9 @@ from hashlib import sha256
 import json
 import math
 from pathlib import Path
+from statistics import median
 import subprocess
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from app.core.errors import ValidationError
 
@@ -32,6 +33,48 @@ class AudioFrameMetrics:
     zero_crossing_rate: float
     spectral_centroid_hz: float
     spectral_flatness: float
+
+
+@dataclass(frozen=True)
+class TakeAudioEvidence:
+    take_index: int
+    provider_duration_seconds: float
+    first_word_start_seconds: float
+    final_word_end_seconds: float
+    frames: Tuple[AudioFrameMetrics, ...]
+
+
+@dataclass(frozen=True)
+class PlannedTakeWindow:
+    take_index: int
+    audio_start_seconds: float
+    audio_end_seconds: float
+    video_start_seconds: float
+    video_end_seconds: float
+    gain_db: float
+
+
+@dataclass(frozen=True)
+class PlannedSeam:
+    seam_index: int
+    previous_audio_end_seconds: float
+    next_audio_start_seconds: float
+    overlap_seconds: float
+    visual_cut_position_seconds: float
+    final_word_gap_seconds: float
+    short_window_energy_delta_db: float
+    retained_island_duration_seconds: float
+    speech_overlap: bool
+    rejected_candidates: Tuple[Dict[str, object], ...]
+
+
+@dataclass(frozen=True)
+class AcousticSeamPlan:
+    analyzer_version: str
+    takes: Tuple[PlannedTakeWindow, ...]
+    seams: Tuple[PlannedSeam, ...]
+    active_speech_rms_range_db: float
+    final_duration_seconds: float
 
 
 def acoustic_analysis_cache_key(
@@ -144,10 +187,355 @@ def analyze_audio_frames(
     return parse_frame_metrics(payload)
 
 
+def _validate_take_evidence(takes: Sequence[TakeAudioEvidence]) -> Tuple[TakeAudioEvidence, ...]:
+    if not isinstance(takes, (list, tuple)) or len(takes) < 2:
+        raise ValidationError("Acoustic seam planning requires at least two takes.")
+    ordered = tuple(sorted(takes, key=lambda take: take.take_index))
+    if [take.take_index for take in ordered] != list(range(len(ordered))):
+        raise ValidationError("Acoustic take indexes must be consecutive from zero.")
+    for take in ordered:
+        values = (
+            take.provider_duration_seconds,
+            take.first_word_start_seconds,
+            take.final_word_end_seconds,
+        )
+        if any(not math.isfinite(value) for value in values):
+            raise ValidationError("Acoustic take timing values must be finite.")
+        if not (
+            0.0 < take.first_word_start_seconds
+            < take.final_word_end_seconds
+            < take.provider_duration_seconds
+        ):
+            raise ValidationError(
+                "Acoustic take word timings must fit inside provider duration.",
+                {"take_index": take.take_index},
+            )
+        if not take.frames:
+            raise ValidationError("Acoustic take evidence requires frame metrics.")
+    return ordered
+
+
+def _active_speech_rms(take: TakeAudioEvidence) -> float:
+    values = [
+        frame.rms_dbfs
+        for frame in take.frames
+        if take.first_word_start_seconds <= frame.timestamp_seconds <= take.final_word_end_seconds
+        and frame.rms_dbfs > -45.0
+    ]
+    if not values:
+        raise ValidationError(
+            "Acoustic take has no measurable active speech.",
+            {"take_index": take.take_index},
+        )
+    return float(median(values))
+
+
+def _plan_speech_gains(
+    takes: Sequence[TakeAudioEvidence],
+) -> Tuple[Tuple[float, ...], float]:
+    measured = tuple(_active_speech_rms(take) for take in takes)
+    target = float(median(measured))
+    gains = tuple(max(-2.0, min(2.0, target - value)) for value in measured)
+    adjusted = tuple(value + gain for value, gain in zip(measured, gains))
+    adjusted_range = max(adjusted) - min(adjusted)
+    if adjusted_range > 1.5 + 1e-9:
+        raise ValidationError(
+            "Acoustic speech loudness cannot be matched inside the gain clamp.",
+            {"active_speech_rms_range_db": round(adjusted_range, 3)},
+        )
+    return gains, adjusted_range
+
+
+def _frames_between(
+    take: TakeAudioEvidence,
+    start_seconds: float,
+    end_seconds: float,
+) -> Tuple[AudioFrameMetrics, ...]:
+    return tuple(
+        frame
+        for frame in take.frames
+        if start_seconds <= frame.timestamp_seconds < end_seconds
+    )
+
+
+def _is_breath_like(frame: AudioFrameMetrics) -> bool:
+    return (
+        frame.rms_dbfs > -52.0
+        and frame.spectral_centroid_hz >= 2600.0
+        and frame.spectral_flatness >= 0.30
+        and frame.zero_crossing_rate >= 0.08
+    )
+
+
+def _maximum_breath_island_duration(frames: Sequence[AudioFrameMetrics]) -> float:
+    longest = 0.0
+    current_start: Optional[float] = None
+    previous_timestamp: Optional[float] = None
+    frame_step = 0.016
+    for frame in frames:
+        if _is_breath_like(frame):
+            if current_start is None:
+                current_start = frame.timestamp_seconds
+            previous_timestamp = frame.timestamp_seconds
+            continue
+        if current_start is not None and previous_timestamp is not None:
+            longest = max(longest, previous_timestamp - current_start + frame_step)
+        current_start = None
+        previous_timestamp = None
+    if current_start is not None and previous_timestamp is not None:
+        longest = max(longest, previous_timestamp - current_start + frame_step)
+    return max(0.0, longest)
+
+
+def _boundary_rms(
+    take: TakeAudioEvidence,
+    boundary_seconds: float,
+    *,
+    before: bool,
+) -> float:
+    start = boundary_seconds - 0.032 if before else boundary_seconds
+    end = boundary_seconds if before else boundary_seconds + 0.032
+    frames = _frames_between(take, max(0.0, start), min(take.provider_duration_seconds, end))
+    if not frames:
+        raise ValidationError(
+            "Acoustic seam boundary has insufficient frame evidence.",
+            {"take_index": take.take_index, "boundary_seconds": boundary_seconds},
+        )
+    return float(median(frame.rms_dbfs for frame in frames))
+
+
+def _select_seam(
+    seam_index: int,
+    previous: TakeAudioEvidence,
+    next_take: TakeAudioEvidence,
+    previous_gain_db: float,
+    next_gain_db: float,
+) -> PlannedSeam:
+    contexts = (0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22)
+    overlaps = (0.04, 0.05, 0.06, 0.07)
+    valid = []
+    rejected: List[Dict[str, object]] = []
+    for tail_context in contexts:
+        previous_end = min(
+            previous.provider_duration_seconds,
+            previous.final_word_end_seconds + tail_context,
+        )
+        for head_context in contexts:
+            next_start = max(0.0, next_take.first_word_start_seconds - head_context)
+            previous_margin = _frames_between(
+                previous, previous.final_word_end_seconds, previous_end
+            )
+            next_margin = _frames_between(next_take, next_start, next_take.first_word_start_seconds)
+            island_duration = max(
+                _maximum_breath_island_duration(previous_margin),
+                _maximum_breath_island_duration(next_margin),
+            )
+            for overlap in overlaps:
+                word_gap = (
+                    previous_end
+                    - previous.final_word_end_seconds
+                    + next_take.first_word_start_seconds
+                    - next_start
+                    - overlap
+                )
+                candidate = {
+                    "tail_context_seconds": tail_context,
+                    "head_context_seconds": head_context,
+                    "overlap_seconds": overlap,
+                    "word_gap_seconds": round(word_gap, 6),
+                    "retained_island_duration_seconds": round(island_duration, 6),
+                }
+                reasons = []
+                if not 0.100 - 1e-9 <= word_gap <= 0.320 + 1e-9:
+                    reasons.append("word_gap_out_of_range")
+                if island_duration > 0.080 + 1e-9:
+                    reasons.append("retained_breath_island")
+                try:
+                    energy_delta = abs(
+                        _boundary_rms(previous, previous_end, before=True)
+                        + previous_gain_db
+                        - _boundary_rms(next_take, next_start, before=False)
+                        - next_gain_db
+                    )
+                except ValidationError:
+                    reasons.append("insufficient_boundary_evidence")
+                    energy_delta = math.inf
+                if reasons:
+                    rejected.append({**candidate, "reasons": reasons})
+                    continue
+                valid.append(
+                    (
+                        energy_delta,
+                        abs(word_gap - 0.160),
+                        island_duration,
+                        next_start,
+                        previous_end,
+                        overlap,
+                        candidate,
+                    )
+                )
+    if not valid:
+        raise ValidationError(
+            "No transcript-safe acoustic seam candidate exists.",
+            {"seam_index": seam_index, "rejected_candidate_count": len(rejected)},
+        )
+    energy_delta, _, island_duration, next_start, previous_end, overlap, _ = min(valid)
+    visual_position = overlap / 2.0
+    word_gap = (
+        previous_end
+        - previous.final_word_end_seconds
+        + next_take.first_word_start_seconds
+        - next_start
+        - overlap
+    )
+    return PlannedSeam(
+        seam_index=seam_index,
+        previous_audio_end_seconds=previous_end,
+        next_audio_start_seconds=next_start,
+        overlap_seconds=overlap,
+        visual_cut_position_seconds=visual_position,
+        final_word_gap_seconds=word_gap,
+        short_window_energy_delta_db=energy_delta,
+        retained_island_duration_seconds=island_duration,
+        speech_overlap=False,
+        rejected_candidates=tuple(rejected),
+    )
+
+
+def _derive_video_windows(
+    takes: Sequence[TakeAudioEvidence],
+    seams: Sequence[PlannedSeam],
+    gains: Sequence[float],
+) -> Tuple[PlannedTakeWindow, ...]:
+    planned = []
+    for index, take in enumerate(takes):
+        audio_start = 0.0 if index == 0 else seams[index - 1].next_audio_start_seconds
+        audio_end = (
+            take.final_word_end_seconds + 0.08
+            if index == len(takes) - 1
+            else seams[index].previous_audio_end_seconds
+        )
+        audio_end = min(take.provider_duration_seconds, audio_end)
+        video_start = audio_start
+        if index > 0:
+            video_start += seams[index - 1].visual_cut_position_seconds
+        video_end = audio_end
+        if index < len(seams):
+            video_end -= seams[index].overlap_seconds - seams[index].visual_cut_position_seconds
+        if video_end <= video_start:
+            raise ValidationError("Acoustic seam plan produced an empty video window.")
+        planned.append(
+            PlannedTakeWindow(
+                take_index=take.take_index,
+                audio_start_seconds=audio_start,
+                audio_end_seconds=audio_end,
+                video_start_seconds=video_start,
+                video_end_seconds=video_end,
+                gain_db=float(gains[index]),
+            )
+        )
+    return tuple(planned)
+
+
+def _planned_duration(
+    takes: Sequence[PlannedTakeWindow], seams: Sequence[PlannedSeam]
+) -> float:
+    return sum(take.audio_end_seconds - take.audio_start_seconds for take in takes) - sum(
+        seam.overlap_seconds for seam in seams
+    )
+
+
+def _extend_final_outro(
+    planned: Sequence[PlannedTakeWindow],
+    evidence: Sequence[TakeAudioEvidence],
+    seams: Sequence[PlannedSeam],
+    *,
+    min_duration_seconds: float,
+    max_duration_seconds: float,
+) -> Tuple[PlannedTakeWindow, ...]:
+    result = list(planned)
+    current_duration = _planned_duration(result, seams)
+    if current_duration > max_duration_seconds + 1e-9:
+        raise ValidationError("Acoustic plan exceeds the duration envelope.")
+    if current_duration >= min_duration_seconds - 1e-9:
+        return tuple(result)
+    required = min_duration_seconds - current_duration
+    final = result[-1]
+    capacity = evidence[-1].provider_duration_seconds - final.audio_end_seconds
+    if capacity + 1e-9 < required:
+        raise ValidationError(
+            "Acoustic plan cannot satisfy the duration envelope.",
+            {"required_seconds": required, "available_seconds": capacity},
+        )
+    result[-1] = PlannedTakeWindow(
+        take_index=final.take_index,
+        audio_start_seconds=final.audio_start_seconds,
+        audio_end_seconds=final.audio_end_seconds + required,
+        video_start_seconds=final.video_start_seconds,
+        video_end_seconds=final.video_end_seconds + required,
+        gain_db=final.gain_db,
+    )
+    return tuple(result)
+
+
+def plan_acoustic_seams(
+    takes: Sequence[TakeAudioEvidence],
+    *,
+    fps: float = 24.0,
+    min_duration_seconds: float = 14.5,
+    max_duration_seconds: float = 16.5,
+) -> AcousticSeamPlan:
+    if not math.isfinite(fps) or fps <= 0:
+        raise ValidationError("Acoustic seam planning requires a positive finite frame rate.")
+    if (
+        not math.isfinite(min_duration_seconds)
+        or not math.isfinite(max_duration_seconds)
+        or min_duration_seconds < 0
+        or max_duration_seconds <= min_duration_seconds
+    ):
+        raise ValidationError("Acoustic duration envelope is invalid.")
+    ordered = _validate_take_evidence(takes)
+    gains, rms_range = _plan_speech_gains(ordered)
+    seams = tuple(
+        _select_seam(
+            index,
+            ordered[index],
+            ordered[index + 1],
+            gains[index],
+            gains[index + 1],
+        )
+        for index in range(len(ordered) - 1)
+    )
+    planned = _derive_video_windows(ordered, seams, gains)
+    planned = _extend_final_outro(
+        planned,
+        ordered,
+        seams,
+        min_duration_seconds=min_duration_seconds,
+        max_duration_seconds=max_duration_seconds,
+    )
+    final_duration = _planned_duration(planned, seams)
+    video_duration = sum(take.video_end_seconds - take.video_start_seconds for take in planned)
+    if abs(final_duration - video_duration) > 1.0 / fps + 1e-9:
+        raise ValidationError("Acoustic audio/video plan exceeds one frame of duration drift.")
+    return AcousticSeamPlan(
+        analyzer_version=ACOUSTIC_ANALYZER_VERSION,
+        takes=planned,
+        seams=seams,
+        active_speech_rms_range_db=rms_range,
+        final_duration_seconds=final_duration,
+    )
+
+
 __all__ = [
     "ACOUSTIC_ANALYZER_VERSION",
+    "AcousticSeamPlan",
     "AudioFrameMetrics",
+    "PlannedSeam",
+    "PlannedTakeWindow",
+    "TakeAudioEvidence",
     "acoustic_analysis_cache_key",
     "analyze_audio_frames",
     "parse_frame_metrics",
+    "plan_acoustic_seams",
 ]

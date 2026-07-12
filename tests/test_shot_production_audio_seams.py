@@ -7,10 +7,13 @@ import pytest
 from app.core.errors import ValidationError
 from app.features.shot_production.audio_seams import (
     ACOUSTIC_ANALYZER_VERSION,
+    AcousticSeamPlan,
     AudioFrameMetrics,
+    TakeAudioEvidence,
     acoustic_analysis_cache_key,
     analyze_audio_frames,
     parse_frame_metrics,
+    plan_acoustic_seams,
 )
 
 
@@ -123,3 +126,115 @@ def test_analyze_audio_frames_rejects_failed_ffprobe(tmp_path):
 
     with pytest.raises(ValidationError, match="Acoustic frame analysis failed"):
         analyze_audio_frames(media_path, run_fn=lambda *_args, **_kwargs: Result())
+
+
+def _evidence(
+    index,
+    *,
+    duration=4.0,
+    first_word=0.5,
+    final_word=3.0,
+    speech_rms=-20.0,
+    room_rms=-60.0,
+    breath_start=None,
+    breath_end=None,
+):
+    frames = []
+    timestamp = 0.0
+    while timestamp <= duration:
+        rms = room_rms
+        centroid = 2200.0
+        flatness = 0.25
+        zcr = 0.04
+        if first_word <= timestamp <= final_word:
+            rms = speech_rms
+            centroid = 1200.0
+            flatness = 0.12
+            zcr = 0.08
+        if breath_start is not None and breath_start <= timestamp <= breath_end:
+            rms = -42.0
+            centroid = 3600.0
+            flatness = 0.62
+            zcr = 0.12
+        frames.append(AudioFrameMetrics(timestamp, rms, rms + 8.0, zcr, centroid, flatness))
+        timestamp = round(timestamp + 0.016, 6)
+    return TakeAudioEvidence(
+        take_index=index,
+        provider_duration_seconds=duration,
+        first_word_start_seconds=first_word,
+        final_word_end_seconds=final_word,
+        frames=tuple(frames),
+    )
+
+
+def test_planner_removes_pause_breath_pause_from_next_take_head():
+    takes = (
+        _evidence(0, final_word=3.0),
+        _evidence(1, first_word=0.5, breath_start=0.18, breath_end=0.34),
+    )
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+    assert isinstance(plan, AcousticSeamPlan)
+    assert plan.takes[1].audio_start_seconds > 0.34
+    assert plan.seams[0].retained_island_duration_seconds == 0.0
+    assert 0.100 <= plan.seams[0].final_word_gap_seconds <= 0.320
+    assert 0.040 <= plan.seams[0].overlap_seconds <= 0.070
+
+
+def test_planner_keeps_word_guards_and_never_crossfades_speech():
+    takes = (_evidence(0), _evidence(1))
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+    assert plan.takes[0].audio_end_seconds >= takes[0].final_word_end_seconds + 0.060
+    assert plan.takes[1].audio_start_seconds <= takes[1].first_word_start_seconds - 0.060
+    assert plan.seams[0].speech_overlap is False
+
+
+def test_planner_video_windows_match_crossfaded_audio_duration():
+    takes = (_evidence(0), _evidence(1), _evidence(2), _evidence(3))
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=20.0)
+    video_duration = sum(
+        take.video_end_seconds - take.video_start_seconds for take in plan.takes
+    )
+    audio_duration = sum(
+        take.audio_end_seconds - take.audio_start_seconds for take in plan.takes
+    ) - sum(seam.overlap_seconds for seam in plan.seams)
+
+    assert video_duration == pytest.approx(audio_duration, abs=1 / 24)
+    assert plan.final_duration_seconds == pytest.approx(audio_duration)
+
+
+def test_planner_matches_active_speech_gain_within_clamp():
+    takes = (
+        _evidence(0, speech_rms=-18.0),
+        _evidence(1, speech_rms=-19.0),
+        _evidence(2, speech_rms=-20.0),
+        _evidence(3, speech_rms=-19.5),
+    )
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=20.0)
+    gains = [take.gain_db for take in plan.takes]
+
+    assert all(-2.0 <= gain <= 2.0 for gain in gains)
+    assert plan.active_speech_rms_range_db <= 1.5
+
+
+def test_planner_reports_boundary_energy_after_gain_matching():
+    takes = (
+        _evidence(0, speech_rms=-18.0, room_rms=-52.0),
+        _evidence(1, speech_rms=-20.0, room_rms=-60.0),
+    )
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+    assert plan.seams[0].short_window_energy_delta_db <= 6.0
+
+
+def test_planner_fails_when_final_take_cannot_reach_duration_floor():
+    takes = (_evidence(0, duration=2.0, final_word=1.5), _evidence(1, duration=2.0, final_word=1.5))
+
+    with pytest.raises(ValidationError, match="duration envelope"):
+        plan_acoustic_seams(takes, min_duration_seconds=10.0, max_duration_seconds=12.0)
