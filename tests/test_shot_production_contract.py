@@ -101,6 +101,45 @@ def test_derive_shot_deck_returns_four_deterministic_immutable_png_variants():
 
 
 @pytest.mark.parametrize(
+    ("shot_count", "expected_names"),
+    [
+        (2, ["original", "center"]),
+        (7, ["original", "center", "left", "right", "original", "center", "left"]),
+    ],
+)
+def test_derive_shot_deck_matches_arbitrary_planned_shot_count(shot_count, expected_names):
+    from app.features.shot_production.shot_deck import derive_shot_deck
+
+    source = _png_bytes()
+    deck = derive_shot_deck(
+        approved_master_bytes=source,
+        expected_sha256=sha256(source).hexdigest(),
+        mime_type="image/png",
+        shot_count=shot_count,
+    )
+
+    assert len(deck) == shot_count
+    assert [shot.index for shot in deck] == list(range(shot_count))
+    assert [shot.name for shot in deck] == expected_names
+
+
+def test_compile_veo_take_requests_requires_exact_beat_and_shot_cardinality():
+    from app.features.shot_production.prompts import compile_veo_take_requests
+    from app.features.shot_production.shot_deck import derive_shot_deck
+
+    source = _png_bytes()
+    deck = derive_shot_deck(
+        approved_master_bytes=source,
+        expected_sha256=sha256(source).hexdigest(),
+        mime_type="image/png",
+        shot_count=2,
+    )
+
+    with pytest.raises(ValidationError, match="same number"):
+        compile_veo_take_requests(beats=_beats(), shot_deck=deck, base_seed=12)
+
+
+@pytest.mark.parametrize(
     ("image_bytes", "mime_type", "expected_hash", "message"),
     [
         (_png_bytes(), "image/png", "0" * 64, "SHA-256"),

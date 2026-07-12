@@ -95,14 +95,9 @@ def compile_veo_take_requests(
     """Map ordered editorial beats to matching approved shot variants."""
     if not beats:
         raise ValidationError("Veo request compilation requires at least one editorial beat.")
-    if len(shot_deck) != 4:
+    if len(beats) != len(shot_deck):
         raise ValidationError(
-            "Veo request compilation requires exactly four approved shot variants.",
-            {"shot_variant_count": len(shot_deck)},
-        )
-    if len(beats) > len(shot_deck):
-        raise ValidationError(
-            "Veo request compilation has more beats than approved shot variants.",
+            "Veo request compilation requires the same number of beats and approved shot variants.",
             {"beat_count": len(beats), "shot_variant_count": len(shot_deck)},
         )
     if isinstance(base_seed, bool) or not isinstance(base_seed, int) or base_seed < 0:

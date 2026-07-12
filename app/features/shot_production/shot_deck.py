@@ -106,8 +106,11 @@ def derive_shot_deck(
     approved_master_bytes: bytes,
     expected_sha256: str,
     mime_type: str,
-) -> Tuple[ShotVariant, ShotVariant, ShotVariant, ShotVariant]:
-    """Return the approved original plus restrained center, left, and right crops."""
+    shot_count: int = 4,
+) -> Tuple[ShotVariant, ...]:
+    """Return the requested number of deterministic restrained master crops."""
+    if isinstance(shot_count, bool) or not isinstance(shot_count, int) or shot_count < 1:
+        raise ValidationError("Approved shot deck requires a positive integer shot count.")
     master, source_sha256 = _load_approved_png(
         approved_master_bytes=approved_master_bytes,
         expected_sha256=expected_sha256,
@@ -127,14 +130,19 @@ def derive_shot_deck(
     )
     names = ("original", "center", "left", "right")
 
-    variants = []
-    for index, (name, crop_box) in enumerate(zip(names, crop_boxes)):
-        if index == 0:
+    profiles = []
+    for profile_index, (name, crop_box) in enumerate(zip(names, crop_boxes)):
+        if profile_index == 0:
             image_bytes = approved_master_bytes
         else:
             cropped = master.crop(crop_box)
             resized = cropped.resize((width, height), Image.Resampling.LANCZOS)
             image_bytes = _encode_png(resized)
+        profiles.append((name, crop_box, image_bytes))
+
+    variants = []
+    for index in range(shot_count):
+        name, crop_box, image_bytes = profiles[index % len(profiles)]
         variants.append(
             ShotVariant(
                 index=index,
@@ -149,7 +157,7 @@ def derive_shot_deck(
             )
         )
 
-    return tuple(variants)  # type: ignore[return-value]
+    return tuple(variants)
 
 
 __all__ = ["ShotVariant", "derive_shot_deck"]
