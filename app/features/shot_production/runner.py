@@ -33,6 +33,16 @@ from app.adapters.deepgram_client import Word, WordLevelTranscript
 from app.adapters.storage_client import get_storage_client
 from app.adapters.video_stitcher import stitch_segments
 from app.core.errors import ValidationError
+from app.features.shot_production.acoustic_qa import (
+    DEFAULT_ACOUSTIC_QA_MODEL,
+    ACOUSTIC_QA_RUBRIC_VERSION,
+    evaluate_acoustic_seam_continuity,
+)
+from app.features.shot_production.audio_seams import (
+    TakeAudioEvidence,
+    analyze_audio_frames,
+    plan_acoustic_seams,
+)
 from app.features.shot_production.composer import (
     build_take_trim_window,
     evaluate_seam_gaps,
@@ -111,6 +121,8 @@ def _clear_downstream_artifacts(payload: Dict[str, Any]) -> None:
         "final_transcript",
         "final_transcript_qa",
         "seam_qa",
+        "acoustic_seam_plan",
+        "acoustic_seam_qa",
         "caption",
         "media_qa",
         "upload_intent",
@@ -731,6 +743,8 @@ def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> 
             "final_transcript",
             "final_transcript_qa",
             "seam_qa",
+            "acoustic_seam_plan",
+            "acoustic_seam_qa",
             "caption",
             "media_qa",
             "upload",
@@ -974,6 +988,22 @@ def _extract_voice_clip(
         )
 
 
+def _extract_seam_clip(
+    source: Path,
+    destination: Path,
+    *,
+    center_seconds: float,
+    duration_seconds: float = 1.5,
+) -> None:
+    start_seconds = max(0.0, center_seconds - duration_seconds / 2.0)
+    _extract_voice_clip(
+        source,
+        destination,
+        start_seconds=start_seconds,
+        end_seconds=start_seconds + duration_seconds,
+    )
+
+
 @_manifest_locked
 def run_voice_qa(
     manifest_path: Path,
@@ -1043,6 +1073,8 @@ def run_voice_qa(
             "final_transcript",
             "final_transcript_qa",
             "seam_qa",
+            "acoustic_seam_plan",
+            "acoustic_seam_qa",
             "caption",
             "media_qa",
             "upload",
@@ -1185,6 +1217,13 @@ def compose_and_caption(
     stitch_fn: Callable[..., Any] = stitch_segments,
     caption_fn: Callable[..., str] = burn_captions,
     probe_fn: Callable[[Path], Dict[str, Any]] = _probe_media,
+    acoustic_seams: bool = False,
+    analyze_audio_fn: Callable[..., Any] = analyze_audio_frames,
+    plan_acoustic_fn: Callable[..., Any] = plan_acoustic_seams,
+    extract_seam_audio_fn: Callable[..., None] = _extract_seam_clip,
+    acoustic_evaluator: Callable[..., Any] = evaluate_acoustic_seam_continuity,
+    acoustic_llm_client: Optional[Any] = None,
+    acoustic_model: Optional[str] = DEFAULT_ACOUSTIC_QA_MODEL,
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
@@ -1202,7 +1241,8 @@ def compose_and_caption(
         payload["caption"]["probe"] = fresh_probe
         payload["updated_at"] = _utc_now()
         _atomic_write_json(manifest_path, payload)
-        if (payload.get("seam_qa") or {}).get("passed") and media_qa["passed"]:
+        acoustic_ready = not acoustic_seams or (payload.get("acoustic_seam_qa") or {}).get("passed")
+        if (payload.get("seam_qa") or {}).get("passed") and acoustic_ready and media_qa["passed"]:
             return existing_caption
     if cached_delivery_invalid:
         invalidate_composition(
@@ -1228,11 +1268,27 @@ def compose_and_caption(
         raise ValidationError("Composition requires checksum-verified raw takes.")
     segment_videos = [Path(take["raw"]["path"]).read_bytes() for take in ordered]
     trim_windows = [take["trim_window"] for take in ordered]
+    acoustic_plan = None
+    if acoustic_seams:
+        evidence = tuple(
+            TakeAudioEvidence(
+                take_index=take["index"],
+                provider_duration_seconds=float(take["duration_seconds"]),
+                first_word_start_seconds=float(take["transcript_qa"]["first_word_start_seconds"]),
+                final_word_end_seconds=float(take["transcript_qa"]["final_word_end_seconds"]),
+                frames=tuple(analyze_audio_fn(Path(take["raw"]["path"]))),
+            )
+            for take in ordered
+        )
+        acoustic_plan = plan_acoustic_fn(evidence)
+        payload["acoustic_seam_plan"] = asdict(acoustic_plan)
+        _atomic_write_json(manifest_path, payload)
     stitched_bytes, stitch_metadata = stitch_fn(
         segment_videos=segment_videos,
         post_id=payload["run_id"],
         correlation_id=f"semantic_ugc_{payload['run_id']}_stitch",
         trim_windows=trim_windows,
+        acoustic_plan=asdict(acoustic_plan) if acoustic_plan is not None else None,
     )
     stitched_path = manifest_path.parent / "stitched.mp4"
     stitched_path.write_bytes(stitched_bytes)
@@ -1285,6 +1341,73 @@ def compose_and_caption(
             {"gaps_seconds": seam_qa["gaps_seconds"]},
         )
 
+    if acoustic_plan is not None:
+        video_durations = [
+            take.video_end_seconds - take.video_start_seconds for take in acoustic_plan.takes
+        ]
+        cut_times = []
+        elapsed = 0.0
+        for duration in video_durations[:-1]:
+            elapsed += duration
+            cut_times.append(elapsed)
+        qa_dir = manifest_path.parent / "qa" / "acoustic"
+        clips = []
+        clip_records = []
+        for seam_index, center_seconds in enumerate(cut_times):
+            destination = qa_dir / f"seam-{seam_index}.wav"
+            extract_seam_audio_fn(
+                stitched_path,
+                destination,
+                center_seconds=center_seconds,
+                duration_seconds=1.5,
+            )
+            audio_bytes = destination.read_bytes()
+            clips.append({"mime_type": "audio/wav", "media_bytes": audio_bytes})
+            clip_records.append(
+                {
+                    "seam_index": seam_index,
+                    "center_seconds": round(center_seconds, 6),
+                    "path": str(destination),
+                    "mime_type": "audio/wav",
+                    "sha256": sha256(audio_bytes).hexdigest(),
+                    "bytes": len(audio_bytes),
+                }
+            )
+        deterministic_reasons = []
+        if acoustic_plan.active_speech_rms_range_db > 1.5:
+            deterministic_reasons.append("active_speech_rms_range_exceeded")
+        if any(not 0.04 <= seam.overlap_seconds <= 0.07 for seam in acoustic_plan.seams):
+            deterministic_reasons.append("audio_overlap_out_of_range")
+        if any(not 0.10 <= seam.final_word_gap_seconds <= 0.32 for seam in acoustic_plan.seams):
+            deterministic_reasons.append("word_gap_out_of_range")
+        if any(seam.retained_island_duration_seconds > 0.08 for seam in acoustic_plan.seams):
+            deterministic_reasons.append("retained_breath_island_too_long")
+        if any(seam.speech_overlap for seam in acoustic_plan.seams):
+            deterministic_reasons.append("speech_overlap_detected")
+        if float(stitch_metadata.get("stitch_audio_video_duration_delta_s") or 0) > 1 / 24 + 1e-6:
+            deterministic_reasons.append("audio_video_duration_drift")
+        report = acoustic_evaluator(
+            clips,
+            llm_client=acoustic_llm_client,
+            model=str(acoustic_model or DEFAULT_ACOUSTIC_QA_MODEL),
+        )
+        report_payload = asdict(report)
+        report_payload["clips"] = clip_records
+        report_payload["deterministic_passed"] = not deterministic_reasons
+        report_payload["deterministic_failure_reasons"] = deterministic_reasons
+        report_payload["model"] = str(acoustic_model or DEFAULT_ACOUSTIC_QA_MODEL)
+        report_payload["rubric_version"] = ACOUSTIC_QA_RUBRIC_VERSION
+        report_payload["passed"] = bool(report.passed and not deterministic_reasons)
+        payload["acoustic_seam_qa"] = report_payload
+        _atomic_write_json(manifest_path, payload)
+        if not report_payload["passed"]:
+            payload["status"] = "acoustic_seam_qa_failed"
+            _atomic_write_json(manifest_path, payload)
+            raise ValidationError(
+                "Final stitched acoustic seam QA failed.",
+                {"reasons": deterministic_reasons + list(report.blocking_reasons)},
+            )
+
     aligned = align_transcript_to_script(transcript=final_transcript, script=script)
     rendered_path = Path(
         caption_fn(
@@ -1335,11 +1458,14 @@ def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> D
         raise ValidationError("Captioned pilot has not passed final media QA before upload.")
     if not (payload.get("voice_qa") or {}).get("passed"):
         raise ValidationError("Captioned pilot has not passed voice QA before upload.")
+    if payload.get("acoustic_seam_plan") and not (payload.get("acoustic_seam_qa") or {}).get("passed"):
+        raise ValidationError("Captioned pilot has not passed acoustic seam QA before upload.")
     captioned_path = Path(caption.get("captioned_path") or "")
     if not captioned_path.is_file():
         raise ValidationError("Captioned pilot video is missing before upload.")
     storage = storage_client or get_storage_client()
-    file_name = f"semantic-ugc-{payload['run_id']}-captioned.mp4"
+    suffix = "acoustic-preview-captioned" if payload.get("acoustic_seam_plan") else "captioned"
+    file_name = f"semantic-ugc-{payload['run_id']}-{suffix}.mp4"
     intent = payload.get("upload_intent") or {}
     result = payload.get("upload") or {}
     if not intent:
@@ -1506,6 +1632,8 @@ def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any
         "final_transcript",
         "final_transcript_qa",
         "seam_qa",
+        "acoustic_seam_plan",
+        "acoustic_seam_qa",
         "caption",
         "media_qa",
         "upload_intent",
@@ -1555,6 +1683,8 @@ def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any
         "final_transcript",
         "final_transcript_qa",
         "seam_qa",
+        "acoustic_seam_plan",
+        "acoustic_seam_qa",
         "caption",
         "media_qa",
         "upload",

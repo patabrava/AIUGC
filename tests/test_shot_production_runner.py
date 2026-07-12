@@ -1048,6 +1048,81 @@ def test_compose_requires_passed_voice_qa(tmp_path):
         compose_and_caption(manifest_path, _DeepgramByCall([SCRIPT]))
 
 
+def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_path):
+    from app.features.shot_production.acoustic_qa import AcousticQAReport
+    from app.features.shot_production.audio_seams import (
+        AcousticSeamPlan,
+        PlannedSeam,
+        PlannedTakeWindow,
+    )
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["duration_seconds"] = 4.0
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.2,
+            "final_word_end_seconds": 3.4,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 3.65,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    takes = tuple(
+        PlannedTakeWindow(i, 0.0, 3.65, 0.0, 3.65, 0.0) for i in range(4)
+    )
+    seams = tuple(
+        PlannedSeam(i, 3.65, 0.0, 0.04, 0.02, 0.16, 0.2, 0.0, False, ())
+        for i in range(3)
+    )
+    plan = AcousticSeamPlan("test-v1", takes, seams, 0.8, 14.48)
+    stitch_calls = []
+
+    def stitch_fn(**kwargs):
+        stitch_calls.append(kwargs)
+        return b"stitched-video", {
+            "stitch_segment_count": 4,
+            "stitch_audio_video_duration_delta_s": 0.02,
+        }
+
+    def extract_fn(_source, destination, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"wav")
+
+    def evaluator(_clips, **_kwargs):
+        return AcousticQAReport(True, True, True, True, True, True, True, 0.96, (), (), True)
+
+    def caption_fn(**_kwargs):
+        output = manifest_path.parent / "captioned-acoustic.mp4"
+        output.write_bytes(b"captioned")
+        return str(output)
+
+    compose_and_caption(
+        manifest_path,
+        _DeepgramByCall([SCRIPT]),
+        acoustic_seams=True,
+        analyze_audio_fn=lambda _path: (),
+        plan_acoustic_fn=lambda _evidence: plan,
+        extract_seam_audio_fn=extract_fn,
+        acoustic_evaluator=evaluator,
+        stitch_fn=stitch_fn,
+        caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe("14.5"),
+    )
+
+    assert stitch_calls[0]["acoustic_plan"]["analyzer_version"] == "test-v1"
+    saved = _read(manifest_path)
+    assert saved["acoustic_seam_qa"]["passed"] is True
+    assert len(saved["acoustic_seam_qa"]["clips"]) == 3
+    assert saved["acoustic_seam_plan"]["final_duration_seconds"] == 14.48
+
+
 @pytest.mark.parametrize(
     ("probe", "reason"),
     [

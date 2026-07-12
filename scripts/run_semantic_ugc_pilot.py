@@ -70,6 +70,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=1800.0)
     parser.add_argument("--visual-model")
     parser.add_argument("--voice-model", default="gemini-2.5-flash")
+    parser.add_argument(
+        "--acoustic-seams",
+        action="store_true",
+        help="Plan transcript-safe native-audio micro-crossfades and require acoustic seam QA.",
+    )
+    parser.add_argument("--acoustic-model", default="gemini-2.5-flash")
     parser.add_argument("--upload", action="store_true")
     parser.add_argument(
         "--confirm-paid-plan",
@@ -173,7 +179,12 @@ def main() -> int:
         run_voice_qa(manifest_path, model=args.voice_model)
         build_contact_sheet(manifest_path)
         run_visual_qa(manifest_path, model=args.visual_model)
-        caption = compose_and_caption(manifest_path, deepgram)
+        caption = compose_and_caption(
+            manifest_path,
+            deepgram,
+            acoustic_seams=args.acoustic_seams,
+            acoustic_model=args.acoustic_model,
+        )
         upload = upload_final(manifest_path) if args.upload else None
     print(
         json.dumps(
