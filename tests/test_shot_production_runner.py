@@ -23,6 +23,18 @@ SCRIPT = (
     "Das zehrt an den Kräften."
 )
 
+FIFTY_SECOND_SCRIPT = " ".join(
+    [
+        "Viele Menschen merken im Alltag erst spät, wie viel Kraft kleine Barrieren jeden einzelnen Tag tatsächlich kosten.",
+        "Eine zu steile Rampe wirkt auf dem Papier vielleicht harmlos, verlangt aber bei jeder Nutzung volle Konzentration.",
+        "Schon beim ersten Anstieg müssen Schultern, Arme und Hände gleichzeitig stabilisieren, lenken und das gesamte Gewicht bewegen.",
+        "Wenn dann noch eine enge Kurve folgt, bleibt kaum Raum für einen sicheren und wirklich entspannten Bewegungsablauf.",
+        "Das Problem fällt Außenstehenden oft nicht auf, weil wenige Zentimeter Unterschied von weitem völlig unbedeutend erscheinen können.",
+        "Für Rollstuhlfahrer summiert sich diese zusätzliche Belastung jedoch über Wege, Termine und viele alltägliche Situationen hinweg.",
+        "Darum sollten Rampen nicht nur normgerecht berechnet, sondern gemeinsam mit den Menschen vor Ort praktisch getestet werden.",
+    ]
+)
+
 
 def _approved_png(path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,24 +51,25 @@ def _approved_png(path: Path) -> str:
 
 
 def _script_input(path: Path, **overrides) -> None:
+    script = str(overrides.pop("script", SCRIPT))
     payload = {
         "source": "app.features.topics.agents.generate_dialog_scripts",
         "target_length_tier": 16,
         "category": "problem_agitate_solution",
-        "script": SCRIPT,
-        "generator_output": {"problem_agitate_solution": [SCRIPT]},
+        "script": script,
+        "generator_output": {"problem_agitate_solution": [script]},
     }
     payload.update(overrides)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _initialize(tmp_path: Path):
+def _initialize(tmp_path: Path, *, script: str = SCRIPT, target_length_tier: int = 16):
     from app.features.shot_production.runner import initialize_pilot
 
     approved = tmp_path / "approved.png"
     approved_hash = _approved_png(approved)
     script_input = tmp_path / "script.json"
-    _script_input(script_input)
+    _script_input(script_input, script=script, target_length_tier=target_length_tier)
     manifest = tmp_path / "run" / "manifest.json"
     payload = initialize_pilot(
         manifest_path=manifest,
@@ -92,7 +105,7 @@ def test_initialize_pilot_fails_hash_before_any_provider_boundary(tmp_path):
     assert not (tmp_path / "run" / "manifest.json").exists()
 
 
-def test_initialize_pilot_records_real_script_four_takes_and_complete_request_audit(tmp_path):
+def test_initialize_pilot_records_minimum_two_shots_and_complete_request_audit(tmp_path):
     manifest_path, payload = _initialize(tmp_path)
 
     assert payload == _read(manifest_path)
@@ -102,13 +115,11 @@ def test_initialize_pilot_records_real_script_four_takes_and_complete_request_au
     assert payload["script"]["source"] == "app.features.topics.agents.generate_dialog_scripts"
     assert payload["script"]["target_length_tier"] == 16
     assert [take["beat"]["text"] for take in payload["takes"]] == [
-        "Jeder, der einen Rollstuhl nutzt, weiß genau:",
-        "Normgerechte Rampen sind oft trotzdem eine echte Qual.",
-        "Manchmal fühlt sich jeder Zentimeter Steigung wie ein unnötiger Kampf an.",
-        "Das zehrt an den Kräften.",
+        "Jeder, der einen Rollstuhl nutzt, weiß genau: Normgerechte Rampen sind oft trotzdem eine echte Qual.",
+        "Manchmal fühlt sich jeder Zentimeter Steigung wie ein unnötiger Kampf an. Das zehrt an den Kräften.",
     ]
-    assert [take["duration_seconds"] for take in payload["takes"]] == [4, 6, 6, 4]
-    assert [take["seed"] for take in payload["takes"]] == [240711, 240712, 240713, 240714]
+    assert [take["duration_seconds"] for take in payload["takes"]] == [8, 8]
+    assert [take["seed"] for take in payload["takes"]] == [240711, 240712]
     assert all(take["model"] == "veo-3.1-generate-001" for take in payload["takes"])
     assert all(take["aspect_ratio"] == "9:16" for take in payload["takes"])
     assert all(take["negative_prompt"] for take in payload["takes"])
@@ -116,8 +127,10 @@ def test_initialize_pilot_records_real_script_four_takes_and_complete_request_au
     assert all(take["submission"] is None for take in payload["takes"])
     assert len(payload["request_contract_sha256"]) == 64
     assert len(payload["script"]["input_sha256"]) == 64
-    assert payload["script"]["planned_provider_durations"] == [4, 6, 6, 4]
-    assert len({take["shot"]["sha256"] for take in payload["takes"]}) == 4
+    assert payload["script"]["planned_provider_durations"] == [8, 8]
+    assert payload["script"]["planning_profile"] == "minimum-eight-second-shots-v1"
+    assert payload["script"]["delivery_duration_seconds"] == {"requested": 16.0, "minimum": 14.5, "maximum": 16.5}
+    assert len({take["shot"]["sha256"] for take in payload["takes"]}) == 2
     assert all(Path(take["shot"]["path"]).is_file() for take in payload["takes"])
 
     with pytest.raises(ValidationError, match="already exists"):
@@ -128,7 +141,7 @@ def test_initialize_pilot_records_real_script_four_takes_and_complete_request_au
     ("override", "message"),
     [
         ({"source": "manual"}, "app-generated"),
-        ({"target_length_tier": 8}, "16-second"),
+        ({"target_length_tier": 8}, "duration"),
     ],
 )
 def test_initialize_pilot_rejects_unapproved_script_provenance_or_tier(tmp_path, override, message):
@@ -147,6 +160,29 @@ def test_initialize_pilot_rejects_unapproved_script_provenance_or_tier(tmp_path,
             script_input_path=script_input,
             base_seed=240711,
         )
+
+
+def test_initialize_pilot_plans_seven_shots_for_fifty_second_script(tmp_path):
+    from app.features.shot_production.runner import initialize_pilot
+
+    approved = tmp_path / "approved.png"
+    approved_hash = _approved_png(approved)
+    script_input = tmp_path / "script.json"
+    _script_input(script_input, script=FIFTY_SECOND_SCRIPT, target_length_tier=50)
+    manifest = tmp_path / "run" / "manifest.json"
+
+    payload = initialize_pilot(
+        manifest_path=manifest,
+        approved_frame_path=approved,
+        expected_sha256=approved_hash,
+        script_input_path=script_input,
+        base_seed=240711,
+    )
+
+    assert len(payload["takes"]) == 7
+    assert [take["index"] for take in payload["takes"]] == list(range(7))
+    assert all(take["duration_seconds"] == 8 for take in payload["takes"])
+    assert payload["script"]["delivery_duration_seconds"] == {"requested": 50.0, "minimum": 48.5, "maximum": 50.5}
 
 
 class _SubmitClient:
@@ -207,15 +243,10 @@ def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
     submit_pending_takes(manifest_path, resumed_client, max_inflight=4)
     completed = _read(manifest_path)
 
-    assert [call["correlation_id"].split("_take_")[1].split("_")[0] for call in resumed_client.calls] == [
-        "2",
-        "3",
-    ]
+    assert resumed_client.calls == []
     assert [take["operation"]["operation_id"] for take in completed["takes"]] == [
         "operations/op-0",
         "operations/recovered-1",
-        "operations/op-2",
-        "operations/op-3",
     ]
     assert all("reference_images" not in call for call in first_client.calls + resumed_client.calls)
     assert all("video" not in call and "last_frame" not in call for call in first_client.calls + resumed_client.calls)
@@ -366,10 +397,14 @@ class _WaveClient(_SubmitClient, _PollClient):
         }
 
 
-def test_generation_runs_in_two_operation_vertex_quota_waves(tmp_path):
+def test_generation_runs_arbitrary_take_count_in_two_operation_vertex_quota_waves(tmp_path):
     from app.features.shot_production.runner import generate_raw_takes_in_waves
 
-    manifest_path, _ = _initialize(tmp_path)
+    manifest_path, _ = _initialize(
+        tmp_path,
+        script=FIFTY_SECOND_SCRIPT,
+        target_length_tier=50,
+    )
     client = _WaveClient()
 
     generate_raw_takes_in_waves(
@@ -390,6 +425,12 @@ def test_generation_runs_in_two_operation_vertex_quota_waves(tmp_path):
         ("submit", 3),
         ("poll", 2),
         ("poll", 3),
+        ("submit", 4),
+        ("submit", 5),
+        ("poll", 4),
+        ("poll", 5),
+        ("submit", 6),
+        ("poll", 6),
     ]
     payload = _read(manifest_path)
     assert payload["status"] == "raw_completed"
@@ -435,12 +476,9 @@ def test_poll_downloads_all_raw_takes_in_index_order_and_resumes(tmp_path):
     )
 
     payload = _read(manifest_path)
-    assert client.calls == [f"operations/op-{index}" for index in range(4)]
+    assert client.calls == [f"operations/op-{index}" for index in range(len(payload["takes"]))]
     assert [Path(take["raw"]["path"]).read_bytes() for take in payload["takes"]] == [
-        b"raw-0",
-        b"raw-1",
-        b"raw-2",
-        b"raw-3",
+        f"raw-{index}".encode() for index in range(len(payload["takes"]))
     ]
     assert all(take["status"] == "completed" for take in payload["takes"])
 
@@ -511,11 +549,11 @@ def test_take_transcription_records_real_word_windows_and_blocks_failed_take(tmp
 
     failed_manifest = _manifest_with_raw_takes(tmp_path / "failed")
     wrong = list(beats)
-    wrong[2] = "Völlig falscher Satz ohne erwartete Wörter."
-    with pytest.raises(ValidationError, match="take indexes.*2"):
+    wrong[1] = "Völlig falscher Satz ohne erwartete Wörter."
+    with pytest.raises(ValidationError, match="take indexes.*1"):
         transcribe_and_validate_takes(failed_manifest, _DeepgramByCall(wrong))
     failed = _read(failed_manifest)
-    assert failed["takes"][2]["transcript_qa"]["passed"] is False
+    assert failed["takes"][1]["transcript_qa"]["passed"] is False
     assert "stitch" not in failed
 
 
@@ -630,7 +668,8 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     contact = build_contact_sheet(manifest_path)
     assert Path(contact["path"]).is_file()
     with Image.open(contact["path"]) as sheet:
-        assert sheet.width > sheet.height / 2
+        assert sheet.width == len(payload["takes"]) * 270
+        assert sheet.height == 3 * 510
 
     calls = []
 
@@ -718,15 +757,14 @@ def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure
     assert [clip["media_bytes"] for clip in evaluator_calls[0][0]] == [
         b"voice-0",
         b"voice-1",
-        b"voice-2",
-        b"voice-3",
     ]
     assert evaluator_calls[0][1]["model"] == "gemini-2.5-flash"
     saved = _read(manifest_path)
     assert saved["voice_qa"]["passed"] is True
     assert saved["voice_qa"]["model"] == "gemini-2.5-flash"
     assert saved["voice_qa"]["rubric_version"] == "voice-continuity-v1"
-    assert len(saved["voice_qa"]["clips"]) == 4
+    take_count = len(payload["takes"])
+    assert len(saved["voice_qa"]["clips"]) == take_count
     assert all(Path(clip["path"]).is_file() for clip in saved["voice_qa"]["clips"])
 
     run_voice_qa(
@@ -735,7 +773,7 @@ def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure
         extract_audio_fn=extract_audio,
         model="gemini-2.5-flash",
     )
-    assert len(extraction_calls) == 4
+    assert len(extraction_calls) == take_count
     assert len(evaluator_calls) == 1
 
     Path(saved["voice_qa"]["clips"][0]["path"]).write_bytes(b"corrupt")
@@ -745,7 +783,7 @@ def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure
         extract_audio_fn=extract_audio,
         model="gemini-2.5-flash",
     )
-    assert len(extraction_calls) == 8
+    assert len(extraction_calls) == take_count * 2
     assert len(evaluator_calls) == 2
 
     monkeypatch.setattr(runner_module, "VOICE_QA_RUBRIC_VERSION", "voice-continuity-v2")
@@ -755,7 +793,7 @@ def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure
         extract_audio_fn=extract_audio,
         model="gemini-2.5-flash",
     )
-    assert len(extraction_calls) == 12
+    assert len(extraction_calls) == take_count * 3
     assert len(evaluator_calls) == 3
     assert revised_report["rubric_version"] == "voice-continuity-v2"
 
@@ -781,9 +819,9 @@ def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure
             single_speaker_each_clip=True,
             no_music=True,
             no_background_voices=True,
-            outlier_take_indexes=(2,),
+            outlier_take_indexes=(1,),
             confidence=0.99,
-            blocking_reasons=("Take 2 has a different vocal timbre.",),
+            blocking_reasons=("Take 1 has a different vocal timbre.",),
             observed_differences=(),
             passed=False,
         )
@@ -838,24 +876,24 @@ def test_voice_failed_outlier_requires_explicit_targeted_retry_and_archives_repo
     payload["status"] = "voice_qa_failed"
     payload["voice_qa"] = {
         "passed": False,
-        "outlier_take_indexes": [2],
-        "blocking_reasons": ["Take 2 has a different vocal timbre."],
+        "outlier_take_indexes": [1],
+        "blocking_reasons": ["Take 1 has a different vocal timbre."],
     }
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ValidationError, match="retryable failed state"):
-        reset_failed_take(manifest_path, index=1, reason="operator selected the wrong take")
+        reset_failed_take(manifest_path, index=0, reason="operator selected the wrong take")
 
     reset = reset_failed_take(
         manifest_path,
-        index=2,
-        reason="voice QA identified take 2 as the vocal outlier",
+        index=1,
+        reason="voice QA identified take 1 as the vocal outlier",
     )
 
-    assert reset["takes"][2]["status"] == "planned"
+    assert reset["takes"][1]["status"] == "planned"
     assert "voice_qa" not in reset
     assert reset["qa_failure_history"][-1]["stage"] == "voice_qa"
-    assert reset["qa_failure_history"][-1]["selected_take_indexes"] == [2]
+    assert reset["qa_failure_history"][-1]["selected_take_indexes"] == [1]
 
 
 def test_batch_voice_retry_archives_one_report_and_plans_only_selected_outliers(tmp_path):
@@ -870,28 +908,24 @@ def test_batch_voice_retry_archives_one_report_and_plans_only_selected_outliers(
     payload["status"] = "voice_qa_failed"
     payload["voice_qa"] = {
         "passed": False,
-        "outlier_take_indexes": [1, 3],
-        "blocking_reasons": ["Takes 1 and 3 do not match the reference vocal timbre."],
+        "outlier_take_indexes": [0, 1],
+        "blocking_reasons": ["Takes 0 and 1 do not match the reference vocal timbre."],
     }
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     reset = reset_voice_failed_takes(
         manifest_path,
-        indexes=[1, 3],
+        indexes=[0, 1],
         reason="operator approved retry of both voice outliers",
     )
 
-    assert reset["takes"][0]["raw"] == original_raw[0]
-    assert reset["takes"][2]["raw"] == original_raw[2]
-    assert reset["takes"][1]["status"] == "planned"
-    assert reset["takes"][3]["status"] == "planned"
-    assert reset["takes"][1]["raw"] is None
-    assert reset["takes"][3]["raw"] is None
+    assert all(take["status"] == "planned" for take in reset["takes"])
+    assert all(take["raw"] is None for take in reset["takes"])
     voice_history = [
         item for item in reset["qa_failure_history"] if item["stage"] == "voice_qa"
     ]
     assert len(voice_history) == 1
-    assert voice_history[0]["selected_take_indexes"] == [1, 3]
+    assert voice_history[0]["selected_take_indexes"] == [0, 1]
 
 
 def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
@@ -923,7 +957,7 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
 
     def stitch_fn(**kwargs):
         stitch_calls.append(kwargs)
-        return b"stitched-video", {"stitch_final_duration_s": 5.4, "stitch_segment_count": 4}
+        return b"stitched-video", {"stitch_final_duration_s": 15.0, "stitch_segment_count": 2}
 
     caption_calls = []
 
@@ -941,14 +975,14 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
         probe_fn=lambda _path: _valid_final_probe(),
     )
 
-    assert stitch_calls[0]["segment_videos"] == [b"clip-0", b"clip-1", b"clip-2", b"clip-3"]
+    assert stitch_calls[0]["segment_videos"] == [b"clip-0", b"clip-1"]
     assert stitch_calls[0]["trim_windows"] == [take["trim_window"] for take in payload["takes"]]
     assert len(caption_calls) == 1
     expected_caption_text = " ".join(word.strip(".,:;!?") for word in SCRIPT.split())
     assert caption_calls[0]["transcript"].full_text == expected_caption_text
     assert Path(result["captioned_path"]).read_bytes() == b"captioned-video"
     saved = _read(manifest_path)
-    assert saved["stitch"]["metadata"]["stitch_segment_count"] == 4
+    assert saved["stitch"]["metadata"]["stitch_segment_count"] == 2
     assert saved["caption"]["sha256"]
 
     Path(saved["caption"]["captioned_path"]).write_bytes(b"corrupt caption")
@@ -1060,26 +1094,26 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     manifest_path = _manifest_with_raw_takes(tmp_path)
     payload = _read(manifest_path)
     for take in payload["takes"]:
-        take["duration_seconds"] = 4.0
+        take["duration_seconds"] = 8.0
         take["transcript_qa"] = {
             "passed": True,
             "first_word_start_seconds": 0.2,
-            "final_word_end_seconds": 3.4,
+            "final_word_end_seconds": 6.8,
         }
         take["trim_window"] = {
             "start_seconds": 0.0,
-            "end_seconds": 3.65,
+            "end_seconds": 7.26,
             "source": "deepgram_word_window",
         }
     payload["visual_qa"] = {"passed": True}
     payload["voice_qa"] = {"passed": True}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     takes = tuple(
-        PlannedTakeWindow(i, 0.0, 3.65, 0.0, 3.65, 0.0) for i in range(4)
+        PlannedTakeWindow(i, 0.0, 7.26, 0.0, 7.26, 0.0) for i in range(2)
     )
     seams = tuple(
-        PlannedSeam(i, 3.65, 0.0, 0.04, 0.02, 0.16, 0.2, 0.0, False, ())
-        for i in range(3)
+        PlannedSeam(i, 7.26, 0.0, 0.04, 0.02, 0.16, 0.2, 0.0, False, ())
+        for i in range(1)
     )
     plan = AcousticSeamPlan("test-v1", takes, seams, 0.8, 14.48)
     stitch_calls = []
@@ -1087,7 +1121,7 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     def stitch_fn(**kwargs):
         stitch_calls.append(kwargs)
         return b"stitched-video", {
-            "stitch_segment_count": 4,
+            "stitch_segment_count": 2,
             "stitch_audio_video_duration_delta_s": 0.02,
         }
 
@@ -1108,7 +1142,7 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         _DeepgramByCall([SCRIPT]),
         acoustic_seams=True,
         analyze_audio_fn=lambda _path: (),
-        plan_acoustic_fn=lambda _evidence: plan,
+        plan_acoustic_fn=lambda _evidence, **_kwargs: plan,
         extract_seam_audio_fn=extract_fn,
         acoustic_evaluator=evaluator,
         stitch_fn=stitch_fn,
@@ -1119,8 +1153,34 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     assert stitch_calls[0]["acoustic_plan"]["analyzer_version"] == "test-v1"
     saved = _read(manifest_path)
     assert saved["acoustic_seam_qa"]["passed"] is True
-    assert len(saved["acoustic_seam_qa"]["clips"]) == 3
+    assert len(saved["acoustic_seam_qa"]["clips"]) == 1
     assert saved["acoustic_seam_plan"]["final_duration_seconds"] == 14.48
+
+
+def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
+    from app.features.shot_production.audio_seams import (
+        AcousticSeamPlan,
+        PlannedSeam,
+        PlannedTakeWindow,
+    )
+    from app.features.shot_production.runner import _evaluate_acoustic_plan_contract
+
+    plan = AcousticSeamPlan(
+        "test-v1",
+        (
+            PlannedTakeWindow(0, 0.0, 7.26, 0.0, 7.26, 0.0),
+            PlannedTakeWindow(1, 0.0, 7.26, 0.0, 7.26, 0.0),
+        ),
+        (PlannedSeam(0, 7.26, 0.0, 0.04, 0.02, 0.16, 6.01, 0.0, False, ()),),
+        1.0,
+        14.48,
+    )
+
+    assert _evaluate_acoustic_plan_contract(
+        plan,
+        {"stitch_audio_video_duration_delta_s": 0.02},
+        fps=24.0,
+    ) == ["seam_energy_delta_exceeded"]
 
 
 @pytest.mark.parametrize(
@@ -1372,8 +1432,6 @@ def test_repair_failed_seam_windows_tightens_only_failed_cut_and_moves_pause_to_
     timings = [
         (0.56, 3.54, 0.0, 3.79),
         (0.40, 4.02, 0.15, 4.27),
-        (0.56, 4.50, 0.31, 4.75),
-        (0.56, 2.50, 0.31, 2.75),
     ]
     for take, (first_start, final_end, trim_start, trim_end) in zip(payload["takes"], timings):
         take["status"] = "transcribed"
@@ -1393,8 +1451,8 @@ def test_repair_failed_seam_windows_tightens_only_failed_cut_and_moves_pause_to_
     payload["final_transcript"] = {"full_text": SCRIPT, "words": []}
     payload["seam_qa"] = {
         "passed": False,
-        "gaps_seconds": [0.54, 0.38, 0.78],
-        "failed_seam_indexes": [2],
+        "gaps_seconds": [0.78],
+        "failed_seam_indexes": [0],
         "max_allowed_seconds": 0.6,
     }
     stitched = manifest_path.parent / "stitched.mp4"
@@ -1416,12 +1474,10 @@ def test_repair_failed_seam_windows_tightens_only_failed_cut_and_moves_pause_to_
     )
 
     new_windows = [take["trim_window"] for take in repaired["takes"]]
-    assert new_windows[0] == original_windows[0]
-    assert new_windows[1] == original_windows[1]
-    assert new_windows[2]["start_seconds"] == original_windows[2]["start_seconds"]
-    assert new_windows[2]["end_seconds"] == pytest.approx(4.59)
-    assert new_windows[3]["start_seconds"] == pytest.approx(0.48)
-    assert new_windows[3]["end_seconds"] == pytest.approx(3.08)
+    assert new_windows[0]["start_seconds"] == original_windows[0]["start_seconds"]
+    assert new_windows[0]["end_seconds"] == pytest.approx(3.63)
+    assert new_windows[1]["start_seconds"] == pytest.approx(0.32)
+    assert new_windows[1]["end_seconds"] == pytest.approx(4.60)
     repaired_total = sum(
         window["end_seconds"] - window["start_seconds"] for window in new_windows
     )
@@ -1429,12 +1485,10 @@ def test_repair_failed_seam_windows_tightens_only_failed_cut_and_moves_pause_to_
     assert repaired["status"] == "seam_repair_planned"
     assert "seam_qa" not in repaired and "stitch" not in repaired
     assert repaired["composition_history"][-1]["snapshot"]["seam_qa"]["gaps_seconds"] == [
-        0.54,
-        0.38,
         0.78,
     ]
     audit = repaired["seam_repair_history"][-1]
-    assert audit["failed_seam_indexes"] == [2]
+    assert audit["failed_seam_indexes"] == [0]
     assert audit["duration_compensation_seconds"] == pytest.approx(0.33)
     assert audit["target_gap_seconds"] == 0.45
 
@@ -1466,8 +1520,8 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
     payload = _read(manifest_path)
-    payload["takes"][2]["transcript_qa"] = {"passed": False}
-    payload["takes"][2]["status"] = "transcript_failed"
+    payload["takes"][1]["transcript_qa"] = {"passed": False}
+    payload["takes"][1]["status"] = "transcript_failed"
     payload["visual_qa"] = {"passed": False}
     payload["stitch"] = {"path": "old"}
     payload["seam_qa"] = {"passed": True}
@@ -1477,17 +1531,17 @@ def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tm
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     original_contract = payload["request_contract_sha256"]
-    original_seed = payload["takes"][2]["seed"]
+    original_seed = payload["takes"][1]["seed"]
     reset_failed_take(
         manifest_path,
-        index=2,
+        index=1,
         reason="transcript merged two distinct German words",
         retry_guidance=(
             "Pronounce every written word distinctly. Keep Zentimeter and Steigung as two separate words."
         ),
     )
     reset = _read(manifest_path)
-    take = reset["takes"][2]
+    take = reset["takes"][1]
     assert take["attempt"] == 2
     assert len(take["attempt_history"]) == 1
     assert take["attempt_history"][0]["reason"] == "transcript merged two distinct German words"
@@ -1524,15 +1578,15 @@ def test_revise_failed_beat_preserves_other_takes_and_exact_duration_plan(tmp_pa
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
     before = _read(manifest_path)
-    before["takes"][2]["status"] = "transcript_failed"
-    before["takes"][2]["transcript_qa"] = {"passed": False, "word_error_rate": 0.18}
+    before["takes"][1]["status"] = "transcript_failed"
+    before["takes"][1]["transcript_qa"] = {"passed": False, "word_error_rate": 0.18}
     before["status"] = "transcript_failed"
     manifest_path.write_text(json.dumps(before), encoding="utf-8")
-    replacement = "Manchmal wird schon eine leichte Steigung zu einem unnötigen Kampf."
+    replacement = "Manchmal wird schon eine leichte Steigung zu einem unnötigen Kampf. Das zehrt an den Kräften."
 
     revised = revise_failed_beat(
         manifest_path,
-        index=2,
+        index=1,
         replacement_text=replacement,
         reason="Repeated Veo delivery merged the original phrase into the wrong German compound",
     )
@@ -1540,22 +1594,20 @@ def test_revise_failed_beat_preserves_other_takes_and_exact_duration_plan(tmp_pa
     assert revised["script"]["text"] == (
         "Jeder, der einen Rollstuhl nutzt, weiß genau: "
         "Normgerechte Rampen sind oft trotzdem eine echte Qual. "
-        f"{replacement} Das zehrt an den Kräften."
+        f"{replacement}"
     )
     assert revised["script"]["source"] == "app.features.topics.agents.generate_dialog_scripts"
     assert revised["script"]["source_payload"]["script"] == SCRIPT
-    assert revised["script"]["editorial_revisions"][-1]["original_text"] == before["takes"][2]["beat"]["text"]
-    assert [take["duration_seconds"] for take in revised["takes"]] == [4, 6, 6, 4]
-    assert [take["beat"]["text"] for take in revised["takes"]][2] == replacement
-    assert revised["takes"][2]["attempt"] == 2
-    assert revised["takes"][2]["seed"] == before["takes"][2]["seed"] + 1000
-    assert replacement in revised["takes"][2]["prompt"]
-    assert before["takes"][2]["beat"]["text"] not in revised["takes"][2]["prompt"]
-    assert revised["takes"][2]["raw"] is None
-    assert revised["takes"][2]["operation"] is None
+    assert revised["script"]["editorial_revisions"][-1]["original_text"] == before["takes"][1]["beat"]["text"]
+    assert [take["duration_seconds"] for take in revised["takes"]] == [8, 8]
+    assert [take["beat"]["text"] for take in revised["takes"]][1] == replacement
+    assert revised["takes"][1]["attempt"] == 2
+    assert revised["takes"][1]["seed"] == before["takes"][1]["seed"] + 1000
+    assert replacement in revised["takes"][1]["prompt"]
+    assert before["takes"][1]["beat"]["text"] not in revised["takes"][1]["prompt"]
+    assert revised["takes"][1]["raw"] is None
+    assert revised["takes"][1]["operation"] is None
     assert revised["takes"][0]["raw"] == before["takes"][0]["raw"]
-    assert revised["takes"][1]["raw"] == before["takes"][1]["raw"]
-    assert revised["takes"][3]["raw"] == before["takes"][3]["raw"]
     assert revised["request_contract_sha256"] != before["request_contract_sha256"]
 
     client = _SubmitClient()
@@ -1583,14 +1635,12 @@ def test_reset_visual_failed_takes_retries_only_selected_indexes_as_one_batch(tm
 
     reset = reset_visual_failed_takes(
         manifest_path,
-        indexes=[1, 2],
+        indexes=[0, 1],
         reason="manual contact-sheet review found baked-in generated subtitle artifacts",
         retry_guidance=guidance,
     )
 
-    assert reset["takes"][0]["raw"] == before["takes"][0]["raw"]
-    assert reset["takes"][3]["raw"] == before["takes"][3]["raw"]
-    for index in (1, 2):
+    for index in (0, 1):
         assert reset["takes"][index]["status"] == "planned"
         assert reset["takes"][index]["raw"] is None
         assert reset["takes"][index]["operation"] is None

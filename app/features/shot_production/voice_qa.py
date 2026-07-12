@@ -85,9 +85,9 @@ class VoiceQAReport:
 
 
 def _validate_audio_clips(audio_clips: Sequence[Dict[str, Any]]) -> None:
-    if not isinstance(audio_clips, (list, tuple)) or len(audio_clips) != 4:
+    if not isinstance(audio_clips, (list, tuple)) or len(audio_clips) < 2:
         raise ValidationError(
-            "Voice QA requires exactly four ordered audio clips.",
+            "Voice QA requires at least two ordered audio clips.",
             {"clip_count": len(audio_clips) if isinstance(audio_clips, (list, tuple)) else None},
         )
     for index, clip in enumerate(audio_clips):
@@ -131,10 +131,19 @@ def evaluate_voice_consistency(
 ) -> VoiceQAReport:
     """Evaluate four ordered full-take clips as one continuous UGC voice performance."""
     _validate_audio_clips(audio_clips)
+    clip_count = len(audio_clips)
+    take_order = ", ".join(str(index) for index in range(clip_count))
+    prompt = _VOICE_QA_PROMPT.replace(
+        "Four complete raw-take audio clips follow this text in take order 0, 1, 2, 3.",
+        f"{clip_count} complete raw-take audio clips follow this text in take order {take_order}.",
+    ).replace(
+        "unique zero-based integer indexes from 0 through 3 for outliers",
+        f"unique zero-based take indexes from 0 through {clip_count - 1} for outliers",
+    )
     client = llm_client or get_llm_client()
     payload = _parse_json_response(
         client.generate_gemini_text(
-            prompt=_VOICE_QA_PROMPT,
+            prompt=prompt,
             model=model,
             temperature=0,
             input_media=list(audio_clips),
@@ -181,11 +190,11 @@ def evaluate_voice_consistency(
     if (
         not isinstance(raw_outliers, list)
         or any(not isinstance(index, int) or isinstance(index, bool) for index in raw_outliers)
-        or any(index < 0 or index > 3 for index in raw_outliers)
+        or any(index < 0 or index >= clip_count for index in raw_outliers)
         or raw_outliers != sorted(set(raw_outliers))
     ):
         raise ValidationError(
-            "Voice QA outlier take indexes must be unique ordered integers from 0 through 3.",
+            f"Voice QA outlier take indexes must be unique ordered integers from 0 through {clip_count - 1}.",
             {"outlier_take_indexes": raw_outliers},
         )
     blocking_reasons = tuple(payload["blocking_reasons"])

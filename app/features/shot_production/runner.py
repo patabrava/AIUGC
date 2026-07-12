@@ -51,6 +51,7 @@ from app.features.shot_production.composer import (
 from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
 from app.features.shot_production.prompts import (
     EFFECTIVE_NEGATIVE_PROMPT,
+    SUPPORTED_DURATIONS,
     build_veo_take_prompt,
     compile_veo_take_requests,
 )
@@ -65,8 +66,7 @@ from app.features.shot_production.voice_qa import (
 
 MANIFEST_VERSION = 2
 APP_SCRIPT_SOURCE = "app.features.topics.agents.generate_dialog_scripts"
-TARGET_LENGTH_TIER = 16
-EXPECTED_PROVIDER_DURATIONS = [4, 6, 6, 4]
+PLANNING_PROFILE = "minimum-eight-second-shots-v1"
 DEFAULT_MAX_INFLIGHT = 2
 _RUN_LOCKS = threading.local()
 
@@ -252,24 +252,53 @@ def _script_is_in_generator_output(script_source: Dict[str, Any], script_text: s
     )
 
 
+def _delivery_duration_contract(requested_seconds: Any) -> Dict[str, float]:
+    if isinstance(requested_seconds, bool):
+        raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.")
+    try:
+        requested = float(requested_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.") from exc
+    if not math.isfinite(requested) or requested < 4.0:
+        raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.")
+    return {
+        "requested": requested,
+        "minimum": max(0.5, requested - 1.5),
+        "maximum": requested + 0.5,
+    }
+
+
 def _validate_approved_pilot_plan(
     *,
     script_source: Dict[str, Any],
     script_text: str,
     beats: list[EditorialBeat],
-) -> None:
+) -> Dict[str, float]:
     if script_source.get("source") != APP_SCRIPT_SOURCE or not _script_is_in_generator_output(
         script_source, script_text
     ):
         raise ValidationError("Pilot requires an app-generated script with intact generator provenance.")
-    if script_source.get("target_length_tier") != TARGET_LENGTH_TIER:
-        raise ValidationError("Pilot requires the approved 16-second script tier.")
+    duration_contract = _delivery_duration_contract(script_source.get("target_length_tier"))
     durations = [beat.provider_duration_seconds for beat in beats]
-    if durations != EXPECTED_PROVIDER_DURATIONS:
+    if not durations or any(duration not in SUPPORTED_DURATIONS for duration in durations):
         raise ValidationError(
-            "Pilot script does not compile to the approved four-take duration plan.",
-            {"expected": EXPECTED_PROVIDER_DURATIONS, "actual": durations},
+            "Pilot script contains an unsupported Veo duration.",
+            {"actual": durations},
         )
+    if [beat.index for beat in beats] != list(range(len(beats))):
+        raise ValidationError("Pilot script beats must use contiguous zero-based indexes.")
+    if sum(durations) < duration_contract["minimum"]:
+        raise ValidationError(
+            "Pilot script duration plan cannot reach the requested delivery duration.",
+            {"provider_capacity_seconds": sum(durations), **duration_contract},
+        )
+    estimated_speech = sum(beat.estimated_speech_seconds for beat in beats)
+    if estimated_speech > duration_contract["maximum"]:
+        raise ValidationError(
+            "Pilot script estimated speech exceeds the requested delivery duration.",
+            {"estimated_speech_seconds": estimated_speech, **duration_contract},
+        )
+    return duration_contract
 
 
 def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -307,9 +336,17 @@ def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _validate_paid_request_contract(payload: Dict[str, Any]) -> None:
     script = payload.get("script") or {}
-    if script.get("source") != APP_SCRIPT_SOURCE or script.get("target_length_tier") != TARGET_LENGTH_TIER:
-        raise ValidationError("Pilot paid request is no longer the approved app-generated 16-second plan.")
-    if script.get("planned_provider_durations") != EXPECTED_PROVIDER_DURATIONS:
+    if script.get("source") != APP_SCRIPT_SOURCE:
+        raise ValidationError("Pilot paid request is no longer an approved app-generated plan.")
+    duration_contract = _delivery_duration_contract(script.get("target_length_tier"))
+    durations = script.get("planned_provider_durations")
+    take_durations = [take.get("duration_seconds") for take in payload.get("takes") or []]
+    if (
+        not isinstance(durations, list)
+        or durations != take_durations
+        or any(duration not in SUPPORTED_DURATIONS for duration in durations)
+        or sum(durations) < duration_contract["minimum"]
+    ):
         raise ValidationError("Pilot paid request duration plan changed after approval.")
     if sha256(str(script.get("text") or "").encode("utf-8")).hexdigest() != script.get("text_sha256"):
         raise ValidationError("Pilot script text changed without an audited contract update.")
@@ -360,16 +397,17 @@ def initialize_pilot(
         raise ValidationError("Pilot script input requires a non-empty script.")
 
     # Hash/aspect validation happens before the run directory or manifest is created.
+    beats = plan_editorial_beats(script_text)
+    duration_contract = _validate_approved_pilot_plan(
+        script_source=script_source,
+        script_text=script_text,
+        beats=beats,
+    )
     deck = derive_shot_deck(
         approved_master_bytes=approved_bytes,
         expected_sha256=expected_sha256,
         mime_type="image/png",
-    )
-    beats = plan_editorial_beats(script_text)
-    _validate_approved_pilot_plan(
-        script_source=script_source,
-        script_text=script_text,
-        beats=beats,
+        shot_count=len(beats),
     )
     requests = compile_veo_take_requests(beats=beats, shot_deck=deck, base_seed=base_seed)
 
@@ -431,6 +469,8 @@ def initialize_pilot(
             "source": script_source.get("source"),
             "category": script_source.get("category"),
             "target_length_tier": script_source.get("target_length_tier"),
+            "planning_profile": PLANNING_PROFILE,
+            "delivery_duration_seconds": duration_contract,
             "text": script_text,
             "planned_provider_durations": [beat.provider_duration_seconds for beat in beats],
             "source_payload": script_source,
@@ -1017,8 +1057,8 @@ def run_voice_qa(
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     ordered = sorted(payload["takes"], key=lambda take: take["index"])
-    if len(ordered) != 4:
-        raise ValidationError("Pilot voice QA requires exactly four semantic takes.")
+    if len(ordered) < 2:
+        raise ValidationError("Pilot voice QA requires at least two semantic takes.")
     voice_inputs = []
     for take in ordered:
         if not (take.get("transcript_qa") or {}).get("passed"):
@@ -1057,7 +1097,7 @@ def run_voice_qa(
         and existing_report.get("input_sha256") == input_sha256
         and existing_report.get("model") == effective_model
         and existing_report.get("rubric_version") == VOICE_QA_RUBRIC_VERSION
-        and len(existing_clips) == 4
+        and len(existing_clips) == len(ordered)
         and all(_artifact_matches(clip) for clip in existing_clips)
     ):
         if existing_report.get("passed"):
@@ -1209,6 +1249,30 @@ def evaluate_final_media_probe(
     }
 
 
+def _evaluate_acoustic_plan_contract(
+    acoustic_plan: Any,
+    stitch_metadata: Dict[str, Any],
+    *,
+    fps: float,
+) -> list[str]:
+    reasons = []
+    if acoustic_plan.active_speech_rms_range_db > 1.5:
+        reasons.append("active_speech_rms_range_exceeded")
+    if any(not 0.04 <= seam.overlap_seconds <= 0.07 for seam in acoustic_plan.seams):
+        reasons.append("audio_overlap_out_of_range")
+    if any(not 0.10 <= seam.final_word_gap_seconds <= 0.32 for seam in acoustic_plan.seams):
+        reasons.append("word_gap_out_of_range")
+    if any(seam.retained_island_duration_seconds > 0.08 for seam in acoustic_plan.seams):
+        reasons.append("retained_breath_island_too_long")
+    if any(seam.short_window_energy_delta_db > 6.0 for seam in acoustic_plan.seams):
+        reasons.append("seam_energy_delta_exceeded")
+    if any(seam.speech_overlap for seam in acoustic_plan.seams):
+        reasons.append("speech_overlap_detected")
+    if float(stitch_metadata.get("stitch_audio_video_duration_delta_s") or 0) > 1 / fps + 1e-6:
+        reasons.append("audio_video_duration_drift")
+    return reasons
+
+
 @_manifest_locked
 def compose_and_caption(
     manifest_path: Path,
@@ -1227,6 +1291,11 @@ def compose_and_caption(
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
+    duration_contract = (payload.get("script") or {}).get("delivery_duration_seconds") or _delivery_duration_contract(
+        (payload.get("script") or {}).get("target_length_tier")
+    )
+    minimum_duration = float(duration_contract["minimum"])
+    maximum_duration = float(duration_contract["maximum"])
     if not (payload.get("visual_qa") or {}).get("passed"):
         raise ValidationError("Composition requires a passed visual QA gate.")
     if not (payload.get("voice_qa") or {}).get("passed"):
@@ -1236,7 +1305,11 @@ def compose_and_caption(
     if existing_caption and _artifact_matches(existing_caption, path_key="captioned_path"):
         captioned_path = Path(existing_caption["captioned_path"])
         fresh_probe = probe_fn(captioned_path)
-        media_qa = evaluate_final_media_probe(fresh_probe)
+        media_qa = evaluate_final_media_probe(
+            fresh_probe,
+            min_duration_seconds=minimum_duration,
+            max_duration_seconds=maximum_duration,
+        )
         payload["media_qa"] = media_qa
         payload["caption"]["probe"] = fresh_probe
         payload["updated_at"] = _utc_now()
@@ -1280,7 +1353,11 @@ def compose_and_caption(
             )
             for take in ordered
         )
-        acoustic_plan = plan_acoustic_fn(evidence)
+        acoustic_plan = plan_acoustic_fn(
+            evidence,
+            min_duration_seconds=minimum_duration,
+            max_duration_seconds=maximum_duration,
+        )
         payload["acoustic_seam_plan"] = asdict(acoustic_plan)
         _atomic_write_json(manifest_path, payload)
     stitched_bytes, stitch_metadata = stitch_fn(
@@ -1373,19 +1450,11 @@ def compose_and_caption(
                     "bytes": len(audio_bytes),
                 }
             )
-        deterministic_reasons = []
-        if acoustic_plan.active_speech_rms_range_db > 1.5:
-            deterministic_reasons.append("active_speech_rms_range_exceeded")
-        if any(not 0.04 <= seam.overlap_seconds <= 0.07 for seam in acoustic_plan.seams):
-            deterministic_reasons.append("audio_overlap_out_of_range")
-        if any(not 0.10 <= seam.final_word_gap_seconds <= 0.32 for seam in acoustic_plan.seams):
-            deterministic_reasons.append("word_gap_out_of_range")
-        if any(seam.retained_island_duration_seconds > 0.08 for seam in acoustic_plan.seams):
-            deterministic_reasons.append("retained_breath_island_too_long")
-        if any(seam.speech_overlap for seam in acoustic_plan.seams):
-            deterministic_reasons.append("speech_overlap_detected")
-        if float(stitch_metadata.get("stitch_audio_video_duration_delta_s") or 0) > 1 / 24 + 1e-6:
-            deterministic_reasons.append("audio_video_duration_drift")
+        deterministic_reasons = _evaluate_acoustic_plan_contract(
+            acoustic_plan,
+            stitch_metadata,
+            fps=float(stitch_metadata.get("stitch_fps") or 24.0),
+        )
         report = acoustic_evaluator(
             clips,
             llm_client=acoustic_llm_client,
@@ -1420,7 +1489,11 @@ def compose_and_caption(
     captioned_bytes = rendered_path.read_bytes()
     captioned_path.write_bytes(captioned_bytes)
     caption_probe = probe_fn(captioned_path)
-    media_qa = evaluate_final_media_probe(caption_probe)
+    media_qa = evaluate_final_media_probe(
+        caption_probe,
+        min_duration_seconds=minimum_duration,
+        max_duration_seconds=maximum_duration,
+    )
     payload["caption"] = {
         "captioned_path": str(captioned_path),
         "sha256": sha256(captioned_bytes).hexdigest(),
@@ -2159,10 +2232,11 @@ def revise_failed_beat(
     revised_script = " ".join(parts)
     revised_beats = plan_editorial_beats(revised_script)
     revised_durations = [beat.provider_duration_seconds for beat in revised_beats]
-    if len(revised_beats) != len(ordered) or revised_durations != EXPECTED_PROVIDER_DURATIONS:
+    expected_durations = [int(candidate["duration_seconds"]) for candidate in ordered]
+    if len(revised_beats) != len(ordered) or revised_durations != expected_durations:
         raise ValidationError(
-            "Editorial revision must preserve the approved four-take duration plan.",
-            {"expected": EXPECTED_PROVIDER_DURATIONS, "actual": revised_durations},
+            "Editorial revision must preserve the approved semantic duration plan.",
+            {"expected": expected_durations, "actual": revised_durations},
         )
     for candidate, beat in zip(ordered, revised_beats):
         if beat.index != index and beat.text != candidate["beat"]["text"]:

@@ -62,6 +62,36 @@ def test_voice_qa_returns_typed_report_and_sends_audio_in_take_order():
     assert "take order 0, 1, 2, 3" in llm.calls[0]["prompt"].lower()
 
 
+@pytest.mark.parametrize("clip_count", [2, 7])
+def test_voice_qa_accepts_dynamic_ordered_take_counts(clip_count):
+    from app.features.shot_production.voice_qa import evaluate_voice_consistency
+
+    clips = [_audio(f"take-{index}".encode()) for index in range(clip_count)]
+    llm = _FakeLLM(_response())
+    report = evaluate_voice_consistency(clips, llm_client=llm)
+
+    assert report.passed is True
+    assert f"zero-based take indexes from 0 through {clip_count - 1}" in llm.calls[0]["prompt"]
+
+
+def test_voice_qa_uses_actual_dynamic_outlier_range():
+    from app.features.shot_production.voice_qa import evaluate_voice_consistency
+
+    clips = [_audio(f"take-{index}".encode()) for index in range(7)]
+    report = evaluate_voice_consistency(
+        clips,
+        llm_client=_FakeLLM(_response(outlier_take_indexes=[6])),
+    )
+    assert report.outlier_take_indexes == (6,)
+    assert report.passed is False
+
+    with pytest.raises(ValidationError, match="0 through 6"):
+        evaluate_voice_consistency(
+            clips,
+            llm_client=_FakeLLM(_response(outlier_take_indexes=[7])),
+        )
+
+
 @pytest.mark.parametrize(
     "failed_component",
     [
@@ -160,7 +190,7 @@ def test_voice_qa_rejects_malformed_or_non_strict_responses(response):
         + [{"mime_type": "audio/wav", "media_bytes": b""}],
     ],
 )
-def test_voice_qa_requires_four_valid_audio_clips(clips):
+def test_voice_qa_requires_two_or_more_valid_audio_clips(clips):
     from app.features.shot_production.voice_qa import evaluate_voice_consistency
 
     llm = _FakeLLM(_response())

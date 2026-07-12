@@ -58,8 +58,8 @@ class AcousticQAReport:
 
 
 def _validate_clips(clips: Sequence[Dict[str, Any]]) -> None:
-    if not isinstance(clips, (list, tuple)) or len(clips) != 3:
-        raise ValidationError("Acoustic seam QA requires exactly three ordered audio clips.")
+    if not isinstance(clips, (list, tuple)) or len(clips) < 1:
+        raise ValidationError("Acoustic seam QA requires at least one ordered audio clip.")
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict) or not str(clip.get("mime_type") or "").startswith("audio/"):
             raise ValidationError("Acoustic seam QA requires audio MIME types.", {"seam_index": index})
@@ -74,8 +74,13 @@ def evaluate_acoustic_seam_continuity(
     model: Optional[str] = DEFAULT_ACOUSTIC_QA_MODEL,
 ) -> AcousticQAReport:
     _validate_clips(clips)
+    seam_count = len(clips)
+    prompt = _PROMPT.replace(
+        "Three 1.5-second audio clips follow, ordered by jump-cut seam 0, 1, 2.",
+        f"{seam_count} 1.5-second audio clips follow, ordered by jump-cut seam 0 through {seam_count - 1}.",
+    )
     raw = (llm_client or get_llm_client()).generate_gemini_text(
-        prompt=_PROMPT,
+        prompt=prompt,
         model=model,
         temperature=0,
         input_media=list(clips),
