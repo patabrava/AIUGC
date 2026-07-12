@@ -1336,6 +1336,7 @@ def test_invalidate_composition_preserves_passed_takes_and_archives_delivery(tmp
         "bytes": old_caption.stat().st_size,
     }
     payload["media_qa"] = {"passed": True, "duration_seconds": 16.04}
+    payload["upload_intent"] = {"storage_key": "videos/old-captioned.mp4"}
     payload["upload"] = {"url": "https://example.test/old.mp4"}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -1349,6 +1350,7 @@ def test_invalidate_composition_preserves_passed_takes_and_archives_delivery(tmp
     assert all(take["transcript_qa"]["passed"] for take in reset["takes"])
     assert reset["visual_qa"]["passed"] is True
     assert "stitch" not in reset and "caption" not in reset and "upload" not in reset
+    assert "upload_intent" not in reset
     archived = reset["composition_history"][-1]
     assert archived["snapshot"]["seam_qa"]["gaps_seconds"] == [0.94, 0.981, 1.1]
     assert archived["snapshot"]["final_transcript"]["full_text"] == SCRIPT

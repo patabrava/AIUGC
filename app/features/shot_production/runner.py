@@ -1687,6 +1687,7 @@ def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any
         "acoustic_seam_qa",
         "caption",
         "media_qa",
+        "upload_intent",
         "upload",
         "upload_verification",
     ):
