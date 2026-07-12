@@ -73,12 +73,15 @@ def build_veo_take_prompt(beat: EditorialBeat) -> str:
     dialogue = str(beat.text or "").strip()
     if not dialogue:
         raise ValidationError("Veo take prompt requires a non-empty editorial beat.")
+    final_word_target = beat.provider_duration_seconds - 1.0
     return (
         "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's identity and hair, "
         "cream knit sweater, room, posture, camera position, and framing exactly as shown. Continue as "
         "restrained, natural phone-camera UGC with a subtle conversational expression, subtle blinking, and "
         "minimal head movement. Use the same warm adult German female voice across every take, speaking native German "
-        "with natural conversational pacing and close smartphone microphone sound. She says exactly this German beat once: "
+        "with natural conversational pacing and close smartphone microphone sound. Use the shot duration naturally, "
+        f"pacing the beat to place the final spoken word near {final_word_target:.1f} seconds without sounding slow or theatrical. "
+        "She says exactly this German beat once: "
         f"“{dialogue}” Do not speak any other words or any English. After the final word, naturally stop speaking, "
         "close her mouth, and keep quiet eye contact. Do not freeze or perform an artificial end pose. Keep every frame "
         "completely free of on-screen text: no captions, subtitles, logos, watermarks, letters, symbols, or gibberish glyphs."

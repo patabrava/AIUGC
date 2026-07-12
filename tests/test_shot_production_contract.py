@@ -224,6 +224,8 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         assert "subtle blinking" in request.prompt.lower()
         assert "minimal head movement" in request.prompt.lower()
         assert "same warm adult german female voice" in request.prompt.lower()
+        expected_final_word_time = request.duration_seconds - 1.0
+        assert f"final spoken word near {expected_final_word_time:.1f} seconds" in request.prompt.lower()
         assert "do not speak any other words" in request.prompt.lower()
         assert "do not freeze" in request.prompt.lower()
         assert "every frame completely free of on-screen text" in request.prompt.lower()
