@@ -74,6 +74,18 @@ def test_voice_qa_accepts_dynamic_ordered_take_counts(clip_count):
     assert f"zero-based take indexes from 0 through {clip_count - 1}" in llm.calls[0]["prompt"]
 
 
+def test_voice_qa_marks_one_take_not_applicable_without_calling_gemini():
+    from app.features.shot_production.voice_qa import evaluate_voice_consistency
+
+    llm = _FakeLLM(_response())
+    report = evaluate_voice_consistency([_audio(b"only-take")], llm_client=llm)
+
+    assert report.passed is True
+    assert report.status == "not_applicable"
+    assert report.outlier_take_indexes == ()
+    assert llm.calls == []
+
+
 def test_voice_qa_uses_actual_dynamic_outlier_range():
     from app.features.shot_production.voice_qa import evaluate_voice_consistency
 
@@ -183,14 +195,13 @@ def test_voice_qa_rejects_malformed_or_non_strict_responses(response):
 @pytest.mark.parametrize(
     "clips",
     [
-        [_audio(b"one")],
         [_audio(bytes([index + 1])) for index in range(3)]
         + [{"mime_type": "image/png", "media_bytes": b"bad"}],
         [_audio(bytes([index + 1])) for index in range(3)]
         + [{"mime_type": "audio/wav", "media_bytes": b""}],
     ],
 )
-def test_voice_qa_requires_two_or_more_valid_audio_clips(clips):
+def test_voice_qa_requires_valid_audio_clips(clips):
     from app.features.shot_production.voice_qa import evaluate_voice_consistency
 
     llm = _FakeLLM(_response())
