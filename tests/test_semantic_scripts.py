@@ -370,6 +370,85 @@ def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():
     )
 
 
+def test_overlong_conditional_fallback_preserves_ordered_condition_and_consequence():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    fact = (
+        "Wenn der Aufzug am Bahnhof kurzfristig ausfällt und niemand erreichbar ist "
+        "obwohl die Reise bereits verbindlich geplant wurde dann muss der alternative "
+        "Einstieg vor der Abfahrt bestätigt werden."
+    )
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Bahnreisen",
+        cta="",
+        facts=[fact],
+        requested_duration_seconds=50,
+        llm_client=_UnavailableLLM(),
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=50,
+    )
+    beats = plan_editorial_beats(result.script)
+    complete_statements = (
+        "Als Bedingung gilt, dass der Aufzug am Bahnhof kurzfristig ausfällt und niemand erreichbar ist",
+        "Obwohl die Reise bereits verbindlich geplant wurde, bleibt diese Bedingung bestehen",
+        "Dann muss der alternative Einstieg vor der Abfahrt bestätigt werden, sofern diese Bedingungen gelten",
+    )
+
+    statement_positions = [result.script.index(text) for text in complete_statements]
+    assert statement_positions == sorted(statement_positions)
+    assert validation.planned_take_count == validation.minimum_take_count == 7
+    assert all(beat.text.endswith((".", "!", "?")) for beat in beats)
+    assert result.script.count("der alternative Einstieg") < len(beats)
+
+
+def test_overlong_booking_fact_fallback_preserves_source_requirement():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    fact = (
+        "Der Mobilitätsservice muss für barrierefreie Bahnreisen mindestens "
+        "vierundzwanzig Stunden vor der Abfahrt verbindlich gebucht werden, damit "
+        "die notwendige Unterstützung am Bahnsteig vollständig und zuverlässig "
+        "bereitsteht."
+    )
+    assert script_word_count(fact) == 25
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Bahnreisen",
+        cta="",
+        facts=[fact],
+        requested_duration_seconds=50,
+        llm_client=_UnavailableLLM(),
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=50,
+    )
+    main_requirement = (
+        "Der Mobilitätsservice muss für barrierefreie Bahnreisen mindestens "
+        "vierundzwanzig Stunden vor der Abfahrt verbindlich gebucht werden"
+    )
+    purpose_statement = (
+        "Damit die notwendige Unterstützung am Bahnsteig vollständig und zuverlässig "
+        "bereitsteht, ist diese Buchung nötig"
+    )
+
+    assert result.script.index(main_requirement) < result.script.index(purpose_statement)
+    assert "Klare Vorbereitung erleichtert deinen nächsten Schritt" not in result.script
+    assert validation.planned_take_count == validation.minimum_take_count == 7
+    assert all(
+        beat.text.endswith((".", "!", "?"))
+        for beat in plan_editorial_beats(result.script)
+    )
+
+
 def test_semantic_prompt_rejects_unknown_post_family():
     with pytest.raises(ValueError, match="post_type"):
         build_semantic_script_prompt(

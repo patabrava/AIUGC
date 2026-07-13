@@ -349,39 +349,139 @@ def _fallback_action_coda(index: int, word_count: int) -> list[str]:
     return variants[word_count]
 
 
-def _fallback_fact_statements(facts: tuple[str, ...]) -> list[list[str]]:
-    statements: list[list[str]] = []
-    for fact in facts:
-        words = _WORD_PATTERN.findall(fact)
-        normalized_words = [word.casefold() for word in words]
-        if normalized_words[:1] == ["wenn"] and "dann" in normalized_words[1:]:
-            then_index = normalized_words.index("dann", 1)
-            condition = words[1:then_index]
-            consequence = words[then_index + 1 :]
-            if condition and consequence:
-                statements.extend(
-                    (
-                        ["Die", "Bedingung", "ist,", "dass", *condition],
-                        [words[then_index], *consequence],
-                    )
-                )
-                continue
-        if words:
-            statements.append(words)
+def _conditional_fallback_statements(
+    words: Sequence[str],
+    *,
+    maximum_words: int,
+) -> list[list[str]]:
+    normalized_words = [word.casefold() for word in words]
+    then_index = normalized_words.index("dann", 1)
+    condition = list(words[1:then_index])
+    consequence = list(words[then_index + 1 :])
+    if not condition or not consequence:
+        raise ValueError("Semantic UGC fallback received an incomplete conditional fact.")
+
+    condition_words = [word.casefold() for word in condition]
+    concession: list[str] = []
+    if "obwohl" in condition_words:
+        concession_index = condition_words.index("obwohl")
+        concession = condition[concession_index + 1 :]
+        condition = condition[:concession_index]
+        if not condition or not concession:
+            raise ValueError("Semantic UGC fallback cannot safely split the conditional fact.")
+
+    statements = [["Als", "Bedingung", "gilt,", "dass", *condition]]
+    if concession:
+        concession[-1] = f"{concession[-1]},"
+        statements.append(
+            [
+                "Obwohl",
+                *concession,
+                "bleibt",
+                "diese",
+                "Bedingung",
+                "bestehen",
+            ]
+        )
+    consequence[-1] = f"{consequence[-1]},"
+    statements.append(
+        [
+            "Dann",
+            *consequence,
+            "sofern",
+            "diese",
+            "Bedingungen",
+            "gelten",
+        ]
+    )
+    if any(len(statement) > maximum_words for statement in statements):
+        raise ValueError(
+            "Semantic UGC fallback cannot preserve the conditional fact in complete takes."
+        )
     return statements
 
 
-def _select_complete_fallback_statement(
-    statements: Sequence[Sequence[str]],
+def _purpose_fallback_statements(
+    words: Sequence[str],
     *,
-    start_index: int,
+    marker_index: int,
     maximum_words: int,
-) -> list[str]:
-    for offset in range(len(statements)):
-        statement = list(statements[(start_index + offset) % len(statements)])
-        if len(statement) <= maximum_words:
-            return statement
-    return ["Klare", "Vorbereitung", "erleichtert", "deinen", "nächsten", "Schritt"]
+) -> list[list[str]]:
+    requirement = list(words[:marker_index])
+    purpose = list(words[marker_index + 1 :])
+    normalized_requirement = {word.casefold() for word in requirement}
+    if not requirement or not purpose or "gebucht" not in normalized_requirement:
+        raise ValueError("Semantic UGC fallback cannot safely split the purpose clause.")
+    purpose[-1] = f"{purpose[-1]},"
+    statements = [
+        requirement,
+        ["Damit", *purpose, "ist", "diese", "Buchung", "nötig"],
+    ]
+    if any(len(statement) > maximum_words for statement in statements):
+        raise ValueError(
+            "Semantic UGC fallback cannot preserve the booking fact in complete takes."
+        )
+    return statements
+
+
+def _fallback_fact_statements(
+    facts: Sequence[str],
+    *,
+    maximum_words: int,
+) -> list[list[str]]:
+    statements: list[list[str]] = []
+    for fact in facts:
+        words = _WORD_PATTERN.findall(fact)
+        if not words:
+            continue
+        if len(words) <= maximum_words:
+            statements.append(words)
+            continue
+        normalized_words = [word.casefold() for word in words]
+        if normalized_words[:1] == ["wenn"] and "dann" in normalized_words[1:]:
+            statements.extend(
+                _conditional_fallback_statements(
+                    words,
+                    maximum_words=maximum_words,
+                )
+            )
+            continue
+        if "damit" in normalized_words:
+            statements.extend(
+                _purpose_fallback_statements(
+                    words,
+                    marker_index=normalized_words.index("damit"),
+                    maximum_words=maximum_words,
+                )
+            )
+            continue
+        raise ValueError(
+            "Semantic UGC fallback cannot honestly decompose the supplied fact."
+        )
+    return statements
+
+
+def _compose_fallback_sentence(
+    *,
+    index: int,
+    target_words: int,
+    statement: Sequence[str],
+) -> str:
+    remaining_words = target_words - len(statement)
+    if remaining_words < 0:
+        raise ValueError("Semantic UGC fallback statement exceeds one complete take.")
+    prefix = list(_FALLBACK_PREFIXES[index])
+    if len(prefix) > remaining_words:
+        prefix = []
+    coda = _fallback_action_coda(index, remaining_words - len(prefix))
+    sentence = ""
+    if prefix:
+        sentence = f"{' '.join(prefix)}: "
+    sentence += " ".join(statement)
+    if coda:
+        sentence += f"; {' '.join(coda)}"
+    sentence += "."
+    return sentence
 
 
 def _build_fallback_script(
@@ -397,31 +497,55 @@ def _build_fallback_script(
         base_words + (1 if index < extra_words else 0)
         for index in range(block_count)
     ]
-    source_text = " ".join((*facts, str(title or ""), str(cta or "")))
-    source_words = _WORD_PATTERN.findall(source_text)
-    if not source_words:
-        source_words = ["Klare", "Vorbereitung", "erleichtert", "deinen", "nächsten", "Schritt"]
-
-    fact_word_sets = _fallback_fact_statements(facts)
-    if not fact_word_sets:
-        fact_word_sets = [source_words]
-    sentences = []
-    for index, target_words in enumerate(block_word_counts):
-        prefix = list(_FALLBACK_PREFIXES[index])
-        available_content_words = target_words - len(prefix)
-        if available_content_words <= 0:
-            raise ValueError("Semantic UGC fallback block has no room for fact content.")
-        content = _select_complete_fallback_statement(
-            fact_word_sets,
-            start_index=index,
-            maximum_words=available_content_words,
+    source_values: Sequence[str] = facts or tuple(
+        value
+        for value in (
+            " ".join(str(title or "").split()),
+            " ".join(str(cta or "").split()),
         )
-        coda_word_count = available_content_words - len(content)
-        coda = _fallback_action_coda(index, coda_word_count)
-        sentence = f"{' '.join(prefix)}: {' '.join(content)}"
-        if coda:
-            sentence += f"; {' '.join(coda)}"
-        sentence += "."
+        if value
+    )
+    fact_word_sets = _fallback_fact_statements(
+        source_values,
+        maximum_words=max(block_word_counts),
+    )
+    if not fact_word_sets:
+        raise ValueError("Semantic UGC fallback requires source evidence.")
+    if len(fact_word_sets) > block_count:
+        raise ValueError(
+            "Semantic UGC fallback cannot preserve every source statement in this duration."
+        )
+
+    sentences = []
+    normalized_sentences = set()
+    for index, target_words in enumerate(block_word_counts):
+        candidate_indexes = (
+            (index,)
+            if index < len(fact_word_sets)
+            else tuple(
+                (index + offset) % len(fact_word_sets)
+                for offset in range(len(fact_word_sets))
+            )
+        )
+        sentence = ""
+        for candidate_index in candidate_indexes:
+            statement = fact_word_sets[candidate_index]
+            if len(statement) > target_words:
+                continue
+            candidate = _compose_fallback_sentence(
+                index=index,
+                target_words=target_words,
+                statement=statement,
+            )
+            normalized_candidate = _normalized_sentences(candidate)[0]
+            if normalized_candidate not in normalized_sentences:
+                sentence = candidate
+                normalized_sentences.add(normalized_candidate)
+                break
+        if not sentence:
+            raise ValueError(
+                "Semantic UGC fallback cannot repeat or discard source statements."
+            )
         if script_word_count(sentence) != target_words:
             raise ValueError("Could not build a contract-safe Semantic UGC fallback block.")
         sentences.append(sentence)
