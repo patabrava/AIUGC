@@ -479,6 +479,76 @@ def test_recover_stalled_batches_only_requeues_empty_s1_batches(monkeypatch):
     assert scheduled == [("resume-me", "startup_recovery")]
 
 
+def test_recover_stalled_batches_skips_semantic_batch_before_scheduling(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        topic_handlers,
+        "list_batches",
+        lambda archived=False, limit=25, offset=0: (
+            [
+                {
+                    "id": "semantic-stalled",
+                    "state": "S1_SETUP",
+                    "creation_mode": "semantic_ugc",
+                    "created_at": now.isoformat(),
+                }
+            ],
+            1,
+        ),
+    )
+    monkeypatch.setattr(topic_handlers, "get_posts_by_batch", lambda batch_id: [])
+    monkeypatch.setattr(topic_handlers, "get_seeding_progress", lambda batch_id: None)
+
+    scheduled = []
+    monkeypatch.setattr(
+        topic_handlers,
+        "schedule_batch_discovery",
+        lambda batch_id, reason: scheduled.append((batch_id, reason)) or True,
+    )
+
+    recovered = topic_handlers.recover_stalled_batches(limit=10)
+
+    assert recovered == []
+    assert scheduled == []
+
+
+def test_schedule_batch_discovery_rejects_semantic_batch_at_central_boundary(monkeypatch):
+    batch_id = "semantic-direct"
+    topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+    monkeypatch.setattr(
+        topic_handlers,
+        "get_batch_by_id",
+        lambda _batch_id: {
+            "id": batch_id,
+            "state": "S1_SETUP",
+            "creation_mode": "semantic_ugc",
+        },
+    )
+    monkeypatch.setattr(topic_handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+
+    task_calls = []
+
+    class FakeTask:
+        def done(self):
+            return False
+
+    def fake_create_task(coroutine):
+        coroutine.close()
+        task_calls.append(coroutine)
+        return FakeTask()
+
+    monkeypatch.setattr(topic_handlers.asyncio, "create_task", fake_create_task)
+
+    try:
+        scheduled = topic_handlers.schedule_batch_discovery(batch_id, reason="direct_test")
+
+        assert scheduled is False
+        assert task_calls == []
+        assert topic_handlers.is_batch_discovery_active(batch_id) is False
+    finally:
+        topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+
+
 def test_recover_stalled_batches_skips_old_backlog_and_caps_recovery(monkeypatch):
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(

@@ -908,6 +908,11 @@ async def _run_batch_discovery_task(batch_id: str) -> None:
             _clear_discovery_task(batch_id, task)
 
 
+def _legacy_discovery_allowed(batch: Dict[str, Any]) -> bool:
+    """Keep Semantic UGC out of legacy discovery until its Task 3 path exists."""
+    return str(batch.get("creation_mode") or "automated").strip() != "semantic_ugc"
+
+
 def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
     with _SEEDING_PROGRESS_LOCK:
         task = _DISCOVERY_TASKS.get(batch_id)
@@ -918,6 +923,17 @@ def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
         _DISCOVERY_TASKS[batch_id] = None  # type: ignore[assignment]
 
     batch = get_batch_by_id(batch_id)
+    if not _legacy_discovery_allowed(batch):
+        logger.info(
+            "batch_autoseed_skipped_semantic_ugc",
+            batch_id=batch_id,
+            state=batch.get("state"),
+            reason=reason,
+        )
+        with _SEEDING_PROGRESS_LOCK:
+            if _DISCOVERY_TASKS.get(batch_id) is None:
+                _DISCOVERY_TASKS.pop(batch_id, None)
+        return False
     if _batch_has_manual_drafts(batch_id):
         logger.info(
             "batch_autoseed_skipped_manual_batch",
@@ -955,6 +971,8 @@ def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]
         if len(recovered) >= limit:
             break
         if batch["state"] != BatchState.S1_SETUP.value:
+            continue
+        if not _legacy_discovery_allowed(batch):
             continue
         batch_id = batch["id"]
         created_at = _parse_utc_timestamp(batch.get("created_at"))
