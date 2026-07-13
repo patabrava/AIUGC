@@ -479,7 +479,7 @@ def test_recover_stalled_batches_only_requeues_empty_s1_batches(monkeypatch):
     assert scheduled == [("resume-me", "startup_recovery")]
 
 
-def test_recover_stalled_batches_skips_semantic_batch_before_scheduling(monkeypatch):
+def test_recover_stalled_batches_schedules_semantic_discovery(monkeypatch):
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(
         topic_handlers,
@@ -508,11 +508,11 @@ def test_recover_stalled_batches_skips_semantic_batch_before_scheduling(monkeypa
 
     recovered = topic_handlers.recover_stalled_batches(limit=10)
 
-    assert recovered == []
-    assert scheduled == []
+    assert recovered == ["semantic-stalled"]
+    assert scheduled == [("semantic-stalled", "startup_recovery")]
 
 
-def test_schedule_batch_discovery_rejects_semantic_batch_at_central_boundary(monkeypatch):
+def test_schedule_batch_discovery_accepts_semantic_batch_at_central_boundary(monkeypatch):
     batch_id = "semantic-direct"
     topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
     monkeypatch.setattr(
@@ -542,9 +542,9 @@ def test_schedule_batch_discovery_rejects_semantic_batch_at_central_boundary(mon
     try:
         scheduled = topic_handlers.schedule_batch_discovery(batch_id, reason="direct_test")
 
-        assert scheduled is False
-        assert task_calls == []
-        assert topic_handlers.is_batch_discovery_active(batch_id) is False
+        assert scheduled is True
+        assert len(task_calls) == 1
+        assert topic_handlers.is_batch_discovery_active(batch_id) is True
     finally:
         topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
 

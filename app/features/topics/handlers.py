@@ -20,6 +20,7 @@ from typing import Optional, Dict, Any, List
 
 from app.features.topics.schemas import (
     DiscoverTopicsRequest,
+    SemanticTopicData,
     TopicListResponse,
     TopicResponse,
     TopicResearchRunRequest,
@@ -62,7 +63,13 @@ from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.core.video_profiles import script_word_count
+from app.features.shot_production.duration import build_semantic_duration_contract
+from app.features.shot_production.planner import plan_editorial_beats
 from app.features.characters.actor_identity import is_manual_creation_mode
+from app.features.topics.semantic_scripts import (
+    generate_semantic_script,
+    validate_semantic_script,
+)
 from app.features.topics.hub import (
     _build_script_variants,
     _wants_html,
@@ -92,6 +99,7 @@ _COVERAGE_WAITERS: Dict[str, Dict[str, int]] = {}
 _TOPIC_BANK_RESEARCH_TASKS: Dict[str, Thread] = {}
 _TOPIC_BANK_RESEARCH_LOCK = RLock()
 _LIFESTYLE_COLLECTION_MAX_ATTEMPTS = 1
+_SEMANTIC_TOPIC_INPUT_TIER = 32
 
 
 def _attach_publish_captions(
@@ -425,6 +433,240 @@ def _create_post_from_suggestion(
         seed_data=seed_payload,
         target_length_tier=target_length_tier,
     )
+
+
+def _semantic_actor_context(batch: Dict[str, Any]) -> str:
+    snapshot = batch.get("actor_identity_snapshot")
+    if not isinstance(snapshot, dict):
+        return ""
+    values = []
+    for key in (
+        "name",
+        "long_character_description",
+        "character_description",
+        "description",
+    ):
+        text = " ".join(str(snapshot.get(key) or "").split())
+        if text and text not in values:
+            values.append(text)
+    return " | ".join(values)
+
+
+def _semantic_source_urls(
+    candidate: Dict[str, Any],
+    seed_payload: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    sources: List[Dict[str, str]] = []
+    seen_urls: set[str] = set()
+
+    def append_source(value: Any) -> None:
+        if isinstance(value, list):
+            for item in value:
+                append_source(item)
+            return
+        if isinstance(value, dict):
+            url = " ".join(str(value.get("url") or "").split())
+            title = " ".join(
+                str(value.get("title") or value.get("label") or url).split()
+            )
+        else:
+            url = " ".join(str(value or "").split())
+            title = url
+        if not url or url in seen_urls:
+            return
+        seen_urls.add(url)
+        sources.append({"title": title or url, "url": url})
+
+    for payload in (candidate, seed_payload):
+        append_source(payload.get("source_urls"))
+        append_source(payload.get("sources"))
+        append_source(payload.get("source"))
+    primary_source_url = candidate.get("primary_source_url")
+    if primary_source_url:
+        append_source(
+            {
+                "title": candidate.get("primary_source_title"),
+                "url": primary_source_url,
+            }
+        )
+    return sources
+
+
+def _semantic_fact_inputs(
+    candidate: Dict[str, Any],
+    seed_payload: Dict[str, Any],
+) -> List[str]:
+    facts: List[str] = []
+
+    def append_fact(value: Any) -> None:
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                append_fact(item)
+            return
+        text = " ".join(str(value or "").split())
+        if text and text not in facts:
+            facts.append(text)
+
+    for payload in (candidate, seed_payload):
+        for key in (
+            "facts",
+            "support_facts",
+            "strict_fact",
+            "source_context",
+            "source_summary",
+            "product_angle",
+            "angle",
+        ):
+            append_fact(payload.get(key))
+    strict_seed = seed_payload.get("strict_seed")
+    if isinstance(strict_seed, dict):
+        append_fact(strict_seed.get("facts"))
+        append_fact(strict_seed.get("source_context"))
+    if not facts:
+        append_fact(seed_payload.get("canonical_topic"))
+        append_fact(candidate.get("title"))
+        append_fact(candidate.get("rotation") or candidate.get("script"))
+    return facts
+
+
+def _semantic_research_provenance(
+    candidate: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "canonical_input_tier": _SEMANTIC_TOPIC_INPUT_TIER,
+        "topic_registry_id": candidate.get("topic_registry_id") or candidate.get("id"),
+        "topic_script_id": candidate.get("script_id"),
+        "canonical_topic": (
+            candidate.get("canonical_topic")
+            or (candidate.get("seed_payload") or {}).get("canonical_topic")
+            or candidate.get("title")
+        ),
+        "source_summary": candidate.get("source_summary"),
+    }
+
+
+def _semantic_seed_payload(post_type: str, candidate: Dict[str, Any]) -> Dict[str, Any]:
+    if post_type == "lifestyle":
+        seed_payload = build_lifestyle_seed_payload(
+            topic_data=candidate,
+            dialog_scripts=candidate["dialog_scripts"],
+        )
+    elif post_type == "product":
+        seed_payload = build_product_seed_payload(candidate)
+    else:
+        seed_payload = dict(candidate.get("seed_payload") or {})
+    seed_payload["canonical_topic"] = str(
+        seed_payload.get("canonical_topic")
+        or candidate.get("canonical_topic")
+        or candidate.get("angle")
+        or candidate.get("title")
+        or ""
+    ).strip()
+    return seed_payload
+
+
+def _create_semantic_post_from_candidate(
+    *,
+    batch: Dict[str, Any],
+    post_type: str,
+    candidate: Dict[str, Any],
+    contract: Any,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    seed_payload = _semantic_seed_payload(post_type, candidate)
+    sources = _semantic_source_urls(candidate, seed_payload)
+    facts = _semantic_fact_inputs(candidate, seed_payload)
+    title = str(candidate.get("title") or seed_payload.get("canonical_topic") or "").strip()
+    cta = str(candidate.get("cta") or seed_payload.get("cta") or title).strip()
+    research_provenance = _semantic_research_provenance(candidate)
+    generated = generate_semantic_script(
+        post_type=post_type,
+        title=title,
+        cta=cta,
+        facts=facts,
+        requested_duration_seconds=contract.requested_duration_seconds,
+        actor_context=_semantic_actor_context(batch),
+        research_provenance=research_provenance,
+        source_urls=[source["url"] for source in sources],
+        maximum_seconds=contract.maximum_duration_seconds,
+    )
+    validation = validate_semantic_script(
+        generated.script,
+        requested_duration_seconds=contract.requested_duration_seconds,
+        maximum_seconds=contract.maximum_duration_seconds,
+    )
+    if generated.contract_hash != contract.contract_hash:
+        raise ValueError("Semantic script result does not match the batch duration contract.")
+
+    topic_payload = SemanticTopicData(
+        title=title,
+        rotation=generated.script,
+        cta=cta,
+        spoken_duration=contract.requested_duration_seconds,
+    )
+    beats = plan_editorial_beats(topic_payload.rotation)
+    if len(beats) != validation.planned_take_count:
+        raise ValueError("Semantic script beat evidence changed after validation.")
+
+    seed_payload.pop("target_length_tier", None)
+    seed_payload.pop("script_duration_contract", None)
+    seed_payload.update(
+        {
+            "script": topic_payload.rotation,
+            "dialog_script": topic_payload.rotation,
+            "estimated_duration_s": contract.requested_duration_seconds,
+            "target_duration_seconds": contract.requested_duration_seconds,
+            "semantic_duration_contract": contract.as_dict(),
+            "semantic_duration_contract_hash": contract.contract_hash,
+            "semantic_script_provenance": dict(generated.provenance),
+            "source_urls": sources,
+            "script_review_status": "pending",
+            "semantic_script_word_count": validation.word_count,
+            "semantic_minimum_take_count": contract.minimum_take_count,
+            "semantic_planned_take_count": validation.planned_take_count,
+            "semantic_planned_beats": [
+                {
+                    "index": beat.index,
+                    "text": beat.text,
+                    "word_count": beat.word_count,
+                    "estimated_speech_seconds": beat.estimated_speech_seconds,
+                    "provider_duration_seconds": beat.provider_duration_seconds,
+                }
+                for beat in beats
+            ],
+        }
+    )
+    if validation.take_count_exception:
+        seed_payload["semantic_take_count_exception"] = dict(
+            validation.take_count_exception
+        )
+    seed_payload = _attach_publish_captions(
+        topic_title=topic_payload.title,
+        post_type=post_type,
+        seed_payload=seed_payload,
+        script_fallback=topic_payload.rotation,
+        canonical_topic=seed_payload["canonical_topic"],
+    )
+
+    post = create_post_for_batch(
+        batch_id=batch["id"],
+        post_type=post_type,
+        topic_title=topic_payload.title,
+        topic_rotation=topic_payload.rotation,
+        topic_cta=topic_payload.cta,
+        spoken_duration=float(topic_payload.spoken_duration),
+        seed_data=seed_payload,
+        target_length_tier=None,
+    )
+    mark_topic_family_used(candidate.get("topic_registry_id") or candidate.get("family_id"))
+    mark_topic_script_used(script_id=candidate.get("script_id"))
+    return post, {
+        "title": topic_payload.title,
+        "rotation": topic_payload.rotation,
+        "cta": topic_payload.cta,
+        "spoken_duration": float(topic_payload.spoken_duration),
+        "post_type": post_type,
+        "seed_payload": {"canonical_topic": seed_payload["canonical_topic"]},
+    }
 
 
 def _run_coverage_warmup_task(coverage_key: str, post_type: str, target_length_tier: int) -> None:
@@ -908,11 +1150,6 @@ async def _run_batch_discovery_task(batch_id: str) -> None:
             _clear_discovery_task(batch_id, task)
 
 
-def _legacy_discovery_allowed(batch: Dict[str, Any]) -> bool:
-    """Keep Semantic UGC out of legacy discovery until its Task 3 path exists."""
-    return str(batch.get("creation_mode") or "automated").strip() != "semantic_ugc"
-
-
 def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
     with _SEEDING_PROGRESS_LOCK:
         task = _DISCOVERY_TASKS.get(batch_id)
@@ -923,17 +1160,6 @@ def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
         _DISCOVERY_TASKS[batch_id] = None  # type: ignore[assignment]
 
     batch = get_batch_by_id(batch_id)
-    if not _legacy_discovery_allowed(batch):
-        logger.info(
-            "batch_autoseed_skipped_semantic_ugc",
-            batch_id=batch_id,
-            state=batch.get("state"),
-            reason=reason,
-        )
-        with _SEEDING_PROGRESS_LOCK:
-            if _DISCOVERY_TASKS.get(batch_id) is None:
-                _DISCOVERY_TASKS.pop(batch_id, None)
-        return False
     if _batch_has_manual_drafts(batch_id):
         logger.info(
             "batch_autoseed_skipped_manual_batch",
@@ -972,8 +1198,6 @@ def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]
             break
         if batch["state"] != BatchState.S1_SETUP.value:
             continue
-        if not _legacy_discovery_allowed(batch):
-            continue
         batch_id = batch["id"]
         created_at = _parse_utc_timestamp(batch.get("created_at"))
         if created_at is None or created_at < newest_allowed_created_at:
@@ -991,7 +1215,12 @@ def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]
 def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
     """Return True when every research-backed post type can seed from audited families."""
     post_type_counts = batch.get("post_type_counts") or {}
-    target_length_tier = int(batch.get("target_length_tier") or 8)
+    is_semantic_ugc = str(batch.get("creation_mode") or "").strip() == "semantic_ugc"
+    target_length_tier = (
+        _SEMANTIC_TOPIC_INPUT_TIER
+        if is_semantic_ugc
+        else int(batch.get("target_length_tier") or 8)
+    )
 
     for post_type, count in post_type_counts.items():
         requested_count = int(count or 0)
@@ -1006,9 +1235,231 @@ def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
     return True
 
 
+def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str, Any]:
+    batch_id = batch["id"]
+    post_type_counts = batch["post_type_counts"]
+    contract = build_semantic_duration_contract(batch.get("target_duration_seconds"))
+    expected_posts = sum(int(value or 0) for value in post_type_counts.values())
+    existing_topics = get_all_topics_from_registry()
+    all_generated_topics: List[Dict[str, Any]] = []
+    created_posts: List[Dict[str, Any]] = []
+    preselected_suggestions: Dict[str, List[Dict[str, Any]]] = {}
+
+    update_seeding_progress(
+        batch_id,
+        state=batch["state"],
+        stage="booting",
+        stage_label="Preparing Semantic UGC topics",
+        detail_message=(
+            "Selecting duration-neutral topic inputs before generating scripts for "
+            f"{contract.requested_duration_seconds} seconds."
+        ),
+        posts_created=0,
+        expected_posts=expected_posts,
+        current_post_type=None,
+        attempt=None,
+        max_attempts=None,
+        is_retrying=False,
+        retry_message=None,
+    )
+
+    for post_type, raw_count in post_type_counts.items():
+        count = int(raw_count or 0)
+        if count <= 0 or post_type in {"lifestyle", "product"}:
+            continue
+        stored_suggestions = list_topic_suggestions(
+            target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+            limit=max(count * 20, 50),
+            post_type=post_type,
+        )
+        suggestions = _unique_topic_suggestions(
+            stored_suggestions,
+            count,
+            existing_topics=all_generated_topics,
+        )
+        preselected_suggestions[post_type] = suggestions
+        if len(suggestions) >= count:
+            continue
+        update_seeding_progress(
+            batch_id,
+            state=batch["state"],
+            stage="coverage_pending",
+            stage_label="Waiting for duration-neutral family coverage",
+            detail_message=(
+                f"Only {len(suggestions)} canonical {post_type} families are ready. "
+                "Background 32-second family warm-up and audit promotion were queued."
+            ),
+            posts_created=0,
+            expected_posts=expected_posts,
+            current_post_type=post_type,
+            attempt=None,
+            max_attempts=None,
+            is_retrying=False,
+            retry_message=None,
+        )
+        _schedule_coverage_warmup(
+            batch_id=batch_id,
+            post_type=post_type,
+            target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+            required_count=count,
+        )
+        return {
+            "batch_id": batch_id,
+            "posts_created": 0,
+            "state": batch["state"],
+            "topics": [],
+            "coverage_pending": True,
+        }
+
+    for post_type, raw_count in post_type_counts.items():
+        count = int(raw_count or 0)
+        if count <= 0:
+            continue
+        update_seeding_progress(
+            batch_id,
+            state=batch["state"],
+            stage="writing_posts",
+            stage_label="Generating duration-driven Semantic UGC scripts",
+            detail_message=(
+                f"Adapting {count} {post_type} topic inputs to "
+                f"{contract.requested_duration_seconds} seconds."
+            ),
+            posts_created=len(created_posts),
+            expected_posts=expected_posts,
+            current_post_type=post_type,
+            attempt=None,
+            max_attempts=None,
+            is_retrying=False,
+            retry_message=None,
+        )
+
+        if post_type == "lifestyle":
+            candidates = deduplicate_topics(
+                generate_lifestyle_topics(
+                    count=count,
+                    target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+                ),
+                existing_topics + all_generated_topics,
+                threshold=0.35,
+            )
+            if len(candidates) < count:
+                existing_titles = {
+                    str(item.get("title") or "").strip().lower()
+                    for item in existing_topics + all_generated_topics + candidates
+                    if isinstance(item, dict)
+                }
+                existing_scripts = [
+                    str(item.get("script") or item.get("rotation") or "").strip()
+                    for item in existing_topics + all_generated_topics + candidates
+                    if isinstance(item, dict)
+                ]
+                candidates.extend(
+                    _build_lifestyle_fallback_candidates(
+                        count=count - len(candidates),
+                        existing_titles=existing_titles,
+                        existing_scripts=existing_scripts,
+                        target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+                    )
+                )
+            if len(candidates) < count:
+                existing_titles = {
+                    str(item.get("title") or "").strip().lower()
+                    for item in existing_topics + all_generated_topics + candidates
+                    if isinstance(item, dict)
+                }
+                existing_scripts = [
+                    str(item.get("script") or item.get("rotation") or "").strip()
+                    for item in existing_topics + all_generated_topics + candidates
+                    if isinstance(item, dict)
+                ]
+                candidates.extend(
+                    _force_fill_lifestyle_candidates(
+                        count=count - len(candidates),
+                        existing_titles=existing_titles,
+                        existing_scripts=existing_scripts,
+                        target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+                    )
+                )
+        elif post_type == "product":
+            candidates = generate_product_topics(
+                count=count,
+                target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+            )
+        else:
+            candidates = preselected_suggestions.get(post_type, [])
+
+        for candidate in candidates[:count]:
+            post, topic_record = _create_semantic_post_from_candidate(
+                batch=batch,
+                post_type=post_type,
+                candidate=candidate,
+                contract=contract,
+            )
+            created_posts.append(post)
+            all_generated_topics.append(topic_record)
+            existing_topics.append(topic_record)
+            update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="writing_posts",
+                stage_label="Generating duration-driven Semantic UGC scripts",
+                detail_message=(
+                    f"{len(created_posts)} of {expected_posts} posts are ready for script review."
+                ),
+                posts_created=len(created_posts),
+                expected_posts=expected_posts,
+                current_post_type=post_type,
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
+
+    created_counts = Counter(post.get("post_type") for post in created_posts)
+    missing_post_types = {
+        post_type: {
+            "requested": int(requested_count or 0),
+            "created": created_counts.get(post_type, 0),
+        }
+        for post_type, requested_count in post_type_counts.items()
+        if int(requested_count or 0) > created_counts.get(post_type, 0)
+    }
+    if missing_post_types:
+        raise ValidationError(
+            message="Semantic topic discovery did not create every requested post.",
+            details={
+                "batch_id": batch_id,
+                "missing_post_types": missing_post_types,
+            },
+        )
+
+    updated_batch = update_batch_state(batch_id, BatchState.S2_SEEDED)
+    update_seeding_progress(
+        batch_id,
+        state=updated_batch["state"],
+        stage="completed",
+        stage_label="Semantic UGC topic generation complete",
+        detail_message=f"{len(created_posts)} scripts are ready for review.",
+        posts_created=len(created_posts),
+        expected_posts=expected_posts,
+        current_post_type=None,
+        attempt=None,
+        max_attempts=None,
+        is_retrying=False,
+        retry_message=None,
+    )
+    return {
+        "batch_id": batch_id,
+        "posts_created": len(created_posts),
+        "state": updated_batch["state"],
+        "topics": all_generated_topics,
+    }
+
+
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     """Synchronous topic discovery workflow executed off the request event loop."""
     batch = get_batch_by_id(batch_id)
+    is_semantic_ugc = str(batch.get("creation_mode") or "").strip() == "semantic_ugc"
 
     manual_drafts_present = _batch_has_manual_drafts(batch_id)
     if manual_drafts_present:
@@ -1033,6 +1484,9 @@ def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
             message="Batch must be in S1_SETUP state for topic discovery",
             details={"current_state": batch["state"], "required_state": "S1_SETUP"}
         )
+
+    if is_semantic_ugc:
+        return _discover_semantic_topics_for_batch_sync(batch)
 
     post_type_counts = batch["post_type_counts"]
     existing_topics = get_all_topics_from_registry()

@@ -29,6 +29,22 @@ class TopicData(BaseModel):
         return v
 
 
+class SemanticTopicData(BaseModel):
+    """Duration-driven topic payload used only by Semantic UGC posts."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    rotation: str = Field(..., min_length=1, max_length=2000)
+    cta: str = Field(..., min_length=1, max_length=200)
+    spoken_duration: Decimal = Field(..., ge=8)
+
+    @validator("title", "rotation", "cta")
+    def validate_semantic_text(cls, value: str) -> str:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
+
+
 class SeedData(BaseModel):
     """Seed data extracted from topic (factual only)."""
     facts: List[str] = Field(..., description="Factual information extracted from topic")

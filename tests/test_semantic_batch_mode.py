@@ -316,16 +316,16 @@ async def test_semantic_form_parsing_passes_seconds_to_create_query(monkeypatch)
         return _batch_row(**kwargs)
 
     monkeypatch.setattr(batch_handlers, "create_batch", fake_create_batch)
-    legacy_discovery_calls = []
+    discovery_calls = []
     monkeypatch.setattr(
         batch_handlers,
         "start_seeding_interaction",
-        lambda **kwargs: legacy_discovery_calls.append(("start", kwargs)),
+        lambda **kwargs: discovery_calls.append(("start", kwargs)),
     )
     monkeypatch.setattr(
         batch_handlers,
         "schedule_batch_discovery",
-        lambda *args, **kwargs: legacy_discovery_calls.append(("schedule", args, kwargs)),
+        lambda *args, **kwargs: discovery_calls.append(("schedule", args, kwargs)),
     )
 
     response = await batch_handlers.create_batch_endpoint(FakeRequest())
@@ -333,15 +333,16 @@ async def test_semantic_form_parsing_passes_seconds_to_create_query(monkeypatch)
     assert captured["target_length_tier"] is None
     assert captured["target_duration_seconds"] == 50
     assert response.data.target_duration_seconds == 50
-    assert legacy_discovery_calls == []
+    assert [call[0] for call in discovery_calls] == ["start", "schedule"]
+    assert discovery_calls[1][1:] == (("batch-semantic",), {"reason": "batch_create"})
 
 
 @pytest.mark.anyio
-async def test_semantic_status_recovery_does_not_schedule_legacy_discovery(monkeypatch):
+async def test_semantic_status_recovery_schedules_semantic_discovery(monkeypatch):
     _enable_test_environment()
     from app.features.batches import handlers as batch_handlers
 
-    legacy_discovery_calls = []
+    discovery_calls = []
     monkeypatch.setattr(batch_handlers, "get_batch_by_id", lambda _batch_id: _batch_row())
     monkeypatch.setattr(
         batch_handlers,
@@ -354,18 +355,19 @@ async def test_semantic_status_recovery_does_not_schedule_legacy_discovery(monke
     monkeypatch.setattr(
         batch_handlers,
         "start_seeding_interaction",
-        lambda **kwargs: legacy_discovery_calls.append(("start", kwargs)),
+        lambda **kwargs: discovery_calls.append(("start", kwargs)),
     )
     monkeypatch.setattr(
         batch_handlers,
         "schedule_batch_discovery",
-        lambda *args, **kwargs: legacy_discovery_calls.append(("schedule", args, kwargs)),
+        lambda *args, **kwargs: discovery_calls.append(("schedule", args, kwargs)),
     )
 
     response = await batch_handlers.get_batch_status("batch-semantic")
 
     assert response.data["state"] == "S1_SETUP"
-    assert legacy_discovery_calls == []
+    assert [call[0] for call in discovery_calls] == ["start", "schedule"]
+    assert discovery_calls[1][1:] == (("batch-semantic",), {"reason": "status_recovery"})
 
 
 @pytest.mark.anyio

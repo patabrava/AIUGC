@@ -555,6 +555,8 @@ def create_post_for_batch(
     """Create a post record for a batch with topic and seed data."""
     supabase = _get_supabase_adapter()
     resolved_seed_data = dict(seed_data or {})
+    if resolved_seed_data.get("target_duration_seconds") is not None:
+        resolved_seed_data.pop("target_length_tier", None)
     if target_length_tier is not None and "target_length_tier" not in resolved_seed_data:
         resolved_seed_data["target_length_tier"] = target_length_tier
 

@@ -297,7 +297,7 @@ async def create_batch_endpoint(request: Request):
                 target_length_tier=normalize_target_length_tier(payload.target_length_tier),
             )
             batch = update_batch_state(batch["id"], BatchState.S2_SEEDED)
-        elif not _is_semantic_ugc_mode(payload.creation_mode):
+        else:
             start_seeding_interaction(
                 batch_id=batch["id"],
                 brand=batch["brand"],
@@ -1028,7 +1028,6 @@ async def get_batch_status(batch_id: str):
         if (
             batch["state"] == BatchState.S1_SETUP.value
             and posts_summary["posts_count"] == 0
-            and not _is_semantic_ugc_mode(batch.get("creation_mode"))
             and not is_batch_discovery_active(batch_id)
         ):
             if progress is None or progress.get("stage") in {"failed", "completed"}:
