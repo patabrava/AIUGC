@@ -8,7 +8,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / "supabase/migrations/20260713_semantic_ugc_production.sql"
+MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_migration_test"
 

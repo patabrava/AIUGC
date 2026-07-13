@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 import json
 from hashlib import sha256
 import os
 from pathlib import Path
 import subprocess
+import time
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE_MIGRATION = ROOT / "supabase/migrations/20260713_semantic_ugc_production.sql"
+BASE_MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 API_MIGRATION = ROOT / "supabase/migrations/20260713000100_semantic_video_api_transactions.sql"
 BASE_MIGRATION_SHA256 = "7e938ecf55215f9818c78a7745a85194d1656296657dc4248e9efbd81d6c1baa"
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
@@ -34,6 +36,8 @@ CANCEL_RUN_ID = "00000000-0000-0000-0000-000000000034"
 CANCEL_POST_ID = "00000000-0000-0000-0000-000000000044"
 UNSAFE_CANCEL_RUN_ID = "00000000-0000-0000-0000-000000000035"
 UNSAFE_CANCEL_POST_ID = "00000000-0000-0000-0000-000000000045"
+RACE_CANCEL_RUN_ID = "00000000-0000-0000-0000-000000000036"
+RACE_CANCEL_POST_ID = "00000000-0000-0000-0000-000000000046"
 
 
 def test_semantic_video_api_changes_use_strictly_later_forward_migration():
@@ -82,6 +86,36 @@ def _psql(database: str, sql: str, *, check: bool = True) -> subprocess.Complete
 
 def _jsonb(value) -> str:
     return f"$json${json.dumps(value, separators=(',', ':'))}$json$::jsonb"
+
+
+def _with_canonical_request_hash(contract: dict) -> tuple[dict, str]:
+    canonical = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {**contract, "canonical_request_json": canonical}, sha256(canonical.encode()).hexdigest()
+
+
+def _retry_contract_hash(
+    *,
+    plan_hash: str,
+    revision: int,
+    indexes: list[int],
+    request_hashes: list[str],
+    provider_seconds: int,
+    quota_units: int,
+    estimated_cost: str,
+) -> str:
+    basis = "\n".join(
+        (
+            "semantic-retry-contract-v1",
+            plan_hash,
+            str(revision),
+            ",".join(str(index) for index in indexes),
+            ",".join(request_hashes),
+            str(provider_seconds),
+            str(quota_units),
+            estimated_cost,
+        )
+    )
+    return sha256(basis.encode()).hexdigest()
 
 
 def _as_service_role(sql: str) -> str:
@@ -171,6 +205,7 @@ def _takes(*, request_hashes: list[str], bad_word_count: bool = False) -> list[d
 
 
 def _candidate_run_payload(*, master_label: str | None = None) -> dict:
+    system_prompt = "Exact Raw Camera system prompt."
     return {
         "post_id": CANDIDATE_POST_ID,
         "batch_id": BATCH_ID,
@@ -197,7 +232,18 @@ def _candidate_run_payload(*, master_label: str | None = None) -> dict:
         },
         "reference_hash": "candidate-reference-hash",
         "master_snapshot": (
-            {"candidates": [{"index": 1, "label": master_label}]}
+            {
+                "candidates": [
+                    {"index": index, "label": master_label}
+                    for index in range(1, 4)
+                ],
+                "prompt_writer_system_prompt": system_prompt,
+                "prompt_writer_system_prompt_sha256": sha256(
+                    system_prompt.encode("utf-8")
+                ).hexdigest(),
+                "prompt_writer_output": "Exact prompt writer output.",
+                "composition_prompt": "Exact composition prompt.",
+            }
             if master_label
             else {}
         ),
@@ -273,7 +319,7 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
             DATABASE,
             """
             INSERT INTO supabase_migrations.schema_migrations (version, name)
-            VALUES ('20260713', 'semantic_ugc_production');
+            VALUES ('20260713000000', 'semantic_ugc_production');
             """,
         )
         _psql(DATABASE, API_MIGRATION.read_text())
@@ -395,7 +441,7 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
               IF (
                 SELECT array_agg(version ORDER BY version)
                 FROM supabase_migrations.schema_migrations
-              ) <> ARRAY['20260713', '20260713000100'] THEN
+              ) <> ARRAY['20260713000000', '20260713000100'] THEN
                 RAISE EXCEPTION 'migration ledger ordering is incorrect';
               END IF;
             END;
@@ -488,6 +534,22 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
         assert losing_finalize.returncode != 0
         assert "semantic_video_conflict:" in losing_finalize.stderr
 
+        invalid_count_payload = _candidate_run_payload(master_label="invalid-count")
+        invalid_count_payload["master_snapshot"]["candidates"] = invalid_count_payload[
+            "master_snapshot"
+        ]["candidates"][:2]
+        invalid_count_finalize = _psql(
+            DATABASE,
+            _as_service_role(
+                "SELECT id FROM public.finalize_semantic_video_candidates("
+                f"(SELECT id FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}'), "
+                f"0, '{initial_winner}', {_jsonb(invalid_count_payload)});"
+            ),
+            check=False,
+        )
+        assert invalid_count_finalize.returncode != 0
+        assert "candidate run update is invalid" in invalid_count_finalize.stderr
+
         _psql(
             DATABASE,
             _as_service_role(
@@ -503,7 +565,8 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
             BEGIN
               IF (SELECT count(*) FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') <> 1
                  OR (SELECT revision FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') <> 0
-                 OR (SELECT candidate_reservation_token FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') IS NOT NULL
+                 OR (SELECT candidate_reservation_token FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}')
+                    IS DISTINCT FROM '{initial_winner}'::UUID
                  OR (SELECT master_snapshot #>> '{{candidates,0,label}}' FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') <> 'initial' THEN
                 RAISE EXCEPTION 'initial candidate reservation/finalization contract failed';
               END IF;
@@ -512,72 +575,45 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
             """,
         )
 
-        refresh_tokens = [
-            "00000000-0000-0000-0000-000000000103",
-            "00000000-0000-0000-0000-000000000104",
-        ]
-        refresh_sql = [
+        refresh_token = "00000000-0000-0000-0000-000000000103"
+        blocked_refresh = _psql(
+            DATABASE,
             _as_service_role(
                 "SELECT id FROM public.reserve_semantic_video_candidates("
                 f"'{CANDIDATE_POST_ID}', 0, {_jsonb(_candidate_run_payload())}, "
-                f"'refresh-{index}', '{token}', 300);"
-            )
-            for index, token in enumerate(refresh_tokens, start=1)
-        ]
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            refresh_results = list(
-                pool.map(lambda sql: _psql(DATABASE, sql, check=False), refresh_sql)
-            )
-        assert sum(result.returncode == 0 for result in refresh_results) == 1, [
-            (result.stdout, result.stderr) for result in refresh_results
-        ]
-        refresh_winner_index = next(
-            index for index, result in enumerate(refresh_results) if result.returncode == 0
+                f"'refresh', '{refresh_token}', 300);"
+            ),
+            check=False,
         )
-        refresh_winner = refresh_tokens[refresh_winner_index]
-        assert "semantic_video_conflict:" in refresh_results[1 - refresh_winner_index].stderr
+        assert blocked_refresh.returncode != 0
+        assert "manual reconciliation" in blocked_refresh.stderr
 
         recovery_token = "00000000-0000-0000-0000-000000000105"
         _psql(
             DATABASE,
             f"UPDATE public.semantic_video_runs SET candidate_reservation_expires_at = now() - interval '1 second' WHERE post_id = '{CANDIDATE_POST_ID}';",
         )
-        _psql(
+        blocked_recovery = _psql(
             DATABASE,
             _as_service_role(
                 "SELECT id FROM public.reserve_semantic_video_candidates("
-                f"'{CANDIDATE_POST_ID}', 1, {_jsonb(_candidate_run_payload())}, "
+                f"'{CANDIDATE_POST_ID}', 0, {_jsonb(_candidate_run_payload())}, "
                 f"'recovery', '{recovery_token}', 300);"
-            ),
-        )
-        stale_finalizer = _psql(
-            DATABASE,
-            _as_service_role(
-                "SELECT id FROM public.finalize_semantic_video_candidates("
-                f"(SELECT id FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}'), "
-                f"1, '{refresh_winner}', {_jsonb(_candidate_run_payload(master_label='stale'))});"
             ),
             check=False,
         )
-        assert stale_finalizer.returncode != 0
-        assert "semantic_video_conflict:" in stale_finalizer.stderr
-        _psql(
-            DATABASE,
-            _as_service_role(
-                "SELECT id FROM public.finalize_semantic_video_candidates("
-                f"(SELECT id FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}'), "
-                f"2, '{recovery_token}', {_jsonb(_candidate_run_payload(master_label='recovered'))});"
-            ),
-        )
+        assert blocked_recovery.returncode != 0
+        assert "manual reconciliation" in blocked_recovery.stderr
         _psql(
             DATABASE,
             f"""
             DO $$
             BEGIN
-              IF (SELECT revision FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') <> 2
-                 OR (SELECT candidate_reservation_token FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') IS NOT NULL
-                 OR (SELECT master_snapshot #>> '{{candidates,0,label}}' FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') <> 'recovered' THEN
-                RAISE EXCEPTION 'expired reservation recovery or stale-finalizer guard failed';
+              IF (SELECT revision FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') <> 0
+                 OR (SELECT candidate_reservation_token FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}')
+                    IS DISTINCT FROM '{initial_winner}'::UUID
+                 OR (SELECT master_snapshot #>> '{{candidates,0,label}}' FROM public.semantic_video_runs WHERE post_id = '{CANDIDATE_POST_ID}') <> 'initial' THEN
+                RAISE EXCEPTION 'expired paid candidate attempt was reclaimed or mutated';
               END IF;
             END;
             $$;
@@ -758,6 +794,67 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
             ),
             check=False,
         )
+        nonfinite_cost_results = []
+        for label, special_value in (("nan", "NaN"), ("infinity", "Infinity")):
+            request_hashes = [f"{label}-price-0", f"{label}-price-1"]
+            nonfinite_update = _run_update(
+                plan_hash=f"{label}-price-plan",
+                request_hashes=request_hashes,
+                post_id=COST_POST_ID,
+                price=special_value,
+                estimated_cost=special_value,
+            )
+            nonfinite_cost_results.append(
+                _psql(
+                    DATABASE,
+                    _as_service_role_rollback(
+                        f"SELECT public.persist_semantic_video_plan('{COST_RUN_ID}', 1, "
+                        f"{_jsonb(nonfinite_update)}, {_jsonb(_takes(request_hashes=request_hashes))});"
+                    ),
+                    check=False,
+                )
+            )
+
+        malformed_billing_results = []
+        billing_mutations = {
+            "missing-billable-seconds": lambda update: update["plan_snapshot"].pop(
+                "billable_provider_seconds"
+            ),
+            "missing-price": lambda update: update["plan_snapshot"].pop(
+                "price_per_provider_second_usd"
+            ),
+            "missing-nested-cost": lambda update: update["plan_snapshot"].pop(
+                "estimated_cost_usd"
+            ),
+            "missing-top-level-cost": lambda update: update.pop("estimated_cost_usd"),
+            "null-top-level-cost": lambda update: update.__setitem__(
+                "estimated_cost_usd", None
+            ),
+            "wrong-billable-type": lambda update: update["plan_snapshot"].__setitem__(
+                "billable_provider_seconds", {"seconds": 16}
+            ),
+            "wrong-price-type": lambda update: update["plan_snapshot"].__setitem__(
+                "price_per_provider_second_usd", ["0.40"]
+            ),
+        }
+        for label, mutate in billing_mutations.items():
+            request_hashes = [f"{label}-0", f"{label}-1"]
+            malformed_update = _run_update(
+                plan_hash=f"{label}-plan",
+                request_hashes=request_hashes,
+                post_id=COST_POST_ID,
+            )
+            mutate(malformed_update)
+            malformed_billing_results.append(
+                _psql(
+                    DATABASE,
+                    _as_service_role_rollback(
+                        f"SELECT public.persist_semantic_video_plan('{COST_RUN_ID}', 1, "
+                        f"{_jsonb(malformed_update)}, {_jsonb(_takes(request_hashes=request_hashes))});"
+                    ),
+                    check=False,
+                )
+            )
 
         assert (
             completed_state.returncode != 0,
@@ -777,11 +874,18 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
             zero_price.stdout,
             zero_price.stderr,
         )
+        assert all(result.returncode != 0 for result in nonfinite_cost_results), [
+            (result.stdout, result.stderr) for result in nonfinite_cost_results
+        ]
+        assert all(result.returncode != 0 for result in malformed_billing_results), [
+            (result.stdout, result.stderr) for result in malformed_billing_results
+        ]
         assert "submission state" in completed_state.stderr.lower()
         assert "cost" in underpriced_cost.stderr.lower()
         assert "count" in missing_counter.stderr.lower()
         assert "count" in null_counter.stderr.lower()
         assert "cost" in zero_price.stderr.lower()
+        assert all("cost" in result.stderr.lower() for result in nonfinite_cost_results)
 
         _psql(
             DATABASE,
@@ -881,16 +985,24 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
                 {"take_index": 1, "request_hash": "request-1", "provider_duration_seconds": 8},
             ],
         }
+        master_system_prompt = "Exact master system prompt."
         master_candidates = {
+            "prompt_writer_system_prompt": master_system_prompt,
+            "prompt_writer_system_prompt_sha256": sha256(
+                master_system_prompt.encode("utf-8")
+            ).hexdigest(),
+            "prompt_writer_output": "Exact master writer output.",
+            "composition_prompt": "Exact master composition prompt.",
             "candidates": [
                 {
-                    "index": 1,
-                    "storage_uri": "semantic/master-candidate.png",
+                    "index": index,
+                    "storage_uri": f"semantic/master-candidate-{index}.png",
                     "mime_type": "image/png",
                     "byte_length": 10,
-                    "sha256": "master-candidate-hash",
+                    "sha256": f"master-candidate-hash-{index}",
                     "provider_model": "gemini-3.1-flash-image",
                 }
+                for index in range(1, 4)
             ]
         }
         _psql(
@@ -905,7 +1017,8 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
               ('{INITIAL_POST_ID}', '{BATCH_ID}'),
               ('{RETRY_POST_ID}', '{BATCH_ID}'),
               ('{CANCEL_POST_ID}', '{BATCH_ID}'),
-              ('{UNSAFE_CANCEL_POST_ID}', '{BATCH_ID}');
+              ('{UNSAFE_CANCEL_POST_ID}', '{BATCH_ID}'),
+              ('{RACE_CANCEL_POST_ID}', '{BATCH_ID}');
 
             INSERT INTO public.semantic_video_runs (
               id, post_id, batch_id, requested_duration_seconds, duration_contract,
@@ -953,6 +1066,13 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
                 '{{"text":"approved"}}'::JSONB, 'script-hash', '{{}}'::JSONB,
                 '{{}}'::JSONB, 'reference-hash', '{{}}'::JSONB, NULL,
                 'generating', NULL, NULL, NULL, NULL, NULL, 'semantic/unsafe-cancel'
+              ),
+              (
+                '{RACE_CANCEL_RUN_ID}', '{RACE_CANCEL_POST_ID}', '{BATCH_ID}', 50,
+                '{{"requested_duration_seconds":50}}'::JSONB, 'duration-hash',
+                '{{"text":"approved"}}'::JSONB, 'script-hash', '{{}}'::JSONB,
+                '{{}}'::JSONB, 'reference-hash', '{{}}'::JSONB, NULL,
+                'generating', NULL, NULL, NULL, NULL, NULL, 'semantic/race-cancel'
               );
 
             INSERT INTO public.semantic_video_takes (
@@ -968,7 +1088,8 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
               ('{CANCEL_RUN_ID}', 0, 1, 'Beat 0', 2, 1.0, 8, '{{}}', 'shot-0', 'prompt-0', NULL, 'veo-3.1-generate-001', 100, '{{}}', 'cancel-request-0', 'planned', '{{}}'),
               ('{CANCEL_RUN_ID}', 1, 1, 'Beat 1', 2, 1.0, 8, '{{}}', 'shot-1', 'prompt-1', NULL, 'veo-3.1-generate-001', 101, '{{}}', 'cancel-request-1', 'reserved', '{{}}'),
               ('{UNSAFE_CANCEL_RUN_ID}', 0, 1, 'Beat 0', 2, 1.0, 8, '{{}}', 'shot-0', 'prompt-0', NULL, 'veo-3.1-generate-001', 100, '{{}}', 'unsafe-request-0', 'planned', '{{}}'),
-              ('{UNSAFE_CANCEL_RUN_ID}', 1, 1, 'Beat 1', 2, 1.0, 8, '{{}}', 'shot-1', 'prompt-1', NULL, 'veo-3.1-generate-001', 101, '{{}}', 'unsafe-request-1', 'intent_persisted', '{{}}');
+              ('{UNSAFE_CANCEL_RUN_ID}', 1, 1, 'Beat 1', 2, 1.0, 8, '{{}}', 'shot-1', 'prompt-1', NULL, 'veo-3.1-generate-001', 101, '{{}}', 'unsafe-request-1', 'intent_persisted', '{{}}'),
+              ('{RACE_CANCEL_RUN_ID}', 0, 1, 'Beat 0', 2, 1.0, 8, '{{}}', 'shot-0', 'prompt-0', NULL, 'veo-3.1-generate-001', 100, '{{}}', 'race-request-0', 'planned', '{{}}');
 
             CREATE OR REPLACE FUNCTION public.fail_semantic_transition_update()
             RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -1004,6 +1125,11 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
             "RAISE EXCEPTION 'service_role can bypass approval RPCs with direct insert'; END IF; "
             "IF NOT has_table_privilege('service_role', 'public.semantic_video_approvals', 'SELECT') THEN "
             "RAISE EXCEPTION 'service_role cannot read persisted approvals'; END IF; "
+            "IF has_table_privilege('service_role', 'public.semantic_video_takes', 'INSERT') THEN "
+            "RAISE EXCEPTION 'service_role can bypass plan and retry RPCs with direct take insert'; END IF; "
+            "IF NOT has_table_privilege('service_role', 'public.semantic_video_takes', 'SELECT') "
+            "OR NOT has_table_privilege('service_role', 'public.semantic_video_takes', 'UPDATE') THEN "
+            "RAISE EXCEPTION 'service_role cannot execute worker take transitions'; END IF; "
             "END; $$;",
         )
         for role in ("anon", "authenticated"):
@@ -1014,6 +1140,22 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
             )
             assert denied.returncode != 0
             assert "permission denied" in denied.stderr.lower()
+
+        nonfinite_initial = _psql(
+            DATABASE,
+            "\\set VERBOSITY verbose\n"
+            "BEGIN; "
+            f"UPDATE public.semantic_video_runs SET plan_snapshot = jsonb_set(jsonb_set(plan_snapshot, '{{price_per_provider_second_usd}}', to_jsonb('NaN'::text)), '{{estimated_cost_usd}}', to_jsonb('NaN'::text)), estimated_cost_usd = 'NaN'::numeric WHERE id = '{INITIAL_RUN_ID}'; "
+            "SET LOCAL ROLE service_role; "
+            f"SELECT public.approve_semantic_video_initial_plan('{INITIAL_RUN_ID}', 0, 'plan-hash', 'operator@example.com', NULL); "
+            "ROLLBACK;",
+            check=False,
+        )
+        assert nonfinite_initial.returncode != 0, (
+            nonfinite_initial.stdout,
+            nonfinite_initial.stderr,
+        )
+        assert "cost" in nonfinite_initial.stderr.lower()
 
         def assert_one_winner(sql: str) -> None:
             with ThreadPoolExecutor(max_workers=2) as pool:
@@ -1046,6 +1188,16 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
                 f"SELECT public.approve_semantic_video_initial_plan('{INITIAL_RUN_ID}', 0, 'plan-hash', 'operator@example.com', NULL);",
             ),
         ]
+        retry_prompt = "Speak Beat 1 once. Retry delivery correction: Hold eye contact."
+        retry_request_contract, retry_request_hash = _with_canonical_request_hash(
+            {
+                "prompt": retry_prompt,
+                "seed": 1101,
+                "attempt": 2,
+                "retry_of_request_hash": "retry-request-1",
+                "retry_guidance": {"guidance": "Hold eye contact."},
+            }
+        )
         retry_take = {
             "take_index": 1,
             "attempt": 2,
@@ -1055,28 +1207,114 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
             "provider_duration_seconds": 8,
             "shot_transform": {},
             "shot_hash": "shot-1",
-            "prompt_hash": "retry-prompt-hash",
+            "prompt_hash": sha256(retry_prompt.encode()).hexdigest(),
             "negative_prompt_hash": "negative-1",
             "provider_model": "veo-3.1-generate-001",
             "seed": 1101,
-            "request_contract": {
-                "prompt": "Speak Beat 1 once. Retry delivery correction: Hold eye contact.",
-                "seed": 1101,
-                "attempt": 2,
-                "retry_of_request_hash": "retry-request-1",
-                "retry_guidance": {"guidance": "Hold eye contact."},
-            },
-            "request_hash": "retry-request-2",
+            "request_contract": retry_request_contract,
+            "request_hash": retry_request_hash,
             "submission_state": "planned",
             "retry_guidance": {"guidance": "Hold eye contact."},
         }
+        retry_contract_hash = _retry_contract_hash(
+            plan_hash="plan-hash",
+            revision=0,
+            indexes=[1],
+            request_hashes=[retry_request_hash],
+            provider_seconds=8,
+            quota_units=1,
+            estimated_cost="3.20",
+        )
+        nonfinite_retry = _psql(
+            DATABASE,
+            "\\set VERBOSITY verbose\n"
+            "BEGIN; "
+            f"UPDATE public.semantic_video_runs SET plan_snapshot = jsonb_set(plan_snapshot, '{{price_per_provider_second_usd}}', to_jsonb('NaN'::text)) WHERE id = '{RETRY_RUN_ID}'; "
+            "SET LOCAL ROLE service_role; "
+            "SELECT public.approve_semantic_video_retry("
+            f"'{RETRY_RUN_ID}', 0, 'plan-hash', {_jsonb([retry_take])}, "
+            f"'{retry_contract_hash}', 'operator@example.com', 'qa correction'); "
+            "ROLLBACK;",
+            check=False,
+        )
+        assert nonfinite_retry.returncode != 0, (
+            nonfinite_retry.stdout,
+            nonfinite_retry.stderr,
+        )
+        assert "price" in nonfinite_retry.stderr.lower()
+
+        tampered_retry_cases = []
+        bad_prompt_hash_take = deepcopy(retry_take)
+        bad_prompt_hash_take["prompt_hash"] = "0" * 64
+        tampered_retry_cases.append((bad_prompt_hash_take, retry_contract_hash))
+
+        bad_request_hash_take = deepcopy(retry_take)
+        bad_request_hash_take["request_hash"] = "f" * 64
+        tampered_retry_cases.append(
+            (
+                bad_request_hash_take,
+                _retry_contract_hash(
+                    plan_hash="plan-hash",
+                    revision=0,
+                    indexes=[1],
+                    request_hashes=["f" * 64],
+                    provider_seconds=8,
+                    quota_units=1,
+                    estimated_cost="3.20",
+                ),
+            )
+        )
+        tampered_retry_cases.append((retry_take, "0" * 64))
+
+        duplicate_guidance_take = deepcopy(retry_take)
+        duplicate_prompt = retry_prompt + " Hold eye contact."
+        duplicate_contract = {
+            key: value
+            for key, value in duplicate_guidance_take["request_contract"].items()
+            if key != "canonical_request_json"
+        }
+        duplicate_contract["prompt"] = duplicate_prompt
+        duplicate_contract, duplicate_hash = _with_canonical_request_hash(duplicate_contract)
+        duplicate_guidance_take["request_contract"] = duplicate_contract
+        duplicate_guidance_take["prompt_hash"] = sha256(duplicate_prompt.encode()).hexdigest()
+        duplicate_guidance_take["request_hash"] = duplicate_hash
+        tampered_retry_cases.append(
+            (
+                duplicate_guidance_take,
+                _retry_contract_hash(
+                    plan_hash="plan-hash",
+                    revision=0,
+                    indexes=[1],
+                    request_hashes=[duplicate_hash],
+                    provider_seconds=8,
+                    quota_units=1,
+                    estimated_cost="3.20",
+                ),
+            )
+        )
+        tampered_results = [
+            _psql(
+                DATABASE,
+                "\\set VERBOSITY verbose\n"
+                + _as_service_role_rollback(
+                    "SELECT public.approve_semantic_video_retry("
+                    f"'{RETRY_RUN_ID}', 0, 'plan-hash', {_jsonb([take])}, "
+                    f"'{contract_hash}', 'operator@example.com', 'qa correction');"
+                ),
+                check=False,
+            )
+            for take, contract_hash in tampered_retry_cases
+        ]
+        assert all(result.returncode != 0 for result in tampered_results), [
+            (result.stdout, result.stderr) for result in tampered_results
+        ]
         transition_cases.append(
             (
                 "retry",
                 RETRY_RUN_ID,
                 "SELECT public.approve_semantic_video_retry("
                 f"'{RETRY_RUN_ID}', 0, 'plan-hash', {_jsonb([retry_take])}, "
-                "'retry-contract-hash', 'operator@example.com', 'qa correction');",
+                f"'{retry_contract_hash}', 'operator@example.com', 'qa correction');",
             )
         )
 
@@ -1112,6 +1350,26 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
                 f"RAISE EXCEPTION '{label} concurrent approval count mismatch'; END IF; END; $$;",
             )
 
+        _psql(
+            DATABASE,
+            f"""
+            DO $$
+            BEGIN
+              IF (SELECT master_snapshot ->> 'prompt_writer_system_prompt' FROM public.semantic_video_runs WHERE id = '{MASTER_RUN_ID}')
+                   IS DISTINCT FROM 'Exact master system prompt.'
+                 OR (SELECT master_snapshot ->> 'prompt_writer_system_prompt_sha256' FROM public.semantic_video_runs WHERE id = '{MASTER_RUN_ID}')
+                   IS DISTINCT FROM '{sha256(master_system_prompt.encode('utf-8')).hexdigest()}'
+                 OR (SELECT master_snapshot ->> 'prompt_writer_output' FROM public.semantic_video_runs WHERE id = '{MASTER_RUN_ID}')
+                   IS DISTINCT FROM 'Exact master writer output.'
+                 OR (SELECT master_snapshot ->> 'composition_prompt' FROM public.semantic_video_runs WHERE id = '{MASTER_RUN_ID}')
+                   IS DISTINCT FROM 'Exact master composition prompt.' THEN
+                RAISE EXCEPTION 'master approval dropped prompt provenance';
+              END IF;
+            END;
+            $$;
+            """,
+        )
+
         unsafe = _psql(
             DATABASE,
             _as_service_role(
@@ -1126,6 +1384,85 @@ def test_transactional_approval_retry_and_cancel_rpcs_are_atomic_and_concurrent_
             f"DO $$ BEGIN IF (SELECT stage FROM public.semantic_video_runs WHERE id = '{UNSAFE_CANCEL_RUN_ID}') <> 'generating' "
             f"OR (SELECT array_agg(submission_state ORDER BY take_index) FROM public.semantic_video_takes WHERE run_id = '{UNSAFE_CANCEL_RUN_ID}') "
             "<> ARRAY['planned','intent_persisted'] THEN RAISE EXCEPTION 'unsafe cancellation partially mutated state'; END IF; END; $$;",
+        )
+
+        _psql(
+            DATABASE,
+            """
+            CREATE OR REPLACE FUNCTION public.pause_racing_cancellation()
+            RETURNS TRIGGER LANGUAGE plpgsql AS $$
+            BEGIN
+              IF current_setting('application_name') = 'semantic-cancel-race' THEN
+                PERFORM pg_sleep(2);
+              END IF;
+              RETURN NULL;
+            END;
+            $$;
+            CREATE TRIGGER pause_racing_cancellation
+            BEFORE UPDATE ON public.semantic_video_takes
+            FOR EACH STATEMENT EXECUTE FUNCTION public.pause_racing_cancellation();
+            """,
+        )
+        racing_cancel_sql = (
+            "SET application_name = 'semantic-cancel-race';\n"
+            + _as_service_role(
+                f"SELECT public.cancel_semantic_video_run('{RACE_CANCEL_RUN_ID}', 0, "
+                "'operator@example.com', 'stop', 'corr-race');"
+            )
+        )
+        racing_intent_sql = _as_service_role(
+            "DO $$ DECLARE changed_count INTEGER; BEGIN "
+            "UPDATE public.semantic_video_takes SET submission_state = 'intent_persisted', "
+            "submission_intent_at = now() "
+            f"WHERE run_id = '{RACE_CANCEL_RUN_ID}' AND take_index = 0 "
+            "AND submission_state = 'planned' AND request_hash = 'race-request-0'; "
+            "GET DIAGNOSTICS changed_count = ROW_COUNT; "
+            "IF changed_count <> 1 THEN RAISE EXCEPTION 'intent transition lost race'; END IF; "
+            "END; $$;"
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            cancel_future = pool.submit(
+                _psql,
+                DATABASE,
+                "\\set VERBOSITY verbose\n" + racing_cancel_sql,
+                check=False,
+            )
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                sleeping = _psql(
+                    DATABASE,
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE application_name = 'semantic-cancel-race' "
+                    "AND wait_event = 'PgSleep';",
+                )
+                if any(line.strip() == "1" for line in sleeping.stdout.splitlines()):
+                    break
+                time.sleep(0.05)
+            else:
+                pytest.fail("cancellation did not reach the post-check race boundary")
+            intent_future = pool.submit(
+                _psql,
+                DATABASE,
+                racing_intent_sql,
+                check=False,
+            )
+            race_results = [cancel_future.result(), intent_future.result()]
+
+        assert sum(result.returncode == 0 for result in race_results) == 1, [
+            (result.stdout, result.stderr) for result in race_results
+        ]
+        race_state = _psql(
+            DATABASE,
+            f"SELECT run.stage || ':' || take.submission_state "
+            "FROM public.semantic_video_runs AS run "
+            "JOIN public.semantic_video_takes AS take ON take.run_id = run.id "
+            f"WHERE run.id = '{RACE_CANCEL_RUN_ID}';",
+        ).stdout
+        assert "failed:cancelled" in race_state or "generating:intent_persisted" in race_state
+        _psql(
+            DATABASE,
+            "DROP TRIGGER pause_racing_cancellation ON public.semantic_video_takes; "
+            "DROP FUNCTION public.pause_racing_cancellation();",
         )
 
         cancel_sql = (

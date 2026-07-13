@@ -79,7 +79,7 @@ class ProgressResponse(BaseModel):
 
 
 class CandidateGenerationRequest(BaseModel):
-    candidate_count: int = Field(default=3, ge=1, le=4)
+    candidate_count: int = Field(default=3, ge=3, le=3)
     expected_revision: Optional[int] = Field(default=None, ge=0)
 
 

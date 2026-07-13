@@ -28,6 +28,29 @@ BEGIN
         )
       );
   END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint
+    WHERE conname = 'semantic_video_runs_estimated_cost_finite_check'
+      AND conrelid = 'public.semantic_video_runs'::pg_catalog.regclass
+  ) THEN
+    ALTER TABLE public.semantic_video_runs
+      ADD CONSTRAINT semantic_video_runs_estimated_cost_finite_check CHECK (
+        estimated_cost_usd IS NULL
+        OR estimated_cost_usd::TEXT NOT IN ('NaN', 'Infinity', '-Infinity')
+      );
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint
+    WHERE conname = 'semantic_video_approvals_estimated_cost_finite_check'
+      AND conrelid = 'public.semantic_video_approvals'::pg_catalog.regclass
+  ) THEN
+    ALTER TABLE public.semantic_video_approvals
+      ADD CONSTRAINT semantic_video_approvals_estimated_cost_finite_check CHECK (
+        estimated_cost_usd::TEXT NOT IN ('NaN', 'Infinity', '-Infinity')
+      );
+  END IF;
 END;
 $$;
 
@@ -265,16 +288,10 @@ BEGIN
     RETURN;
   END IF;
 
-  IF locked_run.candidate_reservation_token = p_reservation_token
-     AND locked_run.candidate_reservation_expires_at > pg_catalog.clock_timestamp() THEN
-    RETURN NEXT locked_run;
-    RETURN;
-  END IF;
-  IF locked_run.candidate_reservation_token IS NOT NULL
-     AND locked_run.candidate_reservation_expires_at > pg_catalog.clock_timestamp() THEN
+  IF locked_run.candidate_reservation_token IS NOT NULL THEN
     RAISE EXCEPTION USING
       ERRCODE = '40001',
-      MESSAGE = 'semantic_video_conflict: candidate generation is already reserved';
+      MESSAGE = 'semantic_video_conflict: candidate generation attempt requires manual reconciliation';
   END IF;
   IF p_expected_revision IS NULL
      OR locked_run.revision IS DISTINCT FROM p_expected_revision THEN
@@ -410,7 +427,23 @@ BEGIN
   IF p_run_update ->> 'stage' IS DISTINCT FROM 'awaiting_reference_approval'
      OR pg_catalog.jsonb_typeof(p_run_update -> 'master_snapshot') IS DISTINCT FROM 'object'
      OR pg_catalog.jsonb_typeof(p_run_update #> '{master_snapshot,candidates}') IS DISTINCT FROM 'array'
-     OR pg_catalog.jsonb_array_length(p_run_update #> '{master_snapshot,candidates}') NOT BETWEEN 1 AND 4
+     OR pg_catalog.jsonb_array_length(p_run_update #> '{master_snapshot,candidates}') <> 3
+     OR pg_catalog.jsonb_typeof(p_run_update #> '{master_snapshot,prompt_writer_system_prompt}') IS DISTINCT FROM 'string'
+     OR NULLIF(pg_catalog.btrim(p_run_update #>> '{master_snapshot,prompt_writer_system_prompt}'), '') IS NULL
+     OR pg_catalog.jsonb_typeof(p_run_update #> '{master_snapshot,prompt_writer_system_prompt_sha256}') IS DISTINCT FROM 'string'
+     OR p_run_update #>> '{master_snapshot,prompt_writer_system_prompt_sha256}' IS DISTINCT FROM pg_catalog.encode(
+       pg_catalog.sha256(
+         pg_catalog.convert_to(
+           p_run_update #>> '{master_snapshot,prompt_writer_system_prompt}',
+           'UTF8'
+         )
+       ),
+       'hex'
+     )
+     OR pg_catalog.jsonb_typeof(p_run_update #> '{master_snapshot,prompt_writer_output}') IS DISTINCT FROM 'string'
+     OR NULLIF(pg_catalog.btrim(p_run_update #>> '{master_snapshot,prompt_writer_output}'), '') IS NULL
+     OR pg_catalog.jsonb_typeof(p_run_update #> '{master_snapshot,composition_prompt}') IS DISTINCT FROM 'string'
+     OR NULLIF(pg_catalog.btrim(p_run_update #>> '{master_snapshot,composition_prompt}'), '') IS NULL
      OR p_run_update -> 'master_hash' IS DISTINCT FROM 'null'::JSONB
      OR p_run_update -> 'plan_snapshot' IS DISTINCT FROM 'null'::JSONB
      OR p_run_update -> 'plan_hash' IS DISTINCT FROM 'null'::JSONB
@@ -460,10 +493,7 @@ BEGIN
 
   UPDATE public.semantic_video_runs AS run
   SET master_snapshot = p_run_update -> 'master_snapshot',
-      master_hash = NULL,
-      candidate_reservation_owner = NULL,
-      candidate_reservation_token = NULL,
-      candidate_reservation_expires_at = NULL
+      master_hash = NULL
   WHERE run.id = p_run_id
     AND run.revision = p_reserved_revision
     AND run.candidate_reservation_token = p_reservation_token
@@ -702,6 +732,9 @@ BEGIN
   IF plan_price_per_second IS NULL
      OR supplied_plan_cost IS NULL
      OR supplied_run_cost IS NULL
+     OR plan_price_per_second::TEXT IN ('NaN', 'Infinity', '-Infinity')
+     OR supplied_plan_cost::TEXT IN ('NaN', 'Infinity', '-Infinity')
+     OR supplied_run_cost::TEXT IN ('NaN', 'Infinity', '-Infinity')
      OR plan_price_per_second <= 0 THEN
     RAISE EXCEPTION 'semantic video plan cost contract is invalid';
   END IF;
@@ -940,6 +973,10 @@ BEGIN
   selected_hash := selected_candidate ->> 'sha256';
   approved_master := selected_candidate || pg_catalog.jsonb_build_object(
     'candidates', locked_run.master_snapshot -> 'candidates',
+    'prompt_writer_system_prompt', locked_run.master_snapshot -> 'prompt_writer_system_prompt',
+    'prompt_writer_system_prompt_sha256', locked_run.master_snapshot -> 'prompt_writer_system_prompt_sha256',
+    'prompt_writer_output', locked_run.master_snapshot -> 'prompt_writer_output',
+    'composition_prompt', locked_run.master_snapshot -> 'composition_prompt',
     'approved_candidate_index', p_candidate_index,
     'approved_by', p_approved_by
   );
@@ -1132,6 +1169,9 @@ BEGIN
   IF plan_price IS NULL
      OR plan_price <= 0
      OR plan_cost IS NULL
+     OR plan_price::TEXT IN ('NaN', 'Infinity', '-Infinity')
+     OR plan_cost::TEXT IN ('NaN', 'Infinity', '-Infinity')
+     OR locked_run.estimated_cost_usd::TEXT IN ('NaN', 'Infinity', '-Infinity')
      OR plan_cost IS DISTINCT FROM computed_cost
      OR locked_run.estimated_cost_usd IS DISTINCT FROM computed_cost THEN
     RAISE EXCEPTION USING
@@ -1213,6 +1253,13 @@ DECLARE
   plan_price NUMERIC;
   computed_cost NUMERIC;
   retry_prompt TEXT;
+  retry_guidance_text TEXT;
+  canonical_request_json TEXT;
+  computed_prompt_hash TEXT;
+  computed_request_hash TEXT;
+  retry_request_hash_csv TEXT;
+  expected_contract_basis TEXT;
+  expected_contract_hash TEXT;
   returned_takes JSONB;
 BEGIN
   IF p_run_id IS NULL
@@ -1349,16 +1396,45 @@ BEGIN
     END IF;
 
     retry_prompt := retry_payload #>> '{request_contract,prompt}';
+    retry_guidance_text := COALESCE(
+      NULLIF(pg_catalog.btrim(pg_catalog.regexp_replace(previous_take.retry_guidance ->> 'guidance', '\s+', ' ', 'g')), ''),
+      NULLIF(pg_catalog.btrim(pg_catalog.regexp_replace(previous_take.retry_guidance ->> 'prompt_suffix', '\s+', ' ', 'g')), ''),
+      NULLIF(pg_catalog.btrim(pg_catalog.regexp_replace(previous_take.retry_guidance ->> 'instruction', '\s+', ' ', 'g')), ''),
+      NULLIF(pg_catalog.btrim(pg_catalog.regexp_replace(previous_take.retry_guidance ->> 'message', '\s+', ' ', 'g')), '')
+    );
+    canonical_request_json := retry_payload #>> '{request_contract,canonical_request_json}';
+    computed_prompt_hash := pg_catalog.encode(
+      pg_catalog.sha256(pg_catalog.convert_to(retry_prompt, 'UTF8')),
+      'hex'
+    );
+    computed_request_hash := pg_catalog.encode(
+      pg_catalog.sha256(pg_catalog.convert_to(canonical_request_json, 'UTF8')),
+      'hex'
+    );
     IF pg_catalog.jsonb_typeof(retry_payload #> '{request_contract,attempt}') IS DISTINCT FROM 'number'
        OR (retry_payload #>> '{request_contract,attempt}')::INTEGER IS DISTINCT FROM previous_take.attempt + 1
        OR pg_catalog.jsonb_typeof(retry_payload #> '{request_contract,seed}') IS DISTINCT FROM 'number'
        OR (retry_payload #>> '{request_contract,seed}')::BIGINT IS DISTINCT FROM previous_take.seed + 1000
        OR retry_payload #>> '{request_contract,retry_of_request_hash}' IS DISTINCT FROM previous_take.request_hash
        OR retry_payload #> '{request_contract,retry_guidance}' IS DISTINCT FROM previous_take.retry_guidance
+       OR pg_catalog.jsonb_typeof(retry_payload #> '{request_contract,canonical_request_json}') IS DISTINCT FROM 'string'
        OR NULLIF(pg_catalog.btrim(retry_prompt), '') IS NULL
+       OR NULLIF(pg_catalog.btrim(retry_guidance_text), '') IS NULL
        OR retry_prompt IS NOT DISTINCT FROM previous_take.request_contract ->> 'prompt'
        OR pg_catalog.strpos(retry_prompt, 'Retry delivery correction:') = 0
-       OR pg_catalog.strpos(retry_prompt, previous_take.beat_text) = 0 THEN
+       OR pg_catalog.strpos(retry_prompt, previous_take.beat_text) = 0
+       OR (
+         (pg_catalog.length(retry_prompt) - pg_catalog.length(pg_catalog.replace(retry_prompt, retry_guidance_text, '')))
+         / pg_catalog.length(retry_guidance_text)
+       ) IS DISTINCT FROM 1
+       OR (
+         (pg_catalog.length(retry_prompt) - pg_catalog.length(pg_catalog.replace(retry_prompt, previous_take.beat_text, '')))
+         / pg_catalog.length(previous_take.beat_text)
+       ) IS DISTINCT FROM 1
+       OR canonical_request_json::JSONB IS DISTINCT FROM
+          (retry_payload -> 'request_contract') - 'canonical_request_json'
+       OR retry_payload ->> 'prompt_hash' IS DISTINCT FROM computed_prompt_hash
+       OR retry_payload ->> 'request_hash' IS DISTINCT FROM computed_request_hash THEN
       RAISE EXCEPTION USING
         ERRCODE = '40001',
         MESSAGE = 'semantic_video_conflict: retry request contract is not a deterministic correction';
@@ -1385,12 +1461,38 @@ BEGIN
     pg_catalog.btrim(locked_run.plan_snapshot ->> 'price_per_provider_second_usd'),
     ''
   )::NUMERIC;
-  IF plan_price IS NULL OR plan_price <= 0 THEN
+  IF plan_price IS NULL
+     OR plan_price <= 0
+     OR plan_price::TEXT IN ('NaN', 'Infinity', '-Infinity') THEN
     RAISE EXCEPTION USING
       ERRCODE = '40001',
       MESSAGE = 'semantic_video_conflict: persisted retry price is invalid';
   END IF;
   computed_cost := pg_catalog.round(plan_price * provider_seconds, 2);
+  SELECT pg_catalog.string_agg(
+    entry.value ->> 'request_hash',
+    ','
+    ORDER BY (entry.value ->> 'take_index')::INTEGER
+  )
+  INTO retry_request_hash_csv
+  FROM pg_catalog.jsonb_array_elements(p_retry_takes) AS entry(value);
+  expected_contract_basis := 'semantic-retry-contract-v1'
+    || pg_catalog.chr(10) || p_plan_hash
+    || pg_catalog.chr(10) || p_expected_revision::TEXT
+    || pg_catalog.chr(10) || pg_catalog.array_to_string(approved_indexes, ',')
+    || pg_catalog.chr(10) || retry_request_hash_csv
+    || pg_catalog.chr(10) || provider_seconds::TEXT
+    || pg_catalog.chr(10) || retry_count::TEXT
+    || pg_catalog.chr(10) || computed_cost::TEXT;
+  expected_contract_hash := pg_catalog.encode(
+    pg_catalog.sha256(pg_catalog.convert_to(expected_contract_basis, 'UTF8')),
+    'hex'
+  );
+  IF p_contract_hash IS DISTINCT FROM expected_contract_hash THEN
+    RAISE EXCEPTION USING
+      ERRCODE = '40001',
+      MESSAGE = 'semantic_video_conflict: retry approval contract hash is invalid';
+  END IF;
 
   INSERT INTO public.semantic_video_takes (
     run_id,
@@ -1563,6 +1665,13 @@ BEGIN
       ERRCODE = '40001',
       MESSAGE = 'semantic_video_conflict: terminal run cannot be cancelled';
   END IF;
+
+  PERFORM take.id
+  FROM public.semantic_video_takes AS take
+  WHERE take.run_id = p_run_id
+  ORDER BY take.id
+  FOR UPDATE;
+
   IF EXISTS (
     SELECT 1
     FROM public.semantic_video_takes AS take
@@ -1631,3 +1740,4 @@ GRANT EXECUTE ON FUNCTION public.approve_semantic_video_retry(UUID, INTEGER, TEX
 REVOKE ALL ON FUNCTION public.cancel_semantic_video_run(UUID, INTEGER, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.cancel_semantic_video_run(UUID, INTEGER, TEXT, TEXT, TEXT) TO service_role;
 REVOKE INSERT ON TABLE public.semantic_video_approvals FROM service_role;
+REVOKE INSERT ON TABLE public.semantic_video_takes FROM service_role;

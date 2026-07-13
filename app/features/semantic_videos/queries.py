@@ -383,11 +383,6 @@ def persist_semantic_video_plan(
     return dict(run), rows
 
 
-def append_approval(payload: Mapping[str, Any], *, client=None) -> dict[str, Any]:
-    response = _client(client).table("semantic_video_approvals").insert(dict(payload)).execute()
-    return _one_affected(response, operation="approval append")
-
-
 def list_attempts(run_id: str, *, client=None) -> list[dict[str, Any]]:
     response = (
         _client(client)
@@ -408,36 +403,6 @@ def list_approvals(run_id: str, *, client=None) -> list[dict[str, Any]]:
         .select("*")
         .eq("run_id", run_id)
         .order("created_at")
-        .execute()
-    )
-    return _rows(response)
-
-
-def append_attempts(
-    run_id: str,
-    takes: Sequence[Mapping[str, Any]],
-    *,
-    client=None,
-) -> list[dict[str, Any]]:
-    if not takes:
-        raise ValidationError("Semantic video retry requires at least one take attempt.")
-    payload = [{**dict(take), "run_id": run_id} for take in takes]
-    rows = _rows(_client(client).table("semantic_video_takes").insert(payload).execute())
-    if len(rows) != len(payload):
-        raise StateTransitionError(
-            "Semantic video attempt append affected an unexpected row count.",
-            {"run_id": run_id, "expected_rows": len(payload), "affected_rows": len(rows)},
-        )
-    return rows
-
-
-def cancel_pending_takes(run_id: str, *, client=None) -> list[dict[str, Any]]:
-    response = (
-        _client(client)
-        .table("semantic_video_takes")
-        .update({"submission_state": "cancelled"})
-        .eq("run_id", run_id)
-        .in_("submission_state", ["planned", "reserved", "intent_persisted"])
         .execute()
     )
     return _rows(response)
@@ -665,9 +630,6 @@ __all__ = [
     "approve_initial_plan_transition",
     "approve_master_transition",
     "approve_retry_transition",
-    "append_approval",
-    "append_attempts",
-    "cancel_pending_takes",
     "cancel_run_transition",
     "acquire_run_lease",
     "complete_run",

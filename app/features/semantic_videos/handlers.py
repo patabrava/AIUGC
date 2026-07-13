@@ -15,7 +15,11 @@ from app.adapters.storage_client import get_storage_client
 from app.core.errors import NotFoundError, StateTransitionError, SuccessResponse, ValidationError
 from app.core.config import get_settings
 from app.core.video_profiles import script_word_count
-from app.features.shot_frames.service import ShotFrameReference, generate_shot_frame_candidates
+from app.features.shot_frames.service import (
+    ShotFrameReference,
+    generate_shot_frame_candidates,
+    load_raw_camera_system_prompt,
+)
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.semantic_videos.queries import (
     approve_initial_plan_transition,
@@ -53,9 +57,37 @@ from app.features.semantic_videos.service import compile_semantic_video_plan
 router = APIRouter(prefix="/semantic-videos/posts", tags=["semantic-videos"])
 
 
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def _canonical_hash(value: Any) -> str:
-    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return sha256(payload.encode("utf-8")).hexdigest()
+    return sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _retry_contract_hash(
+    *,
+    plan_hash: str,
+    revision: int,
+    indexes: list[int],
+    request_hashes: list[str],
+    provider_seconds: int,
+    quota_units: int,
+    estimated_cost: str,
+) -> str:
+    basis = "\n".join(
+        (
+            "semantic-retry-contract-v1",
+            plan_hash,
+            str(revision),
+            ",".join(str(index) for index in indexes),
+            ",".join(request_hashes),
+            str(provider_seconds),
+            str(quota_units),
+            estimated_cost,
+        )
+    )
+    return sha256(basis.encode("utf-8")).hexdigest()
 
 
 def _retry_guidance_text(value: Any) -> str:
@@ -223,6 +255,8 @@ def _reference_source_identity(reference: dict[str, Any]) -> dict[str, Any]:
     actor_rows, location_row = _ordered_reference_rows(reference)
     return {
         "actor_identity_id": str(reference.get("actor_identity_id") or ""),
+        "scene_description": str(reference.get("scene_description") or ""),
+        "wardrobe_description": str(reference.get("wardrobe_description") or ""),
         "actor_reference_uris": [str(row["storage_uri"]) for row in actor_rows],
         "location_reference_uri": str(location_row["storage_uri"]),
     }
@@ -358,8 +392,13 @@ def generate_candidates(
                 "provider_model": str(candidate.provider_model),
             }
         )
+    prompt_writer_system_prompt = load_raw_camera_system_prompt()
     master_snapshot = {
         "candidates": candidates,
+        "prompt_writer_system_prompt": prompt_writer_system_prompt,
+        "prompt_writer_system_prompt_sha256": sha256(
+            prompt_writer_system_prompt.encode("utf-8")
+        ).hexdigest(),
         "prompt_writer_output": str(generated.prompt_writer_output),
         "composition_prompt": str(generated.composition_prompt),
     }
@@ -374,11 +413,23 @@ def generate_candidates(
         reservation_token=reservation_token,
         run_updates=run_payload,
     )
+    persisted_master = (
+        run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
+    )
+    persisted_candidates = persisted_master.get("candidates")
+    if (
+        not isinstance(persisted_candidates, list)
+        or len(persisted_candidates) != payload.candidate_count
+        or any(not isinstance(candidate, dict) for candidate in persisted_candidates)
+    ):
+        raise StateTransitionError(
+            "Semantic video candidate finalization returned an invalid persisted contract."
+        )
     response = CandidateGenerationResponse(
         run_id=str(run["id"]),
         revision=int(run.get("revision") or 0),
         stage=str(run["stage"]),
-        candidates=[CandidateResponse(**candidate) for candidate in candidates],
+        candidates=[CandidateResponse(**candidate) for candidate in persisted_candidates],
     )
     return SuccessResponse(data=response.model_dump(mode="json"))
 
@@ -582,7 +633,7 @@ def _assert_plan_sources_current(
         current_duration_contract = build_semantic_duration_contract(
             context["batch"].get("target_duration_seconds")
         )
-    except ValidationError as exc:
+    except (ValidationError, ValueError) as exc:
         raise StateTransitionError("Semantic video duration contract changed after planning.") from exc
     if current_duration_contract.contract_hash != str(run.get("duration_contract_hash") or ""):
         raise StateTransitionError(
@@ -751,28 +802,39 @@ def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Re
         approved_by=str(getattr(request.state, "user_email", "unknown")),
         reason=payload.reason,
     )
-    approved_indexes = [int(index) for index in approval.get("approved_take_indexes") or indexes]
-    approved_seconds = int(
-        approval.get("approved_provider_seconds")
-        if approval.get("approved_provider_seconds") is not None
-        else plan.get("billable_provider_seconds") or 0
-    )
-    quota_units = int(
-        approval.get("quota_units")
-        if approval.get("quota_units") is not None
-        else plan.get("quota_units") or len(indexes)
-    )
-    estimated_cost = str(
-        approval.get("estimated_cost_usd")
-        if approval.get("estimated_cost_usd") is not None
-        else plan.get("estimated_cost_usd") or run.get("estimated_cost_usd") or "0.00"
-    )
+    try:
+        approved_indexes = [int(index) for index in approval["approved_take_indexes"]]
+        approved_seconds = int(approval["approved_provider_seconds"])
+        quota_units = int(approval["quota_units"])
+        estimated_cost_value = Decimal(str(approval["estimated_cost_usd"]))
+        contract_hash = str(approval["contract_hash"])
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        raise StateTransitionError(
+            "Semantic video initial approval returned an incomplete persisted contract."
+        ) from exc
+    expected_seconds = int(plan.get("billable_provider_seconds") or 0)
+    expected_quota = int(plan.get("quota_units") or 0)
+    try:
+        expected_cost = Decimal(str(plan["estimated_cost_usd"]))
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        raise StateTransitionError("Semantic video persisted plan billing contract is invalid.") from exc
+    if (
+        approved_indexes != indexes
+        or approved_seconds != expected_seconds
+        or quota_units != expected_quota
+        or estimated_cost_value != expected_cost
+        or contract_hash != payload.plan_hash
+    ):
+        raise StateTransitionError(
+            "Semantic video initial approval returned a mismatched persisted contract."
+        )
+    estimated_cost = str(approval["estimated_cost_usd"])
     response = ApprovalResponse(
         run_id=str(updated["id"]),
         revision=int(updated["revision"]),
         stage=str(updated["stage"]),
         approval_id=str(approval["id"]),
-        contract_hash=payload.plan_hash,
+        contract_hash=contract_hash,
         approved_take_indexes=approved_indexes,
         approved_provider_seconds=approved_seconds,
         quota_units=quota_units,
@@ -865,7 +927,9 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
                 "retry_guidance": guidance_snapshot,
             }
         )
-        request_hash = _canonical_hash(request_contract)
+        canonical_request_json = _canonical_json(request_contract)
+        request_hash = sha256(canonical_request_json.encode("utf-8")).hexdigest()
+        request_contract["canonical_request_json"] = canonical_request_json
         if request_hash == str(previous.get("request_hash") or ""):
             raise StateTransitionError(
                 "Semantic video retry request hash must differ from the failed attempt."
@@ -895,16 +959,15 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
     price = Decimal(str(plan.get("price_per_provider_second_usd") or "0.40"))
     incremental_cost = (price * Decimal(provider_seconds)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     cost_text = format(incremental_cost, ".2f")
-    retry_contract = {
-        "plan_hash": payload.plan_hash,
-        "run_revision": revision,
-        "take_indexes": payload.failed_take_indexes,
-        "request_hashes": [take["request_hash"] for take in retry_takes],
-        "approved_provider_seconds": provider_seconds,
-        "quota_units": len(retry_takes),
-        "estimated_cost_usd": cost_text,
-    }
-    retry_hash = _canonical_hash(retry_contract)
+    retry_hash = _retry_contract_hash(
+        plan_hash=payload.plan_hash,
+        revision=revision,
+        indexes=payload.failed_take_indexes,
+        request_hashes=[take["request_hash"] for take in retry_takes],
+        provider_seconds=provider_seconds,
+        quota_units=len(retry_takes),
+        estimated_cost=cost_text,
+    )
     updated, approval, persisted_retry_takes = approve_retry_transition(
         str(run["id"]),
         expected_revision=revision,

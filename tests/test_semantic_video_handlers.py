@@ -111,6 +111,8 @@ def _install_repository(monkeypatch):
         "reference": {
             "actor_identity_id": "actor-1",
             "actor": {"name": "AYRA Actor", "character_description": "Immutable actor description."},
+            "scene_description": "Bright actor-free living room beside a window.",
+            "wardrobe_description": "Blue cotton blouse with a simple round neckline.",
             "actor_references": [
                 {
                     "role": "actor_front",
@@ -207,9 +209,6 @@ def _install_repository(monkeypatch):
             assert state["candidate_reservation"] == reservation_token
             assert state["run"]["revision"] == reserved_revision
             state["run"].update(deepcopy(run_updates))
-            state["run"]["candidate_reservation_owner"] = None
-            state["run"]["candidate_reservation_token"] = None
-            state["candidate_reservation"] = None
             return deepcopy(state["run"])
 
     def append_approval(payload):
@@ -253,6 +252,18 @@ def _install_repository(monkeypatch):
         approved_snapshot = {
             **selected,
             "candidates": deepcopy(candidates),
+            "prompt_writer_system_prompt": state["run"]["master_snapshot"].get(
+                "prompt_writer_system_prompt"
+            ),
+            "prompt_writer_system_prompt_sha256": state["run"]["master_snapshot"].get(
+                "prompt_writer_system_prompt_sha256"
+            ),
+            "prompt_writer_output": state["run"]["master_snapshot"].get(
+                "prompt_writer_output"
+            ),
+            "composition_prompt": state["run"]["master_snapshot"].get(
+                "composition_prompt"
+            ),
             "approved_candidate_index": candidate_index,
             "approved_by": approved_by,
         }
@@ -653,7 +664,14 @@ def test_initial_approval_rejects_same_uri_reference_byte_replacement(
 
 @pytest.mark.parametrize(
     "mutation",
-    ["actor_identity", "ordered_source_uris", "script", "duration", "master_bytes"],
+    [
+        "actor_identity",
+        "ordered_source_uris",
+        "script",
+        "duration",
+        "invalid_duration",
+        "master_bytes",
+    ],
 )
 def test_initial_approval_rejects_every_fresh_source_mutation(monkeypatch, mutation):
     handlers, state, storage = _install_repository(monkeypatch)
@@ -683,6 +701,8 @@ def test_initial_approval_rejects_every_fresh_source_mutation(monkeypatch, mutat
         )
     elif mutation == "duration":
         state["context"]["batch"]["target_duration_seconds"] = 51
+    elif mutation == "invalid_duration":
+        state["context"]["batch"]["target_duration_seconds"] = 7
     elif mutation == "master_bytes":
         master_uri = state["run"]["master_snapshot"]["storage_uri"]
         storage.objects[master_uri] = b"mutated-master-bytes"
@@ -883,6 +903,36 @@ def test_initial_approval_appends_exact_hash_and_moves_run_to_generating(monkeyp
     assert approval["quota_units"] == 7
 
 
+@pytest.mark.parametrize("candidate_count", [1, 2, 4])
+def test_candidate_endpoint_requires_exactly_three_candidates_before_provider_call(
+    monkeypatch,
+    candidate_count,
+):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_shot_frame_candidates",
+        lambda **kwargs: provider_calls.append(kwargs),
+        raising=False,
+    )
+
+    response = TestClient(
+        app,
+        base_url="http://localhost",
+        raise_server_exceptions=False,
+    ).post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": candidate_count},
+    )
+
+    assert response.status_code == 422, response.text
+    assert provider_calls == []
+
+
 def test_candidate_endpoint_uses_exact_ordered_references_and_persists_all_bytes(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
     from app.main import app
@@ -930,6 +980,100 @@ def test_candidate_endpoint_uses_exact_ordered_references_and_persists_all_bytes
     ]
     assert state["run"]["stage"] == "awaiting_reference_approval"
     assert state["run"]["master_snapshot"]["candidates"] == candidates
+
+
+def test_candidate_endpoint_returns_the_finalized_persisted_candidate_contract(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    monkeypatch.setattr(
+        handlers,
+        "generate_shot_frame_candidates",
+        lambda **_kwargs: SimpleNamespace(
+            prompt_writer_output="Complete prompt writer result.",
+            composition_prompt="Complete composition prompt.",
+            candidates=[
+                SimpleNamespace(
+                    index=index,
+                    image_bytes=f"candidate-{index}".encode(),
+                    mime_type="image/png",
+                    provider_model="gemini-3.1-flash-image",
+                )
+                for index in range(1, 4)
+            ],
+        ),
+        raising=False,
+    )
+
+    def finalize_candidate_generation(
+        run_id,
+        *,
+        reserved_revision,
+        reservation_token,
+        run_updates,
+    ):
+        assert run_id == "run-1"
+        assert reserved_revision == state["run"]["revision"]
+        assert reservation_token == state["candidate_reservation"]
+        state["run"].update(deepcopy(run_updates))
+        state["run"]["master_snapshot"]["candidates"][0]["storage_uri"] = (
+            "https://storage/canonicalized-candidate-1.png"
+        )
+        return deepcopy(state["run"])
+
+    monkeypatch.setattr(
+        handlers,
+        "finalize_candidate_generation",
+        finalize_candidate_generation,
+        raising=False,
+    )
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    response_candidates = response.json()["data"]["candidates"]
+    assert response_candidates == state["run"]["master_snapshot"]["candidates"]
+    assert response_candidates[0]["storage_uri"] == (
+        "https://storage/canonicalized-candidate-1.png"
+    )
+
+
+def test_failed_candidate_attempt_cannot_trigger_a_second_paid_generation(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    provider_calls = []
+
+    def fail_after_provider_invocation(**kwargs):
+        provider_calls.append(kwargs)
+        raise RuntimeError("simulated provider result uncertainty")
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_shot_frame_candidates",
+        fail_after_provider_invocation,
+        raising=False,
+    )
+    client = TestClient(app, base_url="http://localhost", raise_server_exceptions=False)
+
+    first = client.post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+    second = client.post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert first.status_code == 500, first.text
+    assert second.status_code == 409, second.text
+    assert len(provider_calls) == 1
+    assert storage.upload_calls == []
+    assert state["run"]["candidate_reservation_token"] == state["candidate_reservation"]
 
 
 def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_call(monkeypatch):
@@ -1116,6 +1260,7 @@ def test_candidate_generation_reserves_before_concurrent_provider_effects(monkey
 def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
+    from app.features.shot_frames.service import load_raw_camera_system_prompt
 
     state["context"]["reference"].pop("master")
     monkeypatch.setattr(
@@ -1133,6 +1278,14 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
     )
     client = TestClient(app, base_url="http://localhost")
     assert client.post("/semantic-videos/posts/post-1/candidates", json={"candidate_count": 3}).status_code == 200
+    system_prompt = load_raw_camera_system_prompt()
+    candidate_master = state["run"]["master_snapshot"]
+    assert candidate_master["prompt_writer_system_prompt"] == system_prompt
+    assert candidate_master["prompt_writer_system_prompt_sha256"] == sha256(
+        system_prompt.encode("utf-8")
+    ).hexdigest()
+    assert candidate_master["prompt_writer_output"] == "Complete prompt writer result."
+    assert candidate_master["composition_prompt"] == "Complete composition prompt."
 
     response = client.post(
         "/semantic-videos/posts/post-1/master-approve",
@@ -1143,6 +1296,16 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
     assert state["run"]["master_snapshot"]["approved_candidate_index"] == 2
     assert state["run"]["master_hash"] == sha256(b"candidate-2").hexdigest()
     assert state["run"]["stage"] == "awaiting_paid_approval"
+    assert state["run"]["master_snapshot"]["prompt_writer_system_prompt"] == system_prompt
+    assert state["run"]["master_snapshot"]["prompt_writer_system_prompt_sha256"] == sha256(
+        system_prompt.encode("utf-8")
+    ).hexdigest()
+    assert state["run"]["master_snapshot"]["prompt_writer_output"] == (
+        "Complete prompt writer result."
+    )
+    assert state["run"]["master_snapshot"]["composition_prompt"] == (
+        "Complete composition prompt."
+    )
     assert state["approvals"][0]["approval_type"] == "reference"
     assert state["approvals"][0]["contract_hash"] == sha256(b"candidate-2").hexdigest()
 
@@ -1265,6 +1428,8 @@ def test_initial_approval_rejects_stale_hash_and_changed_script(monkeypatch):
     "mutation",
     [
         "actor_description",
+        "scene_description",
+        "wardrobe_description",
         "actor_mime",
         "actor_declared_hash",
         "actor_declared_byte_length",
@@ -1299,6 +1464,10 @@ def test_initial_approval_rejects_authoritative_reference_metadata_changes(
 
     if mutation == "actor_description":
         actor["character_description"] = "A changed actor description."
+    elif mutation == "scene_description":
+        state["context"]["reference"]["scene_description"] = "A changed location description."
+    elif mutation == "wardrobe_description":
+        state["context"]["reference"]["wardrobe_description"] = "A changed wardrobe description."
     elif mutation == "actor_mime":
         actor_row["mime_type"] = "image/jpeg"
     elif mutation == "actor_declared_hash":
@@ -1394,6 +1563,76 @@ def test_initial_approval_uses_one_atomic_transition(monkeypatch):
     assert len(calls) == 1
     assert state["run"]["stage"] == "generating"
     assert len(state["approvals"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        ("missing_contract_hash", None),
+        ("contract_hash", "f" * 64),
+        ("approved_take_indexes", [0]),
+        ("approved_provider_seconds", 8),
+        ("quota_units", 1),
+        ("estimated_cost_usd", "3.20"),
+    ],
+)
+def test_initial_approval_rejects_incomplete_or_mismatched_persisted_contract(
+    monkeypatch,
+    mutation,
+    value,
+):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost", raise_server_exceptions=False)
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+
+    def approve_initial_plan_transition(
+        run_id,
+        *,
+        expected_revision,
+        plan_hash,
+        approved_by,
+        reason,
+    ):
+        del run_id, approved_by, reason
+        approval = {
+            "id": "approval-untrusted-response",
+            "contract_hash": plan_hash,
+            "approved_take_indexes": [take["take_index"] for take in plan["takes"]],
+            "approved_provider_seconds": plan["billable_provider_seconds"],
+            "quota_units": plan["quota_units"],
+            "estimated_cost_usd": plan["estimated_cost_usd"],
+        }
+        if mutation == "missing_contract_hash":
+            approval.pop("contract_hash")
+        else:
+            approval[mutation] = value
+        updated = {
+            **state["run"],
+            "revision": expected_revision + 1,
+            "stage": "generating",
+        }
+        return updated, approval
+
+    monkeypatch.setattr(
+        handlers,
+        "approve_initial_plan_transition",
+        approve_initial_plan_transition,
+        raising=False,
+    )
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "state_transition_error"
 
 
 def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeypatch):
@@ -1884,7 +2123,7 @@ def test_candidate_reservation_queries_use_atomic_rpcs_and_map_only_conflicts():
     finalized = {
         "id": "run-1",
         "revision": 4,
-        "candidate_reservation_token": None,
+        "candidate_reservation_token": "token-1",
     }
     client = _RecordingClient(reserved, finalized)
 

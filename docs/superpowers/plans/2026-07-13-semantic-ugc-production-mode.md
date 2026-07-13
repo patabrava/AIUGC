@@ -17,7 +17,7 @@
 - `app/features/topics/prompt_data/semantic_{value,lifestyle,product}.txt`: post-family templates used only by Semantic UGC.
 - `app/features/batches/{schemas,handlers,queries}.py`: form/API validation and batch persistence for the new mode.
 - `templates/batches/list.html`: mode selector and numeric duration UX.
-- `supabase/migrations/20260713_semantic_ugc_production.sql`: batch contract plus run/take/approval persistence and atomic lease helper.
+- `supabase/migrations/20260713000000_semantic_ugc_production.sql`: batch contract plus run/take/approval persistence and atomic lease helper.
 - `app/features/semantic_videos/{schemas,queries,service,handlers}.py`: production orchestration vertical slice.
 - `workers/semantic_video_worker.py`: one-stage-per-tick resumable worker.
 - `templates/batches/detail/_semantic_video.html` and `static/js/batches/semantic_video.js`: reference, plan, approval, retry, and progress UI.
@@ -177,7 +177,7 @@ git commit -m "feat: add semantic duration and script contracts"
 ### Task 2: Batch mode, database contract, and creation UI
 
 **Files:**
-- Create: `supabase/migrations/20260713_semantic_ugc_production.sql`
+- Create: `supabase/migrations/20260713000000_semantic_ugc_production.sql`
 - Modify: `app/features/batches/schemas.py`
 - Modify: `app/features/batches/handlers.py`
 - Modify: `app/features/batches/queries.py`
@@ -240,7 +240,7 @@ Expected: all new tests pass and legacy assertions remain green.
 - [ ] **Step 8: Commit Task 2**
 
 ```bash
-git add supabase/migrations/20260713_semantic_ugc_production.sql app/features/batches templates/batches/list.html tests/test_semantic_batch_mode.py tests/test_batches_manual_mode.py tests/test_batches_queries.py
+git add supabase/migrations/20260713000000_semantic_ugc_production.sql app/features/batches templates/batches/list.html tests/test_semantic_batch_mode.py tests/test_batches_manual_mode.py tests/test_batches_queries.py
 git commit -m "feat: add semantic ugc batch mode"
 ```
 

@@ -19,7 +19,7 @@ from app.features.characters.actor_identity import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / "supabase/migrations/20260713_semantic_ugc_production.sql"
+MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 
 
 @pytest.fixture
