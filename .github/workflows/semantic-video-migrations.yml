@@ -1,0 +1,28 @@
+name: Semantic Video Migration Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install test runner
+        run: python -m pip install pytest==7.4.3
+
+      - name: Run real PostgreSQL migration gate
+        run: scripts/test_semantic_video_migrations.sh

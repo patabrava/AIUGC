@@ -7,6 +7,7 @@ Per Constitution § III: Deterministic Execution
 import hashlib
 import os
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, Field, field_validator, model_validator
@@ -276,6 +277,12 @@ class Settings(BaseSettings):
     veo_quota_project_scope: str = Field(
         default="default-gemini-project",
         description="Operator label for the Google project whose Veo quota is being guarded",
+    )
+    semantic_ugc_veo_price_per_provider_second_usd: Decimal = Field(
+        default=Decimal("0.40"),
+        gt=0,
+        validation_alias=AliasChoices("SEMANTIC_UGC_VEO_PRICE_PER_PROVIDER_SECOND_USD"),
+        description="Trusted Veo price per provider second for Semantic UGC approvals",
     )
 
     # Caption reliability

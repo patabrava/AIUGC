@@ -6,6 +6,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Sequence
 
+from postgrest.exceptions import APIError
+
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import NotFoundError, StateTransitionError, ValidationError
 
@@ -29,6 +31,32 @@ def _one_affected(response, *, operation: str, details: Optional[dict[str, Any]]
             {**(details or {}), "affected_rows": len(rows)},
         )
     return rows[0]
+
+
+def _execute_transition_rpc(query, *, operation: str) -> Any:
+    try:
+        return query.execute()
+    except APIError as exc:
+        if str(getattr(exc, "code", "")) == "40001":
+            raise StateTransitionError(f"Semantic video {operation} conflict.") from exc
+        raise
+
+
+def _transition_result(query, *, operation: str) -> dict[str, Any]:
+    response = _execute_transition_rpc(query, operation=operation)
+    result = getattr(response, "data", None)
+    if isinstance(result, list):
+        if len(result) != 1:
+            raise StateTransitionError(
+                f"Semantic video {operation} returned an unexpected result count.",
+                {"result_count": len(result)},
+            )
+        result = result[0]
+    if not isinstance(result, Mapping):
+        raise StateTransitionError(
+            f"Semantic video {operation} returned an invalid contract."
+        )
+    return dict(result)
 
 
 def load_semantic_video_context(post_id: str, *, client=None) -> dict[str, Any]:
@@ -94,6 +122,182 @@ def create_run(payload: Mapping[str, Any], *, client=None) -> dict[str, Any]:
     return _one_affected(response, operation="run creation")
 
 
+def reserve_candidate_generation(
+    post_id: str,
+    *,
+    expected_revision: Optional[int],
+    run_create: Mapping[str, Any],
+    reservation_owner: str,
+    reservation_token: str,
+    reservation_seconds: int,
+    client=None,
+) -> dict[str, Any]:
+    response = _execute_transition_rpc(
+        _client(client).rpc(
+            "reserve_semantic_video_candidates",
+            {
+                "p_post_id": post_id,
+                "p_expected_revision": expected_revision,
+                "p_run_create": dict(run_create),
+                "p_reservation_owner": reservation_owner,
+                "p_reservation_token": reservation_token,
+                "p_reservation_seconds": reservation_seconds,
+            },
+        ),
+        operation="candidate reservation",
+    )
+    return _one_affected(response, operation="candidate reservation")
+
+
+def finalize_candidate_generation(
+    run_id: str,
+    *,
+    reserved_revision: int,
+    reservation_token: str,
+    run_updates: Mapping[str, Any],
+    client=None,
+) -> dict[str, Any]:
+    response = _execute_transition_rpc(
+        _client(client).rpc(
+            "finalize_semantic_video_candidates",
+            {
+                "p_run_id": run_id,
+                "p_reserved_revision": reserved_revision,
+                "p_reservation_token": reservation_token,
+                "p_run_update": dict(run_updates),
+            },
+        ),
+        operation="candidate finalization",
+    )
+    return _one_affected(response, operation="candidate finalization")
+
+
+def approve_master_transition(
+    run_id: str,
+    *,
+    expected_revision: int,
+    candidate_index: int,
+    approved_by: str,
+    reason: Optional[str],
+    client=None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    result = _transition_result(
+        _client(client).rpc(
+            "approve_semantic_video_master",
+            {
+                "p_run_id": run_id,
+                "p_expected_revision": expected_revision,
+                "p_candidate_index": candidate_index,
+                "p_approved_by": approved_by,
+                "p_reason": reason,
+            },
+        ),
+        operation="master approval",
+    )
+    run = result.get("run")
+    approval = result.get("approval")
+    if not isinstance(run, Mapping) or not isinstance(approval, Mapping):
+        raise StateTransitionError("Semantic video master approval returned an invalid contract.")
+    return dict(run), dict(approval)
+
+
+def approve_initial_plan_transition(
+    run_id: str,
+    *,
+    expected_revision: int,
+    plan_hash: str,
+    approved_by: str,
+    reason: Optional[str],
+    client=None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    result = _transition_result(
+        _client(client).rpc(
+            "approve_semantic_video_initial_plan",
+            {
+                "p_run_id": run_id,
+                "p_expected_revision": expected_revision,
+                "p_plan_hash": plan_hash,
+                "p_approved_by": approved_by,
+                "p_reason": reason,
+            },
+        ),
+        operation="initial plan approval",
+    )
+    run = result.get("run")
+    approval = result.get("approval")
+    if not isinstance(run, Mapping) or not isinstance(approval, Mapping):
+        raise StateTransitionError("Semantic video initial plan approval returned an invalid contract.")
+    return dict(run), dict(approval)
+
+
+def approve_retry_transition(
+    run_id: str,
+    *,
+    expected_revision: int,
+    plan_hash: str,
+    retry_takes: Sequence[Mapping[str, Any]],
+    contract_hash: str,
+    approved_by: str,
+    reason: Optional[str],
+    client=None,
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    result = _transition_result(
+        _client(client).rpc(
+            "approve_semantic_video_retry",
+            {
+                "p_run_id": run_id,
+                "p_expected_revision": expected_revision,
+                "p_plan_hash": plan_hash,
+                "p_retry_takes": [dict(take) for take in retry_takes],
+                "p_contract_hash": contract_hash,
+                "p_approved_by": approved_by,
+                "p_reason": reason,
+            },
+        ),
+        operation="retry approval",
+    )
+    run = result.get("run")
+    approval = result.get("approval")
+    takes = result.get("takes")
+    if (
+        not isinstance(run, Mapping)
+        or not isinstance(approval, Mapping)
+        or not isinstance(takes, list)
+        or any(not isinstance(take, Mapping) for take in takes)
+    ):
+        raise StateTransitionError("Semantic video retry approval returned an invalid contract.")
+    return dict(run), dict(approval), [dict(take) for take in takes]
+
+
+def cancel_run_transition(
+    run_id: str,
+    *,
+    expected_revision: int,
+    cancelled_by: str,
+    reason: str,
+    correlation_id: str,
+    client=None,
+) -> tuple[dict[str, Any], int]:
+    result = _transition_result(
+        _client(client).rpc(
+            "cancel_semantic_video_run",
+            {
+                "p_run_id": run_id,
+                "p_expected_revision": expected_revision,
+                "p_cancelled_by": cancelled_by,
+                "p_reason": reason,
+                "p_correlation_id": correlation_id,
+            },
+        ),
+        operation="cancellation",
+    )
+    run = result.get("run")
+    cancelled_count = result.get("cancelled_take_count")
+    if not isinstance(run, Mapping) or isinstance(cancelled_count, bool) or not isinstance(cancelled_count, int):
+        raise StateTransitionError("Semantic video cancellation returned an invalid contract.")
+    return dict(run), cancelled_count
+
+
 def update_run(
     run_id: str,
     *,
@@ -134,15 +338,18 @@ def persist_semantic_video_plan(
     take_payloads = [dict(take) for take in takes]
     if [int(take.get("take_index", -1)) for take in take_payloads] != list(range(len(take_payloads))):
         raise ValidationError("Semantic video initial takes must be in exact zero-based order.")
-    response = _client(client).rpc(
-        "persist_semantic_video_plan",
-        {
-            "p_run_id": run_id,
-            "p_expected_revision": expected_revision,
-            "p_run_update": dict(run_updates),
-            "p_initial_takes": take_payloads,
-        },
-    ).execute()
+    response = _execute_transition_rpc(
+        _client(client).rpc(
+            "persist_semantic_video_plan",
+            {
+                "p_run_id": run_id,
+                "p_expected_revision": expected_revision,
+                "p_run_update": dict(run_updates),
+                "p_initial_takes": take_payloads,
+            },
+        ),
+        operation="plan persistence",
+    )
     result = getattr(response, "data", None)
     if isinstance(result, list):
         if len(result) != 1:
@@ -455,9 +662,13 @@ def fail_run(
 
 
 __all__ = [
+    "approve_initial_plan_transition",
+    "approve_master_transition",
+    "approve_retry_transition",
     "append_approval",
     "append_attempts",
     "cancel_pending_takes",
+    "cancel_run_transition",
     "acquire_run_lease",
     "complete_run",
     "create_run",

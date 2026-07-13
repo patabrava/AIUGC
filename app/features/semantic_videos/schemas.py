@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PlanCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     expected_revision: int = Field(ge=0)
-    price_per_provider_second_usd: Decimal = Field(default=Decimal("0.40"), ge=0)
     base_seed: int = Field(default=240713, ge=0)
     resolution: str = Field(default="1080p", min_length=1, max_length=32)
 

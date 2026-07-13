@@ -3,29 +3,32 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
 import json
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Request
 
 from app.adapters.storage_client import get_storage_client
 from app.core.errors import NotFoundError, StateTransitionError, SuccessResponse, ValidationError
+from app.core.config import get_settings
 from app.core.video_profiles import script_word_count
 from app.features.shot_frames.service import ShotFrameReference, generate_shot_frame_candidates
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.semantic_videos.queries import (
-    append_approval,
-    append_attempts,
-    cancel_pending_takes,
-    create_run,
+    approve_initial_plan_transition,
+    approve_master_transition,
+    approve_retry_transition,
+    cancel_run_transition,
+    finalize_candidate_generation,
     get_run_by_post,
     list_approvals as list_approvals,
     list_attempts,
     load_semantic_video_context,
     persist_semantic_video_plan,
-    update_run,
+    reserve_candidate_generation,
 )
 from app.features.semantic_videos.schemas import (
     ApprovalResponse,
@@ -53,6 +56,39 @@ router = APIRouter(prefix="/semantic-videos/posts", tags=["semantic-videos"])
 def _canonical_hash(value: Any) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _retry_guidance_text(value: Any) -> str:
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, dict):
+        text = next(
+            (
+                str(value[key])
+                for key in ("guidance", "prompt_suffix", "instruction", "message")
+                if str(value.get(key) or "").strip()
+            ),
+            "",
+        )
+    else:
+        text = ""
+    text = " ".join(text.split())
+    if not text:
+        raise StateTransitionError(
+            "Semantic video retry requires persisted QA retry guidance."
+        )
+    return text
+
+
+def _trusted_veo_price() -> Decimal:
+    value = get_settings().semantic_ugc_veo_price_per_provider_second_usd
+    try:
+        price = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError("Semantic video configured Veo price must be positive.") from exc
+    if not price.is_finite() or price <= 0:
+        raise ValidationError("Semantic video configured Veo price must be positive.")
+    return price
 
 
 def _approved_script(post: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -262,6 +298,30 @@ def generate_candidates(
         request=request,
     )
     location, location_snapshot = _download_reference(location_row, role="location", request=request)
+    persisted_reference = {
+        **reference,
+        "actor_references": [actor_front_snapshot, actor_three_quarter_snapshot],
+        "location_reference": location_snapshot,
+    }
+    persisted_reference.pop("master", None)
+    reservation_token = str(uuid4())
+    reservation_owner = str(
+        getattr(request.state, "user_email", None)
+        or getattr(request.state, "correlation_id", None)
+        or "semantic-candidates"
+    )
+    reserved = reserve_candidate_generation(
+        post_id,
+        expected_revision=payload.expected_revision,
+        run_create=_reference_run_payload(
+            context=context,
+            reference_snapshot=persisted_reference,
+            master_snapshot={},
+        ),
+        reservation_owner=reservation_owner,
+        reservation_token=reservation_token,
+        reservation_seconds=1800,
+    )
     generated = generate_shot_frame_candidates(
         script=script,
         actor_name=str(actor.get("name") or "Semantic UGC actor"),
@@ -272,6 +332,11 @@ def generate_candidates(
         location_reference=location,
         candidate_count=payload.candidate_count,
     )
+    if len(generated.candidates) != payload.candidate_count:
+        raise StateTransitionError(
+            "Semantic video candidate generation returned an unexpected candidate count.",
+            {"expected": payload.candidate_count, "actual": len(generated.candidates)},
+        )
     correlation_id = str(getattr(request.state, "correlation_id", "semantic-candidates"))
     candidates = []
     for candidate in generated.candidates:
@@ -293,18 +358,6 @@ def generate_candidates(
                 "provider_model": str(candidate.provider_model),
             }
         )
-    if len(candidates) != payload.candidate_count:
-        raise StateTransitionError(
-            "Semantic video candidate generation returned an unexpected candidate count.",
-            {"expected": payload.candidate_count, "actual": len(candidates)},
-        )
-
-    persisted_reference = {
-        **reference,
-        "actor_references": [actor_front_snapshot, actor_three_quarter_snapshot],
-        "location_reference": location_snapshot,
-    }
-    persisted_reference.pop("master", None)
     master_snapshot = {
         "candidates": candidates,
         "prompt_writer_output": str(generated.prompt_writer_output),
@@ -315,14 +368,12 @@ def generate_candidates(
         reference_snapshot=persisted_reference,
         master_snapshot=master_snapshot,
     )
-    if existing:
-        run = update_run(
-            str(existing["id"]),
-            expected_revision=int(payload.expected_revision),
-            updates=run_payload,
-        )
-    else:
-        run = create_run(run_payload)
+    run = finalize_candidate_generation(
+        str(reserved["id"]),
+        reserved_revision=int(reserved.get("revision") or 0),
+        reservation_token=reservation_token,
+        run_updates=run_payload,
+    )
     response = CandidateGenerationResponse(
         run_id=str(run["id"]),
         revision=int(run.get("revision") or 0),
@@ -357,41 +408,20 @@ def approve_master(post_id: str, payload: MasterApprovalRequest, request: Reques
             "Semantic video master candidate does not exist.",
             {"candidate_index": payload.candidate_index},
         )
-    master_hash = str(selected.get("sha256") or "")
     approved_by = str(getattr(request.state, "user_email", "unknown"))
-    approved_snapshot = {
-        **selected,
-        "candidates": candidates,
-        "approved_candidate_index": payload.candidate_index,
-        "approved_by": approved_by,
-    }
-    approval = append_approval(
-        {
-            "run_id": str(run["id"]),
-            "approval_type": "reference",
-            "run_revision": revision,
-            "contract_hash": master_hash,
-            "approved_take_indexes": [],
-            "approved_provider_seconds": 0,
-            "quota_units": 0,
-            "estimated_cost_usd": "0.00",
-            "approved_by": approved_by,
-            "reason": payload.reason,
-        }
-    )
-    updated = update_run(
+    updated, approval = approve_master_transition(
         str(run["id"]),
         expected_revision=revision,
-        updates={
-            "master_snapshot": approved_snapshot,
-            "master_hash": master_hash,
-            "stage": "awaiting_paid_approval",
-            "plan_snapshot": None,
-            "plan_hash": None,
-            "estimated_cost_usd": None,
-            "failure_envelope": None,
-        },
+        candidate_index=payload.candidate_index,
+        approved_by=approved_by,
+        reason=payload.reason,
     )
+    approved_snapshot = (
+        dict(updated["master_snapshot"])
+        if isinstance(updated.get("master_snapshot"), dict)
+        else {}
+    )
+    master_hash = str(updated.get("master_hash") or approval.get("contract_hash") or "")
     response = MasterApprovalResponse(
         run_id=str(updated["id"]),
         revision=int(updated["revision"]),
@@ -406,6 +436,7 @@ def approve_master(post_id: str, payload: MasterApprovalRequest, request: Reques
 
 @router.post("/{post_id}/plan", response_model=SuccessResponse)
 def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request):
+    trusted_price = _trusted_veo_price()
     existing = get_run_by_post(post_id)
     if not existing:
         raise NotFoundError("Semantic video run not found.", {"post_id": post_id})
@@ -433,7 +464,7 @@ def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request)
         batch_snapshot=context["batch"],
         reference_snapshot=reference,
         approved_frame_bytes=master_bytes,
-        price_per_provider_second=payload.price_per_provider_second_usd,
+        price_per_provider_second=trusted_price,
         base_seed=payload.base_seed,
         resolution=payload.resolution,
     )
@@ -502,6 +533,26 @@ def _assert_plan_sources_current(
     persisted_reference = run.get("reference_snapshot")
     if not isinstance(persisted_reference, dict) or not persisted_reference:
         raise StateTransitionError("Semantic video persisted reference snapshot is no longer available.")
+    persisted_actor = (
+        run.get("actor_snapshot")
+        if isinstance(run.get("actor_snapshot"), dict)
+        else persisted_reference.get("actor")
+    )
+    current_actor = current_reference.get("actor")
+    if (
+        not isinstance(current_actor, dict)
+        or not isinstance(persisted_actor, dict)
+        or current_actor != persisted_actor
+        or persisted_reference.get("actor") != persisted_actor
+    ):
+        raise StateTransitionError(
+            "Semantic video actor descriptive snapshot changed after candidate generation."
+        )
+    persisted_reference_hash = _canonical_hash(persisted_reference)
+    if persisted_reference_hash != str(run.get("reference_hash") or ""):
+        raise StateTransitionError(
+            "Semantic video persisted reference contract changed after planning."
+        )
     try:
         current_source_identity = _reference_source_identity(current_reference)
         persisted_source_identity = _reference_source_identity(persisted_reference)
@@ -551,6 +602,25 @@ def _assert_plan_sources_current(
     ]
     fresh_reference_snapshots = []
     for role, current_row, persisted_row in reference_rows:
+        current_mime = str(current_row.get("mime_type") or "image/png")
+        persisted_mime = str(persisted_row.get("mime_type") or "image/png")
+        declared_hash = current_row.get("sha256")
+        declared_bytes = current_row.get("byte_length")
+        if (
+            current_mime != persisted_mime
+            or (
+                declared_hash is not None
+                and str(declared_hash).lower() != str(persisted_row.get("sha256") or "").lower()
+            )
+            or (
+                declared_bytes is not None
+                and int(declared_bytes) != int(persisted_row.get("byte_length") or -1)
+            )
+        ):
+            raise StateTransitionError(
+                "Semantic video reference metadata changed after candidate generation.",
+                {"role": role},
+            )
         current_source = {
             key: value
             for key, value in current_row.items()
@@ -584,12 +654,25 @@ def _assert_plan_sources_current(
     if not isinstance(master, dict) or not str(master.get("storage_uri") or "").strip():
         raise StateTransitionError("Semantic video approved master is no longer available.")
     current_master = current_reference.get("master")
-    if (
-        isinstance(current_master, dict)
-        and str(current_master.get("storage_uri") or "").strip()
-        and str(current_master["storage_uri"]) != str(master["storage_uri"])
-    ):
-        raise StateTransitionError("Semantic video approved master source changed after planning.")
+    if isinstance(current_master, dict) and str(current_master.get("storage_uri") or "").strip():
+        master_fields_changed = (
+            str(current_master["storage_uri"]) != str(master["storage_uri"])
+            or str(current_master.get("mime_type") or "image/png")
+            != str(master.get("mime_type") or "image/png")
+            or (
+                current_master.get("sha256") is not None
+                and str(current_master.get("sha256") or "").lower()
+                != str(master.get("sha256") or "").lower()
+            )
+            or (
+                current_master.get("byte_length") is not None
+                and int(current_master["byte_length"]) != int(master.get("byte_length") or -1)
+            )
+        )
+        if master_fields_changed:
+            raise StateTransitionError(
+                "Semantic video approved master metadata changed after planning."
+            )
     master_bytes = get_storage_client().download_video(
         video_url=str(master["storage_uri"]),
         correlation_id=str(getattr(request.state, "correlation_id", "semantic-approval")),
@@ -661,24 +744,28 @@ def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Re
     takes = [take for take in all_takes if int(take.get("attempt") or 1) == 1]
     plan = run.get("plan_snapshot") if isinstance(run.get("plan_snapshot"), dict) else {}
     indexes = sorted(int(take["take_index"]) for take in takes)
-    approval = append_approval(
-        {
-            "run_id": str(run["id"]),
-            "approval_type": "initial_plan",
-            "run_revision": revision,
-            "contract_hash": payload.plan_hash,
-            "approved_take_indexes": indexes,
-            "approved_provider_seconds": int(plan.get("billable_provider_seconds") or 0),
-            "quota_units": int(plan.get("quota_units") or len(indexes)),
-            "estimated_cost_usd": str(plan.get("estimated_cost_usd") or run.get("estimated_cost_usd") or "0.00"),
-            "approved_by": str(getattr(request.state, "user_email", "unknown")),
-            "reason": payload.reason,
-        }
-    )
-    updated = update_run(
+    updated, approval = approve_initial_plan_transition(
         str(run["id"]),
         expected_revision=revision,
-        updates={"stage": "generating", "failure_envelope": None},
+        plan_hash=payload.plan_hash,
+        approved_by=str(getattr(request.state, "user_email", "unknown")),
+        reason=payload.reason,
+    )
+    approved_indexes = [int(index) for index in approval.get("approved_take_indexes") or indexes]
+    approved_seconds = int(
+        approval.get("approved_provider_seconds")
+        if approval.get("approved_provider_seconds") is not None
+        else plan.get("billable_provider_seconds") or 0
+    )
+    quota_units = int(
+        approval.get("quota_units")
+        if approval.get("quota_units") is not None
+        else plan.get("quota_units") or len(indexes)
+    )
+    estimated_cost = str(
+        approval.get("estimated_cost_usd")
+        if approval.get("estimated_cost_usd") is not None
+        else plan.get("estimated_cost_usd") or run.get("estimated_cost_usd") or "0.00"
     )
     response = ApprovalResponse(
         run_id=str(updated["id"]),
@@ -686,10 +773,10 @@ def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Re
         stage=str(updated["stage"]),
         approval_id=str(approval["id"]),
         contract_hash=payload.plan_hash,
-        approved_take_indexes=indexes,
-        approved_provider_seconds=int(plan.get("billable_provider_seconds") or 0),
-        quota_units=int(plan.get("quota_units") or len(indexes)),
-        estimated_cost_usd=str(plan.get("estimated_cost_usd") or run.get("estimated_cost_usd") or "0.00"),
+        approved_take_indexes=approved_indexes,
+        approved_provider_seconds=approved_seconds,
+        quota_units=quota_units,
+        estimated_cost_usd=estimated_cost,
     )
     return SuccessResponse(data=response.model_dump(mode="json"))
 
@@ -714,11 +801,21 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
             {"approved_hash": payload.plan_hash, "current_hash": run.get("plan_hash")},
         )
 
+    all_takes = list_attempts(str(run["id"]))
+    _assert_plan_sources_current(
+        post_id=post_id,
+        run=run,
+        takes=all_takes,
+        request=request,
+    )
     latest: dict[int, dict[str, Any]] = {}
-    for take in list_attempts(str(run["id"])):
+    initial: dict[int, dict[str, Any]] = {}
+    for take in all_takes:
         index = int(take["take_index"])
         if index not in latest or int(take.get("attempt") or 1) >= int(latest[index].get("attempt") or 1):
             latest[index] = take
+        if index not in initial or int(take.get("attempt") or 1) < int(initial[index].get("attempt") or 1):
+            initial[index] = take
     failed_indexes = {
         index
         for index, take in latest.items()
@@ -737,33 +834,60 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
     retry_takes = []
     for index in payload.failed_take_indexes:
         previous = latest[index]
+        original = initial[index]
         attempt = int(previous.get("attempt") or 1) + 1
-        request_contract = deepcopy(previous.get("request_contract") or {})
+        guidance_snapshot = deepcopy(previous.get("retry_guidance") or {})
+        guidance_text = _retry_guidance_text(guidance_snapshot)
+        request_contract = deepcopy(original.get("request_contract") or {})
+        base_prompt = str(request_contract.get("prompt") or "").strip()
+        if not base_prompt:
+            raise StateTransitionError(
+                "Semantic video retry requires the original persisted provider prompt."
+            )
+        if guidance_text in base_prompt:
+            raise StateTransitionError(
+                "Semantic video retry guidance is already present in the base prompt."
+            )
+        retry_prompt = f"{base_prompt} Retry delivery correction: {guidance_text}"
+        beat_text = str(previous.get("beat_text") or "")
+        if beat_text != str(original.get("beat_text") or "") or retry_prompt.count(beat_text) != 1:
+            raise StateTransitionError(
+                "Semantic video retry must preserve the exact scripted beat once."
+            )
+        previous_seed = int(previous.get("seed") or 0)
+        retry_seed = previous_seed + 1000
         request_contract.update(
             {
                 "attempt": attempt,
+                "prompt": retry_prompt,
+                "seed": retry_seed,
                 "retry_of_request_hash": str(previous.get("request_hash") or ""),
-                "retry_guidance": deepcopy(previous.get("retry_guidance") or {}),
+                "retry_guidance": guidance_snapshot,
             }
         )
+        request_hash = _canonical_hash(request_contract)
+        if request_hash == str(previous.get("request_hash") or ""):
+            raise StateTransitionError(
+                "Semantic video retry request hash must differ from the failed attempt."
+            )
         retry_takes.append(
             {
                 "take_index": index,
                 "attempt": attempt,
-                "beat_text": str(previous.get("beat_text") or ""),
+                "beat_text": beat_text,
                 "word_count": int(previous.get("word_count") or 0),
                 "estimated_speech_seconds": previous.get("estimated_speech_seconds") or 0,
                 "provider_duration_seconds": int(previous.get("provider_duration_seconds") or 0),
                 "shot_transform": deepcopy(previous.get("shot_transform") or {}),
                 "shot_hash": str(previous.get("shot_hash") or ""),
-                "prompt_hash": str(previous.get("prompt_hash") or ""),
+                "prompt_hash": sha256(retry_prompt.encode("utf-8")).hexdigest(),
                 "negative_prompt_hash": previous.get("negative_prompt_hash"),
                 "provider_model": str(previous.get("provider_model") or run.get("provider_model") or ""),
-                "seed": previous.get("seed"),
+                "seed": retry_seed,
                 "request_contract": request_contract,
-                "request_hash": _canonical_hash(request_contract),
+                "request_hash": request_hash,
                 "submission_state": "planned",
-                "retry_guidance": deepcopy(previous.get("retry_guidance") or {}),
+                "retry_guidance": guidance_snapshot,
             }
         )
     provider_seconds = sum(int(take["provider_duration_seconds"]) for take in retry_takes)
@@ -781,36 +905,42 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
         "estimated_cost_usd": cost_text,
     }
     retry_hash = _canonical_hash(retry_contract)
-    approval = append_approval(
-        {
-            "run_id": str(run["id"]),
-            "approval_type": "retry",
-            "run_revision": revision,
-            "contract_hash": retry_hash,
-            "approved_take_indexes": payload.failed_take_indexes,
-            "approved_provider_seconds": provider_seconds,
-            "quota_units": len(retry_takes),
-            "estimated_cost_usd": cost_text,
-            "approved_by": str(getattr(request.state, "user_email", "unknown")),
-            "reason": payload.reason,
-        }
-    )
-    append_attempts(str(run["id"]), retry_takes)
-    updated = update_run(
+    updated, approval, persisted_retry_takes = approve_retry_transition(
         str(run["id"]),
         expected_revision=revision,
-        updates={"stage": "generating", "failure_envelope": None},
+        plan_hash=payload.plan_hash,
+        retry_takes=retry_takes,
+        contract_hash=retry_hash,
+        approved_by=str(getattr(request.state, "user_email", "unknown")),
+        reason=payload.reason,
     )
+    persisted_indexes = sorted(int(index) for index in approval.get("approved_take_indexes") or [])
+    persisted_seconds = int(approval.get("approved_provider_seconds") or 0)
+    persisted_quota = int(approval.get("quota_units") or 0)
+    persisted_cost = str(approval.get("estimated_cost_usd") or "")
+    persisted_hash = str(approval.get("contract_hash") or "")
+    persisted_request_hashes = sorted(str(take.get("request_hash") or "") for take in persisted_retry_takes)
+    if (
+        persisted_indexes != payload.failed_take_indexes
+        or persisted_seconds != provider_seconds
+        or persisted_quota != len(retry_takes)
+        or persisted_hash != retry_hash
+        or Decimal(persisted_cost) != incremental_cost
+        or persisted_request_hashes != sorted(take["request_hash"] for take in retry_takes)
+    ):
+        raise StateTransitionError(
+            "Semantic video persisted retry approval does not match the approved contract."
+        )
     response = ApprovalResponse(
         run_id=str(updated["id"]),
         revision=int(updated["revision"]),
         stage=str(updated["stage"]),
         approval_id=str(approval["id"]),
-        contract_hash=retry_hash,
-        approved_take_indexes=payload.failed_take_indexes,
-        approved_provider_seconds=provider_seconds,
-        quota_units=len(retry_takes),
-        estimated_cost_usd=cost_text,
+        contract_hash=persisted_hash,
+        approved_take_indexes=persisted_indexes,
+        approved_provider_seconds=persisted_seconds,
+        quota_units=persisted_quota,
+        estimated_cost_usd=persisted_cost,
     )
     return SuccessResponse(data=response.model_dump(mode="json"))
 
@@ -829,28 +959,18 @@ def cancel_run(post_id: str, payload: CancellationRequest, request: Request):
             "Semantic video terminal runs cannot be cancelled.",
             {"stage": run.get("stage")},
         )
-    cancelled = cancel_pending_takes(str(run["id"]))
-    failure_envelope = {
-        "code": "cancelled",
-        "message": payload.reason,
-        "cancelled_by": str(getattr(request.state, "user_email", "unknown")),
-        "correlation_id": str(getattr(request.state, "correlation_id", "")),
-    }
-    updated = update_run(
+    updated, cancelled_count = cancel_run_transition(
         str(run["id"]),
         expected_revision=revision,
-        updates={
-            "stage": "failed",
-            "failure_envelope": failure_envelope,
-            "lease_owner": None,
-            "lease_expires_at": None,
-        },
+        cancelled_by=str(getattr(request.state, "user_email", "unknown")),
+        reason=payload.reason,
+        correlation_id=str(getattr(request.state, "correlation_id", "")),
     )
     response = CancellationResponse(
         run_id=str(updated["id"]),
         revision=int(updated["revision"]),
         stage="failed",
-        cancelled_take_count=len(cancelled),
+        cancelled_take_count=cancelled_count,
         reason=payload.reason,
     )
     return SuccessResponse(data=response.model_dump(mode="json"))

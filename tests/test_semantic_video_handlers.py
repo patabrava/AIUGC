@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from decimal import Decimal
 from hashlib import sha256
 import io
 import os
 from types import SimpleNamespace
+from threading import Barrier, Lock
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from postgrest.exceptions import APIError
 import pytest
 
 from app.core.errors import StateTransitionError
@@ -85,7 +89,13 @@ def _install_repository(monkeypatch):
 
     master = _png_bytes()
     master_hash = sha256(master).hexdigest()
-    state = {"run": None, "takes": [], "approvals": []}
+    state = {
+        "run": None,
+        "takes": [],
+        "approvals": [],
+        "candidate_reservation": None,
+        "reservation_lock": Lock(),
+    }
     context = {
         "post": {
             "id": "post-1",
@@ -135,10 +145,6 @@ def _install_repository(monkeypatch):
     def get_run_by_post(_post_id):
         return deepcopy(state["run"])
 
-    def create_run(payload):
-        state["run"] = {**deepcopy(payload), "id": "run-1", "revision": 0}
-        return deepcopy(state["run"])
-
     def update_run(run_id, *, expected_revision, updates):
         assert run_id == "run-1"
         assert state["run"]["revision"] == expected_revision
@@ -156,6 +162,55 @@ def _install_repository(monkeypatch):
             for index, take in enumerate(takes)
         ]
         return deepcopy(state["run"]), deepcopy(state["takes"])
+
+    def reserve_candidate_generation(
+        post_id,
+        *,
+        expected_revision,
+        run_create,
+        reservation_owner,
+        reservation_token,
+        reservation_seconds,
+    ):
+        assert post_id == "post-1"
+        assert reservation_owner
+        assert reservation_seconds > 0
+        with state["reservation_lock"]:
+            if state["candidate_reservation"] is not None:
+                raise StateTransitionError("Semantic video candidate reservation is active.")
+            if state["run"] is None:
+                if expected_revision is not None:
+                    raise StateTransitionError("Semantic video candidate revision conflict.")
+                state["run"] = {**deepcopy(run_create), "id": "run-1", "revision": 0}
+            else:
+                if state["run"]["revision"] != expected_revision:
+                    raise StateTransitionError("Semantic video candidate revision conflict.")
+                state["run"]["revision"] += 1
+            state["candidate_reservation"] = reservation_token
+            state["run"].update(
+                {
+                    "candidate_reservation_owner": reservation_owner,
+                    "candidate_reservation_token": reservation_token,
+                }
+            )
+            return deepcopy(state["run"])
+
+    def finalize_candidate_generation(
+        run_id,
+        *,
+        reserved_revision,
+        reservation_token,
+        run_updates,
+    ):
+        assert run_id == "run-1"
+        with state["reservation_lock"]:
+            assert state["candidate_reservation"] == reservation_token
+            assert state["run"]["revision"] == reserved_revision
+            state["run"].update(deepcopy(run_updates))
+            state["run"]["candidate_reservation_owner"] = None
+            state["run"]["candidate_reservation_token"] = None
+            state["candidate_reservation"] = None
+            return deepcopy(state["run"])
 
     def append_approval(payload):
         row = {**deepcopy(payload), "id": f"approval-{len(state['approvals']) + 1}"}
@@ -178,14 +233,221 @@ def _install_repository(monkeypatch):
                 changed.append(deepcopy(take))
         return changed
 
+    def approve_master_transition(
+        run_id,
+        *,
+        expected_revision,
+        candidate_index,
+        approved_by,
+        reason,
+    ):
+        if state["run"]["revision"] != expected_revision:
+            raise StateTransitionError("Semantic video master approval revision conflict.")
+        candidates = state["run"]["master_snapshot"].get("candidates") or []
+        selected = next(
+            (deepcopy(row) for row in candidates if int(row["index"]) == candidate_index),
+            None,
+        )
+        if selected is None:
+            raise StateTransitionError("Semantic video master candidate conflict.")
+        approved_snapshot = {
+            **selected,
+            "candidates": deepcopy(candidates),
+            "approved_candidate_index": candidate_index,
+            "approved_by": approved_by,
+        }
+        approval = append_approval(
+            {
+                "run_id": run_id,
+                "approval_type": "reference",
+                "run_revision": expected_revision,
+                "contract_hash": selected["sha256"],
+                "approved_take_indexes": [],
+                "approved_provider_seconds": 0,
+                "quota_units": 0,
+                "estimated_cost_usd": "0.00",
+                "approved_by": approved_by,
+                "reason": reason,
+            }
+        )
+        updated = update_run(
+            run_id,
+            expected_revision=expected_revision,
+            updates={
+                "master_snapshot": approved_snapshot,
+                "master_hash": selected["sha256"],
+                "stage": "awaiting_paid_approval",
+                "plan_snapshot": None,
+                "plan_hash": None,
+                "estimated_cost_usd": None,
+                "failure_envelope": None,
+            },
+        )
+        return updated, approval
+
+    def approve_initial_plan_transition(
+        run_id,
+        *,
+        expected_revision,
+        plan_hash,
+        approved_by,
+        reason,
+    ):
+        if (
+            state["run"]["revision"] != expected_revision
+            or state["run"]["stage"] != "awaiting_paid_approval"
+            or state["run"].get("plan_hash") != plan_hash
+        ):
+            raise StateTransitionError("Semantic video initial approval conflict.")
+        initial_takes = [take for take in state["takes"] if int(take.get("attempt") or 1) == 1]
+        plan = state["run"]["plan_snapshot"]
+        approval = append_approval(
+            {
+                "run_id": run_id,
+                "approval_type": "initial_plan",
+                "run_revision": expected_revision,
+                "contract_hash": plan_hash,
+                "approved_take_indexes": [int(take["take_index"]) for take in initial_takes],
+                "approved_provider_seconds": int(plan["billable_provider_seconds"]),
+                "quota_units": int(plan["quota_units"]),
+                "estimated_cost_usd": str(plan["estimated_cost_usd"]),
+                "approved_by": approved_by,
+                "reason": reason,
+            }
+        )
+        updated = update_run(
+            run_id,
+            expected_revision=expected_revision,
+            updates={"stage": "generating", "failure_envelope": None},
+        )
+        return updated, approval
+
+    def approve_retry_transition(
+        run_id,
+        *,
+        expected_revision,
+        plan_hash,
+        retry_takes,
+        contract_hash,
+        approved_by,
+        reason,
+    ):
+        if (
+            state["run"]["revision"] != expected_revision
+            or state["run"]["stage"] != "retry_approval_required"
+            or state["run"].get("plan_hash") != plan_hash
+        ):
+            raise StateTransitionError("Semantic video retry approval conflict.")
+        provider_seconds = sum(int(take["provider_duration_seconds"]) for take in retry_takes)
+        price = Decimal(str(state["run"]["plan_snapshot"]["price_per_provider_second_usd"]))
+        cost = format((price * Decimal(provider_seconds)).quantize(Decimal("0.01")), ".2f")
+        approval = append_approval(
+            {
+                "run_id": run_id,
+                "approval_type": "retry",
+                "run_revision": expected_revision,
+                "contract_hash": contract_hash,
+                "approved_take_indexes": [int(take["take_index"]) for take in retry_takes],
+                "approved_provider_seconds": provider_seconds,
+                "quota_units": len(retry_takes),
+                "estimated_cost_usd": cost,
+                "approved_by": approved_by,
+                "reason": reason,
+            }
+        )
+        persisted = append_attempts(run_id, retry_takes)
+        updated = update_run(
+            run_id,
+            expected_revision=expected_revision,
+            updates={"stage": "generating", "failure_envelope": None},
+        )
+        return updated, approval, persisted
+
+    def cancel_run_transition(
+        run_id,
+        *,
+        expected_revision,
+        cancelled_by,
+        reason,
+        correlation_id,
+    ):
+        if state["run"]["revision"] != expected_revision:
+            raise StateTransitionError("Semantic video cancellation revision conflict.")
+        latest = {}
+        for take in state["takes"]:
+            index = int(take["take_index"])
+            if index not in latest or int(take.get("attempt") or 1) > int(latest[index].get("attempt") or 1):
+                latest[index] = take
+        if any(
+            take["submission_state"] in {"intent_persisted", "submitted", "submission_unknown"}
+            for take in latest.values()
+        ):
+            raise StateTransitionError("Semantic video cancellation has paid work in flight.")
+        cancelled = 0
+        for take in state["takes"]:
+            if take["submission_state"] in {"planned", "reserved"}:
+                take["submission_state"] = "cancelled"
+                cancelled += 1
+        updated = update_run(
+            run_id,
+            expected_revision=expected_revision,
+            updates={
+                "stage": "failed",
+                "failure_envelope": {
+                    "code": "cancelled",
+                    "message": reason,
+                    "cancelled_by": cancelled_by,
+                    "correlation_id": correlation_id,
+                },
+                "lease_owner": None,
+                "lease_expires_at": None,
+            },
+        )
+        return updated, cancelled
+
     monkeypatch.setattr(handlers, "load_semantic_video_context", lambda post_id: deepcopy(state["context"]))
     monkeypatch.setattr(handlers, "get_run_by_post", get_run_by_post)
-    monkeypatch.setattr(handlers, "create_run", create_run)
-    monkeypatch.setattr(handlers, "update_run", update_run)
+    monkeypatch.setattr(handlers, "update_run", update_run, raising=False)
     monkeypatch.setattr(handlers, "persist_semantic_video_plan", persist_semantic_video_plan)
-    monkeypatch.setattr(handlers, "append_approval", append_approval)
+    monkeypatch.setattr(
+        handlers,
+        "reserve_candidate_generation",
+        reserve_candidate_generation,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "finalize_candidate_generation",
+        finalize_candidate_generation,
+        raising=False,
+    )
+    monkeypatch.setattr(handlers, "append_approval", append_approval, raising=False)
     monkeypatch.setattr(handlers, "append_attempts", append_attempts, raising=False)
     monkeypatch.setattr(handlers, "cancel_pending_takes", cancel_pending_takes, raising=False)
+    monkeypatch.setattr(
+        handlers,
+        "approve_master_transition",
+        approve_master_transition,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "approve_initial_plan_transition",
+        approve_initial_plan_transition,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "approve_retry_transition",
+        approve_retry_transition,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "cancel_run_transition",
+        cancel_run_transition,
+        raising=False,
+    )
     monkeypatch.setattr(handlers, "list_attempts", lambda run_id: deepcopy(state["takes"]))
     monkeypatch.setattr(handlers, "list_approvals", lambda run_id: deepcopy(state["approvals"]))
     fake_storage = _FakeStorage(master)
@@ -201,6 +463,75 @@ def _seed_awaiting_paid_run(state, *, revision=0):
         "revision": revision,
         "stage": "awaiting_paid_approval",
     }
+
+
+def test_plan_http_contract_rejects_caller_controlled_price(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={
+            "expected_revision": 0,
+            "price_per_provider_second_usd": "0.01",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert state["takes"] == []
+
+
+def test_plan_uses_only_positive_server_configured_price(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    monkeypatch.setattr(
+        handlers,
+        "get_settings",
+        lambda: SimpleNamespace(semantic_ugc_veo_price_per_provider_second_usd=Decimal("0.73")),
+        raising=False,
+    )
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["price_per_provider_second_usd"] == "0.73"
+
+
+@pytest.mark.parametrize("configured_price", [Decimal("0"), Decimal("-0.01")])
+def test_plan_rejects_nonpositive_server_price_before_persistence(
+    monkeypatch,
+    configured_price,
+):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    monkeypatch.setattr(
+        handlers,
+        "get_settings",
+        lambda: SimpleNamespace(
+            semantic_ugc_veo_price_per_provider_second_usd=configured_price
+        ),
+        raising=False,
+    )
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    )
+
+    assert response.status_code == 422, response.text
+    assert state["takes"] == []
 
 
 def _create_plan_from_unenriched_candidate_flow(monkeypatch, client, handlers, state, storage):
@@ -487,7 +818,7 @@ def test_plan_endpoint_persists_run_and_takes_through_one_atomic_query_call(monk
         return deepcopy(state["takes"])
 
     monkeypatch.setattr(handlers, "persist_semantic_video_plan", persist_plan, raising=False)
-    monkeypatch.setattr(handlers, "update_run", legacy_update)
+    monkeypatch.setattr(handlers, "update_run", legacy_update, raising=False)
     monkeypatch.setattr(handlers, "replace_initial_takes", legacy_replace, raising=False)
     response = TestClient(app, base_url="http://localhost").post(
         "/semantic-videos/posts/post-1/plan",
@@ -729,6 +1060,59 @@ def test_candidate_endpoint_rejects_missing_or_stale_existing_revision_before_ex
     assert state["run"] == original_run
 
 
+@pytest.mark.parametrize("flow", ["initial", "refresh"])
+def test_candidate_generation_reserves_before_concurrent_provider_effects(monkeypatch, flow):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    if flow == "refresh":
+        state["run"] = {
+            "id": "run-1",
+            "post_id": "post-1",
+            "revision": 5,
+            "stage": "awaiting_reference_approval",
+        }
+    barrier = Barrier(2)
+    provider_calls = []
+
+    def load_context(_post_id):
+        barrier.wait(timeout=5)
+        return deepcopy(state["context"])
+
+    def generate(**_kwargs):
+        provider_calls.append(flow)
+        return SimpleNamespace(
+            prompt_writer_output="Prompt writer output.",
+            composition_prompt="Composition prompt.",
+            candidates=[
+                SimpleNamespace(
+                    index=index,
+                    image_bytes=f"{flow}-candidate-{index}".encode(),
+                    mime_type="image/png",
+                    provider_model="gemini-3.1-flash-image",
+                )
+                for index in range(1, 4)
+            ],
+        )
+
+    monkeypatch.setattr(handlers, "load_semantic_video_context", load_context)
+    monkeypatch.setattr(handlers, "generate_shot_frame_candidates", generate, raising=False)
+    payload = {"candidate_count": 3}
+    if flow == "refresh":
+        payload["expected_revision"] = 5
+
+    def submit():
+        client = TestClient(app, base_url="http://localhost", raise_server_exceptions=False)
+        return client.post("/semantic-videos/posts/post-1/candidates", json=payload)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _index: submit(), range(2)))
+
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    assert len(provider_calls) == 1
+    assert len(storage.upload_calls) == 3
+
+
 def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -763,6 +1147,94 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
     assert state["approvals"][0]["contract_hash"] == sha256(b"candidate-2").hexdigest()
 
 
+def test_master_approval_uses_one_atomic_transition(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    candidate = {
+        "index": 2,
+        "storage_uri": "https://storage/generated/candidate-2.png",
+        "mime_type": "image/png",
+        "byte_length": len(b"candidate-2"),
+        "sha256": sha256(b"candidate-2").hexdigest(),
+        "provider_model": "gemini-3.1-flash-image",
+    }
+    state["run"] = {
+        "id": "run-1",
+        "revision": 4,
+        "stage": "awaiting_reference_approval",
+        "master_snapshot": {"candidates": [candidate]},
+    }
+    calls = []
+
+    def approve_master_transition(
+        run_id,
+        *,
+        expected_revision,
+        candidate_index,
+        approved_by,
+        reason,
+    ):
+        calls.append((run_id, expected_revision, candidate_index, approved_by, reason))
+        approved = {
+            **candidate,
+            "candidates": [candidate],
+            "approved_candidate_index": candidate_index,
+            "approved_by": approved_by,
+        }
+        state["run"].update(
+            {
+                "revision": expected_revision + 1,
+                "stage": "awaiting_paid_approval",
+                "master_snapshot": approved,
+                "master_hash": candidate["sha256"],
+            }
+        )
+        approval = {
+            "id": "approval-atomic-master",
+            "contract_hash": candidate["sha256"],
+        }
+        state["approvals"].append(approval)
+        return deepcopy(state["run"]), deepcopy(approval)
+
+    monkeypatch.setattr(
+        handlers,
+        "approve_master_transition",
+        approve_master_transition,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "append_approval",
+        lambda *_args, **_kwargs: pytest.fail("legacy approval insert called"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "update_run",
+        lambda *_args, **_kwargs: pytest.fail("legacy run update called"),
+        raising=False,
+    )
+
+    response = TestClient(
+        app,
+        base_url="http://localhost",
+        raise_server_exceptions=False,
+    ).post(
+        "/semantic-videos/posts/post-1/master-approve",
+        json={
+            "candidate_index": 2,
+            "expected_revision": 4,
+            "reason": "Best identity match",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    assert state["run"]["stage"] == "awaiting_paid_approval"
+    assert len(state["approvals"]) == 1
+
+
 def test_initial_approval_rejects_stale_hash_and_changed_script(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -789,6 +1261,141 @@ def test_initial_approval_rejects_stale_hash_and_changed_script(monkeypatch):
     assert state["approvals"] == []
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "actor_description",
+        "actor_mime",
+        "actor_declared_hash",
+        "actor_declared_byte_length",
+        "location_mime",
+        "location_declared_hash",
+        "location_declared_byte_length",
+        "master_mime",
+        "master_declared_hash",
+        "master_declared_byte_length",
+    ],
+)
+def test_initial_approval_rejects_authoritative_reference_metadata_changes(
+    monkeypatch,
+    mutation,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    plan = _create_plan_from_unenriched_candidate_flow(
+        monkeypatch,
+        client,
+        handlers,
+        state,
+        storage,
+    )
+    actor = state["context"]["reference"]["actor"]
+    actor_row = state["context"]["reference"]["actor_references"][0]
+    location = state["context"]["reference"]["location_reference"]
+    master = deepcopy(state["run"]["master_snapshot"])
+    state["context"]["reference"]["master"] = master
+
+    if mutation == "actor_description":
+        actor["character_description"] = "A changed actor description."
+    elif mutation == "actor_mime":
+        actor_row["mime_type"] = "image/jpeg"
+    elif mutation == "actor_declared_hash":
+        actor_row["sha256"] = "0" * 64
+    elif mutation == "actor_declared_byte_length":
+        actor_row["byte_length"] = 999
+    elif mutation == "location_mime":
+        location["mime_type"] = "image/jpeg"
+    elif mutation == "location_declared_hash":
+        location["sha256"] = "0" * 64
+    elif mutation == "location_declared_byte_length":
+        location["byte_length"] = 999
+    elif mutation == "master_mime":
+        master["mime_type"] = "image/jpeg"
+    elif mutation == "master_declared_hash":
+        master["sha256"] = "0" * 64
+    elif mutation == "master_declared_byte_length":
+        master["byte_length"] = 999
+
+    approval_count = len(state["approvals"])
+    response = client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 2},
+    )
+
+    assert response.status_code == 409, response.text
+    assert len(state["approvals"]) == approval_count
+    assert state["run"]["stage"] == "awaiting_paid_approval"
+
+
+def test_initial_approval_uses_one_atomic_transition(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    calls = []
+
+    def approve_initial_plan_transition(
+        run_id,
+        *,
+        expected_revision,
+        plan_hash,
+        approved_by,
+        reason,
+    ):
+        calls.append((run_id, expected_revision, plan_hash, approved_by, reason))
+        state["run"].update({"revision": expected_revision + 1, "stage": "generating"})
+        approval = {
+            "id": "approval-atomic-initial",
+            "contract_hash": plan_hash,
+            "approved_take_indexes": list(range(7)),
+            "approved_provider_seconds": 56,
+            "quota_units": 7,
+            "estimated_cost_usd": "22.40",
+        }
+        state["approvals"].append(approval)
+        return deepcopy(state["run"]), deepcopy(approval)
+
+    monkeypatch.setattr(
+        handlers,
+        "approve_initial_plan_transition",
+        approve_initial_plan_transition,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "append_approval",
+        lambda *_args, **_kwargs: pytest.fail("legacy approval insert called"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "update_run",
+        lambda *_args, **_kwargs: pytest.fail("legacy run update called"),
+        raising=False,
+    )
+
+    response = TestClient(
+        app,
+        base_url="http://localhost",
+        raise_server_exceptions=False,
+    ).post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    assert state["run"]["stage"] == "generating"
+    assert len(state["approvals"]) == 1
+
+
 def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -806,6 +1413,10 @@ def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeyp
     state["run"]["stage"] = "retry_approval_required"
     for take in state["takes"]:
         take["submission_state"] = "qa_failed" if take["take_index"] in {1, 4} else "completed"
+        if take["take_index"] in {1, 4}:
+            take["retry_guidance"] = {
+                "guidance": f"Correct QA issue for take {take['take_index']}."
+            }
 
     response = client.post(
         "/semantic-videos/posts/post-1/retry-approve",
@@ -837,6 +1448,179 @@ def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeyp
     assert rejected.status_code == 409, rejected.text
 
 
+def test_retry_approval_revalidates_full_plan_sources(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    assert client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    ).status_code == 200
+    state["run"]["stage"] = "retry_approval_required"
+    for take in state["takes"]:
+        take["submission_state"] = "qa_failed" if take["take_index"] == 1 else "completed"
+        if take["take_index"] == 1:
+            take["retry_guidance"] = {"guidance": "Hold eye contact through the line."}
+    state["context"]["reference"]["actor"]["character_description"] = "Changed actor identity."
+    approval_count = len(state["approvals"])
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 2,
+            "failed_take_indexes": [1],
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert len(state["approvals"]) == approval_count
+    assert not any(int(take.get("attempt") or 1) > 1 for take in state["takes"])
+
+
+def test_retry_approval_changes_prompt_seed_and_hashes_once(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    assert client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    ).status_code == 200
+    state["run"]["stage"] = "retry_approval_required"
+    for take in state["takes"]:
+        take["submission_state"] = "qa_failed" if take["take_index"] == 1 else "completed"
+        if take["take_index"] == 1:
+            take["retry_guidance"] = {"guidance": "Hold eye contact through the line."}
+    previous = deepcopy(next(take for take in state["takes"] if take["take_index"] == 1))
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 2,
+            "failed_take_indexes": [1],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    retry = max(
+        (take for take in state["takes"] if take["take_index"] == 1),
+        key=lambda take: int(take["attempt"]),
+    )
+    guidance = "Hold eye contact through the line."
+    retry_prompt = retry["request_contract"]["prompt"]
+    assert retry["beat_text"] == previous["beat_text"]
+    assert retry_prompt.count(guidance) == 1
+    assert retry["seed"] == int(previous["seed"]) + 1000
+    assert retry["prompt_hash"] == sha256(retry_prompt.encode("utf-8")).hexdigest()
+    assert retry["prompt_hash"] != previous["prompt_hash"]
+    assert retry["request_hash"] != previous["request_hash"]
+
+
+def test_retry_approval_uses_one_atomic_transition(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    state["run"]["stage"] = "retry_approval_required"
+    for take in state["takes"]:
+        take["submission_state"] = "qa_failed" if take["take_index"] == 1 else "completed"
+        if take["take_index"] == 1:
+            take["retry_guidance"] = {"guidance": "Hold eye contact through the line."}
+    calls = []
+
+    def approve_retry_transition(
+        run_id,
+        *,
+        expected_revision,
+        plan_hash,
+        retry_takes,
+        contract_hash,
+        approved_by,
+        reason,
+    ):
+        calls.append((run_id, expected_revision, plan_hash, deepcopy(retry_takes)))
+        persisted = [
+            {**deepcopy(take), "id": f"retry-{index}", "run_id": run_id}
+            for index, take in enumerate(retry_takes, start=1)
+        ]
+        state["takes"].extend(persisted)
+        state["run"].update({"revision": expected_revision + 1, "stage": "generating"})
+        approval = {
+            "id": "approval-atomic-retry",
+            "contract_hash": contract_hash,
+            "approved_take_indexes": [take["take_index"] for take in retry_takes],
+            "approved_provider_seconds": sum(
+                take["provider_duration_seconds"] for take in retry_takes
+            ),
+            "quota_units": len(retry_takes),
+            "estimated_cost_usd": "3.2000",
+        }
+        state["approvals"].append(approval)
+        return deepcopy(state["run"]), deepcopy(approval), deepcopy(persisted)
+
+    monkeypatch.setattr(
+        handlers,
+        "approve_retry_transition",
+        approve_retry_transition,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "append_approval",
+        lambda *_args, **_kwargs: pytest.fail("legacy approval insert called"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "append_attempts",
+        lambda *_args, **_kwargs: pytest.fail("legacy retry insert called"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "update_run",
+        lambda *_args, **_kwargs: pytest.fail("legacy run update called"),
+        raising=False,
+    )
+
+    response = TestClient(
+        app,
+        base_url="http://localhost",
+        raise_server_exceptions=False,
+    ).post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 1,
+            "failed_take_indexes": [1],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    assert state["run"]["stage"] == "generating"
+    assert len(state["approvals"]) == 1
+    assert response.json()["data"]["estimated_cost_usd"] == "3.2000"
+
+
 def test_cancel_only_accepts_nonterminal_run_and_cancels_pending_takes(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -858,6 +1642,105 @@ def test_cancel_only_accepts_nonterminal_run_and_cancels_pending_takes(monkeypat
         json={"expected_revision": 2, "reason": "Again"},
     )
     assert second.status_code == 409, second.text
+
+
+@pytest.mark.parametrize(
+    "unsafe_state",
+    ["intent_persisted", "submitted", "submission_unknown"],
+)
+def test_cancel_rejects_paid_in_flight_current_take_without_partial_mutation(
+    monkeypatch,
+    unsafe_state,
+):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    client.post("/semantic-videos/posts/post-1/plan", json={"expected_revision": 0})
+    state["takes"][0]["submission_state"] = unsafe_state
+    original_takes = deepcopy(state["takes"])
+    original_run = deepcopy(state["run"])
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/cancel",
+        json={"expected_revision": 1, "reason": "Operator cancelled"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert state["takes"] == original_takes
+    assert state["run"] == original_run
+
+
+def test_cancel_uses_one_atomic_transition(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    client.post("/semantic-videos/posts/post-1/plan", json={"expected_revision": 0})
+    calls = []
+
+    def cancel_run_transition(
+        run_id,
+        *,
+        expected_revision,
+        cancelled_by,
+        reason,
+        correlation_id,
+    ):
+        calls.append((run_id, expected_revision, cancelled_by, reason, correlation_id))
+        cancelled = 0
+        for take in state["takes"]:
+            if take["submission_state"] in {"planned", "reserved"}:
+                take["submission_state"] = "cancelled"
+                cancelled += 1
+        state["run"].update(
+            {
+                "revision": expected_revision + 1,
+                "stage": "failed",
+                "failure_envelope": {
+                    "code": "cancelled",
+                    "message": reason,
+                    "cancelled_by": cancelled_by,
+                    "correlation_id": correlation_id,
+                },
+            }
+        )
+        return deepcopy(state["run"]), cancelled
+
+    monkeypatch.setattr(
+        handlers,
+        "cancel_run_transition",
+        cancel_run_transition,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "cancel_pending_takes",
+        lambda *_args, **_kwargs: pytest.fail("legacy take cancellation called"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "update_run",
+        lambda *_args, **_kwargs: pytest.fail("legacy run update called"),
+        raising=False,
+    )
+
+    response = TestClient(
+        app,
+        base_url="http://localhost",
+        raise_server_exceptions=False,
+    ).post(
+        "/semantic-videos/posts/post-1/cancel",
+        json={"expected_revision": 1, "reason": "Operator cancelled"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    assert state["run"]["stage"] == "failed"
+    assert {take["submission_state"] for take in state["takes"]} == {"cancelled"}
 
 
 class _QueryResponse:
@@ -887,7 +1770,10 @@ class _RecordingQuery:
         return self
 
     def execute(self):
-        return _QueryResponse(self.client.responses.pop(0))
+        response = self.client.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return _QueryResponse(response)
 
 
 class _RecordingClient:
@@ -948,6 +1834,276 @@ def test_persist_semantic_video_plan_query_uses_one_rpc_and_returns_exact_contra
             },
         }
     ]
+
+    conflict = APIError(
+        {
+            "code": "40001",
+            "details": None,
+            "hint": None,
+            "message": "semantic_video_conflict: plan revision mismatch",
+        }
+    )
+    with pytest.raises(StateTransitionError, match="plan persistence"):
+        persist_semantic_video_plan(
+            persisted_run["id"],
+            expected_revision=4,
+            run_updates=run_update,
+            takes=initial_takes,
+            client=_RecordingClient(conflict),
+        )
+
+    unexpected = APIError(
+        {
+            "code": "P0001",
+            "details": None,
+            "hint": None,
+            "message": "semantic_video_conflict: injected plan failure",
+        }
+    )
+    with pytest.raises(APIError, match="injected plan failure"):
+        persist_semantic_video_plan(
+            persisted_run["id"],
+            expected_revision=4,
+            run_updates=run_update,
+            takes=initial_takes,
+            client=_RecordingClient(unexpected),
+        )
+
+
+def test_candidate_reservation_queries_use_atomic_rpcs_and_map_only_conflicts():
+    from app.features.semantic_videos.queries import (
+        finalize_candidate_generation,
+        reserve_candidate_generation,
+    )
+
+    reserved = {
+        "id": "run-1",
+        "revision": 4,
+        "candidate_reservation_token": "token-1",
+    }
+    finalized = {
+        "id": "run-1",
+        "revision": 4,
+        "candidate_reservation_token": None,
+    }
+    client = _RecordingClient(reserved, finalized)
+
+    assert reserve_candidate_generation(
+        "post-1",
+        expected_revision=3,
+        run_create={"post_id": "post-1"},
+        reservation_owner="operator@example.com",
+        reservation_token="token-1",
+        reservation_seconds=300,
+        client=client,
+    ) == reserved
+    assert finalize_candidate_generation(
+        "run-1",
+        reserved_revision=4,
+        reservation_token="token-1",
+        run_updates={"master_snapshot": {"candidates": [1, 2, 3]}},
+        client=client,
+    ) == finalized
+    assert client.calls == [
+        {
+            "kind": "rpc",
+            "function": "reserve_semantic_video_candidates",
+            "payload": {
+                "p_post_id": "post-1",
+                "p_expected_revision": 3,
+                "p_run_create": {"post_id": "post-1"},
+                "p_reservation_owner": "operator@example.com",
+                "p_reservation_token": "token-1",
+                "p_reservation_seconds": 300,
+            },
+        },
+        {
+            "kind": "rpc",
+            "function": "finalize_semantic_video_candidates",
+            "payload": {
+                "p_run_id": "run-1",
+                "p_reserved_revision": 4,
+                "p_reservation_token": "token-1",
+                "p_run_update": {"master_snapshot": {"candidates": [1, 2, 3]}},
+            },
+        },
+    ]
+
+    conflict = APIError(
+        {
+            "code": "40001",
+            "details": None,
+            "hint": None,
+            "message": "semantic_video_conflict: candidate reservation is active",
+        }
+    )
+    with pytest.raises(StateTransitionError, match="reservation"):
+        reserve_candidate_generation(
+            "post-1",
+            expected_revision=None,
+            run_create={"post_id": "post-1"},
+            reservation_owner="operator@example.com",
+            reservation_token="token-2",
+            reservation_seconds=300,
+            client=_RecordingClient(conflict),
+        )
+
+    unexpected = APIError(
+        {
+            "code": "P0001",
+            "details": None,
+            "hint": None,
+            "message": "unexpected persistence failure",
+        }
+    )
+    with pytest.raises(APIError, match="unexpected persistence failure"):
+        reserve_candidate_generation(
+            "post-1",
+            expected_revision=None,
+            run_create={"post_id": "post-1"},
+            reservation_owner="operator@example.com",
+            reservation_token="token-3",
+            reservation_seconds=300,
+            client=_RecordingClient(unexpected),
+        )
+
+
+def test_approval_retry_and_cancel_queries_use_transactional_rpcs_and_map_only_conflicts():
+    from app.features.semantic_videos.queries import (
+        approve_initial_plan_transition,
+        approve_master_transition,
+        approve_retry_transition,
+        cancel_run_transition,
+    )
+
+    master_result = {
+        "run": {"id": "run-1", "revision": 2, "stage": "awaiting_paid_approval"},
+        "approval": {"id": "approval-master", "contract_hash": "master-hash"},
+    }
+    initial_result = {
+        "run": {"id": "run-1", "revision": 3, "stage": "generating"},
+        "approval": {"id": "approval-initial", "contract_hash": "plan-hash"},
+    }
+    retry_result = {
+        "run": {"id": "run-1", "revision": 4, "stage": "generating"},
+        "approval": {"id": "approval-retry", "contract_hash": "retry-hash"},
+        "takes": [{"id": "retry-1", "take_index": 1, "attempt": 2}],
+    }
+    cancel_result = {
+        "run": {"id": "run-1", "revision": 5, "stage": "failed"},
+        "cancelled_take_count": 2,
+    }
+    client = _RecordingClient(master_result, initial_result, retry_result, cancel_result)
+
+    master_run, master_approval = approve_master_transition(
+        "run-1",
+        expected_revision=1,
+        candidate_index=2,
+        approved_by="operator@example.com",
+        reason="Best match",
+        client=client,
+    )
+    initial_run, initial_approval = approve_initial_plan_transition(
+        "run-1",
+        expected_revision=2,
+        plan_hash="plan-hash",
+        approved_by="operator@example.com",
+        reason=None,
+        client=client,
+    )
+    retry_run, retry_approval, retry_takes = approve_retry_transition(
+        "run-1",
+        expected_revision=3,
+        plan_hash="plan-hash",
+        retry_takes=[{"take_index": 1, "attempt": 2, "request_hash": "request-2"}],
+        contract_hash="retry-hash",
+        approved_by="operator@example.com",
+        reason="QA correction",
+        client=client,
+    )
+    cancelled_run, cancelled_count = cancel_run_transition(
+        "run-1",
+        expected_revision=4,
+        cancelled_by="operator@example.com",
+        reason="Operator cancelled",
+        correlation_id="corr-1",
+        client=client,
+    )
+
+    assert (master_run, master_approval) == (
+        master_result["run"],
+        master_result["approval"],
+    )
+    assert (initial_run, initial_approval) == (
+        initial_result["run"],
+        initial_result["approval"],
+    )
+    assert (retry_run, retry_approval, retry_takes) == (
+        retry_result["run"],
+        retry_result["approval"],
+        retry_result["takes"],
+    )
+    assert (cancelled_run, cancelled_count) == (cancel_result["run"], 2)
+    assert [call["function"] for call in client.calls] == [
+        "approve_semantic_video_master",
+        "approve_semantic_video_initial_plan",
+        "approve_semantic_video_retry",
+        "cancel_semantic_video_run",
+    ]
+
+    conflict = APIError(
+        {
+            "code": "40001",
+            "details": None,
+            "hint": None,
+            "message": "semantic_video_conflict: revision mismatch",
+        }
+    )
+    with pytest.raises(StateTransitionError, match="master approval"):
+        approve_master_transition(
+            "run-1",
+            expected_revision=1,
+            candidate_index=2,
+            approved_by="operator@example.com",
+            reason=None,
+            client=_RecordingClient(conflict),
+        )
+
+    unexpected = APIError(
+        {
+            "code": "P0001",
+            "details": None,
+            "hint": None,
+            "message": "injected database failure",
+        }
+    )
+    with pytest.raises(APIError, match="injected database failure"):
+        cancel_run_transition(
+            "run-1",
+            expected_revision=4,
+            cancelled_by="operator@example.com",
+            reason="Operator cancelled",
+            correlation_id="corr-1",
+            client=_RecordingClient(unexpected),
+        )
+
+    misleading_message = APIError(
+        {
+            "code": "P0001",
+            "details": None,
+            "hint": None,
+            "message": "semantic_video_conflict: injected database failure",
+        }
+    )
+    with pytest.raises(APIError, match="injected database failure"):
+        approve_initial_plan_transition(
+            "run-1",
+            expected_revision=2,
+            plan_hash="plan-hash",
+            approved_by="operator@example.com",
+            reason=None,
+            client=_RecordingClient(misleading_message),
+        )
 
 
 def test_query_helpers_persist_intent_operation_and_qa_with_affected_row_validation():
