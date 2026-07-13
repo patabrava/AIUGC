@@ -119,24 +119,61 @@ def update_run(
     )
 
 
-def replace_initial_takes(
+def persist_semantic_video_plan(
     run_id: str,
-    takes: Sequence[Mapping[str, Any]],
     *,
+    expected_revision: int,
+    run_updates: Mapping[str, Any],
+    takes: Sequence[Mapping[str, Any]],
     client=None,
-) -> list[dict[str, Any]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if not takes:
         raise ValidationError("Semantic video plan requires at least one initial take.")
-    db = _client(client)
-    db.table("semantic_video_takes").delete().eq("run_id", run_id).eq("attempt", 1).execute()
-    payload = [{**dict(take), "run_id": run_id, "attempt": 1} for take in takes]
-    rows = _rows(db.table("semantic_video_takes").insert(payload).execute())
-    if len(rows) != len(payload):
+    if "revision" in run_updates:
+        raise ValidationError("Semantic video revision is managed by atomic plan persistence.")
+    take_payloads = [dict(take) for take in takes]
+    if [int(take.get("take_index", -1)) for take in take_payloads] != list(range(len(take_payloads))):
+        raise ValidationError("Semantic video initial takes must be in exact zero-based order.")
+    response = _client(client).rpc(
+        "persist_semantic_video_plan",
+        {
+            "p_run_id": run_id,
+            "p_expected_revision": expected_revision,
+            "p_run_update": dict(run_updates),
+            "p_initial_takes": take_payloads,
+        },
+    ).execute()
+    result = getattr(response, "data", None)
+    if isinstance(result, list):
+        if len(result) != 1:
+            raise StateTransitionError(
+                "Semantic video atomic plan persistence returned an unexpected result count.",
+                {"run_id": run_id, "result_count": len(result)},
+            )
+        result = result[0]
+    if not isinstance(result, Mapping):
         raise StateTransitionError(
-            "Semantic video initial take replacement affected an unexpected row count.",
-            {"run_id": run_id, "expected_rows": len(payload), "affected_rows": len(rows)},
+            "Semantic video atomic plan persistence returned an invalid result.",
+            {"run_id": run_id},
         )
-    return rows
+    run = result.get("run")
+    persisted_takes = result.get("takes")
+    if not isinstance(run, Mapping) or not isinstance(persisted_takes, list):
+        raise StateTransitionError(
+            "Semantic video atomic plan persistence returned an invalid contract.",
+            {"run_id": run_id},
+        )
+    rows = [dict(take) for take in persisted_takes if isinstance(take, Mapping)]
+    if (
+        len(rows) != len(take_payloads)
+        or [int(take.get("take_index", -1)) for take in rows] != list(range(len(take_payloads)))
+        or any(int(take.get("attempt", 0)) != 1 for take in rows)
+    ):
+        raise StateTransitionError(
+            "Semantic video atomic plan persistence returned unexpected initial takes.",
+            {"run_id": run_id, "expected_rows": len(take_payloads), "affected_rows": len(rows)},
+        )
+    return dict(run), rows
 
 
 def append_approval(payload: Mapping[str, Any], *, client=None) -> dict[str, Any]:
@@ -430,10 +467,10 @@ __all__ = [
     "list_attempts",
     "load_semantic_video_context",
     "persist_accepted_operation",
+    "persist_semantic_video_plan",
     "persist_submission_intent",
     "persist_take_qa_artifacts",
     "release_run_lease",
-    "replace_initial_takes",
     "update_run",
     "fail_run",
 ]

@@ -146,10 +146,16 @@ def _install_repository(monkeypatch):
         state["run"]["revision"] += 1
         return deepcopy(state["run"])
 
-    def replace_initial_takes(run_id, takes):
+    def persist_semantic_video_plan(run_id, *, expected_revision, run_updates, takes):
         assert run_id == "run-1"
-        state["takes"] = [{**deepcopy(take), "id": f"take-{index + 1}", "run_id": run_id} for index, take in enumerate(takes)]
-        return deepcopy(state["takes"])
+        assert state["run"]["revision"] == expected_revision
+        state["run"].update(deepcopy(run_updates))
+        state["run"]["revision"] += 1
+        state["takes"] = [
+            {**deepcopy(take), "id": f"take-{index + 1}", "run_id": run_id}
+            for index, take in enumerate(takes)
+        ]
+        return deepcopy(state["run"]), deepcopy(state["takes"])
 
     def append_approval(payload):
         row = {**deepcopy(payload), "id": f"approval-{len(state['approvals']) + 1}"}
@@ -176,7 +182,7 @@ def _install_repository(monkeypatch):
     monkeypatch.setattr(handlers, "get_run_by_post", get_run_by_post)
     monkeypatch.setattr(handlers, "create_run", create_run)
     monkeypatch.setattr(handlers, "update_run", update_run)
-    monkeypatch.setattr(handlers, "replace_initial_takes", replace_initial_takes)
+    monkeypatch.setattr(handlers, "persist_semantic_video_plan", persist_semantic_video_plan)
     monkeypatch.setattr(handlers, "append_approval", append_approval)
     monkeypatch.setattr(handlers, "append_attempts", append_attempts, raising=False)
     monkeypatch.setattr(handlers, "cancel_pending_takes", cancel_pending_takes, raising=False)
@@ -187,13 +193,148 @@ def _install_repository(monkeypatch):
     return handlers, state, fake_storage
 
 
+def _seed_awaiting_paid_run(state, *, revision=0):
+    state["run"] = {
+        "id": "run-1",
+        "post_id": "post-1",
+        "batch_id": "batch-1",
+        "revision": revision,
+        "stage": "awaiting_paid_approval",
+    }
+
+
+def _create_plan_from_unenriched_candidate_flow(monkeypatch, client, handlers, state, storage):
+    state["context"]["reference"].pop("master")
+    for reference in [
+        *state["context"]["reference"]["actor_references"],
+        state["context"]["reference"]["location_reference"],
+    ]:
+        reference.pop("sha256", None)
+        reference.pop("byte_length", None)
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_shot_frame_candidates",
+        lambda **_kwargs: SimpleNamespace(
+            prompt_writer_output="Complete prompt writer result.",
+            composition_prompt="Complete composition prompt.",
+            candidates=[
+                SimpleNamespace(
+                    index=index,
+                    image_bytes=storage.master,
+                    mime_type="image/png",
+                    provider_model="gemini-3.1-flash-image",
+                )
+                for index in range(1, 4)
+            ],
+        ),
+        raising=False,
+    )
+    candidate_response = client.post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+    assert candidate_response.status_code == 200, candidate_response.text
+    assert all(
+        "sha256" in reference and "byte_length" in reference
+        for reference in [
+            *state["run"]["reference_snapshot"]["actor_references"],
+            state["run"]["reference_snapshot"]["location_reference"],
+        ]
+    )
+
+    master_response = client.post(
+        "/semantic-videos/posts/post-1/master-approve",
+        json={"candidate_index": 1, "expected_revision": 0},
+    )
+    assert master_response.status_code == 200, master_response.text
+
+    plan_response = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 1},
+    )
+    assert plan_response.status_code == 200, plan_response.text
+    return plan_response.json()["data"]
+
+
+def test_initial_approval_uses_persisted_enriched_reference_after_unenriched_candidate_flow(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    plan = _create_plan_from_unenriched_candidate_flow(
+        monkeypatch,
+        client,
+        handlers,
+        state,
+        storage,
+    )
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 2},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["stage"] == "generating"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["actor_identity", "ordered_source_uris", "script", "duration", "master_bytes"],
+)
+def test_initial_approval_rejects_every_fresh_source_mutation(monkeypatch, mutation):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    plan = _create_plan_from_unenriched_candidate_flow(
+        monkeypatch,
+        client,
+        handlers,
+        state,
+        storage,
+    )
+
+    if mutation == "actor_identity":
+        state["context"]["reference"]["actor_identity_id"] = "actor-2"
+    elif mutation == "ordered_source_uris":
+        actor_references = state["context"]["reference"]["actor_references"]
+        actor_references[0]["storage_uri"], actor_references[1]["storage_uri"] = (
+            actor_references[1]["storage_uri"],
+            actor_references[0]["storage_uri"],
+        )
+    elif mutation == "script":
+        state["context"]["post"]["seed_data"]["script"] = SCRIPT.replace(
+            "transparent",
+            "nachvollziehbar",
+        )
+    elif mutation == "duration":
+        state["context"]["batch"]["target_duration_seconds"] = 51
+    elif mutation == "master_bytes":
+        master_uri = state["run"]["master_snapshot"]["storage_uri"]
+        storage.objects[master_uri] = b"mutated-master-bytes"
+
+    approval_count = len(state["approvals"])
+    response = client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 2},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "state_transition_error"
+    assert len(state["approvals"]) == approval_count
+    assert state["run"]["stage"] == "awaiting_paid_approval"
+
+
 def test_free_plan_endpoint_persists_seven_take_plan_without_provider_calls(monkeypatch):
     _handlers, state, storage = _install_repository(monkeypatch)
     from app.main import app
 
+    _seed_awaiting_paid_run(state)
     response = TestClient(app, base_url="http://localhost").post(
         "/semantic-videos/posts/post-1/plan",
-        json={},
+        json={"expected_revision": 0},
     )
 
     assert response.status_code == 200, response.text
@@ -207,12 +348,129 @@ def test_free_plan_endpoint_persists_seven_take_plan_without_provider_calls(monk
     assert len(storage.download_calls) == 1
 
 
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "awaiting_script_approval",
+        "awaiting_reference_approval",
+        "generating",
+        "transcript_qa",
+        "identity_qa",
+        "voice_qa",
+        "retry_approval_required",
+        "acoustic_qa",
+        "composing",
+        "uploading",
+        "completed",
+        "failed",
+    ],
+)
+def test_plan_endpoint_rejects_every_stage_except_awaiting_paid_approval_without_mutation(
+    monkeypatch,
+    stage,
+):
+    _handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["run"] = {"id": "run-1", "post_id": "post-1", "revision": 4, "stage": stage}
+    original_run = deepcopy(state["run"])
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 4},
+    )
+
+    assert response.status_code == 409, response.text
+    assert storage.download_calls == []
+    assert state["run"] == original_run
+    assert state["takes"] == []
+
+
+def test_plan_endpoint_requires_an_existing_awaiting_paid_approval_run_without_mutation(monkeypatch):
+    _handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    )
+
+    assert response.status_code == 404, response.text
+    assert storage.download_calls == []
+    assert state["run"] is None
+    assert state["takes"] == []
+
+
+def test_plan_endpoint_persists_run_and_takes_through_one_atomic_query_call(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["run"] = {
+        "id": "run-1",
+        "post_id": "post-1",
+        "batch_id": "batch-1",
+        "revision": 4,
+        "stage": "awaiting_paid_approval",
+    }
+    atomic_calls = []
+    legacy_calls = []
+
+    def persist_plan(run_id, *, expected_revision, run_updates, takes):
+        atomic_calls.append(
+            {
+                "run_id": run_id,
+                "expected_revision": expected_revision,
+                "run_updates": deepcopy(run_updates),
+                "takes": deepcopy(takes),
+            }
+        )
+        state["run"].update(deepcopy(run_updates))
+        state["run"]["revision"] = expected_revision + 1
+        state["takes"] = [
+            {**deepcopy(take), "id": f"take-{index + 1}", "run_id": run_id}
+            for index, take in enumerate(takes)
+        ]
+        return deepcopy(state["run"]), deepcopy(state["takes"])
+
+    def legacy_update(*args, **kwargs):
+        legacy_calls.append(("update", args, kwargs))
+        state["run"].update(deepcopy(kwargs["updates"]))
+        state["run"]["revision"] = kwargs["expected_revision"] + 1
+        return deepcopy(state["run"])
+
+    def legacy_replace(run_id, takes):
+        legacy_calls.append(("replace", run_id, deepcopy(takes)))
+        state["takes"] = [
+            {**deepcopy(take), "id": f"take-{index + 1}", "run_id": run_id}
+            for index, take in enumerate(takes)
+        ]
+        return deepcopy(state["takes"])
+
+    monkeypatch.setattr(handlers, "persist_semantic_video_plan", persist_plan, raising=False)
+    monkeypatch.setattr(handlers, "update_run", legacy_update)
+    monkeypatch.setattr(handlers, "replace_initial_takes", legacy_replace, raising=False)
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 4},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(atomic_calls) == 1
+    assert atomic_calls[0]["run_id"] == "run-1"
+    assert atomic_calls[0]["expected_revision"] == 4
+    assert len(atomic_calls[0]["takes"]) == 7
+    assert legacy_calls == []
+
+
 def test_progress_endpoint_reports_persisted_generated_and_verified_counts(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
 
     client = TestClient(app, base_url="http://localhost")
-    assert client.post("/semantic-videos/posts/post-1/plan", json={}).status_code == 200
+    _seed_awaiting_paid_run(state)
+    assert client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).status_code == 200
     state["takes"][0]["submission_state"] = "completed"
     state["takes"][0]["transcript_result"] = {"passed": True}
 
@@ -231,11 +489,15 @@ def test_initial_approval_appends_exact_hash_and_moves_run_to_generating(monkeyp
     from app.main import app
 
     client = TestClient(app, base_url="http://localhost")
-    plan = client.post("/semantic-videos/posts/post-1/plan", json={}).json()["data"]
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
 
     response = client.post(
         "/semantic-videos/posts/post-1/approve",
-        json={"plan_hash": plan["plan_hash"], "expected_revision": 0, "reason": "Approved test plan"},
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1, "reason": "Approved test plan"},
     )
 
     assert response.status_code == 200, response.text
@@ -316,6 +578,116 @@ def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "awaiting_script_approval",
+        "awaiting_paid_approval",
+        "generating",
+        "transcript_qa",
+        "identity_qa",
+        "voice_qa",
+        "retry_approval_required",
+        "acoustic_qa",
+        "composing",
+        "uploading",
+        "completed",
+        "failed",
+    ],
+)
+def test_candidate_endpoint_rejects_every_unintended_existing_stage_before_external_calls(
+    monkeypatch,
+    stage,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    state["run"] = {"id": "run-1", "post_id": "post-1", "revision": 4, "stage": stage}
+    original_run = deepcopy(state["run"])
+    provider_calls = []
+
+    def fake_generate(**kwargs):
+        provider_calls.append(kwargs)
+        return SimpleNamespace(
+            prompt_writer_output="Complete prompt writer result.",
+            composition_prompt="Complete composition prompt.",
+            candidates=[
+                SimpleNamespace(
+                    index=index,
+                    image_bytes=f"candidate-{index}".encode(),
+                    mime_type="image/png",
+                    provider_model="gemini-3.1-flash-image",
+                )
+                for index in range(1, 4)
+            ],
+        )
+
+    monkeypatch.setattr(handlers, "generate_shot_frame_candidates", fake_generate, raising=False)
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 4},
+    )
+
+    assert response.status_code == 409, response.text
+    assert provider_calls == []
+    assert storage.download_calls == []
+    assert storage.upload_calls == []
+    assert state["run"] == original_run
+
+
+@pytest.mark.parametrize("supplied_revision", [None, 3])
+def test_candidate_endpoint_rejects_missing_or_stale_existing_revision_before_external_calls(
+    monkeypatch,
+    supplied_revision,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    state["run"] = {
+        "id": "run-1",
+        "post_id": "post-1",
+        "revision": 4,
+        "stage": "awaiting_reference_approval",
+    }
+    original_run = deepcopy(state["run"])
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_shot_frame_candidates",
+        lambda **kwargs: provider_calls.append(kwargs)
+        or SimpleNamespace(
+            prompt_writer_output="Complete prompt writer result.",
+            composition_prompt="Complete composition prompt.",
+            candidates=[
+                SimpleNamespace(
+                    index=index,
+                    image_bytes=f"candidate-{index}".encode(),
+                    mime_type="image/png",
+                    provider_model="gemini-3.1-flash-image",
+                )
+                for index in range(1, 4)
+            ],
+        ),
+        raising=False,
+    )
+    payload = {"candidate_count": 3}
+    if supplied_revision is not None:
+        payload["expected_revision"] = supplied_revision
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json=payload,
+    )
+
+    assert response.status_code == 409, response.text
+    assert provider_calls == []
+    assert storage.download_calls == []
+    assert storage.upload_calls == []
+    assert state["run"] == original_run
+
+
 def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -355,10 +727,14 @@ def test_initial_approval_rejects_stale_hash_and_changed_script(monkeypatch):
     from app.main import app
 
     client = TestClient(app, base_url="http://localhost")
-    plan = client.post("/semantic-videos/posts/post-1/plan", json={}).json()["data"]
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
     stale = client.post(
         "/semantic-videos/posts/post-1/approve",
-        json={"plan_hash": "0" * 64, "expected_revision": 0},
+        json={"plan_hash": "0" * 64, "expected_revision": 1},
     )
     assert stale.status_code == 409, stale.text
     assert state["approvals"] == []
@@ -366,7 +742,7 @@ def test_initial_approval_rejects_stale_hash_and_changed_script(monkeypatch):
     state["context"]["post"]["seed_data"]["script"] = SCRIPT.replace("transparent", "nachvollziehbar")
     changed = client.post(
         "/semantic-videos/posts/post-1/approve",
-        json={"plan_hash": plan["plan_hash"], "expected_revision": 0},
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
     )
     assert changed.status_code == 409, changed.text
     assert state["approvals"] == []
@@ -377,10 +753,14 @@ def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeyp
     from app.main import app
 
     client = TestClient(app, base_url="http://localhost")
-    plan = client.post("/semantic-videos/posts/post-1/plan", json={}).json()["data"]
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
     assert client.post(
         "/semantic-videos/posts/post-1/approve",
-        json={"plan_hash": plan["plan_hash"], "expected_revision": 0},
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
     ).status_code == 200
     state["run"]["stage"] = "retry_approval_required"
     for take in state["takes"]:
@@ -390,7 +770,7 @@ def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeyp
         "/semantic-videos/posts/post-1/retry-approve",
         json={
             "plan_hash": plan["plan_hash"],
-            "expected_revision": 1,
+            "expected_revision": 2,
             "failed_take_indexes": [1, 4],
             "reason": "Retry exact QA failures",
         },
@@ -409,7 +789,7 @@ def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeyp
         "/semantic-videos/posts/post-1/retry-approve",
         json={
             "plan_hash": plan["plan_hash"],
-            "expected_revision": 2,
+            "expected_revision": 3,
             "failed_take_indexes": [0],
         },
     )
@@ -421,10 +801,11 @@ def test_cancel_only_accepts_nonterminal_run_and_cancels_pending_takes(monkeypat
     from app.main import app
 
     client = TestClient(app, base_url="http://localhost")
-    client.post("/semantic-videos/posts/post-1/plan", json={})
+    _seed_awaiting_paid_run(state)
+    client.post("/semantic-videos/posts/post-1/plan", json={"expected_revision": 0})
     response = client.post(
         "/semantic-videos/posts/post-1/cancel",
-        json={"expected_revision": 0, "reason": "Operator cancelled"},
+        json={"expected_revision": 1, "reason": "Operator cancelled"},
     )
     assert response.status_code == 200, response.text
     assert response.json()["data"]["stage"] == "failed"
@@ -433,7 +814,7 @@ def test_cancel_only_accepts_nonterminal_run_and_cancels_pending_takes(monkeypat
 
     second = client.post(
         "/semantic-videos/posts/post-1/cancel",
-        json={"expected_revision": 1, "reason": "Again"},
+        json={"expected_revision": 2, "reason": "Again"},
     )
     assert second.status_code == 409, second.text
 
@@ -482,6 +863,50 @@ class _RecordingClient:
         call = {"kind": "rpc", "function": function_name, "payload": deepcopy(payload)}
         self.calls.append(call)
         return _RecordingQuery(self, call)
+
+
+def test_persist_semantic_video_plan_query_uses_one_rpc_and_returns_exact_contract():
+    from app.features.semantic_videos.queries import persist_semantic_video_plan
+
+    run_update = {"stage": "awaiting_paid_approval", "plan_hash": "a" * 64}
+    initial_takes = [{"take_index": 0, "attempt": 1, "request_hash": "b" * 64}]
+    persisted_run = {
+        "id": "00000000-0000-0000-0000-000000000021",
+        "revision": 5,
+        "stage": "awaiting_paid_approval",
+        "plan_hash": "a" * 64,
+    }
+    persisted_takes = [
+        {
+            "id": "00000000-0000-0000-0000-000000000031",
+            "run_id": persisted_run["id"],
+            **initial_takes[0],
+        }
+    ]
+    client = _RecordingClient({"run": persisted_run, "takes": persisted_takes})
+
+    run, takes = persist_semantic_video_plan(
+        persisted_run["id"],
+        expected_revision=4,
+        run_updates=run_update,
+        takes=initial_takes,
+        client=client,
+    )
+
+    assert run == persisted_run
+    assert takes == persisted_takes
+    assert client.calls == [
+        {
+            "kind": "rpc",
+            "function": "persist_semantic_video_plan",
+            "payload": {
+                "p_run_id": persisted_run["id"],
+                "p_expected_revision": 4,
+                "p_run_update": run_update,
+                "p_initial_takes": initial_takes,
+            },
+        }
+    ]
 
 
 def test_query_helpers_persist_intent_operation_and_qa_with_affected_row_validation():

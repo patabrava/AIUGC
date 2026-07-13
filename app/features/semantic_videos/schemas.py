@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class PlanCreateRequest(BaseModel):
-    expected_revision: Optional[int] = Field(default=None, ge=0)
+    expected_revision: int = Field(ge=0)
     price_per_provider_second_usd: Decimal = Field(default=Decimal("0.40"), ge=0)
     base_seed: int = Field(default=240713, ge=0)
     resolution: str = Field(default="1080p", min_length=1, max_length=32)
@@ -80,6 +80,7 @@ class ProgressResponse(BaseModel):
 
 class CandidateGenerationRequest(BaseModel):
     candidate_count: int = Field(default=3, ge=1, le=4)
+    expected_revision: Optional[int] = Field(default=None, ge=0)
 
 
 class CandidateResponse(BaseModel):

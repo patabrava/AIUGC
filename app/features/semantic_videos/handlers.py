@@ -24,7 +24,7 @@ from app.features.semantic_videos.queries import (
     list_approvals as list_approvals,
     list_attempts,
     load_semantic_video_context,
-    replace_initial_takes,
+    persist_semantic_video_plan,
     update_run,
 )
 from app.features.semantic_videos.schemas import (
@@ -183,6 +183,15 @@ def _reference_snapshot(context: dict[str, Any], run: dict[str, Any] | None = No
     return reference
 
 
+def _reference_source_identity(reference: dict[str, Any]) -> dict[str, Any]:
+    actor_rows, location_row = _ordered_reference_rows(reference)
+    return {
+        "actor_identity_id": str(reference.get("actor_identity_id") or ""),
+        "actor_reference_uris": [str(row["storage_uri"]) for row in actor_rows],
+        "location_reference_uri": str(location_row["storage_uri"]),
+    }
+
+
 def _plan_response(run: dict[str, Any], takes: list[dict[str, Any]]) -> PlanResponse:
     snapshot = run.get("plan_snapshot") if isinstance(run.get("plan_snapshot"), dict) else {}
     return PlanResponse(
@@ -216,6 +225,20 @@ def generate_candidates(
     payload: CandidateGenerationRequest,
     request: Request,
 ):
+    existing = get_run_by_post(post_id)
+    if existing:
+        revision = int(existing.get("revision") or 0)
+        if str(existing.get("stage") or "") != "awaiting_reference_approval":
+            raise StateTransitionError(
+                "Semantic video candidates cannot replace a run in its current stage.",
+                {"stage": existing.get("stage")},
+            )
+        if payload.expected_revision is None or payload.expected_revision != revision:
+            raise StateTransitionError(
+                "Semantic video candidate generation revision is stale.",
+                {"expected_revision": payload.expected_revision, "actual_revision": revision},
+            )
+
     context = load_semantic_video_context(post_id)
     script, _script_snapshot = _approved_script(context["post"])
     reference = deepcopy(context.get("reference") or {})
@@ -292,16 +315,10 @@ def generate_candidates(
         reference_snapshot=persisted_reference,
         master_snapshot=master_snapshot,
     )
-    existing = get_run_by_post(post_id)
     if existing:
-        if str(existing.get("stage") or "") in {"generating", "completed", "failed"}:
-            raise StateTransitionError(
-                "Semantic video candidates cannot replace a run in its current stage.",
-                {"stage": existing.get("stage")},
-            )
         run = update_run(
             str(existing["id"]),
-            expected_revision=int(existing.get("revision") or 0),
+            expected_revision=int(payload.expected_revision),
             updates=run_payload,
         )
     else:
@@ -389,13 +406,20 @@ def approve_master(post_id: str, payload: MasterApprovalRequest, request: Reques
 
 @router.post("/{post_id}/plan", response_model=SuccessResponse)
 def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request):
-    context = load_semantic_video_context(post_id)
     existing = get_run_by_post(post_id)
-    if existing and payload.expected_revision is not None and int(existing.get("revision") or 0) != payload.expected_revision:
+    if not existing:
+        raise NotFoundError("Semantic video run not found.", {"post_id": post_id})
+    if str(existing.get("stage") or "") != "awaiting_paid_approval":
+        raise StateTransitionError(
+            "Semantic video run is not awaiting paid plan creation.",
+            {"stage": existing.get("stage")},
+        )
+    if int(existing.get("revision") or 0) != payload.expected_revision:
         raise StateTransitionError(
             "Semantic video plan revision is stale.",
             {"expected_revision": payload.expected_revision, "actual_revision": existing.get("revision")},
         )
+    context = load_semantic_video_context(post_id)
     reference = _reference_snapshot(context, existing)
     master = reference.get("master")
     if not isinstance(master, dict) or not str(master.get("storage_uri") or "").strip():
@@ -413,15 +437,12 @@ def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request)
         base_seed=payload.base_seed,
         resolution=payload.resolution,
     )
-    if existing:
-        run = update_run(
-            str(existing["id"]),
-            expected_revision=int(existing.get("revision") or 0),
-            updates=compiled.run_payload,
-        )
-    else:
-        run = create_run(compiled.run_payload)
-    takes = replace_initial_takes(str(run["id"]), compiled.take_payloads)
+    run, takes = persist_semantic_video_plan(
+        str(existing["id"]),
+        expected_revision=payload.expected_revision,
+        run_updates=compiled.run_payload,
+        takes=compiled.take_payloads,
+    )
     return SuccessResponse(data=_plan_response(run, takes).model_dump(mode="json"))
 
 
@@ -477,18 +498,82 @@ def _assert_plan_sources_current(
     request: Request,
 ) -> None:
     context = load_semantic_video_context(post_id)
-    reference = _reference_snapshot(context)
-    if not isinstance(reference.get("master"), dict):
-        master = run.get("master_snapshot")
-        if isinstance(master, dict):
-            reference["master"] = deepcopy(master)
-    master = reference.get("master")
+    current_reference = _reference_snapshot(context)
+    persisted_reference = run.get("reference_snapshot")
+    if not isinstance(persisted_reference, dict) or not persisted_reference:
+        raise StateTransitionError("Semantic video persisted reference snapshot is no longer available.")
+    try:
+        current_source_identity = _reference_source_identity(current_reference)
+        persisted_source_identity = _reference_source_identity(persisted_reference)
+    except ValidationError as exc:
+        raise StateTransitionError("Semantic video reference sources changed after candidate generation.") from exc
+    if current_source_identity != persisted_source_identity:
+        raise StateTransitionError(
+            "Semantic video reference sources changed after candidate generation.",
+            {
+                "persisted_source_identity": persisted_source_identity,
+                "current_source_identity": current_source_identity,
+            },
+        )
+
+    try:
+        _script, current_script_snapshot = _approved_script(context["post"])
+    except ValidationError as exc:
+        raise StateTransitionError("Semantic video approved script changed after planning.") from exc
+    current_script_hash = _canonical_hash(current_script_snapshot)
+    if current_script_hash != str(run.get("script_hash") or ""):
+        raise StateTransitionError(
+            "Semantic video approved script changed after planning.",
+            {"persisted_script_hash": run.get("script_hash"), "current_script_hash": current_script_hash},
+        )
+
+    try:
+        current_duration_contract = build_semantic_duration_contract(
+            context["batch"].get("target_duration_seconds")
+        )
+    except ValidationError as exc:
+        raise StateTransitionError("Semantic video duration contract changed after planning.") from exc
+    if current_duration_contract.contract_hash != str(run.get("duration_contract_hash") or ""):
+        raise StateTransitionError(
+            "Semantic video duration contract changed after planning.",
+            {
+                "persisted_duration_contract_hash": run.get("duration_contract_hash"),
+                "current_duration_contract_hash": current_duration_contract.contract_hash,
+            },
+        )
+
+    master = run.get("master_snapshot")
     if not isinstance(master, dict) or not str(master.get("storage_uri") or "").strip():
         raise StateTransitionError("Semantic video approved master is no longer available.")
+    current_master = current_reference.get("master")
+    if (
+        isinstance(current_master, dict)
+        and str(current_master.get("storage_uri") or "").strip()
+        and str(current_master["storage_uri"]) != str(master["storage_uri"])
+    ):
+        raise StateTransitionError("Semantic video approved master source changed after planning.")
     master_bytes = get_storage_client().download_video(
         video_url=str(master["storage_uri"]),
         correlation_id=str(getattr(request.state, "correlation_id", "semantic-approval")),
     )
+    actual_master_hash = sha256(master_bytes).hexdigest()
+    expected_master_hash = str(run.get("master_hash") or master.get("sha256") or "")
+    if (
+        actual_master_hash != expected_master_hash
+        or int(master.get("byte_length") or -1) != len(master_bytes)
+    ):
+        raise StateTransitionError(
+            "Semantic video approved master bytes changed after planning.",
+            {
+                "expected_sha256": expected_master_hash or None,
+                "actual_sha256": actual_master_hash,
+                "expected_bytes": master.get("byte_length"),
+                "actual_bytes": len(master_bytes),
+            },
+        )
+
+    reference = deepcopy(persisted_reference)
+    reference["master"] = deepcopy(master)
     initial_takes = [take for take in takes if int(take.get("attempt") or 1) == 1]
     if not initial_takes:
         raise StateTransitionError("Semantic video plan has no persisted initial takes.")
