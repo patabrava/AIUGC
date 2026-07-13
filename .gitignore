@@ -71,5 +71,8 @@ agents/Deep Research Flow Test Final.md
 # Generated prompt scratchpads (local)
 app/features/topics/prompt_data/prompt1_batch.txt
 
+# Paid live proof evidence stays local (manifest, operation ids, and generated media)
+output/semantic-ugc-live-proof/
+
 # Worktrees
 .worktrees/

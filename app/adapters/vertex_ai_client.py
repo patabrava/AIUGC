@@ -92,6 +92,9 @@ class VertexAIClient:
         reference_images: Optional[list[Dict[str, str]]] = None,
         negative_prompt: Optional[str] = None,
         seed: Optional[int] = None,
+        sample_count: Optional[int] = None,
+        generate_audio: Optional[bool] = None,
+        resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         model_name = model or (_DEFAULT_VERTEX_FAST_MODEL if use_fast_model else _DEFAULT_VERTEX_MODEL)
@@ -104,6 +107,9 @@ class VertexAIClient:
             reference_images=reference_images,
             negative_prompt=negative_prompt,
             seed=seed,
+            sample_count=sample_count,
+            generate_audio=generate_audio,
+            resolution=resolution,
         )
 
         self._log_request(
@@ -136,6 +142,9 @@ class VertexAIClient:
         use_fast_model: bool = False,
         negative_prompt: Optional[str] = None,
         seed: Optional[int] = None,
+        sample_count: Optional[int] = None,
+        generate_audio: Optional[bool] = None,
+        resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         model_name = model or (_DEFAULT_VERTEX_FAST_MODEL if use_fast_model else _DEFAULT_VERTEX_MODEL)
@@ -151,6 +160,9 @@ class VertexAIClient:
             image_mime_type=mime_type,
             negative_prompt=negative_prompt,
             seed=seed,
+            sample_count=sample_count,
+            generate_audio=generate_audio,
+            resolution=resolution,
         )
 
         self._log_request(
@@ -323,6 +335,9 @@ class VertexAIClient:
         reference_images: Optional[list[Dict[str, str]]] = None,
         negative_prompt: Optional[str] = None,
         seed: Optional[int] = None,
+        sample_count: Optional[int] = None,
+        generate_audio: Optional[bool] = None,
+        resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
         instance: Dict[str, Any] = {"prompt": prompt}
         if reference_images and (image_base64 or image_mime_type):
@@ -351,6 +366,19 @@ class VertexAIClient:
             "aspectRatio": aspect_ratio,
             "durationSeconds": duration_seconds,
         }
+        if sample_count is not None:
+            if isinstance(sample_count, bool) or not 1 <= sample_count <= 4:
+                raise ValidationError("Vertex Veo sample count must be an integer from 1 to 4.")
+            parameters["sampleCount"] = sample_count
+        if generate_audio is not None:
+            if not isinstance(generate_audio, bool):
+                raise ValidationError("Vertex Veo generate audio flag must be boolean.")
+            parameters["generateAudio"] = generate_audio
+        if resolution is not None:
+            normalized_resolution = str(resolution).strip().lower()
+            if normalized_resolution not in {"720p", "1080p", "4k"}:
+                raise ValidationError("Vertex Veo resolution is unsupported.")
+            parameters["resolution"] = normalized_resolution
         if output_gcs_uri:
             parameters["storageUri"] = output_gcs_uri
         if negative_prompt:

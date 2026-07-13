@@ -689,6 +689,9 @@ class SemanticVideoWorker:
                     model=str(request_contract.get("provider_model") or take.get("provider_model") or ""),
                     negative_prompt=str(request_contract.get("negative_prompt") or ""),
                     seed=int(request_contract["seed"]) if request_contract.get("seed") is not None else None,
+                    sample_count=1,
+                    generate_audio=True,
+                    resolution=str(request_contract.get("resolution") or run.get("resolution") or "720p"),
                 )
                 operation_id = str(result.get("operation_id") or "").strip()
                 if not operation_id:

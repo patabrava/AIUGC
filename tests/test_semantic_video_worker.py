@@ -64,6 +64,7 @@ def _takes(count: int = 7) -> tuple[bytes, list[dict]]:
                     "aspect_ratio": "9:16",
                     "provider_duration_seconds": 8,
                     "provider_model": "veo-3.1-generate-001",
+                    "resolution": "1080p",
                     "seed": 1000 + index,
                     "shot_sha256": shot.output_sha256,
                 },
@@ -281,6 +282,9 @@ def test_worker_persists_intent_before_each_provider_call_and_acceptance_immedia
 
     assert result.action == "submitted"
     assert len(vertex.submit_calls) == 2
+    assert all(call["sample_count"] == 1 for call in vertex.submit_calls)
+    assert all(call["generate_audio"] is True for call in vertex.submit_calls)
+    assert all(call["resolution"] == "1080p" for call in vertex.submit_calls)
     assert [event[0] for event in repo.events] == [
         "claim",
         "reserve",
