@@ -304,6 +304,72 @@ def test_provider_failure_uses_distinct_fact_aware_contract_safe_fallback(second
     assert result.provenance["source"] == "fallback"
 
 
+@pytest.mark.parametrize("seconds", range(8, 61))
+def test_short_provider_failure_fallback_is_contract_safe_at_every_duration(seconds):
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Titel",
+        cta="",
+        facts=["Fakt"],
+        requested_duration_seconds=seconds,
+        llm_client=_UnavailableLLM(),
+    )
+    contract = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=seconds,
+    )
+    sentences = _sentences(result.script)
+
+    assert contract.minimum_words <= script_word_count(result.script) <= contract.maximum_words
+    assert len(plan_editorial_beats(result.script)) == contract.minimum_take_count
+    assert len(sentences) == contract.minimum_take_count
+    assert len(sentences) == len(set(sentences))
+    assert len({_normalized_template_signature(sentence) for sentence in sentences}) == len(
+        sentences
+    )
+    assert all(sentence.endswith((".", "!", "?")) for sentence in sentences)
+    assert all("Fakt Fakt" not in sentence for sentence in sentences)
+    assert "Fakt" in result.script
+    assert result.provenance["source"] == "fallback"
+
+
+def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    condition = (
+        "der Mobilitätsservice wegen hoher Auslastung nicht rechtzeitig gebucht wird"
+    )
+    consequence = (
+        "Dann kann die notwendige Unterstützung beim Einsteigen und Umsteigen "
+        "am Reisetag fehlen"
+    )
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Bahnreisen",
+        cta="Speichere dir den Tipp.",
+        facts=[f"Wenn {condition}, {consequence}."],
+        requested_duration_seconds=50,
+        llm_client=_UnavailableLLM(),
+    )
+    beats = plan_editorial_beats(result.script)
+
+    assert condition in result.script
+    assert consequence in result.script
+    assert len(beats) == 7
+    assert all(beat.text.endswith((".", "!", "?")) for beat in beats)
+    assert all(
+        not re.search(r"\bWenn\b", beat.text)
+        or re.search(r"\bdann\b.+\bfehlen\b", beat.text, re.IGNORECASE)
+        for beat in beats
+    )
+
+
 def test_semantic_prompt_rejects_unknown_post_family():
     with pytest.raises(ValueError, match="post_type"):
         build_semantic_script_prompt(

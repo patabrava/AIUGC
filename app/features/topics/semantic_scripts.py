@@ -261,7 +261,7 @@ def _fallback_action_coda(index: int, word_count: int) -> list[str]:
         return []
     verb, noun, adverb = _FALLBACK_ACTIONS[index]
     variants = {
-        1: [adverb],
+        1: [verb],
         2: [verb, adverb],
         3: [verb, noun, adverb],
         4: [verb, "alle", noun, adverb],
@@ -278,10 +278,110 @@ def _fallback_action_coda(index: int, word_count: int) -> list[str]:
             "besonders",
             adverb,
         ],
+        9: [
+            verb,
+            "deine",
+            "nächsten",
+            "sicheren",
+            noun,
+            "deshalb",
+            adverb,
+            "und",
+            "bewusst",
+        ],
+        10: [
+            verb,
+            "deine",
+            "nächsten",
+            "sicheren",
+            noun,
+            "deshalb",
+            "jetzt",
+            adverb,
+            "und",
+            "bewusst",
+        ],
+        11: [
+            verb,
+            "deine",
+            "nächsten",
+            "sicheren",
+            noun,
+            "deshalb",
+            "jetzt",
+            "besonders",
+            adverb,
+            "und",
+            "bewusst",
+        ],
+        12: [
+            verb,
+            "deine",
+            "nächsten",
+            "sicheren",
+            noun,
+            "deshalb",
+            "jetzt",
+            "besonders",
+            adverb,
+            "und",
+            "stets",
+            "bewusst",
+        ],
+        13: [
+            verb,
+            "deine",
+            "nächsten",
+            "sicheren",
+            noun,
+            "deshalb",
+            "jetzt",
+            "besonders",
+            adverb,
+            "mit",
+            "ruhigem",
+            "klarem",
+            "Fokus",
+        ],
     }
     if word_count not in variants:
-        raise ValueError("Semantic UGC fallback coda must contain at most eight words.")
+        raise ValueError("Semantic UGC fallback coda cannot fit the requested block.")
     return variants[word_count]
+
+
+def _fallback_fact_statements(facts: tuple[str, ...]) -> list[list[str]]:
+    statements: list[list[str]] = []
+    for fact in facts:
+        words = _WORD_PATTERN.findall(fact)
+        normalized_words = [word.casefold() for word in words]
+        if normalized_words[:1] == ["wenn"] and "dann" in normalized_words[1:]:
+            then_index = normalized_words.index("dann", 1)
+            condition = words[1:then_index]
+            consequence = words[then_index + 1 :]
+            if condition and consequence:
+                statements.extend(
+                    (
+                        ["Die", "Bedingung", "ist,", "dass", *condition],
+                        [words[then_index], *consequence],
+                    )
+                )
+                continue
+        if words:
+            statements.append(words)
+    return statements
+
+
+def _select_complete_fallback_statement(
+    statements: Sequence[Sequence[str]],
+    *,
+    start_index: int,
+    maximum_words: int,
+) -> list[str]:
+    for offset in range(len(statements)):
+        statement = list(statements[(start_index + offset) % len(statements)])
+        if len(statement) <= maximum_words:
+            return statement
+    return ["Klare", "Vorbereitung", "erleichtert", "deinen", "nächsten", "Schritt"]
 
 
 def _build_fallback_script(
@@ -302,25 +402,21 @@ def _build_fallback_script(
     if not source_words:
         source_words = ["Klare", "Vorbereitung", "erleichtert", "deinen", "nächsten", "Schritt"]
 
-    fact_word_sets = []
-    for fact in facts:
-        words = _WORD_PATTERN.findall(fact)
-        if words:
-            fact_word_sets.append(words)
+    fact_word_sets = _fallback_fact_statements(facts)
     if not fact_word_sets:
         fact_word_sets = [source_words]
     sentences = []
     for index, target_words in enumerate(block_word_counts):
         prefix = list(_FALLBACK_PREFIXES[index])
-        fact_words = fact_word_sets[index % len(fact_word_sets)]
         available_content_words = target_words - len(prefix)
         if available_content_words <= 0:
             raise ValueError("Semantic UGC fallback block has no room for fact content.")
-        content = fact_words[:available_content_words]
+        content = _select_complete_fallback_statement(
+            fact_word_sets,
+            start_index=index,
+            maximum_words=available_content_words,
+        )
         coda_word_count = available_content_words - len(content)
-        if coda_word_count > 8:
-            content.extend(source_words[: coda_word_count - 8])
-            coda_word_count = available_content_words - len(content)
         coda = _fallback_action_coda(index, coda_word_count)
         sentence = f"{' '.join(prefix)}: {' '.join(content)}"
         if coda:
