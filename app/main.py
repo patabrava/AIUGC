@@ -23,7 +23,11 @@ from app.core.logging import configure_logging, get_logger, set_correlation_id
 from app.core.errors import FlowForgeException, ErrorResponse, error_code_for_status
 from app.adapters.supabase_client import get_supabase
 from app.features.batches.handlers import router as batches_router
-from app.features.topics.handlers import recover_stalled_batches, router as topics_router
+from app.features.topics.handlers import (
+    find_recoverable_stalled_batch_ids,
+    router as topics_router,
+    schedule_recovered_batch_discovery,
+)
 from app.features.topics.hub import recover_stalled_topic_research_runs
 from app.features.topics.queries import get_topic_research_cron_monitoring
 from app.features.posts.handlers import router as posts_router
@@ -156,7 +160,19 @@ async def lifespan(app: FastAPI):
 async def _run_startup_recovery_checks() -> None:
     """Run optional recovery scans without blocking ASGI startup/liveness."""
     try:
-        recovered_batches = await asyncio.to_thread(recover_stalled_batches, limit=1, max_age_hours=6)
+        recoverable_batch_ids = await asyncio.to_thread(
+            find_recoverable_stalled_batch_ids,
+            limit=1,
+            max_age_hours=6,
+        )
+        recovered_batches = [
+            batch_id
+            for batch_id in recoverable_batch_ids
+            if schedule_recovered_batch_discovery(
+                batch_id,
+                reason="startup_recovery",
+            )
+        ]
     except Exception as exc:
         recovered_batches = []
         logger.warning("startup_batch_recovery_failed", error=str(exc))

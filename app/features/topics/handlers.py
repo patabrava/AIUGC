@@ -1150,14 +1150,38 @@ async def _run_batch_discovery_task(batch_id: str) -> None:
             _clear_discovery_task(batch_id, task)
 
 
-def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
+def _claim_batch_discovery_slot(batch_id: str, *, reason: str) -> bool:
     with _SEEDING_PROGRESS_LOCK:
         task = _DISCOVERY_TASKS.get(batch_id)
         if task and not task.done():
             logger.info("batch_autoseed_already_active", batch_id=batch_id, reason=reason)
             return False
-        # Mark a sentinel so concurrent callers see the slot as taken
         _DISCOVERY_TASKS[batch_id] = None  # type: ignore[assignment]
+    return True
+
+
+def _release_claimed_batch_discovery_slot(batch_id: str) -> None:
+    with _SEEDING_PROGRESS_LOCK:
+        if _DISCOVERY_TASKS.get(batch_id) is None:
+            _DISCOVERY_TASKS.pop(batch_id, None)
+
+
+def _start_claimed_batch_discovery(batch_id: str, *, reason: str) -> bool:
+    coroutine = _run_batch_discovery_task(batch_id)
+    try:
+        task = asyncio.create_task(coroutine)
+    except Exception:
+        coroutine.close()
+        _release_claimed_batch_discovery_slot(batch_id)
+        raise
+    _mark_discovery_task(batch_id, task)
+    logger.info("batch_autoseed_scheduled", batch_id=batch_id, reason=reason)
+    return True
+
+
+def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
+    if not _claim_batch_discovery_slot(batch_id, reason=reason):
+        return False
 
     batch = get_batch_by_id(batch_id)
     if _batch_has_manual_drafts(batch_id):
@@ -1167,9 +1191,7 @@ def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
             state=batch.get("state"),
             reason=reason,
         )
-        with _SEEDING_PROGRESS_LOCK:
-            if _DISCOVERY_TASKS.get(batch_id) is None:
-                _DISCOVERY_TASKS.pop(batch_id, None)
+        _release_claimed_batch_discovery_slot(batch_id)
         return False
     if batch["state"] != BatchState.S1_SETUP.value:
         logger.info(
@@ -1178,25 +1200,26 @@ def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
             state=batch["state"],
             reason=reason,
         )
-        with _SEEDING_PROGRESS_LOCK:
-            if _DISCOVERY_TASKS.get(batch_id) is None:
-                _DISCOVERY_TASKS.pop(batch_id, None)
+        _release_claimed_batch_discovery_slot(batch_id)
         return False
 
-    task = asyncio.create_task(_run_batch_discovery_task(batch_id))
-    _mark_discovery_task(batch_id, task)
-    logger.info("batch_autoseed_scheduled", batch_id=batch_id, reason=reason)
-    return True
+    return _start_claimed_batch_discovery(batch_id, reason=reason)
 
 
-def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]:
-    recovered: List[str] = []
+def find_recoverable_stalled_batch_ids(
+    limit: int = 1,
+    max_age_hours: int = 6,
+) -> List[str]:
+    """Scan synchronously for recent empty setup batches eligible for recovery."""
+    eligible_batch_ids: List[str] = []
     batches, _ = list_batches(archived=False, limit=max(limit * 10, 25), offset=0)
     newest_allowed_created_at = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
     for batch in batches:
-        if len(recovered) >= limit:
+        if len(eligible_batch_ids) >= limit:
             break
         if batch["state"] != BatchState.S1_SETUP.value:
+            continue
+        if is_manual_creation_mode(batch.get("creation_mode")):
             continue
         batch_id = batch["id"]
         created_at = _parse_utc_timestamp(batch.get("created_at"))
@@ -1207,6 +1230,23 @@ def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]
         progress = get_seeding_progress(batch_id)
         if progress and progress.get("stage") not in {"failed", "completed"}:
             continue
+        eligible_batch_ids.append(batch_id)
+    return eligible_batch_ids
+
+
+def schedule_recovered_batch_discovery(batch_id: str, *, reason: str) -> bool:
+    """Schedule a batch already validated by the synchronous recovery scan."""
+    if not _claim_batch_discovery_slot(batch_id, reason=reason):
+        return False
+    return _start_claimed_batch_discovery(batch_id, reason=reason)
+
+
+def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]:
+    recovered: List[str] = []
+    for batch_id in find_recoverable_stalled_batch_ids(
+        limit=limit,
+        max_age_hours=max_age_hours,
+    ):
         if schedule_batch_discovery(batch_id, reason="startup_recovery"):
             recovered.append(batch_id)
     return recovered

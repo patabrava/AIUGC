@@ -71,7 +71,11 @@ def test_app_lifespan_does_not_eagerly_create_supabase_client(monkeypatch):
         raise AssertionError("get_supabase should not be called during startup")
 
     monkeypatch.setattr(main_module, "get_supabase", _fail_if_called)
-    monkeypatch.setattr(main_module, "recover_stalled_batches", lambda **kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "find_recoverable_stalled_batch_ids",
+        lambda **kwargs: [],
+    )
     monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: [])
 
     async def _run():
@@ -93,7 +97,11 @@ def test_app_lifespan_can_disable_startup_database_recovery(monkeypatch):
 
     monkeypatch.setenv("DISABLE_STARTUP_RECOVERY_CHECKS", "true")
     monkeypatch.setenv("DISABLE_BACKGROUND_SCHEDULERS", "true")
-    monkeypatch.setattr(main_module, "recover_stalled_batches", lambda **kwargs: _called("batch_recovery"))
+    monkeypatch.setattr(
+        main_module,
+        "find_recoverable_stalled_batch_ids",
+        lambda **kwargs: _called("batch_recovery"),
+    )
     monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: _called("topic_recovery"))
     monkeypatch.setattr(main_module, "get_topic_research_cron_monitoring", lambda: _called("cron_monitoring"))
 
@@ -105,6 +113,87 @@ def test_app_lifespan_can_disable_startup_database_recovery(monkeypatch):
 
     assert asyncio.run(_run()) is True
     assert calls == {"batch_recovery": 0, "topic_recovery": 0, "cron_monitoring": 0}
+
+
+def test_startup_recovery_schedules_semantic_discovery_on_main_event_loop(monkeypatch):
+    import asyncio
+    import gc
+    import threading
+    import warnings
+    from datetime import datetime, timezone
+
+    from app.features.topics import handlers as topic_handlers
+
+    batch_id = "semantic-threaded-recovery"
+    batch = {
+        "id": batch_id,
+        "brand": "AYRA",
+        "state": "S1_SETUP",
+        "creation_mode": "semantic_ugc",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "post_type_counts": {"value": 1, "lifestyle": 0, "product": 0},
+        "target_duration_seconds": 50,
+        "target_length_tier": None,
+    }
+    scan_thread_ids = []
+    discovery_thread_ids = []
+    discovery_loops = []
+
+    def fake_list_batches(*, archived, limit, offset):
+        scan_thread_ids.append(threading.get_ident())
+        return [batch], 1
+
+    monkeypatch.setattr(topic_handlers, "list_batches", fake_list_batches)
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", lambda _batch_id: batch)
+    monkeypatch.setattr(topic_handlers, "get_posts_by_batch", lambda _batch_id: [])
+    monkeypatch.setattr(topic_handlers, "get_seeding_progress", lambda _batch_id: None)
+    monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: [])
+    monkeypatch.setattr(main_module, "get_topic_research_cron_monitoring", lambda: {})
+
+    async def fake_discover_topics_for_batch(recovered_batch_id):
+        discovery_thread_ids.append(threading.get_ident())
+        discovery_loops.append(asyncio.get_running_loop())
+        return {
+            "batch_id": recovered_batch_id,
+            "posts_created": 1,
+            "state": "S2_SEEDED",
+            "topics": [],
+        }
+
+    monkeypatch.setattr(
+        topic_handlers,
+        "discover_topics_for_batch",
+        fake_discover_topics_for_batch,
+    )
+
+    async def _run():
+        running_loop = asyncio.get_running_loop()
+        main_thread_id = threading.get_ident()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RuntimeWarning)
+            await main_module._run_startup_recovery_checks()
+            await asyncio.sleep(0)
+            gc.collect()
+        return running_loop, main_thread_id, caught
+
+    topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+    try:
+        running_loop, main_thread_id, caught = asyncio.run(_run())
+    finally:
+        topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+
+    unawaited = [
+        warning
+        for warning in caught
+        if issubclass(warning.category, RuntimeWarning)
+        and "was never awaited" in str(warning.message)
+    ]
+    assert scan_thread_ids and all(
+        thread_id != main_thread_id for thread_id in scan_thread_ids
+    )
+    assert discovery_thread_ids == [main_thread_id]
+    assert discovery_loops == [running_loop]
+    assert unawaited == []
 
 
 def test_database_dependency_errors_render_html_for_browser_gets():
@@ -198,7 +287,11 @@ def test_app_lifespan_logs_google_ai_context_fingerprint(monkeypatch):
             recorded.append((event, data))
 
     monkeypatch.setattr(main_module, "logger", FakeLogger())
-    monkeypatch.setattr(main_module, "recover_stalled_batches", lambda **kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "find_recoverable_stalled_batch_ids",
+        lambda **kwargs: [],
+    )
     monkeypatch.setattr(main_module, "recover_stalled_topic_research_runs", lambda **kwargs: [])
     monkeypatch.setattr(main_module.settings, "gemini_api_key", "test-google-key")
 
