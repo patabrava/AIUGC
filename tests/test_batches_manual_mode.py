@@ -153,6 +153,61 @@ def test_automated_batch_request_still_accepts_type_counts():
     assert payload.post_type_counts.total == 3
 
 
+@pytest.mark.parametrize(
+    "creation_mode",
+    [
+        "automated",
+        "manual",
+        "manual_character_consistency",
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+    ],
+)
+@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
+def test_every_legacy_batch_mode_keeps_fixed_duration_tiers(creation_mode, target_length_tier):
+    request = {
+        "brand": "ACME",
+        "creation_mode": creation_mode,
+        "target_length_tier": target_length_tier,
+    }
+    if creation_mode in {"manual", "manual_character_consistency"}:
+        request["manual_post_count"] = 1
+    else:
+        request["post_type_counts"] = {"value": 1, "lifestyle": 0, "product": 0}
+
+    payload = CreateBatchRequest.model_validate(request)
+
+    assert payload.target_length_tier == target_length_tier
+    assert getattr(payload, "target_duration_seconds", None) is None
+
+
+@pytest.mark.parametrize(
+    "creation_mode",
+    [
+        "automated",
+        "manual",
+        "manual_character_consistency",
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+    ],
+)
+def test_every_legacy_batch_mode_still_rejects_non_tier_duration(creation_mode):
+    request = {
+        "brand": "ACME",
+        "creation_mode": creation_mode,
+        "target_length_tier": 50,
+    }
+    if creation_mode in {"manual", "manual_character_consistency"}:
+        request["manual_post_count"] = 1
+    else:
+        request["post_type_counts"] = {"value": 1, "lifestyle": 0, "product": 0}
+
+    with pytest.raises(ValidationError):
+        CreateBatchRequest.model_validate(request)
+
+
 def test_create_batch_persists_creation_mode_and_manual_count(monkeypatch):
     storage = {"batches": []}
     monkeypatch.setattr(batch_queries, "get_supabase", lambda: _fake_supabase(storage))

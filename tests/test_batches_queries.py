@@ -6,6 +6,17 @@ import pytest
 from app.features.batches import queries as batch_queries
 
 
+def test_batch_list_projection_keeps_legacy_and_semantic_duration_fields():
+    fields = set(batch_queries.BATCH_LIST_FIELDS.split(","))
+
+    assert {
+        "creation_mode",
+        "target_length_tier",
+        "target_duration_seconds",
+        "video_pipeline_route",
+    } <= fields
+
+
 class _RetryingQuery:
     def __init__(self, rows):
         self.rows = rows

@@ -56,6 +56,10 @@ from app.features.blog.schemas import normalize_blog_content
 from app.features.topics.captions import resolve_display_caption
 from app.features.characters import queries as character_queries
 from app.features.characters.actor_identity import is_character_consistency_mode, is_manual_creation_mode
+from app.features.shot_production.duration import (
+    MINIMUM_SEMANTIC_UGC_DURATION_SECONDS,
+    build_semantic_duration_contract,
+)
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -102,7 +106,20 @@ _VEO_BATCH_PRICING_BY_MODEL = {
 }
 
 
-def _resolve_form_target_length_tier(form, creation_mode: str) -> int:
+def _is_semantic_ugc_mode(creation_mode: object) -> bool:
+    return str(creation_mode or "").strip() == "semantic_ugc"
+
+
+def _semantic_ugc_max_duration_seconds() -> int:
+    return build_semantic_duration_contract(
+        MINIMUM_SEMANTIC_UGC_DURATION_SECONDS
+    ).maximum_duration_seconds
+
+
+def _resolve_form_target_length_tier(form, creation_mode: str) -> Optional[int]:
+    if _is_semantic_ugc_mode(creation_mode):
+        return None
+
     values = []
     if hasattr(form, "getlist"):
         values = [value for value in form.getlist("target_length_tier") if str(value or "").strip()]
@@ -112,6 +129,15 @@ def _resolve_form_target_length_tier(form, creation_mode: str) -> int:
 
     selected_value = values[-1] if is_manual_creation_mode(creation_mode) else values[0]
     return int(selected_value or 8)
+
+
+def _resolve_form_target_duration_seconds(form, creation_mode: str) -> Optional[int]:
+    if not _is_semantic_ugc_mode(creation_mode):
+        return None
+    value = form.get("target_duration_seconds")
+    if value is None or not str(value).strip():
+        return None
+    return int(value)
 
 
 def _wants_html(request: Request) -> bool:
@@ -202,13 +228,20 @@ async def create_batch_endpoint(request: Request):
                     "post_type_counts": post_type_counts,
                     "manual_post_count": int(manual_post_count) if manual_post_count not in {None, ""} else None,
                     "target_length_tier": _resolve_form_target_length_tier(form, creation_mode),
+                    "target_duration_seconds": _resolve_form_target_duration_seconds(form, creation_mode),
                 }
             )
 
+        target_length_tier = (
+            None
+            if _is_semantic_ugc_mode(payload.creation_mode)
+            else normalize_target_length_tier(payload.target_length_tier)
+        )
         batch = create_batch(
             brand=payload.brand,
             post_type_counts=payload.post_type_counts.model_dump() if payload.post_type_counts else {},
-            target_length_tier=normalize_target_length_tier(payload.target_length_tier),
+            target_length_tier=target_length_tier,
+            target_duration_seconds=payload.target_duration_seconds,
             creation_mode=payload.creation_mode,
             manual_post_count=payload.manual_post_count,
         )
@@ -241,17 +274,21 @@ async def create_batch_endpoint(request: Request):
                 "request": request,
                 "batches": batch_responses,
                 "total": total,
-                "filters": {"archived": None, "limit": 50, "offset": 0}
+                "filters": {"archived": None, "limit": 50, "offset": 0},
+                "semantic_ugc_max_duration_seconds": _semantic_ugc_max_duration_seconds(),
             }
             response = templates.TemplateResponse("batches/list.html", context)
             response.headers["HX-Trigger"] = json.dumps({
-                    "batch_created": {
-                        "batch_id": batch["id"],
-                        "brand": batch["brand"],
-                        "expected_posts": expected_posts,
-                        "target_length_tier": batch.get("target_length_tier"),
-                    }
-                })
+                "batch_created": {
+                    "batch_id": batch["id"],
+                    "brand": batch["brand"],
+                    "expected_posts": expected_posts,
+                    "target_length_tier": batch.get("target_length_tier"),
+                    "target_duration_seconds": batch.get("target_duration_seconds"),
+                    "creation_mode": batch.get("creation_mode"),
+                    "video_pipeline_route": batch.get("video_pipeline_route"),
+                }
+            })
             return response
 
         return SuccessResponse(data=BatchResponse(**batch))
@@ -524,6 +561,7 @@ def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: 
     return {
         "initial_model": initial_model,
         "target_length_tier": batch_detail.get("target_length_tier"),
+        "target_duration_seconds": batch_detail.get("target_duration_seconds"),
         "pipeline_route": batch_detail.get("video_pipeline_route"),
         "pricing_by_model": _VEO_BATCH_PRICING_BY_MODEL,
     }
@@ -671,7 +709,8 @@ async def list_batches_endpoint(
                     "archived": archived,
                     "limit": limit,
                     "offset": offset
-                }
+                },
+                "semantic_ugc_max_duration_seconds": _semantic_ugc_max_duration_seconds(),
             }
             return templates.TemplateResponse("batches/list.html", context)
 
@@ -930,6 +969,10 @@ async def get_batch_status(batch_id: str):
             payload = {
                 "id": batch["id"],
                 "state": batch["state"],
+                "creation_mode": batch.get("creation_mode"),
+                "target_length_tier": batch.get("target_length_tier"),
+                "target_duration_seconds": batch.get("target_duration_seconds"),
+                "video_pipeline_route": batch.get("video_pipeline_route"),
                 "posts_count": posts_summary["posts_count"],
                 "posts_by_state": posts_summary["posts_by_state"],
                 "updated_at": batch["updated_at"],
@@ -993,6 +1036,10 @@ async def get_batch_status(batch_id: str):
         payload = {
             "id": batch["id"],
             "state": batch["state"],
+            "creation_mode": batch.get("creation_mode"),
+            "target_length_tier": batch.get("target_length_tier"),
+            "target_duration_seconds": batch.get("target_duration_seconds"),
+            "video_pipeline_route": batch.get("video_pipeline_route"),
             "posts_count": posts_summary["posts_count"],
             "posts_by_state": posts_summary["posts_by_state"],
             "updated_at": batch["updated_at"],
