@@ -243,7 +243,7 @@ Every behavior is introduced red-green-refactor. Required automated proof includ
 
 The implementation is authorized for exactly one live Veo video-generation request and no other paid generation request.
 
-The proof uses an existing approved master and an eight-second, one-take script so the request count is exactly one. It does not call Gemini image generation, Nano Banana, another Veo model, or an automatic retry. The command must enforce:
+The proof uses an existing approved master and an eight-second, one-take script so the request count is exactly one. It does not call Gemini image generation, Nano Banana, Deepgram, Gemini QA, another Veo model, storage upload, or an automatic retry. All non-Vertex proof steps use local files, FFmpeg/FFprobe, deterministic captions derived from the known approved script, and human visual inspection. The command must enforce:
 
 - `max_submissions = 1`;
 - `max_budget_usd = 17.70`;
@@ -253,7 +253,7 @@ The proof uses an existing approved master and an eight-second, one-take script 
 
 As verified from the official Google Cloud pricing page on 2026-07-13, Veo 3.1 video plus audio at 720p or 1080p is listed at USD 0.40 per provider second. The expected maximum for one eight-second request is USD 3.20. Pricing is still supplied by configuration and checked against the user-approved ceiling at runtime.
 
-The operation identifier is persisted before polling. Polling, downloading, transcription, QA, captions, and upload do not create additional Veo generation requests. If the single request cannot be accepted or completed, the paid proof stops without a second submission.
+The operation identifier is persisted before polling. Polling and downloading address the same accepted operation. Media inspection and captions run locally and cannot invoke another paid provider. If the single request cannot be accepted or completed, the paid proof stops without a second submission.
 
 ## Acceptance criteria
 
