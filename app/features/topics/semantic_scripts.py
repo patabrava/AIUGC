@@ -38,7 +38,6 @@ _WORD_PATTERN = re.compile(
 )
 _EXPECTED_LLM_FALLBACK_ERRORS = (
     ThirdPartyError,
-    RuntimeError,
     httpx.HTTPError,
     google.auth.exceptions.TransportError,
     google.auth.exceptions.RefreshError,

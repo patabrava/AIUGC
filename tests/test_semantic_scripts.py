@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.errors import ThirdPartyError
 from app.core.video_profiles import script_word_count
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.shot_production.planner import plan_editorial_beats
@@ -240,7 +241,7 @@ def test_validation_records_reason_for_one_unavoidable_extra_take(monkeypatch):
 def test_provider_fallback_uses_multiple_supplied_facts():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     result = generate_semantic_script(
         post_type="value",
@@ -263,7 +264,7 @@ def test_provider_fallback_uses_multiple_supplied_facts():
 def test_provider_fallback_uses_structurally_distinct_sentence_templates():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     result = generate_semantic_script(
         post_type="value",
@@ -289,7 +290,7 @@ def test_provider_fallback_uses_structurally_distinct_sentence_templates():
 def test_eight_second_fallback_packs_two_short_facts_into_one_take():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     facts = ["Erster Hinweis.", "Zweiter Beleg."]
     result = generate_semantic_script(
@@ -316,7 +317,7 @@ def test_result_preserves_research_provenance_and_source_urls(provider_available
 
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     research_provenance = {
         "dossier_id": "dossier-17",
@@ -384,11 +385,27 @@ def test_programming_type_error_from_llm_client_propagates():
         )
 
 
+def test_programming_runtime_error_from_llm_client_propagates():
+    class _BrokenClient:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("programming defect")
+
+    with pytest.raises(RuntimeError, match="programming defect"):
+        generate_semantic_script(
+            post_type="value",
+            title="Titel",
+            cta="",
+            facts=["Fakt"],
+            requested_duration_seconds=16,
+            llm_client=_BrokenClient(),
+        )
+
+
 @pytest.mark.parametrize("seconds", range(8, 61))
 def test_provider_failure_uses_distinct_fact_aware_contract_safe_fallback(seconds):
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     result = generate_semantic_script(
         post_type="value",
@@ -420,7 +437,7 @@ def test_provider_failure_uses_distinct_fact_aware_contract_safe_fallback(second
 def test_short_provider_failure_fallback_is_contract_safe_at_every_duration(seconds):
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     result = generate_semantic_script(
         post_type="value",
@@ -491,7 +508,7 @@ def test_generic_provider_fallback_is_contract_safe_for_fact_length_matrix(
 ):
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     assert script_word_count(fact) == fact_word_count
     result = generate_semantic_script(
@@ -539,7 +556,7 @@ def test_generic_provider_fallback_is_contract_safe_for_fact_length_matrix(
 def test_fallback_quellenauszug_quotes_contain_only_ordered_source_tokens():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     fact = (
         "Wenn der Aufzug am Bahnhof kurzfristig ausfällt und niemand erreichbar ist "
@@ -568,7 +585,7 @@ def test_fallback_quellenauszug_quotes_contain_only_ordered_source_tokens():
 def test_shortened_fallback_quotes_are_contiguous_and_keep_middle_negation():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     fact = (
         "Anfang Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda "
@@ -598,7 +615,7 @@ def test_shortened_fallback_quotes_are_contiguous_and_keep_middle_negation():
 def test_every_provider_failure_beat_contains_a_quoted_source_anchor():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     result = generate_semantic_script(
         post_type="value",
@@ -629,7 +646,7 @@ def test_every_provider_failure_beat_contains_a_quoted_source_anchor():
 def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     condition = (
         "der Mobilitätsservice wegen hoher Auslastung nicht rechtzeitig gebucht wird"
@@ -662,7 +679,7 @@ def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():
 def test_overlong_conditional_fallback_preserves_ordered_condition_and_consequence():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     fact = (
         "Wenn der Aufzug am Bahnhof kurzfristig ausfällt und niemand erreichbar ist "
@@ -698,7 +715,7 @@ def test_overlong_conditional_fallback_preserves_ordered_condition_and_consequen
 def test_overlong_booking_fact_fallback_preserves_source_requirement():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
-            raise RuntimeError("provider unavailable")
+            raise ThirdPartyError("provider unavailable")
 
     fact = (
         "Der Mobilitätsservice muss für barrierefreie Bahnreisen mindestens "
