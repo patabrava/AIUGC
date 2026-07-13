@@ -43,6 +43,7 @@ SEMANTIC_UGC_POSTGRES_CONTAINER="$CONTAINER_NAME" \
   python3 -m pytest \
     tests/test_semantic_batch_migration_postgres.py \
     tests/test_semantic_video_plan_migration_postgres.py \
+    tests/test_semantic_video_worker_migration_postgres.py \
     -q
 
 POSTGRES_PORT="$(docker port "$CONTAINER_NAME" 5432/tcp | awk -F: 'END { print $NF }')"
@@ -85,11 +86,18 @@ BEGIN
     SELECT 1
     FROM supabase_migrations.schema_migrations
     WHERE version = '20260713000100'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM supabase_migrations.schema_migrations
+    WHERE version = '20260713000200'
   ) THEN
-    RAISE EXCEPTION 'Supabase CLI did not record both Semantic UGC migrations';
+    RAISE EXCEPTION 'Supabase CLI did not record all Semantic UGC migrations';
   END IF;
   IF to_regprocedure('public.persist_semantic_video_plan(uuid,integer,jsonb,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'Supabase CLI did not install Semantic UGC RPCs';
+  END IF;
+  IF to_regprocedure('public.reserve_semantic_video_submission(uuid,uuid,text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'Supabase CLI did not install Semantic UGC worker RPCs';
   END IF;
 END;
 $$;

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Sequence
 
 from postgrest.exceptions import APIError
@@ -115,11 +114,6 @@ def get_run_by_post(post_id: str, *, client=None) -> Optional[dict[str, Any]]:
     )
     rows = _rows(response)
     return rows[0] if rows else None
-
-
-def create_run(payload: Mapping[str, Any], *, client=None) -> dict[str, Any]:
-    response = _client(client).table("semantic_video_runs").insert(dict(payload)).execute()
-    return _one_affected(response, operation="run creation")
 
 
 def reserve_candidate_generation(
@@ -298,31 +292,6 @@ def cancel_run_transition(
     return dict(run), cancelled_count
 
 
-def update_run(
-    run_id: str,
-    *,
-    expected_revision: int,
-    updates: Mapping[str, Any],
-    client=None,
-) -> dict[str, Any]:
-    if "revision" in updates:
-        raise ValidationError("Semantic video revision is managed by optimistic updates.")
-    payload = {**dict(updates), "revision": expected_revision + 1}
-    response = (
-        _client(client)
-        .table("semantic_video_runs")
-        .update(payload)
-        .eq("id", run_id)
-        .eq("revision", expected_revision)
-        .execute()
-    )
-    return _one_affected(
-        response,
-        operation="run update",
-        details={"run_id": run_id, "expected_revision": expected_revision},
-    )
-
-
 def persist_semantic_video_plan(
     run_id: str,
     *,
@@ -425,108 +394,176 @@ def get_run(run_id: str, *, client=None, required: bool = True) -> Optional[dict
     return None
 
 
-def _update_take_state(
-    take_id: str,
+def _worker_rpc(
+    function_name: str,
+    payload: Mapping[str, Any],
     *,
-    expected_state: Optional[str],
-    updates: Mapping[str, Any],
-    request_hash: Optional[str] = None,
-    client=None,
     operation: str,
-) -> dict[str, Any]:
-    query = _client(client).table("semantic_video_takes").update(dict(updates)).eq("id", take_id)
-    if expected_state is not None:
-        query = query.eq("submission_state", expected_state)
-    if request_hash is not None:
-        query = query.eq("request_hash", request_hash)
-    return _one_affected(
-        query.execute(),
-        operation=operation,
-        details={"take_id": take_id, "expected_state": expected_state},
-    )
-
-
-def persist_submission_intent(
-    take_id: str,
-    *,
-    expected_state: str,
-    request_hash: str,
-    intent_at: Optional[str] = None,
     client=None,
 ) -> dict[str, Any]:
-    timestamp = intent_at or datetime.now(timezone.utc).isoformat()
-    return _update_take_state(
-        take_id,
-        expected_state=expected_state,
-        request_hash=request_hash,
-        updates={
-            "submission_state": "intent_persisted",
-            "submission_intent_at": timestamp,
-        },
-        client=client,
-        operation="submission intent persistence",
+    return _transition_result(
+        _client(client).rpc(function_name, dict(payload)),
+        operation=operation,
     )
 
 
-def persist_accepted_operation(
-    take_id: str,
+def _worker_fence_payload(
+    *, run_id: str, take_id: Optional[str], worker_id: str, lease_token: str
+) -> dict[str, Any]:
+    if not str(run_id or "").strip() or not str(worker_id or "").strip() or not str(lease_token or "").strip():
+        raise ValidationError("Semantic video worker transition requires a run and lease fence.")
+    payload = {
+        "p_run_id": str(run_id),
+        "p_worker_id": str(worker_id),
+        "p_lease_token": str(lease_token),
+    }
+    if take_id is not None:
+        if not str(take_id or "").strip():
+            raise ValidationError("Semantic video worker take transition requires a take id.")
+        payload["p_take_id"] = str(take_id)
+    return payload
+
+
+def reserve_paid_submission(
+    *, run_id: str, take_id: str, worker_id: str, lease_token: str, client=None
+) -> dict[str, Any]:
+    return _worker_rpc(
+        "reserve_semantic_video_submission",
+        _worker_fence_payload(
+            run_id=run_id, take_id=take_id, worker_id=worker_id, lease_token=lease_token
+        ),
+        operation="paid submission reservation",
+        client=client,
+    )
+
+
+def persist_worker_submission_intent(
     *,
-    expected_state: str,
+    run_id: str,
+    take_id: str,
+    worker_id: str,
+    lease_token: str,
+    request_hash: str,
+    client=None,
+) -> dict[str, Any]:
+    if not str(request_hash or "").strip():
+        raise ValidationError("Semantic video submission intent requires a request hash.")
+    return _worker_rpc(
+        "persist_semantic_video_submission_intent",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=take_id, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_request_hash": str(request_hash),
+        },
+        operation="submission intent persistence",
+        client=client,
+    )
+
+
+def persist_worker_accepted_operation(
+    *,
+    run_id: str,
+    take_id: str,
+    worker_id: str,
+    lease_token: str,
     operation_id: str,
     provider_model: str,
     client=None,
 ) -> dict[str, Any]:
-    if not str(operation_id or "").strip():
-        raise ValidationError("Accepted Semantic video operation requires an operation id.")
-    return _update_take_state(
-        take_id,
-        expected_state=expected_state,
-        updates={
-            "submission_state": "submitted",
-            "operation_id": str(operation_id),
-            "provider_model": str(provider_model),
+    if not str(operation_id or "").strip() or not str(provider_model or "").strip():
+        raise ValidationError("Accepted Semantic video operation requires an id and model.")
+    return _worker_rpc(
+        "persist_semantic_video_accepted_operation",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=take_id, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_operation_id": str(operation_id),
+            "p_provider_model": str(provider_model),
         },
-        client=client,
         operation="accepted operation persistence",
+        client=client,
     )
 
 
-def persist_take_qa_artifacts(
-    take_id: str,
+def persist_worker_submission_unknown(
     *,
-    expected_state: Optional[str] = None,
-    submission_state: Optional[str] = None,
-    raw_artifact_uri: Optional[str] = None,
-    raw_artifact_sha256: Optional[str] = None,
-    transcript_result: Optional[Mapping[str, Any]] = None,
-    identity_qa_result: Optional[Mapping[str, Any]] = None,
-    voice_qa_contribution: Optional[Mapping[str, Any]] = None,
-    retry_guidance: Optional[Mapping[str, Any]] = None,
+    run_id: str,
+    take_id: str,
+    worker_id: str,
+    lease_token: str,
+    error: Mapping[str, Any],
     client=None,
 ) -> dict[str, Any]:
-    values = {
-        "submission_state": submission_state,
-        "raw_artifact_uri": raw_artifact_uri,
-        "raw_artifact_sha256": raw_artifact_sha256,
-        "transcript_result": dict(transcript_result) if transcript_result is not None else None,
-        "identity_qa_result": dict(identity_qa_result) if identity_qa_result is not None else None,
-        "voice_qa_contribution": dict(voice_qa_contribution) if voice_qa_contribution is not None else None,
-        "retry_guidance": dict(retry_guidance) if retry_guidance is not None else None,
-    }
-    updates = {key: value for key, value in values.items() if value is not None}
-    if not updates:
-        raise ValidationError("Semantic video QA/artifact persistence requires at least one field.")
-    return _update_take_state(
-        take_id,
-        expected_state=expected_state,
-        updates=updates,
+    if not isinstance(error, Mapping) or not error:
+        raise ValidationError("Unknown semantic video submission requires an error envelope.")
+    return _worker_rpc(
+        "persist_semantic_video_submission_unknown",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=take_id, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_error": dict(error),
+        },
+        operation="unknown submission persistence",
         client=client,
-        operation="QA and artifact persistence",
+    )
+
+
+def persist_worker_provider_failure(
+    *,
+    run_id: str,
+    take_id: str,
+    worker_id: str,
+    lease_token: str,
+    error: Mapping[str, Any],
+    client=None,
+) -> dict[str, Any]:
+    if not isinstance(error, Mapping) or not error:
+        raise ValidationError("Semantic video provider failure requires an error envelope.")
+    return _worker_rpc(
+        "persist_semantic_video_provider_failure",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=take_id, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_error": dict(error),
+        },
+        operation="provider failure persistence",
+        client=client,
+    )
+
+
+def persist_worker_completed_take(
+    *,
+    run_id: str,
+    take_id: str,
+    worker_id: str,
+    lease_token: str,
+    provider_video_uri: str,
+    raw_artifact_uri: str,
+    raw_artifact_sha256: str,
+    client=None,
+) -> dict[str, Any]:
+    return _worker_rpc(
+        "persist_semantic_video_completed_take",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=take_id, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_provider_video_uri": str(provider_video_uri),
+            "p_raw_artifact_uri": str(raw_artifact_uri),
+            "p_raw_artifact_sha256": str(raw_artifact_sha256),
+        },
+        operation="completed take persistence",
+        client=client,
     )
 
 
 def acquire_run_lease(
     *,
+    run_id: Optional[str] = None,
     worker_id: str,
     lease_seconds: int,
     client=None,
@@ -535,7 +572,11 @@ def acquire_run_lease(
         raise ValidationError("Semantic video lease requires a worker id and positive lease seconds.")
     response = _client(client).rpc(
         "claim_semantic_video_run",
-        {"worker_id": str(worker_id), "lease_seconds": int(lease_seconds)},
+        {
+            "worker_id": str(worker_id),
+            "lease_seconds": int(lease_seconds),
+            "requested_run_id": str(run_id) if run_id is not None else None,
+        },
     ).execute()
     rows = _rows(response)
     if len(rows) > 1:
@@ -546,82 +587,94 @@ def acquire_run_lease(
     return rows[0] if rows else None
 
 
-def release_run_lease(
-    run_id: str,
+def advance_worker_stage(
     *,
+    run_id: str,
     worker_id: str,
-    expected_revision: int,
+    lease_token: str,
+    expected_stage: str,
+    next_stage: str,
+    artifacts: Mapping[str, Any],
     client=None,
 ) -> dict[str, Any]:
-    response = (
-        _client(client)
-        .table("semantic_video_runs")
-        .update(
-            {
-                "lease_owner": None,
-                "lease_expires_at": None,
-                "revision": expected_revision + 1,
-            }
-        )
-        .eq("id", run_id)
-        .eq("revision", expected_revision)
-        .eq("lease_owner", worker_id)
-        .execute()
-    )
-    return _one_affected(
-        response,
-        operation="lease release",
-        details={"run_id": run_id, "worker_id": worker_id, "expected_revision": expected_revision},
-    )
-
-
-def complete_run(
-    run_id: str,
-    *,
-    expected_revision: int,
-    final_video_uri: str,
-    final_video_sha256: str,
-    final_caption_uri: Optional[str] = None,
-    final_caption_sha256: Optional[str] = None,
-    client=None,
-) -> dict[str, Any]:
-    if not str(final_video_uri or "").strip() or not str(final_video_sha256 or "").strip():
-        raise ValidationError("Semantic video completion requires final video URI and SHA-256.")
-    return update_run(
-        run_id,
-        expected_revision=expected_revision,
-        updates={
-            "stage": "completed",
-            "final_video_uri": final_video_uri,
-            "final_video_sha256": final_video_sha256,
-            "final_caption_uri": final_caption_uri,
-            "final_caption_sha256": final_caption_sha256,
-            "failure_envelope": None,
-            "lease_owner": None,
-            "lease_expires_at": None,
+    return _worker_rpc(
+        "advance_semantic_video_stage",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=None, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_expected_stage": str(expected_stage),
+            "p_next_stage": str(next_stage),
+            "p_artifacts": dict(artifacts),
         },
+        operation="stage advancement",
         client=client,
     )
 
 
-def fail_run(
-    run_id: str,
+def require_worker_retry_approval(
     *,
-    expected_revision: int,
-    failure_envelope: Mapping[str, Any],
+    run_id: str,
+    worker_id: str,
+    lease_token: str,
+    expected_stage: str,
+    failed_take_indexes: Sequence[int],
+    evidence: Mapping[str, Any],
     client=None,
 ) -> dict[str, Any]:
-    if not isinstance(failure_envelope, Mapping) or not failure_envelope:
-        raise ValidationError("Semantic video failure requires a non-empty failure envelope.")
-    return update_run(
-        run_id,
-        expected_revision=expected_revision,
-        updates={
-            "stage": "failed",
-            "failure_envelope": dict(failure_envelope),
-            "lease_owner": None,
-            "lease_expires_at": None,
+    return _worker_rpc(
+        "require_semantic_video_retry_approval",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=None, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_expected_stage": str(expected_stage),
+            "p_failed_take_indexes": [int(index) for index in failed_take_indexes],
+            "p_evidence": dict(evidence),
         },
+        operation="retry approval requirement",
+        client=client,
+    )
+
+
+def release_worker_lease(
+    *, run_id: str, worker_id: str, lease_token: str, client=None
+) -> dict[str, Any]:
+    return _worker_rpc(
+        "release_semantic_video_lease",
+        _worker_fence_payload(
+            run_id=run_id, take_id=None, worker_id=worker_id, lease_token=lease_token
+        ),
+        operation="lease release",
+        client=client,
+    )
+
+
+def complete_worker_run(
+    *,
+    run_id: str,
+    worker_id: str,
+    lease_token: str,
+    final_video_uri: str,
+    final_video_sha256: str,
+    final_caption_uri: str,
+    final_caption_sha256: str,
+    artifact_manifest: Mapping[str, Any],
+    client=None,
+) -> dict[str, Any]:
+    return _worker_rpc(
+        "complete_semantic_video_run",
+        {
+            **_worker_fence_payload(
+                run_id=run_id, take_id=None, worker_id=worker_id, lease_token=lease_token
+            ),
+            "p_final_video_uri": str(final_video_uri),
+            "p_final_video_sha256": str(final_video_sha256),
+            "p_final_caption_uri": str(final_caption_uri),
+            "p_final_caption_sha256": str(final_caption_sha256),
+            "p_artifact_manifest": dict(artifact_manifest),
+        },
+        operation="run completion",
         client=client,
     )
 
@@ -632,18 +685,20 @@ __all__ = [
     "approve_retry_transition",
     "cancel_run_transition",
     "acquire_run_lease",
-    "complete_run",
-    "create_run",
+    "advance_worker_stage",
+    "complete_worker_run",
     "get_run_by_post",
     "get_run",
     "list_approvals",
     "list_attempts",
     "load_semantic_video_context",
-    "persist_accepted_operation",
     "persist_semantic_video_plan",
-    "persist_submission_intent",
-    "persist_take_qa_artifacts",
-    "release_run_lease",
-    "update_run",
-    "fail_run",
+    "persist_worker_accepted_operation",
+    "persist_worker_completed_take",
+    "persist_worker_provider_failure",
+    "persist_worker_submission_intent",
+    "persist_worker_submission_unknown",
+    "release_worker_lease",
+    "require_worker_retry_approval",
+    "reserve_paid_submission",
 ]

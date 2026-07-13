@@ -110,6 +110,13 @@ services:
       <<: *app-env
       SERVICE_CMD: python workers/video_poller.py
 
+  semantic-video-worker:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      SEMANTIC_VIDEO_WORKER_POLL_SECONDS: ${SEMANTIC_VIDEO_WORKER_POLL_SECONDS:-5}
+      SERVICE_CMD: python -m workers.semantic_video_worker
+
   expansion-worker:
     <<: *runtime-base
     environment:

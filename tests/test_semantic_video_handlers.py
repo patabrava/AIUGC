@@ -2345,112 +2345,128 @@ def test_approval_retry_and_cancel_queries_use_transactional_rpcs_and_map_only_c
         )
 
 
-def test_query_helpers_persist_intent_operation_and_qa_with_affected_row_validation():
+def test_query_helpers_use_only_lease_fenced_paid_worker_rpcs():
     from app.features.semantic_videos.queries import (
-        persist_accepted_operation,
-        persist_submission_intent,
-        persist_take_qa_artifacts,
+        persist_worker_accepted_operation,
+        persist_worker_completed_take,
+        persist_worker_submission_intent,
+        reserve_paid_submission,
     )
 
     client = _RecordingClient(
-        [{"id": "take-1", "submission_state": "intent_persisted"}],
-        [{"id": "take-1", "submission_state": "submitted"}],
-        [{"id": "take-1", "submission_state": "completed"}],
+        {"id": "take-1", "submission_state": "reserved"},
+        {"id": "take-1", "submission_state": "intent_persisted"},
+        {"id": "take-1", "submission_state": "submitted"},
+        {"id": "take-1", "submission_state": "completed"},
     )
-    persist_submission_intent(
-        "take-1",
-        expected_state="reserved",
-        request_hash="a" * 64,
-        intent_at="2026-07-13T10:00:00Z",
-        client=client,
-    )
-    persist_accepted_operation(
-        "take-1",
-        expected_state="intent_persisted",
+    fence = {
+        "run_id": "run-1",
+        "take_id": "take-1",
+        "worker_id": "worker-1",
+        "lease_token": "00000000-0000-0000-0000-000000000001",
+        "client": client,
+    }
+    reserve_paid_submission(**fence)
+    persist_worker_submission_intent(**fence, request_hash="a" * 64)
+    persist_worker_accepted_operation(
+        **fence,
         operation_id="operations/accepted-1",
         provider_model="veo-3.1-generate-001",
-        client=client,
     )
-    persist_take_qa_artifacts(
-        "take-1",
-        expected_state="submitted",
-        submission_state="completed",
+    persist_worker_completed_take(
+        **fence,
+        provider_video_uri="gs://bucket/raw.mp4",
         raw_artifact_uri="https://storage/raw.mp4",
         raw_artifact_sha256="b" * 64,
-        transcript_result={"passed": True},
-        identity_qa_result={"passed": True},
-        client=client,
     )
 
-    assert client.calls[0]["payload"]["submission_state"] == "intent_persisted"
-    assert ("eq", "request_hash", "a" * 64) in client.calls[0]["filters"]
-    assert ("eq", "submission_state", "reserved") in client.calls[0]["filters"]
-    assert client.calls[1]["payload"] == {
-        "submission_state": "submitted",
-        "operation_id": "operations/accepted-1",
-        "provider_model": "veo-3.1-generate-001",
-    }
-    assert client.calls[2]["payload"]["raw_artifact_sha256"] == "b" * 64
-
-    losing_client = _RecordingClient([])
-    with pytest.raises(StateTransitionError, match="optimistic"):
-        persist_submission_intent(
-            "take-1",
-            expected_state="reserved",
-            request_hash="a" * 64,
-            client=losing_client,
-        )
+    assert [call["function"] for call in client.calls] == [
+        "reserve_semantic_video_submission",
+        "persist_semantic_video_submission_intent",
+        "persist_semantic_video_accepted_operation",
+        "persist_semantic_video_completed_take",
+    ]
+    assert all(call["payload"]["p_lease_token"] == fence["lease_token"] for call in client.calls)
+    assert client.calls[3]["payload"]["p_raw_artifact_sha256"] == "b" * 64
 
 
-def test_query_helpers_cover_get_lease_release_completion_and_failure():
+def test_query_helpers_cover_fenced_claim_stage_retry_release_and_completion():
     from app.features.semantic_videos.queries import (
         acquire_run_lease,
-        complete_run,
-        fail_run,
-        get_run,
-        release_run_lease,
+        advance_worker_stage,
+        complete_worker_run,
+        release_worker_lease,
+        require_worker_retry_approval,
     )
 
     client = _RecordingClient(
-        [{"id": "run-1", "revision": 2}],
-        [{"id": "run-1", "lease_owner": "worker-1", "revision": 3}],
-        [{"id": "run-1", "lease_owner": None, "revision": 4}],
-        [{"id": "run-1", "stage": "completed", "revision": 5}],
-        [{"id": "run-2", "stage": "failed", "revision": 8}],
+        [{"id": "run-1", "lease_owner": "worker-1", "lease_token": "lease-1"}],
+        {"id": "run-1", "stage": "identity_qa"},
+        {"id": "run-1", "stage": "retry_approval_required"},
+        {"id": "run-1", "lease_owner": None},
+        {
+            "run": {"id": "run-2", "stage": "completed"},
+            "post_id": "post-2",
+            "video_status": "caption_completed",
+        },
     )
-    assert get_run("run-1", client=client)["revision"] == 2
-    claimed = acquire_run_lease(worker_id="worker-1", lease_seconds=45, client=client)
-    assert claimed["lease_owner"] == "worker-1"
-    released = release_run_lease(
-        "run-1",
+    claimed = acquire_run_lease(
+        run_id="run-1",
         worker_id="worker-1",
-        expected_revision=3,
+        lease_seconds=45,
         client=client,
     )
-    assert released["revision"] == 4
-    completed = complete_run(
-        "run-1",
-        expected_revision=4,
+    assert claimed["lease_owner"] == "worker-1"
+    advanced = advance_worker_stage(
+        run_id="run-1",
+        worker_id="worker-1",
+        lease_token="lease-1",
+        expected_stage="transcript_qa",
+        next_stage="identity_qa",
+        artifacts={"transcript": {"passed": True}},
+        client=client,
+    )
+    assert advanced["stage"] == "identity_qa"
+    retry = require_worker_retry_approval(
+        run_id="run-1",
+        worker_id="worker-1",
+        lease_token="lease-1",
+        expected_stage="identity_qa",
+        failed_take_indexes=[0],
+        evidence={"identity": {"score": 0.42}},
+        client=client,
+    )
+    assert retry["stage"] == "retry_approval_required"
+    released = release_worker_lease(
+        run_id="run-1",
+        worker_id="worker-1",
+        lease_token="lease-1",
+        client=client,
+    )
+    assert released["lease_owner"] is None
+    completed = complete_worker_run(
+        run_id="run-2",
+        worker_id="worker-1",
+        lease_token="lease-2",
         final_video_uri="https://storage/final.mp4",
         final_video_sha256="c" * 64,
-        final_caption_uri="https://storage/final.vtt",
+        final_caption_uri="https://storage/final-captioned.mp4",
         final_caption_sha256="d" * 64,
+        artifact_manifest={"delivery": {"passed": True}},
         client=client,
     )
-    assert completed["stage"] == "completed"
-    failed = fail_run(
-        "run-2",
-        expected_revision=7,
-        failure_envelope={"code": "qa_failed", "message": "Identity mismatch"},
-        client=client,
-    )
-    assert failed["stage"] == "failed"
+    assert completed["run"]["stage"] == "completed"
 
-    assert client.calls[1] == {
+    assert client.calls[0] == {
         "kind": "rpc",
         "function": "claim_semantic_video_run",
-        "payload": {"worker_id": "worker-1", "lease_seconds": 45},
+        "payload": {
+            "worker_id": "worker-1",
+            "lease_seconds": 45,
+            "requested_run_id": "run-1",
+        },
     }
-    assert ("eq", "lease_owner", "worker-1") in client.calls[2]["filters"]
-    assert client.calls[3]["payload"]["stage"] == "completed"
-    assert client.calls[4]["payload"]["failure_envelope"]["code"] == "qa_failed"
+    assert client.calls[1]["function"] == "advance_semantic_video_stage"
+    assert client.calls[2]["function"] == "require_semantic_video_retry_approval"
+    assert client.calls[3]["function"] == "release_semantic_video_lease"
+    assert client.calls[4]["function"] == "complete_semantic_video_run"

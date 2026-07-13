@@ -33,6 +33,18 @@ services:
       VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
     command: python workers/video_poller.py
 
+  semantic-video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    environment:
+      VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
+      SEMANTIC_VIDEO_WORKER_POLL_SECONDS: ${SEMANTIC_VIDEO_WORKER_POLL_SECONDS:-5}
+    command: python -m workers.semantic_video_worker
+
   expansion-worker:
     build:
       context: .
