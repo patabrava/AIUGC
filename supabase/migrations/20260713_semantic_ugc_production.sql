@@ -67,9 +67,12 @@ ALTER TABLE public.batches
     )
   );
 
+CREATE UNIQUE INDEX IF NOT EXISTS posts_id_batch_id_unique
+  ON public.posts (id, batch_id);
+
 CREATE TABLE IF NOT EXISTS public.semantic_video_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_id UUID NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+  post_id UUID NOT NULL,
   batch_id UUID NOT NULL REFERENCES public.batches(id) ON DELETE CASCADE,
   requested_duration_seconds INTEGER NOT NULL CHECK (requested_duration_seconds >= 8),
   duration_contract JSONB NOT NULL,
@@ -116,8 +119,29 @@ CREATE TABLE IF NOT EXISTS public.semantic_video_runs (
   final_caption_sha256 TEXT,
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT semantic_video_runs_post_batch_fk
+    FOREIGN KEY (post_id, batch_id)
+    REFERENCES public.posts(id, batch_id)
+    ON DELETE CASCADE
 );
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'semantic_video_runs_post_batch_fk'
+      AND conrelid = 'public.semantic_video_runs'::regclass
+  ) THEN
+    ALTER TABLE public.semantic_video_runs
+      ADD CONSTRAINT semantic_video_runs_post_batch_fk
+      FOREIGN KEY (post_id, batch_id)
+      REFERENCES public.posts(id, batch_id)
+      ON DELETE CASCADE;
+  END IF;
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS public.semantic_video_takes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

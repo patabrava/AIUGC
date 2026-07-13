@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -9,6 +11,7 @@ from starlette.datastructures import FormData
 
 from app.features.batches import queries as batch_queries
 from app.features.batches.schemas import BatchDetailResponse, BatchResponse, CreateBatchRequest
+from app.core.errors import ValidationError as FlowForgeValidationError
 from app.features.characters.actor_identity import (
     CHARACTER_CONSISTENCY_MODES,
     is_character_consistency_mode,
@@ -17,6 +20,11 @@ from app.features.characters.actor_identity import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "supabase/migrations/20260713_semantic_ugc_production.sql"
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 def _post_counts() -> dict[str, int]:
@@ -64,7 +72,7 @@ def test_semantic_batch_uses_numeric_duration_only():
         brand="AYRA",
         creation_mode="semantic_ugc",
         post_type_counts=_post_counts(),
-        target_length_tier=16,
+        target_length_tier=50,
         target_duration_seconds=50,
     )
 
@@ -140,6 +148,19 @@ def test_batch_response_models_expose_both_duration_authorities():
 
 def test_create_batch_persists_semantic_duration_and_route(monkeypatch):
     captured = {}
+    monkeypatch.setattr(
+        batch_queries,
+        "get_active_actor_identity",
+        lambda: SimpleNamespace(
+            id="actor-semantic",
+            name="Semantic Actor",
+            is_active=True,
+            training_images=[
+                "https://cdn.example.com/actor-a.png",
+                "https://cdn.example.com/actor-b.png",
+            ],
+        ),
+    )
 
     def fake_insert(payload, legacy_payload=None):
         captured["payload"] = payload
@@ -163,9 +184,95 @@ def test_create_batch_persists_semantic_duration_and_route(monkeypatch):
     assert created["target_duration_seconds"] == 50
 
 
+@pytest.mark.parametrize(
+    "training_images",
+    [None, [], ["https://cdn.example.com/actor-a.png"]],
+)
+def test_semantic_batch_requires_active_actor_with_two_usable_reference_images(monkeypatch, training_images):
+    actor = None
+    if training_images is not None:
+        actor = SimpleNamespace(
+            id="actor-1",
+            name="Actor One",
+            is_active=True,
+            training_images=training_images,
+        )
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", lambda: actor)
+    monkeypatch.setattr(
+        batch_queries,
+        "_insert_batch_row",
+        lambda payload, legacy_payload=None: {"id": "unexpected", **payload},
+    )
+
+    with pytest.raises(FlowForgeValidationError) as exc_info:
+        batch_queries.create_batch(
+            brand="AYRA",
+            post_type_counts=_post_counts(),
+            target_length_tier=None,
+            target_duration_seconds=50,
+            creation_mode="semantic_ugc",
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+def test_semantic_batch_persists_active_actor_with_exactly_two_ordered_images_without_lora(monkeypatch):
+    captured = {}
+    actor = SimpleNamespace(
+        id="actor-semantic",
+        name="Semantic Actor",
+        is_active=True,
+        training_images=[
+            " https://cdn.example.com/actor-a.png ",
+            "https://cdn.example.com/actor-b.png",
+            "https://cdn.example.com/actor-c.png",
+        ],
+    )
+    monkeypatch.setattr(batch_queries, "get_active_actor_identity", lambda: actor)
+
+    def fake_insert(payload, legacy_payload=None):
+        captured.update(payload)
+        return {"id": "batch-semantic", **payload}
+
+    monkeypatch.setattr(batch_queries, "_insert_batch_row", fake_insert)
+
+    batch_queries.create_batch(
+        brand="AYRA",
+        post_type_counts=_post_counts(),
+        target_length_tier=None,
+        target_duration_seconds=50,
+        creation_mode="semantic_ugc",
+    )
+
+    assert captured["actor_identity_id"] == "actor-semantic"
+    assert captured["actor_identity_snapshot"] == {
+        "actor_identity_id": "actor-semantic",
+        "name": "Semantic Actor",
+        "reference_image_urls": [
+            "https://cdn.example.com/actor-a.png",
+            "https://cdn.example.com/actor-b.png",
+        ],
+    }
+
+
 def test_duplicate_batch_copies_semantic_duration_and_route(monkeypatch):
     calls = []
-    monkeypatch.setattr(batch_queries, "get_batch_by_id", lambda _batch_id: _batch_row())
+    actor_snapshot = {
+        "actor_identity_id": "actor-original",
+        "name": "Original Actor",
+        "reference_image_urls": [
+            "https://cdn.example.com/original-a.png",
+            "https://cdn.example.com/original-b.png",
+        ],
+    }
+    monkeypatch.setattr(
+        batch_queries,
+        "get_batch_by_id",
+        lambda _batch_id: _batch_row(
+            actor_identity_id="actor-original",
+            actor_identity_snapshot=actor_snapshot,
+        ),
+    )
     monkeypatch.setattr(
         batch_queries,
         "create_batch",
@@ -177,6 +284,8 @@ def test_duplicate_batch_copies_semantic_duration_and_route(monkeypatch):
     assert duplicated["id"] == "batch-copy"
     assert calls[0][1]["creation_mode"] == "semantic_ugc"
     assert calls[0][1]["target_duration_seconds"] == 50
+    assert calls[0][1]["semantic_actor_identity_id"] == "actor-original"
+    assert calls[0][1]["semantic_actor_identity_snapshot"] == actor_snapshot
     assert calls[0][0][2] is None
 
 
@@ -207,14 +316,159 @@ async def test_semantic_form_parsing_passes_seconds_to_create_query(monkeypatch)
         return _batch_row(**kwargs)
 
     monkeypatch.setattr(batch_handlers, "create_batch", fake_create_batch)
-    monkeypatch.setattr(batch_handlers, "start_seeding_interaction", lambda **_kwargs: None)
-    monkeypatch.setattr(batch_handlers, "schedule_batch_discovery", lambda *_args, **_kwargs: None)
+    legacy_discovery_calls = []
+    monkeypatch.setattr(
+        batch_handlers,
+        "start_seeding_interaction",
+        lambda **kwargs: legacy_discovery_calls.append(("start", kwargs)),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda *args, **kwargs: legacy_discovery_calls.append(("schedule", args, kwargs)),
+    )
 
     response = await batch_handlers.create_batch_endpoint(FakeRequest())
 
     assert captured["target_length_tier"] is None
     assert captured["target_duration_seconds"] == 50
     assert response.data.target_duration_seconds == 50
+    assert legacy_discovery_calls == []
+
+
+@pytest.mark.anyio
+async def test_semantic_status_recovery_does_not_schedule_legacy_discovery(monkeypatch):
+    _enable_test_environment()
+    from app.features.batches import handlers as batch_handlers
+
+    legacy_discovery_calls = []
+    monkeypatch.setattr(batch_handlers, "get_batch_by_id", lambda _batch_id: _batch_row())
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda _batch_id: {"posts_count": 0, "posts_by_state": {}},
+    )
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", lambda _batch_id: None)
+    monkeypatch.setattr(batch_handlers, "_batch_has_manual_drafts", lambda _batch: False)
+    monkeypatch.setattr(batch_handlers, "is_batch_discovery_active", lambda _batch_id: False)
+    monkeypatch.setattr(
+        batch_handlers,
+        "start_seeding_interaction",
+        lambda **kwargs: legacy_discovery_calls.append(("start", kwargs)),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda *args, **kwargs: legacy_discovery_calls.append(("schedule", args, kwargs)),
+    )
+
+    response = await batch_handlers.get_batch_status("batch-semantic")
+
+    assert response.data["state"] == "S1_SETUP"
+    assert legacy_discovery_calls == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("duration", [None, "not-a-number", "7", "61"])
+async def test_semantic_form_validation_raises_project_422_error(monkeypatch, duration):
+    _enable_test_environment()
+    from app.features.batches import handlers as batch_handlers
+
+    class FakeRequest:
+        headers = {"content-type": "application/x-www-form-urlencoded"}
+
+        async def form(self):
+            values = [
+                ("brand", "AYRA"),
+                ("creation_mode", "semantic_ugc"),
+                ("post_type_counts.value", "1"),
+                ("post_type_counts.lifestyle", "0"),
+                ("post_type_counts.product", "0"),
+            ]
+            if duration is not None:
+                values.append(("target_duration_seconds", duration))
+            return FormData(values)
+
+    with pytest.raises(FlowForgeValidationError) as exc_info:
+        await batch_handlers.create_batch_endpoint(FakeRequest())
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.code.value == "validation_error"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("duration", [None, "not-a-number", 7, 61])
+async def test_semantic_json_validation_raises_project_422_error(duration):
+    _enable_test_environment()
+    from app.features.batches import handlers as batch_handlers
+
+    class FakeRequest:
+        headers = {"content-type": "application/json"}
+
+        async def json(self):
+            data = {
+                "brand": "AYRA",
+                "creation_mode": "semantic_ugc",
+                "post_type_counts": _post_counts(),
+            }
+            if duration is not None:
+                data["target_duration_seconds"] = duration
+            return data
+
+    with pytest.raises(FlowForgeValidationError) as exc_info:
+        await batch_handlers.create_batch_endpoint(FakeRequest())
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.code.value == "validation_error"
+
+
+@pytest.mark.anyio
+async def test_malformed_json_keeps_explicit_bad_request_status():
+    _enable_test_environment()
+    from fastapi import HTTPException
+
+    from app.features.batches import handlers as batch_handlers
+
+    class FakeRequest:
+        headers = {"content-type": "application/json"}
+
+        async def json(self):
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await batch_handlers.create_batch_endpoint(FakeRequest())
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_semantic_validation_is_rendered_as_project_error_envelope():
+    _enable_test_environment()
+    from starlette.requests import Request
+
+    from app.main import flowforge_exception_handler
+
+    response = await flowforge_exception_handler(
+        Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/batches",
+                "headers": [],
+                "query_string": b"",
+                "scheme": "http",
+                "server": ("testserver", 80),
+                "client": ("testclient", 123),
+            }
+        ),
+        FlowForgeValidationError("Invalid batch creation request."),
+    )
+
+    assert response.status_code == 422
+    payload = json.loads(response.body)
+    assert payload["ok"] is False
+    assert payload["status"] == 422
+    assert payload["code"] == "validation_error"
 
 
 @pytest.mark.anyio
@@ -251,12 +505,37 @@ def test_semantic_batch_form_has_accessible_conditional_duration_controls():
     assert 'min="8"' in source
     assert 'max="{{ semantic_ugc_max_duration_seconds | default(60) }}"' in source
     assert 'aria-describedby="semantic-duration-help"' in source
-    for seconds in (8, 16, 32, 50):
-        assert f'data-duration-preset="{seconds}"' in source
+    assert "targetDurationSeconds: {{ semantic_ugc_default_duration_seconds" in source
+    assert "{% for seconds in semantic_ugc_duration_presets %}" in source
+    assert 'data-duration-preset="{{ seconds }}"' in source
     assert "creationMode === 'semantic_ugc'" in source
     assert "creationMode !== 'semantic_ugc'" in source
     assert "shot plan" in source.lower()
     assert "approval" in source.lower()
+
+
+def test_semantic_duration_ui_config_never_exceeds_configured_maximum(monkeypatch):
+    _enable_test_environment()
+    from app.features.batches import handlers as batch_handlers
+
+    monkeypatch.setenv("SEMANTIC_UGC_MAX_DURATION_SECONDS", "20")
+
+    config = batch_handlers._semantic_ugc_duration_ui_config()
+
+    assert config == {
+        "maximum": 20,
+        "default": 20,
+        "presets": [8, 16],
+    }
+
+
+def test_semantic_video_run_rejects_post_from_another_batch_by_composite_fk():
+    migration = MIGRATION.read_text().lower()
+
+    assert "create unique index if not exists posts_id_batch_id_unique" in migration
+    assert "on public.posts (id, batch_id)" in migration
+    assert "foreign key (post_id, batch_id)" in migration
+    assert "references public.posts(id, batch_id)" in migration
 
 
 def test_semantic_migration_defines_batch_and_run_persistence_contract():

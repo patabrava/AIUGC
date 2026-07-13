@@ -26,6 +26,10 @@ BATCH_LIST_FIELDS = (
     "target_length_tier,target_duration_seconds,video_pipeline_route,"
     "created_at,updated_at,archived"
 )
+BATCH_LIST_SCHEMA_LAG_FIELDS = (
+    "id,brand,state,creation_mode,post_type_counts,manual_post_count,"
+    "target_length_tier,video_pipeline_route,created_at,updated_at,archived"
+)
 POSTS_SUMMARY_FIELDS = "id,post_type"
 VIDEO_SUBMISSION_STARTED_STATUSES = {
     "submitted",
@@ -48,6 +52,76 @@ def _actor_identity_snapshot_payload(actor_identity) -> Dict[str, Any]:
             if actor_identity.training_completed_at
             else None
         ),
+    }
+
+
+def _usable_semantic_reference_urls(values: object) -> List[str]:
+    urls: List[str] = []
+    for value in values if isinstance(values, list) else []:
+        url = str(value or "").strip()
+        if not url.startswith(("https://", "http://")) or url in urls:
+            continue
+        urls.append(url)
+    return urls
+
+
+def _semantic_actor_snapshot_from_active(actor_identity) -> tuple[str, Dict[str, Any]]:
+    if actor_identity is None or not getattr(actor_identity, "is_active", False):
+        raise ValidationError(
+            "Cannot create a Semantic UGC batch: no active ActorIdentity is selected.",
+            {"creation_mode": "semantic_ugc", "settings_url": "/settings/actor"},
+        )
+
+    reference_urls = _usable_semantic_reference_urls(
+        getattr(actor_identity, "training_images", None)
+    )
+    if len(reference_urls) < 2:
+        raise ValidationError(
+            "Cannot create a Semantic UGC batch: the active ActorIdentity needs at least two usable reference images.",
+            {
+                "creation_mode": "semantic_ugc",
+                "actor_identity_id": str(actor_identity.id),
+                "usable_reference_image_count": len(reference_urls),
+                "settings_url": "/settings/actor",
+            },
+        )
+
+    actor_identity_id = str(actor_identity.id)
+    return actor_identity_id, {
+        "actor_identity_id": actor_identity_id,
+        "name": str(actor_identity.name),
+        "reference_image_urls": reference_urls[:2],
+    }
+
+
+def _validated_semantic_actor_snapshot(
+    actor_identity_id: str,
+    snapshot: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        raise ValidationError(
+            "Semantic UGC actor snapshot must be an object.",
+            {"creation_mode": "semantic_ugc", "actor_identity_id": str(actor_identity_id)},
+        )
+    raw_reference_urls = snapshot.get("reference_image_urls")
+    reference_urls = _usable_semantic_reference_urls(raw_reference_urls)
+    snapshot_actor_id = str(snapshot.get("actor_identity_id") or "").strip()
+    name = str(snapshot.get("name") or "").strip()
+    if (
+        snapshot_actor_id != str(actor_identity_id)
+        or not name
+        or len(reference_urls) != 2
+        or not isinstance(raw_reference_urls, list)
+        or len(raw_reference_urls) != 2
+    ):
+        raise ValidationError(
+            "Semantic UGC actor snapshot must match the actor and contain exactly two usable reference image URLs.",
+            {"creation_mode": "semantic_ugc", "actor_identity_id": str(actor_identity_id)},
+        )
+    return {
+        "actor_identity_id": snapshot_actor_id,
+        "name": name,
+        "reference_image_urls": reference_urls,
     }
 
 
@@ -233,6 +307,8 @@ def create_batch(
     target_duration_seconds: Optional[int] = None,
     creation_mode: str = "automated",
     manual_post_count: Optional[int] = None,
+    semantic_actor_identity_id: Optional[str] = None,
+    semantic_actor_identity_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new batch in S1_SETUP state.
@@ -261,17 +337,36 @@ def create_batch(
             )
         video_pipeline_route = None
 
-    batch_data = {
+    batch_data: Dict[str, Any] = {
         "brand": brand,
         "state": BatchState.S1_SETUP.value,
         "creation_mode": creation_mode,
         "post_type_counts": post_type_counts or {},
         "manual_post_count": manual_post_count,
         "target_length_tier": target_length_tier,
-        "target_duration_seconds": target_duration_seconds,
-        "video_pipeline_route": video_pipeline_route,
         "archived": False
     }
+
+    if is_semantic_ugc:
+        batch_data["target_duration_seconds"] = target_duration_seconds
+        batch_data["video_pipeline_route"] = video_pipeline_route
+        if (semantic_actor_identity_id is None) != (semantic_actor_identity_snapshot is None):
+            raise ValidationError(
+                "Semantic UGC actor identity and snapshot must be provided together.",
+                {"creation_mode": creation_mode},
+            )
+        if semantic_actor_identity_id is not None and semantic_actor_identity_snapshot is not None:
+            actor_identity_id = str(semantic_actor_identity_id)
+            actor_snapshot = _validated_semantic_actor_snapshot(
+                actor_identity_id,
+                semantic_actor_identity_snapshot,
+            )
+        else:
+            actor_identity_id, actor_snapshot = _semantic_actor_snapshot_from_active(
+                get_active_actor_identity()
+            )
+        batch_data["actor_identity_id"] = actor_identity_id
+        batch_data["actor_identity_snapshot"] = actor_snapshot
 
     if is_character_consistency_mode(creation_mode):
         actor_identity = get_active_actor_identity()
@@ -296,20 +391,8 @@ def create_batch(
 
     batch = _insert_batch_row(
         batch_data,
-        None if is_semantic_ugc else legacy_batch_data,
+        legacy_batch_data if creation_mode == "automated" else None,
     )
-    if creation_mode:
-        batch = {
-            **batch,
-            "creation_mode": creation_mode,
-            "manual_post_count": manual_post_count,
-            "target_length_tier": target_length_tier,
-            "target_duration_seconds": target_duration_seconds,
-            "video_pipeline_route": video_pipeline_route,
-        }
-        for key in ("actor_identity_id", "actor_identity_snapshot", "character_snapshot", "scene_plan"):
-            if key in batch_data:
-                batch[key] = batch_data[key]
     
     logger.info(
         "batch_created",
@@ -382,14 +465,26 @@ def list_batches(
     """List batches with optional filtering."""
     supabase = get_supabase()
 
-    query = supabase.client.table("batches").select(BATCH_LIST_FIELDS, count="exact")
-    
-    if archived is not None:
-        query = query.eq("archived", archived)
-    
-    query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
-    
-    response = _execute_with_retry("list_batches", query.execute)
+    def build_query(fields: str):
+        query = supabase.client.table("batches").select(fields, count="exact")
+        if archived is not None:
+            query = query.eq("archived", archived)
+        return query.order("created_at", desc=True).range(offset, offset + limit - 1)
+
+    try:
+        response = _execute_with_retry("list_batches", build_query(BATCH_LIST_FIELDS).execute)
+    except APIError as exc:
+        if exc.code != "PGRST204" or "target_duration_seconds" not in str(exc):
+            raise
+        logger.warning(
+            "batch_list_schema_cache_fallback",
+            omitted_fields=["target_duration_seconds"],
+            error=str(exc),
+        )
+        response = _execute_with_retry(
+            "list_batches_schema_lag",
+            build_query(BATCH_LIST_SCHEMA_LAG_FIELDS).execute,
+        )
     
     return response.data, response.count or 0
 
@@ -470,6 +565,12 @@ def duplicate_batch(batch_id: str, new_brand: Optional[str] = None) -> Dict[str,
         target_duration_seconds=original.get("target_duration_seconds"),
         creation_mode=creation_mode,
         manual_post_count=original.get("manual_post_count"),
+        semantic_actor_identity_id=(
+            original.get("actor_identity_id") if creation_mode == "semantic_ugc" else None
+        ),
+        semantic_actor_identity_snapshot=(
+            original.get("actor_identity_snapshot") if creation_mode == "semantic_ugc" else None
+        ),
     )
     
     logger.info(

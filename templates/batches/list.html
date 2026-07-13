@@ -3,6 +3,7 @@
 {% block title %}Batches - Lippe Lift Studio{% endblock %}
 
 {% block content %}
+{% set semantic_ugc_duration_presets = semantic_ugc_duration_presets | default([8, 16, 32, 50]) %}
 <div
     x-data="batchListComponent()"
     data-batch-page
@@ -250,7 +251,7 @@
                 hx-select="#batches-list-content"
                 hx-swap="outerHTML"
                 hx-indicator="#batch-spinner"
-                x-data="{ creationMode: 'automated', targetDurationSeconds: 50 }"
+                x-data="{ creationMode: 'automated', targetDurationSeconds: {{ semantic_ugc_default_duration_seconds | default(50) }} }"
                 @htmx:before-request="
                     const brand = $event.detail.elt.querySelector('[name=brand]').value;
                     const creationMode = $event.detail.elt.querySelector('[name=creation_mode]').value || 'automated';
@@ -404,10 +405,9 @@
                             <span class="text-sm text-gray-600">seconds</span>
                         </div>
                         <div class="mt-2 flex flex-wrap gap-2" aria-label="Duration presets">
-                            <button type="button" data-duration-preset="8" @click="targetDurationSeconds = 8" class="rounded-md border border-[#006AAB]/30 bg-white px-3 py-1.5 text-sm font-medium text-[#006AAB] transition hover:bg-[#006AAB]/10 focus:outline-none focus:ring-2 focus:ring-[#E58434]">8s</button>
-                            <button type="button" data-duration-preset="16" @click="targetDurationSeconds = 16" class="rounded-md border border-[#006AAB]/30 bg-white px-3 py-1.5 text-sm font-medium text-[#006AAB] transition hover:bg-[#006AAB]/10 focus:outline-none focus:ring-2 focus:ring-[#E58434]">16s</button>
-                            <button type="button" data-duration-preset="32" @click="targetDurationSeconds = 32" class="rounded-md border border-[#006AAB]/30 bg-white px-3 py-1.5 text-sm font-medium text-[#006AAB] transition hover:bg-[#006AAB]/10 focus:outline-none focus:ring-2 focus:ring-[#E58434]">32s</button>
-                            <button type="button" data-duration-preset="50" @click="targetDurationSeconds = 50" class="rounded-md border border-[#006AAB]/30 bg-white px-3 py-1.5 text-sm font-medium text-[#006AAB] transition hover:bg-[#006AAB]/10 focus:outline-none focus:ring-2 focus:ring-[#E58434]">50s</button>
+                            {% for seconds in semantic_ugc_duration_presets %}
+                            <button type="button" data-duration-preset="{{ seconds }}" @click="targetDurationSeconds = {{ seconds }}" class="rounded-md border border-[#006AAB]/30 bg-white px-3 py-1.5 text-sm font-medium text-[#006AAB] transition hover:bg-[#006AAB]/10 focus:outline-none focus:ring-2 focus:ring-[#E58434]">{{ seconds }}s</button>
+                            {% endfor %}
                         </div>
                         <p id="semantic-duration-help" class="mt-2 text-xs leading-5 text-gray-600">
                             Enter any whole second from 8 to {{ semantic_ugc_max_duration_seconds | default(60) }}. The shot plan and exact generation cost are shown for approval before paid video work begins.

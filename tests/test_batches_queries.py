@@ -2,6 +2,7 @@ import httpx
 from types import SimpleNamespace
 
 import pytest
+from postgrest.exceptions import APIError
 
 from app.features.batches import queries as batch_queries
 
@@ -15,6 +16,84 @@ def test_batch_list_projection_keeps_legacy_and_semantic_duration_fields():
         "target_duration_seconds",
         "video_pipeline_route",
     } <= fields
+
+
+class _SchemaLagListQuery:
+    def __init__(self, owner, rows):
+        self.owner = owner
+        self.rows = rows
+        self.fields = ""
+
+    def select(self, fields, **_kwargs):
+        self.fields = fields
+        self.owner.projections.append(fields)
+        return self
+
+    def eq(self, *_args, **_kwargs):
+        return self
+
+    def order(self, *_args, **_kwargs):
+        return self
+
+    def range(self, *_args, **_kwargs):
+        return self
+
+    def execute(self):
+        if "target_duration_seconds" in self.fields:
+            raise APIError(
+                {
+                    "code": "PGRST204",
+                    "details": None,
+                    "hint": None,
+                    "message": (
+                        "Could not find the 'target_duration_seconds' column of "
+                        "'batches' in the schema cache"
+                    ),
+                }
+            )
+        return SimpleNamespace(data=self.rows, count=len(self.rows))
+
+
+class _SchemaLagListClient:
+    def __init__(self, rows):
+        self.rows = rows
+        self.projections = []
+
+    def table(self, name):
+        assert name == "batches"
+        return _SchemaLagListQuery(self, self.rows)
+
+
+def test_list_batches_falls_back_to_safe_projection_during_schema_cache_lag(monkeypatch):
+    rows = [
+        {
+            "id": "batch-1",
+            "brand": "ACME",
+            "state": "S1_SETUP",
+            "creation_mode": "manual",
+            "post_type_counts": {},
+            "manual_post_count": 2,
+            "target_length_tier": 16,
+            "video_pipeline_route": None,
+            "created_at": "2026-07-13T00:00:00Z",
+            "updated_at": "2026-07-13T00:00:00Z",
+            "archived": False,
+        }
+    ]
+    client = _SchemaLagListClient(rows)
+    monkeypatch.setattr(
+        batch_queries,
+        "get_supabase",
+        lambda: SimpleNamespace(client=client),
+    )
+
+    batches, total = batch_queries.list_batches()
+
+    assert batches == rows
+    assert total == 1
+    assert len(client.projections) == 2
+    assert "target_duration_seconds" in client.projections[0]
+    assert "target_duration_seconds" not in client.projections[1]
 
 
 class _RetryingQuery:

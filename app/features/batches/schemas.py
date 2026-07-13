@@ -67,6 +67,16 @@ class CreateBatchRequest(BaseModel):
         strict=True,
         description="Exact requested duration for Semantic UGC batches",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_duration_authority(cls, data):
+        """Ignore legacy tier input before field bounds run for Semantic UGC."""
+        if isinstance(data, dict) and data.get("creation_mode") == "semantic_ugc":
+            normalized = dict(data)
+            normalized["target_length_tier"] = None
+            return normalized
+        return data
     
     @validator('brand')
     def validate_brand(cls, v):

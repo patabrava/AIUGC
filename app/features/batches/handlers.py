@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError as PydanticValidationError
 
 from app.features.batches.schemas import (
     CreateBatchRequest,
@@ -67,7 +68,12 @@ except ModuleNotFoundError:
     async def get_tiktok_publish_state() -> Dict[str, Any]:
         """Keep batch detail rendering alive when TikTok code is not deployed yet."""
         return {"status": "unavailable"}
-from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
+from app.core.errors import (
+    FlowForgeException,
+    SuccessResponse,
+    StateTransitionError,
+    ValidationError as FlowForgeValidationError,
+)
 from app.core.logging import get_logger
 from app.core.states import BatchState
 
@@ -116,6 +122,24 @@ def _semantic_ugc_max_duration_seconds() -> int:
     ).maximum_duration_seconds
 
 
+def _semantic_ugc_duration_ui_config() -> Dict[str, Any]:
+    maximum = _semantic_ugc_max_duration_seconds()
+    return {
+        "maximum": maximum,
+        "default": min(50, maximum),
+        "presets": [seconds for seconds in (8, 16, 32, 50) if seconds <= maximum],
+    }
+
+
+def _semantic_ugc_template_context() -> Dict[str, Any]:
+    config = _semantic_ugc_duration_ui_config()
+    return {
+        "semantic_ugc_max_duration_seconds": config["maximum"],
+        "semantic_ugc_default_duration_seconds": config["default"],
+        "semantic_ugc_duration_presets": config["presets"],
+    }
+
+
 def _resolve_form_target_length_tier(form, creation_mode: str) -> Optional[int]:
     if _is_semantic_ugc_mode(creation_mode):
         return None
@@ -138,6 +162,45 @@ def _resolve_form_target_duration_seconds(form, creation_mode: str) -> Optional[
     if value is None or not str(value).strip():
         return None
     return int(value)
+
+
+async def _parse_create_batch_request(request: Request) -> CreateBatchRequest:
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            data = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": "Invalid JSON payload", "error": str(exc)},
+            ) from exc
+        return CreateBatchRequest.model_validate(data)
+
+    form = await request.form()
+    post_type_counts: Dict[str, int] = {
+        "value": int(form.get("post_type_counts.value", 0) or 0),
+        "lifestyle": int(form.get("post_type_counts.lifestyle", 0) or 0),
+        "product": int(form.get("post_type_counts.product", 0) or 0),
+    }
+    creation_mode = str(
+        form.get("creation_mode", "automated") or "automated"
+    ).strip() or "automated"
+    manual_post_count = form.get("manual_post_count")
+    return CreateBatchRequest.model_validate(
+        {
+            "brand": str(form.get("brand", "")).strip(),
+            "creation_mode": creation_mode,
+            "post_type_counts": post_type_counts,
+            "manual_post_count": (
+                int(manual_post_count) if manual_post_count not in {None, ""} else None
+            ),
+            "target_length_tier": _resolve_form_target_length_tier(form, creation_mode),
+            "target_duration_seconds": _resolve_form_target_duration_seconds(
+                form,
+                creation_mode,
+            ),
+        }
+    )
 
 
 def _wants_html(request: Request) -> bool:
@@ -199,38 +262,18 @@ async def create_batch_endpoint(request: Request):
     Per Canon § 3.2: Initializes batch in S1_SETUP state.
     """
     try:
-        payload: Optional[CreateBatchRequest] = None
-
-        content_type = request.headers.get("content-type", "")
-        if "application/json" in content_type:
-            try:
-                data = await request.json()
-            except json.JSONDecodeError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"message": "Invalid JSON payload", "error": str(exc)}
-                ) from exc
-
-            payload = CreateBatchRequest.model_validate(data)
-        else:
-            form = await request.form()
-            post_type_counts: Dict[str, int] = {
-                "value": int(form.get("post_type_counts.value", 0) or 0),
-                "lifestyle": int(form.get("post_type_counts.lifestyle", 0) or 0),
-                "product": int(form.get("post_type_counts.product", 0) or 0)
-            }
-            creation_mode = str(form.get("creation_mode", "automated") or "automated").strip() or "automated"
-            manual_post_count = form.get("manual_post_count")
-            payload = CreateBatchRequest.model_validate(
-                {
-                    "brand": str(form.get("brand", "")).strip(),
-                    "creation_mode": creation_mode,
-                    "post_type_counts": post_type_counts,
-                    "manual_post_count": int(manual_post_count) if manual_post_count not in {None, ""} else None,
-                    "target_length_tier": _resolve_form_target_length_tier(form, creation_mode),
-                    "target_duration_seconds": _resolve_form_target_duration_seconds(form, creation_mode),
+        try:
+            payload = await _parse_create_batch_request(request)
+        except (PydanticValidationError, ValueError, TypeError) as exc:
+            details: Dict[str, Any] = {"error": str(exc)}
+            if isinstance(exc, PydanticValidationError):
+                details = {
+                    "errors": exc.errors(include_url=False, include_context=False),
                 }
-            )
+            raise FlowForgeValidationError(
+                "Invalid batch creation request.",
+                details,
+            ) from exc
 
         target_length_tier = (
             None
@@ -254,7 +297,7 @@ async def create_batch_endpoint(request: Request):
                 target_length_tier=normalize_target_length_tier(payload.target_length_tier),
             )
             batch = update_batch_state(batch["id"], BatchState.S2_SEEDED)
-        else:
+        elif not _is_semantic_ugc_mode(payload.creation_mode):
             start_seeding_interaction(
                 batch_id=batch["id"],
                 brand=batch["brand"],
@@ -275,7 +318,7 @@ async def create_batch_endpoint(request: Request):
                 "batches": batch_responses,
                 "total": total,
                 "filters": {"archived": None, "limit": 50, "offset": 0},
-                "semantic_ugc_max_duration_seconds": _semantic_ugc_max_duration_seconds(),
+                **_semantic_ugc_template_context(),
             }
             response = templates.TemplateResponse("batches/list.html", context)
             response.headers["HX-Trigger"] = json.dumps({
@@ -294,6 +337,8 @@ async def create_batch_endpoint(request: Request):
         return SuccessResponse(data=BatchResponse(**batch))
     
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception("create_batch_failed", error=str(e))
@@ -710,7 +755,7 @@ async def list_batches_endpoint(
                     "limit": limit,
                     "offset": offset
                 },
-                "semantic_ugc_max_duration_seconds": _semantic_ugc_max_duration_seconds(),
+                **_semantic_ugc_template_context(),
             }
             return templates.TemplateResponse("batches/list.html", context)
 
@@ -983,6 +1028,7 @@ async def get_batch_status(batch_id: str):
         if (
             batch["state"] == BatchState.S1_SETUP.value
             and posts_summary["posts_count"] == 0
+            and not _is_semantic_ugc_mode(batch.get("creation_mode"))
             and not is_batch_discovery_active(batch_id)
         ):
             if progress is None or progress.get("stage") in {"failed", "completed"}:
