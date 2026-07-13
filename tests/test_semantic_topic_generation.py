@@ -110,6 +110,7 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
 
     monkeypatch.setattr(handlers, "get_batch_by_id", lambda _batch_id: batch)
     monkeypatch.setattr(handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+    monkeypatch.setattr(handlers, "get_posts_by_batch", lambda _batch_id: [])
     monkeypatch.setattr(handlers, "get_all_topics_from_registry", lambda: [])
     monkeypatch.setattr(handlers, "update_seeding_progress", lambda *args, **kwargs: {})
     monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *args, **kwargs: None)
@@ -269,3 +270,130 @@ def test_semantic_post_insert_removes_internal_canonical_tier(monkeypatch):
     )
 
     assert "target_length_tier" not in captured["seed_data"]
+
+
+def test_semantic_value_retry_resumes_only_missing_persisted_slots(monkeypatch):
+    contract = build_semantic_duration_contract(50)
+    batch = {
+        "id": "batch-semantic-resume-value",
+        "brand": "AYRA",
+        "state": "S1_SETUP",
+        "creation_mode": "semantic_ugc",
+        "target_duration_seconds": 50,
+        "target_length_tier": None,
+        "post_type_counts": {"value": 3, "lifestyle": 0, "product": 0},
+        "actor_identity_snapshot": {"name": "Nora"},
+    }
+    candidates = [
+        {
+            **_candidate("value"),
+            "id": f"family-value-{index}",
+            "family_id": f"family-value-{index}",
+            "topic_registry_id": f"family-value-{index}",
+            "script_id": f"script-value-{index}",
+            "family_fingerprint": f"value-family-{index}",
+            "title": title,
+            "rotation": rotation,
+            "script": rotation,
+            "seed_payload": {
+                "canonical_topic": title,
+                "facts": [rotation],
+            },
+        }
+        for index, (title, rotation) in enumerate(
+            (
+                (
+                    "Rollstuhlrampe vor Reiseantritt prüfen",
+                    "Die Einstiegshöhe entscheidet, welche mobile Rampe für die geplante Reise passt.",
+                ),
+                (
+                    "Aufzugstatus am Bahnhof speichern",
+                    "Ein gespeicherter Aufzugstatus macht kurzfristige Alternativrouten am Bahnhof sichtbar.",
+                ),
+                (
+                    "Begleitservice frühzeitig buchen",
+                    "Der gebuchte Begleitservice koordiniert Treffpunkt und Umstieg für die konkrete Verbindung.",
+                ),
+            ),
+            start=1,
+        )
+    ]
+    persisted_posts = []
+    provider_calls = []
+    fail_family_two = {"enabled": True}
+    state_updates = []
+
+    monkeypatch.setattr(handlers, "get_batch_by_id", lambda _batch_id: batch)
+    monkeypatch.setattr(handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+    monkeypatch.setattr(handlers, "get_posts_by_batch", lambda _batch_id: list(persisted_posts))
+    monkeypatch.setattr(handlers, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(handlers, "update_seeding_progress", lambda *args, **kwargs: {})
+    monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *args, **kwargs: None)
+    monkeypatch.setattr(handlers, "mark_topic_script_used", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        handlers,
+        "_attach_publish_captions",
+        lambda *, seed_payload, **kwargs: seed_payload,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "list_topic_suggestions",
+        lambda **kwargs: list(candidates),
+    )
+
+    def fake_generate_semantic_script(**kwargs):
+        provider_calls.append(kwargs["title"])
+        if fail_family_two["enabled"] and kwargs["title"] == candidates[1]["title"]:
+            raise RuntimeError("provider failed on semantic slot value:2")
+        return SemanticScriptResult(
+            script=_seven_take_script(),
+            contract_hash=contract.contract_hash,
+            provenance={"source": "gemini", "post_type": "value"},
+        )
+
+    def fake_create_post_for_batch(**kwargs):
+        row = {
+            "id": f"post-{len(persisted_posts) + 1}",
+            "batch_id": batch["id"],
+            "post_type": kwargs["post_type"],
+            "topic_title": kwargs["topic_title"],
+            "topic_rotation": kwargs["topic_rotation"],
+            "topic_cta": kwargs["topic_cta"],
+            "spoken_duration": kwargs["spoken_duration"],
+            "seed_data": dict(kwargs["seed_data"]),
+        }
+        persisted_posts.append(row)
+        return row
+
+    monkeypatch.setattr(handlers, "generate_semantic_script", fake_generate_semantic_script)
+    monkeypatch.setattr(handlers, "create_post_for_batch", fake_create_post_for_batch)
+    monkeypatch.setattr(
+        handlers,
+        "update_batch_state",
+        lambda batch_id, state: state_updates.append(state.value)
+        or {**batch, "state": state.value},
+    )
+
+    with pytest.raises(RuntimeError, match="value:2"):
+        handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert provider_calls == [candidates[0]["title"], candidates[1]["title"]]
+    assert len(persisted_posts) == 1
+
+    fail_family_two["enabled"] = False
+    provider_calls.clear()
+    result = handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert provider_calls == [candidates[1]["title"], candidates[2]["title"]]
+    assert len(persisted_posts) == 3
+    assert [post["seed_data"]["semantic_slot_id"] for post in persisted_posts] == [
+        "value:1",
+        "value:2",
+        "value:3",
+    ]
+    assert {
+        post["seed_data"]["semantic_family_identity"] for post in persisted_posts
+    } == {"value-family-1", "value-family-2", "value-family-3"}
+    assert state_updates == ["S2_SEEDED"]
+    assert result["posts_created"] == 3
+    assert result["state"] == "S2_SEEDED"

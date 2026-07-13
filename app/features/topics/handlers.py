@@ -90,7 +90,7 @@ _SEEDING_PROGRESS: Dict[str, Dict[str, Any]] = {}
 _SEEDING_EVENTS: Dict[str, List[Dict[str, Any]]] = {}
 _SEEDING_EVENT_COUNTERS: Dict[str, int] = {}
 _SEEDING_PROGRESS_LOCK = RLock()
-_DISCOVERY_TASKS: Dict[str, asyncio.Task] = {}
+_DISCOVERY_TASKS: Dict[str, Optional[asyncio.Task]] = {}
 _PROGRESS_TTL_SECONDS = 45
 _WARMUP_SEED_TOPIC_COUNT = 5
 _COVERAGE_WARMUP_MAX_ROUNDS = 3
@@ -565,12 +565,190 @@ def _semantic_seed_payload(post_type: str, candidate: Dict[str, Any]) -> Dict[st
     return seed_payload
 
 
+def _semantic_family_identity(candidate: Dict[str, Any]) -> str:
+    for key in (
+        "family_fingerprint",
+        "family_id",
+        "topic_registry_id",
+        "id",
+    ):
+        value = str(candidate.get(key) or "").strip()
+        if value:
+            return value
+    return _topic_family_signature(candidate)
+
+
+def _semantic_seed_data(post: Dict[str, Any]) -> Dict[str, Any]:
+    seed_data = post.get("seed_data")
+    if isinstance(seed_data, dict):
+        return dict(seed_data)
+    if isinstance(seed_data, str):
+        try:
+            parsed = json.loads(seed_data)
+        except (TypeError, ValueError):
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _semantic_persisted_topic(post: Dict[str, Any], seed_data: Dict[str, Any]) -> Dict[str, Any]:
+    title = str(
+        post.get("topic_title")
+        or seed_data.get("canonical_topic")
+        or ""
+    ).strip()
+    rotation = str(
+        post.get("topic_rotation")
+        or seed_data.get("script")
+        or seed_data.get("dialog_script")
+        or title
+    ).strip()
+    return {
+        "title": title,
+        "rotation": rotation,
+        "script": rotation,
+        "post_type": post.get("post_type"),
+        "seed_payload": seed_data,
+    }
+
+
+def _select_semantic_candidates(
+    candidates: List[Dict[str, Any]],
+    *,
+    count: int,
+    used_family_identities: set[str],
+    existing_topics: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    selected: List[Dict[str, Any]] = []
+    seen_identities = set(used_family_identities)
+    seen_signatures = {
+        signature
+        for topic in existing_topics
+        if (signature := _topic_family_signature(topic))
+    }
+    for candidate in candidates:
+        identity = _semantic_family_identity(candidate)
+        signature = _topic_family_signature(candidate)
+        if not identity or identity in seen_identities:
+            continue
+        if signature and signature in seen_signatures:
+            continue
+        if not deduplicate_topics(
+            [candidate],
+            existing_topics + selected,
+            threshold=0.35,
+        ):
+            continue
+        selected.append(candidate)
+        seen_identities.add(identity)
+        if signature:
+            seen_signatures.add(signature)
+        if len(selected) >= count:
+            break
+    return selected
+
+
+def _reserve_semantic_candidates(
+    candidates: List[Dict[str, Any]],
+    *,
+    count: int,
+    used_family_identities: set[str],
+    reserved_topics: List[Dict[str, Any]],
+    dedupe_topics: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    selected = _select_semantic_candidates(
+        candidates,
+        count=count,
+        used_family_identities=used_family_identities,
+        existing_topics=(dedupe_topics or []) + reserved_topics,
+    )
+    reserved_topics.extend(selected)
+    used_family_identities.update(
+        _semantic_family_identity(candidate) for candidate in selected
+    )
+    return selected
+
+
+def _missing_semantic_lifestyle_candidates(
+    *,
+    count: int,
+    used_family_identities: set[str],
+    reserved_topics: List[Dict[str, Any]],
+    existing_topics: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    candidates = _reserve_semantic_candidates(
+        generate_lifestyle_topics(
+            count=count,
+            target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+        ),
+        count=count,
+        used_family_identities=used_family_identities,
+        reserved_topics=reserved_topics,
+        dedupe_topics=existing_topics,
+    )
+    for fallback_builder in (
+        _build_lifestyle_fallback_candidates,
+        _force_fill_lifestyle_candidates,
+    ):
+        remaining = count - len(candidates)
+        if remaining <= 0:
+            break
+        dedupe_inputs = existing_topics + reserved_topics
+        additions = _reserve_semantic_candidates(
+            fallback_builder(
+                count=remaining,
+                existing_titles={
+                    str(item.get("title") or "").strip().lower()
+                    for item in dedupe_inputs
+                    if isinstance(item, dict)
+                },
+                existing_scripts=[
+                    str(item.get("script") or item.get("rotation") or "").strip()
+                    for item in dedupe_inputs
+                    if isinstance(item, dict)
+                ],
+                target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+            ),
+            count=remaining,
+            used_family_identities=used_family_identities,
+            reserved_topics=reserved_topics,
+            dedupe_topics=existing_topics,
+        )
+        candidates.extend(additions)
+    return candidates
+
+
+def semantic_batch_posts_are_resumable(
+    batch: Dict[str, Any],
+    posts_by_type: Dict[str, int],
+) -> bool:
+    """Return whether an S1 Semantic UGC batch can safely resume from these totals."""
+    if str(batch.get("creation_mode") or "").strip() != "semantic_ugc":
+        return False
+    requested = {
+        str(post_type): int(count or 0)
+        for post_type, count in (batch.get("post_type_counts") or {}).items()
+    }
+    actual = {
+        str(post_type): int(count or 0)
+        for post_type, count in (posts_by_type or {}).items()
+        if int(count or 0) > 0
+    }
+    return all(
+        post_type in requested and count <= requested[post_type]
+        for post_type, count in actual.items()
+    )
+
+
 def _create_semantic_post_from_candidate(
     *,
     batch: Dict[str, Any],
     post_type: str,
     candidate: Dict[str, Any],
     contract: Any,
+    semantic_slot_id: str,
+    semantic_family_identity: str,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     seed_payload = _semantic_seed_payload(post_type, candidate)
     sources = _semantic_source_urls(candidate, seed_payload)
@@ -623,6 +801,8 @@ def _create_semantic_post_from_candidate(
             "semantic_script_word_count": validation.word_count,
             "semantic_minimum_take_count": contract.minimum_take_count,
             "semantic_planned_take_count": validation.planned_take_count,
+            "semantic_slot_id": semantic_slot_id,
+            "semantic_family_identity": semantic_family_identity,
             "semantic_planned_beats": [
                 {
                     "index": beat.index,
@@ -1152,11 +1332,12 @@ async def _run_batch_discovery_task(batch_id: str) -> None:
 
 def _claim_batch_discovery_slot(batch_id: str, *, reason: str) -> bool:
     with _SEEDING_PROGRESS_LOCK:
-        task = _DISCOVERY_TASKS.get(batch_id)
-        if task and not task.done():
-            logger.info("batch_autoseed_already_active", batch_id=batch_id, reason=reason)
-            return False
-        _DISCOVERY_TASKS[batch_id] = None  # type: ignore[assignment]
+        if batch_id in _DISCOVERY_TASKS:
+            task = _DISCOVERY_TASKS[batch_id]
+            if task is None or not task.done():
+                logger.info("batch_autoseed_already_active", batch_id=batch_id, reason=reason)
+                return False
+        _DISCOVERY_TASKS[batch_id] = None
     return True
 
 
@@ -1183,25 +1364,29 @@ def schedule_batch_discovery(batch_id: str, *, reason: str) -> bool:
     if not _claim_batch_discovery_slot(batch_id, reason=reason):
         return False
 
-    batch = get_batch_by_id(batch_id)
-    if _batch_has_manual_drafts(batch_id):
-        logger.info(
-            "batch_autoseed_skipped_manual_batch",
-            batch_id=batch_id,
-            state=batch.get("state"),
-            reason=reason,
-        )
+    try:
+        batch = get_batch_by_id(batch_id)
+        if _batch_has_manual_drafts(batch_id):
+            logger.info(
+                "batch_autoseed_skipped_manual_batch",
+                batch_id=batch_id,
+                state=batch.get("state"),
+                reason=reason,
+            )
+            _release_claimed_batch_discovery_slot(batch_id)
+            return False
+        if batch["state"] != BatchState.S1_SETUP.value:
+            logger.info(
+                "batch_autoseed_skipped_non_setup",
+                batch_id=batch_id,
+                state=batch["state"],
+                reason=reason,
+            )
+            _release_claimed_batch_discovery_slot(batch_id)
+            return False
+    except Exception:
         _release_claimed_batch_discovery_slot(batch_id)
-        return False
-    if batch["state"] != BatchState.S1_SETUP.value:
-        logger.info(
-            "batch_autoseed_skipped_non_setup",
-            batch_id=batch_id,
-            state=batch["state"],
-            reason=reason,
-        )
-        _release_claimed_batch_discovery_slot(batch_id)
-        return False
+        raise
 
     return _start_claimed_batch_discovery(batch_id, reason=reason)
 
@@ -1225,8 +1410,13 @@ def find_recoverable_stalled_batch_ids(
         created_at = _parse_utc_timestamp(batch.get("created_at"))
         if created_at is None or created_at < newest_allowed_created_at:
             continue
-        if get_posts_by_batch(batch_id):
-            continue
+        persisted_posts = get_posts_by_batch(batch_id)
+        if persisted_posts:
+            persisted_counts = Counter(
+                str(post.get("post_type") or "") for post in persisted_posts
+            )
+            if not semantic_batch_posts_are_resumable(batch, dict(persisted_counts)):
+                continue
         progress = get_seeding_progress(batch_id)
         if progress and progress.get("stage") not in {"failed", "completed"}:
             continue
@@ -1277,13 +1467,103 @@ def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
 
 def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str, Any]:
     batch_id = batch["id"]
-    post_type_counts = batch["post_type_counts"]
+    post_type_counts = {
+        str(post_type): int(count or 0)
+        for post_type, count in (batch.get("post_type_counts") or {}).items()
+    }
     contract = build_semantic_duration_contract(batch.get("target_duration_seconds"))
-    expected_posts = sum(int(value or 0) for value in post_type_counts.values())
-    existing_topics = get_all_topics_from_registry()
+    expected_posts = sum(post_type_counts.values())
+    persisted_posts = list(get_posts_by_batch(batch_id) or [])
+    persisted_counts = Counter(
+        str(post.get("post_type") or "") for post in persisted_posts
+    )
+    if not semantic_batch_posts_are_resumable(batch, dict(persisted_counts)):
+        raise ValidationError(
+            message="Persisted Semantic UGC posts do not match the requested batch mix.",
+            details={
+                "batch_id": batch_id,
+                "requested_post_types": post_type_counts,
+                "persisted_post_types": dict(persisted_counts),
+            },
+        )
+
     all_generated_topics: List[Dict[str, Any]] = []
     created_posts: List[Dict[str, Any]] = []
     preselected_suggestions: Dict[str, List[Dict[str, Any]]] = {}
+    occupied_slots = {post_type: set() for post_type in post_type_counts}
+    used_family_identities: set[str] = set()
+
+    for post in persisted_posts:
+        post_type = str(post.get("post_type") or "")
+        seed_data = _semantic_seed_data(post)
+        slot_id = str(seed_data.get("semantic_slot_id") or "").strip()
+        if slot_id:
+            expected_prefix = f"{post_type}:"
+            try:
+                slot_number = int(slot_id.removeprefix(expected_prefix))
+            except ValueError:
+                slot_number = 0
+            if (
+                not slot_id.startswith(expected_prefix)
+                or slot_number < 1
+                or slot_number > post_type_counts[post_type]
+            ):
+                raise ValidationError(
+                    message="Persisted Semantic UGC post has an invalid resume slot.",
+                    details={"batch_id": batch_id, "post_id": post.get("id"), "slot_id": slot_id},
+                )
+        else:
+            slot_number = next(
+                (
+                    number
+                    for number in range(1, post_type_counts[post_type] + 1)
+                    if number not in occupied_slots[post_type]
+                ),
+                0,
+            )
+            slot_id = f"{post_type}:{slot_number}"
+        if not slot_number or slot_number in occupied_slots[post_type]:
+            raise ValidationError(
+                message="Persisted Semantic UGC posts contain a duplicate resume slot.",
+                details={"batch_id": batch_id, "post_id": post.get("id"), "slot_id": slot_id},
+            )
+        occupied_slots[post_type].add(slot_number)
+
+        persisted_topic = _semantic_persisted_topic(post, seed_data)
+        family_identity = str(
+            seed_data.get("semantic_family_identity")
+            or seed_data.get("family_fingerprint")
+            or seed_data.get("family_id")
+            or ""
+        ).strip() or _semantic_family_identity(persisted_topic)
+        if not family_identity:
+            family_identity = f"persisted:{post.get('id') or slot_id}"
+        if family_identity in used_family_identities:
+            raise ValidationError(
+                message="Persisted Semantic UGC posts contain a duplicate topic family.",
+                details={
+                    "batch_id": batch_id,
+                    "post_id": post.get("id"),
+                    "semantic_family_identity": family_identity,
+                },
+            )
+        used_family_identities.add(family_identity)
+        all_generated_topics.append(persisted_topic)
+
+    missing_slots = {
+        post_type: [
+            f"{post_type}:{number}"
+            for number in range(1, count + 1)
+            if number not in occupied_slots[post_type]
+        ]
+        for post_type, count in post_type_counts.items()
+    }
+    persisted_post_count = len(persisted_posts)
+    existing_topics = (
+        get_all_topics_from_registry()
+        if any(missing_slots.values())
+        else []
+    )
 
     update_seeding_progress(
         batch_id,
@@ -1294,7 +1574,7 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             "Selecting duration-neutral topic inputs before generating scripts for "
             f"{contract.requested_duration_seconds} seconds."
         ),
-        posts_created=0,
+        posts_created=persisted_post_count,
         expected_posts=expected_posts,
         current_post_type=None,
         attempt=None,
@@ -1303,22 +1583,25 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
         retry_message=None,
     )
 
-    for post_type, raw_count in post_type_counts.items():
-        count = int(raw_count or 0)
-        if count <= 0 or post_type in {"lifestyle", "product"}:
+    reserved_family_identities = set(used_family_identities)
+    reserved_topics = list(all_generated_topics)
+    for post_type, count in post_type_counts.items():
+        missing_count = len(missing_slots[post_type])
+        if missing_count <= 0 or post_type in {"lifestyle", "product"}:
             continue
         stored_suggestions = list_topic_suggestions(
             target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
             limit=max(count * 20, 50),
             post_type=post_type,
         )
-        suggestions = _unique_topic_suggestions(
+        suggestions = _reserve_semantic_candidates(
             stored_suggestions,
-            count,
-            existing_topics=all_generated_topics,
+            count=missing_count,
+            used_family_identities=reserved_family_identities,
+            reserved_topics=reserved_topics,
         )
         preselected_suggestions[post_type] = suggestions
-        if len(suggestions) >= count:
+        if len(suggestions) >= missing_count:
             continue
         update_seeding_progress(
             batch_id,
@@ -1326,10 +1609,11 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             stage="coverage_pending",
             stage_label="Waiting for duration-neutral family coverage",
             detail_message=(
-                f"Only {len(suggestions)} canonical {post_type} families are ready. "
+                f"Only {len(suggestions)} of {missing_count} missing canonical "
+                f"{post_type} families are ready. "
                 "Background 32-second family warm-up and audit promotion were queued."
             ),
-            posts_created=0,
+            posts_created=persisted_post_count,
             expected_posts=expected_posts,
             current_post_type=post_type,
             attempt=None,
@@ -1341,19 +1625,20 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             batch_id=batch_id,
             post_type=post_type,
             target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
-            required_count=count,
+            required_count=missing_count,
         )
         return {
             "batch_id": batch_id,
-            "posts_created": 0,
+            "posts_created": persisted_post_count,
             "state": batch["state"],
-            "topics": [],
+            "topics": all_generated_topics,
             "coverage_pending": True,
         }
 
-    for post_type, raw_count in post_type_counts.items():
-        count = int(raw_count or 0)
-        if count <= 0:
+    for post_type, count in post_type_counts.items():
+        slots = missing_slots[post_type]
+        missing_count = len(slots)
+        if missing_count <= 0:
             continue
         update_seeding_progress(
             batch_id,
@@ -1361,10 +1646,10 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             stage="writing_posts",
             stage_label="Generating duration-driven Semantic UGC scripts",
             detail_message=(
-                f"Adapting {count} {post_type} topic inputs to "
+                f"Adapting {missing_count} missing {post_type} topic inputs to "
                 f"{contract.requested_duration_seconds} seconds."
             ),
-            posts_created=len(created_posts),
+            posts_created=persisted_post_count + len(created_posts),
             expected_posts=expected_posts,
             current_post_type=post_type,
             attempt=None,
@@ -1374,66 +1659,45 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
         )
 
         if post_type == "lifestyle":
-            candidates = deduplicate_topics(
-                generate_lifestyle_topics(
-                    count=count,
+            candidates = _missing_semantic_lifestyle_candidates(
+                count=missing_count,
+                used_family_identities=reserved_family_identities,
+                reserved_topics=reserved_topics,
+                existing_topics=existing_topics,
+            )
+        elif post_type == "product":
+            candidates = _reserve_semantic_candidates(
+                generate_product_topics(
+                    count=missing_count,
                     target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
                 ),
-                existing_topics + all_generated_topics,
-                threshold=0.35,
-            )
-            if len(candidates) < count:
-                existing_titles = {
-                    str(item.get("title") or "").strip().lower()
-                    for item in existing_topics + all_generated_topics + candidates
-                    if isinstance(item, dict)
-                }
-                existing_scripts = [
-                    str(item.get("script") or item.get("rotation") or "").strip()
-                    for item in existing_topics + all_generated_topics + candidates
-                    if isinstance(item, dict)
-                ]
-                candidates.extend(
-                    _build_lifestyle_fallback_candidates(
-                        count=count - len(candidates),
-                        existing_titles=existing_titles,
-                        existing_scripts=existing_scripts,
-                        target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
-                    )
-                )
-            if len(candidates) < count:
-                existing_titles = {
-                    str(item.get("title") or "").strip().lower()
-                    for item in existing_topics + all_generated_topics + candidates
-                    if isinstance(item, dict)
-                }
-                existing_scripts = [
-                    str(item.get("script") or item.get("rotation") or "").strip()
-                    for item in existing_topics + all_generated_topics + candidates
-                    if isinstance(item, dict)
-                ]
-                candidates.extend(
-                    _force_fill_lifestyle_candidates(
-                        count=count - len(candidates),
-                        existing_titles=existing_titles,
-                        existing_scripts=existing_scripts,
-                        target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
-                    )
-                )
-        elif post_type == "product":
-            candidates = generate_product_topics(
-                count=count,
-                target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+                count=missing_count,
+                used_family_identities=reserved_family_identities,
+                reserved_topics=reserved_topics,
             )
         else:
             candidates = preselected_suggestions.get(post_type, [])
 
-        for candidate in candidates[:count]:
+        if len(candidates) != missing_count:
+            raise ValidationError(
+                message="Semantic topic discovery could not select every missing topic family.",
+                details={
+                    "batch_id": batch_id,
+                    "post_type": post_type,
+                    "missing_slots": slots,
+                    "selected_families": len(candidates),
+                },
+            )
+
+        for slot_id, candidate in zip(slots, candidates):
+            family_identity = _semantic_family_identity(candidate)
             post, topic_record = _create_semantic_post_from_candidate(
                 batch=batch,
                 post_type=post_type,
                 candidate=candidate,
                 contract=contract,
+                semantic_slot_id=slot_id,
+                semantic_family_identity=family_identity,
             )
             created_posts.append(post)
             all_generated_topics.append(topic_record)
@@ -1444,9 +1708,10 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
                 stage="writing_posts",
                 stage_label="Generating duration-driven Semantic UGC scripts",
                 detail_message=(
-                    f"{len(created_posts)} of {expected_posts} posts are ready for script review."
+                    f"{persisted_post_count + len(created_posts)} of {expected_posts} "
+                    "posts are ready for script review."
                 ),
-                posts_created=len(created_posts),
+                posts_created=persisted_post_count + len(created_posts),
                 expected_posts=expected_posts,
                 current_post_type=post_type,
                 attempt=None,
@@ -1455,32 +1720,35 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
                 retry_message=None,
             )
 
-    created_counts = Counter(post.get("post_type") for post in created_posts)
-    missing_post_types = {
+    final_counts = Counter(
+        str(post.get("post_type") or "") for post in persisted_posts + created_posts
+    )
+    mismatched_post_types = {
         post_type: {
             "requested": int(requested_count or 0),
-            "created": created_counts.get(post_type, 0),
+            "persisted": final_counts.get(post_type, 0),
         }
         for post_type, requested_count in post_type_counts.items()
-        if int(requested_count or 0) > created_counts.get(post_type, 0)
+        if int(requested_count or 0) != final_counts.get(post_type, 0)
     }
-    if missing_post_types:
+    if mismatched_post_types:
         raise ValidationError(
-            message="Semantic topic discovery did not create every requested post.",
+            message="Semantic topic discovery did not persist the exact requested batch mix.",
             details={
                 "batch_id": batch_id,
-                "missing_post_types": missing_post_types,
+                "mismatched_post_types": mismatched_post_types,
             },
         )
 
     updated_batch = update_batch_state(batch_id, BatchState.S2_SEEDED)
+    completed_posts = len(persisted_posts) + len(created_posts)
     update_seeding_progress(
         batch_id,
         state=updated_batch["state"],
         stage="completed",
         stage_label="Semantic UGC topic generation complete",
-        detail_message=f"{len(created_posts)} scripts are ready for review.",
-        posts_created=len(created_posts),
+        detail_message=f"{completed_posts} scripts are ready for review.",
+        posts_created=completed_posts,
         expected_posts=expected_posts,
         current_post_type=None,
         attempt=None,
@@ -1490,7 +1758,7 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
     )
     return {
         "batch_id": batch_id,
-        "posts_created": len(created_posts),
+        "posts_created": completed_posts,
         "state": updated_batch["state"],
         "topics": all_generated_topics,
     }

@@ -371,6 +371,47 @@ async def test_semantic_status_recovery_schedules_semantic_discovery(monkeypatch
 
 
 @pytest.mark.anyio
+async def test_semantic_status_recovery_schedules_partial_discovery(monkeypatch):
+    _enable_test_environment()
+    from app.features.batches import handlers as batch_handlers
+
+    discovery_calls = []
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda _batch_id: _batch_row(
+            post_type_counts={"value": 2, "lifestyle": 0, "product": 0}
+        ),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda _batch_id: {"posts_count": 1, "posts_by_state": {"value": 1}},
+    )
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", lambda _batch_id: None)
+    monkeypatch.setattr(batch_handlers, "_batch_has_manual_drafts", lambda _batch: False)
+    monkeypatch.setattr(batch_handlers, "is_batch_discovery_active", lambda _batch_id: False)
+    monkeypatch.setattr(
+        batch_handlers,
+        "start_seeding_interaction",
+        lambda **kwargs: discovery_calls.append(("start", kwargs)),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda *args, **kwargs: discovery_calls.append(("schedule", args, kwargs)),
+    )
+
+    await batch_handlers.get_batch_status("batch-semantic")
+
+    assert [call[0] for call in discovery_calls] == ["start", "schedule"]
+    assert discovery_calls[1][1:] == (
+        ("batch-semantic",),
+        {"reason": "status_recovery"},
+    )
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("duration", [None, "not-a-number", "7", "61"])
 async def test_semantic_form_validation_raises_project_422_error(monkeypatch, duration):
     _enable_test_environment()

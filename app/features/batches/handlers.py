@@ -44,6 +44,7 @@ from app.features.topics.handlers import (
     has_required_family_coverage,
     is_batch_discovery_active,
     schedule_batch_discovery,
+    semantic_batch_posts_are_resumable,
     start_seeding_interaction,
     update_seeding_progress,
 )
@@ -1025,9 +1026,13 @@ async def get_batch_status(batch_id: str):
             }
             return SuccessResponse(data=payload)
 
+        semantic_resume_is_safe = semantic_batch_posts_are_resumable(
+            batch,
+            posts_summary["posts_by_state"],
+        )
         if (
             batch["state"] == BatchState.S1_SETUP.value
-            and posts_summary["posts_count"] == 0
+            and (posts_summary["posts_count"] == 0 or semantic_resume_is_safe)
             and not is_batch_discovery_active(batch_id)
         ):
             if progress is None or progress.get("stage") in {"failed", "completed"}:
