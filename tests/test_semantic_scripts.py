@@ -50,6 +50,22 @@ def _normalized_template_signature(sentence: str) -> str:
     )
 
 
+def _word_tokens(text: str) -> list[str]:
+    return re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", text)
+
+
+def _is_ordered_subsequence(candidate: list[str], source: list[str]) -> bool:
+    source_iter = iter(word.casefold() for word in source)
+    return all(
+        any(token.casefold() == source_token for source_token in source_iter)
+        for token in candidate
+    )
+
+
+def _quoted_spans(text: str) -> list[str]:
+    return re.findall(r'[„"]([^“”"]+)[“”"]', text)
+
+
 class _FakeLLM:
     def __init__(self, text: str):
         self.text = text
@@ -300,6 +316,7 @@ def test_provider_failure_uses_distinct_fact_aware_contract_safe_fallback(second
     assert contract.minimum_words <= script_word_count(result.script) <= contract.maximum_words
     assert len(plan_editorial_beats(result.script)) == contract.minimum_take_count
     assert len(sentences) == len(set(sentences))
+    assert all(_quoted_spans(sentence) for sentence in sentences)
     assert "Mobilitätsservice" in result.script
     assert result.provenance["source"] == "fallback"
 
@@ -328,6 +345,7 @@ def test_short_provider_failure_fallback_is_contract_safe_at_every_duration(seco
     assert len(plan_editorial_beats(result.script)) == contract.minimum_take_count
     assert len(sentences) == contract.minimum_take_count
     assert len(sentences) == len(set(sentences))
+    assert all(_quoted_spans(sentence) for sentence in sentences)
     assert len({_normalized_template_signature(sentence) for sentence in sentences}) == len(
         sentences
     )
@@ -404,13 +422,79 @@ def test_generic_provider_fallback_is_contract_safe_for_fact_length_matrix(
     assert len(sentences) == contract.minimum_take_count
     assert len(sentences) == len(set(sentences))
     assert all(sentence.endswith((".", "!", "?")) for sentence in sentences)
+    quoted_spans = [span for sentence in sentences for span in _quoted_spans(sentence)]
+    assert len(quoted_spans) == len(sentences)
+    assert all(
+        _is_ordered_subsequence(_word_tokens(span), source_words)
+        for span in quoted_spans
+    )
     assert source_words[0] in result.script
     assert source_words[-1] in result.script
     if fact_word_count <= maximum_block_words:
-        assert sentences[0].startswith(" ".join(source_words))
+        assert sentences[0].startswith(f'„{" ".join(source_words)}')
     if fact_word_count > maximum_block_words:
         assert "Quellenauszug" in result.script
     assert result.provenance["source"] == "fallback"
+
+
+def test_fallback_quellenauszug_quotes_contain_only_ordered_source_tokens():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    fact = (
+        "Wenn der Aufzug am Bahnhof kurzfristig ausfällt und niemand erreichbar ist "
+        "obwohl die Reise bereits verbindlich geplant wurde dann muss der alternative "
+        "Einstieg vor der Abfahrt bestätigt werden."
+    )
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Bahnreisen",
+        cta="",
+        facts=[fact],
+        requested_duration_seconds=50,
+        llm_client=_UnavailableLLM(),
+    )
+    quoted_spans = re.findall(r'Quellenauszug:\s*[„"]([^“”"]+)[“”"]', result.script)
+
+    assert result.script.count("Quellenauszug:") > 0
+    assert len(quoted_spans) == result.script.count("Quellenauszug:")
+    source_words = _word_tokens(fact)
+    assert all(
+        _is_ordered_subsequence(_word_tokens(span), source_words)
+        for span in quoted_spans
+    )
+
+
+def test_every_provider_failure_beat_contains_a_quoted_source_anchor():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Titel",
+        cta="",
+        facts=["Signalwort.", "Quellenkern."],
+        requested_duration_seconds=60,
+        llm_client=_UnavailableLLM(),
+    )
+    beats = plan_editorial_beats(result.script)
+    quoted_anchors = [_quoted_spans(beat.text) for beat in beats]
+
+    assert len(beats) == 8
+    assert all(len(anchors) == 1 for anchors in quoted_anchors)
+    assert [anchors[0] for anchors in quoted_anchors] == [
+        "Signalwort",
+        "Quellenkern",
+        "Signalwort",
+        "Quellenkern",
+        "Signalwort",
+        "Quellenkern",
+        "Signalwort",
+        "Quellenkern",
+    ]
+    assert len({_normalized_template_signature(beat.text) for beat in beats}) == len(beats)
 
 
 def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():

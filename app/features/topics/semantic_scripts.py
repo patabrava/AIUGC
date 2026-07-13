@@ -262,17 +262,57 @@ _FALLBACK_SAFE_MARKERS = frozenset(
         "während",
     }
 )
-_FALLBACK_EVIDENCE_ACTIONS: Sequence[tuple[int, Sequence[str]]] = (
+_FALLBACK_ANCHOR_STOPWORDS = _FALLBACK_SAFE_MARKERS | frozenset(
+    {
+        "am",
+        "an",
+        "auf",
+        "aus",
+        "bei",
+        "das",
+        "dem",
+        "den",
+        "der",
+        "des",
+        "die",
+        "ein",
+        "eine",
+        "einem",
+        "einen",
+        "einer",
+        "eines",
+        "für",
+        "im",
+        "in",
+        "ist",
+        "kann",
+        "mit",
+        "muss",
+        "nach",
+        "sind",
+        "vor",
+        "von",
+        "war",
+        "werden",
+        "wird",
+        "wurde",
+        "zu",
+        "zum",
+        "zur",
+    }
+)
+_FALLBACK_SOURCE_PLACEHOLDER = "{source}"
+_FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
     (
         1,
         (
             "Prüfe",
-            "diesen",
-            "Hinweis",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "direkt",
             "an",
             "der",
             "bereitgestellten",
+            "vollständigen",
             "Quelle",
             "nach",
         ),
@@ -281,13 +321,13 @@ _FALLBACK_EVIDENCE_ACTIONS: Sequence[tuple[int, Sequence[str]]] = (
         1,
         (
             "Vergleiche",
-            "diese",
-            "Aussage",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "vorab",
             "sorgfältig",
             "mit",
             "dem",
             "vollständigen",
+            "belegten",
             "Quellenmaterial",
         ),
     ),
@@ -295,27 +335,27 @@ _FALLBACK_EVIDENCE_ACTIONS: Sequence[tuple[int, Sequence[str]]] = (
         1,
         (
             "Nutze",
-            "den",
-            "Quellenauszug",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "nur",
             "mit",
             "seinem",
             "vollständigen",
             "belegten",
             "Kontext",
+            "weiter",
         ),
     ),
     (
-        2,
+        4,
         (
             "Halte",
             "dich",
+            "bei",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "konsequent",
             "an",
             "die",
             "belegte",
-            "Aussage",
-            "der",
             "Quelle",
         ),
     ),
@@ -323,27 +363,27 @@ _FALLBACK_EVIDENCE_ACTIONS: Sequence[tuple[int, Sequence[str]]] = (
         1,
         (
             "Bewahre",
-            "den",
-            "genannten",
-            "Sachverhalt",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "unverändert",
             "für",
             "deine",
             "weitere",
+            "sorgfältige",
             "Prüfung",
+            "auf",
         ),
     ),
     (
         1,
         (
             "Ordne",
-            "diese",
-            "Quellenangabe",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "sorgfältig",
             "in",
-            "ihren",
+            "seinen",
             "ursprünglichen",
-            "Zusammenhang",
+            "Quellenzusammenhang",
+            "wieder",
             "ein",
         ),
     ),
@@ -351,28 +391,28 @@ _FALLBACK_EVIDENCE_ACTIONS: Sequence[tuple[int, Sequence[str]]] = (
         1,
         (
             "Kontrolliere",
-            "die",
-            "übernommenen",
-            "Begriffe",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "nochmals",
             "direkt",
             "am",
             "vollständigen",
+            "bereitgestellten",
             "Ausgangstext",
+            "sorgfältig",
         ),
     ),
     (
         1,
         (
             "Verwende",
-            "diesen",
-            "Hinweis",
+            _FALLBACK_SOURCE_PLACEHOLDER,
             "nur",
             "in",
             "seiner",
             "hier",
             "belegten",
-            "Bedeutung",
+            "Quellenbedeutung",
+            "weiter",
         ),
     ),
 )
@@ -616,6 +656,36 @@ def _fallback_fact_statements(
     return statements
 
 
+def _fallback_source_unit_parts(
+    statement: Sequence[str],
+) -> tuple[bool, list[str]]:
+    is_excerpt = bool(statement) and statement[0] == "Quellenauszug:"
+    source_words = list(statement[1:] if is_excerpt else statement)
+    if not source_words:
+        raise ValueError("Semantic UGC fallback source unit cannot be empty.")
+    return is_excerpt, source_words
+
+
+def _fallback_anchor_word(statement: Sequence[str]) -> str:
+    _, source_words = _fallback_source_unit_parts(statement)
+    meaningful_words = [
+        (index, word)
+        for index, word in enumerate(source_words)
+        if word.casefold() not in _FALLBACK_ANCHOR_STOPWORDS
+    ]
+    if not meaningful_words:
+        return source_words[0]
+    capitalized_words = [
+        item for item in meaningful_words if item[1][:1].isupper()
+    ]
+    candidates = capitalized_words or meaningful_words
+    _, anchor = max(
+        candidates,
+        key=lambda item: (len(item[1]), -item[0]),
+    )
+    return anchor
+
+
 def _compose_fallback_source_sentence(
     *,
     index: int,
@@ -626,19 +696,30 @@ def _compose_fallback_source_sentence(
     if remaining_words < 0:
         raise ValueError("Semantic UGC fallback statement exceeds one complete take.")
     coda = _fallback_action_coda(index, remaining_words)
-    sentence = " ".join(statement)
+    is_excerpt, source_words = _fallback_source_unit_parts(statement)
+    label = "Quellenauszug: " if is_excerpt else ""
+    sentence = f'{label}„{" ".join(source_words)}“'
     if coda:
         sentence += f"; {' '.join(coda)}"
     sentence += "."
     return sentence
 
 
-def _fallback_evidence_action_sentence(*, index: int, target_words: int) -> str:
+def _fallback_fact_aware_sentence(
+    *,
+    wrapper_index: int,
+    target_words: int,
+    source_statement: Sequence[str],
+) -> str:
     if not 9 <= target_words <= 16:
-        raise ValueError("Semantic UGC fallback action requires 9 to 16 words.")
-    insertion_index, base_words = _FALLBACK_EVIDENCE_ACTIONS[index]
+        raise ValueError("Semantic UGC fallback wrapper requires 9 to 16 words.")
+    if not 0 <= wrapper_index < len(_FALLBACK_FACT_AWARE_WRAPPERS):
+        raise ValueError("Semantic UGC fallback exhausted its distinct wrapper bank.")
+    insertion_index, base_words = _FALLBACK_FACT_AWARE_WRAPPERS[wrapper_index]
     if len(base_words) != 9:
-        raise ValueError("Semantic UGC fallback action template must contain nine words.")
+        raise ValueError("Semantic UGC fallback wrapper must contain nine words.")
+    if sum(word == _FALLBACK_SOURCE_PLACEHOLDER for word in base_words) != 1:
+        raise ValueError("Semantic UGC fallback wrapper requires one source anchor.")
     modifiers: Sequence[str] = {
         9: (),
         10: ("erneut",),
@@ -657,10 +738,15 @@ def _fallback_evidence_action_sentence(*, index: int, target_words: int) -> str:
             "erneut",
         ),
     }[target_words]
+    anchor = _fallback_anchor_word(source_statement)
+    anchored_base_words = [
+        f"„{anchor}“" if word == _FALLBACK_SOURCE_PLACEHOLDER else word
+        for word in base_words
+    ]
     words = [
-        *base_words[:insertion_index],
+        *anchored_base_words[:insertion_index],
         *modifiers,
-        *base_words[insertion_index:],
+        *anchored_base_words[insertion_index:],
     ]
     return f"{' '.join(words)}."
 
@@ -702,9 +788,12 @@ def _build_fallback_script(
                 statement=fact_word_sets[index],
             )
         else:
-            sentence = _fallback_evidence_action_sentence(
-                index=index,
+            wrapper_index = index - len(fact_word_sets)
+            source_index = wrapper_index % len(fact_word_sets)
+            sentence = _fallback_fact_aware_sentence(
+                wrapper_index=wrapper_index,
                 target_words=target_words,
+                source_statement=fact_word_sets[source_index],
             )
         if script_word_count(sentence) != target_words:
             raise ValueError("Could not build a contract-safe Semantic UGC fallback block.")
