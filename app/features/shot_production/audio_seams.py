@@ -429,7 +429,10 @@ def _select_seam(
             "No transcript-safe acoustic seam candidate exists.",
             {"seam_index": seam_index, "rejected_candidate_count": len(rejected)},
         )
-    island_duration, _, energy_delta, next_start, previous_end, overlap, _ = min(valid)
+    island_duration, _, energy_delta, next_start, previous_end, overlap, _ = min(
+        valid,
+        key=lambda candidate: candidate[:6],
+    )
     visual_position = overlap / 2.0
     word_gap = (
         previous_end

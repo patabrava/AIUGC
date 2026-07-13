@@ -1,6 +1,5 @@
 import math
 import json
-from pathlib import Path
 
 import pytest
 
@@ -165,6 +164,18 @@ def _evidence(
         final_word_end_seconds=final_word,
         frames=tuple(frames),
     )
+
+
+def test_planner_resolves_equally_safe_candidates_deterministically():
+    takes = (
+        _evidence(0, final_word=2.8),
+        _evidence(1, first_word=0.10),
+    )
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+    assert plan.seams[0].next_audio_start_seconds == 0.0
+    assert plan.seams[0].overlap_seconds == 0.04
 
 
 def test_planner_removes_pause_breath_pause_from_next_take_head():

@@ -1271,6 +1271,7 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
             "end_seconds": 7.26,
             "source": "deepgram_word_window",
         }
+    payload["takes"][1]["transcript_qa"]["first_word_start_seconds"] = 0.08
     payload["visual_qa"] = {"passed": True}
     payload["voice_qa"] = {"passed": True}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -1303,12 +1304,23 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         output.write_bytes(b"captioned")
         return str(output)
 
+    def normalize_fn(_previous, _incoming, output, **_kwargs):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"room-tone-bridged")
+
+    def plan_fn(evidence, **_kwargs):
+        assert evidence[1].provider_duration_seconds == pytest.approx(8.04)
+        assert evidence[1].first_word_start_seconds == pytest.approx(0.12)
+        assert evidence[1].final_word_end_seconds == pytest.approx(6.84)
+        return plan
+
     compose_and_caption(
         manifest_path,
         _DeepgramByCall([SCRIPT]),
         acoustic_seams=True,
         analyze_audio_fn=lambda _path: (),
-        plan_acoustic_fn=lambda _evidence, **_kwargs: plan,
+        plan_acoustic_fn=plan_fn,
+        normalize_preroll_fn=normalize_fn,
         extract_seam_audio_fn=extract_fn,
         acoustic_evaluator=evaluator,
         stitch_fn=stitch_fn,
@@ -1317,10 +1329,113 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     )
 
     assert stitch_calls[0]["acoustic_plan"]["analyzer_version"] == "test-v1"
+    assert stitch_calls[0]["segment_videos"][1] == b"room-tone-bridged"
     saved = _read(manifest_path)
     assert saved["acoustic_seam_qa"]["passed"] is True
     assert len(saved["acoustic_seam_qa"]["clips"]) == 1
     assert saved["acoustic_seam_plan"]["final_duration_seconds"] == 14.48
+    assert saved["acoustic_preroll_normalization"][0]["take_index"] == 1
+
+
+def test_acoustic_source_preparation_bridges_early_speech_with_previous_room_tone(tmp_path):
+    from app.features.shot_production.runner import _prepare_acoustic_segment_sources
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    takes = sorted(_read(manifest_path)["takes"], key=lambda take: take["index"])
+    for take in takes:
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.2,
+            "final_word_end_seconds": 6.8,
+        }
+    takes[1]["transcript_qa"]["first_word_start_seconds"] = 0.08
+    calls = []
+
+    def normalize(previous_path, incoming_path, output_path, **kwargs):
+        calls.append((previous_path, incoming_path, output_path, kwargs))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"room-tone-bridged")
+
+    paths, timing_offsets, records = _prepare_acoustic_segment_sources(
+        takes,
+        manifest_path.parent,
+        normalize_fn=normalize,
+    )
+
+    assert paths[0] == Path(takes[0]["raw"]["path"])
+    assert paths[1].read_bytes() == b"room-tone-bridged"
+    assert timing_offsets == (0.0, 0.04)
+    assert calls[0][0] == paths[0]
+    assert calls[0][1] == Path(takes[1]["raw"]["path"])
+    assert calls[0][3] == {
+        "bridge_start_seconds": pytest.approx(6.9),
+        "padding_seconds": pytest.approx(0.04),
+    }
+    assert records[0]["take_index"] == 1
+    assert records[0]["padding_seconds"] == pytest.approx(0.04)
+    assert records[0]["source_take_index"] == 0
+
+
+def test_long_form_acoustic_planning_uses_cadence_floor_before_requesting_regeneration():
+    from app.features.shot_production.runner import _plan_acoustic_delivery
+
+    expected_plan = object()
+    calls = []
+
+    def plan_fn(_evidence, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise ValidationError("Acoustic plan cannot satisfy the duration envelope.")
+        return expected_plan
+
+    plan, resolution = _plan_acoustic_delivery(
+        (),
+        {"requested": 32.0, "minimum": 30.5, "maximum": 32.5},
+        plan_fn=plan_fn,
+    )
+
+    assert plan is expected_plan
+    assert [call["min_duration_seconds"] for call in calls] == [30.5, 28.8]
+    assert resolution == {
+        "source": "long_form_acoustic_cadence_floor",
+        "requested_seconds": 32.0,
+        "approved_minimum_seconds": 30.5,
+        "effective_minimum_seconds": 28.8,
+        "maximum_seconds": 32.5,
+    }
+
+
+def test_long_form_final_transcript_accepts_one_asr_stem_only_with_exact_take_consensus():
+    from app.features.shot_production.runner import _accept_final_transcript_consensus
+
+    final_qa = {
+        "passed": False,
+        "word_error_rate": 1 / 71,
+        "expected_words": [f"word-{index}" for index in range(71)],
+        "actual_words": [f"word-{index}" for index in range(70)] + ["stem"],
+        "first_word_present": True,
+        "last_word_present": True,
+        "foreign_words": [],
+    }
+    takes = [
+        {"transcript_qa": {"passed": True, "word_error_rate": 0.0}}
+        for _index in range(4)
+    ]
+
+    accepted = _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=object(),
+        requested_duration_seconds=32.0,
+    )
+
+    assert accepted is True
+    assert _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=None,
+        requested_duration_seconds=32.0,
+    ) is False
 
 
 def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
