@@ -337,6 +337,82 @@ def test_short_provider_failure_fallback_is_contract_safe_at_every_duration(seco
     assert result.provenance["source"] == "fallback"
 
 
+@pytest.mark.parametrize("seconds", [8, 16, 32, 50, 60])
+@pytest.mark.parametrize(
+    ("fact_word_count", "fact"),
+    [
+        (1, "Achtung."),
+        (7, "Der Reisehinweis unterstützt eine rechtzeitige sichere Abfahrt."),
+        (
+            14,
+            "Der Reisehinweis unterstützt Reisende bei der rechtzeitigen Prüfung "
+            "wichtiger Schritte vor einer geplanten Abfahrt.",
+        ),
+        (
+            15,
+            "Heute unterstützt der Reisehinweis Reisende bei der rechtzeitigen "
+            "Prüfung wichtiger Schritte vor einer geplanten Abfahrt.",
+        ),
+        (
+            16,
+            "Heute unterstützt der Reisehinweis Reisende verlässlich bei der "
+            "rechtzeitigen Prüfung wichtiger Schritte vor einer geplanten Abfahrt.",
+        ),
+        (
+            17,
+            "Heute unterstützt der Reisehinweis Reisende besonders verlässlich bei "
+            "der rechtzeitigen Prüfung wichtiger Schritte vor einer geplanten Abfahrt.",
+        ),
+        (
+            25,
+            "Heute unterstützt der Reisehinweis Reisende verlässlich bei der "
+            "rechtzeitigen Prüfung wichtiger Schritte vor einer geplanten Abfahrt "
+            "und nennt dafür alle relevanten Quellen ohne unbelegte Annahmen.",
+        ),
+    ],
+)
+def test_generic_provider_fallback_is_contract_safe_for_fact_length_matrix(
+    seconds,
+    fact_word_count,
+    fact,
+):
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    assert script_word_count(fact) == fact_word_count
+    result = generate_semantic_script(
+        post_type="value",
+        title="Reiseplanung",
+        cta="",
+        facts=[fact],
+        requested_duration_seconds=seconds,
+        llm_client=_UnavailableLLM(),
+    )
+    contract = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=seconds,
+    )
+    sentences = _sentences(result.script)
+    source_words = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", fact)
+    maximum_block_words = (
+        contract.minimum_words + contract.minimum_take_count - 1
+    ) // contract.minimum_take_count
+
+    assert contract.minimum_words <= script_word_count(result.script) <= contract.maximum_words
+    assert len(plan_editorial_beats(result.script)) == contract.minimum_take_count
+    assert len(sentences) == contract.minimum_take_count
+    assert len(sentences) == len(set(sentences))
+    assert all(sentence.endswith((".", "!", "?")) for sentence in sentences)
+    assert source_words[0] in result.script
+    assert source_words[-1] in result.script
+    if fact_word_count <= maximum_block_words:
+        assert sentences[0].startswith(" ".join(source_words))
+    if fact_word_count > maximum_block_words:
+        assert "Quellenauszug" in result.script
+    assert result.provenance["source"] == "fallback"
+
+
 def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
@@ -361,11 +437,11 @@ def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():
 
     assert condition in result.script
     assert consequence in result.script
+    assert result.script.index(condition) < result.script.index(consequence)
     assert len(beats) == 7
     assert all(beat.text.endswith((".", "!", "?")) for beat in beats)
     assert all(
-        not re.search(r"\bWenn\b", beat.text)
-        or re.search(r"\bdann\b.+\bfehlen\b", beat.text, re.IGNORECASE)
+        "Wenn" not in beat.text or "Quellenauszug" in beat.text
         for beat in beats
     )
 
@@ -393,13 +469,13 @@ def test_overlong_conditional_fallback_preserves_ordered_condition_and_consequen
         requested_duration_seconds=50,
     )
     beats = plan_editorial_beats(result.script)
-    complete_statements = (
-        "Als Bedingung gilt, dass der Aufzug am Bahnhof kurzfristig ausfällt und niemand erreichbar ist",
-        "Obwohl die Reise bereits verbindlich geplant wurde, bleibt diese Bedingung bestehen",
-        "Dann muss der alternative Einstieg vor der Abfahrt bestätigt werden, sofern diese Bedingungen gelten",
+    ordered_source_fragments = (
+        "Wenn der Aufzug am Bahnhof kurzfristig ausfällt und niemand erreichbar ist",
+        "obwohl die Reise bereits verbindlich geplant wurde",
+        "dann muss der alternative Einstieg vor der Abfahrt bestätigt werden",
     )
 
-    statement_positions = [result.script.index(text) for text in complete_statements]
+    statement_positions = [result.script.index(text) for text in ordered_source_fragments]
     assert statement_positions == sorted(statement_positions)
     assert validation.planned_take_count == validation.minimum_take_count == 7
     assert all(beat.text.endswith((".", "!", "?")) for beat in beats)
@@ -436,8 +512,8 @@ def test_overlong_booking_fact_fallback_preserves_source_requirement():
         "vierundzwanzig Stunden vor der Abfahrt verbindlich gebucht werden"
     )
     purpose_statement = (
-        "Damit die notwendige Unterstützung am Bahnsteig vollständig und zuverlässig "
-        "bereitsteht, ist diese Buchung nötig"
+        "damit die notwendige Unterstützung am Bahnsteig vollständig und zuverlässig "
+        "bereitsteht"
     )
 
     assert result.script.index(main_requirement) < result.script.index(purpose_statement)
