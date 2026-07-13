@@ -1021,6 +1021,38 @@ def test_build_batch_detail_view_prefers_last_requested_batch_model():
     assert view["video_submission_ready_count"] == 0
 
 
+def test_semantic_batch_status_keeps_dynamic_duration_authority(monkeypatch):
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "brand": "Semantic demo",
+            "state": "S4_SCRIPTED",
+            "creation_mode": "semantic_ugc",
+            "target_length_tier": None,
+            "target_duration_seconds": 50,
+            "video_pipeline_route": "semantic_ugc",
+            "post_type_counts": {"value": 1},
+            "updated_at": "2026-07-13T00:00:00Z",
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda batch_id: {"posts_count": 1, "posts_by_state": {"caption_completed": 1}},
+    )
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", lambda batch_id: None)
+    monkeypatch.setattr(batch_handlers, "_batch_has_manual_drafts", lambda batch: False)
+
+    response = __import__("asyncio").run(batch_handlers.get_batch_status("batch-semantic"))
+
+    assert response.data["creation_mode"] == "semantic_ugc"
+    assert response.data["target_length_tier"] is None
+    assert response.data["target_duration_seconds"] == 50
+    assert response.data["video_pipeline_route"] == "semantic_ugc"
+
+
 def test_build_batch_detail_view_defaults_new_batch_to_fast_veo_model():
     batch_payload = {
         "state": "S5_PROMPTS_BUILT",

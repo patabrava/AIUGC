@@ -1,0 +1,92 @@
+{% set semantic = batch_view.semantic_video %}
+<section
+    id="semantic-video-workflow"
+    class="brand-panel mb-6 overflow-hidden rounded-2xl border border-[#006AAB]/15 bg-white shadow-sm"
+    aria-labelledby="semantic-video-heading"
+>
+    <div class="border-b border-[#006AAB]/10 bg-[#F6FAFF] px-5 py-4 sm:px-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <p class="text-xs font-bold uppercase tracking-[0.16em] text-[#006AAB]">Semantic UGC · Veo 3.1</p>
+                <h2 id="semantic-video-heading" class="mt-1 text-xl font-bold text-[#1C2740]">Character-consistent video production</h2>
+            </div>
+            <div class="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[#1C2740] ring-1 ring-[#006AAB]/15">
+                Requested delivery: {{ semantic.requested_duration_seconds }}s
+            </div>
+        </div>
+    </div>
+
+    <div class="space-y-5 p-4 sm:p-6">
+        {% for item in semantic.posts %}
+        <article
+            class="rounded-2xl border border-[#1C2740]/10 p-4 sm:p-5"
+            data-semantic-video-controller
+            data-post-id="{{ item.post_id }}"
+            data-revision="{{ item.revision if item.revision is not none else '' }}"
+            data-plan-hash="{{ item.plan_hash }}"
+            data-stage="{{ item.stage }}"
+        >
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <h3 class="font-bold text-[#1C2740]">{{ item.topic_title }}</h3>
+                    <p class="mt-1 text-sm text-[#1C2740]/65">
+                        Requested {{ item.requested_duration_seconds or semantic.requested_duration_seconds }}s ·
+                        Delivery {% if item.delivery_duration_seconds is not none %}{{ item.delivery_duration_seconds }}s{% else %}pending{% endif %}
+                    </p>
+                </div>
+                <span class="rounded-full bg-[#EAF3FB] px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#006AAB]" data-field="stage" aria-live="polite">
+                    {{ item.stage | replace('_', ' ') }}
+                </span>
+            </div>
+
+            <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Master</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.master_state | replace('_', ' ') }}</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Takes</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.take_count }}</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Provider seconds</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.billable_provider_seconds }}s</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Approved plan cost</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.estimated_cost_usd }}</dd></div>
+            </dl>
+
+            <div class="mt-4 grid grid-cols-2 gap-3" aria-label="Video generation progress">
+                <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm"><span class="text-[#1C2740]/60">Generated</span><strong class="ml-2 text-[#1C2740]"><span data-field="generated-takes">{{ item.generated_takes }}</span>/<span data-field="total-takes">{{ item.take_count }}</span></strong></div>
+                <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm"><span class="text-[#1C2740]/60">Verified</span><strong class="ml-2 text-[#1C2740]"><span data-field="verified-takes">{{ item.verified_takes }}</span>/<span data-field="verified-total">{{ item.take_count }}</span></strong></div>
+            </div>
+
+            {% if item.candidates %}
+            <fieldset class="mt-5">
+                <legend class="text-sm font-bold text-[#1C2740]">Choose the approved master frame</legend>
+                <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                    {% for candidate in item.candidates %}
+                    <label class="cursor-pointer rounded-xl border border-[#1C2740]/15 p-2 transition focus-within:ring-2 focus-within:ring-[#006AAB]">
+                        <input class="sr-only" type="radio" name="semantic-master-{{ item.post_id }}" value="{{ candidate.index }}" aria-label="Select master candidate {{ candidate.index }}" {% if item.master_state == 'approved' and item.master_hash_is_current and candidate.index == item.approved_candidate_index %}checked{% endif %}>
+                        <img class="aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" src="{{ candidate.storage_uri }}" alt="Master candidate {{ candidate.index }} for {{ item.topic_title }}">
+                        <span class="mt-2 block text-center text-xs font-bold text-[#1C2740]">Candidate {{ candidate.index }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </fieldset>
+            {% endif %}
+
+            <div class="mt-5 flex flex-wrap gap-2">
+                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold" data-action="generate-candidates" {% if item.stage not in ['not_started', 'awaiting_reference_approval'] %}disabled{% endif %}>Generate 3 reference candidates</button>
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.candidates %}disabled{% endif %}>Approve selected master</button>
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current %}disabled{% endif %}>Build free Veo plan</button>
+                <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve ${{ item.estimated_cost_usd }} generation</button>
+            </div>
+
+            {% if item.stage == 'retry_approval_required' %}
+            <div class="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                <p class="text-sm font-bold text-amber-950">Retry only failed takes: {{ item.failed_take_indexes | join(', ') }}</p>
+                <p class="mt-1 text-sm text-amber-900">{{ item.retry_provider_seconds }} provider seconds · incremental cost ${{ item.retry_estimated_cost_usd }}</p>
+                <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Approve failed-take retry</button>
+            </div>
+            {% else %}
+            <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
+            {% endif %}
+
+            <p class="mt-3 min-h-5 text-sm text-[#1C2740]/70" data-field="status" aria-live="polite"></p>
+        </article>
+        {% else %}
+        <p class="rounded-xl bg-[#F6FAFF] p-4 text-sm text-[#1C2740]/70">Semantic posts are still being prepared.</p>
+        {% endfor %}
+    </div>
+</section>

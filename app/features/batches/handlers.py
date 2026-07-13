@@ -6,6 +6,7 @@ Per Constitution § V: Locality & Vertical Slices
 
 import asyncio
 import json
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -62,6 +63,7 @@ from app.features.shot_production.duration import (
     MINIMUM_SEMANTIC_UGC_DURATION_SECONDS,
     build_semantic_duration_contract,
 )
+from app.features.semantic_videos import queries as semantic_video_queries
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -82,7 +84,12 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 templates = Jinja2Templates(directory="templates")
-DETAIL_JS_VERSION = str(Path("static/js/batches/detail.js").stat().st_mtime_ns)
+DETAIL_JS_VERSION = str(
+    max(
+        Path("static/js/batches/detail.js").stat().st_mtime_ns,
+        Path("static/js/batches/semantic_video.js").stat().st_mtime_ns,
+    )
+)
 _COVERAGE_RECOVERY_COOLDOWN_SECONDS = 300
 _COVERAGE_RECOVERY_LAST_SCHEDULED_AT: Dict[str, float] = {}
 _VEO_BATCH_PRICING_BY_MODEL = {
@@ -613,6 +620,154 @@ def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: 
     }
 
 
+def _latest_semantic_attempts(attempts: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    latest: Dict[int, Dict[str, Any]] = {}
+    for attempt in attempts:
+        try:
+            index = int(attempt.get("take_index"))
+            attempt_number = int(attempt.get("attempt") or 1)
+        except (TypeError, ValueError):
+            continue
+        current = latest.get(index)
+        if current is None or attempt_number >= int(current.get("attempt") or 1):
+            latest[index] = dict(attempt)
+    return [latest[index] for index in sorted(latest)]
+
+
+def _semantic_money(value: object, *, default: str = "0.00") -> str:
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+    if not amount.is_finite() or amount < 0:
+        return default
+    return format(amount, ".2f")
+
+
+def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any]:
+    post_id = str(post.get("id") or "")
+    base = {
+        "post_id": post_id,
+        "topic_title": str(post.get("topic_title") or "Untitled post"),
+        "run_id": None,
+        "revision": None,
+        "stage": "not_started",
+        "plan_hash": "",
+        "master_state": "not_generated",
+        "approved_candidate_index": None,
+        "master_hash_is_current": False,
+        "initial_plan_is_approved": False,
+        "candidates": [],
+        "requested_duration_seconds": None,
+        "delivery_duration_seconds": None,
+        "take_count": 0,
+        "billable_provider_seconds": 0,
+        "price_per_provider_second_usd": "0.00",
+        "estimated_cost_usd": "0.00",
+        "generated_takes": 0,
+        "verified_takes": 0,
+        "failed_take_indexes": [],
+        "retry_provider_seconds": 0,
+        "retry_estimated_cost_usd": "0.00",
+        "latest_attempts": [],
+    }
+    run = semantic_video_queries.get_run_by_post(post_id)
+    if not run:
+        return base
+
+    run_id = str(run.get("id") or "")
+    attempts = semantic_video_queries.list_attempts(run_id)
+    approvals = semantic_video_queries.list_approvals(run_id)
+    latest = _latest_semantic_attempts(attempts)
+    master = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
+    candidates = master.get("candidates") if isinstance(master.get("candidates"), list) else []
+    candidates = [dict(candidate) for candidate in candidates if isinstance(candidate, dict)]
+    plan = run.get("plan_snapshot") if isinstance(run.get("plan_snapshot"), dict) else {}
+    artifact_manifest = (
+        run.get("artifact_manifest") if isinstance(run.get("artifact_manifest"), dict) else {}
+    )
+    master_hash = str(run.get("master_hash") or "")
+    plan_hash = str(run.get("plan_hash") or "")
+    current_reference_approval = any(
+        str(approval.get("approval_type") or "") == "reference"
+        and str(approval.get("contract_hash") or "") == master_hash
+        for approval in approvals
+    )
+    current_initial_approval = any(
+        str(approval.get("approval_type") or "") == "initial_plan"
+        and str(approval.get("contract_hash") or "") == plan_hash
+        for approval in approvals
+    )
+    generated_states = {"completed", "qa_failed", "failed"}
+    failed_states = {"qa_failed", "failed"}
+    failed = [
+        int(attempt["take_index"])
+        for attempt in latest
+        if str(attempt.get("submission_state") or "") in failed_states
+    ]
+    retry_seconds = sum(
+        int(attempt.get("provider_duration_seconds") or 0)
+        for attempt in latest
+        if int(attempt.get("take_index") or 0) in failed
+    )
+    price = _semantic_money(plan.get("price_per_provider_second_usd"))
+    retry_cost = _semantic_money(Decimal(price) * retry_seconds)
+    delivery_duration = artifact_manifest.get("delivery_duration_seconds")
+    if delivery_duration is None:
+        delivery_duration = artifact_manifest.get("actual_duration_seconds")
+
+    if current_reference_approval:
+        master_state = "approved"
+    elif candidates:
+        master_state = "candidates_ready"
+    else:
+        master_state = "not_generated"
+
+    return {
+        **base,
+        "run_id": run_id,
+        "revision": int(run.get("revision") or 0),
+        "stage": str(run.get("stage") or "not_started"),
+        "plan_hash": plan_hash,
+        "master_state": master_state,
+        "approved_candidate_index": master.get("approved_candidate_index"),
+        "master_hash_is_current": current_reference_approval,
+        "initial_plan_is_approved": current_initial_approval,
+        "candidates": candidates,
+        "requested_duration_seconds": int(run.get("requested_duration_seconds") or 0) or None,
+        "delivery_duration_seconds": delivery_duration,
+        "take_count": int(plan.get("take_count") or len(latest)),
+        "billable_provider_seconds": int(plan.get("billable_provider_seconds") or 0),
+        "price_per_provider_second_usd": price,
+        "estimated_cost_usd": _semantic_money(
+            plan.get("estimated_cost_usd", run.get("estimated_cost_usd"))
+        ),
+        "generated_takes": sum(
+            str(attempt.get("submission_state") or "") in generated_states for attempt in latest
+        ),
+        "verified_takes": sum(
+            bool((attempt.get("transcript_result") or {}).get("passed"))
+            for attempt in latest
+        ),
+        "failed_take_indexes": failed,
+        "retry_provider_seconds": retry_seconds,
+        "retry_estimated_cost_usd": retry_cost,
+        "latest_attempts": latest,
+    }
+
+
+def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not _is_semantic_ugc_mode(batch_detail.get("creation_mode")):
+        return None
+    return {
+        "requested_duration_seconds": batch_detail.get("target_duration_seconds"),
+        "posts": [
+            _build_semantic_video_post_projection(post)
+            for post in (batch_detail.get("posts") or [])
+        ],
+    }
+
+
 def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     """Prepare template-only derived data for the batch detail page."""
     batch_state = batch_detail.get("state")
@@ -726,6 +881,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         "selected_instagram_account": meta_publish_state.get("selected_instagram") or {},
         "available_meta_pages": meta_publish_state.get("available_pages") or [],
         "video_generation_settings": _build_batch_video_generation_settings(batch_detail, posts),
+        "semantic_video": _build_semantic_video_projection(batch_detail),
         "tiktok_defaults": _load_json_object(batch_detail.get("tiktok_defaults")),
     }
 
