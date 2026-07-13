@@ -302,6 +302,20 @@ def test_submission_persists_intent_and_blocks_ambiguous_paid_retry(tmp_path):
     assert no_op_client.calls == []
 
 
+def test_pilot_submission_pins_one_audio_720p_output_per_take(tmp_path):
+    from app.features.shot_production.runner import submit_pending_takes
+
+    manifest_path, _ = _initialize(tmp_path)
+    client = _SubmitClient()
+
+    submit_pending_takes(manifest_path, client, max_inflight=4)
+
+    assert client.calls
+    assert all(call["sample_count"] == 1 for call in client.calls)
+    assert all(call["generate_audio"] is True for call in client.calls)
+    assert all(call["resolution"] == "720p" for call in client.calls)
+
+
 def test_unknown_submission_requires_not_accepted_reconciliation_before_retry(tmp_path):
     from app.features.shot_production.runner import (
         reconcile_unknown_submission,

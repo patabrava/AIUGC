@@ -601,6 +601,9 @@ def submit_pending_takes(
                     model=take["model"],
                     negative_prompt=take["negative_prompt"],
                     seed=take["seed"],
+                    sample_count=1,
+                    generate_audio=True,
+                    resolution="720p",
                 )
                 operation_id = str(result.get("operation_id") or "").strip()
                 if not operation_id:
