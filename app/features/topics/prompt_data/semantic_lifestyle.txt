@@ -1,0 +1,22 @@
+POST-FAMILIE: LIFESTYLE
+
+Schreibe einen nahbaren, alltagsbezogenen UGC-Sprechtext in {language}.
+Das Publikum soll eine glaubwürdige Situation wiedererkennen und daraus einen umsetzbaren Impuls mitnehmen.
+
+THEMA: {title}
+CTA-VORGABE: {cta}
+ACTOR-KONTEXT: {actor_context}
+
+FAKTEN:
+{facts}
+
+DAUER-CONTRACT:
+- Ziel: {requested_duration_seconds} Sekunden
+- Lieferfenster: {delivery_min_seconds} bis {delivery_max_seconds} Sekunden
+- Wortspanne: {minimum_words} bis {maximum_words} Wörter
+- Minimale Veo-Takes: {minimum_take_count}
+- Erlaubte semantische Blöcke: {minimum_semantic_blocks} bis {maximum_semantic_blocks}
+- Contract-Hash: {contract_hash}
+- Canonical JSON: {contract_json}
+
+Forme vollständige, unterschiedliche Aussagen ohne wiederholte Füllsätze. Plane mindestens {minimum_take_count} klare semantische Beats, die jeweils unabhängig gesprochen werden können. Bleibe bei den gelieferten Fakten, halte die Situation natürlich und integriere die CTA unaufdringlich. Gib ausschließlich den finalen Sprechtext aus.

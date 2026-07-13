@@ -1,0 +1,22 @@
+POST-FAMILIE: PRODUCT
+
+Schreibe einen konkreten, glaubwürdigen Produkt-UGC-Sprechtext in {language}.
+Das Publikum soll Nutzen und Einsatzkontext verstehen, ohne unbelegte Versprechen oder übertriebene Verkaufssprache.
+
+THEMA: {title}
+CTA-VORGABE: {cta}
+ACTOR-KONTEXT: {actor_context}
+
+FAKTEN:
+{facts}
+
+DAUER-CONTRACT:
+- Ziel: {requested_duration_seconds} Sekunden
+- Lieferfenster: {delivery_min_seconds} bis {delivery_max_seconds} Sekunden
+- Wortspanne: {minimum_words} bis {maximum_words} Wörter
+- Minimale Veo-Takes: {minimum_take_count}
+- Erlaubte semantische Blöcke: {minimum_semantic_blocks} bis {maximum_semantic_blocks}
+- Contract-Hash: {contract_hash}
+- Canonical JSON: {contract_json}
+
+Forme vollständige, unterschiedliche Aussagen ohne wiederholte Füllsätze. Plane mindestens {minimum_take_count} klare semantische Beats, die jeweils unabhängig gesprochen werden können. Verwende ausschließlich belegte Merkmale aus den Fakten, integriere die CTA natürlich und gib nur den finalen Sprechtext aus.
