@@ -62,6 +62,15 @@ def _is_ordered_subsequence(candidate: list[str], source: list[str]) -> bool:
     )
 
 
+def _is_contiguous_span(candidate: list[str], source: list[str]) -> bool:
+    folded_candidate = [word.casefold() for word in candidate]
+    folded_source = [word.casefold() for word in source]
+    return any(
+        folded_source[start : start + len(folded_candidate)] == folded_candidate
+        for start in range(len(folded_source) - len(folded_candidate) + 1)
+    )
+
+
 def _quoted_spans(text: str) -> list[str]:
     return re.findall(r'[„"]([^“”"]+)[“”"]', text)
 
@@ -163,6 +172,31 @@ def test_validation_rejects_planner_fragments_without_terminal_punctuation():
         )
 
 
+def test_validation_rejects_a_take_over_eighteen_words_or_seven_point_five_seconds():
+    first_sentence = [
+        *[f"Quelle{index}/Zusatz{index}" for index in range(9)],
+        *[f"Anker{index}" for index in range(4)],
+    ]
+    first_sentence[-1] += "."
+    sentences = [" ".join(first_sentence)]
+    for sentence_index in range(1, 7):
+        words = [
+            f"Satz{sentence_index}Wort{word_index}"
+            for word_index in range(16)
+        ]
+        words[-1] += "."
+        sentences.append(" ".join(words))
+    script = " ".join(sentences)
+    beats = plan_editorial_beats(script)
+
+    assert script_word_count(script) == 118
+    assert len(beats) == 7
+    assert beats[0].word_count == 22
+    assert beats[0].estimated_speech_seconds == 9.05
+    with pytest.raises(ValueError, match="18 words|7.5 seconds"):
+        validate_semantic_script(script, requested_duration_seconds=50)
+
+
 def test_validation_rejects_extra_take_without_recorded_exception(monkeypatch):
     valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
     monkeypatch.setattr(
@@ -252,6 +286,30 @@ def test_provider_fallback_uses_structurally_distinct_sentence_templates():
     assert len(set(signatures)) == len(signatures)
 
 
+def test_eight_second_fallback_packs_two_short_facts_into_one_take():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    facts = ["Erster Hinweis.", "Zweiter Beleg."]
+    result = generate_semantic_script(
+        post_type="value",
+        title="Titel",
+        cta="",
+        facts=facts,
+        requested_duration_seconds=8,
+        llm_client=_UnavailableLLM(),
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=8,
+    )
+
+    assert validation.planned_take_count == validation.minimum_take_count == 1
+    assert _quoted_spans(result.script) == ["Erster Hinweis", "Zweiter Beleg"]
+    assert result.provenance["source"] == "fallback"
+
+
 @pytest.mark.parametrize("provider_available", [True, False])
 def test_result_preserves_research_provenance_and_source_urls(provider_available):
     valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
@@ -287,6 +345,43 @@ def test_result_preserves_research_provenance_and_source_urls(provider_available
 
     assert result.provenance["research"] == research_provenance
     assert result.provenance["source_urls"] == source_urls
+
+
+def test_result_provenance_returns_defensive_nested_copies():
+    valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
+    result = generate_semantic_script(
+        post_type="value",
+        title="Titel",
+        cta="",
+        facts=["Fakt"],
+        requested_duration_seconds=50,
+        llm_client=_FakeLLM(valid_script),
+        research_provenance={"audit": {"status": "approved"}},
+        source_urls=["https://example.test/source"],
+    )
+
+    exposed = result.provenance
+    exposed["research"]["audit"]["status"] = "mutated"
+    exposed["source_urls"].append("https://example.test/injected")
+
+    assert result.provenance["research"]["audit"]["status"] == "approved"
+    assert result.provenance["source_urls"] == ["https://example.test/source"]
+
+
+def test_programming_type_error_from_llm_client_propagates():
+    class _BrokenClient:
+        def generate_gemini_text(self, **_kwargs):
+            raise TypeError("programming defect")
+
+    with pytest.raises(TypeError, match="programming defect"):
+        generate_semantic_script(
+            post_type="value",
+            title="Titel",
+            cta="",
+            facts=["Fakt"],
+            requested_duration_seconds=16,
+            llm_client=_BrokenClient(),
+        )
 
 
 @pytest.mark.parametrize("seconds", range(8, 61))
@@ -423,9 +518,13 @@ def test_generic_provider_fallback_is_contract_safe_for_fact_length_matrix(
     assert len(sentences) == len(set(sentences))
     assert all(sentence.endswith((".", "!", "?")) for sentence in sentences)
     quoted_spans = [span for sentence in sentences for span in _quoted_spans(sentence)]
-    assert len(quoted_spans) == len(sentences)
+    assert all(_quoted_spans(sentence) for sentence in sentences)
     assert all(
         _is_ordered_subsequence(_word_tokens(span), source_words)
+        for span in quoted_spans
+    )
+    assert all(
+        _is_contiguous_span(_word_tokens(span), source_words)
         for span in quoted_spans
     )
     assert source_words[0] in result.script
@@ -464,6 +563,36 @@ def test_fallback_quellenauszug_quotes_contain_only_ordered_source_tokens():
         _is_ordered_subsequence(_word_tokens(span), source_words)
         for span in quoted_spans
     )
+
+
+def test_shortened_fallback_quotes_are_contiguous_and_keep_middle_negation():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    fact = (
+        "Anfang Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda "
+        "NICHT Mu Nu Xi Omikron Pi Rho Sigma Tau Upsilon Phi Chi Ende."
+    )
+    result = generate_semantic_script(
+        post_type="value",
+        title="Titel",
+        cta="",
+        facts=[fact],
+        requested_duration_seconds=8,
+        llm_client=_UnavailableLLM(),
+    )
+    source_words = _word_tokens(fact)
+    quoted_spans = _quoted_spans(result.script)
+
+    assert quoted_spans
+    assert all(
+        _is_contiguous_span(_word_tokens(span), source_words)
+        for span in quoted_spans
+    )
+    assert any("NICHT" in _word_tokens(span) for span in quoted_spans)
+    assert "Gekürzter Quellenauszug:" in result.script
+    assert "…" in result.script
 
 
 def test_every_provider_failure_beat_contains_a_quoted_source_anchor():

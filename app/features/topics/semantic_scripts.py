@@ -5,18 +5,24 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
+import google.auth.exceptions
+import httpx
 import json
 from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from app.adapters.llm_client import get_llm_client
+from app.core.errors import ThirdPartyError
 from app.core.video_profiles import script_word_count
 from app.features.shot_production.duration import (
     SemanticDurationContract,
     build_semantic_duration_contract,
 )
-from app.features.shot_production.planner import plan_editorial_beats
+from app.features.shot_production.planner import (
+    estimate_speech_seconds,
+    plan_editorial_beats,
+)
 
 
 PROMPT_DATA_DIR = Path(__file__).resolve().parent / "prompt_data"
@@ -30,17 +36,39 @@ _COMPLETE_STATEMENT_END = re.compile(r"[.!?](?:[\"'»”’)\]}]+)?$")
 _WORD_PATTERN = re.compile(
     r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*"
 )
+_EXPECTED_LLM_FALLBACK_ERRORS = (
+    ThirdPartyError,
+    RuntimeError,
+    httpx.HTTPError,
+    google.auth.exceptions.TransportError,
+    google.auth.exceptions.RefreshError,
+)
 
 SEMANTIC_SCRIPT_SYSTEM_PROMPT = """Du schreibst natürlich gesprochene UGC-Skripte auf Basis belegter Fakten.
 Gib ausschließlich den finalen Sprechtext aus. Jeder Satz trägt eine neue vollständige Aussage bei.
 Halte die angegebene Wortspanne und die semantische Take-Struktur exakt ein."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class SemanticScriptResult:
     script: str
     contract_hash: str
-    provenance: Mapping[str, Any]
+    _provenance: Mapping[str, Any]
+
+    def __init__(
+        self,
+        *,
+        script: str,
+        contract_hash: str,
+        provenance: Mapping[str, Any],
+    ) -> None:
+        object.__setattr__(self, "script", script)
+        object.__setattr__(self, "contract_hash", contract_hash)
+        object.__setattr__(self, "_provenance", deepcopy(dict(provenance)))
+
+    @property
+    def provenance(self) -> Mapping[str, Any]:
+        return deepcopy(dict(self._provenance))
 
 
 @dataclass(frozen=True)
@@ -52,6 +80,19 @@ class SemanticScriptValidationResult:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.contract, name)
+
+
+@dataclass(frozen=True)
+class _FallbackSourceQuote:
+    words: tuple[str, ...]
+    label: str = ""
+    leading_ellipsis: bool = False
+    trailing_ellipsis: bool = False
+
+
+@dataclass(frozen=True)
+class _FallbackSourceUnit:
+    quotes: tuple[_FallbackSourceQuote, ...]
 
 
 @lru_cache(maxsize=None)
@@ -194,6 +235,19 @@ def validate_semantic_script(
         raise ValueError("Semantic UGC script must contain distinct sentences without padding.")
 
     beats = plan_editorial_beats(cleaned)
+    unsafe_beats = []
+    for beat in beats:
+        beat_word_count = script_word_count(beat.text)
+        estimated_speech_seconds = estimate_speech_seconds(beat_word_count)
+        if beat_word_count > 18 or estimated_speech_seconds > 7.5:
+            unsafe_beats.append(
+                (beat.index, beat_word_count, estimated_speech_seconds)
+            )
+    if unsafe_beats:
+        raise ValueError(
+            "Every Semantic UGC beat must stay within 18 words and 7.5 seconds; "
+            f"unsafe beats: {unsafe_beats}."
+        )
     incomplete_beat_indexes = [
         beat.index
         for beat in beats
@@ -262,6 +316,23 @@ _FALLBACK_SAFE_MARKERS = frozenset(
         "während",
     }
 )
+_FALLBACK_NEGATION_MARKERS = frozenset(
+    {
+        "kein",
+        "keine",
+        "keinem",
+        "keinen",
+        "keiner",
+        "keines",
+        "nicht",
+        "nie",
+        "niemals",
+        "nirgendwo",
+        "ohne",
+    }
+)
+_FALLBACK_EXCERPT_LABEL = "Quellenauszug:"
+_FALLBACK_SHORTENED_LABEL = "Gekürzter Quellenauszug:"
 _FALLBACK_ANCHOR_STOPWORDS = _FALLBACK_SAFE_MARKERS | frozenset(
     {
         "am",
@@ -587,55 +658,183 @@ def _partition_fallback_fact(
     return [list(statement) for statement in result] if result is not None else None
 
 
-def _extractive_fallback_excerpt(
+def _fallback_source_unit_word_count(unit: _FallbackSourceUnit) -> int:
+    return sum(
+        script_word_count(quote.label) + len(quote.words)
+        for quote in unit.quotes
+    ) + max(0, len(unit.quotes) - 1)
+
+
+def _pack_whole_fallback_facts(
+    facts: Sequence[Sequence[str]],
+    *,
+    block_word_counts: Sequence[int],
+) -> Optional[list[_FallbackSourceUnit]]:
+    units: list[_FallbackSourceUnit] = []
+    current_quotes: list[_FallbackSourceQuote] = []
+    for words in facts:
+        quote = _FallbackSourceQuote(words=tuple(words))
+        candidate = _FallbackSourceUnit(quotes=tuple([*current_quotes, quote]))
+        target_index = len(units)
+        if (
+            target_index < len(block_word_counts)
+            and _fallback_source_unit_word_count(candidate)
+            <= block_word_counts[target_index]
+        ):
+            current_quotes.append(quote)
+            continue
+        if not current_quotes:
+            return None
+        units.append(_FallbackSourceUnit(quotes=tuple(current_quotes)))
+        current_quotes = [quote]
+        target_index = len(units)
+        if (
+            target_index >= len(block_word_counts)
+            or _fallback_source_unit_word_count(
+                _FallbackSourceUnit(quotes=tuple(current_quotes))
+            )
+            > block_word_counts[target_index]
+        ):
+            return None
+    if current_quotes:
+        units.append(_FallbackSourceUnit(quotes=tuple(current_quotes)))
+    return units
+
+
+def _sequential_fallback_units(
     words: Sequence[str],
     *,
-    capacity: int,
-) -> list[str]:
-    if capacity < 2:
-        raise ValueError("Semantic UGC fallback excerpt has insufficient capacity.")
-    required_indexes = {0, len(words) - 1}
-    required_indexes.update(
+    target_words: Sequence[int],
+) -> Optional[list[_FallbackSourceUnit]]:
+    offset = 0
+    units = []
+    label_words = script_word_count(_FALLBACK_EXCERPT_LABEL)
+    for target in target_words:
+        capacity = target - label_words
+        if capacity < 1:
+            return None
+        end = min(len(words), offset + capacity)
+        units.append(
+            _FallbackSourceUnit(
+                quotes=(
+                    _FallbackSourceQuote(
+                        words=tuple(words[offset:end]),
+                        label=_FALLBACK_EXCERPT_LABEL,
+                    ),
+                )
+            )
+        )
+        offset = end
+        if offset == len(words):
+            return units
+    return None
+
+
+def _shortened_fallback_unit(
+    words: Sequence[str],
+    *,
+    target_words: int,
+) -> _FallbackSourceUnit:
+    protected_indexes = {0, len(words) - 1}
+    protected_indexes.update(
         index
         for index, word in enumerate(words)
-        if word.casefold() in _FALLBACK_SAFE_MARKERS
+        if word.casefold()
+        in (_FALLBACK_SAFE_MARKERS | _FALLBACK_NEGATION_MARKERS)
     )
-    if len(required_indexes) > capacity:
+    intervals = [[index, index + 1] for index in sorted(protected_indexes)]
+    merged_intervals: list[list[int]] = []
+    for start, end in intervals:
+        if merged_intervals and start - merged_intervals[-1][1] <= 3:
+            merged_intervals[-1][1] = end
+        else:
+            merged_intervals.append([start, end])
+    intervals = merged_intervals
+
+    label_words = script_word_count(_FALLBACK_SHORTENED_LABEL)
+
+    def unit_word_count() -> int:
+        return sum(label_words + end - start for start, end in intervals) + max(
+            0,
+            len(intervals) - 1,
+        )
+
+    if unit_word_count() > target_words:
         raise ValueError(
             "Semantic UGC fallback cannot retain all source markers in this duration."
         )
-    selected_indexes = set(required_indexes)
-    for offset in range(len(words)):
-        for index in (offset, len(words) - 1 - offset):
-            if len(selected_indexes) >= capacity:
-                break
-            selected_indexes.add(index)
-        if len(selected_indexes) >= capacity:
+
+    while unit_word_count() < target_words:
+        changed = False
+        for interval_index, interval in enumerate(intervals):
+            next_start = (
+                intervals[interval_index + 1][0]
+                if interval_index + 1 < len(intervals)
+                else len(words)
+            )
+            if interval[1] < next_start - 1:
+                interval[1] += 1
+                changed = True
+                if unit_word_count() == target_words:
+                    break
+            previous_end = (
+                intervals[interval_index - 1][1]
+                if interval_index > 0
+                else 0
+            )
+            if unit_word_count() < target_words and interval[0] > previous_end + 1:
+                interval[0] -= 1
+                changed = True
+                if unit_word_count() == target_words:
+                    break
+        if not changed:
             break
-    return [words[index] for index in sorted(selected_indexes)]
+
+    quotes = tuple(
+        _FallbackSourceQuote(
+            words=tuple(words[start:end]),
+            label=_FALLBACK_SHORTENED_LABEL,
+            leading_ellipsis=start > 0,
+            trailing_ellipsis=end < len(words),
+        )
+        for start, end in intervals
+    )
+    return _FallbackSourceUnit(quotes=quotes)
 
 
 def _fallback_fact_statements(
     facts: Sequence[str],
     *,
     block_word_counts: Sequence[int],
-) -> list[list[str]]:
-    if len(facts) > len(block_word_counts):
+) -> list[_FallbackSourceUnit]:
+    parsed_facts = [_fallback_fact_words_and_boundaries(fact) for fact in facts]
+    for words, _ in parsed_facts:
+        if not words:
+            raise ValueError("Semantic UGC fallback received source text without words.")
+    if len(parsed_facts) > len(block_word_counts):
+        packed_units = _pack_whole_fallback_facts(
+            [words for words, _ in parsed_facts],
+            block_word_counts=block_word_counts,
+        )
+        if packed_units is not None:
+            return packed_units
         raise ValueError(
             "Semantic UGC fallback cannot represent every source fact in this duration."
         )
-    statements: list[list[str]] = []
-    for fact_index, fact in enumerate(facts):
-        words, boundaries = _fallback_fact_words_and_boundaries(fact)
-        if not words:
-            raise ValueError("Semantic UGC fallback received source text without words.")
+
+    statements: list[_FallbackSourceUnit] = []
+    for fact_index, (words, boundaries) in enumerate(parsed_facts):
         remaining_facts = len(facts) - fact_index - 1
         available_statement_count = (
             len(block_word_counts) - len(statements) - remaining_facts
         )
         target_words = block_word_counts[len(statements)]
         if len(words) <= target_words:
-            statements.append(words)
+            statements.append(
+                _FallbackSourceUnit(
+                    quotes=(_FallbackSourceQuote(words=tuple(words)),)
+                )
+            )
             continue
         available_targets = block_word_counts[
             len(statements) : len(statements) + available_statement_count
@@ -646,28 +845,43 @@ def _fallback_fact_statements(
             capacities=[target - 1 for target in available_targets],
         )
         if partitions is not None:
-            statements.extend([["Quellenauszug:", *part] for part in partitions])
+            statements.extend(
+                _FallbackSourceUnit(
+                    quotes=(
+                        _FallbackSourceQuote(
+                            words=tuple(part),
+                            label=_FALLBACK_EXCERPT_LABEL,
+                        ),
+                    )
+                )
+                for part in partitions
+            )
             continue
-        excerpt = _extractive_fallback_excerpt(
+        sequential_units = _sequential_fallback_units(
             words,
-            capacity=target_words - 1,
+            target_words=available_targets,
         )
-        statements.append(["Quellenauszug:", *excerpt])
+        if sequential_units is not None:
+            statements.extend(sequential_units)
+            continue
+        statements.append(
+            _shortened_fallback_unit(
+                words,
+                target_words=target_words,
+            )
+        )
     return statements
 
 
-def _fallback_source_unit_parts(
-    statement: Sequence[str],
-) -> tuple[bool, list[str]]:
-    is_excerpt = bool(statement) and statement[0] == "Quellenauszug:"
-    source_words = list(statement[1:] if is_excerpt else statement)
+def _fallback_source_words(unit: _FallbackSourceUnit) -> list[str]:
+    source_words = [word for quote in unit.quotes for word in quote.words]
     if not source_words:
         raise ValueError("Semantic UGC fallback source unit cannot be empty.")
-    return is_excerpt, source_words
+    return source_words
 
 
-def _fallback_anchor_word(statement: Sequence[str]) -> str:
-    _, source_words = _fallback_source_unit_parts(statement)
+def _fallback_anchor_word(unit: _FallbackSourceUnit) -> str:
+    source_words = _fallback_source_words(unit)
     meaningful_words = [
         (index, word)
         for index, word in enumerate(source_words)
@@ -690,15 +904,23 @@ def _compose_fallback_source_sentence(
     *,
     index: int,
     target_words: int,
-    statement: Sequence[str],
+    statement: _FallbackSourceUnit,
 ) -> str:
-    remaining_words = target_words - len(statement)
+    remaining_words = target_words - _fallback_source_unit_word_count(statement)
     if remaining_words < 0:
         raise ValueError("Semantic UGC fallback statement exceeds one complete take.")
     coda = _fallback_action_coda(index, remaining_words)
-    is_excerpt, source_words = _fallback_source_unit_parts(statement)
-    label = "Quellenauszug: " if is_excerpt else ""
-    sentence = f'{label}„{" ".join(source_words)}“'
+
+    def render_quote(quote: _FallbackSourceQuote) -> str:
+        quote_text = " ".join(quote.words)
+        if quote.leading_ellipsis:
+            quote_text = f"… {quote_text}"
+        if quote.trailing_ellipsis:
+            quote_text = f"{quote_text} …"
+        label = f"{quote.label} " if quote.label else ""
+        return f"{label}„{quote_text}“"
+
+    sentence = " und ".join(render_quote(quote) for quote in statement.quotes)
     if coda:
         sentence += f"; {' '.join(coda)}"
     sentence += "."
@@ -709,7 +931,7 @@ def _fallback_fact_aware_sentence(
     *,
     wrapper_index: int,
     target_words: int,
-    source_statement: Sequence[str],
+    source_statement: _FallbackSourceUnit,
 ) -> str:
     if not 9 <= target_words <= 16:
         raise ValueError("Semantic UGC fallback wrapper requires 9 to 16 words.")
@@ -840,15 +1062,15 @@ def generate_semantic_script(
         maximum_seconds=contract.maximum_duration_seconds,
     )
 
+    client = llm_client or get_llm_client()
     try:
-        client = llm_client or get_llm_client()
         raw_text = client.generate_gemini_text(
             prompt=prompt,
             system_prompt=SEMANTIC_SCRIPT_SYSTEM_PROMPT,
             temperature=0.4,
             thinking_budget=0,
         )
-    except Exception as exc:
+    except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
         script = _build_fallback_script(
             title=title,
             cta=cta,
