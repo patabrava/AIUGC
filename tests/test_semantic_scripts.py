@@ -1,4 +1,5 @@
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,10 +11,43 @@ from app.features.topics.semantic_scripts import (
     generate_semantic_script,
     validate_semantic_script,
 )
+import app.features.topics.semantic_scripts as semantic_scripts
 
 
 def _words(count: int) -> str:
     return " ".join(f"Wort{index}" for index in range(count)) + "."
+
+
+def _complete_semantic_script(word_counts: list[int]) -> str:
+    filler = ("konkret", "frühzeitig", "sicher", "praktisch", "bewusst", "direkt")
+    sentences = []
+    for index, word_count in enumerate(word_counts):
+        prefix = ["Dieser", f"Hinweis{index}", "hilft", "dir"]
+        suffix = ["bei", "einer", "klaren", "Entscheidung", "weiter"]
+        middle = [
+            filler[offset % len(filler)]
+            for offset in range(word_count - len(prefix) - len(suffix))
+        ]
+        sentences.append(" ".join([*prefix, *middle, *suffix]) + ".")
+    return " ".join(sentences)
+
+
+def _sentences(script: str) -> list[str]:
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", script)
+        if sentence.strip()
+    ]
+
+
+def _normalized_template_signature(sentence: str) -> str:
+    tokens = re.findall(r"[A-Za-zÀ-ÿÄÖÜäöüß]+", sentence.casefold())[:7]
+    signature = " ".join(tokens)
+    return re.sub(
+        r"\b(dieser|diesen)\s+\w+\b",
+        r"\1 <modifier>",
+        signature,
+    )
 
 
 class _FakeLLM:
@@ -58,7 +92,8 @@ def test_semantic_prompt_renders_arbitrary_duration_without_tier_file(
 
 
 def test_generated_script_must_fit_same_contract_and_strips_response_wrappers():
-    fake_llm = _FakeLLM(f"```text\nSkript: {_words(109)}\n```")
+    valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
+    fake_llm = _FakeLLM(f"```text\nSkript: {valid_script}\n```")
 
     result = generate_semantic_script(
         post_type="value",
@@ -74,7 +109,7 @@ def test_generated_script_must_fit_same_contract_and_strips_response_wrappers():
         requested_duration_seconds=50,
     )
     assert validation.minimum_take_count == 7
-    assert result.script.startswith("Wort0")
+    assert result.script.startswith("Dieser Hinweis0")
     assert "```" not in result.script
     assert result.contract_hash == validation.contract_hash
     assert result.provenance["source"] == "gemini"
@@ -97,6 +132,145 @@ def test_semantic_script_validation_rejects_repeated_padding_sentences():
 
     with pytest.raises(ValueError, match="distinct sentences"):
         validate_semantic_script(script, requested_duration_seconds=50)
+
+
+def test_validation_rejects_planner_fragments_without_terminal_punctuation():
+    one_long_sentence = _words(109)
+    beats = plan_editorial_beats(one_long_sentence)
+    assert len(beats) == 7
+    assert any(not beat.text.endswith((".", "!", "?")) for beat in beats)
+
+    with pytest.raises(ValueError, match="complete semantic statement"):
+        validate_semantic_script(
+            one_long_sentence,
+            requested_duration_seconds=50,
+        )
+
+
+def test_validation_rejects_extra_take_without_recorded_exception(monkeypatch):
+    valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
+    monkeypatch.setattr(
+        semantic_scripts,
+        "plan_editorial_beats",
+        lambda _script: [
+            SimpleNamespace(index=index, text=f"Vollständiger Satz {index}.")
+            for index in range(8)
+        ],
+    )
+
+    with pytest.raises(ValueError, match="recorded semantic-boundary exception"):
+        validate_semantic_script(valid_script, requested_duration_seconds=50)
+
+
+def test_validation_records_reason_for_one_unavoidable_extra_take(monkeypatch):
+    valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
+    monkeypatch.setattr(
+        semantic_scripts,
+        "plan_editorial_beats",
+        lambda _script: [
+            SimpleNamespace(index=index, text=f"Vollständiger Satz {index}.")
+            for index in range(8)
+        ],
+    )
+
+    validation = validate_semantic_script(
+        valid_script,
+        requested_duration_seconds=50,
+        take_count_exception_reason="CTA muss als eigener vollständiger Satz stehen.",
+    )
+
+    assert validation.planned_take_count == 8
+    assert validation.take_count_exception == {
+        "minimum_take_count": 7,
+        "planned_take_count": 8,
+        "reason": "CTA muss als eigener vollständiger Satz stehen.",
+    }
+
+
+def test_provider_fallback_uses_multiple_supplied_facts():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Bahnreisen",
+        cta="Speichere dir den Tipp.",
+        facts=[
+            "Der Mobilitätsservice braucht eine frühe Buchung.",
+            "Aufzüge können kurzfristig außer Betrieb sein.",
+            "Das Merkzeichen B erlaubt kostenlose Begleitung.",
+        ],
+        requested_duration_seconds=50,
+        llm_client=_UnavailableLLM(),
+    )
+
+    assert "Mobilitätsservice" in result.script
+    assert "Aufzüge" in result.script
+    assert "Merkzeichen" in result.script
+
+
+def test_provider_fallback_uses_structurally_distinct_sentence_templates():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Bahnreisen",
+        cta="Speichere dir den Tipp.",
+        facts=[
+            "Der Mobilitätsservice braucht eine frühe Buchung.",
+            "Aufzüge können kurzfristig außer Betrieb sein.",
+            "Das Merkzeichen B erlaubt kostenlose Begleitung.",
+        ],
+        requested_duration_seconds=50,
+        llm_client=_UnavailableLLM(),
+    )
+    signatures = [
+        _normalized_template_signature(sentence)
+        for sentence in _sentences(result.script)
+    ]
+
+    assert len(signatures) == 7
+    assert len(set(signatures)) == len(signatures)
+
+
+@pytest.mark.parametrize("provider_available", [True, False])
+def test_result_preserves_research_provenance_and_source_urls(provider_available):
+    valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
+
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    research_provenance = {
+        "dossier_id": "dossier-17",
+        "audit": {"status": "approved", "score": 94},
+        "citations": [{"title": "DB Barrierefrei", "fact_indexes": [0, 1]}],
+    }
+    source_urls = [
+        "https://www.bahn.de/service/individuelle-reise/barrierefrei",
+        "https://www.bundesfachstelle-barrierefreiheit.de/",
+    ]
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Bahnreisen",
+        cta="Speichere dir den Tipp.",
+        facts=[
+            "Der Mobilitätsservice braucht eine frühe Buchung.",
+            "Aufzüge können kurzfristig außer Betrieb sein.",
+        ],
+        requested_duration_seconds=50,
+        llm_client=(
+            _FakeLLM(valid_script) if provider_available else _UnavailableLLM()
+        ),
+        research_provenance=research_provenance,
+        source_urls=source_urls,
+    )
+
+    assert result.provenance["research"] == research_provenance
+    assert result.provenance["source_urls"] == source_urls
 
 
 @pytest.mark.parametrize("seconds", range(8, 61))

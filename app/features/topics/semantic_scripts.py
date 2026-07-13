@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 import json
@@ -25,6 +26,7 @@ _RESPONSE_LABEL = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_COMPLETE_STATEMENT_END = re.compile(r"[.!?](?:[\"'»”’)\]}]+)?$")
 _WORD_PATTERN = re.compile(
     r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*"
 )
@@ -39,6 +41,17 @@ class SemanticScriptResult:
     script: str
     contract_hash: str
     provenance: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class SemanticScriptValidationResult:
+    contract: SemanticDurationContract
+    word_count: int
+    planned_take_count: int
+    take_count_exception: Optional[Mapping[str, Any]] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.contract, name)
 
 
 @lru_cache(maxsize=None)
@@ -61,6 +74,30 @@ def _normalize_facts(facts: Optional[Iterable[str]]) -> tuple[str, ...]:
         for value in facts or ()
         if (text := " ".join(str(value or "").split()))
     )
+
+
+def _build_result_provenance(
+    *,
+    source: str,
+    post_type: str,
+    research_provenance: Optional[Mapping[str, Any]],
+    source_urls: Optional[Iterable[str]],
+    provider_error_type: Optional[str] = None,
+) -> dict[str, Any]:
+    provenance: dict[str, Any] = {
+        "source": source,
+        "post_type": post_type,
+        "template": f"semantic_{post_type}.txt",
+        "research": deepcopy(dict(research_provenance or {})),
+        "source_urls": [
+            url
+            for value in source_urls or ()
+            if (url := " ".join(str(value or "").split()))
+        ],
+    }
+    if provider_error_type:
+        provenance["provider_error_type"] = provider_error_type
+    return provenance
 
 
 def build_semantic_script_prompt(
@@ -137,7 +174,8 @@ def validate_semantic_script(
     *,
     requested_duration_seconds: int,
     maximum_seconds: Optional[int] = None,
-) -> SemanticDurationContract:
+    take_count_exception_reason: Optional[str] = None,
+) -> SemanticScriptValidationResult:
     """Validate copy against the same duration and semantic-beat contract used to render it."""
     contract = build_semantic_duration_contract(
         requested_duration_seconds,
@@ -156,68 +194,94 @@ def validate_semantic_script(
         raise ValueError("Semantic UGC script must contain distinct sentences without padding.")
 
     beats = plan_editorial_beats(cleaned)
-    if not contract.minimum_take_count <= len(beats) <= contract.minimum_take_count + 1:
+    incomplete_beat_indexes = [
+        beat.index
+        for beat in beats
+        if not _COMPLETE_STATEMENT_END.search(beat.text.strip())
+    ]
+    if incomplete_beat_indexes:
+        raise ValueError(
+            "Every Semantic UGC beat must be a complete semantic statement; "
+            f"incomplete beat indexes: {incomplete_beat_indexes}."
+        )
+    planned_take_count = len(beats)
+    if not contract.minimum_take_count <= planned_take_count <= contract.minimum_take_count + 1:
         raise ValueError(
             "Semantic UGC script must plan to the contract minimum take count, "
             "with at most one semantic-boundary exception."
         )
-    return contract
+    exception_reason = " ".join(str(take_count_exception_reason or "").split())
+    take_count_exception = None
+    if planned_take_count == contract.minimum_take_count + 1:
+        if not exception_reason:
+            raise ValueError(
+                "One extra Semantic UGC take requires a recorded semantic-boundary exception."
+            )
+        take_count_exception = {
+            "minimum_take_count": contract.minimum_take_count,
+            "planned_take_count": planned_take_count,
+            "reason": exception_reason,
+        }
+    elif exception_reason:
+        raise ValueError(
+            "A take-count exception reason is only valid when one extra take is planned."
+        )
+    return SemanticScriptValidationResult(
+        contract=contract,
+        word_count=word_count,
+        planned_take_count=planned_take_count,
+        take_count_exception=take_count_exception,
+    )
 
 
-_FALLBACK_ADJECTIVES: Sequence[str] = (
-    "wichtige",
-    "praktische",
-    "konkrete",
-    "hilfreiche",
-    "verlässliche",
-    "entscheidende",
-    "klare",
-    "alltagstaugliche",
+_FALLBACK_PREFIXES: Sequence[Sequence[str]] = (
+    ("Wichtig", "bleibt"),
+    ("Beachte", "außerdem"),
+    ("Prüfe", "vorab"),
+    ("Für", "dich", "gilt"),
+    ("Im", "Alltag", "zählt"),
+    ("Merke", "dir"),
+    ("Entscheidend", "ist"),
+    ("Zum", "Abschluss"),
 )
-_FALLBACK_CONTEXT: Sequence[Sequence[str]] = (
-    ("hilft", "dir", "bei", "einer", "klaren", "Vorbereitung", "heute"),
-    ("zählt", "für", "deinen", "nächsten", "sicheren", "Schritt", "besonders"),
-    ("macht", "deine", "nächste", "Entscheidung", "klarer", "und", "leichter"),
-    ("schafft", "mehr", "Überblick", "für", "deinen", "konkreten", "Alltag"),
-    ("gibt", "deiner", "Planung", "eine", "verlässliche", "praktische", "Richtung"),
-    ("verbindet", "gute", "Vorbereitung", "mit", "mehr", "persönlicher", "Sicherheit"),
-    ("zeigt", "dir", "konkret", "den", "nächsten", "sinnvollen", "Schritt"),
-    ("unterstützt", "dich", "beim", "informierten", "selbstbestimmten", "Weiterplanen", "heute"),
+_FALLBACK_ACTIONS: Sequence[tuple[str, str, str]] = (
+    ("plane", "Schritte", "früh"),
+    ("prüfe", "Pläne", "rechtzeitig"),
+    ("kläre", "Termine", "vorab"),
+    ("sichere", "Abläufe", "frühzeitig"),
+    ("ordne", "Hinweise", "rechtzeitig"),
+    ("besprich", "Wege", "vorher"),
+    ("kontrolliere", "Kontakte", "früh"),
+    ("speichere", "Bedarfe", "direkt"),
 )
 
 
-def _fallback_prefix(index: int, word_count: int) -> list[str]:
-    adjective = _FALLBACK_ADJECTIVES[index]
-    if word_count == 5:
-        return ["Wichtig", "ist", "dieser", adjective, "Punkt"]
-    if word_count == 6:
-        return ["Beachte", "heute", "diesen", adjective, "Punkt", "genau"]
-    if word_count == 7:
-        return ["Für", "deine", "Planung", "zählt", "dieser", adjective, "Punkt"]
-    if word_count == 8:
-        return [
-            "Für",
+def _fallback_action_coda(index: int, word_count: int) -> list[str]:
+    if word_count <= 0:
+        return []
+    verb, noun, adverb = _FALLBACK_ACTIONS[index]
+    variants = {
+        1: [adverb],
+        2: [verb, adverb],
+        3: [verb, noun, adverb],
+        4: [verb, "alle", noun, adverb],
+        5: [verb, "deine", "nächsten", noun, adverb],
+        6: [verb, "deine", "nächsten", noun, "deshalb", adverb],
+        7: [verb, "deine", "nächsten", "sicheren", noun, "deshalb", adverb],
+        8: [
+            verb,
             "deine",
-            "heutige",
-            "Planung",
-            "zählt",
-            "dieser",
-            adjective,
-            "Punkt",
-        ]
-    if word_count == 9:
-        return [
-            "Für",
-            "deine",
-            "Planung",
-            "im",
-            "Alltag",
-            "zählt",
-            "dieser",
-            adjective,
-            "Punkt",
-        ]
-    raise ValueError("Semantic UGC fallback prefix must contain five to nine words.")
+            "nächsten",
+            "sicheren",
+            noun,
+            "deshalb",
+            "besonders",
+            adverb,
+        ],
+    }
+    if word_count not in variants:
+        raise ValueError("Semantic UGC fallback coda must contain at most eight words.")
+    return variants[word_count]
 
 
 def _build_fallback_script(
@@ -238,22 +302,30 @@ def _build_fallback_script(
     if not source_words:
         source_words = ["Klare", "Vorbereitung", "erleichtert", "deinen", "nächsten", "Schritt"]
 
-    fact_words = _WORD_PATTERN.findall(facts[0]) if facts else source_words
+    fact_word_sets = []
+    for fact in facts:
+        words = _WORD_PATTERN.findall(fact)
+        if words:
+            fact_word_sets.append(words)
+    if not fact_word_sets:
+        fact_word_sets = [source_words]
     sentences = []
     for index, target_words in enumerate(block_word_counts):
-        full_fact_prefix_words = target_words - len(fact_words)
-        if fact_words and 5 <= full_fact_prefix_words <= 9:
-            prefix = _fallback_prefix(index, full_fact_prefix_words)
-            content = fact_words
-        else:
-            prefix = _fallback_prefix(index, 5)
-            content_word_count = target_words - len(prefix)
-            fact_anchor = fact_words[: min(2, len(fact_words))]
-            content_pool = [*fact_anchor, *_FALLBACK_CONTEXT[index], *source_words]
-            while len(content_pool) < content_word_count:
-                content_pool.extend(_FALLBACK_CONTEXT[index])
-            content = content_pool[:content_word_count]
-        sentence = " ".join([*prefix, *content]).strip() + "."
+        prefix = list(_FALLBACK_PREFIXES[index])
+        fact_words = fact_word_sets[index % len(fact_word_sets)]
+        available_content_words = target_words - len(prefix)
+        if available_content_words <= 0:
+            raise ValueError("Semantic UGC fallback block has no room for fact content.")
+        content = fact_words[:available_content_words]
+        coda_word_count = available_content_words - len(content)
+        if coda_word_count > 8:
+            content.extend(source_words[: coda_word_count - 8])
+            coda_word_count = available_content_words - len(content)
+        coda = _fallback_action_coda(index, coda_word_count)
+        sentence = f"{' '.join(prefix)}: {' '.join(content)}"
+        if coda:
+            sentence += f"; {' '.join(coda)}"
+        sentence += "."
         if script_word_count(sentence) != target_words:
             raise ValueError("Could not build a contract-safe Semantic UGC fallback block.")
         sentences.append(sentence)
@@ -278,6 +350,8 @@ def generate_semantic_script(
     language: str = "Deutsch",
     actor_context: Optional[str] = None,
     maximum_seconds: Optional[int] = None,
+    research_provenance: Optional[Mapping[str, Any]] = None,
+    source_urls: Optional[Iterable[str]] = None,
 ) -> SemanticScriptResult:
     """Generate and validate one dynamic Semantic UGC script."""
     normalized_post_type = _normalize_post_type(post_type)
@@ -315,12 +389,13 @@ def generate_semantic_script(
         return SemanticScriptResult(
             script=script,
             contract_hash=contract.contract_hash,
-            provenance={
-                "source": "fallback",
-                "post_type": normalized_post_type,
-                "template": f"semantic_{normalized_post_type}.txt",
-                "provider_error_type": type(exc).__name__,
-            },
+            provenance=_build_result_provenance(
+                source="fallback",
+                post_type=normalized_post_type,
+                research_provenance=research_provenance,
+                source_urls=source_urls,
+                provider_error_type=type(exc).__name__,
+            ),
         )
 
     script = _strip_response_wrappers(raw_text)
@@ -332,16 +407,18 @@ def generate_semantic_script(
     return SemanticScriptResult(
         script=script,
         contract_hash=contract.contract_hash,
-        provenance={
-            "source": "gemini",
-            "post_type": normalized_post_type,
-            "template": f"semantic_{normalized_post_type}.txt",
-        },
+        provenance=_build_result_provenance(
+            source="gemini",
+            post_type=normalized_post_type,
+            research_provenance=research_provenance,
+            source_urls=source_urls,
+        ),
     )
 
 
 __all__ = [
     "SemanticScriptResult",
+    "SemanticScriptValidationResult",
     "build_semantic_script_prompt",
     "generate_semantic_script",
     "validate_semantic_script",
