@@ -542,6 +542,44 @@ def _assert_plan_sources_current(
             },
         )
 
+    current_actor_rows, current_location_row = _ordered_reference_rows(current_reference)
+    persisted_actor_rows, persisted_location_row = _ordered_reference_rows(persisted_reference)
+    reference_rows = [
+        ("actor_front", current_actor_rows[0], persisted_actor_rows[0]),
+        ("actor_three_quarter", current_actor_rows[1], persisted_actor_rows[1]),
+        ("location", current_location_row, persisted_location_row),
+    ]
+    fresh_reference_snapshots = []
+    for role, current_row, persisted_row in reference_rows:
+        current_source = {
+            key: value
+            for key, value in current_row.items()
+            if key not in {"sha256", "byte_length"}
+        }
+        fresh_snapshot = _download_reference(current_source, role=role, request=request)[1]
+        fresh_reference_snapshots.append((role, fresh_snapshot, persisted_row))
+    for role, fresh_snapshot, persisted_snapshot in fresh_reference_snapshots:
+        expected_hash = str(persisted_snapshot.get("sha256") or "")
+        expected_bytes = persisted_snapshot.get("byte_length")
+        if (
+            not expected_hash
+            or fresh_snapshot["sha256"] != expected_hash
+            or (
+                expected_bytes is not None
+                and fresh_snapshot["byte_length"] != expected_bytes
+            )
+        ):
+            raise StateTransitionError(
+                "Semantic video reference bytes changed after candidate generation.",
+                {
+                    "role": role,
+                    "expected_sha256": expected_hash or None,
+                    "actual_sha256": fresh_snapshot["sha256"],
+                    "expected_bytes": expected_bytes,
+                    "actual_bytes": fresh_snapshot["byte_length"],
+                },
+            )
+
     master = run.get("master_snapshot")
     if not isinstance(master, dict) or not str(master.get("storage_uri") or "").strip():
         raise StateTransitionError("Semantic video approved master is no longer available.")

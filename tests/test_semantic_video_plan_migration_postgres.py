@@ -14,6 +14,10 @@ CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_plan_rpc_test"
 RUN_ID = "00000000-0000-0000-0000-000000000021"
 POST_ID = "00000000-0000-0000-0000-000000000011"
+STATE_RUN_ID = "00000000-0000-0000-0000-000000000022"
+STATE_POST_ID = "00000000-0000-0000-0000-000000000012"
+COST_RUN_ID = "00000000-0000-0000-0000-000000000023"
+COST_POST_ID = "00000000-0000-0000-0000-000000000013"
 BATCH_ID = "00000000-0000-0000-0000-000000000001"
 
 
@@ -43,9 +47,16 @@ def _jsonb(value) -> str:
     return f"$json${json.dumps(value, separators=(',', ':'))}$json$::jsonb"
 
 
-def _run_update(*, plan_hash: str, request_hashes: list[str]) -> dict:
+def _run_update(
+    *,
+    plan_hash: str,
+    request_hashes: list[str],
+    post_id: str = POST_ID,
+    price: str = "0.40",
+    estimated_cost: str = "6.40",
+) -> dict:
     return {
-        "post_id": POST_ID,
+        "post_id": post_id,
         "batch_id": BATCH_ID,
         "requested_duration_seconds": 50,
         "duration_contract": {"requested_duration_seconds": 50},
@@ -71,8 +82,8 @@ def _run_update(*, plan_hash: str, request_hashes: list[str]) -> dict:
             "take_count": 2,
             "billable_provider_seconds": 16,
             "quota_units": 2,
-            "price_per_provider_second_usd": "0.40",
-            "estimated_cost_usd": "6.40",
+            "price_per_provider_second_usd": price,
+            "estimated_cost_usd": estimated_cost,
             "takes": [
                 {
                     "take_index": index,
@@ -85,8 +96,8 @@ def _run_update(*, plan_hash: str, request_hashes: list[str]) -> dict:
         "plan_hash": plan_hash,
         "provider_model": "veo-3.1-generate-001",
         "resolution": "1080p",
-        "estimated_cost_usd": "6.40",
-        "artifact_prefix": f"semantic-videos/{BATCH_ID}/{POST_ID}",
+        "estimated_cost_usd": estimated_cost,
+        "artifact_prefix": f"semantic-videos/{BATCH_ID}/{post_id}",
     }
 
 
@@ -170,20 +181,42 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
               id, brand, creation_mode, target_length_tier, target_duration_seconds,
               video_pipeline_route
             ) VALUES ('{BATCH_ID}', 'A', 'semantic_ugc', NULL, 50, 'semantic_ugc');
-            INSERT INTO public.posts (id, batch_id) VALUES ('{POST_ID}', '{BATCH_ID}');
+            INSERT INTO public.posts (id, batch_id) VALUES
+              ('{POST_ID}', '{BATCH_ID}'),
+              ('{STATE_POST_ID}', '{BATCH_ID}'),
+              ('{COST_POST_ID}', '{BATCH_ID}');
             INSERT INTO public.semantic_video_runs (
               id, post_id, batch_id, requested_duration_seconds, duration_contract,
               duration_contract_hash, script_snapshot, script_hash, reference_snapshot,
               reference_hash, master_snapshot, master_hash, stage
-            ) VALUES (
-              '{RUN_ID}', '{POST_ID}', '{BATCH_ID}', 50,
-              '{{"requested_duration_seconds":50}}'::JSONB, 'duration-hash',
-              '{{"text":"approved"}}'::JSONB, 'script-hash',
-              '{{"actor_identity_id":null,"actor_references":[],"location_reference":{{"storage_uri":"semantic/location.png"}}}}'::JSONB,
-              'reference-hash',
-              '{{"storage_uri":"semantic/master.png","sha256":"master-hash","byte_length":10}}'::JSONB,
-              'master-hash', 'awaiting_paid_approval'
-            );
+            ) VALUES
+              (
+                '{RUN_ID}', '{POST_ID}', '{BATCH_ID}', 50,
+                '{{"requested_duration_seconds":50}}'::JSONB, 'duration-hash',
+                '{{"text":"approved"}}'::JSONB, 'script-hash',
+                '{{"actor_identity_id":null,"actor_references":[],"location_reference":{{"storage_uri":"semantic/location.png"}}}}'::JSONB,
+                'reference-hash',
+                '{{"storage_uri":"semantic/master.png","sha256":"master-hash","byte_length":10}}'::JSONB,
+                'master-hash', 'awaiting_paid_approval'
+              ),
+              (
+                '{STATE_RUN_ID}', '{STATE_POST_ID}', '{BATCH_ID}', 50,
+                '{{"requested_duration_seconds":50}}'::JSONB, 'duration-hash',
+                '{{"text":"approved"}}'::JSONB, 'script-hash',
+                '{{"actor_identity_id":null,"actor_references":[],"location_reference":{{"storage_uri":"semantic/location.png"}}}}'::JSONB,
+                'reference-hash',
+                '{{"storage_uri":"semantic/master.png","sha256":"master-hash","byte_length":10}}'::JSONB,
+                'master-hash', 'awaiting_paid_approval'
+              ),
+              (
+                '{COST_RUN_ID}', '{COST_POST_ID}', '{BATCH_ID}', 50,
+                '{{"requested_duration_seconds":50}}'::JSONB, 'duration-hash',
+                '{{"text":"approved"}}'::JSONB, 'script-hash',
+                '{{"actor_identity_id":null,"actor_references":[],"location_reference":{{"storage_uri":"semantic/location.png"}}}}'::JSONB,
+                'reference-hash',
+                '{{"storage_uri":"semantic/master.png","sha256":"master-hash","byte_length":10}}'::JSONB,
+                'master-hash', 'awaiting_paid_approval'
+              );
             INSERT INTO public.semantic_video_takes (
               run_id, take_index, attempt, beat_text, word_count, estimated_speech_seconds,
               provider_duration_seconds, shot_transform, shot_hash, prompt_hash,
@@ -305,6 +338,100 @@ def test_atomic_plan_rpc_reapplies_guards_and_rolls_back_bad_take():
                 WHERE run_id = '{RUN_ID}' AND attempt = 1
               ) <> ARRAY['happy-request-0', 'happy-request-1'] THEN
                 RAISE EXCEPTION 'take replacement escaped failed transaction';
+              END IF;
+            END;
+            $$;
+            """,
+        )
+
+        state_baseline_hashes = ["state-baseline-0", "state-baseline-1"]
+        cost_baseline_hashes = ["cost-baseline-0", "cost-baseline-1"]
+        state_baseline_update = _run_update(
+            plan_hash="state-baseline-plan",
+            request_hashes=state_baseline_hashes,
+            post_id=STATE_POST_ID,
+        )
+        cost_baseline_update = _run_update(
+            plan_hash="cost-baseline-plan",
+            request_hashes=cost_baseline_hashes,
+            post_id=COST_POST_ID,
+        )
+        _psql(
+            DATABASE,
+            f"SELECT public.persist_semantic_video_plan('{STATE_RUN_ID}', 0, {_jsonb(state_baseline_update)}, {_jsonb(_takes(request_hashes=state_baseline_hashes))});",
+        )
+        _psql(
+            DATABASE,
+            f"SELECT public.persist_semantic_video_plan('{COST_RUN_ID}', 0, {_jsonb(cost_baseline_update)}, {_jsonb(_takes(request_hashes=cost_baseline_hashes))});",
+        )
+
+        completed_hashes = ["completed-request-0", "completed-request-1"]
+        completed_update = _run_update(
+            plan_hash="completed-plan",
+            request_hashes=completed_hashes,
+            post_id=STATE_POST_ID,
+        )
+        completed_takes = _takes(request_hashes=completed_hashes)
+        completed_takes[0]["submission_state"] = "completed"
+        completed_state = _psql(
+            DATABASE,
+            f"SELECT public.persist_semantic_video_plan('{STATE_RUN_ID}', 1, {_jsonb(completed_update)}, {_jsonb(completed_takes)});",
+            check=False,
+        )
+
+        underpriced_hashes = ["underpriced-request-0", "underpriced-request-1"]
+        underpriced_update = _run_update(
+            plan_hash="underpriced-plan",
+            request_hashes=underpriced_hashes,
+            post_id=COST_POST_ID,
+            price="0.40",
+            estimated_cost="0.01",
+        )
+        underpriced_cost = _psql(
+            DATABASE,
+            f"SELECT public.persist_semantic_video_plan('{COST_RUN_ID}', 1, {_jsonb(underpriced_update)}, {_jsonb(_takes(request_hashes=underpriced_hashes))});",
+            check=False,
+        )
+
+        assert (
+            completed_state.returncode != 0,
+            underpriced_cost.returncode != 0,
+        ) == (True, True), (
+            completed_state.stdout,
+            completed_state.stderr,
+            underpriced_cost.stdout,
+            underpriced_cost.stderr,
+        )
+        assert "submission state" in completed_state.stderr.lower()
+        assert "cost" in underpriced_cost.stderr.lower()
+
+        _psql(
+            DATABASE,
+            f"""
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1
+                FROM public.semantic_video_runs
+                WHERE (id = '{STATE_RUN_ID}' AND (
+                  revision <> 1 OR plan_hash <> 'state-baseline-plan' OR estimated_cost_usd <> 6.40
+                )) OR (id = '{COST_RUN_ID}' AND (
+                  revision <> 1 OR plan_hash <> 'cost-baseline-plan' OR estimated_cost_usd <> 6.40
+                ))
+              ) THEN
+                RAISE EXCEPTION 'adversarial run update escaped failed transaction';
+              END IF;
+              IF (
+                SELECT array_agg(request_hash ORDER BY take_index)
+                FROM public.semantic_video_takes
+                WHERE run_id = '{STATE_RUN_ID}' AND attempt = 1
+              ) <> ARRAY['state-baseline-0', 'state-baseline-1']
+                 OR (
+                   SELECT array_agg(request_hash ORDER BY take_index)
+                   FROM public.semantic_video_takes
+                   WHERE run_id = '{COST_RUN_ID}' AND attempt = 1
+                 ) <> ARRAY['cost-baseline-0', 'cost-baseline-1'] THEN
+                RAISE EXCEPTION 'adversarial takes escaped failed transaction';
               END IF;
             END;
             $$;

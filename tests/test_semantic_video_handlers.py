@@ -280,6 +280,47 @@ def test_initial_approval_uses_persisted_enriched_reference_after_unenriched_can
 
 
 @pytest.mark.parametrize(
+    ("role", "storage_uri", "mutated_bytes"),
+    [
+        ("actor_front", "https://storage/front.png", b"mutated-front-reference"),
+        ("location", "https://storage/location.png", b"mutated-location-reference"),
+    ],
+    ids=["actor-front-same-uri", "location-same-uri"],
+)
+def test_initial_approval_rejects_same_uri_reference_byte_replacement(
+    monkeypatch,
+    role,
+    storage_uri,
+    mutated_bytes,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    plan = _create_plan_from_unenriched_candidate_flow(
+        monkeypatch,
+        client,
+        handlers,
+        state,
+        storage,
+    )
+    storage.objects[storage_uri] = mutated_bytes
+    storage.download_calls.clear()
+    approval_count = len(state["approvals"])
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 2},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "state_transition_error"
+    assert any(call[0] == storage_uri for call in storage.download_calls), role
+    assert len(state["approvals"]) == approval_count
+    assert state["run"]["stage"] == "awaiting_paid_approval"
+
+
+@pytest.mark.parametrize(
     "mutation",
     ["actor_identity", "ordered_source_uris", "script", "duration", "master_bytes"],
 )

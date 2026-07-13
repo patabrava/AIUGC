@@ -305,6 +305,10 @@ DECLARE
   take_position INTEGER := 0;
   input_take_count INTEGER;
   input_provider_seconds INTEGER;
+  plan_price_per_second NUMERIC;
+  supplied_plan_cost NUMERIC;
+  supplied_run_cost NUMERIC;
+  computed_plan_cost NUMERIC;
   existing_take_count INTEGER;
   affected_count INTEGER;
   returned_takes JSONB;
@@ -453,6 +457,9 @@ BEGIN
        OR NULLIF(btrim(take_payload ->> 'request_hash'), '') IS NULL THEN
       RAISE EXCEPTION 'semantic video plan initial takes are not in exact attempt-one order';
     END IF;
+    IF take_payload ->> 'submission_state' IS DISTINCT FROM 'planned' THEN
+      RAISE EXCEPTION 'semantic video plan initial submission state must be planned';
+    END IF;
     plan_take := (p_run_update #> '{plan_snapshot,takes}') -> take_position;
     IF jsonb_typeof(plan_take) IS DISTINCT FROM 'object'
        OR (plan_take ->> 'take_index')::INTEGER IS DISTINCT FROM take_position
@@ -470,6 +477,29 @@ BEGIN
   IF (p_run_update #>> '{plan_snapshot,billable_provider_seconds}')::INTEGER <>
      input_provider_seconds THEN
     RAISE EXCEPTION 'semantic video plan provider seconds do not match initial takes';
+  END IF;
+  plan_price_per_second := NULLIF(
+    btrim(p_run_update #>> '{plan_snapshot,price_per_provider_second_usd}'),
+    ''
+  )::NUMERIC;
+  supplied_plan_cost := NULLIF(
+    btrim(p_run_update #>> '{plan_snapshot,estimated_cost_usd}'),
+    ''
+  )::NUMERIC;
+  supplied_run_cost := NULLIF(btrim(p_run_update ->> 'estimated_cost_usd'), '')::NUMERIC;
+  IF plan_price_per_second IS NULL
+     OR supplied_plan_cost IS NULL
+     OR supplied_run_cost IS NULL
+     OR plan_price_per_second < 0 THEN
+    RAISE EXCEPTION 'semantic video plan cost contract is invalid';
+  END IF;
+  computed_plan_cost := round(plan_price_per_second * input_provider_seconds, 2);
+  IF supplied_plan_cost <> computed_plan_cost
+     OR supplied_run_cost <> computed_plan_cost THEN
+    RAISE EXCEPTION 'semantic video plan cost mismatch: expected %, plan %, run %',
+      computed_plan_cost,
+      supplied_plan_cost,
+      supplied_run_cost;
   END IF;
   IF (
     SELECT count(DISTINCT entry.value ->> 'request_hash')
@@ -559,7 +589,7 @@ BEGIN
     initial_take.seed,
     initial_take.request_contract,
     initial_take.request_hash,
-    COALESCE(initial_take.submission_state, 'planned'),
+    'planned',
     initial_take.retry_guidance
   FROM jsonb_to_recordset(p_initial_takes) AS initial_take (
     take_index INTEGER,
