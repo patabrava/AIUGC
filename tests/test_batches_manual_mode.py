@@ -61,6 +61,25 @@ class _FallbackInsertTable:
         return _FakeResponse([deepcopy(row)])
 
 
+class _SemanticColumnLagInsertTable(_FakeInsertTable):
+    def execute(self):
+        semantic_only_fields = {"target_duration_seconds", "video_pipeline_route"}
+        leaked_fields = sorted(semantic_only_fields.intersection(self.payload or {}))
+        if leaked_fields:
+            raise APIError(
+                {
+                    "code": "PGRST204",
+                    "details": None,
+                    "hint": None,
+                    "message": (
+                        f"Could not find the '{leaked_fields[0]}' column of "
+                        "'batches' in the schema cache"
+                    ),
+                }
+            )
+        return super().execute()
+
+
 class _FakeQueryTable:
     def __init__(self, storage, table_name):
         self.storage = storage
@@ -109,12 +128,25 @@ class _FallbackClient(_FakeClient):
         return _FakeQueryTable(self.storage, name)
 
 
+class _SemanticColumnLagClient(_FakeClient):
+    def table(self, name):
+        if name == "batches":
+            return _SemanticColumnLagInsertTable(self.storage, name)
+        if name == "posts":
+            return _FakeInsertTable(self.storage, name)
+        return _FakeQueryTable(self.storage, name)
+
+
 def _fake_supabase(storage):
     return SimpleNamespace(client=_FakeClient(storage))
 
 
 def _fallback_supabase(storage):
     return SimpleNamespace(client=_FallbackClient(storage))
+
+
+def _semantic_column_lag_supabase(storage):
+    return SimpleNamespace(client=_SemanticColumnLagClient(storage))
 
 
 def test_manual_batch_request_requires_manual_post_count():
@@ -153,6 +185,61 @@ def test_automated_batch_request_still_accepts_type_counts():
     assert payload.post_type_counts.total == 3
 
 
+@pytest.mark.parametrize(
+    "creation_mode",
+    [
+        "automated",
+        "manual",
+        "manual_character_consistency",
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+    ],
+)
+@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
+def test_every_legacy_batch_mode_keeps_fixed_duration_tiers(creation_mode, target_length_tier):
+    request = {
+        "brand": "ACME",
+        "creation_mode": creation_mode,
+        "target_length_tier": target_length_tier,
+    }
+    if creation_mode in {"manual", "manual_character_consistency"}:
+        request["manual_post_count"] = 1
+    else:
+        request["post_type_counts"] = {"value": 1, "lifestyle": 0, "product": 0}
+
+    payload = CreateBatchRequest.model_validate(request)
+
+    assert payload.target_length_tier == target_length_tier
+    assert getattr(payload, "target_duration_seconds", None) is None
+
+
+@pytest.mark.parametrize(
+    "creation_mode",
+    [
+        "automated",
+        "manual",
+        "manual_character_consistency",
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+    ],
+)
+def test_every_legacy_batch_mode_still_rejects_non_tier_duration(creation_mode):
+    request = {
+        "brand": "ACME",
+        "creation_mode": creation_mode,
+        "target_length_tier": 50,
+    }
+    if creation_mode in {"manual", "manual_character_consistency"}:
+        request["manual_post_count"] = 1
+    else:
+        request["post_type_counts"] = {"value": 1, "lifestyle": 0, "product": 0}
+
+    with pytest.raises(ValidationError):
+        CreateBatchRequest.model_validate(request)
+
+
 def test_create_batch_persists_creation_mode_and_manual_count(monkeypatch):
     storage = {"batches": []}
     monkeypatch.setattr(batch_queries, "get_supabase", lambda: _fake_supabase(storage))
@@ -171,9 +258,13 @@ def test_create_batch_persists_creation_mode_and_manual_count(monkeypatch):
     assert storage["batches"][0]["manual_post_count"] == 3
 
 
-def test_create_batch_falls_back_when_batches_schema_is_legacy(monkeypatch):
+def test_legacy_insert_omits_semantic_columns_without_dropping_supported_fields(monkeypatch):
     storage = {"batches": []}
-    monkeypatch.setattr(batch_queries, "get_supabase", lambda: _fallback_supabase(storage))
+    monkeypatch.setattr(
+        batch_queries,
+        "get_supabase",
+        lambda: _semantic_column_lag_supabase(storage),
+    )
 
     batch = batch_queries.create_batch(
         brand="ACME",
@@ -183,10 +274,47 @@ def test_create_batch_falls_back_when_batches_schema_is_legacy(monkeypatch):
         manual_post_count=3,
     )
 
-    assert batch["creation_mode"] == "manual"
-    assert batch["manual_post_count"] == 3
+    persisted = storage["batches"][0]
+    assert persisted["creation_mode"] == "manual"
+    assert persisted["manual_post_count"] == 3
+    assert persisted["target_length_tier"] == 16
+    assert "target_duration_seconds" not in persisted
+    assert "video_pipeline_route" not in persisted
+    assert batch["creation_mode"] == persisted["creation_mode"]
+    assert batch["manual_post_count"] == persisted["manual_post_count"]
+
+
+def test_nonautomated_batch_does_not_fall_back_to_unpersisted_legacy_contract(monkeypatch):
+    storage = {"batches": []}
+    monkeypatch.setattr(batch_queries, "get_supabase", lambda: _fallback_supabase(storage))
+
+    with pytest.raises(APIError):
+        batch_queries.create_batch(
+            brand="ACME",
+            post_type_counts=None,
+            target_length_tier=16,
+            creation_mode="manual",
+            manual_post_count=3,
+        )
+
+    assert storage["batches"] == []
+
+
+def test_automated_legacy_fallback_returns_only_persisted_database_truth(monkeypatch):
+    storage = {"batches": []}
+    monkeypatch.setattr(batch_queries, "get_supabase", lambda: _fallback_supabase(storage))
+
+    batch = batch_queries.create_batch(
+        brand="ACME",
+        post_type_counts={"value": 1, "lifestyle": 0, "product": 0},
+        target_length_tier=16,
+        creation_mode="automated",
+    )
+
     assert storage["batches"][0]["brand"] == "ACME"
     assert "creation_mode" not in storage["batches"][0]
+    assert "creation_mode" not in batch
+    assert "manual_post_count" not in batch
 
 
 def test_create_manual_draft_posts_uses_blank_post_type(monkeypatch):

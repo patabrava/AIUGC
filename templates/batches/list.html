@@ -3,6 +3,7 @@
 {% block title %}Batches - Lippe Lift Studio{% endblock %}
 
 {% block content %}
+{% set semantic_ugc_duration_presets = semantic_ugc_duration_presets | default([8, 16, 32, 50]) %}
 <div
     x-data="batchListComponent()"
     data-batch-page
@@ -250,7 +251,7 @@
                 hx-select="#batches-list-content"
                 hx-swap="outerHTML"
                 hx-indicator="#batch-spinner"
-                x-data="{ creationMode: 'automated' }"
+                x-data="{ creationMode: 'automated', targetDurationSeconds: {{ semantic_ugc_default_duration_seconds | default(50) }} }"
                 @htmx:before-request="
                     const brand = $event.detail.elt.querySelector('[name=brand]').value;
                     const creationMode = $event.detail.elt.querySelector('[name=creation_mode]').value || 'automated';
@@ -258,7 +259,12 @@
                     const lifestyle = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.lifestyle\']').value) || 0;
                     const product = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.product\']').value) || 0;
                     const manualPostCount = parseInt($event.detail.elt.querySelector('[name=manual_post_count]')?.value) || 0;
-                    const targetLengthTier = parseInt($event.detail.elt.querySelector('[name=target_length_tier]').value) || 8;
+                    const targetLengthTier = creationMode === 'semantic_ugc'
+                        ? null
+                        : (parseInt($event.detail.elt.querySelector('[name=target_length_tier]:not(:disabled)')?.value) || 8);
+                    const targetDurationSeconds = creationMode === 'semantic_ugc'
+                        ? (parseInt($event.detail.elt.querySelector('[name=target_duration_seconds]')?.value) || null)
+                        : null;
                     const tempId = 'temp-' + Date.now();
                     window.dispatchEvent(new CustomEvent('batch-progress:update', {
                         detail: {
@@ -266,6 +272,7 @@
                             brand,
                             expected: ['manual', 'manual_character_consistency'].includes(creationMode) ? manualPostCount : value + lifestyle + product,
                             targetLengthTier,
+                            targetDurationSeconds,
                             posts: 0,
                             isTemp: true,
                         }
@@ -298,6 +305,7 @@
                             <option value="character_consistency">Character Consistency</option>
                             <option value="character_consistency_mid">Character Consistency Mid</option>
                             <option value="character_consistency_light">Character Consistency Light</option>
+                            <option value="semantic_ugc">Semantic UGC - Veo 3.1</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500">
                             Automated uses the research agent. Manual lets you define each draft yourself.
@@ -364,11 +372,11 @@
                         </p>
                     </div>
 
-                    <div x-show="!['manual', 'manual_character_consistency'].includes(creationMode)">
+                    <div x-show="!['manual', 'manual_character_consistency', 'semantic_ugc'].includes(creationMode)" x-cloak>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Video Duration</label>
                         <select
                             name="target_length_tier"
-                            :disabled="['manual', 'manual_character_consistency'].includes(creationMode)"
+                            :disabled="['manual', 'manual_character_consistency', 'semantic_ugc'].includes(creationMode)"
                             class="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                             <option value="8">8 seconds</option>
@@ -376,6 +384,34 @@
                             <option value="32">32 seconds</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500">Choose the batch duration once. The pipeline is selected automatically.</p>
+                    </div>
+                    <div x-show="creationMode === 'semantic_ugc'" x-cloak class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3">
+                        <label for="semantic-target-duration" class="block text-sm font-medium text-gray-700">Target video duration</label>
+                        <div class="mt-2 flex items-center gap-2">
+                            <input
+                                id="semantic-target-duration"
+                                type="number"
+                                name="target_duration_seconds"
+                                min="8"
+                                max="{{ semantic_ugc_max_duration_seconds | default(60) }}"
+                                step="1"
+                                inputmode="numeric"
+                                x-model.number="targetDurationSeconds"
+                                :disabled="creationMode !== 'semantic_ugc'"
+                                :required="creationMode === 'semantic_ugc'"
+                                aria-describedby="semantic-duration-help"
+                                class="block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-[#006AAB] focus:outline-none focus:ring-2 focus:ring-[#E58434]"
+                            >
+                            <span class="text-sm text-gray-600">seconds</span>
+                        </div>
+                        <div class="mt-2 flex flex-wrap gap-2" aria-label="Duration presets">
+                            {% for seconds in semantic_ugc_duration_presets %}
+                            <button type="button" data-duration-preset="{{ seconds }}" @click="targetDurationSeconds = {{ seconds }}" class="rounded-md border border-[#006AAB]/30 bg-white px-3 py-1.5 text-sm font-medium text-[#006AAB] transition hover:bg-[#006AAB]/10 focus:outline-none focus:ring-2 focus:ring-[#E58434]">{{ seconds }}s</button>
+                            {% endfor %}
+                        </div>
+                        <p id="semantic-duration-help" class="mt-2 text-xs leading-5 text-gray-600">
+                            Enter any whole second from 8 to {{ semantic_ugc_max_duration_seconds | default(60) }}. The shot plan and exact generation cost are shown for approval before paid video work begins.
+                        </p>
                     </div>
                     <div x-show="['manual', 'manual_character_consistency'].includes(creationMode)" x-cloak class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3 text-sm text-[#006AAB]">
                         Manual batches resolve video duration automatically from each approved script. Short scripts submit as short clips; longer scripts upgrade to extended routes when the dialogue supports it.
@@ -869,6 +905,10 @@
                         expected: expectedPosts,
                         posts: data.posts_count || 0,
                         state: data.state || 'S1_SETUP',
+                        creationMode: data.creation_mode || null,
+                        targetLengthTier: data.target_length_tier ?? null,
+                        targetDurationSeconds: data.target_duration_seconds ?? null,
+                        videoPipelineRoute: data.video_pipeline_route || null,
                         stage: progress.stage || (stateAdvanced ? 'completed' : 'booting'),
                         stageLabel: progress.stage_label || (stateAdvanced ? 'Topic generation complete' : 'Preparing topic generation'),
                         detailMessage: progress.detail_message || (

@@ -172,6 +172,55 @@ def test_submit_image_video_accepts_negative_prompt():
     assert not ({"referenceImages", "video", "lastFrame"} & set(instance))
 
 
+def test_submit_image_video_sends_explicit_one_output_audio_and_resolution_contract():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"name": "operation-one-output"}
+    mock_response.raise_for_status.return_value = None
+    mock_http = MagicMock()
+    mock_http.post.return_value = mock_response
+    mock_credentials = SimpleNamespace(token="token", expired=False)
+
+    with patch("app.adapters.vertex_ai_client.VertexSettings", return_value=_settings()), \
+        patch("app.adapters.vertex_ai_client.google.auth.default", return_value=(mock_credentials, None)), \
+        patch("app.adapters.vertex_ai_client.Request"), \
+        patch("app.adapters.vertex_ai_client.httpx.Client", return_value=mock_http):
+        client = _fresh_client()
+        client.submit_image_video(
+            prompt="One approved-frame take.",
+            image_bytes=b"approved-frame",
+            mime_type="image/png",
+            correlation_id="corr-one",
+            aspect_ratio="9:16",
+            duration_seconds=8,
+            model="veo-3.1-generate-001",
+            sample_count=1,
+            generate_audio=True,
+            resolution="720p",
+        )
+
+    parameters = mock_http.post.call_args.kwargs["json"]["parameters"]
+    assert parameters["sampleCount"] == 1
+    assert parameters["generateAudio"] is True
+    assert parameters["resolution"] == "720p"
+
+
+@pytest.mark.parametrize("sample_count", [0, 5, True])
+def test_submit_image_video_rejects_invalid_explicit_sample_count(sample_count):
+    with patch("app.adapters.vertex_ai_client.VertexSettings", return_value=_settings()), \
+        patch("app.adapters.vertex_ai_client.httpx.Client"):
+        client = _fresh_client()
+        with pytest.raises(ValidationError, match="sample count"):
+            client.submit_image_video(
+                prompt="One take.",
+                image_bytes=b"approved-frame",
+                mime_type="image/png",
+                correlation_id="corr-invalid-count",
+                aspect_ratio="9:16",
+                duration_seconds=8,
+                sample_count=sample_count,
+            )
+
+
 def test_submit_text_video_accepts_reference_images():
     mock_response = MagicMock()
     mock_response.json.return_value = {"name": "operation-reference-images"}

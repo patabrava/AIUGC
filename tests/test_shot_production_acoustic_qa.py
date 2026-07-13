@@ -100,6 +100,11 @@ def test_acoustic_qa_requires_exact_schema_and_sufficient_confidence():
     assert report.passed is False
 
 
-def test_acoustic_qa_requires_one_or_more_nonempty_audio_clips():
-    with pytest.raises(ValidationError, match="at least one"):
-        evaluate_acoustic_seam_continuity([], llm_client=_Client(_response()))
+def test_acoustic_qa_marks_zero_seams_not_applicable_without_calling_gemini():
+    client = _Client(_response())
+    report = evaluate_acoustic_seam_continuity([], llm_client=client)
+
+    assert report.passed is True
+    assert report.status == "not_applicable"
+    assert report.seam_verdicts == ()
+    assert client.calls == []

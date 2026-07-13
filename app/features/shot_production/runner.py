@@ -1106,12 +1106,10 @@ def run_voice_qa(
     llm_client: Optional[Any] = None,
     model: Optional[str] = DEFAULT_VOICE_QA_MODEL,
 ) -> Dict[str, Any]:
-    """Compare all four complete raw-take audio tracks before composition."""
+    """Compare complete raw-take audio tracks, or record N=1 as not applicable."""
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     ordered = sorted(payload["takes"], key=lambda take: take["index"])
-    if len(ordered) < 2:
-        raise ValidationError("Pilot voice QA requires at least two semantic takes.")
     voice_inputs = []
     for take in ordered:
         if not (take.get("transcript_qa") or {}).get("passed"):

@@ -1,11 +1,15 @@
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from app.features.topics.pipeline import (
     RawResearchArtifact,
     run_stage1_raw_research,
     run_stage2_normalization,
     run_stage3_script_generation,
 )
+from app.features.topics.schemas import SemanticTopicData, TopicData
 
 
 class FakeLLM:
@@ -40,3 +44,23 @@ def test_pipeline_stage_functions_exist(monkeypatch):
 
     scripts = run_stage3_script_generation(topic="Pflegegrad", scripts_required=1, dossier=dossier)
     assert scripts.problem_agitate_solution == ["Hook."]
+
+
+def test_semantic_topic_capacity_does_not_relax_legacy_topic_contract():
+    long_rotation = "Wort " * 300
+
+    semantic = SemanticTopicData(
+        title="50 Sekunden",
+        rotation=long_rotation,
+        cta="Mehr erfahren.",
+        spoken_duration=50,
+    )
+    assert len(semantic.rotation) > 900
+
+    with pytest.raises(ValidationError):
+        TopicData(
+            title="Legacy",
+            rotation=long_rotation,
+            cta="Mehr erfahren.",
+            spoken_duration=50,
+        )

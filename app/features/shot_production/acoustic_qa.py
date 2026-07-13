@@ -68,11 +68,12 @@ class AcousticQAReport:
     observed_differences: Tuple[str, ...]
     passed: bool
     seam_verdicts: Tuple[AcousticSeamVerdict, ...] = ()
+    status: str = "evaluated"
 
 
 def _validate_clips(clips: Sequence[Dict[str, Any]]) -> None:
-    if not isinstance(clips, (list, tuple)) or len(clips) < 1:
-        raise ValidationError("Acoustic seam QA requires at least one ordered audio clip.")
+    if not isinstance(clips, (list, tuple)):
+        raise ValidationError("Acoustic seam QA clips must be an ordered sequence.")
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict) or not str(clip.get("mime_type") or "").startswith("audio/"):
             raise ValidationError("Acoustic seam QA requires audio MIME types.", {"seam_index": index})
@@ -88,6 +89,22 @@ def evaluate_acoustic_seam_continuity(
 ) -> AcousticQAReport:
     _validate_clips(clips)
     seam_count = len(clips)
+    if seam_count == 0:
+        return AcousticQAReport(
+            no_breath_restart=True,
+            no_duplicated_breath=True,
+            no_click=True,
+            no_room_tone_reset=True,
+            cadence_continuous=True,
+            speaker_continuous=True,
+            evidence_sufficient=True,
+            confidence=1.0,
+            blocking_reasons=(),
+            observed_differences=(),
+            passed=True,
+            seam_verdicts=(),
+            status="not_applicable",
+        )
     prompt = _PROMPT.replace(
         "Three 1.5-second audio clips follow, ordered by jump-cut seam 0, 1, 2.",
         f"{seam_count} 1.5-second audio clips follow, ordered by jump-cut seam 0 through {seam_count - 1}.",

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import httpx
 from PIL import Image
@@ -923,6 +924,35 @@ def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure
     assert _read(failing_manifest)["voice_qa"]["passed"] is False
 
 
+def test_voice_gate_persists_single_take_not_applicable_without_gemini(tmp_path):
+    from app.features.shot_production.runner import run_voice_qa
+    from app.features.shot_production.voice_qa import evaluate_voice_consistency
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    payload["takes"] = payload["takes"][:1]
+    payload["takes"][0]["transcript_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def extract_audio(_source, destination, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"single-voice")
+
+    report = run_voice_qa(
+        manifest_path,
+        evaluator=evaluate_voice_consistency,
+        extract_audio_fn=extract_audio,
+        llm_client=SimpleNamespace(
+            generate_gemini_text=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("Gemini must not be called for one take")
+            )
+        ),
+    )
+
+    assert report["passed"] is True
+    assert report["status"] == "not_applicable"
+
+
 def test_default_voice_extractor_creates_mono_16khz_pcm_wav(tmp_path):
     from app.features.shot_production.runner import _extract_voice_clip
 
@@ -989,7 +1019,6 @@ def test_batch_voice_retry_archives_one_report_and_plans_only_selected_outliers(
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
     payload = _read(manifest_path)
-    original_raw = [take["raw"] for take in payload["takes"]]
     for take in payload["takes"]:
         take["status"] = "transcribed"
         take["transcript_qa"] = {"passed": True}

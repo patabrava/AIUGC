@@ -6,12 +6,14 @@ Per Constitution § V: Locality & Vertical Slices
 
 import asyncio
 import json
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError as PydanticValidationError
 
 from app.features.batches.schemas import (
     CreateBatchRequest,
@@ -43,6 +45,7 @@ from app.features.topics.handlers import (
     has_required_family_coverage,
     is_batch_discovery_active,
     schedule_batch_discovery,
+    semantic_batch_posts_are_resumable,
     start_seeding_interaction,
     update_seeding_progress,
 )
@@ -56,6 +59,11 @@ from app.features.blog.schemas import normalize_blog_content
 from app.features.topics.captions import resolve_display_caption
 from app.features.characters import queries as character_queries
 from app.features.characters.actor_identity import is_character_consistency_mode, is_manual_creation_mode
+from app.features.shot_production.duration import (
+    MINIMUM_SEMANTIC_UGC_DURATION_SECONDS,
+    build_semantic_duration_contract,
+)
+from app.features.semantic_videos import queries as semantic_video_queries
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -63,7 +71,12 @@ except ModuleNotFoundError:
     async def get_tiktok_publish_state() -> Dict[str, Any]:
         """Keep batch detail rendering alive when TikTok code is not deployed yet."""
         return {"status": "unavailable"}
-from app.core.errors import FlowForgeException, SuccessResponse, StateTransitionError
+from app.core.errors import (
+    FlowForgeException,
+    SuccessResponse,
+    StateTransitionError,
+    ValidationError as FlowForgeValidationError,
+)
 from app.core.logging import get_logger
 from app.core.states import BatchState
 
@@ -71,7 +84,12 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 templates = Jinja2Templates(directory="templates")
-DETAIL_JS_VERSION = str(Path("static/js/batches/detail.js").stat().st_mtime_ns)
+DETAIL_JS_VERSION = str(
+    max(
+        Path("static/js/batches/detail.js").stat().st_mtime_ns,
+        Path("static/js/batches/semantic_video.js").stat().st_mtime_ns,
+    )
+)
 _COVERAGE_RECOVERY_COOLDOWN_SECONDS = 300
 _COVERAGE_RECOVERY_LAST_SCHEDULED_AT: Dict[str, float] = {}
 _VEO_BATCH_PRICING_BY_MODEL = {
@@ -102,7 +120,38 @@ _VEO_BATCH_PRICING_BY_MODEL = {
 }
 
 
-def _resolve_form_target_length_tier(form, creation_mode: str) -> int:
+def _is_semantic_ugc_mode(creation_mode: object) -> bool:
+    return str(creation_mode or "").strip() == "semantic_ugc"
+
+
+def _semantic_ugc_max_duration_seconds() -> int:
+    return build_semantic_duration_contract(
+        MINIMUM_SEMANTIC_UGC_DURATION_SECONDS
+    ).maximum_duration_seconds
+
+
+def _semantic_ugc_duration_ui_config() -> Dict[str, Any]:
+    maximum = _semantic_ugc_max_duration_seconds()
+    return {
+        "maximum": maximum,
+        "default": min(50, maximum),
+        "presets": [seconds for seconds in (8, 16, 32, 50) if seconds <= maximum],
+    }
+
+
+def _semantic_ugc_template_context() -> Dict[str, Any]:
+    config = _semantic_ugc_duration_ui_config()
+    return {
+        "semantic_ugc_max_duration_seconds": config["maximum"],
+        "semantic_ugc_default_duration_seconds": config["default"],
+        "semantic_ugc_duration_presets": config["presets"],
+    }
+
+
+def _resolve_form_target_length_tier(form, creation_mode: str) -> Optional[int]:
+    if _is_semantic_ugc_mode(creation_mode):
+        return None
+
     values = []
     if hasattr(form, "getlist"):
         values = [value for value in form.getlist("target_length_tier") if str(value or "").strip()]
@@ -112,6 +161,54 @@ def _resolve_form_target_length_tier(form, creation_mode: str) -> int:
 
     selected_value = values[-1] if is_manual_creation_mode(creation_mode) else values[0]
     return int(selected_value or 8)
+
+
+def _resolve_form_target_duration_seconds(form, creation_mode: str) -> Optional[int]:
+    if not _is_semantic_ugc_mode(creation_mode):
+        return None
+    value = form.get("target_duration_seconds")
+    if value is None or not str(value).strip():
+        return None
+    return int(value)
+
+
+async def _parse_create_batch_request(request: Request) -> CreateBatchRequest:
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            data = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": "Invalid JSON payload", "error": str(exc)},
+            ) from exc
+        return CreateBatchRequest.model_validate(data)
+
+    form = await request.form()
+    post_type_counts: Dict[str, int] = {
+        "value": int(form.get("post_type_counts.value", 0) or 0),
+        "lifestyle": int(form.get("post_type_counts.lifestyle", 0) or 0),
+        "product": int(form.get("post_type_counts.product", 0) or 0),
+    }
+    creation_mode = str(
+        form.get("creation_mode", "automated") or "automated"
+    ).strip() or "automated"
+    manual_post_count = form.get("manual_post_count")
+    return CreateBatchRequest.model_validate(
+        {
+            "brand": str(form.get("brand", "")).strip(),
+            "creation_mode": creation_mode,
+            "post_type_counts": post_type_counts,
+            "manual_post_count": (
+                int(manual_post_count) if manual_post_count not in {None, ""} else None
+            ),
+            "target_length_tier": _resolve_form_target_length_tier(form, creation_mode),
+            "target_duration_seconds": _resolve_form_target_duration_seconds(
+                form,
+                creation_mode,
+            ),
+        }
+    )
 
 
 def _wants_html(request: Request) -> bool:
@@ -173,42 +270,29 @@ async def create_batch_endpoint(request: Request):
     Per Canon § 3.2: Initializes batch in S1_SETUP state.
     """
     try:
-        payload: Optional[CreateBatchRequest] = None
-
-        content_type = request.headers.get("content-type", "")
-        if "application/json" in content_type:
-            try:
-                data = await request.json()
-            except json.JSONDecodeError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"message": "Invalid JSON payload", "error": str(exc)}
-                ) from exc
-
-            payload = CreateBatchRequest.model_validate(data)
-        else:
-            form = await request.form()
-            post_type_counts: Dict[str, int] = {
-                "value": int(form.get("post_type_counts.value", 0) or 0),
-                "lifestyle": int(form.get("post_type_counts.lifestyle", 0) or 0),
-                "product": int(form.get("post_type_counts.product", 0) or 0)
-            }
-            creation_mode = str(form.get("creation_mode", "automated") or "automated").strip() or "automated"
-            manual_post_count = form.get("manual_post_count")
-            payload = CreateBatchRequest.model_validate(
-                {
-                    "brand": str(form.get("brand", "")).strip(),
-                    "creation_mode": creation_mode,
-                    "post_type_counts": post_type_counts,
-                    "manual_post_count": int(manual_post_count) if manual_post_count not in {None, ""} else None,
-                    "target_length_tier": _resolve_form_target_length_tier(form, creation_mode),
+        try:
+            payload = await _parse_create_batch_request(request)
+        except (PydanticValidationError, ValueError, TypeError) as exc:
+            details: Dict[str, Any] = {"error": str(exc)}
+            if isinstance(exc, PydanticValidationError):
+                details = {
+                    "errors": exc.errors(include_url=False, include_context=False),
                 }
-            )
+            raise FlowForgeValidationError(
+                "Invalid batch creation request.",
+                details,
+            ) from exc
 
+        target_length_tier = (
+            None
+            if _is_semantic_ugc_mode(payload.creation_mode)
+            else normalize_target_length_tier(payload.target_length_tier)
+        )
         batch = create_batch(
             brand=payload.brand,
             post_type_counts=payload.post_type_counts.model_dump() if payload.post_type_counts else {},
-            target_length_tier=normalize_target_length_tier(payload.target_length_tier),
+            target_length_tier=target_length_tier,
+            target_duration_seconds=payload.target_duration_seconds,
             creation_mode=payload.creation_mode,
             manual_post_count=payload.manual_post_count,
         )
@@ -241,22 +325,28 @@ async def create_batch_endpoint(request: Request):
                 "request": request,
                 "batches": batch_responses,
                 "total": total,
-                "filters": {"archived": None, "limit": 50, "offset": 0}
+                "filters": {"archived": None, "limit": 50, "offset": 0},
+                **_semantic_ugc_template_context(),
             }
             response = templates.TemplateResponse("batches/list.html", context)
             response.headers["HX-Trigger"] = json.dumps({
-                    "batch_created": {
-                        "batch_id": batch["id"],
-                        "brand": batch["brand"],
-                        "expected_posts": expected_posts,
-                        "target_length_tier": batch.get("target_length_tier"),
-                    }
-                })
+                "batch_created": {
+                    "batch_id": batch["id"],
+                    "brand": batch["brand"],
+                    "expected_posts": expected_posts,
+                    "target_length_tier": batch.get("target_length_tier"),
+                    "target_duration_seconds": batch.get("target_duration_seconds"),
+                    "creation_mode": batch.get("creation_mode"),
+                    "video_pipeline_route": batch.get("video_pipeline_route"),
+                }
+            })
             return response
 
         return SuccessResponse(data=BatchResponse(**batch))
     
     except FlowForgeException:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.exception("create_batch_failed", error=str(e))
@@ -524,8 +614,157 @@ def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: 
     return {
         "initial_model": initial_model,
         "target_length_tier": batch_detail.get("target_length_tier"),
+        "target_duration_seconds": batch_detail.get("target_duration_seconds"),
         "pipeline_route": batch_detail.get("video_pipeline_route"),
         "pricing_by_model": _VEO_BATCH_PRICING_BY_MODEL,
+    }
+
+
+def _latest_semantic_attempts(attempts: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    latest: Dict[int, Dict[str, Any]] = {}
+    for attempt in attempts:
+        try:
+            index = int(attempt.get("take_index"))
+            attempt_number = int(attempt.get("attempt") or 1)
+        except (TypeError, ValueError):
+            continue
+        current = latest.get(index)
+        if current is None or attempt_number >= int(current.get("attempt") or 1):
+            latest[index] = dict(attempt)
+    return [latest[index] for index in sorted(latest)]
+
+
+def _semantic_money(value: object, *, default: str = "0.00") -> str:
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+    if not amount.is_finite() or amount < 0:
+        return default
+    return format(amount, ".2f")
+
+
+def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any]:
+    post_id = str(post.get("id") or "")
+    base = {
+        "post_id": post_id,
+        "topic_title": str(post.get("topic_title") or "Untitled post"),
+        "run_id": None,
+        "revision": None,
+        "stage": "not_started",
+        "plan_hash": "",
+        "master_state": "not_generated",
+        "approved_candidate_index": None,
+        "master_hash_is_current": False,
+        "initial_plan_is_approved": False,
+        "candidates": [],
+        "requested_duration_seconds": None,
+        "delivery_duration_seconds": None,
+        "take_count": 0,
+        "billable_provider_seconds": 0,
+        "price_per_provider_second_usd": "0.00",
+        "estimated_cost_usd": "0.00",
+        "generated_takes": 0,
+        "verified_takes": 0,
+        "failed_take_indexes": [],
+        "retry_provider_seconds": 0,
+        "retry_estimated_cost_usd": "0.00",
+        "latest_attempts": [],
+    }
+    run = semantic_video_queries.get_run_by_post(post_id)
+    if not run:
+        return base
+
+    run_id = str(run.get("id") or "")
+    attempts = semantic_video_queries.list_attempts(run_id)
+    approvals = semantic_video_queries.list_approvals(run_id)
+    latest = _latest_semantic_attempts(attempts)
+    master = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
+    candidates = master.get("candidates") if isinstance(master.get("candidates"), list) else []
+    candidates = [dict(candidate) for candidate in candidates if isinstance(candidate, dict)]
+    plan = run.get("plan_snapshot") if isinstance(run.get("plan_snapshot"), dict) else {}
+    artifact_manifest = (
+        run.get("artifact_manifest") if isinstance(run.get("artifact_manifest"), dict) else {}
+    )
+    master_hash = str(run.get("master_hash") or "")
+    plan_hash = str(run.get("plan_hash") or "")
+    current_reference_approval = any(
+        str(approval.get("approval_type") or "") == "reference"
+        and str(approval.get("contract_hash") or "") == master_hash
+        for approval in approvals
+    )
+    current_initial_approval = any(
+        str(approval.get("approval_type") or "") == "initial_plan"
+        and str(approval.get("contract_hash") or "") == plan_hash
+        for approval in approvals
+    )
+    generated_states = {"completed", "qa_failed", "failed"}
+    failed_states = {"qa_failed", "failed"}
+    failed = [
+        int(attempt["take_index"])
+        for attempt in latest
+        if str(attempt.get("submission_state") or "") in failed_states
+    ]
+    retry_seconds = sum(
+        int(attempt.get("provider_duration_seconds") or 0)
+        for attempt in latest
+        if int(attempt.get("take_index") or 0) in failed
+    )
+    price = _semantic_money(plan.get("price_per_provider_second_usd"))
+    retry_cost = _semantic_money(Decimal(price) * retry_seconds)
+    delivery_duration = artifact_manifest.get("delivery_duration_seconds")
+    if delivery_duration is None:
+        delivery_duration = artifact_manifest.get("actual_duration_seconds")
+
+    if current_reference_approval:
+        master_state = "approved"
+    elif candidates:
+        master_state = "candidates_ready"
+    else:
+        master_state = "not_generated"
+
+    return {
+        **base,
+        "run_id": run_id,
+        "revision": int(run.get("revision") or 0),
+        "stage": str(run.get("stage") or "not_started"),
+        "plan_hash": plan_hash,
+        "master_state": master_state,
+        "approved_candidate_index": master.get("approved_candidate_index"),
+        "master_hash_is_current": current_reference_approval,
+        "initial_plan_is_approved": current_initial_approval,
+        "candidates": candidates,
+        "requested_duration_seconds": int(run.get("requested_duration_seconds") or 0) or None,
+        "delivery_duration_seconds": delivery_duration,
+        "take_count": int(plan.get("take_count") or len(latest)),
+        "billable_provider_seconds": int(plan.get("billable_provider_seconds") or 0),
+        "price_per_provider_second_usd": price,
+        "estimated_cost_usd": _semantic_money(
+            plan.get("estimated_cost_usd", run.get("estimated_cost_usd"))
+        ),
+        "generated_takes": sum(
+            str(attempt.get("submission_state") or "") in generated_states for attempt in latest
+        ),
+        "verified_takes": sum(
+            bool((attempt.get("transcript_result") or {}).get("passed"))
+            for attempt in latest
+        ),
+        "failed_take_indexes": failed,
+        "retry_provider_seconds": retry_seconds,
+        "retry_estimated_cost_usd": retry_cost,
+        "latest_attempts": latest,
+    }
+
+
+def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not _is_semantic_ugc_mode(batch_detail.get("creation_mode")):
+        return None
+    return {
+        "requested_duration_seconds": batch_detail.get("target_duration_seconds"),
+        "posts": [
+            _build_semantic_video_post_projection(post)
+            for post in (batch_detail.get("posts") or [])
+        ],
     }
 
 
@@ -642,6 +881,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         "selected_instagram_account": meta_publish_state.get("selected_instagram") or {},
         "available_meta_pages": meta_publish_state.get("available_pages") or [],
         "video_generation_settings": _build_batch_video_generation_settings(batch_detail, posts),
+        "semantic_video": _build_semantic_video_projection(batch_detail),
         "tiktok_defaults": _load_json_object(batch_detail.get("tiktok_defaults")),
     }
 
@@ -671,7 +911,8 @@ async def list_batches_endpoint(
                     "archived": archived,
                     "limit": limit,
                     "offset": offset
-                }
+                },
+                **_semantic_ugc_template_context(),
             }
             return templates.TemplateResponse("batches/list.html", context)
 
@@ -930,6 +1171,10 @@ async def get_batch_status(batch_id: str):
             payload = {
                 "id": batch["id"],
                 "state": batch["state"],
+                "creation_mode": batch.get("creation_mode"),
+                "target_length_tier": batch.get("target_length_tier"),
+                "target_duration_seconds": batch.get("target_duration_seconds"),
+                "video_pipeline_route": batch.get("video_pipeline_route"),
                 "posts_count": posts_summary["posts_count"],
                 "posts_by_state": posts_summary["posts_by_state"],
                 "updated_at": batch["updated_at"],
@@ -937,9 +1182,13 @@ async def get_batch_status(batch_id: str):
             }
             return SuccessResponse(data=payload)
 
+        semantic_resume_is_safe = semantic_batch_posts_are_resumable(
+            batch,
+            posts_summary["posts_by_state"],
+        )
         if (
             batch["state"] == BatchState.S1_SETUP.value
-            and posts_summary["posts_count"] == 0
+            and (posts_summary["posts_count"] == 0 or semantic_resume_is_safe)
             and not is_batch_discovery_active(batch_id)
         ):
             if progress is None or progress.get("stage") in {"failed", "completed"}:
@@ -993,6 +1242,10 @@ async def get_batch_status(batch_id: str):
         payload = {
             "id": batch["id"],
             "state": batch["state"],
+            "creation_mode": batch.get("creation_mode"),
+            "target_length_tier": batch.get("target_length_tier"),
+            "target_duration_seconds": batch.get("target_duration_seconds"),
+            "video_pipeline_route": batch.get("video_pipeline_route"),
             "posts_count": posts_summary["posts_count"],
             "posts_by_state": posts_summary["posts_by_state"],
             "updated_at": batch["updated_at"],

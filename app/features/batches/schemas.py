@@ -6,10 +6,11 @@ Per Constitution § II: Validated Boundaries
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, model_validator, validator
 from typing import Dict, Optional, List, Any, Literal
 from datetime import datetime
 from app.core.states import BatchState
+from app.features.shot_production.duration import build_semantic_duration_contract
 
 
 class PostTypeCounts(BaseModel):
@@ -40,9 +41,10 @@ class CreateBatchRequest(BaseModel):
         "character_consistency",
         "character_consistency_light",
         "character_consistency_mid",
+        "semantic_ugc",
     ] = Field(
         default="automated",
-        description="Batch creation mode: automated, manual, manual_character_consistency, character_consistency, character_consistency_light, or character_consistency_mid.",
+        description="Batch creation mode, including the duration-driven semantic_ugc route.",
     )
     post_type_counts: Optional[PostTypeCounts] = Field(
         default=None,
@@ -54,12 +56,27 @@ class CreateBatchRequest(BaseModel):
         le=100,
         description="Number of blank manual drafts to create",
     )
-    target_length_tier: int = Field(
+    target_length_tier: Optional[int] = Field(
         default=8,
         ge=8,
         le=32,
         description="Target video duration tier for the batch"
     )
+    target_duration_seconds: Optional[int] = Field(
+        default=None,
+        strict=True,
+        description="Exact requested duration for Semantic UGC batches",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_duration_authority(cls, data):
+        """Ignore legacy tier input before field bounds run for Semantic UGC."""
+        if isinstance(data, dict) and data.get("creation_mode") == "semantic_ugc":
+            normalized = dict(data)
+            normalized["target_length_tier"] = None
+            return normalized
+        return data
     
     @validator('brand')
     def validate_brand(cls, v):
@@ -86,15 +103,32 @@ class CreateBatchRequest(BaseModel):
     @validator('post_type_counts', always=True)
     def validate_creation_mode_contract(cls, v, values):
         creation_mode = values.get("creation_mode") or "automated"
-        if creation_mode in {"automated", "character_consistency", "character_consistency_light", "character_consistency_mid"} and v is None:
+        if creation_mode in {"automated", "character_consistency", "character_consistency_light", "character_consistency_mid", "semantic_ugc"} and v is None:
             raise ValueError("Post type counts are required for automated and character consistency batches")
         return v
 
     @validator('target_length_tier')
     def validate_target_length_tier(cls, v):
+        if v is None:
+            return v
         if v not in (8, 16, 32):
             raise ValueError("Target length tier must be one of 8, 16, or 32")
         return v
+
+    @model_validator(mode="after")
+    def validate_duration_authority(self):
+        if self.creation_mode == "semantic_ugc":
+            if self.target_duration_seconds is None:
+                raise ValueError("Target duration seconds are required for Semantic UGC batches")
+            build_semantic_duration_contract(self.target_duration_seconds)
+            self.target_length_tier = None
+            return self
+
+        if self.target_duration_seconds is not None:
+            raise ValueError("Target duration seconds are only valid for Semantic UGC batches")
+        if self.target_length_tier is None:
+            raise ValueError("Target length tier is required for legacy batch modes")
+        return self
 
 
 class BatchResponse(BaseModel):
@@ -110,6 +144,8 @@ class BatchResponse(BaseModel):
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None
     target_length_tier: Optional[int] = None
+    target_duration_seconds: Optional[int] = None
+    video_pipeline_route: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     archived: bool
@@ -176,6 +212,7 @@ class BatchDetailResponse(BaseModel):
     post_type_counts: Dict[str, int]
     manual_post_count: Optional[int] = None
     target_length_tier: Optional[int] = None
+    target_duration_seconds: Optional[int] = None
     video_pipeline_route: Optional[str] = None
     created_at: datetime
     updated_at: datetime

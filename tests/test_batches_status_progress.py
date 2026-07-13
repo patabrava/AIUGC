@@ -5,6 +5,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
@@ -479,6 +481,235 @@ def test_recover_stalled_batches_only_requeues_empty_s1_batches(monkeypatch):
     assert scheduled == [("resume-me", "startup_recovery")]
 
 
+def test_recover_stalled_batches_schedules_semantic_discovery(monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        topic_handlers,
+        "list_batches",
+        lambda archived=False, limit=25, offset=0: (
+            [
+                {
+                    "id": "semantic-stalled",
+                    "state": "S1_SETUP",
+                    "creation_mode": "semantic_ugc",
+                    "created_at": now.isoformat(),
+                }
+            ],
+            1,
+        ),
+    )
+    monkeypatch.setattr(topic_handlers, "get_posts_by_batch", lambda batch_id: [])
+    monkeypatch.setattr(topic_handlers, "get_seeding_progress", lambda batch_id: None)
+
+    scheduled = []
+    monkeypatch.setattr(
+        topic_handlers,
+        "schedule_batch_discovery",
+        lambda batch_id, reason: scheduled.append((batch_id, reason)) or True,
+    )
+
+    recovered = topic_handlers.recover_stalled_batches(limit=10)
+
+    assert recovered == ["semantic-stalled"]
+    assert scheduled == [("semantic-stalled", "startup_recovery")]
+
+
+def test_startup_recovery_includes_partial_semantic_but_not_partial_legacy(monkeypatch):
+    now = datetime.now(timezone.utc)
+    batches = [
+        {
+            "id": "semantic-partial",
+            "state": "S1_SETUP",
+            "creation_mode": "semantic_ugc",
+            "post_type_counts": {"value": 2, "lifestyle": 0, "product": 0},
+            "created_at": now.isoformat(),
+        },
+        {
+            "id": "legacy-partial",
+            "state": "S1_SETUP",
+            "creation_mode": "automated",
+            "post_type_counts": {"value": 2, "lifestyle": 0, "product": 0},
+            "created_at": now.isoformat(),
+        },
+    ]
+    persisted_post = {
+        "id": "post-1",
+        "post_type": "value",
+        "seed_data": {
+            "semantic_slot_id": "value:1",
+            "semantic_family_identity": "value-family-1",
+        },
+    }
+    monkeypatch.setattr(
+        topic_handlers,
+        "list_batches",
+        lambda archived=False, limit=25, offset=0: (batches, len(batches)),
+    )
+    monkeypatch.setattr(
+        topic_handlers,
+        "get_posts_by_batch",
+        lambda _batch_id: [persisted_post],
+    )
+    monkeypatch.setattr(topic_handlers, "get_seeding_progress", lambda _batch_id: None)
+
+    assert topic_handlers.find_recoverable_stalled_batch_ids(limit=10) == [
+        "semantic-partial"
+    ]
+
+
+def test_schedule_batch_discovery_accepts_semantic_batch_at_central_boundary(monkeypatch):
+    batch_id = "semantic-direct"
+    topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+    monkeypatch.setattr(
+        topic_handlers,
+        "get_batch_by_id",
+        lambda _batch_id: {
+            "id": batch_id,
+            "state": "S1_SETUP",
+            "creation_mode": "semantic_ugc",
+        },
+    )
+    monkeypatch.setattr(topic_handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+
+    task_calls = []
+
+    class FakeTask:
+        def done(self):
+            return False
+
+    def fake_create_task(coroutine):
+        coroutine.close()
+        task_calls.append(coroutine)
+        return FakeTask()
+
+    monkeypatch.setattr(topic_handlers.asyncio, "create_task", fake_create_task)
+
+    try:
+        scheduled = topic_handlers.schedule_batch_discovery(batch_id, reason="direct_test")
+
+        assert scheduled is True
+        assert len(task_calls) == 1
+        assert topic_handlers.is_batch_discovery_active(batch_id) is True
+    finally:
+        topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+
+
+def test_schedule_batch_discovery_claims_semantic_batch_once_across_threads(monkeypatch):
+    import threading
+
+    batch_id = "semantic-race"
+    topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+    monkeypatch.setattr(
+        topic_handlers,
+        "get_batch_by_id",
+        lambda _batch_id: {
+            "id": batch_id,
+            "state": "S1_SETUP",
+            "creation_mode": "semantic_ugc",
+        },
+    )
+    monkeypatch.setattr(topic_handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+
+    first_task_claimed = threading.Event()
+    release_first_task = threading.Event()
+    task_calls = []
+    task_lock = threading.Lock()
+
+    class FakeTask:
+        def done(self):
+            return False
+
+    def fake_create_task(coroutine):
+        with task_lock:
+            task_calls.append(coroutine)
+            call_number = len(task_calls)
+        if call_number == 1:
+            first_task_claimed.set()
+            assert release_first_task.wait(timeout=2)
+        coroutine.close()
+        return FakeTask()
+
+    monkeypatch.setattr(topic_handlers.asyncio, "create_task", fake_create_task)
+    first_result = []
+
+    def schedule_first():
+        first_result.append(
+            topic_handlers.schedule_batch_discovery(batch_id, reason="race_first")
+        )
+
+    first_thread = threading.Thread(target=schedule_first)
+    first_thread.start()
+    assert first_task_claimed.wait(timeout=2)
+    try:
+        second_result = topic_handlers.schedule_batch_discovery(
+            batch_id,
+            reason="race_second",
+        )
+    finally:
+        release_first_task.set()
+        first_thread.join(timeout=2)
+        topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+
+    assert first_thread.is_alive() is False
+    assert sorted([first_result[0], second_result]) == [False, True]
+    assert len(task_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "failure_path",
+    ["get_batch", "manual_exception", "manual_batch", "wrong_state", "create_task"],
+)
+def test_schedule_batch_discovery_releases_claim_after_preflight_failure(
+    monkeypatch,
+    failure_path,
+):
+    from types import SimpleNamespace
+
+    batch_id = f"semantic-preflight-{failure_path}"
+    topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+    batch = {
+        "id": batch_id,
+        "state": "S2_SEEDED" if failure_path == "wrong_state" else "S1_SETUP",
+        "creation_mode": "semantic_ugc",
+    }
+
+    def fake_get_batch(_batch_id):
+        if failure_path == "get_batch":
+            raise RuntimeError("batch lookup failed")
+        return batch
+
+    def fake_manual_check(_batch_id):
+        if failure_path == "manual_exception":
+            raise RuntimeError("manual preflight failed")
+        return failure_path == "manual_batch"
+
+    def fake_create_task(coroutine):
+        if failure_path == "create_task":
+            raise RuntimeError("task creation failed")
+        coroutine.close()
+        return SimpleNamespace(done=lambda: False)
+
+    monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch)
+    monkeypatch.setattr(topic_handlers, "_batch_has_manual_drafts", fake_manual_check)
+    monkeypatch.setattr(topic_handlers.asyncio, "create_task", fake_create_task)
+
+    try:
+        if failure_path in {"get_batch", "manual_exception", "create_task"}:
+            with pytest.raises(RuntimeError):
+                topic_handlers.schedule_batch_discovery(batch_id, reason="preflight_test")
+        else:
+            assert (
+                topic_handlers.schedule_batch_discovery(
+                    batch_id,
+                    reason="preflight_test",
+                )
+                is False
+            )
+        assert batch_id not in topic_handlers._DISCOVERY_TASKS
+    finally:
+        topic_handlers._DISCOVERY_TASKS.pop(batch_id, None)
+
+
 def test_recover_stalled_batches_skips_old_backlog_and_caps_recovery(monkeypatch):
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(
@@ -788,6 +1019,38 @@ def test_build_batch_detail_view_prefers_last_requested_batch_model():
     assert view["video_generation_settings"]["target_length_tier"] == 8
     assert view["video_generation_settings"]["pricing_by_model"]["veo-3.1-fast-generate-001"]["720p"] == 0.10
     assert view["video_submission_ready_count"] == 0
+
+
+def test_semantic_batch_status_keeps_dynamic_duration_authority(monkeypatch):
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "brand": "Semantic demo",
+            "state": "S4_SCRIPTED",
+            "creation_mode": "semantic_ugc",
+            "target_length_tier": None,
+            "target_duration_seconds": 50,
+            "video_pipeline_route": "semantic_ugc",
+            "post_type_counts": {"value": 1},
+            "updated_at": "2026-07-13T00:00:00Z",
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda batch_id: {"posts_count": 1, "posts_by_state": {"caption_completed": 1}},
+    )
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", lambda batch_id: None)
+    monkeypatch.setattr(batch_handlers, "_batch_has_manual_drafts", lambda batch: False)
+
+    response = __import__("asyncio").run(batch_handlers.get_batch_status("batch-semantic"))
+
+    assert response.data["creation_mode"] == "semantic_ugc"
+    assert response.data["target_length_tier"] is None
+    assert response.data["target_duration_seconds"] == 50
+    assert response.data["video_pipeline_route"] == "semantic_ugc"
 
 
 def test_build_batch_detail_view_defaults_new_batch_to_fast_veo_model():
