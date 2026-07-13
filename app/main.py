@@ -44,6 +44,7 @@ from app.features.auth.middleware import (
 )
 from app.features.characters.handlers import router as characters_router
 from app.features.scenes.handlers import router as scenes_router
+from app.features.semantic_videos.handlers import router as semantic_videos_router
 
 try:
     from app.features.publish.tiktok import router as tiktok_router
@@ -487,6 +488,7 @@ async def health_check():
 app.include_router(auth_router)
 app.include_router(characters_router)
 app.include_router(scenes_router)
+app.include_router(semantic_videos_router)
 app.include_router(batches_router)
 app.include_router(topics_router)
 app.include_router(posts_router)
