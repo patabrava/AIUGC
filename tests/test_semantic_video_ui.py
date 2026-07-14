@@ -29,6 +29,9 @@ def _semantic_batch() -> dict:
                 "id": "post-1",
                 "post_type": "value",
                 "topic_title": "Ramp truth",
+                "topic_rotation": "",
+                "topic_cta": "",
+                "spoken_duration": 0,
                 "seed_data": {"script_review_status": "approved"},
             }
         ],
@@ -119,6 +122,28 @@ def test_legacy_projection_does_not_query_or_render_semantic_workflow(monkeypatc
     )
     assert "semantic-video-workflow" not in html
     assert "semantic_video.js" not in html
+
+
+def test_manual_semantic_projection_and_template_render_semantic_workflow(monkeypatch):
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda post_id: None,
+    )
+    batch = _semantic_batch()
+    batch["creation_mode"] = "manual_semantic_ugc"
+
+    view = batch_handlers._build_batch_detail_view(batch)
+    assert view["semantic_video"] is not None
+
+    env = Environment(loader=FileSystemLoader("templates"))
+    html = env.get_template("batches/detail.html").render(
+        batch=batch,
+        batch_view=view,
+        static_version="1",
+    )
+    assert "semantic-video-workflow" in html
+    assert "semantic_video.js" in html
 
 
 def test_semantic_partial_has_accessible_hash_gated_approval_controls():

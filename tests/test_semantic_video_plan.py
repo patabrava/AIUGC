@@ -132,6 +132,24 @@ def test_compile_semantic_video_plan_builds_canonical_seven_take_costed_payload(
     assert repeated.take_payloads == compiled.take_payloads
 
 
+def test_compile_semantic_video_plan_accepts_manual_semantic_batch():
+    from app.features.semantic_videos.service import compile_semantic_video_plan
+
+    master = _png_bytes()
+    post, batch, reference = _snapshots(master=master)
+    batch["creation_mode"] = "manual_semantic_ugc"
+
+    compiled = compile_semantic_video_plan(
+        post_snapshot=post,
+        batch_snapshot=batch,
+        reference_snapshot=reference,
+        approved_frame_bytes=master,
+    )
+
+    assert compiled.run_payload["requested_duration_seconds"] == 50
+    assert compiled.run_payload["plan_snapshot"]["take_count"] == 7
+
+
 def test_compile_semantic_video_plan_hash_changes_with_script_master_or_duration():
     baseline = _compile()
     changed_script = _compile(script=APPROVED_50_SECOND_SCRIPT.replace("transparent", "nachvollziehbar"))

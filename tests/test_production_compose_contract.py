@@ -93,6 +93,13 @@ def test_all_compose_contracts_run_the_dedicated_semantic_video_worker():
         assert "workers.semantic_video_worker" in str(command)
 
 
+def test_github_deploy_renders_dedicated_semantic_video_worker():
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert '"  semantic-video-worker:"' in workflow_text
+    assert '"    command: python -m workers.semantic_video_worker"' in workflow_text
+
+
 def test_legacy_compose_files_follow_production_build_contract():
     assert LEGACY_COMPOSE_PATHS[0].read_text(encoding="utf-8") == LEGACY_COMPOSE_PATHS[1].read_text(encoding="utf-8")
     for path in LEGACY_COMPOSE_PATHS:

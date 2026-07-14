@@ -9,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
+MANUAL_MODE_MIGRATION = ROOT / "supabase/migrations/20260714000000_manual_semantic_ugc_mode.sql"
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_migration_test"
 
@@ -83,6 +84,9 @@ def test_migration_reapplies_and_rejects_cross_batch_semantic_run():
         migration = MIGRATION.read_text()
         _psql(DATABASE, migration)
         _psql(DATABASE, migration)
+        manual_mode_migration = MANUAL_MODE_MIGRATION.read_text()
+        _psql(DATABASE, manual_mode_migration)
+        _psql(DATABASE, manual_mode_migration)
 
         _psql(
             DATABASE,
@@ -92,7 +96,8 @@ def test_migration_reapplies_and_rejects_cross_batch_semantic_run():
               video_pipeline_route
             ) VALUES
               ('00000000-0000-0000-0000-000000000001', 'A', 'semantic_ugc', NULL, 50, 'semantic_ugc'),
-              ('00000000-0000-0000-0000-000000000002', 'B', 'semantic_ugc', NULL, 50, 'semantic_ugc');
+              ('00000000-0000-0000-0000-000000000002', 'B', 'semantic_ugc', NULL, 50, 'semantic_ugc'),
+              ('00000000-0000-0000-0000-000000000003', 'C', 'manual_semantic_ugc', NULL, 50, 'semantic_ugc');
             INSERT INTO public.posts (id, batch_id) VALUES (
               '00000000-0000-0000-0000-000000000011',
               '00000000-0000-0000-0000-000000000001'

@@ -58,7 +58,11 @@ from app.features.publish.handlers import (
 from app.features.blog.schemas import normalize_blog_content
 from app.features.topics.captions import resolve_display_caption
 from app.features.characters import queries as character_queries
-from app.features.characters.actor_identity import is_character_consistency_mode, is_manual_creation_mode
+from app.features.characters.actor_identity import (
+    is_character_consistency_mode,
+    is_manual_creation_mode,
+    is_semantic_ugc_mode,
+)
 from app.features.shot_production.duration import (
     MINIMUM_SEMANTIC_UGC_DURATION_SECONDS,
     build_semantic_duration_contract,
@@ -120,10 +124,6 @@ _VEO_BATCH_PRICING_BY_MODEL = {
 }
 
 
-def _is_semantic_ugc_mode(creation_mode: object) -> bool:
-    return str(creation_mode or "").strip() == "semantic_ugc"
-
-
 def _semantic_ugc_max_duration_seconds() -> int:
     return build_semantic_duration_contract(
         MINIMUM_SEMANTIC_UGC_DURATION_SECONDS
@@ -149,7 +149,7 @@ def _semantic_ugc_template_context() -> Dict[str, Any]:
 
 
 def _resolve_form_target_length_tier(form, creation_mode: str) -> Optional[int]:
-    if _is_semantic_ugc_mode(creation_mode):
+    if is_semantic_ugc_mode(creation_mode):
         return None
 
     values = []
@@ -164,7 +164,7 @@ def _resolve_form_target_length_tier(form, creation_mode: str) -> Optional[int]:
 
 
 def _resolve_form_target_duration_seconds(form, creation_mode: str) -> Optional[int]:
-    if not _is_semantic_ugc_mode(creation_mode):
+    if not is_semantic_ugc_mode(creation_mode):
         return None
     value = form.get("target_duration_seconds")
     if value is None or not str(value).strip():
@@ -285,7 +285,7 @@ async def create_batch_endpoint(request: Request):
 
         target_length_tier = (
             None
-            if _is_semantic_ugc_mode(payload.creation_mode)
+            if is_semantic_ugc_mode(payload.creation_mode)
             else normalize_target_length_tier(payload.target_length_tier)
         )
         batch = create_batch(
@@ -757,7 +757,7 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
 
 
 def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if not _is_semantic_ugc_mode(batch_detail.get("creation_mode")):
+    if not is_semantic_ugc_mode(batch_detail.get("creation_mode")):
         return None
     return {
         "requested_duration_seconds": batch_detail.get("target_duration_seconds"),

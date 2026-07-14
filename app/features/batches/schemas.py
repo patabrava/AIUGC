@@ -42,6 +42,7 @@ class CreateBatchRequest(BaseModel):
         "character_consistency_light",
         "character_consistency_mid",
         "semantic_ugc",
+        "manual_semantic_ugc",
     ] = Field(
         default="automated",
         description="Batch creation mode, including the duration-driven semantic_ugc route.",
@@ -72,7 +73,10 @@ class CreateBatchRequest(BaseModel):
     @classmethod
     def normalize_duration_authority(cls, data):
         """Ignore legacy tier input before field bounds run for Semantic UGC."""
-        if isinstance(data, dict) and data.get("creation_mode") == "semantic_ugc":
+        if isinstance(data, dict) and data.get("creation_mode") in {
+            "semantic_ugc",
+            "manual_semantic_ugc",
+        }:
             normalized = dict(data)
             normalized["target_length_tier"] = None
             return normalized
@@ -96,14 +100,24 @@ class CreateBatchRequest(BaseModel):
 
     @validator('manual_post_count', always=True)
     def validate_manual_post_count(cls, v, values):
-        if values.get("creation_mode") in {"manual", "manual_character_consistency"} and v is None:
+        if values.get("creation_mode") in {
+            "manual",
+            "manual_character_consistency",
+            "manual_semantic_ugc",
+        } and v is None:
             raise ValueError("Manual post count must be provided for manual batches")
         return v
 
     @validator('post_type_counts', always=True)
     def validate_creation_mode_contract(cls, v, values):
         creation_mode = values.get("creation_mode") or "automated"
-        if creation_mode in {"automated", "character_consistency", "character_consistency_light", "character_consistency_mid", "semantic_ugc"} and v is None:
+        if creation_mode in {
+            "automated",
+            "character_consistency",
+            "character_consistency_light",
+            "character_consistency_mid",
+            "semantic_ugc",
+        } and v is None:
             raise ValueError("Post type counts are required for automated and character consistency batches")
         return v
 
@@ -117,7 +131,7 @@ class CreateBatchRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_duration_authority(self):
-        if self.creation_mode == "semantic_ugc":
+        if self.creation_mode in {"semantic_ugc", "manual_semantic_ugc"}:
             if self.target_duration_seconds is None:
                 raise ValueError("Target duration seconds are required for Semantic UGC batches")
             build_semantic_duration_contract(self.target_duration_seconds)

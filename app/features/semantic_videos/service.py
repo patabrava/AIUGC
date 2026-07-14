@@ -22,6 +22,7 @@ from app.features.shot_production.duration import build_semantic_duration_contra
 from app.features.shot_production.planner import plan_editorial_beats
 from app.features.shot_production.prompts import compile_veo_take_requests
 from app.features.shot_production.shot_deck import derive_shot_deck
+from app.features.characters.actor_identity import is_semantic_ugc_mode
 
 
 DEFAULT_PRICE_PER_PROVIDER_SECOND_USD = Decimal("0.40")
@@ -153,8 +154,8 @@ def compile_semantic_video_plan(
             "Semantic video post and batch snapshots must identify the same batch.",
             {"post_id": post_id or None, "post_batch_id": post_batch_id or None, "batch_id": batch_id or None},
         )
-    if str(batch.get("creation_mode") or "").strip() != "semantic_ugc":
-        raise ValidationError("Semantic video planning requires a semantic_ugc batch.")
+    if not is_semantic_ugc_mode(batch.get("creation_mode")):
+        raise ValidationError("Semantic video planning requires a Semantic UGC batch.")
 
     requested_duration = batch.get("target_duration_seconds")
     duration_contract = build_semantic_duration_contract(requested_duration)

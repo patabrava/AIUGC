@@ -17,7 +17,7 @@
 >
     {% include "batches/detail/_breadcrumbs.html" %}
     {% include "batches/detail/_progress_stepper.html" %}
-    {% if batch.creation_mode == 'semantic_ugc' and batch_view.semantic_video %}
+    {% if batch.creation_mode in ['semantic_ugc', 'manual_semantic_ugc'] and batch_view.semantic_video %}
     {% include "batches/detail/_semantic_video.html" %}
     {% endif %}
     {% include "batches/detail/_workflow_panels.html" %}
@@ -30,7 +30,7 @@
 {{ super() }}
 <script src="/static/js/batches/tiktok_post_settings.js?v={{ static_version }}"></script>
 <script src="/static/js/batches/detail.js?v={{ static_version }}"></script>
-{% if batch.creation_mode == 'semantic_ugc' %}
+{% if batch.creation_mode in ['semantic_ugc', 'manual_semantic_ugc'] %}
 <script src="/static/js/batches/semantic_video.js?v={{ static_version }}"></script>
 {% endif %}
 {% endblock %}

@@ -14,12 +14,15 @@ from app.features.batches.schemas import BatchDetailResponse, BatchResponse, Cre
 from app.core.errors import ValidationError as FlowForgeValidationError
 from app.features.characters.actor_identity import (
     CHARACTER_CONSISTENCY_MODES,
+    is_manual_creation_mode,
     is_character_consistency_mode,
+    is_semantic_ugc_mode,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
+MANUAL_MODE_MIGRATION = ROOT / "supabase/migrations/20260714000000_manual_semantic_ugc_mode.sql"
 
 
 @pytest.fixture
@@ -80,6 +83,44 @@ def test_semantic_batch_uses_numeric_duration_only():
     assert payload.target_length_tier is None
 
 
+def test_manual_semantic_batch_uses_manual_drafts_and_numeric_duration():
+    payload = CreateBatchRequest.model_validate(
+        {
+            "brand": "AYRA",
+            "creation_mode": "manual_semantic_ugc",
+            "manual_post_count": 2,
+            "target_length_tier": 32,
+            "target_duration_seconds": 50,
+        }
+    )
+
+    assert payload.creation_mode == "manual_semantic_ugc"
+    assert payload.manual_post_count == 2
+    assert payload.post_type_counts is None
+    assert payload.target_duration_seconds == 50
+    assert payload.target_length_tier is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"target_duration_seconds": 50},
+        {"manual_post_count": 2},
+        {"manual_post_count": 2, "target_duration_seconds": 7},
+        {"manual_post_count": 2, "target_duration_seconds": 61},
+    ],
+)
+def test_manual_semantic_batch_requires_manual_count_and_valid_dynamic_duration(payload):
+    with pytest.raises(ValidationError):
+        CreateBatchRequest.model_validate(
+            {
+                "brand": "AYRA",
+                "creation_mode": "manual_semantic_ugc",
+                **payload,
+            }
+        )
+
+
 @pytest.mark.parametrize("target_duration_seconds", [7, 61, 8.5, True])
 def test_semantic_batch_rejects_invalid_duration(target_duration_seconds):
     with pytest.raises(ValidationError):
@@ -128,7 +169,13 @@ def test_legacy_batch_cannot_use_semantic_duration_authority():
 
 def test_semantic_mode_stays_outside_character_consistency_modes():
     assert "semantic_ugc" not in CHARACTER_CONSISTENCY_MODES
+    assert "manual_semantic_ugc" not in CHARACTER_CONSISTENCY_MODES
     assert is_character_consistency_mode("semantic_ugc") is False
+    assert is_character_consistency_mode("manual_semantic_ugc") is False
+    assert is_semantic_ugc_mode("semantic_ugc") is True
+    assert is_semantic_ugc_mode("manual_semantic_ugc") is True
+    assert is_manual_creation_mode("semantic_ugc") is False
+    assert is_manual_creation_mode("manual_semantic_ugc") is True
 
 
 def test_batch_response_models_expose_both_duration_authorities():
@@ -182,6 +229,46 @@ def test_create_batch_persists_semantic_duration_and_route(monkeypatch):
     assert captured["payload"]["video_pipeline_route"] == "semantic_ugc"
     assert captured["legacy_payload"] is None
     assert created["target_duration_seconds"] == 50
+
+
+def test_create_batch_persists_manual_semantic_duration_and_route(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        batch_queries,
+        "get_active_actor_identity",
+        lambda: SimpleNamespace(
+            id="actor-semantic",
+            name="Semantic Actor",
+            is_active=True,
+            training_images=[
+                "https://cdn.example.com/actor-a.png",
+                "https://cdn.example.com/actor-b.png",
+            ],
+        ),
+    )
+
+    def fake_insert(payload, legacy_payload=None):
+        captured["payload"] = payload
+        captured["legacy_payload"] = legacy_payload
+        return {"id": "batch-manual-semantic", **payload}
+
+    monkeypatch.setattr(batch_queries, "_insert_batch_row", fake_insert)
+
+    created = batch_queries.create_batch(
+        brand="AYRA",
+        post_type_counts={},
+        target_length_tier=None,
+        target_duration_seconds=50,
+        creation_mode="manual_semantic_ugc",
+        manual_post_count=2,
+    )
+
+    assert captured["payload"]["target_length_tier"] is None
+    assert captured["payload"]["target_duration_seconds"] == 50
+    assert captured["payload"]["video_pipeline_route"] == "semantic_ugc"
+    assert captured["payload"]["manual_post_count"] == 2
+    assert captured["legacy_payload"] is None
+    assert created["creation_mode"] == "manual_semantic_ugc"
 
 
 @pytest.mark.parametrize(
@@ -255,7 +342,8 @@ def test_semantic_batch_persists_active_actor_with_exactly_two_ordered_images_wi
     }
 
 
-def test_duplicate_batch_copies_semantic_duration_and_route(monkeypatch):
+@pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
+def test_duplicate_batch_copies_semantic_duration_and_route(monkeypatch, creation_mode):
     calls = []
     actor_snapshot = {
         "actor_identity_id": "actor-original",
@@ -269,6 +357,8 @@ def test_duplicate_batch_copies_semantic_duration_and_route(monkeypatch):
         batch_queries,
         "get_batch_by_id",
         lambda _batch_id: _batch_row(
+            creation_mode=creation_mode,
+            manual_post_count=2 if creation_mode == "manual_semantic_ugc" else None,
             actor_identity_id="actor-original",
             actor_identity_snapshot=actor_snapshot,
         ),
@@ -282,7 +372,7 @@ def test_duplicate_batch_copies_semantic_duration_and_route(monkeypatch):
     duplicated = batch_queries.duplicate_batch("batch-semantic", "AYRA Copy")
 
     assert duplicated["id"] == "batch-copy"
-    assert calls[0][1]["creation_mode"] == "semantic_ugc"
+    assert calls[0][1]["creation_mode"] == creation_mode
     assert calls[0][1]["target_duration_seconds"] == 50
     assert calls[0][1]["semantic_actor_identity_id"] == "actor-original"
     assert calls[0][1]["semantic_actor_identity_snapshot"] == actor_snapshot
@@ -335,6 +425,74 @@ async def test_semantic_form_parsing_passes_seconds_to_create_query(monkeypatch)
     assert response.data.target_duration_seconds == 50
     assert [call[0] for call in discovery_calls] == ["start", "schedule"]
     assert discovery_calls[1][1:] == (("batch-semantic",), {"reason": "batch_create"})
+
+
+@pytest.mark.anyio
+async def test_manual_semantic_form_creates_drafts_and_skips_discovery(monkeypatch):
+    _enable_test_environment()
+    from app.features.batches import handlers as batch_handlers
+
+    captured = {}
+    draft_calls = []
+    discovery_calls = []
+
+    class FakeRequest:
+        headers = {"content-type": "application/json"}
+
+        async def json(self):
+            return {
+                "brand": "AYRA",
+                "creation_mode": "manual_semantic_ugc",
+                "manual_post_count": 2,
+                "target_duration_seconds": 50,
+            }
+
+    def fake_create_batch(**kwargs):
+        captured.update(kwargs)
+        return _batch_row(**{
+            **kwargs,
+            "id": "batch-manual-semantic",
+            "state": "S1_SETUP",
+        })
+
+    monkeypatch.setattr(batch_handlers, "create_batch", fake_create_batch)
+    monkeypatch.setattr(
+        batch_handlers,
+        "create_manual_draft_posts",
+        lambda batch_id, manual_post_count, target_length_tier: draft_calls.append(
+            (batch_id, manual_post_count, target_length_tier)
+        ) or [],
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "update_batch_state",
+        lambda batch_id, state: _batch_row(
+            id=batch_id,
+            state=state.value,
+            creation_mode="manual_semantic_ugc",
+            post_type_counts={},
+            manual_post_count=2,
+        ),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "start_seeding_interaction",
+        lambda **kwargs: discovery_calls.append(("start", kwargs)),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda *args, **kwargs: discovery_calls.append(("schedule", args, kwargs)),
+    )
+
+    response = await batch_handlers.create_batch_endpoint(FakeRequest())
+
+    assert captured["target_length_tier"] is None
+    assert captured["target_duration_seconds"] == 50
+    assert captured["creation_mode"] == "manual_semantic_ugc"
+    assert draft_calls == [("batch-manual-semantic", 2, 8)]
+    assert discovery_calls == []
+    assert response.data.state.value == "S2_SEEDED"
 
 
 @pytest.mark.anyio
@@ -543,7 +701,23 @@ async def test_batch_status_exposes_semantic_duration_progress(monkeypatch):
 def test_semantic_batch_form_has_accessible_conditional_duration_controls():
     source = (ROOT / "templates/batches/list.html").read_text()
 
-    assert '<option value="semantic_ugc">Semantic UGC - Veo 3.1</option>' in source
+    semantic_option = (
+        '<option value="semantic_ugc" data-semantic-ugc-mode-option>'
+        "Semantic UGC - Veo 3.1</option>"
+    )
+    assert semantic_option in source
+    manual_semantic_option = (
+        '<option value="manual_semantic_ugc" data-semantic-ugc-mode-option>'
+        "Manual Semantic UGC - Veo 3.1</option>"
+    )
+    assert manual_semantic_option in source
+    assert source.index(semantic_option) < source.index(manual_semantic_option)
+    assert source.index(semantic_option) < source.index(
+        '<option value="manual_character_consistency">Manual Character Consistency</option>'
+    )
+    assert 'data-semantic-ugc-mode-option' in source
+    assert 'data-semantic-ugc-duration-panel' in source
+    assert 'Recommended for longer AIUGC videos' in source
     assert 'name="target_duration_seconds"' in source
     assert 'min="8"' in source
     assert 'max="{{ semantic_ugc_max_duration_seconds | default(60) }}"' in source
@@ -551,8 +725,9 @@ def test_semantic_batch_form_has_accessible_conditional_duration_controls():
     assert "targetDurationSeconds: {{ semantic_ugc_default_duration_seconds" in source
     assert "{% for seconds in semantic_ugc_duration_presets %}" in source
     assert 'data-duration-preset="{{ seconds }}"' in source
-    assert "creationMode === 'semantic_ugc'" in source
-    assert "creationMode !== 'semantic_ugc'" in source
+    assert "const semanticModes = ['semantic_ugc', 'manual_semantic_ugc']" in source
+    assert "semanticModes.includes(creationMode)" in source
+    assert "manual_semantic_ugc" in source
     assert "shot plan" in source.lower()
     assert "approval" in source.lower()
 
@@ -597,3 +772,14 @@ def test_semantic_migration_defines_batch_and_run_persistence_contract():
     assert "for update skip locked" in sql
     assert "lease_owner" in sql
     assert "lease_expires_at" in sql
+
+
+def test_manual_semantic_migration_extends_mode_and_duration_authority_contract():
+    assert MANUAL_MODE_MIGRATION.exists(), "Manual Semantic UGC migration is missing"
+    sql = MANUAL_MODE_MIGRATION.read_text().lower()
+
+    assert "manual_semantic_ugc" in sql
+    assert "batches_creation_mode_check" in sql
+    assert "batches_duration_authority_check" in sql
+    assert "batches_semantic_pipeline_route_check" in sql
+    assert "creation_mode in ('semantic_ugc', 'manual_semantic_ugc')" in sql

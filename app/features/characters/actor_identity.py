@@ -13,7 +13,12 @@ CHARACTER_CONSISTENCY_MODES = {
     "character_consistency_mid",
 }
 
-MANUAL_CREATION_MODES = {"manual", "manual_character_consistency"}
+SEMANTIC_UGC_MODES = {"semantic_ugc", "manual_semantic_ugc"}
+MANUAL_CREATION_MODES = {
+    "manual",
+    "manual_character_consistency",
+    "manual_semantic_ugc",
+}
 ACTOR_IDENTITY_VIDEO_SOURCES = {
     "actor_identity_anchor_images",
     "actor_identity_scene_reference",
@@ -27,6 +32,10 @@ def is_character_consistency_mode(value: Any) -> bool:
 
 def is_manual_creation_mode(value: Any) -> bool:
     return str(value or "").strip() in MANUAL_CREATION_MODES
+
+
+def is_semantic_ugc_mode(value: Any) -> bool:
+    return str(value or "").strip() in SEMANTIC_UGC_MODES
 
 
 def is_actor_identity_video_source(value: Any) -> bool:

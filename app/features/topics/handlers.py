@@ -65,7 +65,7 @@ from app.core.config import get_settings
 from app.core.video_profiles import script_word_count
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.shot_production.planner import plan_editorial_beats
-from app.features.characters.actor_identity import is_manual_creation_mode
+from app.features.characters.actor_identity import is_manual_creation_mode, is_semantic_ugc_mode
 from app.features.topics.semantic_scripts import (
     generate_semantic_script,
     validate_semantic_script,
@@ -724,7 +724,7 @@ def semantic_batch_posts_are_resumable(
     posts_by_type: Dict[str, int],
 ) -> bool:
     """Return whether an S1 Semantic UGC batch can safely resume from these totals."""
-    if str(batch.get("creation_mode") or "").strip() != "semantic_ugc":
+    if not is_semantic_ugc_mode(batch.get("creation_mode")):
         return False
     requested = {
         str(post_type): int(count or 0)
@@ -1445,7 +1445,7 @@ def recover_stalled_batches(limit: int = 1, max_age_hours: int = 6) -> List[str]
 def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
     """Return True when every research-backed post type can seed from audited families."""
     post_type_counts = batch.get("post_type_counts") or {}
-    is_semantic_ugc = str(batch.get("creation_mode") or "").strip() == "semantic_ugc"
+    is_semantic_ugc = is_semantic_ugc_mode(batch.get("creation_mode"))
     target_length_tier = (
         _SEMANTIC_TOPIC_INPUT_TIER
         if is_semantic_ugc
@@ -1767,7 +1767,7 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
 def _discover_topics_for_batch_sync(batch_id: str) -> Dict[str, Any]:
     """Synchronous topic discovery workflow executed off the request event loop."""
     batch = get_batch_by_id(batch_id)
-    is_semantic_ugc = str(batch.get("creation_mode") or "").strip() == "semantic_ugc"
+    is_semantic_ugc = is_semantic_ugc_mode(batch.get("creation_mode"))
 
     manual_drafts_present = _batch_has_manual_drafts(batch_id)
     if manual_drafts_present:

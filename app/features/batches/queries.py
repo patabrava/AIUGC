@@ -11,9 +11,13 @@ import httpx
 from postgrest.exceptions import APIError
 from app.adapters.supabase_client import get_supabase
 from app.core.states import BatchState, validate_state_transition
-from app.core.errors import NotFoundError, StateTransitionError, ThirdPartyError, ValidationError
+from app.core.errors import NotFoundError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
-from app.features.characters.actor_identity import actor_identity_is_ready, is_character_consistency_mode
+from app.features.characters.actor_identity import (
+    actor_identity_is_ready,
+    is_character_consistency_mode,
+    is_semantic_ugc_mode,
+)
 from app.features.characters.queries import get_active_actor_identity
 from app.features.topics.queries import create_post_for_batch
 from app.features.shot_production.duration import build_semantic_duration_contract
@@ -314,7 +318,7 @@ def create_batch(
     Create a new batch in S1_SETUP state.
     Per Canon § 3.2: S1_SETUP is initial state.
     """
-    is_semantic_ugc = creation_mode == "semantic_ugc"
+    is_semantic_ugc = is_semantic_ugc_mode(creation_mode)
     if is_semantic_ugc:
         if target_duration_seconds is None:
             raise ValidationError(
@@ -450,7 +454,7 @@ def get_batch_by_id(batch_id: str) -> Dict[str, Any]:
     
     if not response.data:
         raise NotFoundError(
-            message=f"Batch not found",
+            message="Batch not found",
             details={"batch_id": batch_id}
         )
     
@@ -532,7 +536,7 @@ def archive_batch(batch_id: str, archived: bool) -> Dict[str, Any]:
     
     if not response.data:
         raise NotFoundError(
-            message=f"Batch not found",
+            message="Batch not found",
             details={"batch_id": batch_id}
         )
     
@@ -555,7 +559,7 @@ def duplicate_batch(batch_id: str, new_brand: Optional[str] = None) -> Dict[str,
     creation_mode = str(original.get("creation_mode") or "automated")
     target_length_tier = (
         original.get("target_length_tier")
-        if creation_mode == "semantic_ugc"
+        if is_semantic_ugc_mode(creation_mode)
         else original.get("target_length_tier") or 8
     )
     new_batch = create_batch(
@@ -566,10 +570,10 @@ def duplicate_batch(batch_id: str, new_brand: Optional[str] = None) -> Dict[str,
         creation_mode=creation_mode,
         manual_post_count=original.get("manual_post_count"),
         semantic_actor_identity_id=(
-            original.get("actor_identity_id") if creation_mode == "semantic_ugc" else None
+            original.get("actor_identity_id") if is_semantic_ugc_mode(creation_mode) else None
         ),
         semantic_actor_identity_snapshot=(
-            original.get("actor_identity_snapshot") if creation_mode == "semantic_ugc" else None
+            original.get("actor_identity_snapshot") if is_semantic_ugc_mode(creation_mode) else None
         ),
     )
     

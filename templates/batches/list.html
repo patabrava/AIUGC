@@ -255,14 +255,16 @@
                 @htmx:before-request="
                     const brand = $event.detail.elt.querySelector('[name=brand]').value;
                     const creationMode = $event.detail.elt.querySelector('[name=creation_mode]').value || 'automated';
+                    const semanticModes = ['semantic_ugc', 'manual_semantic_ugc'];
+                    const manualModes = ['manual', 'manual_character_consistency', 'manual_semantic_ugc'];
                     const value = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.value\']').value) || 0;
                     const lifestyle = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.lifestyle\']').value) || 0;
                     const product = parseInt($event.detail.elt.querySelector('[name=\'post_type_counts.product\']').value) || 0;
                     const manualPostCount = parseInt($event.detail.elt.querySelector('[name=manual_post_count]')?.value) || 0;
-                    const targetLengthTier = creationMode === 'semantic_ugc'
+                    const targetLengthTier = semanticModes.includes(creationMode)
                         ? null
                         : (parseInt($event.detail.elt.querySelector('[name=target_length_tier]:not(:disabled)')?.value) || 8);
-                    const targetDurationSeconds = creationMode === 'semantic_ugc'
+                    const targetDurationSeconds = semanticModes.includes(creationMode)
                         ? (parseInt($event.detail.elt.querySelector('[name=target_duration_seconds]')?.value) || null)
                         : null;
                     const tempId = 'temp-' + Date.now();
@@ -270,7 +272,7 @@
                         detail: {
                             batchId: tempId,
                             brand,
-                            expected: ['manual', 'manual_character_consistency'].includes(creationMode) ? manualPostCount : value + lifestyle + product,
+                            expected: manualModes.includes(creationMode) ? manualPostCount : value + lifestyle + product,
                             targetLengthTier,
                             targetDurationSeconds,
                             posts: 0,
@@ -300,21 +302,22 @@
                             class="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                             <option value="automated">Automated</option>
+                            <option value="semantic_ugc" data-semantic-ugc-mode-option>Semantic UGC - Veo 3.1</option>
+                            <option value="manual_semantic_ugc" data-semantic-ugc-mode-option>Manual Semantic UGC - Veo 3.1</option>
                             <option value="manual">Manual</option>
                             <option value="manual_character_consistency">Manual Character Consistency</option>
                             <option value="character_consistency">Character Consistency</option>
                             <option value="character_consistency_mid">Character Consistency Mid</option>
                             <option value="character_consistency_light">Character Consistency Light</option>
-                            <option value="semantic_ugc">Semantic UGC - Veo 3.1</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500">
-                            Automated uses the research agent. Manual lets you define each draft yourself.
-                            Character Consistency modes use the selected ready ActorIdentity and full Veo 3.1.
+                            Semantic UGC is recommended for longer AIUGC videos with dynamic 8-{{ semantic_ugc_max_duration_seconds | default(60) }}s durations.
+                            Legacy Character Consistency modes keep the fixed 8/16/32s tiers.
                             <a href="/settings/actor" class="text-[#E58434] underline">Choose actor</a>
                         </p>
                     </div>
                     
-                    <div x-show="!['manual', 'manual_character_consistency'].includes(creationMode)" x-cloak>
+                    <div x-show="!['manual', 'manual_character_consistency', 'manual_semantic_ugc'].includes(creationMode)" x-cloak>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Post Type Counts</label>
                         <div class="space-y-2">
                             <div class="flex items-center justify-between">
@@ -356,7 +359,7 @@
                         </p>
                     </div>
 
-                    <div x-show="['manual', 'manual_character_consistency'].includes(creationMode)" x-cloak>
+                    <div x-show="['manual', 'manual_character_consistency', 'manual_semantic_ugc'].includes(creationMode)" x-cloak>
                         <label class="block text-sm font-medium text-gray-700">Manual Draft Count</label>
                         <input
                             type="number"
@@ -370,13 +373,16 @@
                         <p x-show="creationMode === 'manual_character_consistency'" x-cloak class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                             Uses the active ready ActorIdentity from Settings and requires approved scene references before video submission.
                         </p>
+                        <p x-show="creationMode === 'manual_semantic_ugc'" x-cloak class="mt-2 rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-2 text-xs text-[#006AAB]">
+                            Write each script manually, then use the same Semantic UGC Veo 3.1 planning, approval, and long-video workflow.
+                        </p>
                     </div>
 
-                    <div x-show="!['manual', 'manual_character_consistency', 'semantic_ugc'].includes(creationMode)" x-cloak>
+                    <div x-show="!['manual', 'manual_character_consistency', 'semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)" x-cloak>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Video Duration</label>
                         <select
                             name="target_length_tier"
-                            :disabled="['manual', 'manual_character_consistency', 'semantic_ugc'].includes(creationMode)"
+                            :disabled="['manual', 'manual_character_consistency', 'semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)"
                             class="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-[#E58434] focus:border-[#006AAB]"
                         >
                             <option value="8">8 seconds</option>
@@ -385,8 +391,9 @@
                         </select>
                         <p class="mt-1 text-xs text-gray-500">Choose the batch duration once. The pipeline is selected automatically.</p>
                     </div>
-                    <div x-show="creationMode === 'semantic_ugc'" x-cloak class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3">
+                    <div x-show="['semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)" x-cloak data-semantic-ugc-duration-panel class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3">
                         <label for="semantic-target-duration" class="block text-sm font-medium text-gray-700">Target video duration</label>
+                        <p class="mt-1 text-xs font-medium text-[#006AAB]">Recommended for longer AIUGC videos. Uses the Semantic UGC Veo 3.1 workflow.</p>
                         <div class="mt-2 flex items-center gap-2">
                             <input
                                 id="semantic-target-duration"
@@ -397,8 +404,8 @@
                                 step="1"
                                 inputmode="numeric"
                                 x-model.number="targetDurationSeconds"
-                                :disabled="creationMode !== 'semantic_ugc'"
-                                :required="creationMode === 'semantic_ugc'"
+                                :disabled="!['semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)"
+                                :required="['semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)"
                                 aria-describedby="semantic-duration-help"
                                 class="block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-[#006AAB] focus:outline-none focus:ring-2 focus:ring-[#E58434]"
                             >
