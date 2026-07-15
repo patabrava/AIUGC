@@ -17,6 +17,7 @@ from app.core.errors import ValidationError
 ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v1"
 _ANALYSIS_TIMEOUT_SECONDS = 120
 _MAX_SEAM_WORD_GAP_SECONDS = 0.320
+_DEFAULT_POST_WORD_CROSSFADE_GUARD_SECONDS = 0.100
 _DIGITAL_SILENCE_DBFS = -120.0
 MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB = 12.0
 _PREFERRED_SEAM_ENERGY_DELTA_DB = 6.0
@@ -368,6 +369,7 @@ def _select_seam(
     next_take: TakeAudioEvidence,
     previous_gain_db: float,
     next_gain_db: float,
+    min_post_word_crossfade_guard_seconds: float,
 ) -> PlannedSeam:
     tail_contexts = (0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22)
     head_contexts = (0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22)
@@ -408,7 +410,12 @@ def _select_seam(
                 reasons = []
                 if not 0.100 - 1e-9 <= word_gap <= _MAX_SEAM_WORD_GAP_SECONDS + 1e-9:
                     reasons.append("word_gap_out_of_range")
-                if previous_end - previous.final_word_end_seconds - overlap < 0.100 - 1e-9:
+                if (
+                    previous_end
+                    - previous.final_word_end_seconds
+                    - overlap
+                    < min_post_word_crossfade_guard_seconds - 1e-9
+                ):
                     reasons.append("post_word_crossfade_guard")
                 if next_take.first_word_start_seconds - next_start - overlap < 0.060 - 1e-9:
                     reasons.append("pre_word_crossfade_guard")
@@ -685,6 +692,7 @@ def plan_acoustic_seams(
     fps: float = 24.0,
     min_duration_seconds: float = 14.5,
     max_duration_seconds: float = 16.5,
+    min_post_word_crossfade_guard_seconds: float = _DEFAULT_POST_WORD_CROSSFADE_GUARD_SECONDS,
 ) -> AcousticSeamPlan:
     if not math.isfinite(fps) or fps <= 0:
         raise ValidationError("Acoustic seam planning requires a positive finite frame rate.")
@@ -695,6 +703,11 @@ def plan_acoustic_seams(
         or max_duration_seconds <= min_duration_seconds
     ):
         raise ValidationError("Acoustic duration envelope is invalid.")
+    if (
+        not math.isfinite(min_post_word_crossfade_guard_seconds)
+        or not 0.060 <= min_post_word_crossfade_guard_seconds <= 0.100
+    ):
+        raise ValidationError("Acoustic post-word crossfade guard is invalid.")
     ordered = _validate_take_evidence(takes)
     gains, rms_range = _plan_speech_gains(ordered)
     seams = tuple(
@@ -704,6 +717,7 @@ def plan_acoustic_seams(
             ordered[index + 1],
             gains[index],
             gains[index + 1],
+            min_post_word_crossfade_guard_seconds,
         )
         for index in range(len(ordered) - 1)
     )

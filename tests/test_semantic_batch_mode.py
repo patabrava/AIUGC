@@ -25,6 +25,7 @@ MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.s
 MANUAL_MODE_MIGRATION = ROOT / "supabase/migrations/20260714000000_manual_semantic_ugc_mode.sql"
 QA_RESUME_MIGRATION = ROOT / "supabase/migrations/20260715000200_semantic_video_qa_resume.sql"
 VISUAL_REMEDIATION_MIGRATION = ROOT / "supabase/migrations/20260715000300_semantic_video_visual_remediation.sql"
+QA_STAGE_RESUME_MIGRATION = ROOT / "supabase/migrations/20260715000400_semantic_video_qa_stage_resume.sql"
 
 
 @pytest.fixture
@@ -796,6 +797,16 @@ def test_qa_resume_migration_reuses_only_checksum_verified_completed_takes():
     assert "resume_semantic_video_qa_review" in sql
     assert "retry_approval_required" in sql
     assert "resume_stage is distinct from 'transcript_qa'" in sql
+    assert "latest.submission_state not in ('completed', 'qa_failed')" in sql
+    assert "latest.raw_artifact_sha256 !~ '^[0-9a-f]{64}$'" in sql
+    assert "set submission_state = 'completed'" in sql
+
+
+def test_qa_stage_resume_migration_reuses_durable_takes_for_acoustic_review():
+    sql = QA_STAGE_RESUME_MIGRATION.read_text().lower()
+
+    assert "resume_semantic_video_qa_review" in sql
+    assert "resume_stage not in ('transcript_qa', 'acoustic_qa')" in sql
     assert "latest.submission_state not in ('completed', 'qa_failed')" in sql
     assert "latest.raw_artifact_sha256 !~ '^[0-9a-f]{64}$'" in sql
     assert "set submission_state = 'completed'" in sql

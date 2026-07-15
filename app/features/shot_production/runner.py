@@ -1540,7 +1540,7 @@ def _prepare_acoustic_segment_sources(
             timing_offsets.append(0.0)
             continue
 
-        padding_seconds = round(max(0.040, 0.120 - first_word_start), 3)
+        padding_seconds = round(max(0.120, 0.120 - first_word_start), 3)
         previous_take = ordered_takes[position - 1]
         previous_path = sources[position - 1]
         previous_offset = timing_offsets[position - 1]
@@ -1596,18 +1596,23 @@ def _plan_acoustic_delivery(
 ) -> tuple[Any, Optional[Dict[str, Any]]]:
     minimum = float(duration_contract["minimum"])
     maximum = float(duration_contract["maximum"])
+    requested = float(duration_contract["requested"])
+    plan_options = {}
+    if requested >= 40.0:
+        plan_options["min_post_word_crossfade_guard_seconds"] = 0.060
     try:
         return (
             plan_fn(
                 evidence,
                 min_duration_seconds=minimum,
                 max_duration_seconds=maximum,
+                **plan_options,
             ),
             None,
         )
     except ValidationError as exc:
-        requested = float(duration_contract["requested"])
         effective_minimum = round(requested * 0.9, 3)
+        effective_maximum = round(max(maximum, requested + 1.0), 3)
         is_long_form_duration_failure = (
             requested >= 24.0
             and "duration envelope" in exc.message.lower()
@@ -1618,14 +1623,20 @@ def _plan_acoustic_delivery(
         plan = plan_fn(
             evidence,
             min_duration_seconds=effective_minimum,
-            max_duration_seconds=maximum,
+            max_duration_seconds=effective_maximum,
+            **plan_options,
         )
         return plan, {
             "source": "long_form_acoustic_cadence_floor",
             "requested_seconds": requested,
             "approved_minimum_seconds": minimum,
             "effective_minimum_seconds": effective_minimum,
-            "maximum_seconds": maximum,
+            "approved_maximum_seconds": maximum,
+            "effective_maximum_seconds": effective_maximum,
+            "post_word_crossfade_guard_seconds": plan_options.get(
+                "min_post_word_crossfade_guard_seconds",
+                0.100,
+            ),
         }
 
 
@@ -1697,6 +1708,9 @@ def compose_and_caption(
         == float(duration_contract["requested"])
     ):
         minimum_duration = float(existing_resolution["effective_minimum_seconds"])
+        maximum_duration = float(
+            existing_resolution.get("effective_maximum_seconds", maximum_duration)
+        )
     if not (payload.get("visual_qa") or {}).get("passed"):
         raise ValidationError("Composition requires a passed visual QA gate.")
     if not (payload.get("voice_qa") or {}).get("passed"):
@@ -1780,6 +1794,7 @@ def compose_and_caption(
             if delivery_resolution is not None:
                 payload["delivery_resolution"] = delivery_resolution
                 minimum_duration = float(delivery_resolution["effective_minimum_seconds"])
+                maximum_duration = float(delivery_resolution["effective_maximum_seconds"])
             else:
                 payload.pop("delivery_resolution", None)
         except ValidationError as exc:

@@ -1436,9 +1436,9 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         output.write_bytes(b"room-tone-bridged")
 
     def plan_fn(evidence, **_kwargs):
-        assert evidence[1].provider_duration_seconds == pytest.approx(8.04)
-        assert evidence[1].first_word_start_seconds == pytest.approx(0.12)
-        assert evidence[1].final_word_end_seconds == pytest.approx(6.84)
+        assert evidence[1].provider_duration_seconds == pytest.approx(8.12)
+        assert evidence[1].first_word_start_seconds == pytest.approx(0.20)
+        assert evidence[1].final_word_end_seconds == pytest.approx(6.92)
         return plan
 
     compose_and_caption(
@@ -1491,15 +1491,15 @@ def test_acoustic_source_preparation_bridges_early_speech_with_previous_room_ton
 
     assert paths[0] == Path(takes[0]["raw"]["path"])
     assert paths[1].read_bytes() == b"room-tone-bridged"
-    assert timing_offsets == (0.0, 0.04)
+    assert timing_offsets == (0.0, 0.12)
     assert calls[0][0] == paths[0]
     assert calls[0][1] == Path(takes[1]["raw"]["path"])
     assert calls[0][3] == {
         "bridge_start_seconds": pytest.approx(6.9),
-        "padding_seconds": pytest.approx(0.04),
+        "padding_seconds": pytest.approx(0.12),
     }
     assert records[0]["take_index"] == 1
-    assert records[0]["padding_seconds"] == pytest.approx(0.04)
+    assert records[0]["padding_seconds"] == pytest.approx(0.12)
     assert records[0]["source_take_index"] == 0
 
 
@@ -1523,13 +1523,38 @@ def test_long_form_acoustic_planning_uses_cadence_floor_before_requesting_regene
 
     assert plan is expected_plan
     assert [call["min_duration_seconds"] for call in calls] == [30.5, 28.8]
+    assert [call["max_duration_seconds"] for call in calls] == [32.5, 33.0]
     assert resolution == {
         "source": "long_form_acoustic_cadence_floor",
         "requested_seconds": 32.0,
         "approved_minimum_seconds": 30.5,
         "effective_minimum_seconds": 28.8,
-        "maximum_seconds": 32.5,
+        "approved_maximum_seconds": 32.5,
+        "effective_maximum_seconds": 33.0,
+        "post_word_crossfade_guard_seconds": 0.1,
     }
+
+
+def test_forty_plus_second_acoustic_planning_uses_explicit_dense_speech_guard():
+    from app.features.shot_production.runner import _plan_acoustic_delivery
+
+    calls = []
+
+    def plan_fn(_evidence, **kwargs):
+        calls.append(kwargs)
+        return object()
+
+    _plan_acoustic_delivery(
+        (),
+        {"requested": 50.0, "minimum": 49.5, "maximum": 50.5},
+        plan_fn=plan_fn,
+    )
+
+    assert calls == [{
+        "min_duration_seconds": 49.5,
+        "max_duration_seconds": 50.5,
+        "min_post_word_crossfade_guard_seconds": 0.060,
+    }]
 
 
 def test_long_form_final_transcript_accepts_one_asr_stem_only_with_exact_take_consensus():
