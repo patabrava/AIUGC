@@ -32,6 +32,9 @@ QA_PRIOR_ATTEMPT_REUSE_MIGRATION = (
 CANDIDATE_RECLAIM_MIGRATION = (
     ROOT / "supabase/migrations/20260715000600_semantic_video_candidate_reclaim.sql"
 )
+RECOVERY_COALESCE_FIX_MIGRATION = (
+    ROOT / "supabase/migrations/20260715000700_semantic_video_recovery_coalesce_fix.sql"
+)
 
 
 @pytest.fixture
@@ -842,6 +845,16 @@ def test_candidate_reclaim_migration_only_releases_expired_empty_reservations():
     assert "candidate_reservation_token = null" in sql
     assert "candidate_reservation_expires_at = null" in sql
     assert "to service_role" in sql
+
+
+def test_recovery_coalesce_fix_rewrites_both_exact_function_signatures():
+    sql = RECOVERY_COALESCE_FIX_MIGRATION.read_text().lower()
+
+    assert "reuse_semantic_video_prior_attempts(uuid,integer,text,jsonb)" in sql
+    assert "reclaim_semantic_video_candidate_reservation(uuid,integer)" in sql
+    assert "pg_catalog.pg_get_functiondef" in sql
+    assert "'pg_catalog.coalesce'" in sql
+    assert "'coalesce'" in sql
 
 
 def test_visual_remediation_migration_replaces_no_paid_request_and_invalidates_visual_cache():
