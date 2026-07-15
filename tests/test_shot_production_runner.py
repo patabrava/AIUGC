@@ -1748,6 +1748,33 @@ def test_acoustic_plan_contract_defers_bounded_energy_fallback_to_perceptual_qa(
     ) == []
 
 
+def test_acoustic_plan_contract_uses_the_approved_16_second_word_gap_ceiling():
+    from app.features.shot_production.audio_seams import (
+        AcousticSeamPlan,
+        PlannedSeam,
+        PlannedTakeWindow,
+    )
+    from app.features.shot_production.runner import _evaluate_acoustic_plan_contract
+
+    plan = AcousticSeamPlan(
+        "test-v1",
+        (
+            PlannedTakeWindow(0, 0.0, 6.50, 0.0, 6.50, 0.0),
+            PlannedTakeWindow(1, 0.0, 7.96, 0.0, 7.96, 0.0),
+        ),
+        (PlannedSeam(0, 6.50, 0.0, 0.04, 0.02, 0.44, 4.0, 0.0, False, ()),),
+        1.0,
+        14.42,
+    )
+
+    assert _evaluate_acoustic_plan_contract(
+        plan,
+        {"stitch_audio_video_duration_delta_s": 0.02},
+        fps=24.0,
+        max_seam_word_gap_seconds=0.48,
+    ) == []
+
+
 def test_acoustic_retry_map_targets_only_takes_adjacent_to_failed_seams():
     from app.features.shot_production.runner import _acoustic_retry_map
 

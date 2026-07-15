@@ -105,6 +105,41 @@ def test_normalizes_german_case_punctuation_umlauts_and_eszett():
     assert qa.final_word_end_seconds == 1.3
 
 
+def test_first_word_accepts_a_bounded_asr_suffix_for_a_german_compound():
+    beat = _beat(
+        0,
+        (
+            "Kopfsteinpflaster zwingt dich zu 40 Prozent mehr Muskelkraft und "
+            "schwächt deinen Griff. Dein Rollstuhl leidet auch."
+        ),
+    )
+    transcript = _transcript(
+        ("Steinpflaster", 0.32, 0.82),
+        ("zwingt", 1.04, 1.36),
+        ("dich", 1.36, 1.52),
+        ("zu", 1.52, 1.76),
+        ("40", 1.76, 2.20),
+        ("Prozent", 2.20, 2.60),
+        ("mehr", 2.60, 2.90),
+        ("Muskelkraft", 2.90, 3.40),
+        ("und", 3.40, 3.58),
+        ("schwächt", 3.58, 4.02),
+        ("deinen", 4.02, 4.32),
+        ("Griff", 4.32, 4.62),
+        ("Dein", 4.62, 4.86),
+        ("Rollstuhl", 4.86, 5.28),
+        ("leidet", 5.28, 5.62),
+        ("auch", 5.62, 5.90),
+    )
+
+    qa = evaluate_take_transcript(beat, transcript, other_beats=[])
+
+    assert qa.passed is True
+    assert qa.word_error_rate == pytest.approx(1 / 16)
+    assert qa.first_word_present is True
+    assert qa.first_word_start_seconds == 0.32
+
+
 def test_one_substitution_contributes_one_word_error():
     beat = _beat(0, "Viele Menschen warten heute.")
     transcript = _transcript(

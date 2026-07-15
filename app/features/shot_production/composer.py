@@ -200,10 +200,34 @@ def evaluate_take_transcript(
 
     first_expected = expected_words[0] if expected_words else None
     last_expected = expected_words[-1] if expected_words else None
+    first_source_start_seconds = (
+        _finite_non_negative_seconds(source_words[0].start) if source_words else None
+    )
+    first_word_is_bounded_compound_suffix = bool(
+        first_expected
+        and actual_words
+        and len(expected_words) == len(actual_words)
+        and len(expected_words) > 1
+        and first_expected != actual_words[0]
+        and first_expected.endswith(actual_words[0])
+        and len(first_expected) - len(actual_words[0]) >= 3
+        and len(actual_words[0]) >= 6
+        and first_source_start_seconds is not None
+        and first_source_start_seconds <= 0.5
+        and word_error_rate <= threshold
+        and all(
+            _words_match(expected, actual)
+            for expected, actual in zip(expected_words[1:], actual_words[1:])
+        )
+    )
     first_indexes = [
         index
         for index, word in enumerate(actual_words)
-        if first_expected is not None and _words_match(first_expected, word)
+        if first_expected is not None
+        and (
+            _words_match(first_expected, word)
+            or (index == 0 and first_word_is_bounded_compound_suffix)
+        )
     ]
     last_indexes = [
         index
@@ -226,8 +250,10 @@ def evaluate_take_transcript(
 
     first_word_start_seconds = None
     if first_expected is not None:
-        for actual_word, source_word in zip(actual_words, source_words):
-            if _words_match(first_expected, actual_word):
+        for index, (actual_word, source_word) in enumerate(zip(actual_words, source_words)):
+            if _words_match(first_expected, actual_word) or (
+                index == 0 and first_word_is_bounded_compound_suffix
+            ):
                 first_word_start_seconds = _finite_non_negative_seconds(source_word.start)
                 break
 

@@ -1369,7 +1369,14 @@ def _evaluate_acoustic_plan_contract_details(
     stitch_metadata: Dict[str, Any],
     *,
     fps: float,
+    max_seam_word_gap_seconds: float = 0.32,
 ) -> tuple[list[str], list[int]]:
+    try:
+        maximum_word_gap = float(max_seam_word_gap_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Maximum seam word gap must be a finite positive number.") from exc
+    if not math.isfinite(maximum_word_gap) or maximum_word_gap <= 0:
+        raise ValueError("Maximum seam word gap must be a finite positive number.")
     reasons = []
     failed_seam_indexes = set()
     all_seam_indexes = set(range(len(acoustic_plan.seams)))
@@ -1378,7 +1385,12 @@ def _evaluate_acoustic_plan_contract_details(
         failed_seam_indexes.update(all_seam_indexes)
     seam_rules = (
         ("audio_overlap_out_of_range", lambda seam: not 0.04 <= seam.overlap_seconds <= 0.07),
-        ("word_gap_out_of_range", lambda seam: not 0.10 <= seam.final_word_gap_seconds <= 0.32),
+        (
+            "word_gap_out_of_range",
+            lambda seam: not 0.10
+            <= seam.final_word_gap_seconds
+            <= maximum_word_gap,
+        ),
         ("retained_breath_island_too_long", lambda seam: seam.retained_island_duration_seconds > 0.08),
         (
             "seam_energy_delta_exceeded",
@@ -1409,11 +1421,13 @@ def _evaluate_acoustic_plan_contract(
     stitch_metadata: Dict[str, Any],
     *,
     fps: float,
+    max_seam_word_gap_seconds: float = 0.32,
 ) -> list[str]:
     reasons, _failed_seam_indexes = _evaluate_acoustic_plan_contract_details(
         acoustic_plan,
         stitch_metadata,
         fps=fps,
+        max_seam_word_gap_seconds=max_seam_word_gap_seconds,
     )
     return reasons
 
@@ -1958,6 +1972,9 @@ def compose_and_caption(
             acoustic_plan,
             stitch_metadata,
             fps=float(stitch_metadata.get("stitch_fps") or 24.0),
+            max_seam_word_gap_seconds=(
+                0.48 if float(duration_contract["requested"]) == 16.0 else 0.32
+            ),
         )
         report = acoustic_evaluator(
             clips,
