@@ -294,17 +294,29 @@ jobs:
 
       - name: Verify production route from runner
         run: |
-          curl --fail --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 20 \
-            --retry 5 \
-            --retry-delay 5 \
-            https://lippelift.xyz/livez
-          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/auth/login >/dev/null
+          wait_for_url() {
+            url="$1"
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error \
+                --connect-timeout 10 \
+                --max-time 20 \
+                "$url" >/dev/null; then
+                echo "Production route ready: $url (attempt $attempt)"
+                return 0
+              fi
+              echo "Waiting for production route: $url (attempt $attempt/30)"
+              sleep 10
+            done
+            echo "Production route did not become ready: $url" >&2
+            return 1
+          }
+
+          wait_for_url https://lippelift.xyz/livez
+          wait_for_url https://lippelift.xyz/auth/login
           sleep 70
-          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/livez
-          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/auth/login >/dev/null
-          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://lippelift.xyz/health >/dev/null
+          wait_for_url https://lippelift.xyz/livez
+          wait_for_url https://lippelift.xyz/auth/login
+          wait_for_url https://lippelift.xyz/health
           python3 - <<'PY'
           import json
           import urllib.request
