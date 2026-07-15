@@ -199,6 +199,35 @@ def _strip_response_wrappers(raw_text: Any) -> str:
     return " ".join(text.split())
 
 
+def _build_semantic_repair_prompt(
+    *,
+    original_prompt: str,
+    invalid_script: str,
+    validation_error: ValueError,
+    contract: SemanticDurationContract,
+) -> str:
+    return f"""Überarbeite den folgenden Entwurf einmal so, dass er den Vertrag exakt erfüllt.
+Gib ausschließlich den finalen deutschen Sprechtext aus.
+
+Vertrag:
+- {contract.minimum_words} bis {contract.maximum_words} Wörter
+- exakt {contract.minimum_take_count} vollständige, unterschiedliche Sätze als semantische Takes
+- schreibe jeden dieser {contract.minimum_take_count} Sätze mit exakt 16 Wörtern; der finale Text hat damit exakt {contract.minimum_take_count * 16} Wörter
+- höchstens 18 Wörter und höchstens 7,5 Sekunden geschätzte Sprechzeit pro Take
+- jeder Take endet mit Satzzeichen und trägt eine neue vollständige Aussage bei
+- verwende ausschließlich die Fakten und die CTA aus dem ursprünglichen Auftrag
+- zähle die Wörter intern vor der Ausgabe und erweitere den Entwurf; kürze ihn nicht erneut
+
+Festgestellter Validierungsfehler:
+{validation_error}
+
+Ungültiger Entwurf:
+{invalid_script}
+
+Ursprünglicher Auftrag:
+{original_prompt}"""
+
+
 def _normalized_sentences(script: str) -> list[str]:
     return [
         re.sub(r"[^\wÄÖÜäöüß]+", " ", sentence, flags=re.UNICODE)
@@ -1089,16 +1118,68 @@ def generate_semantic_script(
         )
 
     script = _strip_response_wrappers(raw_text)
-    validate_semantic_script(
-        script,
-        requested_duration_seconds=requested_duration_seconds,
-        maximum_seconds=contract.maximum_duration_seconds,
-    )
+    source = "gemini"
+    try:
+        validate_semantic_script(
+            script,
+            requested_duration_seconds=requested_duration_seconds,
+            maximum_seconds=contract.maximum_duration_seconds,
+        )
+    except ValueError as validation_error:
+        repair_prompt = _build_semantic_repair_prompt(
+            original_prompt=prompt,
+            invalid_script=script,
+            validation_error=validation_error,
+            contract=contract,
+        )
+        try:
+            repaired_raw_text = client.generate_gemini_text(
+                prompt=repair_prompt,
+                system_prompt=SEMANTIC_SCRIPT_SYSTEM_PROMPT,
+                temperature=0.2,
+                thinking_budget=0,
+            )
+        except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
+            script = _build_fallback_script(
+                title=title,
+                cta=cta,
+                facts=fact_values,
+                contract=contract,
+            )
+            return SemanticScriptResult(
+                script=script,
+                contract_hash=contract.contract_hash,
+                provenance=_build_result_provenance(
+                    source="fallback",
+                    post_type=normalized_post_type,
+                    research_provenance=research_provenance,
+                    source_urls=source_urls,
+                    provider_error_type=type(exc).__name__,
+                ),
+            )
+        repaired_script = _strip_response_wrappers(repaired_raw_text)
+        try:
+            validate_semantic_script(
+                repaired_script,
+                requested_duration_seconds=requested_duration_seconds,
+                maximum_seconds=contract.maximum_duration_seconds,
+            )
+        except ValueError:
+            script = _build_fallback_script(
+                title=title,
+                cta=cta,
+                facts=fact_values,
+                contract=contract,
+            )
+            source = "fallback"
+        else:
+            script = repaired_script
+            source = "gemini_repair"
     return SemanticScriptResult(
         script=script,
         contract_hash=contract.contract_hash,
         provenance=_build_result_provenance(
-            source="gemini",
+            source=source,
             post_type=normalized_post_type,
             research_provenance=research_provenance,
             source_urls=source_urls,

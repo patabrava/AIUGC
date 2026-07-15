@@ -43,6 +43,24 @@ def test_parse_frame_metrics_reads_installed_ffprobe_tags():
     )
 
 
+def test_parse_frame_metrics_maps_digital_silence_dbfs_to_finite_floor():
+    parsed = parse_frame_metrics(
+        {
+            "frames": [
+                _frame(
+                    **{
+                        "lavfi.astats.1.RMS_level": "-inf",
+                        "lavfi.astats.1.Peak_level": "-inf",
+                    }
+                )
+            ]
+        }
+    )
+
+    assert parsed[0].rms_dbfs == -120.0
+    assert parsed[0].peak_dbfs == -120.0
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -176,6 +194,47 @@ def test_planner_resolves_equally_safe_candidates_deterministically():
 
     assert plan.seams[0].next_audio_start_seconds == 0.0
     assert plan.seams[0].overlap_seconds == 0.04
+
+
+def test_planner_defers_bounded_room_tone_delta_to_perceptual_seam_qa():
+    takes = (
+        _evidence(0, final_word=3.0, room_rms=-60.0),
+        _evidence(1, first_word=0.5, room_rms=-51.0),
+    )
+
+    plan = plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+    assert plan.seams[0].energy_fallback is True
+    assert 6.0 < plan.seams[0].short_window_energy_delta_db <= 12.0
+
+
+def test_planner_accepts_one_frame_of_delivery_duration_quantization():
+    previous = _evidence(
+        0,
+        duration=8.0,
+        first_word=0.24,
+        final_word=6.66,
+        room_rms=-60.0,
+    )
+    takes = (
+        previous,
+        _evidence(
+            1,
+            duration=8.0,
+            first_word=0.48,
+            final_word=6.18,
+            room_rms=-51.0,
+        ),
+    )
+
+    plan = plan_acoustic_seams(
+        takes,
+        fps=24.0,
+        min_duration_seconds=14.5,
+        max_duration_seconds=16.5,
+    )
+
+    assert 14.5 - (1 / 24) <= plan.final_duration_seconds < 14.5
 
 
 def test_planner_removes_pause_breath_pause_from_next_take_head():
@@ -371,7 +430,7 @@ def test_planner_distributes_long_form_duration_floor_across_take_windows():
         max_duration_seconds=50.5,
     )
 
-    assert plan.final_duration_seconds == pytest.approx(48.5)
+    assert plan.final_duration_seconds == pytest.approx(48.5 - (1 / 24))
     extended_indexes = [
         index
         for index, (window, baseline_window) in enumerate(zip(plan.takes, baseline.takes))

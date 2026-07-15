@@ -142,6 +142,42 @@ def test_generated_script_must_fit_same_contract_and_strips_response_wrappers():
     assert len(fake_llm.calls) == 1
 
 
+def test_invalid_provider_draft_gets_one_contract_repair_attempt():
+    valid_script = _complete_semantic_script([16, 16, 15, 15, 15])
+
+    class _RepairingLLM:
+        def __init__(self):
+            self.calls = []
+
+        def generate_gemini_text(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return "Dieser viel zu kurze Entwurf erfüllt den Vertrag nicht."
+            return valid_script
+
+    fake_llm = _RepairingLLM()
+    result = generate_semantic_script(
+        post_type="value",
+        title="Unterstützung selbstbestimmt organisieren",
+        cta="Sprich deine Bedürfnisse klar aus.",
+        facts=["Unterstützung lässt sich an persönliche Bedürfnisse anpassen."],
+        requested_duration_seconds=40,
+        llm_client=fake_llm,
+    )
+
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=40,
+    )
+    assert result.script == valid_script
+    assert validation.planned_take_count == 5
+    assert len(fake_llm.calls) == 2
+    assert "77" in fake_llm.calls[1]["prompt"]
+    assert "90" in fake_llm.calls[1]["prompt"]
+    assert "viel zu kurze" in fake_llm.calls[1]["prompt"]
+    assert result.provenance["source"] == "gemini_repair"
+
+
 @pytest.mark.parametrize("word_count", [108, 119])
 def test_semantic_script_validation_rejects_copy_outside_word_envelope(word_count):
     with pytest.raises(ValueError, match="word envelope"):

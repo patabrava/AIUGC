@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE_MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 API_MIGRATION = ROOT / "supabase/migrations/20260713000100_semantic_video_api_transactions.sql"
 WORKER_MIGRATION = ROOT / "supabase/migrations/20260713000200_semantic_video_worker.sql"
+RECOVERY_MIGRATION = ROOT / "supabase/migrations/20260714000100_semantic_video_provider_recovery.sql"
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_worker_rpc_test"
 BATCH_ID = "00000000-0000-0000-0000-000000000101"
@@ -20,6 +21,17 @@ RUN_ID = "00000000-0000-0000-0000-000000000103"
 TAKE_1 = "00000000-0000-0000-0000-000000000104"
 TAKE_2 = "00000000-0000-0000-0000-000000000105"
 APPROVAL_ID = "00000000-0000-0000-0000-000000000106"
+
+
+def test_provider_recovery_migration_persists_retry_guidance_and_backfills_stuck_failures():
+    sql = RECOVERY_MIGRATION.read_text()
+
+    assert "CREATE OR REPLACE FUNCTION public.persist_semantic_video_provider_failure" in sql
+    assert "retry_guidance = pg_catalog.jsonb_build_object" in sql
+    assert "submission_state = 'failed'" in sql
+    assert "retry_guidance IS NULL" in sql
+    assert "provider_internal_failure" in sql
+    assert "GRANT EXECUTE ON FUNCTION public.persist_semantic_video_provider_failure" in sql
 
 
 def _psql(database: str, sql: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:

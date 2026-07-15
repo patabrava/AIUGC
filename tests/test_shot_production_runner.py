@@ -138,6 +138,100 @@ def test_initialize_pilot_records_minimum_two_shots_and_complete_request_audit(t
         _initialize(tmp_path)
 
 
+def test_initialize_pilot_accepts_approved_manual_semantic_script(tmp_path):
+    from app.features.shot_production.runner import initialize_pilot
+
+    approved = tmp_path / "approved.png"
+    approved_hash = _approved_png(approved)
+    script_input = tmp_path / "script.json"
+    _script_input(
+        script_input,
+        source="manual_semantic_ugc",
+        creation_mode="manual_semantic_ugc",
+        script_review_status="approved",
+        target_length_tier=None,
+        target_duration_seconds=16,
+        generator_output=None,
+    )
+    manifest = tmp_path / "run" / "manifest.json"
+
+    payload = initialize_pilot(
+        manifest_path=manifest,
+        approved_frame_path=approved,
+        expected_sha256=approved_hash,
+        script_input_path=script_input,
+        base_seed=240711,
+    )
+
+    assert payload["script"]["source"] == "manual_semantic_ugc"
+    assert payload["script"]["creation_mode"] == "manual_semantic_ugc"
+    assert payload["script"]["script_review_status"] == "approved"
+    assert payload["script"]["target_length_tier"] is None
+    assert payload["script"]["target_duration_seconds"] == 16
+    assert payload["script"]["delivery_duration_seconds"] == {
+        "requested": 16.0,
+        "minimum": 14.5,
+        "maximum": 16.5,
+    }
+
+
+def test_initialize_pilot_accepts_dynamic_semantic_generator_provenance(tmp_path):
+    from app.features.shot_production.runner import initialize_pilot
+
+    approved = tmp_path / "approved.png"
+    approved_hash = _approved_png(approved)
+    script_input = tmp_path / "script.json"
+    _script_input(
+        script_input,
+        source="app.features.topics.semantic_scripts.generate_semantic_script",
+        creation_mode="semantic_ugc",
+        target_length_tier=None,
+        target_duration_seconds=16,
+    )
+    manifest = tmp_path / "run" / "manifest.json"
+
+    payload = initialize_pilot(
+        manifest_path=manifest,
+        approved_frame_path=approved,
+        expected_sha256=approved_hash,
+        script_input_path=script_input,
+        base_seed=240711,
+    )
+
+    assert payload["script"]["source"] == (
+        "app.features.topics.semantic_scripts.generate_semantic_script"
+    )
+    assert payload["script"]["creation_mode"] == "semantic_ugc"
+    assert payload["script"]["target_duration_seconds"] == 16
+    assert payload["script"]["delivery_duration_seconds"]["requested"] == 16.0
+
+
+def test_initialize_pilot_rejects_unapproved_manual_semantic_script(tmp_path):
+    from app.features.shot_production.runner import initialize_pilot
+
+    approved = tmp_path / "approved.png"
+    approved_hash = _approved_png(approved)
+    script_input = tmp_path / "script.json"
+    _script_input(
+        script_input,
+        source="manual_semantic_ugc",
+        creation_mode="manual_semantic_ugc",
+        script_review_status="pending",
+        target_length_tier=None,
+        target_duration_seconds=16,
+        generator_output=None,
+    )
+
+    with pytest.raises(ValidationError, match="approved manual semantic"):
+        initialize_pilot(
+            manifest_path=tmp_path / "run" / "manifest.json",
+            approved_frame_path=approved,
+            expected_sha256=approved_hash,
+            script_input_path=script_input,
+            base_seed=240711,
+        )
+
+
 @pytest.mark.parametrize(
     ("override", "message"),
     [
@@ -1464,6 +1558,46 @@ def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
     ) == ["seam_energy_delta_exceeded"]
 
 
+def test_acoustic_plan_contract_defers_bounded_energy_fallback_to_perceptual_qa():
+    from app.features.shot_production.audio_seams import (
+        AcousticSeamPlan,
+        PlannedSeam,
+        PlannedTakeWindow,
+    )
+    from app.features.shot_production.runner import _evaluate_acoustic_plan_contract
+
+    plan = AcousticSeamPlan(
+        "test-v1",
+        (
+            PlannedTakeWindow(0, 0.0, 7.26, 0.0, 7.26, 0.0),
+            PlannedTakeWindow(1, 0.0, 7.26, 0.0, 7.26, 0.0),
+        ),
+        (
+            PlannedSeam(
+                0,
+                7.26,
+                0.0,
+                0.04,
+                0.02,
+                0.16,
+                9.0,
+                0.0,
+                False,
+                (),
+                energy_fallback=True,
+            ),
+        ),
+        1.0,
+        14.48,
+    )
+
+    assert _evaluate_acoustic_plan_contract(
+        plan,
+        {"stitch_audio_video_duration_delta_s": 0.02},
+        fps=24.0,
+    ) == []
+
+
 def test_acoustic_retry_map_targets_only_takes_adjacent_to_failed_seams():
     from app.features.shot_production.runner import _acoustic_retry_map
 
@@ -1734,6 +1868,29 @@ def test_final_media_probe_fails_closed_for_invalid_delivery_contract(probe, rea
 
     assert report["passed"] is False
     assert reason in report["failure_reasons"]
+
+
+def test_final_media_probe_accepts_one_frame_below_minimum_duration():
+    from app.features.shot_production.runner import evaluate_final_media_probe
+
+    report = evaluate_final_media_probe(
+        {
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 720,
+                    "height": 1280,
+                },
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+            "format": {"duration": "14.460", "format_name": "mov,mp4,m4a,3gp,3g2,mj2"},
+        },
+        min_duration_seconds=14.5,
+        max_duration_seconds=16.5,
+    )
+
+    assert report["passed"] is True
 
 
 def test_upload_persists_remote_head_verification_and_rechecks_without_reupload(tmp_path):

@@ -39,6 +39,7 @@ from app.features.shot_production.acoustic_qa import (
     evaluate_acoustic_seam_continuity,
 )
 from app.features.shot_production.audio_seams import (
+    MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB,
     TakeAudioEvidence,
     analyze_audio_frames,
     plan_acoustic_seams,
@@ -67,6 +68,10 @@ from app.features.shot_production.voice_qa import (
 MANIFEST_VERSION = 3
 SUPPORTED_MANIFEST_VERSIONS = frozenset({2, MANIFEST_VERSION})
 APP_SCRIPT_SOURCE = "app.features.topics.agents.generate_dialog_scripts"
+SEMANTIC_SCRIPT_SOURCE = (
+    "app.features.topics.semantic_scripts.generate_semantic_script"
+)
+MANUAL_SEMANTIC_SCRIPT_SOURCE = "manual_semantic_ugc"
 PLANNING_PROFILE = "minimum-eight-second-shots-v1"
 DEFAULT_MAX_INFLIGHT = 2
 _RUN_LOCKS = threading.local()
@@ -276,6 +281,24 @@ def _script_is_audited_generator_revision(
     return revised == script_text
 
 
+def _is_approved_manual_semantic_script(script_source: Dict[str, Any]) -> bool:
+    return (
+        script_source.get("source") == MANUAL_SEMANTIC_SCRIPT_SOURCE
+        and script_source.get("creation_mode") == MANUAL_SEMANTIC_SCRIPT_SOURCE
+        and str(script_source.get("script_review_status") or "").strip().lower()
+        == "approved"
+    )
+
+
+def _requested_script_duration(script_source: Dict[str, Any]) -> Any:
+    if script_source.get("source") in {
+        SEMANTIC_SCRIPT_SOURCE,
+        MANUAL_SEMANTIC_SCRIPT_SOURCE,
+    }:
+        return script_source.get("target_duration_seconds")
+    return script_source.get("target_length_tier")
+
+
 def _delivery_duration_contract(requested_seconds: Any) -> Dict[str, float]:
     if isinstance(requested_seconds, bool):
         raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.")
@@ -301,9 +324,28 @@ def _validate_approved_pilot_plan(
     has_generator_provenance = _script_is_in_generator_output(
         script_source, script_text
     ) or _script_is_audited_generator_revision(script_source, script_text)
-    if script_source.get("source") != APP_SCRIPT_SOURCE or not has_generator_provenance:
-        raise ValidationError("Pilot requires an app-generated script with intact generator provenance.")
-    duration_contract = _delivery_duration_contract(script_source.get("target_length_tier"))
+    source = script_source.get("source")
+    if source == MANUAL_SEMANTIC_SCRIPT_SOURCE:
+        if not _is_approved_manual_semantic_script(script_source):
+            raise ValidationError(
+                "Pilot requires approved manual semantic script provenance."
+            )
+    elif source == SEMANTIC_SCRIPT_SOURCE:
+        if (
+            script_source.get("creation_mode") != "semantic_ugc"
+            or not has_generator_provenance
+        ):
+            raise ValidationError(
+                "Pilot requires dynamic semantic generator provenance."
+            )
+    elif source != APP_SCRIPT_SOURCE or not has_generator_provenance:
+        raise ValidationError(
+            "Pilot requires an app-generated script with intact generator provenance "
+            "or approved manual semantic script provenance."
+        )
+    duration_contract = _delivery_duration_contract(
+        _requested_script_duration(script_source)
+    )
     durations = [beat.provider_duration_seconds for beat in beats]
     if not durations or any(duration not in SUPPORTED_DURATIONS for duration in durations):
         raise ValidationError(
@@ -337,6 +379,13 @@ def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "text": script["text"],
         "planned_provider_durations": script["planned_provider_durations"],
     }
+    for field in (
+        "creation_mode",
+        "script_review_status",
+        "target_duration_seconds",
+    ):
+        if field in script:
+            script_contract[field] = script[field]
     if int(payload.get("version") or 0) >= 3:
         script_contract.update(
             {
@@ -369,7 +418,7 @@ def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _validate_duration_planning_contract(payload: Dict[str, Any]) -> Dict[str, float]:
     script = payload.get("script") or {}
-    derived = _delivery_duration_contract(script.get("target_length_tier"))
+    derived = _delivery_duration_contract(_requested_script_duration(script))
     stored_profile = script.get("planning_profile")
     stored_duration = script.get("delivery_duration_seconds")
     requires_duration_fields = int(payload.get("version") or 0) >= 3
@@ -396,7 +445,13 @@ def _validate_duration_planning_contract(payload: Dict[str, Any]) -> Dict[str, f
 
 def _validate_paid_request_contract(payload: Dict[str, Any]) -> None:
     script = payload.get("script") or {}
-    if script.get("source") != APP_SCRIPT_SOURCE:
+    source = script.get("source")
+    if source == MANUAL_SEMANTIC_SCRIPT_SOURCE:
+        if not _is_approved_manual_semantic_script(script):
+            raise ValidationError(
+                "Pilot paid request is no longer an approved manual semantic plan."
+            )
+    elif source not in {APP_SCRIPT_SOURCE, SEMANTIC_SCRIPT_SOURCE}:
         raise ValidationError("Pilot paid request is no longer an approved app-generated plan.")
     duration_contract = _validate_duration_planning_contract(payload)
     durations = script.get("planned_provider_durations")
@@ -520,8 +575,11 @@ def initialize_pilot(
             "input_sha256": sha256(script_input_bytes).hexdigest(),
             "text_sha256": sha256(script_text.encode("utf-8")).hexdigest(),
             "source": script_source.get("source"),
+            "creation_mode": script_source.get("creation_mode"),
+            "script_review_status": script_source.get("script_review_status"),
             "category": script_source.get("category"),
             "target_length_tier": script_source.get("target_length_tier"),
+            "target_duration_seconds": script_source.get("target_duration_seconds"),
             "planning_profile": PLANNING_PROFILE,
             "delivery_duration_seconds": duration_contract,
             "text": script_text,
@@ -1290,7 +1348,12 @@ def evaluate_final_media_probe(
         duration = float(format_payload["duration"])
     except (KeyError, TypeError, ValueError):
         duration = math.nan
-    if not math.isfinite(duration) or not min_duration_seconds <= duration <= max_duration_seconds:
+    frame_tolerance_seconds = 1.0 / 24.0
+    if (
+        not math.isfinite(duration)
+        or duration < min_duration_seconds - frame_tolerance_seconds - 1e-9
+        or duration > max_duration_seconds + frame_tolerance_seconds + 1e-9
+    ):
         reasons.append("duration_out_of_range")
     return {
         "passed": not reasons,
@@ -1319,7 +1382,17 @@ def _evaluate_acoustic_plan_contract_details(
         ("audio_overlap_out_of_range", lambda seam: not 0.04 <= seam.overlap_seconds <= 0.07),
         ("word_gap_out_of_range", lambda seam: not 0.10 <= seam.final_word_gap_seconds <= 0.32),
         ("retained_breath_island_too_long", lambda seam: seam.retained_island_duration_seconds > 0.08),
-        ("seam_energy_delta_exceeded", lambda seam: seam.short_window_energy_delta_db > 6.0),
+        (
+            "seam_energy_delta_exceeded",
+            lambda seam: (
+                seam.short_window_energy_delta_db > 6.0
+                and (
+                    not getattr(seam, "energy_fallback", False)
+                    or seam.short_window_energy_delta_db
+                    > MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB
+                )
+            ),
+        ),
         ("speech_overlap_detected", lambda seam: seam.speech_overlap),
     )
     for reason, failed in seam_rules:

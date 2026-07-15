@@ -899,6 +899,19 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
         original = initial[index]
         attempt = int(previous.get("attempt") or 1) + 1
         guidance_snapshot = deepcopy(previous.get("retry_guidance") or {})
+        submission_error = previous.get("submission_error")
+        if (
+            not guidance_snapshot
+            and isinstance(submission_error, dict)
+            and str(submission_error.get("code") or "") == "provider_operation_failed"
+        ):
+            guidance_snapshot = {
+                "guidance": (
+                    "Preserve the original delivery exactly; the provider operation failed "
+                    "internally before producing a usable take."
+                ),
+                "source": "provider_internal_failure",
+            }
         guidance_text = _retry_guidance_text(guidance_snapshot)
         request_contract = deepcopy(original.get("request_contract") or {})
         base_prompt = str(request_contract.get("prompt") or "").strip()

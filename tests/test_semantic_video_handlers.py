@@ -1687,6 +1687,50 @@ def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeyp
     assert rejected.status_code == 409, rejected.text
 
 
+def test_retry_approval_recovers_provider_internal_failure_without_qa_guidance(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    assert client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    ).status_code == 200
+    state["run"]["stage"] = "retry_approval_required"
+    for take in state["takes"]:
+        take["submission_state"] = "failed" if take["take_index"] == 0 else "completed"
+        if take["take_index"] == 0:
+            take["retry_guidance"] = None
+            take["submission_error"] = {
+                "code": "provider_operation_failed",
+                "details": {"code": 13, "message": "Internal error. Please try again later."},
+            }
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 2,
+            "failed_take_indexes": [0],
+            "reason": "Retry provider-internal failure",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    retry = max(
+        (take for take in state["takes"] if take["take_index"] == 0),
+        key=lambda take: int(take["attempt"]),
+    )
+    assert retry["attempt"] == 2
+    assert retry["retry_guidance"]["source"] == "provider_internal_failure"
+    assert "provider operation failed internally" in retry["request_contract"]["prompt"]
+
+
 def test_retry_approval_revalidates_full_plan_sources(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app

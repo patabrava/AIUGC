@@ -371,6 +371,25 @@ def test_worker_uploads_checksum_addressed_raw_artifact_after_poll_completion():
     assert repo.takes[0]["raw_artifact_sha256"] == digest
 
 
+def test_worker_never_persists_inline_video_bytes_as_provider_uri():
+    repo = FakeRepo(take_count=1)
+    take = repo.takes[0]
+    take.update(submission_state="submitted", operation_id="operation-inline-1")
+    vertex = FakeVertex()
+    vertex.poll_results["operation-inline-1"] = {
+        "done": True,
+        "status": "completed",
+        "video_uri": "data:video/mp4;base64,AAAA",
+    }
+    worker = _worker(repo, vertex)
+
+    result = worker.tick("run-1")
+
+    assert result.action == "raw_completed"
+    assert repo.takes[0]["provider_video_uri"] == "vertex-operation://operation-inline-1"
+    assert not repo.takes[0]["provider_video_uri"].startswith("data:")
+
+
 def test_worker_provider_operation_failure_stops_and_requires_retry_approval():
     repo = FakeRepo(take_count=1)
     repo.takes[0].update(submission_state="submitted", operation_id="operation-1")

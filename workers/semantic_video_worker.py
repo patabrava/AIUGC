@@ -823,7 +823,11 @@ class SemanticVideoWorker:
                 take_id=str(take["id"]),
                 worker_id=self.worker_id,
                 lease_token=lease_token,
-                provider_video_uri=provider_uri,
+                provider_video_uri=(
+                    f"vertex-operation://{operation_id}"
+                    if provider_uri.startswith("data:")
+                    else provider_uri
+                ),
                 raw_artifact_uri=str(upload["url"]),
                 raw_artifact_sha256=digest,
             )

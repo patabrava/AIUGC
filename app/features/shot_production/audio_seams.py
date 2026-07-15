@@ -17,6 +17,9 @@ from app.core.errors import ValidationError
 ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v1"
 _ANALYSIS_TIMEOUT_SECONDS = 120
 _MAX_SEAM_WORD_GAP_SECONDS = 0.320
+_DIGITAL_SILENCE_DBFS = -120.0
+MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB = 12.0
+_PREFERRED_SEAM_ENERGY_DELTA_DB = 6.0
 _FRAME_TAGS = {
     "rms_dbfs": "lavfi.astats.1.RMS_level",
     "peak_dbfs": "lavfi.astats.1.Peak_level",
@@ -67,6 +70,7 @@ class PlannedSeam:
     retained_island_duration_seconds: float
     speech_overlap: bool
     rejected_candidates: Tuple[Dict[str, object], ...]
+    energy_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,13 @@ def _finite_tag(tags: Dict[str, Any], key: str) -> float:
     return value
 
 
+def _dbfs_tag(tags: Dict[str, Any], key: str) -> float:
+    raw_value = tags.get(key)
+    if isinstance(raw_value, str) and raw_value.strip().lower() == "-inf":
+        return _DIGITAL_SILENCE_DBFS
+    return _finite_tag(tags, key)
+
+
 def parse_frame_metrics(payload: Any) -> Tuple[AudioFrameMetrics, ...]:
     if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list) or not payload["frames"]:
         raise ValidationError("Acoustic frame analysis returned no frames.")
@@ -122,8 +133,8 @@ def parse_frame_metrics(payload: Any) -> Tuple[AudioFrameMetrics, ...]:
         tags = frame["tags"]
         metric = AudioFrameMetrics(
             timestamp_seconds=timestamp,
-            rms_dbfs=_finite_tag(tags, _FRAME_TAGS["rms_dbfs"]),
-            peak_dbfs=_finite_tag(tags, _FRAME_TAGS["peak_dbfs"]),
+            rms_dbfs=_dbfs_tag(tags, _FRAME_TAGS["rms_dbfs"]),
+            peak_dbfs=_dbfs_tag(tags, _FRAME_TAGS["peak_dbfs"]),
             zero_crossing_rate=_finite_tag(tags, _FRAME_TAGS["zero_crossing_rate"]),
             spectral_centroid_hz=_finite_tag(tags, _FRAME_TAGS["spectral_centroid_hz"]),
             spectral_flatness=_finite_tag(tags, _FRAME_TAGS["spectral_flatness"]),
@@ -356,6 +367,7 @@ def _select_seam(
     head_contexts = (0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22)
     overlaps = (0.04, 0.05, 0.06, 0.07)
     valid = []
+    perceptual_fallbacks = []
     rejected: List[Dict[str, object]] = []
     for tail_context in tail_contexts:
         previous_end = min(
@@ -408,8 +420,24 @@ def _select_seam(
                 except ValidationError:
                     reasons.append("insufficient_boundary_evidence")
                     energy_delta = math.inf
-                if energy_delta > 6.0 + 1e-9:
+                deterministic_reasons = tuple(reasons)
+                if energy_delta > _PREFERRED_SEAM_ENERGY_DELTA_DB + 1e-9:
                     reasons.append("energy_delta_exceeded")
+                    if (
+                        not deterministic_reasons
+                        and energy_delta <= MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB + 1e-9
+                    ):
+                        perceptual_fallbacks.append(
+                            (
+                                island_duration,
+                                abs(word_gap - 0.160),
+                                energy_delta,
+                                next_start,
+                                previous_end,
+                                overlap,
+                                candidate,
+                            )
+                        )
                 if reasons:
                     rejected.append({**candidate, "reasons": reasons})
                     continue
@@ -424,6 +452,10 @@ def _select_seam(
                         candidate,
                     )
                 )
+    energy_fallback = False
+    if not valid and perceptual_fallbacks:
+        valid = perceptual_fallbacks
+        energy_fallback = True
     if not valid:
         raise ValidationError(
             "No transcript-safe acoustic seam candidate exists.",
@@ -452,6 +484,7 @@ def _select_seam(
         retained_island_duration_seconds=island_duration,
         speech_overlap=False,
         rejected_candidates=tuple(rejected),
+        energy_fallback=energy_fallback,
     )
 
 
@@ -621,7 +654,7 @@ def _extend_delivery_windows(
                     "retained_island_duration_seconds": retained_island,
                 },
             )
-        if energy_delta > 6.0 + 1e-9:
+        if energy_delta > MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB + 1e-9:
             raise ValidationError(
                 "Acoustic duration extension exceeds the seam energy limit.",
                 {"seam_index": index, "short_window_energy_delta_db": energy_delta},
@@ -632,6 +665,10 @@ def _extend_delivery_windows(
             final_word_gap_seconds=seam.final_word_gap_seconds + extension,
             short_window_energy_delta_db=energy_delta,
             retained_island_duration_seconds=retained_island,
+            energy_fallback=(
+                seam.energy_fallback
+                or energy_delta > _PREFERRED_SEAM_ENERGY_DELTA_DB + 1e-9
+            ),
         )
     return tuple(result), tuple(adjusted_seams)
 
@@ -669,7 +706,7 @@ def plan_acoustic_seams(
         planned,
         ordered,
         seams,
-        min_duration_seconds=min_duration_seconds,
+        min_duration_seconds=max(0.0, min_duration_seconds - (1.0 / fps)),
         max_duration_seconds=max_duration_seconds,
     )
     final_duration = _planned_duration(planned, seams)
@@ -687,6 +724,7 @@ def plan_acoustic_seams(
 
 __all__ = [
     "ACOUSTIC_ANALYZER_VERSION",
+    "MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB",
     "AcousticSeamPlan",
     "AudioFrameMetrics",
     "PlannedSeam",
