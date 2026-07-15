@@ -33,6 +33,7 @@ from app.adapters.deepgram_client import Word, WordLevelTranscript
 from app.adapters.storage_client import get_storage_client
 from app.adapters.video_stitcher import stitch_segments
 from app.core.errors import ValidationError
+from app.core.logging import get_logger
 from app.features.shot_production.acoustic_qa import (
     DEFAULT_ACOUSTIC_QA_MODEL,
     ACOUSTIC_QA_RUBRIC_VERSION,
@@ -48,6 +49,7 @@ from app.features.shot_production.composer import (
     build_take_trim_window,
     evaluate_seam_gaps,
     evaluate_take_transcript,
+    normalize_german_words,
 )
 from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
 from app.features.shot_production.prompts import (
@@ -75,6 +77,17 @@ MANUAL_SEMANTIC_SCRIPT_SOURCE = "manual_semantic_ugc"
 PLANNING_PROFILE = "minimum-eight-second-shots-v1"
 DEFAULT_MAX_INFLIGHT = 2
 _RUN_LOCKS = threading.local()
+logger = get_logger(__name__)
+
+_BORDERLINE_TRANSCRIPT_MAX_WER = 0.15
+_BORDERLINE_TRANSCRIPT_MIN_CONFIDENCE = 0.95
+_BORDERLINE_TRANSCRIPT_MODEL = "gemini-2.5-flash"
+_BORDERLINE_TRANSCRIPT_PROMPT = """Transcribe this short German speech literally. Do not correct grammar, infer missing words, identify the speaker, or use any expected sentence as a hint.
+
+Return JSON only with exactly this shape:
+{"literal_transcript":"...","confidence":0.0,"notes":[]}
+
+Use confidence from 0 through 1 and a list of short uncertainty notes. Preserve exactly what is audible."""
 
 
 def _utc_now() -> str:
@@ -877,8 +890,134 @@ def _deserialize_transcript(payload: Dict[str, Any]) -> WordLevelTranscript:
     return WordLevelTranscript(words=words, full_text=str(payload.get("full_text") or ""))
 
 
+def _is_borderline_transcript_failure(qa: Any) -> bool:
+    return bool(
+        tuple(qa.failure_reasons) == ("word_error_rate_exceeded",)
+        and qa.first_word_present
+        and qa.last_word_present
+        and not qa.foreign_words
+        and 0.10 < float(qa.word_error_rate) <= _BORDERLINE_TRANSCRIPT_MAX_WER
+    )
+
+
+def _parse_json_object(raw: str) -> Optional[Dict[str, Any]]:
+    normalized = str(raw or "").strip()
+    if normalized.startswith("```json") and normalized.endswith("```"):
+        normalized = normalized[7:-3].strip()
+    try:
+        payload = json.loads(normalized)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _adjudicate_borderline_transcript(
+    *,
+    raw_path: Path,
+    transcript: WordLevelTranscript,
+    correlation_id: str,
+) -> Optional[tuple[WordLevelTranscript, Dict[str, Any]]]:
+    """Use independent audio evidence to correct only same-length ASR substitutions."""
+    with tempfile.TemporaryDirectory(prefix="semantic-transcript-audio-") as directory:
+        audio_path = Path(directory) / "speech.m4a"
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(raw_path),
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "64k",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0 or not audio_path.is_file():
+            logger.warning(
+                "semantic_transcript_adjudication_audio_failed",
+                correlation_id=correlation_id,
+                error=result.stderr[-400:],
+            )
+            return None
+        audio_bytes = audio_path.read_bytes()
+
+    try:
+        from app.adapters.llm_client import get_llm_client
+
+        raw = get_llm_client().generate_gemini_text(
+            prompt=_BORDERLINE_TRANSCRIPT_PROMPT,
+            model=_BORDERLINE_TRANSCRIPT_MODEL,
+            temperature=0,
+            input_media=[{"mime_type": "audio/mp4", "media_bytes": audio_bytes}],
+        )
+    except Exception as exc:  # fail closed to the original transcript verdict
+        logger.warning(
+            "semantic_transcript_adjudication_unavailable",
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+        return None
+
+    payload = _parse_json_object(raw)
+    if payload is None or set(payload) != {"literal_transcript", "confidence", "notes"}:
+        return None
+    literal_transcript = payload.get("literal_transcript")
+    confidence = payload.get("confidence")
+    notes = payload.get("notes")
+    if (
+        not isinstance(literal_transcript, str)
+        or not literal_transcript.strip()
+        or isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not math.isfinite(float(confidence))
+        or float(confidence) < _BORDERLINE_TRANSCRIPT_MIN_CONFIDENCE
+        or float(confidence) > 1.0
+        or not isinstance(notes, list)
+        or any(not isinstance(note, str) for note in notes)
+    ):
+        return None
+
+    heard_words = normalize_german_words(literal_transcript)
+    source_words = tuple(transcript.words or ())
+    normalized_source_words = tuple(
+        normalize_german_words(source.word) for source in source_words
+    )
+    if (
+        len(heard_words) != len(source_words)
+        or any(len(words) != 1 for words in normalized_source_words)
+    ):
+        return None
+    adjudicated = WordLevelTranscript(
+        words=[
+            Word(word=word, start=source.start, end=source.end)
+            for word, source in zip(heard_words, source_words)
+        ],
+        full_text=literal_transcript.strip(),
+    )
+    return adjudicated, {
+        "source": "gemini_audio_borderline_v1",
+        "model": _BORDERLINE_TRANSCRIPT_MODEL,
+        "confidence": float(confidence),
+        "notes": notes,
+    }
+
+
 @_manifest_locked
-def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> Dict[str, Any]:
+def transcribe_and_validate_takes(
+    manifest_path: Path,
+    deepgram_client: Any,
+    *,
+    adjudicate_fn: Optional[Callable[..., Optional[tuple[WordLevelTranscript, Dict[str, Any]]]]] = None,
+) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     beats = [_beat_from_payload(take["beat"]) for take in payload["takes"]]
@@ -942,6 +1081,36 @@ def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> 
             transcript,
             other_beats=[other for other in beats if other.index != beat.index],
         )
+        if _is_borderline_transcript_failure(qa):
+            adjudicator = adjudicate_fn or _adjudicate_borderline_transcript
+            try:
+                adjudicated = adjudicator(
+                    raw_path=raw_path,
+                    transcript=transcript,
+                    correlation_id=f"{_correlation_id(payload, take)}_transcript_adjudication",
+                )
+            except Exception as exc:  # injected/custom adjudicators must also fail closed
+                logger.warning(
+                    "semantic_transcript_adjudication_failed",
+                    correlation_id=_correlation_id(payload, take),
+                    error=str(exc),
+                )
+                adjudicated = None
+            if adjudicated is not None:
+                candidate, evidence = adjudicated
+                candidate_qa = evaluate_take_transcript(
+                    beat,
+                    candidate,
+                    other_beats=[other for other in beats if other.index != beat.index],
+                )
+                if candidate_qa.passed:
+                    take["transcript_adjudication"] = {
+                        **dict(evidence),
+                        "original_actual_text": str(transcript.full_text or ""),
+                        "original_word_error_rate": qa.word_error_rate,
+                    }
+                    transcript = candidate
+                    qa = candidate_qa
         take["transcript"] = _serialize_transcript(transcript)
         take["transcript_qa"] = asdict(qa)
         take["trim_window"] = (

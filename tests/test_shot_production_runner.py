@@ -800,6 +800,85 @@ def test_failed_stored_transcript_can_be_reevaluated_without_a_paid_retry(tmp_pa
     assert refreshed["takes"][0]["trim_window"]["source"] == "deepgram_word_window"
 
 
+def test_borderline_asr_failure_can_be_fail_closed_audio_adjudicated(tmp_path):
+    from app.features.shot_production.runner import transcribe_and_validate_takes
+
+    expected = (
+        "Schnee und Eis machen Wege oft unpassierbar, doch Anlieger müssen "
+        "Gehwege von 7 bis 20 Uhr räumen."
+    )
+    deepgram_text = (
+        "Schnee und Eis machen Wege oft unpassierbar, doch Anleger müssen "
+        "Gehwege von 7 bis 20 räumen."
+    )
+    independently_heard = (
+        "Schnee und Eis machen Wege oft unpassierbar, doch Anlieger müssen "
+        "Gehwege von 7 bis 20 räumen."
+    )
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    payload["takes"][0]["beat"]["text"] = expected
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    scripts = [deepgram_text, payload["takes"][1]["beat"]["text"]]
+    calls = []
+    deepgram_transcript = _timed_transcript(deepgram_text)
+    adjudicated_transcript = _timed_transcript(independently_heard)
+
+    def adjudicate(**kwargs):
+        calls.append(kwargs)
+        return adjudicated_transcript, {
+            "source": "gemini_audio_borderline_v1",
+            "confidence": 0.98,
+        }
+
+    result = transcribe_and_validate_takes(
+        manifest_path,
+        _DeepgramByCall(scripts),
+        adjudicate_fn=adjudicate,
+    )
+
+    first = result["takes"][0]
+    assert len(calls) == 1
+    assert calls[0]["raw_path"] == Path(first["raw"]["path"])
+    assert first["transcript_qa"]["passed"] is True
+    assert first["transcript_qa"]["word_error_rate"] == pytest.approx(1 / 17)
+    assert first["transcript"]["full_text"] == adjudicated_transcript.full_text
+    assert first["transcript_adjudication"] == {
+        "source": "gemini_audio_borderline_v1",
+        "confidence": 0.98,
+        "original_actual_text": deepgram_transcript.full_text,
+        "original_word_error_rate": pytest.approx(2 / 17),
+    }
+
+
+def test_borderline_audio_adjudication_must_still_pass_the_existing_wer_limit(tmp_path):
+    from app.features.shot_production.runner import transcribe_and_validate_takes
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    expected = payload["takes"][0]["beat"]["text"]
+    words = expected.split()
+    deepgram_text = " ".join([*words[:-3], "drei", "falsche", words[-1]])
+    scripts = [deepgram_text, payload["takes"][1]["beat"]["text"]]
+
+    def adjudicate(**_kwargs):
+        return _timed_transcript(deepgram_text), {
+            "source": "gemini_audio_borderline_v1",
+            "confidence": 0.99,
+        }
+
+    with pytest.raises(ValidationError, match="take indexes.*0"):
+        transcribe_and_validate_takes(
+            manifest_path,
+            _DeepgramByCall(scripts),
+            adjudicate_fn=adjudicate,
+        )
+
+    failed = _read(manifest_path)["takes"][0]
+    assert failed["transcript_qa"]["passed"] is False
+    assert "transcript_adjudication" not in failed
+
+
 def test_take_timing_migration_invalidates_cached_audio_and_delivery_without_retranscribing(tmp_path):
     from app.features.shot_production.runner import transcribe_and_validate_takes
 
