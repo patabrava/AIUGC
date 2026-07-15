@@ -49,6 +49,7 @@ class ActorIdentityRecord(BaseModel):
     provider_lora_id: Optional[str] = None
     provider_lora_name: Optional[str] = None
     provider_training_task_id: Optional[str] = None
+    character_description: Optional[str] = None
     portrait_image_url: Optional[str] = None
     cover_image_url: Optional[str] = None
     training_status: str

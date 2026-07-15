@@ -126,9 +126,11 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
 
     input_tiers = []
 
-    def fake_list_topic_suggestions(*, target_length_tier, limit, post_type):
+    def fake_list_topic_suggestions(*, target_length_tier, limit, post_type, **_kwargs):
         input_tiers.append(target_length_tier)
         assert target_length_tier == 32
+        assert _kwargs["duration_neutral"] is True
+        assert _kwargs["check_accessibility"] is False
         return [candidate]
 
     def fake_generate_family(*, count, target_length_tier):
@@ -187,7 +189,7 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     assert semantic_call["requested_duration_seconds"] == 50
     assert semantic_call["post_type"] == post_type
     assert semantic_call["cta"] == candidate["cta"]
-    assert semantic_call["facts"]
+    assert semantic_call["facts"] == [candidate["script"]]
     assert "Nora" in semantic_call["actor_context"]
 
     created = created_posts[0]

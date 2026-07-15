@@ -1267,6 +1267,54 @@ def test_count_selectable_topic_families_uses_full_limit(monkeypatch):
     assert captured["limit"] == 10_000
 
 
+def test_duration_neutral_topic_selection_accepts_audited_underlength_script(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {
+            "id": "topic-value",
+            "title": "Rollstuhlrampe vor Reiseantritt pruefen",
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": "rollstuhlrampe-reise",
+        }
+    ]
+    script_rows = [
+        {
+            "id": "script-value",
+            "topic_registry_id": "topic-value",
+            "title": "Rollstuhlrampe vor Reiseantritt pruefen",
+            "script": (
+                "Vor der Reise lohnt sich ein Blick auf Einstiegshoehe und Rampenlaenge, "
+                "damit die mobile Rampe wirklich zur geplanten Verbindung passt."
+            ),
+            "target_length_tier": 32,
+            "post_type": "value",
+            "audit_status": "pass",
+            "source_urls": [{"url": "https://source.example/rampe", "title": "Quelle"}],
+        }
+    ]
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", lambda **kwargs: script_rows)
+    monkeypatch.setattr(topic_queries, "_is_value_source_url_accessible", lambda _url: True)
+
+    strict = topic_queries.list_topic_suggestions(
+        target_length_tier=32,
+        limit=10,
+        post_type="value",
+    )
+    neutral = topic_queries.list_topic_suggestions(
+        target_length_tier=32,
+        limit=10,
+        post_type="value",
+        duration_neutral=True,
+    )
+
+    assert strict == []
+    assert [row["script_id"] for row in neutral] == ["script-value"]
+
+
 @patch("app.features.topics.queries.get_supabase")
 def test_upsert_topic_script_variants_skips_global_duplicate_scripts(mock_get_sb):
     class _FakeResponse:

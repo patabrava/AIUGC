@@ -496,6 +496,15 @@ def _semantic_fact_inputs(
     candidate: Dict[str, Any],
     seed_payload: Dict[str, Any],
 ) -> List[str]:
+    canonical_script = " ".join(
+        str(candidate.get("script") or candidate.get("rotation") or "").split()
+    )
+    if canonical_script:
+        # The audited bank script is the duration-neutral fact summary. Passing the
+        # entire research dossier can exceed the requested script's word budget and
+        # makes both the provider repair and deterministic fallback impossible.
+        return [canonical_script]
+
     facts: List[str] = []
 
     def append_fact(value: Any) -> None:
@@ -1459,6 +1468,7 @@ def has_required_family_coverage(batch: Dict[str, Any]) -> bool:
         available_count = count_selectable_topic_families(
             post_type=post_type,
             target_length_tier=target_length_tier,
+            duration_neutral=is_semantic_ugc,
         )
         if available_count < requested_count:
             return False
@@ -1593,6 +1603,8 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
             limit=max(count * 20, 50),
             post_type=post_type,
+            check_accessibility=False,
+            duration_neutral=True,
         )
         suggestions = _reserve_semantic_candidates(
             stored_suggestions,

@@ -709,6 +709,7 @@ def list_topic_suggestions(
     limit: int = 50,
     post_type: Optional[str] = None,
     check_accessibility: bool = True,
+    duration_neutral: bool = False,
 ) -> List[Dict[str, Any]]:
     registry_rows = get_all_topics_from_registry()
     registry_by_id = {str(row.get("id")): row for row in registry_rows}
@@ -740,7 +741,7 @@ def list_topic_suggestions(
                     target_length_tier=normalized_script.get("target_length_tier"),
                 )
                 continue
-            if normalized_script.get("target_length_tier") is not None:
+            if normalized_script.get("target_length_tier") is not None and not duration_neutral:
                 try:
                     validate_script_duration_contract(
                         script=normalized_script.get("script"),
@@ -852,6 +853,7 @@ def count_selectable_topic_families(
     *,
     post_type: str,
     target_length_tier: int,
+    duration_neutral: bool = False,
 ) -> int:
     return len(
         list_topic_suggestions(
@@ -859,6 +861,7 @@ def count_selectable_topic_families(
             limit=10_000,
             post_type=post_type,
             check_accessibility=False,
+            duration_neutral=duration_neutral,
         )
     )
 
