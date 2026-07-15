@@ -1870,6 +1870,29 @@ def _accept_final_transcript_consensus(
             and final_qa.get("last_word_present")
             and not final_qa.get("foreign_words")
         )
+    concatenated_expected_words = tuple(
+        word
+        for take in ordered_takes
+        for word in ((take.get("transcript_qa") or {}).get("expected_words") or ())
+    )
+    concatenated_actual_words = tuple(
+        word
+        for take in ordered_takes
+        for word in ((take.get("transcript_qa") or {}).get("actual_words") or ())
+    )
+    multi_take_consensus = bool(
+        8.5 < requested_duration_seconds < 24.0
+        and len(ordered_takes) >= 2
+        and acoustic_plan is not None
+        and passed_take_consensus
+        and expected_words
+        and tuple(expected_words) == concatenated_expected_words
+        and tuple(actual_words) == concatenated_actual_words
+        and 0.0 < word_error_rate <= 0.10
+        and final_qa.get("first_word_present")
+        and final_qa.get("last_word_present")
+        and not final_qa.get("foreign_words")
+    )
     long_form_consensus = bool(
         not final_qa.get("passed")
         and requested_duration_seconds >= 24.0
@@ -1882,7 +1905,10 @@ def _accept_final_transcript_consensus(
         and final_qa.get("last_word_present")
         and not final_qa.get("foreign_words")
     )
-    return bool(not final_qa.get("passed") and (single_take_consensus or long_form_consensus))
+    return bool(
+        not final_qa.get("passed")
+        and (single_take_consensus or multi_take_consensus or long_form_consensus)
+    )
 
 
 @_manifest_locked

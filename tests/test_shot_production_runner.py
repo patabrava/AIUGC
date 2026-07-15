@@ -1795,6 +1795,63 @@ def test_single_take_final_transcript_accepts_the_same_bounded_compound_asr_suff
     ) is True
 
 
+def test_sixteen_second_final_transcript_accepts_only_the_passed_take_consensus():
+    from app.features.shot_production.runner import _accept_final_transcript_consensus
+
+    first_expected = [f"erste-{index}" for index in range(15)] + ["uhr", "räumen"]
+    first_actual = [f"erste-{index}" for index in range(15)] + ["räumen"]
+    second_expected = [f"zweite-{index}" for index in range(16)] + ["ab"]
+    second_actual = list(second_expected)
+    final_qa = {
+        "passed": False,
+        "word_error_rate": 1 / 34,
+        "expected_words": first_expected + second_expected,
+        "actual_words": first_actual + second_actual,
+        "first_word_present": True,
+        "last_word_present": True,
+        "foreign_words": [],
+    }
+    takes = [
+        {
+            "transcript_qa": {
+                "passed": True,
+                "word_error_rate": 1 / 17,
+                "expected_words": first_expected,
+                "actual_words": first_actual,
+                "first_word_present": True,
+                "last_word_present": True,
+                "foreign_words": [],
+            }
+        },
+        {
+            "transcript_qa": {
+                "passed": True,
+                "word_error_rate": 0.0,
+                "expected_words": second_expected,
+                "actual_words": second_actual,
+                "first_word_present": True,
+                "last_word_present": True,
+                "foreign_words": [],
+            }
+        },
+    ]
+
+    assert _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=object(),
+        requested_duration_seconds=16.0,
+    ) is True
+
+    final_qa["actual_words"] = [*first_actual, "new-word", *second_actual[1:]]
+    assert _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=object(),
+        requested_duration_seconds=16.0,
+    ) is False
+
+
 def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
     from app.features.shot_production.audio_seams import (
         AcousticSeamPlan,
