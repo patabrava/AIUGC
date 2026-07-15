@@ -61,6 +61,20 @@ def test_parse_frame_metrics_maps_digital_silence_dbfs_to_finite_floor():
     assert parsed[0].peak_dbfs == -120.0
 
 
+def test_parse_frame_metrics_deduplicates_equal_ffprobe_timestamps():
+    parsed = parse_frame_metrics(
+        {
+            "frames": [
+                _frame(timestamp="0.000000"),
+                _frame(timestamp="0.000000"),
+                _frame(timestamp="0.016000"),
+            ]
+        }
+    )
+
+    assert [frame.timestamp_seconds for frame in parsed] == [0.0, 0.016]
+
+
 @pytest.mark.parametrize(
     "payload",
     [

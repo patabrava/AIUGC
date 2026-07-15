@@ -125,11 +125,17 @@ def parse_frame_metrics(payload: Any) -> Tuple[AudioFrameMetrics, ...]:
         if not isinstance(frame, dict) or not isinstance(frame.get("tags"), dict):
             raise ValidationError("Acoustic frame evidence must contain frame tags.", {"frame": index})
         timestamp = _finite_tag(frame, "pts_time")
-        if timestamp < 0 or (previous_timestamp is not None and timestamp <= previous_timestamp):
+        if timestamp < 0 or (
+            previous_timestamp is not None and timestamp < previous_timestamp
+        ):
             raise ValidationError(
                 "Acoustic frame timestamps must be non-negative and strictly increasing.",
                 {"frame": index},
             )
+        if previous_timestamp is not None and math.isclose(
+            timestamp, previous_timestamp, rel_tol=0.0, abs_tol=1e-9
+        ):
+            continue
         tags = frame["tags"]
         metric = AudioFrameMetrics(
             timestamp_seconds=timestamp,
