@@ -1682,6 +1682,40 @@ def test_long_form_final_transcript_accepts_one_asr_stem_with_passed_take_consen
     ) is False
 
 
+def test_single_take_final_transcript_accepts_the_same_bounded_compound_asr_suffix_twice():
+    from app.features.shot_production.runner import _accept_final_transcript_consensus
+
+    expected = ["kopfsteinpflaster"] + [f"wort-{index}" for index in range(1, 16)]
+    actual = ["steinpflaster"] + [f"wort-{index}" for index in range(1, 16)]
+    final_qa = {
+        "passed": False,
+        "word_error_rate": 1 / 16,
+        "expected_words": expected,
+        "actual_words": actual,
+        "first_word_present": False,
+        "last_word_present": True,
+        "foreign_words": [],
+    }
+    takes = [{
+        "transcript_qa": {
+            "passed": True,
+            "word_error_rate": 1 / 16,
+            "expected_words": expected,
+            "actual_words": actual,
+            "first_word_present": True,
+            "last_word_present": True,
+            "foreign_words": [],
+        }
+    }]
+
+    assert _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=None,
+        requested_duration_seconds=8.0,
+    ) is True
+
+
 def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
     from app.features.shot_production.audio_seams import (
         AcousticSeamPlan,
@@ -1762,7 +1796,20 @@ def test_acoustic_plan_contract_uses_the_approved_16_second_word_gap_ceiling():
             PlannedTakeWindow(0, 0.0, 6.50, 0.0, 6.50, 0.0),
             PlannedTakeWindow(1, 0.0, 7.96, 0.0, 7.96, 0.0),
         ),
-        (PlannedSeam(0, 6.50, 0.0, 0.04, 0.02, 0.44, 4.0, 0.0, False, ()),),
+        (
+            PlannedSeam(
+                0,
+                6.50,
+                0.0,
+                0.04,
+                0.02,
+                0.48000000000000004,
+                4.0,
+                0.0,
+                False,
+                (),
+            ),
+        ),
         1.0,
         14.42,
     )

@@ -1389,7 +1389,7 @@ def _evaluate_acoustic_plan_contract_details(
             "word_gap_out_of_range",
             lambda seam: not 0.10
             <= seam.final_word_gap_seconds
-            <= maximum_word_gap,
+            <= maximum_word_gap + 1e-9,
         ),
         ("retained_breath_island_too_long", lambda seam: seam.retained_island_duration_seconds > 0.08),
         (
@@ -1680,7 +1680,28 @@ def _accept_final_transcript_consensus(
         if not take_qa.get("passed") or take_word_error_rate < 0.0:
             passed_take_consensus = False
             break
-    return bool(
+    single_take_consensus = False
+    if len(ordered_takes) == 1:
+        take_qa = ordered_takes[0].get("transcript_qa") or {}
+        try:
+            take_word_error_rate = float(take_qa.get("word_error_rate"))
+        except (TypeError, ValueError):
+            take_word_error_rate = math.inf
+        single_take_consensus = bool(
+            requested_duration_seconds <= 8.5
+            and acoustic_plan is None
+            and take_qa.get("passed")
+            and 0.0 < word_error_rate <= 0.10
+            and abs(take_word_error_rate - word_error_rate) <= 1e-9
+            and take_qa.get("expected_words") == expected_words
+            and take_qa.get("actual_words") == actual_words
+            and take_qa.get("first_word_present")
+            and take_qa.get("last_word_present")
+            and not take_qa.get("foreign_words")
+            and final_qa.get("last_word_present")
+            and not final_qa.get("foreign_words")
+        )
+    long_form_consensus = bool(
         not final_qa.get("passed")
         and requested_duration_seconds >= 24.0
         and acoustic_plan is not None
@@ -1692,6 +1713,7 @@ def _accept_final_transcript_consensus(
         and final_qa.get("last_word_present")
         and not final_qa.get("foreign_words")
     )
+    return bool(not final_qa.get("passed") and (single_take_consensus or long_form_consensus))
 
 
 @_manifest_locked
@@ -1906,7 +1928,11 @@ def compose_and_caption(
         final_qa_payload["provider_failure_reasons"] = list(final_qa.failure_reasons)
         final_qa_payload["passed"] = True
         final_qa_payload["failure_reasons"] = []
-        final_qa_payload["accepted_by"] = "exact_take_transcripts_plus_speech_safe_acoustic_plan"
+        final_qa_payload["accepted_by"] = (
+            "repeated_single_take_transcript_consensus"
+            if len(ordered) == 1
+            else "exact_take_transcripts_plus_speech_safe_acoustic_plan"
+        )
     payload["final_transcript_qa"] = final_qa_payload
     _atomic_write_json(manifest_path, payload)
     if not final_qa_payload["passed"]:
