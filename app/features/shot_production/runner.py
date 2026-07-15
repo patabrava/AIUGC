@@ -1598,6 +1598,8 @@ def _plan_acoustic_delivery(
     maximum = float(duration_contract["maximum"])
     requested = float(duration_contract["requested"])
     plan_options = {}
+    if requested == 16.0:
+        plan_options["max_seam_word_gap_seconds"] = 0.480
     if requested >= 40.0:
         plan_options["min_post_word_crossfade_guard_seconds"] = 0.060
     try:

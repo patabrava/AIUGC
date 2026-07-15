@@ -26,6 +26,12 @@ MANUAL_MODE_MIGRATION = ROOT / "supabase/migrations/20260714000000_manual_semant
 QA_RESUME_MIGRATION = ROOT / "supabase/migrations/20260715000200_semantic_video_qa_resume.sql"
 VISUAL_REMEDIATION_MIGRATION = ROOT / "supabase/migrations/20260715000300_semantic_video_visual_remediation.sql"
 QA_STAGE_RESUME_MIGRATION = ROOT / "supabase/migrations/20260715000400_semantic_video_qa_stage_resume.sql"
+QA_PRIOR_ATTEMPT_REUSE_MIGRATION = (
+    ROOT / "supabase/migrations/20260715000500_semantic_video_prior_attempt_reuse.sql"
+)
+CANDIDATE_RECLAIM_MIGRATION = (
+    ROOT / "supabase/migrations/20260715000600_semantic_video_candidate_reclaim.sql"
+)
 
 
 @pytest.fixture
@@ -810,6 +816,32 @@ def test_qa_stage_resume_migration_reuses_durable_takes_for_acoustic_review():
     assert "latest.submission_state not in ('completed', 'qa_failed')" in sql
     assert "latest.raw_artifact_sha256 !~ '^[0-9a-f]{64}$'" in sql
     assert "set submission_state = 'completed'" in sql
+
+
+def test_prior_attempt_reuse_migration_reprocesses_paid_raw_without_new_submission():
+    sql = QA_PRIOR_ATTEMPT_REUSE_MIGRATION.read_text().lower()
+
+    assert "reuse_semantic_video_prior_attempts" in sql
+    assert "retry_approval_required" in sql
+    assert "coalesce(locked_run.failure_envelope ->> 'stage', '')" in sql
+    assert "not in ('transcript_qa', 'acoustic_qa')" in sql
+    assert "selected.raw_artifact_sha256 !~ '^[0-9a-f]{64}$'" in sql
+    assert "'qa_reuse'" in sql
+    assert "set stage = 'transcript_qa'" in sql
+    assert "insert into public.semantic_video_approvals" not in sql
+    assert "reserved_submission_count" not in sql
+
+
+def test_candidate_reclaim_migration_only_releases_expired_empty_reservations():
+    sql = CANDIDATE_RECLAIM_MIGRATION.read_text().lower()
+
+    assert "reclaim_semantic_video_candidate_reservation" in sql
+    assert "candidate_reservation_expires_at > pg_catalog.clock_timestamp()" in sql
+    assert "jsonb_array_length" in sql
+    assert "candidate_reservation_owner = null" in sql
+    assert "candidate_reservation_token = null" in sql
+    assert "candidate_reservation_expires_at = null" in sql
+    assert "to service_role" in sql
 
 
 def test_visual_remediation_migration_replaces_no_paid_request_and_invalidates_visual_cache():

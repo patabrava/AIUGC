@@ -17,6 +17,7 @@ from app.core.errors import ValidationError
 ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v1"
 _ANALYSIS_TIMEOUT_SECONDS = 120
 _MAX_SEAM_WORD_GAP_SECONDS = 0.320
+_MAX_SHORT_FORM_SEAM_WORD_GAP_SECONDS = 0.480
 _DEFAULT_POST_WORD_CROSSFADE_GUARD_SECONDS = 0.100
 _MAX_ENCODER_PREROLL_SECONDS = 0.100
 _DIGITAL_SILENCE_DBFS = -120.0
@@ -560,6 +561,7 @@ def _extend_delivery_windows(
     *,
     min_duration_seconds: float,
     max_duration_seconds: float,
+    max_seam_word_gap_seconds: float,
 ) -> Tuple[Tuple[PlannedTakeWindow, ...], Tuple[PlannedSeam, ...]]:
     result = list(planned)
     adjusted_seams = list(seams)
@@ -576,7 +578,7 @@ def _extend_delivery_windows(
     capacities = [
         min(
             raw_capacity,
-            max(0.0, _MAX_SEAM_WORD_GAP_SECONDS - seams[index].final_word_gap_seconds),
+            max(0.0, max_seam_word_gap_seconds - seams[index].final_word_gap_seconds),
         )
         if index < len(seams)
         else raw_capacity
@@ -702,6 +704,7 @@ def plan_acoustic_seams(
     min_duration_seconds: float = 14.5,
     max_duration_seconds: float = 16.5,
     min_post_word_crossfade_guard_seconds: float = _DEFAULT_POST_WORD_CROSSFADE_GUARD_SECONDS,
+    max_seam_word_gap_seconds: float = _MAX_SEAM_WORD_GAP_SECONDS,
 ) -> AcousticSeamPlan:
     if not math.isfinite(fps) or fps <= 0:
         raise ValidationError("Acoustic seam planning requires a positive finite frame rate.")
@@ -717,6 +720,13 @@ def plan_acoustic_seams(
         or not 0.060 <= min_post_word_crossfade_guard_seconds <= 0.100
     ):
         raise ValidationError("Acoustic post-word crossfade guard is invalid.")
+    if (
+        not math.isfinite(max_seam_word_gap_seconds)
+        or not _MAX_SEAM_WORD_GAP_SECONDS
+        <= max_seam_word_gap_seconds
+        <= _MAX_SHORT_FORM_SEAM_WORD_GAP_SECONDS
+    ):
+        raise ValidationError("Acoustic seam word-gap ceiling is invalid.")
     ordered = _validate_take_evidence(takes)
     gains, rms_range = _plan_speech_gains(ordered)
     seams = tuple(
@@ -737,6 +747,7 @@ def plan_acoustic_seams(
         seams,
         min_duration_seconds=max(0.0, min_duration_seconds - (1.0 / fps)),
         max_duration_seconds=max_duration_seconds,
+        max_seam_word_gap_seconds=max_seam_word_gap_seconds,
     )
     final_duration = _planned_duration(planned, seams)
     video_duration = sum(take.video_end_seconds - take.video_start_seconds for take in planned)

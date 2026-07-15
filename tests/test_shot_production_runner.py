@@ -1618,6 +1618,28 @@ def test_forty_plus_second_acoustic_planning_uses_explicit_dense_speech_guard():
     }]
 
 
+def test_sixteen_second_acoustic_planning_allows_a_bounded_sentence_pause():
+    from app.features.shot_production.runner import _plan_acoustic_delivery
+
+    calls = []
+
+    def plan_fn(_evidence, **kwargs):
+        calls.append(kwargs)
+        return object()
+
+    _plan_acoustic_delivery(
+        (),
+        {"requested": 16.0, "minimum": 14.5, "maximum": 16.5},
+        plan_fn=plan_fn,
+    )
+
+    assert calls == [{
+        "min_duration_seconds": 14.5,
+        "max_duration_seconds": 16.5,
+        "max_seam_word_gap_seconds": 0.48,
+    }]
+
+
 def test_long_form_final_transcript_accepts_one_asr_stem_with_passed_take_consensus():
     from app.features.shot_production.runner import _accept_final_transcript_consensus
 

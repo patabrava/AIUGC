@@ -228,6 +228,25 @@ def reserve_candidate_generation(
     return _one_affected(response, operation="candidate reservation")
 
 
+def reclaim_candidate_reservation(
+    *,
+    run_id: str,
+    expected_revision: int,
+    client=None,
+) -> dict[str, Any]:
+    if expected_revision < 0 or not str(run_id or "").strip():
+        raise ValidationError("Semantic video candidate reclaim contract is invalid.")
+    return _worker_rpc(
+        "reclaim_semantic_video_candidate_reservation",
+        {
+            "p_run_id": str(run_id),
+            "p_expected_revision": int(expected_revision),
+        },
+        operation="candidate reservation reclaim",
+        client=client,
+    )
+
+
 def finalize_candidate_generation(
     run_id: str,
     *,
@@ -479,6 +498,44 @@ def resume_qa_review(
             "p_plan_hash": str(plan_hash),
         },
         operation="QA review resume",
+        client=client,
+    )
+
+
+def reuse_prior_attempts_for_qa_review(
+    *,
+    run_id: str,
+    expected_revision: int,
+    plan_hash: str,
+    selected_attempts: Mapping[int, int],
+    client=None,
+) -> dict[str, Any]:
+    try:
+        normalized = {
+            str(int(take_index)): int(attempt)
+            for take_index, attempt in selected_attempts.items()
+            if int(take_index) >= 0 and int(attempt) >= 1
+        }
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValidationError(
+            "Semantic video prior-attempt reuse contract is invalid."
+        ) from exc
+    if (
+        expected_revision < 0
+        or not str(plan_hash or "").strip()
+        or not normalized
+        or len(normalized) != len(selected_attempts)
+    ):
+        raise ValidationError("Semantic video prior-attempt reuse contract is invalid.")
+    return _worker_rpc(
+        "reuse_semantic_video_prior_attempts",
+        {
+            "p_run_id": str(run_id),
+            "p_expected_revision": int(expected_revision),
+            "p_plan_hash": str(plan_hash),
+            "p_selected_attempts": normalized,
+        },
+        operation="prior-attempt QA reuse",
         client=client,
     )
 
@@ -869,6 +926,8 @@ __all__ = [
     "persist_worker_submission_intent",
     "persist_worker_submission_unknown",
     "release_worker_lease",
+    "reclaim_candidate_reservation",
+    "reuse_prior_attempts_for_qa_review",
     "require_worker_retry_approval",
     "reserve_paid_submission",
 ]

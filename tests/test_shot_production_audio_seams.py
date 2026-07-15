@@ -516,6 +516,31 @@ def test_planner_rejects_long_form_padding_that_would_exceed_the_word_gap_ceilin
     assert exc_info.value.details["under_capacity_take_indexes"]
 
 
+def test_planner_can_use_bounded_short_form_sentence_pause_for_16_second_delivery():
+    takes = (
+        _evidence(0, duration=8.0, first_word=0.24, final_word=6.18),
+        _evidence(1, duration=8.0, first_word=0.16, final_word=7.38),
+    )
+
+    with pytest.raises(ValidationError, match="duration envelope"):
+        plan_acoustic_seams(
+            takes,
+            min_duration_seconds=14.5,
+            max_duration_seconds=16.5,
+        )
+
+    plan = plan_acoustic_seams(
+        takes,
+        min_duration_seconds=14.5,
+        max_duration_seconds=16.5,
+        max_seam_word_gap_seconds=0.48,
+    )
+
+    assert plan.final_duration_seconds == pytest.approx(14.5 - (1 / 24))
+    assert plan.seams[0].final_word_gap_seconds <= 0.48
+    assert plan.seams[0].final_word_gap_seconds > 0.32
+
+
 def test_planner_preserves_two_take_final_outro_when_it_has_capacity():
     takes = (_evidence(0), _evidence(1))
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
 import json
@@ -32,6 +33,7 @@ from app.features.semantic_videos.queries import (
     list_attempts,
     load_semantic_video_context,
     persist_semantic_video_plan,
+    reclaim_candidate_reservation,
     reserve_candidate_generation,
 )
 from app.features.semantic_videos.schemas import (
@@ -109,6 +111,23 @@ def _retry_guidance_text(value: Any) -> str:
         raise StateTransitionError(
             "Semantic video retry requires persisted QA retry guidance."
         )
+    if isinstance(value, dict) and (value.get("qa_failure") or {}).get("stage") == "transcript_qa":
+        manifest = value.get("pipeline_manifest")
+        takes = manifest.get("takes") if isinstance(manifest, dict) else []
+        for take in takes or []:
+            transcript = take.get("transcript_qa") if isinstance(take, dict) else None
+            if not isinstance(transcript, dict):
+                continue
+            reasons = transcript.get("failure_reasons") or []
+            expected_words = transcript.get("expected_words") or []
+            if "missing_first_word" in reasons and expected_words:
+                first_word = str(expected_words[0]).strip()
+                if first_word:
+                    text = (
+                        f"{text} Start with the complete first word '{first_word}' clearly. "
+                        "Do not omit or clip its opening syllable."
+                    )
+                break
     return text
 
 
@@ -296,6 +315,7 @@ def generate_candidates(
     request: Request,
 ):
     existing = get_run_by_post(post_id)
+    effective_expected_revision = payload.expected_revision
     if existing:
         revision = int(existing.get("revision") or 0)
         if str(existing.get("stage") or "") != "awaiting_reference_approval":
@@ -308,6 +328,23 @@ def generate_candidates(
                 "Semantic video candidate generation revision is stale.",
                 {"expected_revision": payload.expected_revision, "actual_revision": revision},
             )
+        reservation_token = str(existing.get("candidate_reservation_token") or "").strip()
+        reservation_expires_at = str(existing.get("candidate_reservation_expires_at") or "").strip()
+        if reservation_token and reservation_expires_at:
+            try:
+                expires_at = datetime.fromisoformat(reservation_expires_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise StateTransitionError(
+                    "Semantic video candidate reservation expiry is invalid."
+                ) from exc
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at <= datetime.now(timezone.utc):
+                existing = reclaim_candidate_reservation(
+                    run_id=str(existing["id"]),
+                    expected_revision=revision,
+                )
+                effective_expected_revision = int(existing["revision"])
 
     context = load_semantic_video_context(post_id)
     script, _script_snapshot = _approved_script(context["post"])
@@ -336,7 +373,7 @@ def generate_candidates(
     )
     reserved = reserve_candidate_generation(
         post_id,
-        expected_revision=payload.expected_revision,
+        expected_revision=effective_expected_revision,
         run_create=_reference_run_payload(
             context=context,
             reference_snapshot=persisted_reference,

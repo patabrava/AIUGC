@@ -49,6 +49,32 @@ def _png_bytes() -> bytes:
     return buffer.getvalue()
 
 
+def test_retry_guidance_names_a_missing_first_word_for_paid_regeneration():
+    from app.features.semantic_videos.handlers import _retry_guidance_text
+
+    guidance = _retry_guidance_text(
+        {
+            "guidance": "Regenerate only the failed semantic beat and correct transcript QA.",
+            "qa_failure": {"stage": "transcript_qa"},
+            "pipeline_manifest": {
+                "takes": [
+                    {
+                        "transcript_qa": {
+                            "passed": False,
+                            "expected_words": ["kopfsteinpflaster", "zwingt"],
+                            "actual_words": ["steinpflaster", "zwingt"],
+                            "failure_reasons": ["missing_first_word"],
+                        }
+                    }
+                ]
+            },
+        }
+    )
+
+    assert "Start with the complete first word 'kopfsteinpflaster'" in guidance
+    assert "Do not omit or clip its opening syllable" in guidance
+
+
 class _FakeStorage:
     def __init__(self, master: bytes):
         self.master = master
