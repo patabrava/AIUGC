@@ -203,6 +203,13 @@ class FakeRepo:
     def release_run(self, *, run_id, worker_id, lease_token):
         self.events.append(("release", run_id, worker_id, lease_token))
 
+    def persist_worker_exception(
+        self, *, run_id, worker_id, lease_token, stage, error
+    ):
+        self.run["error"] = deepcopy(error)
+        self.events.append(("worker_exception", stage, deepcopy(error)))
+        return deepcopy(self.run)
+
     def _take(self, take_id):
         return next(take for take in self.takes if take["id"] == take_id)
 
@@ -310,6 +317,24 @@ def test_worker_processes_fifty_second_run_in_bounded_submission_waves():
                 take["submission_state"] = "completed"
 
     assert [call["duration_seconds"] for call in vertex.submit_calls] == [8] * 7
+
+
+def test_worker_persists_a_fenced_runtime_exception_before_releasing_the_lease():
+    repo = FakeRepo(take_count=1)
+    repo.reserve_error = RuntimeError("production-only failure")
+    worker = _worker(repo)
+
+    with pytest.raises(RuntimeError, match="production-only failure"):
+        worker.tick("run-1")
+
+    diagnostic = next(event for event in repo.events if event[0] == "worker_exception")
+    assert diagnostic[1] == "generating"
+    assert diagnostic[2] == {
+        "code": "RuntimeError",
+        "message": "production-only failure",
+        "worker_id": "worker-1",
+    }
+    assert repo.events[-1][0] == "release"
 
 
 def test_worker_polls_an_accepted_operation_without_resubmitting():

@@ -522,6 +522,34 @@ def reserve_paid_submission(
     )
 
 
+def persist_worker_exception(
+    *,
+    run_id: str,
+    worker_id: str,
+    lease_token: str,
+    stage: str,
+    error: Mapping[str, Any],
+    client=None,
+) -> dict[str, Any]:
+    if not str(stage or "").strip() or not isinstance(error, Mapping):
+        raise ValidationError("Semantic video worker exception requires a stage and error.")
+    return _worker_rpc(
+        "persist_semantic_video_worker_exception",
+        {
+            **_worker_fence_payload(
+                run_id=run_id,
+                take_id=None,
+                worker_id=worker_id,
+                lease_token=lease_token,
+            ),
+            "p_stage": str(stage),
+            "p_error": dict(error),
+        },
+        operation="worker exception persistence",
+        client=client,
+    )
+
+
 def persist_worker_submission_intent(
     *,
     run_id: str,

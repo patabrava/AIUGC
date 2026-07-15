@@ -74,6 +74,9 @@ class SemanticVideoRepository:
     def reserve_submission(self, **kwargs):
         return queries.reserve_paid_submission(**kwargs)
 
+    def persist_worker_exception(self, **kwargs):
+        return queries.persist_worker_exception(**kwargs)
+
     def persist_submission_intent(self, **kwargs):
         return queries.persist_worker_submission_intent(**kwargs)
 
@@ -603,6 +606,29 @@ class SemanticVideoWorker:
             if stage == "generating":
                 return self._run_generation_wave(run, takes, lease_token)
             return self._run_post_generation_stage(run, takes, lease_token)
+        except Exception as exc:
+            error = {
+                "code": type(exc).__name__,
+                "message": str(exc)[:500],
+                "worker_id": self.worker_id,
+            }
+            try:
+                self.repo.persist_worker_exception(
+                    run_id=claimed_id,
+                    worker_id=self.worker_id,
+                    lease_token=lease_token,
+                    stage=stage,
+                    error=error,
+                )
+            except Exception as persistence_exc:  # noqa: BLE001
+                logger.exception(
+                    "semantic_video_worker_exception_persistence_failed",
+                    run_id=claimed_id,
+                    stage=stage,
+                    original_error=str(exc),
+                    persistence_error=str(persistence_exc),
+                )
+            raise
         finally:
             self.repo.release_run(
                 run_id=claimed_id,
