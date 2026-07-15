@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from app.adapters.llm_client import get_llm_client
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 
 RAW_CAMERA_SYSTEM_PROMPT_PATH = Path(__file__).with_name("raw_camera_casting_system_prompt.txt")
 
@@ -96,6 +98,13 @@ def _build_composition_prompt(*, prompt_writer_output: str) -> str:
     )
 
 
+def _is_vertex_resource_exhausted(exc: ThirdPartyError) -> bool:
+    details = exc.details if isinstance(exc.details, dict) else {}
+    return int(details.get("status_code") or 0) == 429 and "RESOURCE_EXHAUSTED" in str(
+        details.get("body") or ""
+    )
+
+
 def generate_shot_frame_candidates(
     *,
     script: str,
@@ -107,6 +116,8 @@ def generate_shot_frame_candidates(
     candidate_count: int = 3,
     llm_client: Optional[Any] = None,
     image_model: str = "gemini-3.1-flash-image",
+    sleep_fn: Callable[[float], None] = time.sleep,
+    quota_retry_delay_seconds: float = 65.0,
 ) -> ShotFrameGenerationResult:
     """Create still candidates only; explicit approval and Veo submission happen later."""
     if len(actor_references) != 2:
@@ -119,6 +130,12 @@ def generate_shot_frame_candidates(
             "Shot-frame candidate count must be between one and four.",
             {"candidate_count": candidate_count},
         )
+    try:
+        quota_delay = float(quota_retry_delay_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Shot-frame quota retry delay must be finite and non-negative.") from exc
+    if not math.isfinite(quota_delay) or quota_delay < 0:
+        raise ValidationError("Shot-frame quota retry delay must be finite and non-negative.")
     _validate_reference(actor_references[0], "actor_front")
     _validate_reference(actor_references[1], "actor_three_quarter")
     _validate_reference(location_reference, "location")
@@ -152,14 +169,21 @@ def generate_shot_frame_candidates(
     ]
     candidates = []
     for index in range(1, candidate_count + 1):
-        generated = client.generate_gemini_image(
-            prompt=composition_prompt,
-            model=image_model,
-            temperature=0.7,
-            aspect_ratio="9:16",
-            image_size="2K",
-            input_images=ordered_inputs,
-        )
+        for attempt in range(2):
+            try:
+                generated = client.generate_gemini_image(
+                    prompt=composition_prompt,
+                    model=image_model,
+                    temperature=0.7,
+                    aspect_ratio="9:16",
+                    image_size="2K",
+                    input_images=ordered_inputs,
+                )
+                break
+            except ThirdPartyError as exc:
+                if attempt > 0 or not _is_vertex_resource_exhausted(exc):
+                    raise
+                sleep_fn(quota_delay)
         candidates.append(
             ShotFrameCandidate(
                 index=index,

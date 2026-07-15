@@ -5,7 +5,7 @@ from inspect import signature
 
 import pytest
 
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 
 
 class FakeLLMClient:
@@ -85,6 +85,58 @@ def test_generate_shot_frame_candidates_uses_two_actor_refs_then_location_and_st
     assert "supplied identity references" in client.text_calls[0]["prompt"]
     assert "sole and authoritative visual identity evidence" in client.image_calls[0]["prompt"]
     assert [candidate.image_bytes for candidate in result.candidates] == [b"candidate-1", b"candidate-2"]
+
+
+def test_generate_shot_frame_candidates_waits_and_retries_vertex_resource_exhaustion():
+    from app.features.shot_frames.service import generate_shot_frame_candidates
+
+    class QuotaLimitedClient(FakeLLMClient):
+        def __init__(self):
+            super().__init__()
+            self.attempt = 0
+
+        def generate_gemini_image(self, **kwargs):
+            self.image_calls.append(kwargs)
+            self.attempt += 1
+            if self.attempt == 2:
+                raise ThirdPartyError(
+                    "Vertex Gemini generateContent failed",
+                    {
+                        "status_code": 429,
+                        "body": '{"error":{"status":"RESOURCE_EXHAUSTED"}}',
+                    },
+                )
+            return {
+                "image_bytes": f"candidate-attempt-{self.attempt}".encode(),
+                "mime_type": "image/png",
+                "model": "gemini-3.1-flash-image",
+            }
+
+    client = QuotaLimitedClient()
+    waits = []
+
+    result = generate_shot_frame_candidates(
+        script="Script.",
+        actor_name="Actor",
+        scene_description="Room",
+        wardrobe_description="Sweater",
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"three-quarter"),
+        ],
+        location_reference=_reference("location", b"location"),
+        candidate_count=2,
+        llm_client=client,
+        sleep_fn=waits.append,
+        quota_retry_delay_seconds=65.0,
+    )
+
+    assert waits == [65.0]
+    assert len(client.image_calls) == 3
+    assert [candidate.image_bytes for candidate in result.candidates] == [
+        b"candidate-attempt-1",
+        b"candidate-attempt-3",
+    ]
 
 
 def test_generate_shot_frame_candidates_rejects_truncated_prompt_writer_output():
