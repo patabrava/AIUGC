@@ -1796,7 +1796,10 @@ def test_single_take_final_transcript_accepts_the_same_bounded_compound_asr_suff
 
 
 def test_sixteen_second_final_transcript_accepts_only_the_passed_take_consensus():
-    from app.features.shot_production.runner import _accept_final_transcript_consensus
+    from app.features.shot_production.runner import (
+        _accept_final_transcript_consensus,
+        _seam_word_counts_for_final_transcript,
+    )
 
     first_expected = [f"erste-{index}" for index in range(15)] + ["uhr", "räumen"]
     first_actual = [f"erste-{index}" for index in range(15)] + ["räumen"]
@@ -1842,6 +1845,10 @@ def test_sixteen_second_final_transcript_accepts_only_the_passed_take_consensus(
         acoustic_plan=object(),
         requested_duration_seconds=16.0,
     ) is True
+    assert _seam_word_counts_for_final_transcript(
+        takes,
+        consensus_passed=True,
+    ) == (16, 17)
 
     final_qa["actual_words"] = [*first_actual, "new-word", *second_actual[1:]]
     assert _accept_final_transcript_consensus(

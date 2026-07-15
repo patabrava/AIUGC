@@ -1911,6 +1911,21 @@ def _accept_final_transcript_consensus(
     )
 
 
+def _seam_word_counts_for_final_transcript(
+    ordered_takes: Sequence[Dict[str, Any]],
+    *,
+    consensus_passed: bool,
+) -> tuple[int, ...]:
+    if consensus_passed and len(ordered_takes) > 1:
+        actual_counts = tuple(
+            len((take.get("transcript_qa") or {}).get("actual_words") or ())
+            for take in ordered_takes
+        )
+        if all(count > 0 for count in actual_counts):
+            return actual_counts
+    return tuple(int(take["beat"]["word_count"]) for take in ordered_takes)
+
+
 @_manifest_locked
 def compose_and_caption(
     manifest_path: Path,
@@ -2144,7 +2159,10 @@ def compose_and_caption(
     else:
         seam_qa = evaluate_seam_gaps(
             final_transcript,
-            beat_word_counts=[take["beat"]["word_count"] for take in ordered],
+            beat_word_counts=_seam_word_counts_for_final_transcript(
+                ordered,
+                consensus_passed=consensus_passed,
+            ),
             max_gap_seconds=0.6,
         )
     payload["seam_qa"] = seam_qa
