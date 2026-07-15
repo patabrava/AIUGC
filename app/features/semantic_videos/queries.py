@@ -483,6 +483,42 @@ def resume_qa_review(
     )
 
 
+def apply_visual_remediation(
+    *,
+    run_id: str,
+    expected_revision: int,
+    plan_hash: str,
+    take_index: int,
+    expected_raw_sha256: str,
+    remediated_raw_uri: str,
+    remediated_raw_sha256: str,
+    transformation: Mapping[str, Any],
+    client=None,
+) -> dict[str, Any]:
+    if (
+        expected_revision < 0
+        or take_index < 0
+        or not str(plan_hash or "").strip()
+        or not isinstance(transformation, Mapping)
+    ):
+        raise ValidationError("Semantic video visual remediation contract is invalid.")
+    return _worker_rpc(
+        "apply_semantic_video_visual_remediation",
+        {
+            "p_run_id": str(run_id),
+            "p_expected_revision": int(expected_revision),
+            "p_plan_hash": str(plan_hash),
+            "p_take_index": int(take_index),
+            "p_expected_raw_sha256": str(expected_raw_sha256),
+            "p_remediated_raw_uri": str(remediated_raw_uri),
+            "p_remediated_raw_sha256": str(remediated_raw_sha256),
+            "p_transformation": dict(transformation),
+        },
+        operation="visual remediation",
+        client=client,
+    )
+
+
 def get_run(run_id: str, *, client=None, required: bool = True) -> Optional[dict[str, Any]]:
     response = (
         _client(client)

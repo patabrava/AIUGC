@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 MANUAL_MODE_MIGRATION = ROOT / "supabase/migrations/20260714000000_manual_semantic_ugc_mode.sql"
 QA_RESUME_MIGRATION = ROOT / "supabase/migrations/20260715000200_semantic_video_qa_resume.sql"
+VISUAL_REMEDIATION_MIGRATION = ROOT / "supabase/migrations/20260715000300_semantic_video_visual_remediation.sql"
 
 
 @pytest.fixture
@@ -798,3 +799,15 @@ def test_qa_resume_migration_reuses_only_checksum_verified_completed_takes():
     assert "latest.submission_state not in ('completed', 'qa_failed')" in sql
     assert "latest.raw_artifact_sha256 !~ '^[0-9a-f]{64}$'" in sql
     assert "set submission_state = 'completed'" in sql
+
+
+def test_visual_remediation_migration_replaces_no_paid_request_and_invalidates_visual_cache():
+    sql = VISUAL_REMEDIATION_MIGRATION.read_text().lower()
+
+    assert "apply_semantic_video_visual_remediation" in sql
+    assert "failure_envelope ->> 'stage' is distinct from 'identity_qa'" in sql
+    assert "set raw_artifact_uri = p_remediated_raw_uri" in sql
+    assert "- 'contact_sheet' - 'visual_qa'" in sql
+    assert "set stage = 'identity_qa'" in sql
+    assert "insert into public.semantic_video_takes" not in sql
+    assert "reserved_submission_count" not in sql
