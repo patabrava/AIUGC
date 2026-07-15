@@ -347,6 +347,38 @@ def test_eight_second_fallback_packs_two_short_facts_into_one_take():
     assert result.provenance["source"] == "fallback"
 
 
+def test_eight_second_fallback_uses_complete_opening_sentence_from_saved_script():
+    class _UnavailableLLM:
+        def generate_gemini_text(self, **_kwargs):
+            raise ThirdPartyError("provider unavailable")
+
+    saved_script = (
+        "Dein Handy ist fast leer, doch jede öffentliche Steckdose ist zu hoch für dich? "
+        "Das ist ein bekanntes Dilemma für Rollstuhlnutzer:innen. Alternative "
+        "Notstromversorgung ist da entscheidend. Wusstest du, dass USB Anschlüsse an "
+        "Hotel Fernsehern oft nur 2,5 Watt liefern? Sogar aktuelle iPhones können seit "
+        "2025 nur kabelgebunden mit 4,5 Watt laden."
+    )
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Alternative Notstromversorgung",
+        cta="",
+        facts=[saved_script],
+        requested_duration_seconds=8,
+        llm_client=_UnavailableLLM(),
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=8,
+    )
+
+    assert validation.word_count == 14
+    assert "Dein Handy ist fast leer doch jede öffentliche Steckdose ist zu hoch für dich" in result.script
+    assert "Quellenauszug" not in result.script
+    assert result.provenance["source"] == "fallback"
+
+
 @pytest.mark.parametrize("provider_available", [True, False])
 def test_result_preserves_research_provenance_and_source_urls(provider_available):
     valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
@@ -562,8 +594,11 @@ def test_generic_provider_fallback_is_contract_safe_for_fact_length_matrix(
     sentences = _sentences(result.script)
     source_words = re.findall(r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß-]+", fact)
     maximum_block_words = (
-        contract.minimum_words + contract.minimum_take_count - 1
-    ) // contract.minimum_take_count
+        contract.maximum_words
+        if contract.minimum_take_count == 1
+        else (contract.minimum_words + contract.minimum_take_count - 1)
+        // contract.minimum_take_count
+    )
 
     assert contract.minimum_words <= script_word_count(result.script) <= contract.maximum_words
     assert len(plan_editorial_beats(result.script)) == contract.minimum_take_count

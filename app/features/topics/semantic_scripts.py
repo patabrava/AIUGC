@@ -693,6 +693,32 @@ def _fallback_source_unit_word_count(unit: _FallbackSourceUnit) -> int:
     ) + max(0, len(unit.quotes) - 1)
 
 
+def _single_take_complete_source_unit(
+    facts: Sequence[str],
+    *,
+    minimum_words: int,
+    maximum_words: int,
+) -> Optional[_FallbackSourceUnit]:
+    for fact in facts:
+        matches = list(_WORD_PATTERN.finditer(fact))
+        words = [match.group(0) for match in matches]
+        segment_start = 0
+        for index, match in enumerate(matches):
+            next_start = matches[index + 1].start() if index + 1 < len(matches) else len(fact)
+            separator = fact[match.end() : next_start]
+            segment_end = index + 1
+            if re.search(r"[.!?]", separator):
+                segment_words = words[segment_start:segment_end]
+                if minimum_words <= len(segment_words) <= maximum_words:
+                    return _FallbackSourceUnit(
+                        quotes=(_FallbackSourceQuote(words=tuple(segment_words)),)
+                    )
+                segment_start = segment_end
+            elif ":" in separator and segment_start == 0:
+                segment_start = segment_end
+    return None
+
+
 def _pack_whole_fallback_facts(
     facts: Sequence[Sequence[str]],
     *,
@@ -1009,11 +1035,6 @@ def _build_fallback_script(
     contract: SemanticDurationContract,
 ) -> str:
     block_count = contract.minimum_take_count
-    base_words, extra_words = divmod(contract.minimum_words, block_count)
-    block_word_counts = [
-        base_words + (1 if index < extra_words else 0)
-        for index in range(block_count)
-    ]
     source_values: Sequence[str] = facts or tuple(
         value
         for value in (
@@ -1022,6 +1043,31 @@ def _build_fallback_script(
         )
         if value
     )
+    if block_count == 1:
+        complete_source = _single_take_complete_source_unit(
+            source_values,
+            minimum_words=contract.minimum_words,
+            maximum_words=contract.maximum_words,
+        )
+        if complete_source is not None:
+            target_words = _fallback_source_unit_word_count(complete_source)
+            script = _compose_fallback_source_sentence(
+                index=0,
+                target_words=target_words,
+                statement=complete_source,
+            )
+            validate_semantic_script(
+                script,
+                requested_duration_seconds=contract.requested_duration_seconds,
+                maximum_seconds=contract.maximum_duration_seconds,
+            )
+            return script
+
+    base_words, extra_words = divmod(contract.minimum_words, block_count)
+    block_word_counts = [
+        base_words + (1 if index < extra_words else 0)
+        for index in range(block_count)
+    ]
     fact_word_sets = _fallback_fact_statements(
         source_values,
         block_word_counts=block_word_counts,
