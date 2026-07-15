@@ -23,6 +23,7 @@ from app.features.characters.actor_identity import (
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 MANUAL_MODE_MIGRATION = ROOT / "supabase/migrations/20260714000000_manual_semantic_ugc_mode.sql"
+QA_RESUME_MIGRATION = ROOT / "supabase/migrations/20260715000200_semantic_video_qa_resume.sql"
 
 
 @pytest.fixture
@@ -786,3 +787,14 @@ def test_manual_semantic_migration_extends_mode_and_duration_authority_contract(
     assert "batches_duration_authority_check" in sql
     assert "batches_semantic_pipeline_route_check" in sql
     assert "creation_mode in ('semantic_ugc', 'manual_semantic_ugc')" in sql
+
+
+def test_qa_resume_migration_reuses_only_checksum_verified_completed_takes():
+    sql = QA_RESUME_MIGRATION.read_text().lower()
+
+    assert "resume_semantic_video_qa_review" in sql
+    assert "retry_approval_required" in sql
+    assert "resume_stage is distinct from 'transcript_qa'" in sql
+    assert "latest.submission_state not in ('completed', 'qa_failed')" in sql
+    assert "latest.raw_artifact_sha256 !~ '^[0-9a-f]{64}$'" in sql
+    assert "set submission_state = 'completed'" in sql

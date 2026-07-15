@@ -754,6 +754,39 @@ def test_take_transcription_records_real_word_windows_and_blocks_failed_take(tmp
     assert "stitch" not in failed
 
 
+def test_failed_stored_transcript_can_be_reevaluated_without_a_paid_retry(tmp_path):
+    from app.features.shot_production.runner import transcribe_and_validate_takes
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    payload["takes"][0]["beat"]["text"] = "Achte deshalb auf erreichbare Displays."
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    scripts = [take["beat"]["text"] for take in payload["takes"]]
+    scripts[0] = "Völlig falscher Satz."
+
+    with pytest.raises(ValidationError, match="take indexes.*0"):
+        transcribe_and_validate_takes(manifest_path, _DeepgramByCall(scripts))
+
+    failed = _read(manifest_path)
+    numeric = _timed_transcript("8. deshalb auf erreichbare Displays.")
+    failed["takes"][0]["transcript"] = {
+        "full_text": numeric.full_text,
+        "words": [
+            {"word": word.word, "start": word.start, "end": word.end}
+            for word in numeric.words
+        ],
+    }
+    manifest_path.write_text(json.dumps(failed), encoding="utf-8")
+
+    deepgram = _DeepgramByCall([])
+    refreshed = transcribe_and_validate_takes(manifest_path, deepgram)
+
+    assert deepgram.calls == []
+    assert refreshed["takes"][0]["transcript_qa"]["passed"] is True
+    assert refreshed["takes"][0]["transcript_qa"]["word_error_rate"] == 0.0
+    assert refreshed["takes"][0]["trim_window"]["source"] == "deepgram_word_window"
+
+
 def test_take_timing_migration_invalidates_cached_audio_and_delivery_without_retranscribing(tmp_path):
     from app.features.shot_production.runner import transcribe_and_validate_takes
 

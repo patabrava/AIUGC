@@ -925,15 +925,13 @@ def transcribe_and_validate_takes(manifest_path: Path, deepgram_client: Any) -> 
                 or trim_window.get("source") != "deepgram_word_window"
             )
         )
-        if existing_qa and not needs_timing_migration:
-            if not existing_qa.get("passed"):
-                failed.append(take["index"])
+        if existing_qa.get("passed") and not needs_timing_migration:
             continue
         raw_path = Path(raw["path"])
         stored_transcript = take.get("transcript") or {}
         transcript = (
             _deserialize_transcript(stored_transcript)
-            if needs_timing_migration and stored_transcript
+            if (needs_timing_migration or existing_qa) and stored_transcript
             else deepgram_client.transcribe(
                 audio_bytes=raw_path.read_bytes(),
                 correlation_id=f"{_correlation_id(payload, take)}_transcript",

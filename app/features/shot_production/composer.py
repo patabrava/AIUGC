@@ -102,6 +102,10 @@ _GERMAN_STOPWORDS = frozenset(
     }
 )
 
+_GERMAN_ASR_NUMERIC_HOMOPHONES = {
+    "achte": frozenset({"8"}),
+}
+
 
 @dataclass(frozen=True)
 class TakeTranscriptQA:
@@ -130,12 +134,18 @@ def normalize_german_words(text: str) -> Tuple[str, ...]:
     return tuple(normalized_words)
 
 
+def _words_match(expected: str, actual: str) -> bool:
+    return expected == actual or actual in _GERMAN_ASR_NUMERIC_HOMOPHONES.get(
+        expected, frozenset()
+    )
+
+
 def _levenshtein_distance(expected: Sequence[str], actual: Sequence[str]) -> int:
     previous = list(range(len(actual) + 1))
     for expected_index, expected_word in enumerate(expected, start=1):
         current = [expected_index]
         for actual_index, actual_word in enumerate(actual, start=1):
-            substitution_cost = 0 if expected_word == actual_word else 1
+            substitution_cost = 0 if _words_match(expected_word, actual_word) else 1
             current.append(
                 min(
                     current[-1] + 1,
@@ -191,10 +201,14 @@ def evaluate_take_transcript(
     first_expected = expected_words[0] if expected_words else None
     last_expected = expected_words[-1] if expected_words else None
     first_indexes = [
-        index for index, word in enumerate(actual_words) if first_expected is not None and word == first_expected
+        index
+        for index, word in enumerate(actual_words)
+        if first_expected is not None and _words_match(first_expected, word)
     ]
     last_indexes = [
-        index for index, word in enumerate(actual_words) if last_expected is not None and word == last_expected
+        index
+        for index, word in enumerate(actual_words)
+        if last_expected is not None and _words_match(last_expected, word)
     ]
     first_word_present = bool(first_indexes)
     last_word_present = bool(last_indexes)
@@ -213,14 +227,14 @@ def evaluate_take_transcript(
     first_word_start_seconds = None
     if first_expected is not None:
         for actual_word, source_word in zip(actual_words, source_words):
-            if actual_word == first_expected:
+            if _words_match(first_expected, actual_word):
                 first_word_start_seconds = _finite_non_negative_seconds(source_word.start)
                 break
 
     final_word_end_seconds = None
     if last_expected is not None:
         for actual_word, source_word in zip(reversed(actual_words), reversed(source_words)):
-            if actual_word == last_expected:
+            if _words_match(last_expected, actual_word):
                 final_word_end_seconds = _finite_non_negative_seconds(source_word.end)
                 break
 

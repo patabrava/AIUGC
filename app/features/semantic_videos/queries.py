@@ -462,6 +462,27 @@ def list_approvals(run_id: str, *, client=None) -> list[dict[str, Any]]:
     return _rows(response)
 
 
+def resume_qa_review(
+    *,
+    run_id: str,
+    expected_revision: int,
+    plan_hash: str,
+    client=None,
+) -> dict[str, Any]:
+    if expected_revision < 0 or not str(plan_hash or "").strip():
+        raise ValidationError("Semantic video QA resume requires a revision and plan hash.")
+    return _worker_rpc(
+        "resume_semantic_video_qa_review",
+        {
+            "p_run_id": str(run_id),
+            "p_expected_revision": int(expected_revision),
+            "p_plan_hash": str(plan_hash),
+        },
+        operation="QA review resume",
+        client=client,
+    )
+
+
 def get_run(run_id: str, *, client=None, required: bool = True) -> Optional[dict[str, Any]]:
     response = (
         _client(client)

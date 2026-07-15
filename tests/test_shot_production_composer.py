@@ -122,6 +122,25 @@ def test_one_substitution_contributes_one_word_error():
     assert evaluate_take_transcript(beat, transcript, other_beats=[], max_wer=0.25).passed
 
 
+def test_deepgram_numeric_formatting_does_not_reject_german_achte():
+    beat = _beat(0, "Achte deshalb auf erreichbare Displays.")
+    transcript = _transcript(
+        ("8.", 0.08, 0.40),
+        ("deshalb", 0.40, 0.72),
+        ("auf", 0.72, 1.04),
+        ("erreichbare", 1.04, 1.54),
+        ("Displays", 1.76, 2.26),
+    )
+
+    qa = evaluate_take_transcript(beat, transcript, other_beats=[])
+
+    assert qa.passed is True
+    assert qa.word_error_rate == 0.0
+    assert qa.first_word_present is True
+    assert qa.first_word_start_seconds == 0.08
+    assert qa.actual_words[0] == "8"
+
+
 @pytest.mark.parametrize(
     ("words", "missing_reason", "first_present", "last_present"),
     [
