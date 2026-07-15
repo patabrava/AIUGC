@@ -247,6 +247,31 @@ def reclaim_candidate_reservation(
     )
 
 
+def release_candidate_reservation(
+    *,
+    run_id: str,
+    expected_revision: int,
+    reservation_token: str,
+    client=None,
+) -> dict[str, Any]:
+    if (
+        expected_revision < 0
+        or not str(run_id or "").strip()
+        or not str(reservation_token or "").strip()
+    ):
+        raise ValidationError("Semantic video candidate release contract is invalid.")
+    return _worker_rpc(
+        "release_semantic_video_candidate_reservation",
+        {
+            "p_run_id": str(run_id),
+            "p_expected_revision": int(expected_revision),
+            "p_reservation_token": str(reservation_token),
+        },
+        operation="candidate reservation release",
+        client=client,
+    )
+
+
 def finalize_candidate_generation(
     run_id: str,
     *,
@@ -926,6 +951,7 @@ __all__ = [
     "persist_worker_submission_intent",
     "persist_worker_submission_unknown",
     "release_worker_lease",
+    "release_candidate_reservation",
     "reclaim_candidate_reservation",
     "reuse_prior_attempts_for_qa_review",
     "require_worker_retry_approval",

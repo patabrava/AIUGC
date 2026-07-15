@@ -14,6 +14,7 @@ from fastapi import APIRouter, Request
 
 from app.adapters.storage_client import get_storage_client
 from app.core.errors import NotFoundError, StateTransitionError, SuccessResponse, ValidationError
+from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.core.video_profiles import script_word_count
 from app.features.shot_frames.service import (
@@ -34,6 +35,7 @@ from app.features.semantic_videos.queries import (
     load_semantic_video_context,
     persist_semantic_video_plan,
     reclaim_candidate_reservation,
+    release_candidate_reservation,
     reserve_candidate_generation,
 )
 from app.features.semantic_videos.schemas import (
@@ -57,6 +59,7 @@ from app.features.semantic_videos.service import compile_semantic_video_plan
 
 
 router = APIRouter(prefix="/semantic-videos/posts", tags=["semantic-videos"])
+logger = get_logger(__name__)
 
 
 def _canonical_json(value: Any) -> str:
@@ -383,15 +386,30 @@ def generate_candidates(
         reservation_token=reservation_token,
         reservation_seconds=1800,
     )
-    generated = generate_shot_frame_candidates(
-        script=script,
-        actor_name=str(actor.get("name") or "Semantic UGC actor"),
-        scene_description=str(reference.get("scene_description") or "Approved actor-free location reference."),
-        wardrobe_description=str(reference.get("wardrobe_description") or "Preserve wardrobe from actor reference Image 1."),
-        actor_references=[actor_front, actor_three_quarter],
-        location_reference=location,
-        candidate_count=payload.candidate_count,
-    )
+    try:
+        generated = generate_shot_frame_candidates(
+            script=script,
+            actor_name=str(actor.get("name") or "Semantic UGC actor"),
+            scene_description=str(reference.get("scene_description") or "Approved actor-free location reference."),
+            wardrobe_description=str(reference.get("wardrobe_description") or "Preserve wardrobe from actor reference Image 1."),
+            actor_references=[actor_front, actor_three_quarter],
+            location_reference=location,
+            candidate_count=payload.candidate_count,
+        )
+    except Exception:
+        try:
+            release_candidate_reservation(
+                run_id=str(reserved["id"]),
+                expected_revision=int(reserved["revision"]),
+                reservation_token=reservation_token,
+            )
+        except Exception as release_exc:  # noqa: BLE001
+            logger.exception(
+                "semantic_video_candidate_reservation_release_failed",
+                run_id=str(reserved.get("id") or ""),
+                error=str(release_exc),
+            )
+        raise
     if len(generated.candidates) != payload.candidate_count:
         raise StateTransitionError(
             "Semantic video candidate generation returned an unexpected candidate count.",

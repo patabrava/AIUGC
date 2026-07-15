@@ -35,6 +35,9 @@ CANDIDATE_RECLAIM_MIGRATION = (
 RECOVERY_COALESCE_FIX_MIGRATION = (
     ROOT / "supabase/migrations/20260715000700_semantic_video_recovery_coalesce_fix.sql"
 )
+CANDIDATE_RELEASE_MIGRATION = (
+    ROOT / "supabase/migrations/20260715000800_semantic_video_candidate_release.sql"
+)
 
 
 @pytest.fixture
@@ -855,6 +858,17 @@ def test_recovery_coalesce_fix_rewrites_both_exact_function_signatures():
     assert "pg_catalog.pg_get_functiondef" in sql
     assert "'pg_catalog.coalesce'" in sql
     assert "'coalesce'" in sql
+
+
+def test_candidate_release_migration_requires_the_exact_empty_reservation_token():
+    sql = CANDIDATE_RELEASE_MIGRATION.read_text().lower()
+
+    assert "release_semantic_video_candidate_reservation" in sql
+    assert "candidate_reservation_token is distinct from p_reservation_token" in sql
+    assert "jsonb_array_length" in sql
+    assert "candidate_reservation_owner = null" in sql
+    assert "candidate_reservation_token = null" in sql
+    assert "to service_role" in sql
 
 
 def test_visual_remediation_migration_replaces_no_paid_request_and_invalidates_visual_cache():
