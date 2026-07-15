@@ -288,6 +288,7 @@ def test_worker_persists_intent_before_each_provider_call_and_acceptance_immedia
     result = worker.tick("run-1")
 
     assert result.action == "submitted"
+    assert repo.events[0] == ("claim", "run-1", "worker-1", 1800)
     assert len(vertex.submit_calls) == 2
     assert all(call["sample_count"] == 1 for call in vertex.submit_calls)
     assert all(call["generate_audio"] is True for call in vertex.submit_calls)

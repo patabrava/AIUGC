@@ -29,7 +29,7 @@ from app.features.shot_production.shot_deck import derive_shot_deck
 
 logger = get_logger(__name__)
 DEFAULT_MAX_INFLIGHT = 2
-DEFAULT_LEASE_SECONDS = 300
+DEFAULT_LEASE_SECONDS = 1800
 EXECUTABLE_STAGES = frozenset(
     {
         "generating",
