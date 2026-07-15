@@ -75,13 +75,27 @@ def test_parse_frame_metrics_deduplicates_equal_ffprobe_timestamps():
     assert [frame.timestamp_seconds for frame in parsed] == [0.0, 0.016]
 
 
+def test_parse_frame_metrics_orders_out_of_order_ffprobe_timestamps():
+    parsed = parse_frame_metrics(
+        {
+            "frames": [
+                _frame(timestamp="0.016000"),
+                _frame(timestamp="0.000000"),
+                _frame(timestamp="0.032000"),
+            ]
+        }
+    )
+
+    assert [frame.timestamp_seconds for frame in parsed] == [0.0, 0.016, 0.032]
+
+
 @pytest.mark.parametrize(
     "payload",
     [
         {},
         {"frames": []},
         {"frames": [_frame(**{"lavfi.astats.1.RMS_level": "nan"})]},
-        {"frames": [_frame(), _frame(timestamp="0.150000")]},
+        {"frames": [_frame(timestamp="-0.010000")]},
         {"frames": [{"pts_time": "0.1", "tags": {}}]},
     ],
 )

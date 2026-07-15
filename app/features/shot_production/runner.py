@@ -1898,11 +1898,18 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
         raise ValidationError("Final stitched transcript QA failed.", {"reasons": list(final_qa.failure_reasons)})
 
-    seam_qa = evaluate_seam_gaps(
-        final_transcript,
-        beat_word_counts=[take["beat"]["word_count"] for take in ordered],
-        max_gap_seconds=0.6,
-    )
+    if len(ordered) == 1:
+        seam_qa = {
+            "status": "not_applicable",
+            "passed": True,
+            "gaps_seconds": [],
+        }
+    else:
+        seam_qa = evaluate_seam_gaps(
+            final_transcript,
+            beat_word_counts=[take["beat"]["word_count"] for take in ordered],
+            max_gap_seconds=0.6,
+        )
     payload["seam_qa"] = seam_qa
     _atomic_write_json(manifest_path, payload)
     if not seam_qa["passed"]:

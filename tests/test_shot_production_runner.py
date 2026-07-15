@@ -24,6 +24,10 @@ SCRIPT = (
     "Das zehrt an den Kräften."
 )
 
+SINGLE_TAKE_SCRIPT = (
+    "Ein kompakter Homelift schafft Barrierefreiheit auf kleinem Raum und lässt sich oft ohne großen Umbau zuhause nachrüsten."
+)
+
 FIFTY_SECOND_SCRIPT = " ".join(
     [
         "Viele Menschen merken im Alltag erst spät, wie viel Kraft kleine Barrieren jeden einzelnen Tag tatsächlich kosten.",
@@ -711,10 +715,19 @@ class _DeepgramByCall:
         return _timed_transcript(self.scripts[len(self.calls) - 1])
 
 
-def _manifest_with_raw_takes(tmp_path: Path) -> Path:
+def _manifest_with_raw_takes(
+    tmp_path: Path,
+    *,
+    script: str = SCRIPT,
+    target_length_tier: int = 16,
+) -> Path:
     from app.features.shot_production.runner import submit_pending_takes
 
-    manifest_path, _ = _initialize(tmp_path)
+    manifest_path, _ = _initialize(
+        tmp_path,
+        script=script,
+        target_length_tier=target_length_tier,
+    )
     submit_pending_takes(manifest_path, _SubmitClient(), max_inflight=4)
     payload = _read(manifest_path)
     raw_dir = manifest_path.parent / "raw"
@@ -1256,6 +1269,54 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
     assert Path(repaired["captioned_path"]).read_bytes() == b"captioned-video"
     repair_history = _read(manifest_path)["composition_history"]
     assert repair_history[-1]["reason"] == "automatic rebuild of invalid cached caption delivery"
+
+
+def test_compose_single_take_marks_seam_qa_not_applicable(tmp_path):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(
+        tmp_path,
+        script=SINGLE_TAKE_SCRIPT,
+        target_length_tier=8,
+    )
+    payload = _read(manifest_path)
+    take = payload["takes"][0]
+    take["transcript_qa"] = {
+        "passed": True,
+        "first_word_start_seconds": 0.2,
+        "final_word_end_seconds": 6.8,
+    }
+    take["trim_window"] = {
+        "start_seconds": 0.0,
+        "end_seconds": 7.25,
+        "source": "deepgram_word_window",
+    }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True, "status": "not_applicable"}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def caption_fn(**_kwargs):
+        output = manifest_path.parent / "single-take-captioned.mp4"
+        output.write_bytes(b"captioned")
+        return str(output)
+
+    compose_and_caption(
+        manifest_path,
+        _DeepgramByCall([SINGLE_TAKE_SCRIPT]),
+        stitch_fn=lambda **_kwargs: (
+            b"stitched-video",
+            {"stitch_final_duration_s": 8.0, "stitch_segment_count": 1},
+        ),
+        caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe("8.0"),
+    )
+
+    saved = _read(manifest_path)
+    assert saved["seam_qa"] == {
+        "status": "not_applicable",
+        "passed": True,
+        "gaps_seconds": [],
+    }
 
 
 def test_compose_rejects_legacy_trim_windows_from_direct_callers(tmp_path):

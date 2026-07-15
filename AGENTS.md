@@ -256,3 +256,4 @@ Rules that become generally useful across repos should later move into `bridgeco
 ## 10) Specific repo rules
 
 - Semantic UGC actor identity comes exclusively from the two ordered actor reference images; never require, snapshot, or inject a written character description into shot-frame or video generation.
+- Semantic UGC seam and acoustic continuity gates apply only to multi-take delivery; persist one-take gates as `not_applicable`, and normalize valid ffprobe frame evidence by timestamp before deduplication while still rejecting negative or non-finite timestamps.

@@ -120,19 +120,22 @@ def _dbfs_tag(tags: Dict[str, Any], key: str) -> float:
 def parse_frame_metrics(payload: Any) -> Tuple[AudioFrameMetrics, ...]:
     if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list) or not payload["frames"]:
         raise ValidationError("Acoustic frame analysis returned no frames.")
-    parsed = []
-    previous_timestamp: Optional[float] = None
+    ordered_frames = []
     for index, frame in enumerate(payload["frames"]):
         if not isinstance(frame, dict) or not isinstance(frame.get("tags"), dict):
             raise ValidationError("Acoustic frame evidence must contain frame tags.", {"frame": index})
         timestamp = _finite_tag(frame, "pts_time")
-        if timestamp < 0 or (
-            previous_timestamp is not None and timestamp < previous_timestamp
-        ):
+        if timestamp < 0:
             raise ValidationError(
-                "Acoustic frame timestamps must be non-negative and strictly increasing.",
+                "Acoustic frame timestamps must be non-negative.",
                 {"frame": index},
             )
+        ordered_frames.append((timestamp, index, frame))
+    ordered_frames.sort(key=lambda item: (item[0], item[1]))
+
+    parsed = []
+    previous_timestamp: Optional[float] = None
+    for timestamp, _index, frame in ordered_frames:
         if previous_timestamp is not None and math.isclose(
             timestamp, previous_timestamp, rel_tol=0.0, abs_tol=1e-9
         ):
