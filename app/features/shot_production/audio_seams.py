@@ -18,6 +18,7 @@ ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v1"
 _ANALYSIS_TIMEOUT_SECONDS = 120
 _MAX_SEAM_WORD_GAP_SECONDS = 0.320
 _DEFAULT_POST_WORD_CROSSFADE_GUARD_SECONDS = 0.100
+_MAX_ENCODER_PREROLL_SECONDS = 0.100
 _DIGITAL_SILENCE_DBFS = -120.0
 MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB = 12.0
 _PREFERRED_SEAM_ENERGY_DELTA_DB = 6.0
@@ -120,17 +121,22 @@ def _dbfs_tag(tags: Dict[str, Any], key: str) -> float:
 def parse_frame_metrics(payload: Any) -> Tuple[AudioFrameMetrics, ...]:
     if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list) or not payload["frames"]:
         raise ValidationError("Acoustic frame analysis returned no frames.")
-    ordered_frames = []
+    source_frames = []
     for index, frame in enumerate(payload["frames"]):
         if not isinstance(frame, dict) or not isinstance(frame.get("tags"), dict):
             raise ValidationError("Acoustic frame evidence must contain frame tags.", {"frame": index})
         timestamp = _finite_tag(frame, "pts_time")
-        if timestamp < 0:
+        if timestamp < -_MAX_ENCODER_PREROLL_SECONDS:
             raise ValidationError(
-                "Acoustic frame timestamps must be non-negative.",
-                {"frame": index},
+                "Acoustic frame timestamp exceeds the bounded encoder preroll.",
+                {"frame": index, "timestamp_seconds": timestamp},
             )
-        ordered_frames.append((timestamp, index, frame))
+        source_frames.append((timestamp, index, frame))
+    timestamp_offset = max(0.0, -min(item[0] for item in source_frames))
+    ordered_frames = [
+        (timestamp + timestamp_offset, index, frame)
+        for timestamp, index, frame in source_frames
+    ]
     ordered_frames.sort(key=lambda item: (item[0], item[1]))
 
     parsed = []

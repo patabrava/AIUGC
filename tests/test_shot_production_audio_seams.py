@@ -89,13 +89,29 @@ def test_parse_frame_metrics_orders_out_of_order_ffprobe_timestamps():
     assert [frame.timestamp_seconds for frame in parsed] == [0.0, 0.016, 0.032]
 
 
+def test_parse_frame_metrics_normalizes_bounded_negative_encoder_preroll():
+    parsed = parse_frame_metrics(
+        {
+            "frames": [
+                _frame(timestamp="-0.021333"),
+                _frame(timestamp="0.000000"),
+                _frame(timestamp="0.016000"),
+            ]
+        }
+    )
+
+    assert [frame.timestamp_seconds for frame in parsed] == pytest.approx(
+        [0.0, 0.021333, 0.037333]
+    )
+
+
 @pytest.mark.parametrize(
     "payload",
     [
         {},
         {"frames": []},
         {"frames": [_frame(**{"lavfi.astats.1.RMS_level": "nan"})]},
-        {"frames": [_frame(timestamp="-0.010000")]},
+        {"frames": [_frame(timestamp="-0.200000")]},
         {"frames": [{"pts_time": "0.1", "tags": {}}]},
     ],
 )
