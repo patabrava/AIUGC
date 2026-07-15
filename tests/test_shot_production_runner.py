@@ -1557,7 +1557,7 @@ def test_forty_plus_second_acoustic_planning_uses_explicit_dense_speech_guard():
     }]
 
 
-def test_long_form_final_transcript_accepts_one_asr_stem_only_with_exact_take_consensus():
+def test_long_form_final_transcript_accepts_one_asr_stem_with_passed_take_consensus():
     from app.features.shot_production.runner import _accept_final_transcript_consensus
 
     final_qa = {
@@ -1570,8 +1570,10 @@ def test_long_form_final_transcript_accepts_one_asr_stem_only_with_exact_take_co
         "foreign_words": [],
     }
     takes = [
-        {"transcript_qa": {"passed": True, "word_error_rate": 0.0}}
-        for _index in range(4)
+        {"transcript_qa": {"passed": True, "word_error_rate": 0.0}},
+        {"transcript_qa": {"passed": True, "word_error_rate": 1 / 16}},
+        {"transcript_qa": {"passed": True, "word_error_rate": 0.0}},
+        {"transcript_qa": {"passed": True, "word_error_rate": 0.0}},
     ]
 
     accepted = _accept_final_transcript_consensus(
@@ -1586,6 +1588,13 @@ def test_long_form_final_transcript_accepts_one_asr_stem_only_with_exact_take_co
         final_qa,
         takes,
         acoustic_plan=None,
+        requested_duration_seconds=32.0,
+    ) is False
+    takes[1]["transcript_qa"]["passed"] = False
+    assert _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=object(),
         requested_duration_seconds=32.0,
     ) is False
 

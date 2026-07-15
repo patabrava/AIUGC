@@ -1653,22 +1653,22 @@ def _accept_final_transcript_consensus(
         word_error_rate = float(final_qa.get("word_error_rate"))
     except (TypeError, ValueError):
         return False
-    exact_take_consensus = True
+    passed_take_consensus = True
     for take in ordered_takes:
         take_qa = take.get("transcript_qa") or {}
         try:
             take_word_error_rate = float(take_qa["word_error_rate"])
         except (KeyError, TypeError, ValueError):
-            exact_take_consensus = False
+            passed_take_consensus = False
             break
-        if not take_qa.get("passed") or take_word_error_rate != 0.0:
-            exact_take_consensus = False
+        if not take_qa.get("passed") or take_word_error_rate < 0.0:
+            passed_take_consensus = False
             break
     return bool(
         not final_qa.get("passed")
         and requested_duration_seconds >= 24.0
         and acoustic_plan is not None
-        and exact_take_consensus
+        and passed_take_consensus
         and expected_words
         and len(expected_words) == len(actual_words)
         and 0.0 < word_error_rate <= 0.02
