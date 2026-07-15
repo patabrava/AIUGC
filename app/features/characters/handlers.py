@@ -737,7 +737,6 @@ async def train_actor_identity(
 
     identity = character_queries.create_actor_identity(
         name=name,
-        character_description=description or None,
         provider="magnific",
         provider_training_task_id=None,
         provider_lora_id=None,

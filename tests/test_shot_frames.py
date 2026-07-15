@@ -1,21 +1,11 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from inspect import signature
 
 import pytest
 
 from app.core.errors import ValidationError
-
-
-LONG_CHARACTER_DESCRIPTION = (
-    "38-year-old German woman with long, light brown hair with natural blonde highlights, straight with a slight "
-    "natural wave, parted slightly off-center to the left, falling softly around the shoulders and framing the face; "
-    "hazel, almond-shaped eyes with subtle crow's feet at the outer corners; naturally full, soft-arched eyebrows in "
-    "a light brown shade; a straight nose with a gently rounded tip; medium-full lips with a natural muted-pink tone; "
-    "a friendly oval face with a soft jawline and gently rounded chin; soft forehead lines that are faint at rest; "
-    "gentle laugh lines framing the mouth; warm light-medium skin tone with neutral undertones and smooth natural skin "
-    "texture; slim build with relaxed upright posture."
-)
 
 
 class FakeLLMClient:
@@ -60,11 +50,11 @@ def test_raw_camera_system_prompt_is_preserved_as_prompt_writer_instruction():
 def test_generate_shot_frame_candidates_uses_two_actor_refs_then_location_and_stops_before_veo():
     from app.features.shot_frames.service import generate_shot_frame_candidates
 
+    assert "character_description" not in signature(generate_shot_frame_candidates).parameters
     client = FakeLLMClient()
     result = generate_shot_frame_candidates(
         script="Als Rollstuhlfahrer kennst du das.",
         actor_name="AYRA Actor Long Character",
-        character_description=LONG_CHARACTER_DESCRIPTION,
         scene_description="Warm off-white living room with beige curtain and oak side table.",
         wardrobe_description="Cream knit sweater from actor reference Image 1.",
         actor_references=[
@@ -92,8 +82,8 @@ def test_generate_shot_frame_candidates_uses_two_actor_refs_then_location_and_st
     assert "Image 2" in client.image_calls[0]["prompt"]
     assert "Image 3" in client.image_calls[0]["prompt"]
     assert "blazer" in client.image_calls[0]["prompt"].lower()
-    assert LONG_CHARACTER_DESCRIPTION in client.text_calls[0]["prompt"]
-    assert LONG_CHARACTER_DESCRIPTION in client.image_calls[0]["prompt"]
+    assert "supplied identity references" in client.text_calls[0]["prompt"]
+    assert "sole and authoritative visual identity evidence" in client.image_calls[0]["prompt"]
     assert [candidate.image_bytes for candidate in result.candidates] == [b"candidate-1", b"candidate-2"]
 
 
@@ -107,7 +97,6 @@ def test_generate_shot_frame_candidates_rejects_truncated_prompt_writer_output()
         generate_shot_frame_candidates(
             script="Script",
             actor_name="Actor",
-            character_description=LONG_CHARACTER_DESCRIPTION,
             scene_description="Room",
             wardrobe_description="Sweater",
             actor_references=[
@@ -128,7 +117,6 @@ def test_generate_shot_frame_candidates_requires_exactly_two_actor_references(ac
         generate_shot_frame_candidates(
             script="Script",
             actor_name="Actor",
-            character_description=LONG_CHARACTER_DESCRIPTION,
             scene_description="Room",
             wardrobe_description="Sweater",
             actor_references=[_reference(f"actor_{index}", b"actor") for index in range(actor_count)],
@@ -157,7 +145,6 @@ def test_generate_shot_frame_candidates_rejects_swapped_or_wrong_reference_roles
         generate_shot_frame_candidates(
             script="Script",
             actor_name="Actor",
-            character_description=LONG_CHARACTER_DESCRIPTION,
             scene_description="Room",
             wardrobe_description="Sweater",
             actor_references=[
@@ -187,7 +174,6 @@ def test_generate_shot_frame_candidates_rejects_invalid_mime_or_empty_bytes(bad_
         generate_shot_frame_candidates(
             script="Script",
             actor_name="Actor",
-            character_description=LONG_CHARACTER_DESCRIPTION,
             scene_description="Room",
             wardrobe_description="Sweater",
             actor_references=[

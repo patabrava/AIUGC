@@ -305,12 +305,12 @@ def test_semantic_batch_requires_active_actor_with_two_usable_reference_images(m
     assert exc_info.value.status_code == 422
 
 
-def test_semantic_batch_persists_active_actor_with_exactly_two_ordered_images_without_lora(monkeypatch):
+def test_semantic_batch_persists_active_actor_with_exactly_two_ordered_images_without_description_or_lora(monkeypatch):
     captured = {}
     actor = SimpleNamespace(
         id="actor-semantic",
         name="Semantic Actor",
-        character_description="A precise immutable description of Semantic Actor.",
+        character_description=None,
         is_active=True,
         training_images=[
             " https://cdn.example.com/actor-a.png ",
@@ -338,37 +338,11 @@ def test_semantic_batch_persists_active_actor_with_exactly_two_ordered_images_wi
     assert captured["actor_identity_snapshot"] == {
         "actor_identity_id": "actor-semantic",
         "name": "Semantic Actor",
-        "character_description": "A precise immutable description of Semantic Actor.",
         "reference_image_urls": [
             "https://cdn.example.com/actor-a.png",
             "https://cdn.example.com/actor-b.png",
         ],
     }
-
-
-def test_semantic_batch_rejects_actor_without_character_description(monkeypatch):
-    actor = SimpleNamespace(
-        id="actor-semantic",
-        name="Semantic Actor",
-        character_description=None,
-        is_active=True,
-        training_images=[
-            "https://cdn.example.com/actor-a.png",
-            "https://cdn.example.com/actor-b.png",
-        ],
-    )
-    monkeypatch.setattr(batch_queries, "get_active_actor_identity", lambda: actor)
-
-    with pytest.raises(FlowForgeValidationError) as exc_info:
-        batch_queries.create_batch(
-            brand="AYRA",
-            post_type_counts=_post_counts(),
-            target_length_tier=None,
-            target_duration_seconds=50,
-            creation_mode="semantic_ugc",
-        )
-
-    assert "character description" in exc_info.value.message.lower()
 
 
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])

@@ -314,16 +314,6 @@ def generate_candidates(
     reference = deepcopy(context.get("reference") or {})
     actor_rows, location_row = _ordered_reference_rows(reference)
     actor = reference.get("actor") if isinstance(reference.get("actor"), dict) else {}
-    character_description = " ".join(
-        str(
-            actor.get("long_character_description")
-            or actor.get("character_description")
-            or actor.get("description")
-            or ""
-        ).split()
-    )
-    if not character_description:
-        raise ValidationError("Semantic video candidate generation requires the actor's long character description.")
 
     actor_front, actor_front_snapshot = _download_reference(actor_rows[0], role="actor_front", request=request)
     actor_three_quarter, actor_three_quarter_snapshot = _download_reference(
@@ -359,7 +349,6 @@ def generate_candidates(
     generated = generate_shot_frame_candidates(
         script=script,
         actor_name=str(actor.get("name") or "Semantic UGC actor"),
-        character_description=character_description,
         scene_description=str(reference.get("scene_description") or "Approved actor-free location reference."),
         wardrobe_description=str(reference.get("wardrobe_description") or "Preserve wardrobe from actor reference Image 1."),
         actor_references=[actor_front, actor_three_quarter],

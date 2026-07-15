@@ -255,4 +255,4 @@ Rules that become generally useful across repos should later move into `bridgeco
 
 ## 10) Specific repo rules
 
-- 
+- Semantic UGC actor identity comes exclusively from the two ordered actor reference images; never require, snapshot, or inject a written character description into shot-frame or video generation.

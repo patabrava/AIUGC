@@ -31,15 +31,6 @@ from app.features.shot_frames.service import (  # noqa: E402
 DEFAULT_SCRIPT = (
     "Als Rollstuhlfahrer kennst du das: Normgerechte Rampen sind oft ein versteckter Marathon für deine Kraft."
 )
-DEFAULT_CHARACTER_DESCRIPTION = (
-    "38-year-old German woman with long, light brown hair with natural blonde highlights, straight with a slight "
-    "natural wave, parted slightly off-center to the left, falling softly around the shoulders and framing the face; "
-    "hazel, almond-shaped eyes with subtle crow's feet at the outer corners; naturally full, soft-arched eyebrows in "
-    "a light brown shade; a straight nose with a gently rounded tip; medium-full lips with a natural muted-pink tone; "
-    "a friendly oval face with a soft jawline and gently rounded chin; soft forehead lines that are faint at rest; "
-    "gentle laugh lines framing the mouth; warm light-medium skin tone with neutral undertones and smooth natural skin "
-    "texture; slim build with relaxed upright posture."
-)
 DEFAULT_SCENE = (
     "The exact supplied home_living_room_advice_a room: warm off-white wall, beige curtain on the left, pale oak "
     "floor, narrow light-oak side table on actor-right, white mug, and terracotta rubber plant."
@@ -62,7 +53,6 @@ def main() -> int:
     parser.add_argument("--location", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--actor-name", default="AYRA Actor Long Character")
-    parser.add_argument("--character-description", default=DEFAULT_CHARACTER_DESCRIPTION)
     parser.add_argument("--script", default=DEFAULT_SCRIPT)
     parser.add_argument("--scene", default=DEFAULT_SCENE)
     parser.add_argument("--wardrobe", default="The cream knit sweater from Image 1; never the blazer from Image 2.")
@@ -77,7 +67,6 @@ def main() -> int:
     result = generate_shot_frame_candidates(
         script=args.script,
         actor_name=args.actor_name,
-        character_description=args.character_description,
         scene_description=args.scene,
         wardrobe_description=args.wardrobe,
         actor_references=[
@@ -115,7 +104,6 @@ def main() -> int:
         "veo_submitted": False,
         "script": args.script,
         "actor_name": args.actor_name,
-        "character_description": args.character_description,
         "scene_description": args.scene,
         "wardrobe_description": args.wardrobe,
         "prompt_writer_system_sha256": _sha256(RAW_CAMERA_SYSTEM_PROMPT_PATH),

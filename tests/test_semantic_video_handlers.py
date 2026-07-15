@@ -938,6 +938,7 @@ def test_candidate_endpoint_uses_exact_ordered_references_and_persists_all_bytes
     from app.main import app
 
     state["context"]["reference"].pop("master")
+    state["context"]["reference"]["actor"].pop("character_description", None)
     captured = {}
 
     def fake_generate(**kwargs):
@@ -973,6 +974,7 @@ def test_candidate_endpoint_uses_exact_ordered_references_and_persists_all_bytes
     ]
     assert captured["location_reference"].role == "location"
     assert captured["location_reference"].image_bytes == b"location-reference"
+    assert "character_description" not in captured
     assert len(storage.upload_calls) == 3
     candidates = response.json()["data"]["candidates"]
     assert [candidate["sha256"] for candidate in candidates] == [

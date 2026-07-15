@@ -9,6 +9,14 @@ from postgrest.exceptions import APIError
 
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import NotFoundError, StateTransitionError, ValidationError
+from app.features.characters.scene_reference import get_scene_bible
+from app.features.scenes.queries import require_canonical_scene_asset
+
+
+_SEMANTIC_DEFAULT_SCENE_KEY = "home_office_advice_a"
+_SEMANTIC_DEFAULT_WARDROBE = (
+    "Use the wardrobe visible in actor reference Image 1 as the sole wardrobe reference."
+)
 
 
 def _client(client=None):
@@ -58,6 +66,82 @@ def _transition_result(query, *, operation: str) -> dict[str, Any]:
     return dict(result)
 
 
+def _image_only_actor_snapshot(
+    batch: Mapping[str, Any],
+    reference: Mapping[str, Any],
+) -> dict[str, Any]:
+    raw_actor = reference.get("actor")
+    if not isinstance(raw_actor, Mapping):
+        raw_actor = batch.get("actor_identity_snapshot")
+    if not isinstance(raw_actor, Mapping):
+        raw_actor = {}
+    raw_actor_references = reference.get("actor_references")
+    actor_references = raw_actor_references if isinstance(raw_actor_references, list) else []
+    raw_urls = raw_actor.get("reference_image_urls")
+    urls = [str(url).strip() for url in raw_urls if str(url).strip()] if isinstance(raw_urls, list) else []
+    if not urls:
+        urls = [
+            str(row.get("storage_uri") or "").strip()
+            for row in actor_references
+            if isinstance(row, Mapping) and str(row.get("storage_uri") or "").strip()
+        ]
+    return {
+        "actor_identity_id": str(
+            raw_actor.get("actor_identity_id")
+            or reference.get("actor_identity_id")
+            or batch.get("actor_identity_id")
+            or ""
+        ).strip(),
+        "name": str(raw_actor.get("name") or "Semantic UGC actor").strip(),
+        "reference_image_urls": urls[:2],
+    }
+
+
+def _canonical_semantic_location() -> tuple[dict[str, Any], str]:
+    asset = require_canonical_scene_asset(
+        scene_key=_SEMANTIC_DEFAULT_SCENE_KEY,
+        aspect_ratio="9:16",
+        image_size="1K",
+    )
+    bible = get_scene_bible(asset.scene_key)
+    return (
+        {
+            "role": "location",
+            "storage_uri": asset.image_url,
+            "storage_key": asset.storage_key,
+            "mime_type": "image/png",
+            "scene_key": asset.scene_key,
+            "scene_bible_version": asset.scene_bible_version,
+        },
+        bible.scene_identity,
+    )
+
+
+def _complete_semantic_reference(
+    batch: Mapping[str, Any],
+    reference: Mapping[str, Any],
+) -> dict[str, Any]:
+    completed = deepcopy(dict(reference))
+    actor = _image_only_actor_snapshot(batch, completed)
+    completed["actor_identity_id"] = actor["actor_identity_id"]
+    completed["actor"] = actor
+    actor_rows = completed.get("actor_references")
+    if not isinstance(actor_rows, list) or not actor_rows:
+        completed["actor_references"] = [
+            {"role": role, "storage_uri": url, "mime_type": "image/png"}
+            for role, url in zip(
+                ("actor_front", "actor_three_quarter"),
+                actor["reference_image_urls"],
+            )
+        ]
+    if not isinstance(completed.get("location_reference"), dict):
+        location, scene_description = _canonical_semantic_location()
+        completed["location_reference"] = location
+        completed.setdefault("scene_description", scene_description)
+    completed.setdefault("wardrobe_description", _SEMANTIC_DEFAULT_WARDROBE)
+    return completed
+
+
 def load_semantic_video_context(post_id: str, *, client=None) -> dict[str, Any]:
     response = (
         _client(client)
@@ -96,6 +180,7 @@ def load_semantic_video_context(post_id: str, *, client=None) -> dict[str, Any]:
             ],
             "location_reference": deepcopy(location) if isinstance(location, dict) else None,
         }
+    reference = _complete_semantic_reference(batch, reference)
     master = seed_data.get("semantic_master_snapshot")
     if isinstance(master, dict):
         reference["master"] = deepcopy(master)

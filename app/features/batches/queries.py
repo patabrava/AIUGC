@@ -90,24 +90,10 @@ def _semantic_actor_snapshot_from_active(actor_identity) -> tuple[str, Dict[str,
             },
         )
 
-    character_description = " ".join(
-        str(getattr(actor_identity, "character_description", None) or "").split()
-    )
-    if not character_description:
-        raise ValidationError(
-            "Cannot create a Semantic UGC batch: the active ActorIdentity needs a character description.",
-            {
-                "creation_mode": "semantic_ugc",
-                "actor_identity_id": str(actor_identity.id),
-                "settings_url": "/settings/actor",
-            },
-        )
-
     actor_identity_id = str(actor_identity.id)
     return actor_identity_id, {
         "actor_identity_id": actor_identity_id,
         "name": str(actor_identity.name),
-        "character_description": character_description,
         "reference_image_urls": reference_urls[:2],
     }
 
@@ -125,25 +111,20 @@ def _validated_semantic_actor_snapshot(
     reference_urls = _usable_semantic_reference_urls(raw_reference_urls)
     snapshot_actor_id = str(snapshot.get("actor_identity_id") or "").strip()
     name = str(snapshot.get("name") or "").strip()
-    character_description = " ".join(
-        str(snapshot.get("character_description") or "").split()
-    )
     if (
         snapshot_actor_id != str(actor_identity_id)
         or not name
-        or not character_description
         or len(reference_urls) != 2
         or not isinstance(raw_reference_urls, list)
         or len(raw_reference_urls) != 2
     ):
         raise ValidationError(
-            "Semantic UGC actor snapshot must match the actor, contain a character description, and contain exactly two usable reference image URLs.",
+            "Semantic UGC actor snapshot must match the actor and contain exactly two usable reference image URLs.",
             {"creation_mode": "semantic_ugc", "actor_identity_id": str(actor_identity_id)},
         )
     return {
         "actor_identity_id": snapshot_actor_id,
         "name": name,
-        "character_description": character_description,
         "reference_image_urls": reference_urls,
     }
 

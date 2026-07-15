@@ -58,16 +58,15 @@ def _build_prompt_writer_brief(
     *,
     script: str,
     actor_name: str,
-    character_description: str,
     scene_description: str,
     wardrobe_description: str,
 ) -> str:
     return (
         "Write the final image-generation prompt for a vertical 9:16 AIUGC talking-head start frame. "
         f"The subject is the adult woman represented by the supplied identity references ({actor_name}); "
-        "preserve her recognizable facial structure, hair, age, proportions, and ordinary natural appearance. "
-        "Use this authoritative character description verbatim as the identity contract and preserve every listed "
-        f"attribute: {character_description} "
+        "the supplied actor images are the sole visual identity contract. Preserve the visible facial structure, hair, "
+        "age, proportions, and ordinary natural appearance shown in those images without supplementing or overriding "
+        "them with a written physical description. "
         f"Wardrobe: {wardrobe_description} "
         f"Location: {scene_description} "
         "Use a chest-up or medium close portrait so the face is identity-readable while the supplied room remains "
@@ -78,7 +77,7 @@ def _build_prompt_writer_brief(
     )
 
 
-def _build_composition_prompt(*, prompt_writer_output: str, character_description: str) -> str:
+def _build_composition_prompt(*, prompt_writer_output: str) -> str:
     return (
         "Create one new vertical image using all three supplied images with these fixed roles. "
         "Image 1 is the PRIMARY ACTOR IDENTITY reference and the cream knit sweater wardrobe reference. "
@@ -88,9 +87,8 @@ def _build_composition_prompt(*, prompt_writer_output: str, character_descriptio
         "plant, muted palette, and natural daylight. Place exactly one person—the same adult woman from Images 1 and 2—"
         "inside the room from Image 3. Do not average her into a new face, change her apparent age, change her hair, add "
         "another person, invent a wheelchair, redesign the room, add signage, add subtitles, or add readable text. "
-        "The two actor images remain the primary visual identity evidence. Use this exact long character description to "
-        "disambiguate and lock the visible attributes without inventing a different person: "
-        f"{character_description} "
+        "Images 1 and 2 are the sole and authoritative visual identity evidence. Resolve every visible identity attribute "
+        "from those images only; do not infer identity from the actor name or any written physical description. "
         "The output must be a usable opening frame for Veo 3.1: 9:16, chest-up AIUGC talking-head composition, face and "
         "hands anatomically plausible, enough background visible to lock the location, no motion blur, and no beauty polish. "
         "Apply this finished Raw Camera Casting Realism prompt:\n\n"
@@ -102,7 +100,6 @@ def generate_shot_frame_candidates(
     *,
     script: str,
     actor_name: str,
-    character_description: str,
     scene_description: str,
     wardrobe_description: str,
     actor_references: List[ShotFrameReference],
@@ -122,9 +119,6 @@ def generate_shot_frame_candidates(
             "Shot-frame candidate count must be between one and four.",
             {"candidate_count": candidate_count},
         )
-    if not character_description.strip():
-        raise ValidationError("Shot-frame generation requires a character description.")
-
     _validate_reference(actor_references[0], "actor_front")
     _validate_reference(actor_references[1], "actor_three_quarter")
     _validate_reference(location_reference, "location")
@@ -134,7 +128,6 @@ def generate_shot_frame_candidates(
         prompt=_build_prompt_writer_brief(
             script=script,
             actor_name=actor_name,
-            character_description=character_description.strip(),
             scene_description=scene_description,
             wardrobe_description=wardrobe_description,
         ),
@@ -151,10 +144,7 @@ def generate_shot_frame_candidates(
             {"output_length": len(prompt_writer_output), "output_tail": prompt_writer_output[-80:]},
         )
 
-    composition_prompt = _build_composition_prompt(
-        prompt_writer_output=prompt_writer_output,
-        character_description=character_description.strip(),
-    )
+    composition_prompt = _build_composition_prompt(prompt_writer_output=prompt_writer_output)
     ordered_inputs = [
         actor_references[0].as_gemini_input(),
         actor_references[1].as_gemini_input(),
