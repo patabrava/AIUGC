@@ -196,6 +196,66 @@ def test_approve_manual_character_script_auto_derives_duration_tier(monkeypatch)
     assert storage["posts"][0]["video_prompt_json"] is None
 
 
+def test_approve_semantic_script_refreshes_duration_contract_and_editorial_beats(monkeypatch):
+    script = " ".join(
+        [
+            "Ein Kassenschalter wirkt unscheinbar, doch seine Maße entscheiden darüber, ob du ihn selbstständig nutzen kannst.",
+            "Während Steharbeitsplätze etwa 96 Zentimeter hoch sind, brauchen Rollstuhlnutzende einen abgesenkten Bereich von höchstens 80 Zentimetern.",
+            "Fehlt dieser niedrigere Abschnitt, werden Bezahlen, Unterschreiben und Nachfragen anstrengend oder für manche Menschen sogar unmöglich.",
+            "Auch neue Zahlungsterminals müssen seit Juni 2025 barrierefrei bedienbar sein, damit dabei niemand fremde Hilfe braucht.",
+            "Achte deshalb auf erreichbare Displays, verständliche Rückmeldungen und genügend freie Fläche direkt vor dem eigentlichen Schalter.",
+            "Wenn du einen Ort planst, prüfe beide Arbeitshöhen im Entwurf und nicht erst nach dem Einbau.",
+            "Und wenn du unterwegs bist, melde unzugängliche Kassen konkret, damit Betreiber die Barrieren erkennen und beheben.",
+        ]
+    )
+    storage = {
+        "posts": [
+            {
+                "id": "post-semantic",
+                "batch_id": "batch-semantic",
+                "post_type": "value",
+                "seed_data": {
+                    "script": "Stale fallback.",
+                    "target_duration_seconds": 50,
+                    "semantic_planned_beats": [{"text": "Stale fallback."}],
+                    "script_review_status": "pending",
+                },
+                "video_prompt_json": {"stale": True},
+                "video_status": "pending",
+            }
+        ],
+        "batches": [
+            {
+                "id": "batch-semantic",
+                "creation_mode": "semantic_ugc",
+                "target_length_tier": None,
+                "target_duration_seconds": 50,
+            }
+        ],
+    }
+
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.put(
+        "/posts/post-semantic/script-review",
+        data={"action": "approved", "script_text": script},
+    )
+
+    assert response.status_code == 200, response.text
+    seed_data = storage["posts"][0]["seed_data"]
+    assert seed_data["script"] == script
+    assert seed_data["dialog_script"] == script
+    assert seed_data["script_review_status"] == "approved"
+    assert seed_data["semantic_script_word_count"] == 111
+    assert seed_data["semantic_minimum_take_count"] == 7
+    assert seed_data["semantic_planned_take_count"] == 7
+    assert len(seed_data["semantic_planned_beats"]) == 7
+    assert seed_data["semantic_duration_contract"]["requested_duration_seconds"] == 50
+    assert seed_data["semantic_duration_contract_hash"]
+    assert storage["posts"][0]["video_prompt_json"] is None
+
+
 def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):
     storage = {
         "posts": [

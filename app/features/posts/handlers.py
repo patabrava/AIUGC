@@ -31,7 +31,10 @@ from app.features.characters.actor_identity import (
     is_character_consistency_light_mode,
     is_character_consistency_mid_mode,
     is_manual_creation_mode,
+    is_semantic_ugc_mode,
 )
+from app.features.shot_production.planner import plan_editorial_beats
+from app.features.topics.semantic_scripts import validate_semantic_script
 from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.states import BatchState
@@ -163,18 +166,19 @@ def _load_batch_script_settings(batch_id: str, supabase_client) -> dict:
     try:
         response = (
             supabase_client.table("batches")
-            .select("id, creation_mode, target_length_tier")
+            .select("id, creation_mode, target_length_tier, target_duration_seconds")
             .eq("id", batch_id)
             .execute()
         )
     except Exception:
-        return {"creation_mode": "automated", "target_length_tier": None}
+        return {"creation_mode": "automated", "target_length_tier": None, "target_duration_seconds": None}
     if not response.data:
-        return {"creation_mode": "automated", "target_length_tier": None}
+        return {"creation_mode": "automated", "target_length_tier": None, "target_duration_seconds": None}
     row = response.data[0] or {}
     return {
         "creation_mode": str(row.get("creation_mode") or "automated"),
         "target_length_tier": row.get("target_length_tier"),
+        "target_duration_seconds": row.get("target_duration_seconds"),
     }
 
 
@@ -189,6 +193,7 @@ def _apply_script_text_update(
 ) -> dict:
     batch_settings = _load_batch_script_settings(post["batch_id"], supabase_client)
     batch_creation_mode = batch_settings["creation_mode"]
+    is_semantic_batch = is_semantic_ugc_mode(batch_creation_mode)
     seed_data["script"] = script_text
     seed_data["script_review_status"] = "pending"
     seed_data.pop("video_excluded", None)
@@ -205,12 +210,72 @@ def _apply_script_text_update(
         seed_data["post_type"] = resolved_post_type
         seed_data["manual_post_type"] = resolved_post_type
 
+    if is_semantic_batch:
+        requested_duration_seconds = (
+            batch_settings.get("target_duration_seconds")
+            or seed_data.get("target_duration_seconds")
+        )
+        try:
+            validation = validate_semantic_script(
+                script_text,
+                requested_duration_seconds=int(requested_duration_seconds),
+            )
+        except (TypeError, ValueError) as exc:
+            seed_data.pop("semantic_planned_beats", None)
+            seed_data.pop("semantic_planned_take_count", None)
+            if require_valid_duration:
+                raise ValidationError(
+                    "Semantic UGC script does not satisfy its duration contract.",
+                    {
+                        "post_id": post.get("id"),
+                        "target_duration_seconds": requested_duration_seconds,
+                        "error": str(exc),
+                    },
+                ) from exc
+        else:
+            contract = validation.contract
+            beats = plan_editorial_beats(script_text)
+            prior_provenance = seed_data.get("semantic_script_provenance")
+            prior_source = (
+                prior_provenance.get("source")
+                if isinstance(prior_provenance, dict)
+                else None
+            )
+            seed_data.update(
+                {
+                    "dialog_script": script_text,
+                    "estimated_duration_s": contract.requested_duration_seconds,
+                    "target_duration_seconds": contract.requested_duration_seconds,
+                    "semantic_duration_contract": contract.as_dict(),
+                    "semantic_duration_contract_hash": contract.contract_hash,
+                    "semantic_script_word_count": validation.word_count,
+                    "semantic_minimum_take_count": contract.minimum_take_count,
+                    "semantic_planned_take_count": validation.planned_take_count,
+                    "semantic_planned_beats": [
+                        {
+                            "index": beat.index,
+                            "text": beat.text,
+                            "word_count": beat.word_count,
+                            "estimated_speech_seconds": beat.estimated_speech_seconds,
+                            "provider_duration_seconds": beat.provider_duration_seconds,
+                        }
+                        for beat in beats
+                    ],
+                    "semantic_script_provenance": {
+                        **(prior_provenance if isinstance(prior_provenance, dict) else {}),
+                        "source": "operator_override",
+                        "previous_source": prior_source,
+                    },
+                }
+            )
+            seed_data.pop("semantic_take_count_exception", None)
+
     target_length_tier = (
         resolve_manual_target_length_tier(seed_data)
         if is_manual_batch
         else batch_settings.get("target_length_tier") or seed_data.get("target_length_tier")
     )
-    if target_length_tier and resolved_post_type:
+    if target_length_tier and resolved_post_type and not is_semantic_batch:
         try:
             contract = validate_script_duration_contract(
                 script=script_text,
