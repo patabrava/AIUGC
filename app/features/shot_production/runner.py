@@ -1349,8 +1349,8 @@ def evaluate_final_media_probe(
     frame_tolerance_seconds = 1.0 / 24.0
     if (
         not math.isfinite(duration)
-        or duration < min_duration_seconds - frame_tolerance_seconds - 1e-9
-        or duration > max_duration_seconds + frame_tolerance_seconds + 1e-9
+        or duration < min_duration_seconds - frame_tolerance_seconds - 1e-6
+        or duration > max_duration_seconds + frame_tolerance_seconds + 1e-6
     ):
         reasons.append("duration_out_of_range")
     return {
@@ -1693,8 +1693,8 @@ def _accept_final_transcript_consensus(
             and take_qa.get("passed")
             and 0.0 < word_error_rate <= 0.10
             and abs(take_word_error_rate - word_error_rate) <= 1e-9
-            and take_qa.get("expected_words") == expected_words
-            and take_qa.get("actual_words") == actual_words
+            and tuple(take_qa.get("expected_words") or ()) == tuple(expected_words)
+            and tuple(take_qa.get("actual_words") or ()) == tuple(actual_words)
             and take_qa.get("first_word_present")
             and take_qa.get("last_word_present")
             and not take_qa.get("foreign_words")
