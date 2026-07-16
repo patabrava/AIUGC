@@ -7,20 +7,18 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
 import json
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from fastapi import APIRouter, Request
 
 from app.adapters.storage_client import get_storage_client
 from app.core.errors import NotFoundError, StateTransitionError, SuccessResponse, ValidationError
-from app.core.logging import get_logger
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.core.video_profiles import script_word_count
 from app.features.shot_frames.service import (
     ShotFrameReference,
-    generate_shot_frame_candidates,
-    load_raw_camera_system_prompt,
 )
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.semantic_videos.queries import (
@@ -60,6 +58,11 @@ from app.features.semantic_videos.service import compile_semantic_video_plan
 
 router = APIRouter(prefix="/semantic-videos/posts", tags=["semantic-videos"])
 logger = get_logger(__name__)
+
+_CANONICAL_ACTOR_PROVIDER = "canonical-actor-reference/v1"
+_CANONICAL_ACTOR_AUDIT_TEXT = (
+    "Canonical actor front reference passthrough; no image synthesis performed."
+)
 
 
 def _canonical_json(value: Any) -> str:
@@ -192,6 +195,62 @@ def _ordered_reference_rows(reference: dict[str, Any]) -> tuple[list[dict[str, A
         if not str(row.get("storage_uri") or "").strip():
             raise ValidationError("Semantic video references require durable storage URIs.")
     return [dict(row) for row in actor_rows], dict(location)
+
+
+def _canonical_actor_candidates(actor_front: Mapping[str, Any]) -> list[dict[str, Any]]:
+    required = ("storage_uri", "mime_type", "byte_length", "sha256")
+    missing = [field for field in required if actor_front.get(field) in (None, "")]
+    if missing:
+        raise ValidationError(
+            "Canonical actor master requires verified front-reference metadata.",
+            {"missing_fields": missing},
+        )
+    base = {
+        "storage_uri": str(actor_front["storage_uri"]),
+        "storage_key": actor_front.get("storage_key"),
+        "mime_type": str(actor_front["mime_type"]),
+        "byte_length": int(actor_front["byte_length"]),
+        "sha256": str(actor_front["sha256"]).lower(),
+        "provider_model": _CANONICAL_ACTOR_PROVIDER,
+    }
+    return [{"index": index, **base} for index in range(1, 4)]
+
+
+def _assert_canonical_actor_master(
+    *,
+    reference_snapshot: Mapping[str, Any],
+    master_snapshot: Mapping[str, Any],
+) -> None:
+    actor_rows, _location = _ordered_reference_rows(dict(reference_snapshot))
+    canonical = actor_rows[0]
+    comparisons = {
+        "storage_uri": (
+            str(canonical.get("storage_uri") or ""),
+            str(master_snapshot.get("storage_uri") or ""),
+        ),
+        "mime_type": (
+            str(canonical.get("mime_type") or "image/png").lower(),
+            str(master_snapshot.get("mime_type") or "image/png").lower(),
+        ),
+        "byte_length": (
+            int(canonical.get("byte_length") or -1),
+            int(master_snapshot.get("byte_length") or -1),
+        ),
+        "sha256": (
+            str(canonical.get("sha256") or "").lower(),
+            str(master_snapshot.get("sha256") or "").lower(),
+        ),
+    }
+    mismatches = {
+        field: {"canonical": canonical_value, "master": master_value}
+        for field, (canonical_value, master_value) in comparisons.items()
+        if canonical_value != master_value
+    }
+    if mismatches:
+        raise ValidationError(
+            "Semantic video master does not match the canonical actor reference.",
+            {"mismatches": mismatches, "paid_provider_work_approved": False},
+        )
 
 
 def _download_reference(row: dict[str, Any], *, role: str, request: Request) -> tuple[ShotFrameReference, dict[str, Any]]:
@@ -350,18 +409,21 @@ def generate_candidates(
                 effective_expected_revision = int(existing["revision"])
 
     context = load_semantic_video_context(post_id)
-    script, _script_snapshot = _approved_script(context["post"])
+    _script, _script_snapshot = _approved_script(context["post"])
     reference = deepcopy(context.get("reference") or {})
     actor_rows, location_row = _ordered_reference_rows(reference)
-    actor = reference.get("actor") if isinstance(reference.get("actor"), dict) else {}
 
-    actor_front, actor_front_snapshot = _download_reference(actor_rows[0], role="actor_front", request=request)
-    actor_three_quarter, actor_three_quarter_snapshot = _download_reference(
+    _actor_front, actor_front_snapshot = _download_reference(
+        actor_rows[0], role="actor_front", request=request
+    )
+    _actor_three_quarter, actor_three_quarter_snapshot = _download_reference(
         actor_rows[1],
         role="actor_three_quarter",
         request=request,
     )
-    location, location_snapshot = _download_reference(location_row, role="location", request=request)
+    _location, location_snapshot = _download_reference(
+        location_row, role="location", request=request
+    )
     persisted_reference = {
         **reference,
         "actor_references": [actor_front_snapshot, actor_three_quarter_snapshot],
@@ -386,21 +448,33 @@ def generate_candidates(
         reservation_token=reservation_token,
         reservation_seconds=1800,
     )
+    candidates = _canonical_actor_candidates(actor_front_snapshot)
+    master_snapshot = {
+        "candidates": candidates,
+        "prompt_writer_system_prompt": _CANONICAL_ACTOR_AUDIT_TEXT,
+        "prompt_writer_system_prompt_sha256": sha256(
+            _CANONICAL_ACTOR_AUDIT_TEXT.encode("utf-8")
+        ).hexdigest(),
+        "prompt_writer_output": _CANONICAL_ACTOR_AUDIT_TEXT,
+        "composition_prompt": _CANONICAL_ACTOR_AUDIT_TEXT,
+    }
+    run_payload = _reference_run_payload(
+        context=context,
+        reference_snapshot=persisted_reference,
+        master_snapshot=master_snapshot,
+    )
     try:
-        generated = generate_shot_frame_candidates(
-            script=script,
-            actor_name=str(actor.get("name") or "Semantic UGC actor"),
-            scene_description=str(reference.get("scene_description") or "Approved actor-free location reference."),
-            wardrobe_description=str(reference.get("wardrobe_description") or "Preserve wardrobe from actor reference Image 1."),
-            actor_references=[actor_front, actor_three_quarter],
-            location_reference=location,
-            candidate_count=payload.candidate_count,
+        run = finalize_candidate_generation(
+            str(reserved["id"]),
+            reserved_revision=int(reserved.get("revision") or 0),
+            reservation_token=reservation_token,
+            run_updates=run_payload,
         )
     except Exception:
         try:
             release_candidate_reservation(
                 run_id=str(reserved["id"]),
-                expected_revision=int(reserved["revision"]),
+                expected_revision=int(reserved.get("revision") or 0),
                 reservation_token=reservation_token,
             )
         except Exception as release_exc:  # noqa: BLE001
@@ -410,53 +484,6 @@ def generate_candidates(
                 error=str(release_exc),
             )
         raise
-    if len(generated.candidates) != payload.candidate_count:
-        raise StateTransitionError(
-            "Semantic video candidate generation returned an unexpected candidate count.",
-            {"expected": payload.candidate_count, "actual": len(generated.candidates)},
-        )
-    correlation_id = str(getattr(request.state, "correlation_id", "semantic-candidates"))
-    candidates = []
-    for candidate in generated.candidates:
-        candidate_hash = sha256(candidate.image_bytes).hexdigest()
-        uploaded = get_storage_client().upload_image(
-            image_bytes=candidate.image_bytes,
-            file_name=f"semantic-{post_id}-candidate-{candidate.index}-{candidate_hash[:12]}.png",
-            correlation_id=correlation_id,
-            content_type=candidate.mime_type,
-        )
-        candidates.append(
-            {
-                "index": int(candidate.index),
-                "storage_uri": str(uploaded["url"]),
-                "storage_key": uploaded.get("storage_key"),
-                "mime_type": str(candidate.mime_type),
-                "byte_length": len(candidate.image_bytes),
-                "sha256": candidate_hash,
-                "provider_model": str(candidate.provider_model),
-            }
-        )
-    prompt_writer_system_prompt = load_raw_camera_system_prompt()
-    master_snapshot = {
-        "candidates": candidates,
-        "prompt_writer_system_prompt": prompt_writer_system_prompt,
-        "prompt_writer_system_prompt_sha256": sha256(
-            prompt_writer_system_prompt.encode("utf-8")
-        ).hexdigest(),
-        "prompt_writer_output": str(generated.prompt_writer_output),
-        "composition_prompt": str(generated.composition_prompt),
-    }
-    run_payload = _reference_run_payload(
-        context=context,
-        reference_snapshot=persisted_reference,
-        master_snapshot=master_snapshot,
-    )
-    run = finalize_candidate_generation(
-        str(reserved["id"]),
-        reserved_revision=int(reserved.get("revision") or 0),
-        reservation_token=reservation_token,
-        run_updates=run_payload,
-    )
     persisted_master = (
         run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
     )
@@ -503,6 +530,13 @@ def approve_master(post_id: str, payload: MasterApprovalRequest, request: Reques
             "Semantic video master candidate does not exist.",
             {"candidate_index": payload.candidate_index},
         )
+    reference_snapshot = run.get("reference_snapshot")
+    if not isinstance(reference_snapshot, dict) or not reference_snapshot:
+        raise ValidationError("Semantic video canonical actor reference is unavailable.")
+    _assert_canonical_actor_master(
+        reference_snapshot=reference_snapshot,
+        master_snapshot=selected,
+    )
     approved_by = str(getattr(request.state, "user_email", "unknown"))
     updated, approval = approve_master_transition(
         str(run["id"]),
@@ -748,6 +782,10 @@ def _assert_plan_sources_current(
     master = run.get("master_snapshot")
     if not isinstance(master, dict) or not str(master.get("storage_uri") or "").strip():
         raise StateTransitionError("Semantic video approved master is no longer available.")
+    _assert_canonical_actor_master(
+        reference_snapshot=persisted_reference,
+        master_snapshot=master,
+    )
     current_master = current_reference.get("master")
     if isinstance(current_master, dict) and str(current_master.get("storage_uri") or "").strip():
         master_fields_changed = (

@@ -256,6 +256,7 @@ Rules that become generally useful across repos should later move into `bridgeco
 ## 10) Specific repo rules
 
 - Semantic UGC actor identity comes exclusively from the two ordered actor reference images; never require, snapshot, or inject a written character description into shot-frame or video generation.
+- Semantic and Manual Semantic master preparation must pass the persisted `actor_front` reference through unchanged as the canonical actor master; never synthesize a replacement face, and fail closed before master or paid approval when its URI, MIME type, byte length, or SHA-256 differs.
 - Semantic UGC seam and acoustic continuity gates apply only to multi-take delivery; persist one-take gates as `not_applicable`, sort ffprobe frame evidence before deduplication, normalize bounded codec preroll to time zero, and reject materially negative or non-finite timestamps.
 - Semantic UGC deterministic duration fallbacks must prefer a complete source sentence that fits the delivery envelope; keep internal excerpt labels out of spoken copy so exact-transcript QA remains provider-speakable.
 - Semantic UGC must reclaim only expired empty candidate reservations, release a failed candidate request immediately with its exact reservation token, reuse checksum-addressed prior paid takes for QA-only repair without a provider submission, and allow the bounded 0.48s sentence pause needed for natural 16s acoustic delivery before requesting another paid retry.

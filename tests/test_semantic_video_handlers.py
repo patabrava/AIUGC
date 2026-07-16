@@ -79,7 +79,7 @@ class _FakeStorage:
     def __init__(self, master: bytes):
         self.master = master
         self.objects = {
-            "https://storage/front.png": b"front-reference",
+            "https://storage/front.png": master,
             "https://storage/three-quarter.png": b"three-quarter-reference",
             "https://storage/location.png": b"location-reference",
             "https://storage/master.png": master,
@@ -144,7 +144,8 @@ def _install_repository(monkeypatch):
                     "role": "actor_front",
                     "storage_uri": "https://storage/front.png",
                     "mime_type": "image/png",
-                    "sha256": sha256(b"front-reference").hexdigest(),
+                    "byte_length": len(master),
+                    "sha256": master_hash,
                 },
                 {
                     "role": "actor_three_quarter",
@@ -160,7 +161,7 @@ def _install_repository(monkeypatch):
                 "sha256": sha256(b"location-reference").hexdigest(),
             },
             "master": {
-                "storage_uri": "https://storage/master.png",
+                "storage_uri": "https://storage/front.png",
                 "mime_type": "image/png",
                 "byte_length": len(master),
                 "sha256": master_hash,
@@ -647,6 +648,31 @@ def test_initial_approval_uses_persisted_enriched_reference_after_unenriched_can
     assert response.json()["data"]["stage"] == "generating"
 
 
+def test_paid_approval_rejects_noncanonical_master_before_transition(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    plan = _create_plan_from_unenriched_candidate_flow(
+        monkeypatch,
+        client,
+        handlers,
+        state,
+        storage,
+    )
+    state["run"]["master_snapshot"]["sha256"] = "0" * 64
+    approval_count = len(state["approvals"])
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 2},
+    )
+
+    assert response.status_code == 422, response.text
+    assert len(state["approvals"]) == approval_count
+    assert state["run"]["stage"] == "awaiting_paid_approval"
+
+
 @pytest.mark.parametrize(
     ("role", "storage_uri", "mutated_bytes"),
     [
@@ -959,16 +985,101 @@ def test_candidate_endpoint_requires_exactly_three_candidates_before_provider_ca
     assert provider_calls == []
 
 
-def test_candidate_endpoint_uses_exact_ordered_references_and_persists_all_bytes(monkeypatch):
+@pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
+def test_candidate_endpoint_uses_front_reference_as_canonical_master_without_generation(
+    monkeypatch,
+    creation_mode,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["batch"]["creation_mode"] = creation_mode
+    state["context"]["reference"].pop("master")
+    generated = []
+
+    def fake_generate(**kwargs):
+        generated.append(kwargs)
+        return SimpleNamespace(
+            prompt_writer_output="Generated writer output.",
+            composition_prompt="Generated composition prompt.",
+            candidates=[
+                SimpleNamespace(
+                    index=index,
+                    image_bytes=f"synthetic-actor-{index}".encode(),
+                    mime_type="image/png",
+                    provider_model="gemini-3.1-flash-image",
+                )
+                for index in range(1, 4)
+            ],
+        )
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_shot_frame_candidates",
+        fake_generate,
+        raising=False,
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    candidates = response.json()["data"]["candidates"]
+    canonical_hash = sha256(storage.objects["https://storage/front.png"]).hexdigest()
+    assert generated == []
+    assert storage.upload_calls == []
+    assert {candidate["storage_uri"] for candidate in candidates} == {
+        "https://storage/front.png"
+    }
+    assert {candidate["sha256"] for candidate in candidates} == {canonical_hash}
+    assert {candidate["provider_model"] for candidate in candidates} == {
+        "canonical-actor-reference/v1"
+    }
+
+
+@pytest.mark.parametrize("field", ["storage_uri", "sha256", "byte_length"])
+def test_master_approval_rejects_candidate_that_differs_from_canonical_actor(
+    monkeypatch,
+    field,
+):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    client = TestClient(app, base_url="http://localhost")
+    generated = client.post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+    assert generated.status_code == 200, generated.text
+    candidate = state["run"]["master_snapshot"]["candidates"][0]
+    candidate[field] = {
+        "storage_uri": "https://storage/different-actor.png",
+        "sha256": "0" * 64,
+        "byte_length": int(candidate["byte_length"]) + 1,
+    }[field]
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/master-approve",
+        json={"candidate_index": 1, "expected_revision": 0},
+    )
+
+    assert response.status_code == 422, response.text
+    assert state["approvals"] == []
+
+
+def test_candidate_endpoint_verifies_ordered_references_and_persists_canonical_bytes(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
     from app.main import app
 
     state["context"]["reference"].pop("master")
     state["context"]["reference"]["actor"].pop("character_description", None)
-    captured = {}
+    provider_calls = []
 
     def fake_generate(**kwargs):
-        captured.update(kwargs)
+        provider_calls.append(kwargs)
         return SimpleNamespace(
             prompt_writer_output="Complete prompt writer result.",
             composition_prompt="Complete composition prompt.",
@@ -990,22 +1101,17 @@ def test_candidate_endpoint_uses_exact_ordered_references_and_persists_all_bytes
     )
 
     assert response.status_code == 200, response.text
-    assert [reference.role for reference in captured["actor_references"]] == [
-        "actor_front",
-        "actor_three_quarter",
+    assert provider_calls == []
+    assert [url for url, _correlation_id in storage.download_calls] == [
+        "https://storage/front.png",
+        "https://storage/three-quarter.png",
+        "https://storage/location.png",
     ]
-    assert [reference.image_bytes for reference in captured["actor_references"]] == [
-        b"front-reference",
-        b"three-quarter-reference",
-    ]
-    assert captured["location_reference"].role == "location"
-    assert captured["location_reference"].image_bytes == b"location-reference"
-    assert "character_description" not in captured
-    assert len(storage.upload_calls) == 3
+    assert storage.upload_calls == []
     candidates = response.json()["data"]["candidates"]
-    assert [candidate["sha256"] for candidate in candidates] == [
-        sha256(f"candidate-{index}".encode()).hexdigest() for index in range(1, 4)
-    ]
+    assert {candidate["sha256"] for candidate in candidates} == {
+        sha256(storage.master).hexdigest()
+    }
     assert state["run"]["stage"] == "awaiting_reference_approval"
     assert state["run"]["master_snapshot"]["candidates"] == candidates
 
@@ -1069,7 +1175,7 @@ def test_candidate_endpoint_returns_the_finalized_persisted_candidate_contract(m
     )
 
 
-def test_failed_candidate_attempt_cannot_trigger_a_second_paid_generation(monkeypatch):
+def test_candidate_refresh_never_triggers_paid_image_generation(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
     from app.main import app
 
@@ -1097,9 +1203,9 @@ def test_failed_candidate_attempt_cannot_trigger_a_second_paid_generation(monkey
         json={"candidate_count": 3, "expected_revision": 0},
     )
 
-    assert first.status_code == 500, first.text
+    assert first.status_code == 200, first.text
     assert second.status_code == 409, second.text
-    assert len(provider_calls) == 1
+    assert provider_calls == []
     assert storage.upload_calls == []
     assert state["run"]["candidate_reservation_token"] == state["candidate_reservation"]
 
@@ -1281,14 +1387,13 @@ def test_candidate_generation_reserves_before_concurrent_provider_effects(monkey
         responses = list(pool.map(lambda _index: submit(), range(2)))
 
     assert sorted(response.status_code for response in responses) == [200, 409]
-    assert len(provider_calls) == 1
-    assert len(storage.upload_calls) == 3
+    assert provider_calls == []
+    assert storage.upload_calls == []
 
 
 def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
-    from app.features.shot_frames.service import load_raw_camera_system_prompt
 
     state["context"]["reference"].pop("master")
     monkeypatch.setattr(
@@ -1306,14 +1411,14 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
     )
     client = TestClient(app, base_url="http://localhost")
     assert client.post("/semantic-videos/posts/post-1/candidates", json={"candidate_count": 3}).status_code == 200
-    system_prompt = load_raw_camera_system_prompt()
+    audit_text = "Canonical actor front reference passthrough; no image synthesis performed."
     candidate_master = state["run"]["master_snapshot"]
-    assert candidate_master["prompt_writer_system_prompt"] == system_prompt
+    assert candidate_master["prompt_writer_system_prompt"] == audit_text
     assert candidate_master["prompt_writer_system_prompt_sha256"] == sha256(
-        system_prompt.encode("utf-8")
+        audit_text.encode("utf-8")
     ).hexdigest()
-    assert candidate_master["prompt_writer_output"] == "Complete prompt writer result."
-    assert candidate_master["composition_prompt"] == "Complete composition prompt."
+    assert candidate_master["prompt_writer_output"] == audit_text
+    assert candidate_master["composition_prompt"] == audit_text
 
     response = client.post(
         "/semantic-videos/posts/post-1/master-approve",
@@ -1322,20 +1427,16 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
 
     assert response.status_code == 200, response.text
     assert state["run"]["master_snapshot"]["approved_candidate_index"] == 2
-    assert state["run"]["master_hash"] == sha256(b"candidate-2").hexdigest()
+    assert state["run"]["master_hash"] == sha256(_storage.master).hexdigest()
     assert state["run"]["stage"] == "awaiting_paid_approval"
-    assert state["run"]["master_snapshot"]["prompt_writer_system_prompt"] == system_prompt
+    assert state["run"]["master_snapshot"]["prompt_writer_system_prompt"] == audit_text
     assert state["run"]["master_snapshot"]["prompt_writer_system_prompt_sha256"] == sha256(
-        system_prompt.encode("utf-8")
+        audit_text.encode("utf-8")
     ).hexdigest()
-    assert state["run"]["master_snapshot"]["prompt_writer_output"] == (
-        "Complete prompt writer result."
-    )
-    assert state["run"]["master_snapshot"]["composition_prompt"] == (
-        "Complete composition prompt."
-    )
+    assert state["run"]["master_snapshot"]["prompt_writer_output"] == audit_text
+    assert state["run"]["master_snapshot"]["composition_prompt"] == audit_text
     assert state["approvals"][0]["approval_type"] == "reference"
-    assert state["approvals"][0]["contract_hash"] == sha256(b"candidate-2").hexdigest()
+    assert state["approvals"][0]["contract_hash"] == sha256(_storage.master).hexdigest()
 
 
 def test_master_approval_uses_one_atomic_transition(monkeypatch):
@@ -1344,16 +1445,17 @@ def test_master_approval_uses_one_atomic_transition(monkeypatch):
 
     candidate = {
         "index": 2,
-        "storage_uri": "https://storage/generated/candidate-2.png",
+        "storage_uri": "https://storage/front.png",
         "mime_type": "image/png",
-        "byte_length": len(b"candidate-2"),
-        "sha256": sha256(b"candidate-2").hexdigest(),
-        "provider_model": "gemini-3.1-flash-image",
+        "byte_length": len(_storage.master),
+        "sha256": sha256(_storage.master).hexdigest(),
+        "provider_model": "canonical-actor-reference/v1",
     }
     state["run"] = {
         "id": "run-1",
         "revision": 4,
         "stage": "awaiting_reference_approval",
+        "reference_snapshot": deepcopy(state["context"]["reference"]),
         "master_snapshot": {"candidates": [candidate]},
     }
     calls = []

@@ -30,6 +30,48 @@ from app.features.topics import handlers as topic_handlers
 from app.features.topics import queries as topic_queries
 
 
+def test_semantic_video_projection_deduplicates_canonical_compatibility_candidates(
+    monkeypatch,
+):
+    canonical = {
+        "storage_uri": "https://storage/front.png",
+        "mime_type": "image/png",
+        "byte_length": 373,
+        "sha256": "a" * 64,
+        "provider_model": "canonical-actor-reference/v1",
+    }
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: {
+            "id": "run-1",
+            "revision": 0,
+            "stage": "awaiting_reference_approval",
+            "master_snapshot": {
+                "candidates": [
+                    {"index": index, **canonical} for index in range(1, 4)
+                ]
+            },
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_attempts",
+        lambda _run_id: [],
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_approvals",
+        lambda _run_id: [],
+    )
+
+    projection = batch_handlers._build_semantic_video_post_projection(
+        {"id": "post-1", "topic_title": "Canonical actor"}
+    )
+
+    assert projection["candidates"] == [{"index": 1, **canonical}]
+
+
 def test_normalize_seed_data_tolerates_string_source():
     normalized = batch_handlers._normalize_seed_data(
         {

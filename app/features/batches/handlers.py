@@ -682,6 +682,11 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
     master = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
     candidates = master.get("candidates") if isinstance(master.get("candidates"), list) else []
     candidates = [dict(candidate) for candidate in candidates if isinstance(candidate, dict)]
+    unique_candidates: Dict[str, Dict[str, Any]] = {}
+    for candidate in candidates:
+        identity = str(candidate.get("sha256") or candidate.get("storage_uri") or "")
+        unique_candidates.setdefault(identity, candidate)
+    candidates = list(unique_candidates.values())
     plan = run.get("plan_snapshot") if isinstance(run.get("plan_snapshot"), dict) else {}
     artifact_manifest = (
         run.get("artifact_manifest") if isinstance(run.get("artifact_manifest"), dict) else {}

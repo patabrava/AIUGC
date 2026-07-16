@@ -89,7 +89,7 @@
 
         action(root, 'generate-candidates')?.addEventListener('click', (event) => {
             const expected = root.dataset.revision === '' ? null : revision();
-            runAction(root, event.currentTarget, 'candidates', {candidate_count: 3, expected_revision: expected}, 'Generating three stored candidates…');
+            runAction(root, event.currentTarget, 'candidates', {candidate_count: 3, expected_revision: expected}, 'Locking the approved actor reference as the canonical master…');
         });
         action(root, 'approve-master')?.addEventListener('click', (event) => {
             const selected = root.querySelector('input[type="radio"]:checked');

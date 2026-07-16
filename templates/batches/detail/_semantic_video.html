@@ -53,13 +53,13 @@
 
             {% if item.candidates %}
             <fieldset class="mt-5">
-                <legend class="text-sm font-bold text-[#1C2740]">Choose the approved master frame</legend>
+                <legend class="text-sm font-bold text-[#1C2740]">Canonical actor master</legend>
                 <div class="mt-3 grid gap-3 sm:grid-cols-3">
                     {% for candidate in item.candidates %}
                     <label class="cursor-pointer rounded-xl border border-[#1C2740]/15 p-2 transition focus-within:ring-2 focus-within:ring-[#006AAB]">
-                        <input class="sr-only" type="radio" name="semantic-master-{{ item.post_id }}" value="{{ candidate.index }}" aria-label="Select master candidate {{ candidate.index }}" {% if item.master_state == 'approved' and item.master_hash_is_current and candidate.index == item.approved_candidate_index %}checked{% endif %}>
-                        <img class="aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" src="{{ candidate.storage_uri }}" alt="Master candidate {{ candidate.index }} for {{ item.topic_title }}">
-                        <span class="mt-2 block text-center text-xs font-bold text-[#1C2740]">Candidate {{ candidate.index }}</span>
+                        <input class="sr-only" type="radio" name="semantic-master-{{ item.post_id }}" value="{{ candidate.index }}" aria-label="Select canonical actor master" {% if item.master_state == 'approved' and item.master_hash_is_current and candidate.index == item.approved_candidate_index %}checked{% endif %}>
+                        <img class="aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" src="{{ candidate.storage_uri }}" alt="Canonical actor master for {{ item.topic_title }}">
+                        <span class="mt-2 block text-center text-xs font-bold text-[#1C2740]">Approved actor reference</span>
                     </label>
                     {% endfor %}
                 </div>
@@ -67,7 +67,7 @@
             {% endif %}
 
             <div class="mt-5 flex flex-wrap gap-2">
-                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold" data-action="generate-candidates" {% if item.stage not in ['not_started', 'awaiting_reference_approval'] %}disabled{% endif %}>Generate 3 reference candidates</button>
+                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold" data-action="generate-candidates" {% if item.stage not in ['not_started', 'awaiting_reference_approval'] %}disabled{% endif %}>Load canonical actor master</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.candidates %}disabled{% endif %}>Approve selected master</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current %}disabled{% endif %}>Build free Veo plan</button>
                 <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve ${{ item.estimated_cost_usd }} generation</button>
