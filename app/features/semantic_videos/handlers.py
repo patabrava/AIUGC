@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
 import json
-from typing import Any, Mapping
+import math
+from typing import Any, Mapping, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Request
@@ -110,18 +111,125 @@ def _retry_contract_hash(
     return sha256(basis.encode("utf-8")).hexdigest()
 
 
+def _finite_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _native_duration_retry_action(value: Mapping[str, Any]) -> str:
+    qa_failure = value.get("qa_failure")
+    details = qa_failure.get("details") if isinstance(qa_failure, Mapping) else None
+    if not isinstance(details, Mapping):
+        return ""
+    recommended_action = " ".join(str(details.get("recommended_action") or "").split())
+    if str(details.get("failure_type") or "") != "native_duration_shortfall":
+        return recommended_action
+
+    retry_indexes = details.get("recommended_retry_take_indexes")
+    if not isinstance(retry_indexes, list) or not retry_indexes:
+        return recommended_action
+    try:
+        retry_index = int(retry_indexes[-1])
+    except (TypeError, ValueError):
+        return recommended_action
+
+    manifest = value.get("pipeline_manifest")
+    takes = manifest.get("takes") if isinstance(manifest, Mapping) else None
+    if not isinstance(takes, list):
+        return recommended_action
+    retry_take = next(
+        (
+            take
+            for take in takes
+            if isinstance(take, Mapping)
+            and str(take.get("index")) == str(retry_index)
+        ),
+        None,
+    )
+    if not isinstance(retry_take, Mapping):
+        return recommended_action
+
+    beat = retry_take.get("beat")
+    provider_duration = _finite_float(
+        beat.get("provider_duration_seconds") if isinstance(beat, Mapping) else None
+    ) or _finite_float(retry_take.get("duration_seconds"))
+    if provider_duration is None or provider_duration <= 0:
+        return recommended_action
+
+    latest_final_word = _finite_float(details.get("latest_safe_final_word_end_seconds"))
+    if latest_final_word is None:
+        transcript = retry_take.get("transcript_qa")
+        current_final_word = _finite_float(
+            transcript.get("final_word_end_seconds")
+            if isinstance(transcript, Mapping)
+            else None
+        )
+        required_seconds = _finite_float(details.get("required_seconds"))
+        available_by_take = details.get("available_seconds_by_take")
+        safe_by_take = details.get("cadence_safe_available_seconds_by_take")
+        raw_available = (
+            _finite_float(available_by_take.get(str(retry_index)))
+            if isinstance(available_by_take, Mapping)
+            else None
+        )
+        if (
+            current_final_word is None
+            or required_seconds is None
+            or raw_available is None
+            or not isinstance(safe_by_take, Mapping)
+        ):
+            return recommended_action
+        other_safe = sum(
+            safe
+            for index, raw_safe in safe_by_take.items()
+            if str(index) != str(retry_index)
+            and (safe := _finite_float(raw_safe)) is not None
+        )
+        post_word_guard = max(
+            0.0,
+            provider_duration - current_final_word - raw_available,
+        )
+        required_final_tail = max(0.0, required_seconds - other_safe)
+        latest_final_word = max(
+            0.0,
+            provider_duration - required_final_tail - post_word_guard,
+        )
+
+    latest_final_word = min(provider_duration, max(0.0, latest_final_word))
+    conservative_deadline = math.floor((latest_final_word + 1e-9) * 100.0) / 100.0
+    return (
+        "For this retry, this timing overrides any earlier final-word timing target. "
+        "Regenerate only the final take. Pace the exact spoken beat so its final word "
+        f"ends no later than {conservative_deadline:.2f} seconds, then continue natural "
+        f"silent motion and room tone through {provider_duration:.2f} seconds. Do not "
+        "add speech or freeze."
+    )
+
+
 def _retry_guidance_text(value: Any) -> str:
     if isinstance(value, str):
         text = value
     elif isinstance(value, dict):
-        text = next(
+        rpc_guidance = next(
             (
-                str(value[key])
+                " ".join(str(value[key]).split())
                 for key in ("guidance", "prompt_suffix", "instruction", "message")
                 if str(value.get(key) or "").strip()
             ),
             "",
         )
+        actionable = _native_duration_retry_action(value)
+        if rpc_guidance and actionable and rpc_guidance in actionable:
+            text = actionable
+        elif rpc_guidance and actionable and actionable not in rpc_guidance:
+            text = f"{rpc_guidance} Actionable correction: {actionable}"
+        else:
+            text = rpc_guidance or actionable
     else:
         text = ""
     text = " ".join(text.split())

@@ -108,11 +108,15 @@ def build_veo_take_prompt(
     beat: EditorialBeat,
     *,
     visual_contract: Optional[Mapping[str, Any]] = None,
+    is_final_take: bool = False,
 ) -> str:
     dialogue = str(beat.text or "").strip()
     if not dialogue:
         raise ValidationError("Veo take prompt requires a non-empty editorial beat.")
-    final_word_target = beat.provider_duration_seconds - 1.0
+    delivery_tail_seconds = (
+        1.5 if is_final_take and beat.provider_duration_seconds >= 6 else 1.0
+    )
+    final_word_target = beat.provider_duration_seconds - delivery_tail_seconds
     return (
         "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's exact identity, "
         "facial geometry, apparent age, hair, seated posture, camera position, and framing exactly as shown. "
@@ -186,6 +190,7 @@ def compile_veo_take_requests(
                 prompt=build_veo_take_prompt(
                     beat,
                     visual_contract=visual_contract,
+                    is_final_take=expected_index == len(beats) - 1,
                 ),
                 negative_prompt=effective_negative_prompt,
                 model=VEO_MODEL,

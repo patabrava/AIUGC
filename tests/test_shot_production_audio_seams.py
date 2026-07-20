@@ -8,7 +8,10 @@ from app.features.shot_production.audio_seams import (
     ACOUSTIC_ANALYZER_VERSION,
     AcousticSeamPlan,
     AudioFrameMetrics,
+    PlannedSeam,
+    PlannedTakeWindow,
     TakeAudioEvidence,
+    _extend_delivery_windows,
     acoustic_analysis_cache_key,
     analyze_audio_frames,
     parse_frame_metrics,
@@ -619,7 +622,61 @@ def test_planner_rejects_multi_second_padding_and_targets_the_final_take_for_ret
     assert exc_info.value.details["delivery_shortfall_seconds"] > 1 / 24
     assert exc_info.value.details["maximum_encoder_padding_seconds"] == pytest.approx(1 / 24)
     assert exc_info.value.details["recommended_retry_take_indexes"] == [1]
-    assert "final take" in exc_info.value.details["recommended_action"].lower()
+    latest_final_word = exc_info.value.details["latest_safe_final_word_end_seconds"]
+    required_tail = exc_info.value.details["required_final_take_native_tail_seconds"]
+    recommended_action = exc_info.value.details["recommended_action"]
+
+    assert latest_final_word < takes[-1].final_word_end_seconds
+    assert required_tail > 0
+    assert f"{latest_final_word:.2f} seconds" in recommended_action
+    assert "room tone through 8.00 seconds" in recommended_action
+
+
+def test_native_shortfall_guidance_reproduces_live_6_60_second_deadline():
+    evidence = (
+        TakeAudioEvidence(0, 8.0, 0.32, 7.06, ()),
+        TakeAudioEvidence(1, 8.0, 0.16, 7.22, ()),
+    )
+    planned = (
+        PlannedTakeWindow(0, 0.0, 7.20, 0.0, 7.20, 0.0),
+        PlannedTakeWindow(1, 0.0, 7.30, 0.0, 7.30, 0.0),
+    )
+    seams = (
+        PlannedSeam(
+            seam_index=0,
+            previous_audio_end_seconds=7.20,
+            next_audio_start_seconds=0.0,
+            overlap_seconds=0.0616666666666665,
+            visual_cut_position_seconds=0.0,
+            final_word_gap_seconds=0.28,
+            short_window_energy_delta_db=0.0,
+            retained_island_duration_seconds=0.0,
+            speech_overlap=False,
+            rejected_candidates=(),
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="duration envelope") as exc_info:
+        _extend_delivery_windows(
+            planned,
+            evidence,
+            seams,
+            min_duration_seconds=16 - (1 / 24),
+            max_duration_seconds=16 + (1 / 24),
+            max_seam_word_gap_seconds=0.48,
+            max_delivery_padding_seconds=1 / 24,
+        )
+
+    details = exc_info.value.details
+    assert details["required_seconds"] == pytest.approx(1.52)
+    assert details["cadence_safe_available_seconds_by_take"] == pytest.approx(
+        {"0": 0.20, "1": 0.70}
+    )
+    assert details["delivery_shortfall_seconds"] == pytest.approx(0.62)
+    assert details["required_final_take_native_tail_seconds"] == pytest.approx(1.32)
+    assert details["latest_safe_final_word_end_seconds"] == pytest.approx(6.60)
+    assert "overrides any earlier final-word timing target" in details["recommended_action"]
+    assert "final word ends no later than 6.60 seconds" in details["recommended_action"]
 
 
 def test_planner_uses_native_windows_for_exact_16_seconds_with_at_most_one_frame_rounding():

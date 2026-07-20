@@ -354,8 +354,13 @@ _FALLBACK_NEGATION_MARKERS = frozenset(
         "keines",
         "nicht",
         "nie",
+        "niemand",
+        "niemandem",
+        "niemanden",
+        "niemandes",
         "niemals",
         "nirgendwo",
+        "nichts",
         "ohne",
     }
 )
@@ -789,36 +794,50 @@ def _shortened_fallback_unit(
     *,
     target_words: int,
 ) -> _FallbackSourceUnit:
-    protected_indexes = {0, len(words) - 1}
-    protected_indexes.update(
-        index
-        for index, word in enumerate(words)
-        if word.casefold()
-        in (_FALLBACK_SAFE_MARKERS | _FALLBACK_NEGATION_MARKERS)
-    )
-    intervals = [[index, index + 1] for index in sorted(protected_indexes)]
-    merged_intervals: list[list[int]] = []
-    for start, end in intervals:
-        if merged_intervals and start - merged_intervals[-1][1] <= 3:
-            merged_intervals[-1][1] = end
-        else:
-            merged_intervals.append([start, end])
-    intervals = merged_intervals
-
     label_words = script_word_count(_FALLBACK_SHORTENED_LABEL)
 
-    def unit_word_count() -> int:
+    def build_intervals(indexes: set[int]) -> list[list[int]]:
+        intervals = [[index, index + 1] for index in sorted(indexes)]
+        merged_intervals: list[list[int]] = []
+        for start, end in intervals:
+            if merged_intervals and start - merged_intervals[-1][1] <= 3:
+                merged_intervals[-1][1] = end
+            else:
+                merged_intervals.append([start, end])
+        return merged_intervals
+
+    def unit_word_count(intervals: Sequence[Sequence[int]]) -> int:
         return sum(label_words + end - start for start, end in intervals) + max(
             0,
             len(intervals) - 1,
         )
 
-    if unit_word_count() > target_words:
+    protected_indexes = {0, len(words) - 1}
+    intervals = build_intervals(protected_indexes)
+    if unit_word_count(intervals) > target_words:
         raise ValueError(
-            "Semantic UGC fallback cannot retain all source markers in this duration."
+            "Semantic UGC fallback cannot retain source endpoints in this duration."
         )
 
-    while unit_word_count() < target_words:
+    # Exact quoted excerpts plus ellipses make omissions explicit. Preserve
+    # meaning-changing negations first, then retain as many connective markers as
+    # the spoken take can safely hold; a marker-dense source must not abort the
+    # entire batch merely because every conjunction cannot fit into one take.
+    marker_groups = (
+        _FALLBACK_NEGATION_MARKERS,
+        _FALLBACK_SAFE_MARKERS,
+    )
+    for markers in marker_groups:
+        for index, word in enumerate(words):
+            if word.casefold() not in markers or index in protected_indexes:
+                continue
+            candidate_indexes = {*protected_indexes, index}
+            candidate_intervals = build_intervals(candidate_indexes)
+            if unit_word_count(candidate_intervals) <= target_words:
+                protected_indexes = candidate_indexes
+                intervals = candidate_intervals
+
+    while unit_word_count(intervals) < target_words:
         changed = False
         for interval_index, interval in enumerate(intervals):
             next_start = (
@@ -829,17 +848,20 @@ def _shortened_fallback_unit(
             if interval[1] < next_start - 1:
                 interval[1] += 1
                 changed = True
-                if unit_word_count() == target_words:
+                if unit_word_count(intervals) == target_words:
                     break
             previous_end = (
                 intervals[interval_index - 1][1]
                 if interval_index > 0
                 else 0
             )
-            if unit_word_count() < target_words and interval[0] > previous_end + 1:
+            if (
+                unit_word_count(intervals) < target_words
+                and interval[0] > previous_end + 1
+            ):
                 interval[0] -= 1
                 changed = True
-                if unit_word_count() == target_words:
+                if unit_word_count(intervals) == target_words:
                     break
         if not changed:
             break
@@ -968,9 +990,9 @@ def _compose_fallback_source_sentence(
     def render_quote(quote: _FallbackSourceQuote) -> str:
         quote_text = " ".join(quote.words)
         if quote.leading_ellipsis:
-            quote_text = f"… {quote_text}"
+            quote_text = f"…{quote_text}"
         if quote.trailing_ellipsis:
-            quote_text = f"{quote_text} …"
+            quote_text = f"{quote_text}…"
         label = f"{quote.label} " if quote.label else ""
         return f"{label}„{quote_text}“"
 

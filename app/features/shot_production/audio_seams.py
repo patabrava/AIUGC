@@ -19,6 +19,7 @@ _ANALYSIS_TIMEOUT_SECONDS = 120
 _MAX_SEAM_WORD_GAP_SECONDS = 0.320
 _MAX_SHORT_FORM_SEAM_WORD_GAP_SECONDS = 0.480
 _DEFAULT_POST_WORD_CROSSFADE_GUARD_SECONDS = 0.100
+_FINAL_TAKE_POST_WORD_GUARD_SECONDS = 0.080
 _MAX_ENCODER_PREROLL_SECONDS = 0.100
 _DIGITAL_SILENCE_DBFS = -120.0
 MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB = 12.0
@@ -562,7 +563,7 @@ def _derive_video_windows(
     for index, take in enumerate(takes):
         audio_start = 0.0 if index == 0 else seams[index - 1].next_audio_start_seconds
         audio_end = (
-            take.final_word_end_seconds + 0.08
+            take.final_word_end_seconds + _FINAL_TAKE_POST_WORD_GUARD_SECONDS
             if index == len(takes) - 1
             else seams[index].previous_audio_end_seconds
         )
@@ -636,6 +637,18 @@ def _extend_delivery_windows(
     native_shortfall = max(0.0, required - cadence_safe_available)
     if native_shortfall > max_delivery_padding_seconds + 1e-9:
         fair_share = required / len(result)
+        required_final_take_native_tail = max(
+            0.0,
+            required - sum(capacities[:-1]),
+        )
+        latest_safe_final_take_audio_end = max(
+            0.0,
+            evidence[-1].provider_duration_seconds - required_final_take_native_tail,
+        )
+        latest_safe_final_word_end = max(
+            0.0,
+            latest_safe_final_take_audio_end - _FINAL_TAKE_POST_WORD_GUARD_SECONDS,
+        )
         raise ValidationError(
             "Acoustic plan cannot satisfy the duration envelope.",
             {
@@ -659,9 +672,16 @@ def _extend_delivery_windows(
                     if capacity + 1e-9 < fair_share
                 ],
                 "recommended_retry_take_indexes": [result[-1].take_index],
+                "required_final_take_native_tail_seconds": required_final_take_native_tail,
+                "latest_safe_final_take_audio_end_seconds": latest_safe_final_take_audio_end,
+                "latest_safe_final_word_end_seconds": latest_safe_final_word_end,
                 "recommended_action": (
-                    "Regenerate only the final take with measured pacing and enough native "
-                    "post-speech motion and room tone to reach the delivery target."
+                    "For this retry, this timing overrides any earlier final-word timing "
+                    "target. Regenerate only the final take. Pace the exact spoken beat so "
+                    f"its final word ends no later than {latest_safe_final_word_end:.2f} "
+                    "seconds, then continue natural silent motion and room tone through "
+                    f"{evidence[-1].provider_duration_seconds:.2f} seconds. Do not add speech "
+                    "or freeze."
                 ),
             },
         )

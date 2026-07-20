@@ -379,6 +379,53 @@ def test_eight_second_fallback_uses_complete_opening_sentence_from_saved_script(
     assert result.provenance["source"] == "fallback"
 
 
+def test_sixteen_second_value_fallback_handles_marker_dense_canonical_script():
+    class _InvalidTwiceLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_gemini_text(self, **_kwargs):
+            self.calls += 1
+            return "Dieser Entwurf ist zu kurz."
+
+    canonical_script = (
+        "Wenn du morgens losfährst und der Aufzug nicht funktioniert, dann brauchst "
+        "du eine Alternative, damit du deinen Termin erreichst. Wenn der zweite Weg "
+        "jedoch gesperrt ist und niemand hilft, dann bleibt nur eine früh geprüfte "
+        "Route, weil sie Sicherheit gibt."
+    )
+    client = _InvalidTwiceLLM()
+    research_provenance = {"dossier_id": "value-live-regression"}
+    source_urls = ["https://example.test/value-source"]
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Wege",
+        cta="Prüfe die Route.",
+        facts=[canonical_script],
+        requested_duration_seconds=16,
+        llm_client=client,
+        research_provenance=research_provenance,
+        source_urls=source_urls,
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=16,
+    )
+    sentences = _sentences(result.script)
+
+    assert client.calls == 2
+    assert 32 <= validation.word_count <= 36
+    assert validation.planned_take_count == validation.minimum_take_count == 2
+    assert len(sentences) == len(set(sentences)) == 2
+    assert all(sentence.endswith((".", "!", "?")) for sentence in sentences)
+    assert "nicht" in result.script
+    assert "niemand" in result.script
+    assert result.provenance["source"] == "fallback"
+    assert result.provenance["research"] == research_provenance
+    assert result.provenance["source_urls"] == source_urls
+
+
 @pytest.mark.parametrize("provider_available", [True, False])
 def test_result_preserves_research_provenance_and_source_urls(provider_available):
     valid_script = _complete_semantic_script([16, 16, 16, 16, 15, 15, 15])
@@ -653,14 +700,26 @@ def test_fallback_quellenauszug_quotes_contain_only_ordered_source_tokens():
     )
 
 
-def test_shortened_fallback_quotes_are_contiguous_and_keep_middle_negation():
+@pytest.mark.parametrize(
+    "negation",
+    [
+        "NICHT",
+        "niemand",
+        "niemandem",
+        "niemanden",
+        "niemandes",
+        "nichts",
+        "keiner",
+    ],
+)
+def test_shortened_fallback_quotes_are_contiguous_and_keep_middle_negation(negation):
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
             raise ThirdPartyError("provider unavailable")
 
     fact = (
         "Anfang Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda "
-        "NICHT Mu Nu Xi Omikron Pi Rho Sigma Tau Upsilon Phi Chi Ende."
+        f"{negation} Mu Nu Xi Omikron Pi Rho Sigma Tau Upsilon Phi Chi Ende."
     )
     result = generate_semantic_script(
         post_type="value",
@@ -678,7 +737,7 @@ def test_shortened_fallback_quotes_are_contiguous_and_keep_middle_negation():
         _is_contiguous_span(_word_tokens(span), source_words)
         for span in quoted_spans
     )
-    assert any("NICHT" in _word_tokens(span) for span in quoted_spans)
+    assert any(negation in _word_tokens(span) for span in quoted_spans)
     assert "Gekürzter Quellenauszug:" in result.script
     assert "…" in result.script
 

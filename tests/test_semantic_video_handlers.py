@@ -97,6 +97,81 @@ def test_retry_guidance_names_a_missing_first_word_for_paid_regeneration():
     assert "Do not omit or clip its opening syllable" in guidance
 
 
+def test_retry_guidance_keeps_rpc_guidance_and_appends_recommended_action():
+    from app.features.semantic_videos.handlers import _retry_guidance_text
+
+    generic_guidance = (
+        "Regenerate only the failed semantic beat and correct the acoustic_qa "
+        "evidence: Acoustic plan cannot satisfy the duration envelope."
+    )
+    recommended_action = (
+        "Regenerate only the final take with measured pacing and enough native "
+        "post-speech motion and room tone to reach the delivery target."
+    )
+
+    guidance = _retry_guidance_text(
+        {
+            "guidance": generic_guidance,
+            "qa_failure": {
+                "stage": "acoustic_qa",
+                "details": {
+                    "failure_type": "native_duration_shortfall",
+                    "recommended_action": recommended_action,
+                },
+            },
+        }
+    )
+
+    assert guidance.count(generic_guidance) == 1
+    assert guidance.count(recommended_action) == 1
+
+
+def test_retry_guidance_derives_exact_legacy_native_duration_deadline():
+    from app.features.semantic_videos.handlers import _retry_guidance_text
+
+    generic_guidance = (
+        "Regenerate only the failed semantic beat and correct the acoustic_qa "
+        "evidence: Acoustic plan cannot satisfy the duration envelope."
+    )
+    guidance = _retry_guidance_text(
+        {
+            "guidance": generic_guidance,
+            "qa_failure": {
+                "stage": "acoustic_qa",
+                "details": {
+                    "failure_type": "native_duration_shortfall",
+                    "required_seconds": 1.52,
+                    "available_seconds_by_take": {"0": 0.80, "1": 0.70},
+                    "cadence_safe_available_seconds_by_take": {
+                        "0": 0.20,
+                        "1": 0.70,
+                    },
+                    "recommended_retry_take_indexes": [1],
+                },
+            },
+            "pipeline_manifest": {
+                "takes": [
+                    {
+                        "index": 0,
+                        "beat": {"provider_duration_seconds": 8},
+                        "transcript_qa": {"final_word_end_seconds": 7.06},
+                    },
+                    {
+                        "index": 1,
+                        "beat": {"provider_duration_seconds": 8},
+                        "transcript_qa": {"final_word_end_seconds": 7.22},
+                    },
+                ]
+            },
+        }
+    )
+
+    assert guidance.count(generic_guidance) == 1
+    assert "overrides any earlier final-word timing target" in guidance
+    assert "final word ends no later than 6.60 seconds" in guidance
+    assert "room tone through 8.00 seconds" in guidance
+
+
 class _FakeStorage:
     def __init__(self, master: bytes):
         self.master = master
