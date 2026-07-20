@@ -632,6 +632,96 @@ def test_planner_rejects_multi_second_padding_and_targets_the_final_take_for_ret
     assert "room tone through 8.00 seconds" in recommended_action
 
 
+def test_planner_retimes_live_exact_16_shortfall_after_consuming_native_windows():
+    takes = (
+        _evidence(0, duration=8.0, first_word=0.32, final_word=7.06),
+        _evidence(1, duration=8.12, first_word=0.44, final_word=7.10),
+    )
+
+    plan = plan_acoustic_seams(
+        takes,
+        min_duration_seconds=16 - (1 / 24),
+        max_duration_seconds=16 + (1 / 24),
+        target_duration_seconds=16.0,
+        max_seam_word_gap_seconds=0.48,
+    )
+
+    assert plan.content_duration_seconds == pytest.approx(15.193, abs=0.02)
+    assert plan.delivery_retime_ratio == pytest.approx(
+        16.0 / plan.content_duration_seconds
+    )
+    assert 1.0 < plan.delivery_retime_ratio <= 1.06
+    assert plan.delivery_padding_seconds == 0.0
+    assert plan.final_duration_seconds == 16.0
+    assert (
+        plan.seams[0].final_word_gap_seconds * plan.delivery_retime_ratio
+        <= 0.48 + 1e-9
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "overlap_seconds",
+        "final_word_gap_seconds",
+        "retained_island_seconds",
+        "expected_reason",
+    ),
+    (
+        (0.070, 0.370, 0.000, "audio_overlap_out_of_range"),
+        (0.040, 0.460, 0.000, "word_gap_out_of_range"),
+        (0.040, 0.380, 0.080, "retained_breath_island_too_long"),
+    ),
+)
+def test_planner_never_emits_retimed_seam_that_will_fail_delivery_qa(
+    monkeypatch,
+    overlap_seconds,
+    final_word_gap_seconds,
+    retained_island_seconds,
+    expected_reason,
+):
+    takes = (
+        _evidence(0, duration=8.0, first_word=0.32, final_word=7.06),
+        _evidence(1, duration=8.12, first_word=0.44, final_word=7.10),
+    )
+    next_start = 0.16
+    previous_end = (
+        final_word_gap_seconds
+        + takes[0].final_word_end_seconds
+        - takes[1].first_word_start_seconds
+        + next_start
+        + overlap_seconds
+    )
+    monkeypatch.setattr(
+        "app.features.shot_production.audio_seams._select_seam",
+        lambda *_args, **_kwargs: PlannedSeam(
+            seam_index=0,
+            previous_audio_end_seconds=previous_end,
+            next_audio_start_seconds=next_start,
+            overlap_seconds=overlap_seconds,
+            visual_cut_position_seconds=overlap_seconds / 2,
+            final_word_gap_seconds=final_word_gap_seconds,
+            short_window_energy_delta_db=0.0,
+            retained_island_duration_seconds=retained_island_seconds,
+            speech_overlap=False,
+            rejected_candidates=(),
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="delivery retime") as exc_info:
+        plan_acoustic_seams(
+            takes,
+            min_duration_seconds=16 - (1 / 24),
+            max_duration_seconds=16 + (1 / 24),
+            target_duration_seconds=16.0,
+            max_seam_word_gap_seconds=0.48,
+        )
+
+    details = exc_info.value.details
+    assert details["failure_type"] == "delivery_retime_seam_contract_violation"
+    assert details["failed_seam_indexes"] == [0]
+    assert details["failure_reasons_by_seam"] == {"0": [expected_reason]}
+
+
 def test_native_shortfall_guidance_reproduces_live_6_60_second_deadline():
     evidence = (
         TakeAudioEvidence(0, 8.0, 0.32, 7.06, ()),

@@ -172,6 +172,64 @@ def test_retry_guidance_derives_exact_legacy_native_duration_deadline():
     assert "room tone through 8.00 seconds" in guidance
 
 
+@pytest.mark.parametrize(
+    ("previous_prompt", "measured_final_word", "envelope_deadline", "expected_deadline"),
+    [
+        (
+            "Place the final spoken word near 7.0 seconds. Retry delivery correction: "
+            "the final word ends no later than 6.60 seconds.",
+            6.8999996,
+            6.3199996,
+            "6.02",
+        ),
+        (
+            "Place the final spoken word near 6.5 seconds.",
+            7.2999997,
+            6.7199997,
+            "5.92",
+        ),
+    ],
+    ids=["manual-third-retry", "semantic-initial-retry"],
+)
+def test_retry_guidance_never_relaxes_prior_target_and_compensates_live_overshoot(
+    previous_prompt,
+    measured_final_word,
+    envelope_deadline,
+    expected_deadline,
+):
+    from app.features.semantic_videos.handlers import _retry_guidance_text
+
+    guidance = _retry_guidance_text(
+        {
+            "guidance": "Correct the acoustic duration envelope.",
+            "qa_failure": {
+                "stage": "acoustic_qa",
+                "details": {
+                    "failure_type": "native_duration_shortfall",
+                    "latest_safe_final_word_end_seconds": envelope_deadline,
+                    "recommended_retry_take_indexes": [1],
+                },
+            },
+            "pipeline_manifest": {
+                "takes": [
+                    {
+                        "index": 1,
+                        "beat": {"provider_duration_seconds": 8},
+                        "transcript_qa": {
+                            "first_word_start_seconds": 0.24,
+                            "final_word_end_seconds": measured_final_word,
+                        },
+                    }
+                ]
+            },
+        },
+        previous_prompt=previous_prompt,
+        persisted_take={"word_count": 16, "estimated_speech_seconds": 6.65},
+    )
+
+    assert f"final word ends no later than {expected_deadline} seconds" in guidance
+
+
 class _FakeStorage:
     def __init__(self, master: bytes):
         self.master = master
@@ -2532,6 +2590,167 @@ def test_retry_approval_changes_prompt_seed_and_hashes_once(monkeypatch):
     assert retry["prompt_hash"] == sha256(retry_prompt.encode("utf-8")).hexdigest()
     assert retry["prompt_hash"] != previous["prompt_hash"]
     assert retry["request_hash"] != previous["request_hash"]
+
+
+def test_retry_approval_uses_latest_failed_prompt_for_acoustic_overshoot_feedback(
+    monkeypatch,
+):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    script = (
+        "Ein passender Arbeitsplatz macht deinen Alltag leichter, weil du dich sicher, "
+        "ruhig und selbstständig bewegen kannst. Prüfe deshalb Tischhöhe, Ablagen und "
+        "Wendeflächen frühzeitig und plane immer genug Platz für deinen Rollstuhl ein."
+    )
+    state["context"]["post"]["topic_rotation"] = script
+    state["context"]["post"]["seed_data"].update(
+        {"script": script, "script_review_status": "approved"}
+    )
+    state["context"]["batch"]["target_duration_seconds"] = 16
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    assert client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    ).status_code == 200
+    state["run"]["stage"] = "retry_approval_required"
+    for take in state["takes"]:
+        take["submission_state"] = (
+            "qa_failed" if take["take_index"] == 1 else "completed"
+        )
+        if take["take_index"] == 1:
+            assert "final spoken word near 6.5 seconds" in take["request_contract"][
+                "prompt"
+            ]
+            take["retry_guidance"] = {
+                "guidance": "Correct the acoustic duration envelope.",
+                "qa_failure": {
+                    "stage": "acoustic_qa",
+                    "details": {
+                        "failure_type": "native_duration_shortfall",
+                        "latest_safe_final_word_end_seconds": 6.7199997,
+                        "recommended_retry_take_indexes": [1],
+                    },
+                },
+                "pipeline_manifest": {
+                    "takes": [
+                        {
+                            "index": 1,
+                            "beat": {"provider_duration_seconds": 8},
+                            "transcript_qa": {
+                                "final_word_end_seconds": 7.2999997,
+                            },
+                        }
+                    ]
+                },
+            }
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 2,
+            "failed_take_indexes": [1],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    retry = max(
+        (take for take in state["takes"] if take["take_index"] == 1),
+        key=lambda take: int(take["attempt"]),
+    )
+    assert "final word ends no later than 5.92 seconds" in retry[
+        "request_contract"
+    ]["prompt"]
+
+
+def test_retry_approval_fails_closed_when_repeated_overshoot_crosses_speech_floor(
+    monkeypatch,
+):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    script = (
+        "Ein passender Arbeitsplatz macht deinen Alltag leichter, weil du dich sicher, "
+        "ruhig und selbstständig bewegen kannst. Prüfe deshalb Tischhöhe, Ablagen und "
+        "Wendeflächen frühzeitig und plane immer genug Platz für deinen Rollstuhl ein."
+    )
+    state["context"]["post"]["topic_rotation"] = script
+    state["context"]["post"]["seed_data"].update(
+        {"script": script, "script_review_status": "approved"}
+    )
+    state["context"]["batch"]["target_duration_seconds"] = 16
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    assert client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    ).status_code == 200
+
+    initial = next(take for take in state["takes"] if take["take_index"] == 1)
+    initial["submission_state"] = "qa_failed"
+    repeated = deepcopy(initial)
+    repeated["id"] = "take-1-attempt-2"
+    repeated["attempt"] = 2
+    repeated["seed"] = int(initial["seed"]) + 1000
+    repeated["submission_state"] = "qa_failed"
+    repeated["request_contract"] = deepcopy(initial["request_contract"])
+    repeated["request_contract"]["attempt"] = 2
+    repeated["request_contract"]["prompt"] = (
+        f'{initial["request_contract"]["prompt"]} Retry delivery correction: Pace the '
+        "exact spoken beat so its final word ends no later than 5.92 seconds."
+    )
+    repeated["request_hash"] = "repeated-overshoot-request-hash"
+    repeated["retry_guidance"] = {
+        "guidance": "Correct the acoustic duration envelope.",
+        "qa_failure": {
+            "stage": "acoustic_qa",
+            "details": {
+                "failure_type": "native_duration_shortfall",
+                "latest_safe_final_word_end_seconds": 5.80,
+                "recommended_retry_take_indexes": [1],
+            },
+        },
+        "pipeline_manifest": {
+            "takes": [
+                {
+                    "index": 1,
+                    "beat": {"provider_duration_seconds": 8},
+                    "transcript_qa": {
+                        "first_word_start_seconds": 0.24,
+                        "final_word_end_seconds": 6.80,
+                    },
+                }
+            ]
+        },
+    }
+    state["takes"].append(repeated)
+    state["run"]["stage"] = "retry_approval_required"
+    approval_count = len(state["approvals"])
+    attempt_count = len(state["takes"])
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 2,
+            "failed_take_indexes": [1],
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert "minimum feasible speech deadline" in response.json()["message"].lower()
+    assert len(state["approvals"]) == approval_count
+    assert len(state["takes"]) == attempt_count
 
 
 def test_retry_approval_uses_one_atomic_transition(monkeypatch):

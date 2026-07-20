@@ -15,6 +15,7 @@ from app.core.errors import ValidationError
 
 
 ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v1"
+MAX_EXACT_DELIVERY_RETIME_RATIO = 1.06
 _ANALYSIS_TIMEOUT_SECONDS = 120
 _MAX_SEAM_WORD_GAP_SECONDS = 0.320
 _MAX_SHORT_FORM_SEAM_WORD_GAP_SECONDS = 0.480
@@ -87,6 +88,33 @@ class AcousticSeamPlan:
     content_duration_seconds: Optional[float] = None
     target_duration_seconds: Optional[float] = None
     delivery_padding_seconds: float = 0.0
+    delivery_retime_ratio: float = 1.0
+
+
+def delivered_seam_timing_failures(
+    seams: Sequence[PlannedSeam],
+    *,
+    delivery_retime_ratio: float,
+    max_seam_word_gap_seconds: float,
+) -> Dict[int, Tuple[str, ...]]:
+    """Return deterministic seam failures measured on the delivered timeline."""
+    failures: Dict[int, Tuple[str, ...]] = {}
+    for index, seam in enumerate(seams):
+        delivered_overlap = seam.overlap_seconds * delivery_retime_ratio
+        delivered_word_gap = seam.final_word_gap_seconds * delivery_retime_ratio
+        delivered_island = (
+            seam.retained_island_duration_seconds * delivery_retime_ratio
+        )
+        reasons = []
+        if not 0.04 <= delivered_overlap <= 0.07:
+            reasons.append("audio_overlap_out_of_range")
+        if not 0.10 <= delivered_word_gap <= max_seam_word_gap_seconds + 1e-9:
+            reasons.append("word_gap_out_of_range")
+        if delivered_island > 0.08:
+            reasons.append("retained_breath_island_too_long")
+        if reasons:
+            failures[index] = tuple(reasons)
+    return failures
 
 
 def acoustic_analysis_cache_key(
@@ -606,12 +634,18 @@ def _extend_delivery_windows(
     max_duration_seconds: float,
     max_seam_word_gap_seconds: float,
     max_delivery_padding_seconds: float = 0.0,
+    max_delivery_retime_ratio: float = 1.0,
 ) -> Tuple[Tuple[PlannedTakeWindow, ...], Tuple[PlannedSeam, ...]]:
     if (
         not math.isfinite(max_delivery_padding_seconds)
         or max_delivery_padding_seconds < 0.0
     ):
         raise ValidationError("Acoustic delivery padding allowance is invalid.")
+    if (
+        not math.isfinite(max_delivery_retime_ratio)
+        or max_delivery_retime_ratio < 1.0
+    ):
+        raise ValidationError("Acoustic delivery retime allowance is invalid.")
     result = list(planned)
     adjusted_seams = list(seams)
     current_duration = _planned_duration(result, seams)
@@ -624,10 +658,13 @@ def _extend_delivery_windows(
         max(0.0, take.provider_duration_seconds - window.audio_end_seconds)
         for window, take in zip(result, evidence)
     ]
+    native_seam_gap_ceiling = (
+        max_seam_word_gap_seconds / max_delivery_retime_ratio
+    )
     capacities = [
         min(
             raw_capacity,
-            max(0.0, max_seam_word_gap_seconds - seams[index].final_word_gap_seconds),
+            max(0.0, native_seam_gap_ceiling - seams[index].final_word_gap_seconds),
         )
         if index < len(seams)
         else raw_capacity
@@ -635,11 +672,26 @@ def _extend_delivery_windows(
     ]
     cadence_safe_available = sum(capacities)
     native_shortfall = max(0.0, required - cadence_safe_available)
-    if native_shortfall > max_delivery_padding_seconds + 1e-9:
+    maximum_retimed_duration = (
+        current_duration + cadence_safe_available
+    ) * max_delivery_retime_ratio
+    retime_can_reach_floor = (
+        max_delivery_retime_ratio > 1.0 + 1e-9
+        and maximum_retimed_duration >= min_duration_seconds - 1e-9
+    )
+    encoder_rounding_can_reach_floor = (
+        native_shortfall <= max_delivery_padding_seconds + 1e-9
+    )
+    if not retime_can_reach_floor and not encoder_rounding_can_reach_floor:
         fair_share = required / len(result)
+        minimum_native_duration = min_duration_seconds / max_delivery_retime_ratio
+        minimum_native_extension = max(
+            0.0,
+            minimum_native_duration - current_duration,
+        )
         required_final_take_native_tail = max(
             0.0,
-            required - sum(capacities[:-1]),
+            minimum_native_extension - sum(capacities[:-1]),
         )
         latest_safe_final_take_audio_end = max(
             0.0,
@@ -666,6 +718,11 @@ def _extend_delivery_windows(
                 },
                 "delivery_shortfall_seconds": native_shortfall,
                 "maximum_encoder_padding_seconds": max_delivery_padding_seconds,
+                "maximum_delivery_retime_ratio": max_delivery_retime_ratio,
+                "minimum_required_delivery_retime_ratio": (
+                    min_duration_seconds
+                    / (current_duration + cadence_safe_available)
+                ),
                 "under_capacity_take_indexes": [
                     window.take_index
                     for window, capacity in zip(result, capacities)
@@ -846,6 +903,11 @@ def plan_acoustic_seams(
         max_delivery_padding_seconds=(
             1.0 / fps if target_duration_seconds is not None else 0.0
         ),
+        max_delivery_retime_ratio=(
+            MAX_EXACT_DELIVERY_RETIME_RATIO
+            if target_duration_seconds is not None
+            else 1.0
+        ),
     )
     content_duration = _planned_duration(planned, seams)
     delivery_padding = (
@@ -853,9 +915,34 @@ def plan_acoustic_seams(
         if target_duration_seconds is not None
         else 0.0
     )
-    if target_duration_seconds is not None and delivery_padding > 1.0 / fps + 1e-9:
+    delivery_retime_ratio = 1.0
+    if (
+        target_duration_seconds is not None
+        and delivery_padding > 1.0 / fps + 1e-9
+    ):
+        delivery_retime_ratio = float(target_duration_seconds) / content_duration
+        if delivery_retime_ratio > MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
+            raise ValidationError(
+                "Acoustic exact delivery exceeds the bounded A/V retime allowance."
+            )
+        delivery_padding = 0.0
+    delivery_timing_failures = delivered_seam_timing_failures(
+        seams,
+        delivery_retime_ratio=delivery_retime_ratio,
+        max_seam_word_gap_seconds=max_seam_word_gap_seconds,
+    )
+    if delivery_timing_failures:
         raise ValidationError(
-            "Acoustic exact delivery would require more than one frame of synthetic padding."
+            "Acoustic delivery retime violates the deterministic seam contract.",
+            {
+                "failure_type": "delivery_retime_seam_contract_violation",
+                "delivery_retime_ratio": delivery_retime_ratio,
+                "failed_seam_indexes": sorted(delivery_timing_failures),
+                "failure_reasons_by_seam": {
+                    str(index): list(reasons)
+                    for index, reasons in delivery_timing_failures.items()
+                },
+            },
         )
     final_duration = (
         float(target_duration_seconds)
@@ -874,11 +961,13 @@ def plan_acoustic_seams(
         content_duration_seconds=content_duration,
         target_duration_seconds=target_duration_seconds,
         delivery_padding_seconds=delivery_padding,
+        delivery_retime_ratio=delivery_retime_ratio,
     )
 
 
 __all__ = [
     "ACOUSTIC_ANALYZER_VERSION",
+    "MAX_EXACT_DELIVERY_RETIME_RATIO",
     "MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB",
     "AcousticSeamPlan",
     "AudioFrameMetrics",
@@ -887,6 +976,7 @@ __all__ = [
     "TakeAudioEvidence",
     "acoustic_analysis_cache_key",
     "analyze_audio_frames",
+    "delivered_seam_timing_failures",
     "parse_frame_metrics",
     "plan_acoustic_seams",
 ]

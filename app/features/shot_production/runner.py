@@ -40,9 +40,11 @@ from app.features.shot_production.acoustic_qa import (
     evaluate_acoustic_seam_continuity,
 )
 from app.features.shot_production.audio_seams import (
+    MAX_EXACT_DELIVERY_RETIME_RATIO,
     MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB,
     TakeAudioEvidence,
     analyze_audio_frames,
+    delivered_seam_timing_failures,
     plan_acoustic_seams,
 )
 from app.features.shot_production.composer import (
@@ -1572,18 +1574,43 @@ def _evaluate_acoustic_plan_contract_details(
     reasons = []
     failed_seam_indexes = set()
     all_seam_indexes = set(range(len(acoustic_plan.seams)))
+    try:
+        delivery_retime_ratio = float(
+            getattr(acoustic_plan, "delivery_retime_ratio", 1.0)
+        )
+    except (TypeError, ValueError):
+        delivery_retime_ratio = math.nan
+    if (
+        not math.isfinite(delivery_retime_ratio)
+        or not 1.0
+        <= delivery_retime_ratio
+        <= MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9
+    ):
+        reasons.append("delivery_retime_ratio_out_of_range")
+        failed_seam_indexes.update(all_seam_indexes)
+        delivery_retime_ratio = 1.0
     if acoustic_plan.active_speech_rms_range_db > 1.5:
         reasons.append("active_speech_rms_range_exceeded")
         failed_seam_indexes.update(all_seam_indexes)
+    timing_failures = delivered_seam_timing_failures(
+        acoustic_plan.seams,
+        delivery_retime_ratio=delivery_retime_ratio,
+        max_seam_word_gap_seconds=maximum_word_gap,
+    )
+    for reason in (
+        "audio_overlap_out_of_range",
+        "word_gap_out_of_range",
+        "retained_breath_island_too_long",
+    ):
+        matching = [
+            index
+            for index, seam_reasons in timing_failures.items()
+            if reason in seam_reasons
+        ]
+        if matching:
+            reasons.append(reason)
+            failed_seam_indexes.update(matching)
     seam_rules = (
-        ("audio_overlap_out_of_range", lambda seam: not 0.04 <= seam.overlap_seconds <= 0.07),
-        (
-            "word_gap_out_of_range",
-            lambda seam: not 0.10
-            <= seam.final_word_gap_seconds
-            <= maximum_word_gap + 1e-9,
-        ),
-        ("retained_breath_island_too_long", lambda seam: seam.retained_island_duration_seconds > 0.08),
         (
             "seam_energy_delta_exceeded",
             lambda seam: (
@@ -2227,8 +2254,13 @@ def compose_and_caption(
         )
 
     if acoustic_plan is not None:
+        delivery_retime_ratio = float(
+            getattr(acoustic_plan, "delivery_retime_ratio", 1.0)
+        )
         video_durations = [
-            take.video_end_seconds - take.video_start_seconds for take in acoustic_plan.takes
+            (take.video_end_seconds - take.video_start_seconds)
+            * delivery_retime_ratio
+            for take in acoustic_plan.takes
         ]
         cut_times = []
         elapsed = 0.0

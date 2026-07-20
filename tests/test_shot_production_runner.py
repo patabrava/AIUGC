@@ -1552,14 +1552,25 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     payload["visual_qa"] = {"passed": True}
     payload["voice_qa"] = {"passed": True}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
-    takes = tuple(
-        PlannedTakeWindow(i, 0.0, 7.26, 0.0, 7.26, 0.0) for i in range(2)
+    takes = (
+        PlannedTakeWindow(0, 0.0, 7.56, 0.0, 7.54, 0.0),
+        PlannedTakeWindow(1, 0.30, 8.0, 0.32, 8.0, 0.0),
     )
-    seams = tuple(
-        PlannedSeam(i, 7.26, 0.0, 0.04, 0.02, 0.16, 0.2, 0.0, False, ())
-        for i in range(1)
+    seams = (
+        PlannedSeam(0, 7.56, 0.30, 0.04, 0.02, 0.16, 0.2, 0.0, False, ()),
     )
-    plan = AcousticSeamPlan("test-v1", takes, seams, 0.8, 14.48)
+    content_duration = 15.22
+    retime_ratio = 16.0 / content_duration
+    plan = AcousticSeamPlan(
+        "test-v1",
+        takes,
+        seams,
+        0.8,
+        16.0,
+        content_duration_seconds=content_duration,
+        target_duration_seconds=16.0,
+        delivery_retime_ratio=retime_ratio,
+    )
     stitch_calls = []
 
     def stitch_fn(**kwargs):
@@ -1567,9 +1578,13 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         return b"stitched-video", {
             "stitch_segment_count": 2,
             "stitch_audio_video_duration_delta_s": 0.02,
+            "stitch_delivery_retime_ratio": retime_ratio,
         }
 
+    extracted_centers = []
+
     def extract_fn(_source, destination, **_kwargs):
+        extracted_centers.append(_kwargs["center_seconds"])
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"wav")
 
@@ -1611,7 +1626,11 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     saved = _read(manifest_path)
     assert saved["acoustic_seam_qa"]["passed"] is True
     assert len(saved["acoustic_seam_qa"]["clips"]) == 1
-    assert saved["acoustic_seam_plan"]["final_duration_seconds"] == 14.48
+    assert saved["acoustic_seam_plan"]["final_duration_seconds"] == 16.0
+    assert saved["acoustic_seam_plan"]["delivery_retime_ratio"] == pytest.approx(
+        retime_ratio
+    )
+    assert extracted_centers == [pytest.approx(7.54 * retime_ratio)]
     assert saved["acoustic_preroll_normalization"][0]["take_index"] == 1
 
 

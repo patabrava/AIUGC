@@ -21,6 +21,9 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.logging import get_logger
+from app.features.shot_production.audio_seams import (
+    MAX_EXACT_DELIVERY_RETIME_RATIO,
+)
 
 logger = get_logger(__name__)
 
@@ -323,8 +326,9 @@ def stitch_segments(
             trimmed to its spoken window before concatenation.
         acoustic_plan: Optional validated native-audio plan with independent audio/video windows.
         target_duration_seconds: Optional exact delivery target. Transcript-bearing content is
-            never shortened by more than one source frame. Source windows must fill the target;
-            at most one frame/sample interval may be resolved as encoder rounding.
+            never shortened by more than one source frame. Cadence-safe source windows are used
+            first, then a bounded whole-output A/V retime may fill the remaining duration. At most
+            one frame/sample interval may be resolved as encoder rounding.
 
     Returns:
         (final_video_bytes, stitch_metadata).
@@ -384,6 +388,18 @@ def stitch_segments(
                 raise ValueError("Acoustic plan target duration does not match stitch target")
         if target_duration_seconds is not None and target_duration_seconds <= 0:
             raise ValueError("Stitch target duration must be positive")
+        delivery_retime_ratio = 1.0
+        if acoustic_plan is not None and acoustic_plan.get("delivery_retime_ratio") is not None:
+            delivery_retime_ratio = _finite_plan_seconds(
+                acoustic_plan.get("delivery_retime_ratio"),
+                field="delivery retime ratio",
+            )
+        if not 1.0 <= delivery_retime_ratio <= MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
+            raise ValueError("Acoustic plan delivery retime ratio exceeds the bounded allowance")
+        if delivery_retime_ratio > 1.0 + 1e-9 and (
+            target_duration_seconds is None or planned_seams is None
+        ):
+            raise ValueError("Bounded delivery retime requires a targeted acoustic plan")
 
         command: List[str] = ["ffmpeg", "-y"]
         for path in input_paths:
@@ -463,14 +479,30 @@ def stitch_segments(
                     f"c1=qsin:c2=qsin[{output_label}]"
                 )
                 final_audio_label = output_label
+        native_shortfall_seconds = 0.0
         delivery_padding_seconds = 0.0
+        delivery_audio_tempo = 1.0
+        delivery_mode = "native"
         if target_duration_seconds is not None:
             frame_duration_seconds = 1.0 / fps
             if content_duration > target_duration_seconds + frame_duration_seconds + 1e-6:
                 raise ValueError(
                     "Stitch target would truncate transcript-bearing content by more than one frame"
                 )
-            delivery_padding_seconds = max(0.0, target_duration_seconds - content_duration)
+            native_shortfall_seconds = max(
+                0.0,
+                target_duration_seconds - content_duration,
+            )
+            declared_content_duration = None
+            if acoustic_plan is not None and acoustic_plan.get("content_duration_seconds") is not None:
+                declared_content_duration = _finite_plan_seconds(
+                    acoustic_plan.get("content_duration_seconds"),
+                    field="content duration",
+                )
+                if abs(declared_content_duration - content_duration) > 1e-4:
+                    raise ValueError(
+                        "Acoustic plan content duration does not match its native source windows"
+                    )
             declared_padding = None
             if acoustic_plan is not None and acoustic_plan.get("delivery_padding_seconds") is not None:
                 declared_padding = _finite_plan_seconds(
@@ -479,24 +511,49 @@ def stitch_segments(
                 )
                 if declared_padding < 0.0:
                     raise ValueError("Acoustic plan delivery padding cannot be negative")
-            if (
-                delivery_padding_seconds > frame_duration_seconds + 1e-6
-                or (
+            if delivery_retime_ratio > 1.0 + 1e-9:
+                expected_retime_ratio = target_duration_seconds / content_duration
+                if abs(delivery_retime_ratio - expected_retime_ratio) > 1e-4:
+                    raise ValueError(
+                        "Acoustic plan delivery retime ratio does not match its native source windows"
+                    )
+                if declared_padding is not None and declared_padding > 1e-9:
+                    raise ValueError(
+                        "Bounded A/V retime cannot be combined with synthetic delivery padding"
+                    )
+                delivery_audio_tempo = 1.0 / delivery_retime_ratio
+                delivery_mode = "bounded_av_retime"
+                filter_parts.append(
+                    f"[{base_video_label}]setpts={delivery_retime_ratio:.9f}*PTS,"
+                    f"fps={fps:.5f},trim=duration={target_duration_seconds:.6f},"
+                    "setpts=PTS-STARTPTS[vout]"
+                )
+                filter_parts.append(
+                    f"[{final_audio_label}]atempo={delivery_audio_tempo:.9f},"
+                    f"atrim=duration={target_duration_seconds:.6f},"
+                    "asetpts=PTS-STARTPTS[adelivery]"
+                )
+            else:
+                delivery_padding_seconds = native_shortfall_seconds
+                if (
+                    delivery_padding_seconds > frame_duration_seconds + 1e-6
+                    or (
+                        declared_padding is not None
+                        and declared_padding > frame_duration_seconds + 1e-6
+                    )
+                ):
+                    raise ValueError(
+                        "Exact delivery would require more than one frame of synthetic padding"
+                    )
+                if (
                     declared_padding is not None
-                    and declared_padding > frame_duration_seconds + 1e-6
-                )
-            ):
-                raise ValueError(
-                    "Exact delivery would require more than one frame of synthetic padding"
-                )
-            if (
-                declared_padding is not None
-                and abs(declared_padding - delivery_padding_seconds) > 1e-4
-            ):
-                raise ValueError(
-                    "Acoustic plan delivery padding does not match its native source windows"
-                )
-            if delivery_padding_seconds > 1e-9:
+                    and abs(declared_padding - delivery_padding_seconds) > 1e-4
+                ):
+                    raise ValueError(
+                        "Acoustic plan delivery padding does not match its native source windows"
+                    )
+            if delivery_mode == "native" and delivery_padding_seconds > 1e-9:
+                delivery_mode = "encoder_rounding"
                 filter_parts.append(
                     f"[{base_video_label}]tpad=stop_mode=clone:"
                     f"stop_duration={frame_duration_seconds:.6f},"
@@ -508,7 +565,8 @@ def stitch_segments(
                     f"atrim=duration={target_duration_seconds:.6f},"
                     "asetpts=PTS-STARTPTS[adelivery]"
                 )
-            else:
+            elif delivery_mode == "native":
+                delivery_mode = "native_trim"
                 filter_parts.append(
                     f"[{base_video_label}]trim=duration={target_duration_seconds:.6f},"
                     "setpts=PTS-STARTPTS[vout]"
@@ -597,6 +655,10 @@ def stitch_segments(
             else None
         ),
         "stitch_delivery_padding_s": round(delivery_padding_seconds, 6),
+        "stitch_delivery_native_shortfall_s": round(native_shortfall_seconds, 6),
+        "stitch_delivery_retime_ratio": round(delivery_retime_ratio, 9),
+        "stitch_delivery_audio_tempo": round(delivery_audio_tempo, 9),
+        "stitch_delivery_mode": delivery_mode,
     }
     logger.info(
         "stitch_segments_completed",

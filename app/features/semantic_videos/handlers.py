@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
 import json
 import math
+import re
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
@@ -76,6 +77,13 @@ _SCENE_PLATE_AUDIT_TEXT = (
     "Wheelchair scene plate generated from two immutable actor references and one "
     "actor-free location before any Veo request."
 )
+_FINAL_WORD_TARGET_PATTERN = re.compile(
+    r"(?:final spoken word near|final word ends no later than)\s+"
+    r"([0-9]+(?:\.[0-9]+)?)\s+seconds",
+    re.IGNORECASE,
+)
+_MAX_RETRY_SPEECH_WORDS_PER_SECOND = 3.0
+_MIN_RETRY_ESTIMATED_SPEECH_RATIO = 0.80
 
 
 def _canonical_json(value: Any) -> str:
@@ -121,7 +129,68 @@ def _finite_float(value: Any) -> Optional[float]:
     return number if math.isfinite(number) else None
 
 
-def _native_duration_retry_action(value: Mapping[str, Any]) -> str:
+def _prompt_final_word_target_seconds(prompt: str) -> Optional[float]:
+    targets = [
+        target
+        for match in _FINAL_WORD_TARGET_PATTERN.finditer(str(prompt or ""))
+        if (target := _finite_float(match.group(1))) is not None and target >= 0.0
+    ]
+    return min(targets) if targets else None
+
+
+def _minimum_feasible_final_word_end_seconds(
+    *,
+    persisted_take: Mapping[str, Any],
+    manifest_take: Mapping[str, Any],
+) -> float:
+    estimated_speech = _finite_float(persisted_take.get("estimated_speech_seconds"))
+    word_count_value = persisted_take.get("word_count")
+    word_count = (
+        int(word_count_value)
+        if not isinstance(word_count_value, bool)
+        and isinstance(word_count_value, (int, float))
+        and math.isfinite(float(word_count_value))
+        and int(word_count_value) > 0
+        else None
+    )
+    minimum_spoken_durations = []
+    if estimated_speech is not None and estimated_speech > 0.0:
+        minimum_spoken_durations.append(
+            estimated_speech * _MIN_RETRY_ESTIMATED_SPEECH_RATIO
+        )
+    if word_count is not None:
+        minimum_spoken_durations.append(
+            word_count / _MAX_RETRY_SPEECH_WORDS_PER_SECOND
+        )
+    if not minimum_spoken_durations:
+        raise StateTransitionError(
+            "Semantic video retry cannot derive a minimum feasible speech deadline.",
+            {
+                "word_count": word_count_value,
+                "estimated_speech_seconds": persisted_take.get(
+                    "estimated_speech_seconds"
+                ),
+            },
+        )
+
+    transcript = manifest_take.get("transcript_qa")
+    first_word_start = _finite_float(
+        transcript.get("first_word_start_seconds")
+        if isinstance(transcript, Mapping)
+        else None
+    )
+    minimum_deadline = max(0.0, first_word_start or 0.0) + max(
+        minimum_spoken_durations
+    )
+    return math.ceil((minimum_deadline - 1e-9) * 100.0) / 100.0
+
+
+def _native_duration_retry_action(
+    value: Mapping[str, Any],
+    *,
+    previous_prompt: str = "",
+    persisted_take: Optional[Mapping[str, Any]] = None,
+) -> str:
     qa_failure = value.get("qa_failure")
     details = qa_failure.get("details") if isinstance(qa_failure, Mapping) else None
     if not isinstance(details, Mapping):
@@ -161,14 +230,14 @@ def _native_duration_retry_action(value: Mapping[str, Any]) -> str:
     if provider_duration is None or provider_duration <= 0:
         return recommended_action
 
+    transcript = retry_take.get("transcript_qa")
+    current_final_word = _finite_float(
+        transcript.get("final_word_end_seconds")
+        if isinstance(transcript, Mapping)
+        else None
+    )
     latest_final_word = _finite_float(details.get("latest_safe_final_word_end_seconds"))
     if latest_final_word is None:
-        transcript = retry_take.get("transcript_qa")
-        current_final_word = _finite_float(
-            transcript.get("final_word_end_seconds")
-            if isinstance(transcript, Mapping)
-            else None
-        )
         required_seconds = _finite_float(details.get("required_seconds"))
         available_by_take = details.get("available_seconds_by_take")
         safe_by_take = details.get("cadence_safe_available_seconds_by_take")
@@ -200,7 +269,36 @@ def _native_duration_retry_action(value: Mapping[str, Any]) -> str:
             provider_duration - required_final_tail - post_word_guard,
         )
 
+    previous_target = _prompt_final_word_target_seconds(previous_prompt)
+    if previous_target is not None:
+        measured_overshoot = (
+            max(0.0, current_final_word - previous_target)
+            if current_final_word is not None
+            else 0.0
+        )
+        latest_final_word = min(
+            previous_target,
+            latest_final_word - measured_overshoot,
+        )
+
     latest_final_word = min(provider_duration, max(0.0, latest_final_word))
+    if persisted_take is not None:
+        minimum_deadline = _minimum_feasible_final_word_end_seconds(
+            persisted_take=persisted_take,
+            manifest_take=retry_take,
+        )
+        if latest_final_word + 1e-9 < minimum_deadline:
+            raise StateTransitionError(
+                "Semantic video retry timing is below the minimum feasible speech deadline.",
+                {
+                    "calculated_final_word_end_seconds": latest_final_word,
+                    "minimum_feasible_final_word_end_seconds": minimum_deadline,
+                    "word_count": persisted_take.get("word_count"),
+                    "estimated_speech_seconds": persisted_take.get(
+                        "estimated_speech_seconds"
+                    ),
+                },
+            )
     conservative_deadline = math.floor((latest_final_word + 1e-9) * 100.0) / 100.0
     return (
         "For this retry, this timing overrides any earlier final-word timing target. "
@@ -211,7 +309,12 @@ def _native_duration_retry_action(value: Mapping[str, Any]) -> str:
     )
 
 
-def _retry_guidance_text(value: Any) -> str:
+def _retry_guidance_text(
+    value: Any,
+    *,
+    previous_prompt: str = "",
+    persisted_take: Optional[Mapping[str, Any]] = None,
+) -> str:
     if isinstance(value, str):
         text = value
     elif isinstance(value, dict):
@@ -223,7 +326,11 @@ def _retry_guidance_text(value: Any) -> str:
             ),
             "",
         )
-        actionable = _native_duration_retry_action(value)
+        actionable = _native_duration_retry_action(
+            value,
+            previous_prompt=previous_prompt,
+            persisted_take=persisted_take,
+        )
         if rpc_guidance and actionable and rpc_guidance in actionable:
             text = actionable
         elif rpc_guidance and actionable and actionable not in rpc_guidance:
@@ -1533,7 +1640,17 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
                 ),
                 "source": "provider_internal_failure",
             }
-        guidance_text = _retry_guidance_text(guidance_snapshot)
+        previous_contract = previous.get("request_contract")
+        previous_prompt = (
+            str(previous_contract.get("prompt") or "")
+            if isinstance(previous_contract, Mapping)
+            else ""
+        )
+        guidance_text = _retry_guidance_text(
+            guidance_snapshot,
+            previous_prompt=previous_prompt,
+            persisted_take=previous,
+        )
         request_contract = deepcopy(original.get("request_contract") or {})
         base_prompt = str(request_contract.get("prompt") or "").strip()
         if not base_prompt:
