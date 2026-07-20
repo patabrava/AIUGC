@@ -1177,6 +1177,7 @@ def _assert_plan_sources_current(
     run: dict[str, Any],
     takes: list[dict[str, Any]],
     request: Request,
+    require_current_compiler_plan: bool = True,
 ) -> None:
     context = load_semantic_video_context(post_id)
     current_reference = _reference_snapshot(context)
@@ -1335,12 +1336,40 @@ def _assert_plan_sources_current(
             },
         )
 
-    reference = deepcopy(persisted_reference)
-    reference["master"] = deepcopy(master)
     initial_takes = [take for take in takes if int(take.get("attempt") or 1) == 1]
     if not initial_takes:
         raise StateTransitionError("Semantic video plan has no persisted initial takes.")
     plan = run.get("plan_snapshot") if isinstance(run.get("plan_snapshot"), dict) else {}
+    planned_takes = plan.get("takes")
+    ordered_initial = sorted(initial_takes, key=lambda take: int(take.get("take_index") or 0))
+    initial_contract = [
+        {
+            "take_index": int(take.get("take_index") or 0),
+            "provider_duration_seconds": int(take.get("provider_duration_seconds") or 0),
+            "request_hash": str(take.get("request_hash") or ""),
+        }
+        for take in ordered_initial
+    ]
+    planned_request_hashes = [str(value) for value in plan.get("request_hashes") or []]
+    if (
+        not isinstance(planned_takes, list)
+        or initial_contract != planned_takes
+        or int(plan.get("take_count") or 0) != len(initial_contract)
+        or planned_request_hashes != [take["request_hash"] for take in initial_contract]
+    ):
+        raise StateTransitionError(
+            "Semantic video persisted initial take contract changed after planning."
+        )
+    if not require_current_compiler_plan:
+        # A paid retry must continue the already approved immutable take contract.
+        # Recompiling it with a newer prompt compiler would turn a safe deploy into
+        # false source drift even though every source and stored byte hash above is
+        # unchanged. The retry RPC still verifies the original take fields, hashes,
+        # seed lineage, guidance snapshot, and approved plan hash atomically.
+        return
+
+    reference = deepcopy(persisted_reference)
+    reference["master"] = deepcopy(master)
     compiled = compile_semantic_video_plan(
         post_snapshot=context["post"],
         batch_snapshot=context["batch"],
@@ -1460,6 +1489,7 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
         run=run,
         takes=all_takes,
         request=request,
+        require_current_compiler_plan=False,
     )
     latest: dict[int, dict[str, Any]] = {}
     initial: dict[int, dict[str, Any]] = {}

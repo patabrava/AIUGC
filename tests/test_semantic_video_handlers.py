@@ -2410,6 +2410,85 @@ def test_retry_approval_revalidates_full_plan_sources(monkeypatch):
     assert not any(int(take.get("attempt") or 1) > 1 for take in state["takes"])
 
 
+def test_retry_approval_preserves_approved_plan_across_compiler_upgrade(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    assert client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    ).status_code == 200
+    state["run"]["stage"] = "retry_approval_required"
+    for take in state["takes"]:
+        take["submission_state"] = "qa_failed" if take["take_index"] == 1 else "completed"
+        if take["take_index"] == 1:
+            take["retry_guidance"] = {"guidance": "Finish the line earlier."}
+
+    monkeypatch.setattr(
+        handlers,
+        "compile_semantic_video_plan",
+        lambda **_kwargs: pytest.fail(
+            "a paid retry must not recompile an approved plan with new compiler code"
+        ),
+    )
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 2,
+            "failed_take_indexes": [1],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    retry = max(
+        (take for take in state["takes"] if take["take_index"] == 1),
+        key=lambda take: int(take["attempt"]),
+    )
+    assert retry["attempt"] == 2
+
+
+def test_retry_approval_rejects_corrupted_initial_take_set(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    plan = client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).json()["data"]
+    assert client.post(
+        "/semantic-videos/posts/post-1/approve",
+        json={"plan_hash": plan["plan_hash"], "expected_revision": 1},
+    ).status_code == 200
+    state["run"]["stage"] = "retry_approval_required"
+    state["takes"] = [take for take in state["takes"] if take["take_index"] != 0]
+    for take in state["takes"]:
+        take["submission_state"] = "qa_failed" if take["take_index"] == 1 else "completed"
+        if take["take_index"] == 1:
+            take["retry_guidance"] = {"guidance": "Finish the line earlier."}
+
+    response = client.post(
+        "/semantic-videos/posts/post-1/retry-approve",
+        json={
+            "plan_hash": plan["plan_hash"],
+            "expected_revision": 2,
+            "failed_take_indexes": [1],
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert "initial take contract changed" in response.json()["message"].lower()
+
+
 def test_retry_approval_changes_prompt_seed_and_hashes_once(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app

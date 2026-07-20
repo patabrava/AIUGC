@@ -6,7 +6,7 @@ import pytest
 
 import app.adapters.vertex_ai_client as vertex_module
 from app.adapters.vertex_ai_client import VertexAIClient
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 from app.features.posts.prompt_builder import VEO_NEGATIVE_PROMPT
 
 
@@ -21,6 +21,45 @@ def _settings(enabled: bool = True):
 def _fresh_client():
     VertexAIClient._instance = None
     return VertexAIClient()
+
+
+def _gemini_response(status_code, *, body="", retry_after=None, json_body=None):
+    response = MagicMock()
+    response.status_code = status_code
+    response.text = body
+    response.headers = {}
+    if retry_after is not None:
+        response.headers["Retry-After"] = retry_after
+    response.json.return_value = json_body or {
+        "candidates": [{"content": {"parts": [{"text": "accepted"}]}}]
+    }
+    return response
+
+
+def _gemini_post_client(monkeypatch, responses):
+    import app.adapters.vertex_gemini_client as gemini_module
+
+    client = object.__new__(gemini_module.VertexGeminiClient)
+    client._initialized = True
+    mock_http = MagicMock()
+    mock_http.post.side_effect = responses
+    client._http_client = mock_http
+    client._http_client_generation = 0
+    monkeypatch.setattr(client, "_ensure_configured", lambda: None)
+    monkeypatch.setattr(
+        client,
+        "_build_generate_content_url",
+        lambda **_kwargs: "https://vertex.test/generateContent",
+    )
+    monkeypatch.setattr(
+        client,
+        "_build_headers",
+        lambda include_json=False: {
+            "Authorization": "Bearer stable-token",
+            "Content-Type": "application/json",
+        },
+    )
+    return gemini_module, client, mock_http
 
 
 def test_submit_text_video_posts_vertex_rest_payload():
@@ -413,6 +452,130 @@ def test_vertex_gemini_client_singleton_is_thread_safe(monkeypatch):
         clients = list(pool.map(lambda _: gemini_module.get_vertex_gemini_client(), range(32)))
 
     assert len({id(client) for client in clients}) == 1
+
+
+@pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])
+def test_vertex_gemini_generate_content_retries_transient_http_without_mutating_request(
+    monkeypatch,
+    status_code,
+):
+    body = (
+        '{"error":{"status":"RESOURCE_EXHAUSTED"}}'
+        if status_code == 429
+        else "temporary upstream failure"
+    )
+    responses = [
+        _gemini_response(status_code, body=body),
+        _gemini_response(200, json_body={"ok": True}),
+    ]
+    gemini_module, client, mock_http = _gemini_post_client(monkeypatch, responses)
+    sleeps = []
+    monkeypatch.setattr(gemini_module.time, "sleep", sleeps.append)
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": "stable"}]}],
+        "generationConfig": {"temperature": 0, "seed": 240712},
+    }
+
+    result = client._post_generate_content(
+        model="gemini-2.5-flash",
+        location="global",
+        payload=payload,
+        log_event="test_vertex_gemini",
+    )
+
+    assert result == {"ok": True}
+    assert sleeps == [0.5]
+    assert mock_http.post.call_count == 2
+    for call in mock_http.post.call_args_list:
+        assert call.args == ("https://vertex.test/generateContent",)
+        assert call.kwargs == {
+            "headers": {
+                "Authorization": "Bearer stable-token",
+                "Content-Type": "application/json",
+            },
+            "json": payload,
+        }
+        assert call.kwargs["json"] is payload
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected_sleep"),
+    [("3", 3.0), ("999", 8.0)],
+)
+def test_vertex_gemini_generate_content_respects_capped_retry_after(
+    monkeypatch,
+    retry_after,
+    expected_sleep,
+):
+    responses = [
+        _gemini_response(
+            429,
+            body='{"error":{"status":"RESOURCE_EXHAUSTED"}}',
+            retry_after=retry_after,
+        ),
+        _gemini_response(200, json_body={"ok": True}),
+    ]
+    gemini_module, client, _mock_http = _gemini_post_client(monkeypatch, responses)
+    sleeps = []
+    monkeypatch.setattr(gemini_module.time, "sleep", sleeps.append)
+
+    client._post_generate_content(
+        model="gemini-2.5-flash",
+        location="global",
+        payload={"contents": []},
+        log_event="test_vertex_gemini",
+    )
+
+    assert sleeps == [expected_sleep]
+
+
+def test_vertex_gemini_generate_content_fails_non_transient_4xx_without_retry(
+    monkeypatch,
+):
+    gemini_module, client, mock_http = _gemini_post_client(
+        monkeypatch,
+        [_gemini_response(400, body="invalid request")],
+    )
+    sleeps = []
+    monkeypatch.setattr(gemini_module.time, "sleep", sleeps.append)
+
+    with pytest.raises(ThirdPartyError) as exc_info:
+        client._post_generate_content(
+            model="gemini-2.5-flash",
+            location="global",
+            payload={"contents": []},
+            log_event="test_vertex_gemini",
+        )
+
+    assert mock_http.post.call_count == 1
+    assert sleeps == []
+    assert exc_info.value.details["status_code"] == 400
+
+
+def test_vertex_gemini_generate_content_reports_exhausted_http_retry_attempts(
+    monkeypatch,
+):
+    responses = [
+        _gemini_response(503, body=f"temporary failure {attempt}")
+        for attempt in range(1, 5)
+    ]
+    gemini_module, client, mock_http = _gemini_post_client(monkeypatch, responses)
+    sleeps = []
+    monkeypatch.setattr(gemini_module.time, "sleep", sleeps.append)
+
+    with pytest.raises(ThirdPartyError) as exc_info:
+        client._post_generate_content(
+            model="gemini-2.5-flash",
+            location="global",
+            payload={"contents": []},
+            log_event="test_vertex_gemini",
+        )
+
+    assert mock_http.post.call_count == 4
+    assert sleeps == [0.5, 1.0, 2.0]
+    assert exc_info.value.details["attempts"] == 4
+    assert exc_info.value.details["status_code"] == 503
+    assert exc_info.value.details["body"] == "temporary failure 4"
 
 
 def test_generate_grounded_research_returns_text_and_chunks(monkeypatch):

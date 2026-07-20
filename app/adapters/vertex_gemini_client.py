@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import threading
 import time
@@ -29,6 +30,32 @@ _MAX_GEMINI_INLINE_MEDIA_BYTES = 12 * 1024 * 1024
 # under bursts (observed as RemoteProtocolError / LocalProtocolError).
 _VERTEX_INFLIGHT_LIMIT = int(os.environ.get("VERTEX_INFLIGHT_LIMIT", "4"))
 _VERTEX_REQUEST_SEMAPHORE = threading.Semaphore(_VERTEX_INFLIGHT_LIMIT)
+_VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS = 4
+_VERTEX_RETRY_BASE_SECONDS = 0.5
+_VERTEX_RETRY_MAX_SECONDS = 8.0
+_VERTEX_TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
+def _vertex_retry_delay_seconds(*, attempt: int, response: Optional[Any] = None) -> float:
+    delay = min(
+        _VERTEX_RETRY_MAX_SECONDS,
+        _VERTEX_RETRY_BASE_SECONDS * (2 ** attempt),
+    )
+    if response is None:
+        return delay
+    retry_after = str(response.headers.get("Retry-After") or "").strip()
+    if not retry_after:
+        return delay
+    try:
+        retry_after_seconds = float(retry_after)
+    except (TypeError, ValueError):
+        return delay
+    if not math.isfinite(retry_after_seconds) or retry_after_seconds < 0:
+        return delay
+    return min(
+        _VERTEX_RETRY_MAX_SECONDS,
+        max(delay, retry_after_seconds),
+    )
 
 
 class VertexGeminiClient:
@@ -283,8 +310,8 @@ class VertexGeminiClient:
         self._ensure_configured()
         url = self._build_generate_content_url(model=model, location=location)
         last_exc: Optional[Exception] = None
-        max_attempts = 4
-        for attempt in range(max_attempts):
+        for attempt in range(_VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS):
+            response = None
             with _VERTEX_REQUEST_SEMAPHORE:
                 client = self._http_client
                 client_generation = self._http_client_generation
@@ -294,7 +321,6 @@ class VertexGeminiClient:
                         headers=self._build_headers(include_json=True),
                         json=payload,
                     )
-                    break
                 # Catch every transport-layer error (HTTP/2 stream errors,
                 # connection drops, socket-level ReadError, h2's KeyError on
                 # its stream tracker) and trigger a recycle + retry.
@@ -307,25 +333,55 @@ class VertexGeminiClient:
                         error=str(exc)[:200],
                         model=model,
                     )
-            # Outside the semaphore: rebuild the client (one thread wins;
-            # others piggy-back on the rebuilt instance), then back off.
-            self._recycle_http_client(client_generation)
-            if attempt < max_attempts - 1:
-                time.sleep(0.5 * (2 ** attempt))  # 0.5, 1.0, 2.0 s
+
+            if response is None:
+                # Outside the semaphore: rebuild the client (one thread wins;
+                # others piggy-back on the rebuilt instance), then back off.
+                self._recycle_http_client(client_generation)
+                if attempt < _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS - 1:
+                    time.sleep(_vertex_retry_delay_seconds(attempt=attempt))
+                    continue
+                raise ThirdPartyError(
+                    message="Vertex Gemini generateContent failed (transport)",
+                    details={
+                        "error_class": type(last_exc).__name__,
+                        "error": str(last_exc)[:300],
+                        "model": model,
+                        "location": location,
+                        "attempts": _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS,
+                    },
+                ) from last_exc
+
+            if response.status_code < 400:
+                logger.info(log_event, model=model, location=location)
+                return response.json()
+
+            is_transient = (
+                response.status_code in _VERTEX_TRANSIENT_HTTP_STATUS_CODES
+            )
+            if (
+                is_transient
+                and attempt < _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS - 1
+            ):
+                delay_seconds = _vertex_retry_delay_seconds(
+                    attempt=attempt,
+                    response=response,
+                )
+                logger.warning(
+                    f"{log_event}_http_retry",
+                    attempt=attempt + 1,
+                    max_attempts=_VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS,
+                    status_code=response.status_code,
+                    delay_seconds=delay_seconds,
+                    model=model,
+                    location=location,
+                )
+                time.sleep(delay_seconds)
                 continue
-            raise ThirdPartyError(
-                message="Vertex Gemini generateContent failed (transport)",
-                details={
-                    "error_class": type(last_exc).__name__,
-                    "error": str(last_exc)[:300],
-                    "model": model,
-                    "location": location,
-                    "attempts": max_attempts,
-                },
-            ) from last_exc
-        if response.status_code >= 400:
+
             logger.error(
                 f"{log_event}_http_error",
+                attempts=attempt + 1,
                 status_code=response.status_code,
                 response_text=response.text,
                 model=model,
@@ -338,10 +394,11 @@ class VertexGeminiClient:
                     "body": response.text,
                     "model": model,
                     "location": location,
+                    "attempts": attempt + 1,
                 },
             )
-        logger.info(log_event, model=model, location=location)
-        return response.json()
+
+        raise AssertionError("Vertex Gemini generateContent retry loop exhausted unexpectedly.")
 
     def _build_generate_content_url(self, *, model: str, location: str) -> str:
         project = self._settings.vertex_ai_project_id
