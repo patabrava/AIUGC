@@ -134,7 +134,11 @@ def test_initialize_pilot_records_minimum_two_shots_and_complete_request_audit(t
     assert len(payload["script"]["input_sha256"]) == 64
     assert payload["script"]["planned_provider_durations"] == [8, 8]
     assert payload["script"]["planning_profile"] == "minimum-eight-second-shots-v1"
-    assert payload["script"]["delivery_duration_seconds"] == {"requested": 16.0, "minimum": 14.5, "maximum": 16.5}
+    assert payload["script"]["delivery_duration_seconds"] == {
+        "requested": 16.0,
+        "minimum": pytest.approx(16 - (1 / 24)),
+        "maximum": pytest.approx(16 + (1 / 24)),
+    }
     assert len({take["shot"]["sha256"] for take in payload["takes"]}) == 2
     assert all(Path(take["shot"]["path"]).is_file() for take in payload["takes"])
 
@@ -174,8 +178,8 @@ def test_initialize_pilot_accepts_approved_manual_semantic_script(tmp_path):
     assert payload["script"]["target_duration_seconds"] == 16
     assert payload["script"]["delivery_duration_seconds"] == {
         "requested": 16.0,
-        "minimum": 14.5,
-        "maximum": 16.5,
+        "minimum": pytest.approx(16 - (1 / 24)),
+        "maximum": pytest.approx(16 + (1 / 24)),
     }
 
 
@@ -746,6 +750,11 @@ def _manifest_with_raw_takes(
     return manifest_path
 
 
+def _fake_acoustic_preroll(_previous, _incoming, output, **_kwargs):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"room-tone-bridged")
+
+
 def test_take_transcription_records_real_word_windows_and_blocks_failed_take(tmp_path):
     from app.features.shot_production.runner import transcribe_and_validate_takes
 
@@ -997,7 +1006,7 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
 
     def evaluator(master, sheet, **_kwargs):
         calls.append((master, sheet))
-        return VisualQAReport(True, True, True, True, True, True, True, 0.95, (), (), True)
+        return VisualQAReport(True, True, True, True, True, True, True, True, 0.95, (), (), True)
 
     report = run_visual_qa(manifest_path, evaluator=evaluator)
     assert report["passed"] is True
@@ -1014,7 +1023,7 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     failing_manifest.write_text(json.dumps(failing_payload), encoding="utf-8")
 
     def fail_evaluator(*_args, **_kwargs):
-        return VisualQAReport(False, True, True, True, True, True, True, 0.99, ("face drift",), (), False)
+        return VisualQAReport(False, True, True, True, True, True, True, True, 0.99, ("face drift",), (), False)
 
     with pytest.raises(ValidationError, match="visual QA"):
         run_visual_qa(failing_manifest, evaluator=fail_evaluator)
@@ -1327,6 +1336,7 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
 
     assert stitch_calls[0]["segment_videos"] == [b"clip-0", b"clip-1"]
     assert stitch_calls[0]["trim_windows"] == [take["trim_window"] for take in payload["takes"]]
+    assert stitch_calls[0]["target_duration_seconds"] == 16.0
     assert len(caption_calls) == 1
     expected_caption_text = " ".join(word.strip(".,:;!?") for word in SCRIPT.split())
     assert caption_calls[0]["transcript"].full_text == expected_caption_text
@@ -1592,10 +1602,11 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         acoustic_evaluator=evaluator,
         stitch_fn=stitch_fn,
         caption_fn=caption_fn,
-        probe_fn=lambda _path: _valid_final_probe("14.5"),
+        probe_fn=lambda _path: _valid_final_probe("16.0"),
     )
 
     assert stitch_calls[0]["acoustic_plan"]["analyzer_version"] == "test-v1"
+    assert stitch_calls[0]["target_duration_seconds"] == 16.0
     assert stitch_calls[0]["segment_videos"][1] == b"room-tone-bridged"
     saved = _read(manifest_path)
     assert saved["acoustic_seam_qa"]["passed"] is True
@@ -1604,7 +1615,7 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     assert saved["acoustic_preroll_normalization"][0]["take_index"] == 1
 
 
-def test_acoustic_source_preparation_bridges_early_speech_with_previous_room_tone(tmp_path):
+def test_acoustic_source_preparation_always_bridges_cross_take_room_tone(tmp_path):
     from app.features.shot_production.runner import _prepare_acoustic_segment_sources
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
@@ -1615,7 +1626,6 @@ def test_acoustic_source_preparation_bridges_early_speech_with_previous_room_ton
             "first_word_start_seconds": 0.2,
             "final_word_end_seconds": 6.8,
         }
-    takes[1]["transcript_qa"]["first_word_start_seconds"] = 0.08
     calls = []
 
     def normalize(previous_path, incoming_path, output_path, **kwargs):
@@ -1708,13 +1718,18 @@ def test_sixteen_second_acoustic_planning_allows_a_bounded_sentence_pause():
 
     _plan_acoustic_delivery(
         (),
-        {"requested": 16.0, "minimum": 14.5, "maximum": 16.5},
+        {
+            "requested": 16.0,
+            "minimum": 16 - (1 / 24),
+            "maximum": 16 + (1 / 24),
+        },
         plan_fn=plan_fn,
     )
 
     assert calls == [{
-        "min_duration_seconds": 14.5,
-        "max_duration_seconds": 16.5,
+        "min_duration_seconds": pytest.approx(16 - (1 / 24)),
+        "max_duration_seconds": pytest.approx(16 + (1 / 24)),
+        "target_duration_seconds": 16.0,
         "max_seam_word_gap_seconds": 0.48,
     }]
 
@@ -2071,6 +2086,7 @@ def test_composition_persists_failed_seam_verdict_and_adjacent_retry_indexes(tmp
             acoustic_seams=True,
             analyze_audio_fn=lambda _path: (),
             plan_acoustic_fn=lambda _evidence, **_kwargs: plan,
+            normalize_preroll_fn=_fake_acoustic_preroll,
             extract_seam_audio_fn=extract_fn,
             acoustic_evaluator=lambda _clips, **_kwargs: report,
             stitch_fn=lambda **_kwargs: (
@@ -2092,7 +2108,7 @@ def test_composition_persists_failed_seam_verdict_and_adjacent_retry_indexes(tmp
     assert saved["acoustic_seam_qa"]["recommended_retry_take_indexes"] == [0, 1]
 
 
-def test_acoustic_duration_failure_persists_provider_diagnostic_retry_indexes(tmp_path):
+def test_acoustic_duration_failure_prefers_targeted_final_take_retry(tmp_path):
     from app.features.shot_production.runner import compose_and_caption, reset_failed_take
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
@@ -2120,6 +2136,7 @@ def test_acoustic_duration_failure_persists_provider_diagnostic_retry_indexes(tm
                 "required_seconds": 0.4,
                 "total_available_seconds": 0.2,
                 "under_capacity_take_indexes": [0, 1],
+                "recommended_retry_take_indexes": [1],
             },
         )
 
@@ -2130,11 +2147,12 @@ def test_acoustic_duration_failure_persists_provider_diagnostic_retry_indexes(tm
             acoustic_seams=True,
             analyze_audio_fn=lambda _path: (),
             plan_acoustic_fn=fail_plan,
+            normalize_preroll_fn=_fake_acoustic_preroll,
         )
 
     failed = _read(manifest_path)
     assert failed["status"] == "acoustic_plan_failed"
-    assert failed["acoustic_plan_failure"]["recommended_retry_take_indexes"] == [0, 1]
+    assert failed["acoustic_plan_failure"]["recommended_retry_take_indexes"] == [1]
     reset = reset_failed_take(
         manifest_path,
         index=1,
@@ -2179,6 +2197,7 @@ def test_transcript_safe_planning_failure_persists_adjacent_retry_indexes(tmp_pa
             acoustic_seams=True,
             analyze_audio_fn=lambda _path: (),
             plan_acoustic_fn=fail_plan,
+            normalize_preroll_fn=_fake_acoustic_preroll,
         )
 
     failed = _read(manifest_path)
@@ -2258,6 +2277,27 @@ def test_final_media_probe_accepts_one_frame_below_minimum_duration():
     )
 
     assert report["passed"] is True
+
+
+def test_final_media_probe_enforces_exact_target_with_one_frame_tolerance():
+    from app.features.shot_production.runner import evaluate_final_media_probe
+
+    too_short = evaluate_final_media_probe(
+        _valid_final_probe("15.92"),
+        min_duration_seconds=16 - (1 / 24),
+        max_duration_seconds=16 + (1 / 24),
+        target_duration_seconds=16.0,
+    )
+    within_one_frame = evaluate_final_media_probe(
+        _valid_final_probe("15.96"),
+        min_duration_seconds=16 - (1 / 24),
+        max_duration_seconds=16 + (1 / 24),
+        target_duration_seconds=16.0,
+    )
+
+    assert too_short["passed"] is False
+    assert "duration_out_of_range" in too_short["failure_reasons"]
+    assert within_one_frame["passed"] is True
 
 
 def test_upload_persists_remote_head_verification_and_rechecks_without_reupload(tmp_path):

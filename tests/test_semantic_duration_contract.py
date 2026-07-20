@@ -9,7 +9,7 @@ from app.features.shot_production.duration import build_semantic_duration_contra
     ("seconds", "takes", "minimum_words", "maximum_words"),
     [
         (8, 1, 14, 18),
-        (16, 2, 29, 36),
+        (16, 2, 32, 36),
         (32, 4, 61, 72),
         (50, 7, 109, 118),
         (60, 8, 127, 142),
@@ -64,3 +64,10 @@ def test_contract_is_immutable_and_hashes_canonical_json():
     assert first.contract_hash == second.contract_hash
     with pytest.raises(FrozenInstanceError):
         first.minimum_words = 1
+
+
+def test_16_second_delivery_contract_is_exact_within_one_24fps_frame():
+    contract = build_semantic_duration_contract(16)
+
+    assert contract.delivery_min_seconds == pytest.approx(16 - (1 / 24))
+    assert contract.delivery_max_seconds == pytest.approx(16 + (1 / 24))

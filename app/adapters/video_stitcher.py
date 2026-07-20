@@ -311,6 +311,7 @@ def stitch_segments(
     correlation_id: str,
     trim_windows: Optional[List[Dict[str, Any]]] = None,
     acoustic_plan: Optional[Dict[str, Any]] = None,
+    target_duration_seconds: Optional[float] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """Concatenate ordered segment videos into one mp4.
 
@@ -321,6 +322,9 @@ def stitch_segments(
         trim_windows: Optional per-segment start/end seconds. When present, each segment is
             trimmed to its spoken window before concatenation.
         acoustic_plan: Optional validated native-audio plan with independent audio/video windows.
+        target_duration_seconds: Optional exact delivery target. Transcript-bearing content is
+            never shortened by more than one source frame. Source windows must fill the target;
+            at most one frame/sample interval may be resolved as encoder rounding.
 
     Returns:
         (final_video_bytes, stitch_metadata).
@@ -362,6 +366,24 @@ def stitch_segments(
                 count=len(input_paths),
                 durations=segment_durations,
             )
+        plan_target = acoustic_plan.get("target_duration_seconds") if acoustic_plan else None
+        if target_duration_seconds is None and plan_target is not None:
+            target_duration_seconds = _finite_plan_seconds(
+                plan_target,
+                field="target duration",
+            )
+        elif target_duration_seconds is not None:
+            target_duration_seconds = _finite_plan_seconds(
+                target_duration_seconds,
+                field="target duration",
+            )
+            if plan_target is not None and abs(
+                target_duration_seconds
+                - _finite_plan_seconds(plan_target, field="target duration")
+            ) > 1e-6:
+                raise ValueError("Acoustic plan target duration does not match stitch target")
+        if target_duration_seconds is not None and target_duration_seconds <= 0:
+            raise ValueError("Stitch target duration must be positive")
 
         command: List[str] = ["ffmpeg", "-y"]
         for path in input_paths:
@@ -371,6 +393,7 @@ def stitch_segments(
         concat_inputs: List[str] = []
         head_trims: List[float] = []
         tail_trims: List[float] = []
+        audio_window_durations: List[float] = []
         trim_sources: List[str] = []
         reframe_names: List[str] = []
         for index in range(len(input_paths)):
@@ -394,6 +417,7 @@ def stitch_segments(
                 gain_db = 0.0
             head_trims.append(round(audio_start, 3))
             tail_trims.append(round(max(segment_durations[index] - audio_end, 0.0), 3))
+            audio_window_durations.append(audio_end - audio_start)
             trim_sources.append(trim_source)
             reframe_name, reframe = _reframe_filter(index, width, height)
             reframe_names.append(reframe_name)
@@ -406,20 +430,29 @@ def stitch_segments(
                 f"volume={gain_db:.3f}dB,aresample=48000:async=1[a{index}]"
             )
             concat_inputs.append(f"[v{index}][a{index}]")
+        content_duration = sum(audio_window_durations)
+        base_video_label = "vout"
         if planned_seams is None:
+            concat_video_label = "vbase" if target_duration_seconds is not None else "vout"
+            concat_audio_label = "abase" if target_duration_seconds is not None else "aout"
             filter_parts.append(
-                "".join(concat_inputs) + f"concat=n={len(input_paths)}:v=1:a=1[vout][aout]"
+                "".join(concat_inputs)
+                + f"concat=n={len(input_paths)}:v=1:a=1[{concat_video_label}][{concat_audio_label}]"
             )
-            final_audio_label = "aout"
+            base_video_label = concat_video_label
+            final_audio_label = concat_audio_label
         else:
             video_inputs = "".join(f"[v{index}]" for index in range(len(input_paths)))
             planned_audio_duration = sum(
                 take["audio_end_seconds"] - take["audio_start_seconds"]
                 for take in planned_takes
             ) - sum(seam["overlap_seconds"] for seam in planned_seams)
+            content_duration = planned_audio_duration
             filter_parts.append(f"{video_inputs}concat=n={len(input_paths)}:v=1:a=0[vcat]")
+            base_video_label = "vbase" if target_duration_seconds is not None else "vout"
             filter_parts.append(
-                f"[vcat]trim=duration={planned_audio_duration:.6f},setpts=PTS-STARTPTS[vout]"
+                f"[vcat]trim=duration={planned_audio_duration:.6f},setpts=PTS-STARTPTS"
+                f"[{base_video_label}]"
             )
             final_audio_label = "a0"
             for index in range(1, len(input_paths)):
@@ -430,6 +463,61 @@ def stitch_segments(
                     f"c1=qsin:c2=qsin[{output_label}]"
                 )
                 final_audio_label = output_label
+        delivery_padding_seconds = 0.0
+        if target_duration_seconds is not None:
+            frame_duration_seconds = 1.0 / fps
+            if content_duration > target_duration_seconds + frame_duration_seconds + 1e-6:
+                raise ValueError(
+                    "Stitch target would truncate transcript-bearing content by more than one frame"
+                )
+            delivery_padding_seconds = max(0.0, target_duration_seconds - content_duration)
+            declared_padding = None
+            if acoustic_plan is not None and acoustic_plan.get("delivery_padding_seconds") is not None:
+                declared_padding = _finite_plan_seconds(
+                    acoustic_plan.get("delivery_padding_seconds"),
+                    field="delivery padding",
+                )
+                if declared_padding < 0.0:
+                    raise ValueError("Acoustic plan delivery padding cannot be negative")
+            if (
+                delivery_padding_seconds > frame_duration_seconds + 1e-6
+                or (
+                    declared_padding is not None
+                    and declared_padding > frame_duration_seconds + 1e-6
+                )
+            ):
+                raise ValueError(
+                    "Exact delivery would require more than one frame of synthetic padding"
+                )
+            if (
+                declared_padding is not None
+                and abs(declared_padding - delivery_padding_seconds) > 1e-4
+            ):
+                raise ValueError(
+                    "Acoustic plan delivery padding does not match its native source windows"
+                )
+            if delivery_padding_seconds > 1e-9:
+                filter_parts.append(
+                    f"[{base_video_label}]tpad=stop_mode=clone:"
+                    f"stop_duration={frame_duration_seconds:.6f},"
+                    f"trim=duration={target_duration_seconds:.6f},"
+                    "setpts=PTS-STARTPTS[vout]"
+                )
+                filter_parts.append(
+                    f"[{final_audio_label}]apad=pad_dur={frame_duration_seconds:.6f},"
+                    f"atrim=duration={target_duration_seconds:.6f},"
+                    "asetpts=PTS-STARTPTS[adelivery]"
+                )
+            else:
+                filter_parts.append(
+                    f"[{base_video_label}]trim=duration={target_duration_seconds:.6f},"
+                    "setpts=PTS-STARTPTS[vout]"
+                )
+                filter_parts.append(
+                    f"[{final_audio_label}]atrim=duration={target_duration_seconds:.6f},"
+                    "asetpts=PTS-STARTPTS[adelivery]"
+                )
+            final_audio_label = "adelivery"
         filter_complex = ";".join(filter_parts)
 
         output_path = os.path.join(temp_dir, "stitched.mp4")
@@ -463,6 +551,13 @@ def stitch_segments(
         final_duration = _probe_duration(output_path)
         video_duration, audio_duration = _probe_av_stream_durations(output_path)
         duration_delta = abs(video_duration - audio_duration)
+        if (
+            target_duration_seconds is not None
+            and abs(final_duration - target_duration_seconds) > 1.0 / fps + 1e-6
+        ):
+            raise ValueError(
+                "Exact stitch duration exceeded one frame of the delivery target"
+            )
         if planned_seams is not None and duration_delta > 1.0 / fps + 1e-6:
             raise ValueError(
                 f"Acoustic stitch audio/video duration drift exceeded one frame: {duration_delta:.6f}s"
@@ -495,6 +590,13 @@ def stitch_segments(
         "stitch_audio_duration_s": round(audio_duration, 3),
         "stitch_video_duration_s": round(video_duration, 3),
         "stitch_audio_video_duration_delta_s": round(duration_delta, 6),
+        "stitch_content_duration_s": round(content_duration, 6),
+        "stitch_delivery_target_s": (
+            round(target_duration_seconds, 6)
+            if target_duration_seconds is not None
+            else None
+        ),
+        "stitch_delivery_padding_s": round(delivery_padding_seconds, 6),
     }
     logger.info(
         "stitch_segments_completed",

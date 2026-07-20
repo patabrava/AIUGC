@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE_MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 API_MIGRATION = ROOT / "supabase/migrations/20260713000100_semantic_video_api_transactions.sql"
 WORKER_MIGRATION = ROOT / "supabase/migrations/20260713000200_semantic_video_worker.sql"
+LEASE_RENEWAL_MIGRATION = ROOT / "supabase/migrations/20260720000100_semantic_video_lease_renewal.sql"
 RECOVERY_MIGRATION = ROOT / "supabase/migrations/20260714000100_semantic_video_provider_recovery.sql"
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_worker_rpc_test"
@@ -34,6 +35,19 @@ def test_provider_recovery_migration_persists_retry_guidance_and_backfills_stuck
     assert "GRANT EXECUTE ON FUNCTION public.persist_semantic_video_provider_failure" in sql
 
 
+def test_lease_renewal_migration_is_token_fenced_and_service_role_only():
+    assert LEASE_RENEWAL_MIGRATION.exists()
+    sql = LEASE_RENEWAL_MIGRATION.read_text()
+
+    assert "CREATE OR REPLACE FUNCTION public.renew_semantic_video_lease" in sql
+    assert "public.require_semantic_video_worker_lease" in sql
+    assert "run.lease_owner = p_worker_id" in sql
+    assert "run.lease_token = p_lease_token" in sql
+    assert "p_lease_seconds <= 0 OR p_lease_seconds > 3600" in sql
+    assert "GRANT EXECUTE ON FUNCTION public.renew_semantic_video_lease" in sql
+    assert "TO service_role" in sql
+
+
 def _psql(database: str, sql: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -54,6 +68,10 @@ def _psql(database: str, sql: str, *, check: bool = True) -> subprocess.Complete
         capture_output=True,
         check=check,
     )
+
+
+def _scalar(database: str, query: str) -> str:
+    return _psql(database, f"COPY ({query}) TO STDOUT;").stdout.strip()
 
 
 @pytest.mark.skipif(
@@ -149,16 +167,80 @@ def test_worker_migration_fences_paid_state_and_completes_post_atomically():
         )
         _psql(DATABASE, WORKER_MIGRATION.read_text())
         _psql(DATABASE, WORKER_MIGRATION.read_text())
+        _psql(DATABASE, LEASE_RENEWAL_MIGRATION.read_text())
+        _psql(DATABASE, LEASE_RENEWAL_MIGRATION.read_text())
 
         claim = _psql(
             DATABASE,
             f"SET ROLE service_role; SELECT id, lease_token FROM public.claim_semantic_video_run('worker-1', 60, '{RUN_ID}');",
         )
         assert RUN_ID in claim.stdout
-        token = _psql(
+        first_token = _scalar(
             DATABASE,
-            f"SELECT lease_token::text FROM public.semantic_video_runs WHERE id = '{RUN_ID}';",
-        ).stdout.splitlines()[2].strip()
+            f"SELECT lease_token::text FROM public.semantic_video_runs WHERE id = '{RUN_ID}'",
+        )
+
+        _psql(
+            DATABASE,
+            "SET ROLE service_role; "
+            f"SELECT public.renew_semantic_video_lease('{RUN_ID}', 'worker-1', '{first_token}', 120);",
+        )
+        assert _scalar(
+            DATABASE,
+            f"SELECT lease_expires_at > now() + interval '100 seconds' "
+            f"FROM public.semantic_video_runs WHERE id = '{RUN_ID}'",
+        ) == "t"
+
+        stale_renewal = _psql(
+            DATABASE,
+            "SET ROLE service_role; "
+            f"SELECT public.renew_semantic_video_lease('{RUN_ID}', 'worker-1', "
+            "'00000000-0000-0000-0000-000000000999', 120);",
+            check=False,
+        )
+        assert stale_renewal.returncode != 0
+        assert "lease" in stale_renewal.stderr.lower()
+
+        _psql(
+            DATABASE,
+            f"UPDATE public.semantic_video_runs SET lease_expires_at = now() - interval '1 second' "
+            f"WHERE id = '{RUN_ID}';",
+        )
+        reclaimed = _psql(
+            DATABASE,
+            f"SET ROLE service_role; SELECT id, lease_token FROM public.claim_semantic_video_run('worker-2', 60, '{RUN_ID}');",
+        )
+        assert RUN_ID in reclaimed.stdout
+        second_token = _scalar(
+            DATABASE,
+            f"SELECT lease_token::text FROM public.semantic_video_runs WHERE id = '{RUN_ID}'",
+        )
+        assert second_token != first_token
+
+        fenced_previous_owner = _psql(
+            DATABASE,
+            "SET ROLE service_role; "
+            f"SELECT public.renew_semantic_video_lease('{RUN_ID}', 'worker-1', '{first_token}', 120);",
+            check=False,
+        )
+        assert fenced_previous_owner.returncode != 0
+        assert "lease" in fenced_previous_owner.stderr.lower()
+
+        _psql(
+            DATABASE,
+            "SET ROLE service_role; "
+            f"SELECT public.release_semantic_video_lease('{RUN_ID}', 'worker-2', '{second_token}');",
+        )
+        reclaimed_by_first_worker = _psql(
+            DATABASE,
+            f"SET ROLE service_role; SELECT id, lease_token FROM public.claim_semantic_video_run('worker-1', 60, '{RUN_ID}');",
+        )
+        assert RUN_ID in reclaimed_by_first_worker.stdout
+        token = _scalar(
+            DATABASE,
+            f"SELECT lease_token::text FROM public.semantic_video_runs WHERE id = '{RUN_ID}'",
+        )
+        assert token not in {first_token, second_token}
 
         reserve_sql = (
             "SET ROLE service_role; "

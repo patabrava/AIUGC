@@ -14,10 +14,10 @@ os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
 os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
 os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app
-from app.features.posts import handlers as posts_handlers
+from app.main import app  # noqa: E402
+from app.features.posts import handlers as posts_handlers  # noqa: E402
 
 
 class _FakeResponse:
@@ -254,6 +254,101 @@ def test_approve_semantic_script_refreshes_duration_contract_and_editorial_beats
     assert seed_data["semantic_duration_contract"]["requested_duration_seconds"] == 50
     assert seed_data["semantic_duration_contract_hash"]
     assert storage["posts"][0]["video_prompt_json"] is None
+
+
+def test_approve_manual_semantic_script_persists_scene_and_outfit_overrides(monkeypatch):
+    script = (
+        "Ein barrierefreier Zugang macht deinen Alltag leichter, weil du dich sicher, ruhig "
+        "und selbstständig bewegen kannst. Prüfe deshalb Wege, Türen und Rampen frühzeitig "
+        "und plane immer genug Platz für deinen Rollstuhl ein."
+    )
+    storage = {
+        "posts": [
+            {
+                "id": "post-semantic-visual",
+                "batch_id": "batch-semantic-visual",
+                "post_type": "value",
+                "seed_data": {
+                    "manual_draft": True,
+                    "script": "",
+                    "script_review_status": "pending",
+                    "semantic_location_reference": {
+                        "scene_key": "bathroom_accessibility_a",
+                        "storage_uri": "https://cdn.example.com/old-bathroom.png",
+                    },
+                },
+                "video_prompt_json": {"stale": True},
+                "video_status": "pending",
+            }
+        ],
+        "batches": [
+            {
+                "id": "batch-semantic-visual",
+                "creation_mode": "manual_semantic_ugc",
+                "target_length_tier": None,
+                "target_duration_seconds": 16,
+            }
+        ],
+    }
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    response = TestClient(app, base_url="http://localhost").put(
+        "/posts/post-semantic-visual/script-review",
+        data={
+            "action": "approved",
+            "script_text": script,
+            "post_type": "value",
+            "semantic_scene_key": "garden_patio_a",
+            "semantic_wardrobe_description": "navy cotton blouse with a round neckline",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    seed_data = storage["posts"][0]["seed_data"]
+    assert seed_data["semantic_scene_key"] == "garden_patio_a"
+    assert "semantic_location_reference" not in seed_data
+    assert "garden patio" in seed_data["semantic_scene_description"].lower()
+    assert seed_data["semantic_wardrobe_key"] == "custom"
+    assert seed_data["semantic_wardrobe_description"] == (
+        "navy cotton blouse with a round neckline"
+    )
+    assert seed_data["semantic_planned_take_count"] == 2
+
+
+def test_manual_semantic_script_rejects_unknown_scene_override(monkeypatch):
+    storage = {
+        "posts": [
+            {
+                "id": "post-semantic-invalid-scene",
+                "batch_id": "batch-semantic-invalid-scene",
+                "post_type": "value",
+                "seed_data": {"manual_draft": True, "script": "old"},
+                "video_prompt_json": None,
+                "video_status": "pending",
+            }
+        ],
+        "batches": [
+            {
+                "id": "batch-semantic-invalid-scene",
+                "creation_mode": "manual_semantic_ugc",
+                "target_length_tier": None,
+                "target_duration_seconds": 16,
+            }
+        ],
+    }
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    response = TestClient(app, base_url="http://localhost").put(
+        "/posts/post-semantic-invalid-scene/script",
+        data={
+            "script_text": " ".join(["wort"] * 32),
+            "post_type": "value",
+            "semantic_scene_key": "unknown-room",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert storage["posts"][0]["seed_data"]["script"] == "old"
 
 
 def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):

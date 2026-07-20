@@ -204,6 +204,7 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     assert created["seed_data"]["script_review_status"] == "pending"
     assert created["seed_data"]["semantic_minimum_take_count"] == 7
     assert created["seed_data"]["semantic_planned_take_count"] == 7
+    assert created["seed_data"]["semantic_rotation_index"] == 0
     assert len(created["seed_data"]["semantic_planned_beats"]) == 7
     if post_type == "value":
         assert created["seed_data"]["source_urls"] == candidate["source_urls"]
@@ -393,6 +394,9 @@ def test_semantic_value_retry_resumes_only_missing_persisted_slots(monkeypatch):
         "value:2",
         "value:3",
     ]
+    assert [
+        post["seed_data"]["semantic_rotation_index"] for post in persisted_posts
+    ] == [0, 1, 2]
     assert {
         post["seed_data"]["semantic_family_identity"] for post in persisted_posts
     } == {"value-family-1", "value-family-2", "value-family-3"}

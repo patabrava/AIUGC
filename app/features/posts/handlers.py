@@ -33,12 +33,11 @@ from app.features.characters.actor_identity import (
     is_manual_creation_mode,
     is_semantic_ugc_mode,
 )
+from app.features.characters.scene_reference import get_scene_bible
 from app.features.shot_production.planner import plan_editorial_beats
 from app.features.topics.semantic_scripts import validate_semantic_script
 from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
-from app.core.states import BatchState
-
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/posts", tags=["posts"])
@@ -52,11 +51,15 @@ class UpdateScriptRequest(BaseModel):
         max_length=120,
         description="Optional freeform post type (manual drafts only)",
     )
+    semantic_scene_key: Optional[str] = Field(default=None, max_length=120)
+    semantic_wardrobe_description: Optional[str] = Field(default=None, max_length=240)
 
 
 class UpdateScriptReviewRequest(BaseModel):
     """Request to update post script review state."""
     action: str = Field(..., description="Review action: approved, removed, or reset")
+    semantic_scene_key: Optional[str] = Field(default=None, max_length=120)
+    semantic_wardrobe_description: Optional[str] = Field(default=None, max_length=240)
 
 
 def _parse_json_document(value):
@@ -182,12 +185,56 @@ def _load_batch_script_settings(batch_id: str, supabase_client) -> dict:
     }
 
 
+def _apply_semantic_visual_overrides(
+    seed_data: dict,
+    *,
+    submitted_scene_key: Optional[str],
+    submitted_wardrobe_description: Optional[str],
+) -> None:
+    visual_changed = False
+    if submitted_scene_key is not None:
+        # A saved location object belongs to the previous scene key. Keeping it
+        # would send the old third image with the newly selected scene prompt.
+        seed_data.pop("semantic_location_reference", None)
+        scene_key = " ".join(str(submitted_scene_key).split())
+        if scene_key:
+            try:
+                scene = get_scene_bible(scene_key)
+            except KeyError as exc:
+                raise ValidationError(
+                    "Unknown Semantic UGC location override.",
+                    {"semantic_scene_key": scene_key},
+                ) from exc
+            seed_data["semantic_scene_key"] = scene.scene_id
+            seed_data["semantic_scene_description"] = scene.scene_identity
+        else:
+            seed_data.pop("semantic_scene_key", None)
+            seed_data.pop("semantic_scene_description", None)
+        visual_changed = True
+
+    if submitted_wardrobe_description is not None:
+        wardrobe = " ".join(str(submitted_wardrobe_description).split())
+        if wardrobe:
+            seed_data["semantic_wardrobe_key"] = "custom"
+            seed_data["semantic_wardrobe_description"] = wardrobe
+        else:
+            seed_data.pop("semantic_wardrobe_key", None)
+            seed_data.pop("semantic_wardrobe_description", None)
+        visual_changed = True
+
+    if visual_changed:
+        seed_data.pop("semantic_reference_snapshot", None)
+        seed_data.pop("semantic_master_snapshot", None)
+
+
 def _apply_script_text_update(
     *,
     post: dict,
     seed_data: dict,
     script_text: str,
     submitted_post_type: Optional[str],
+    submitted_semantic_scene_key: Optional[str] = None,
+    submitted_semantic_wardrobe_description: Optional[str] = None,
     supabase_client,
     require_valid_duration: bool = False,
 ) -> dict:
@@ -211,6 +258,11 @@ def _apply_script_text_update(
         seed_data["manual_post_type"] = resolved_post_type
 
     if is_semantic_batch:
+        _apply_semantic_visual_overrides(
+            seed_data,
+            submitted_scene_key=submitted_semantic_scene_key,
+            submitted_wardrobe_description=submitted_semantic_wardrobe_description,
+        )
         requested_duration_seconds = (
             batch_settings.get("target_duration_seconds")
             or seed_data.get("target_duration_seconds")
@@ -352,6 +404,8 @@ async def update_post_script(post_id: str, request: Request):
             payload = UpdateScriptRequest.model_validate(data)
             script_text = payload.script_text
             submitted_post_type = payload.post_type
+            submitted_semantic_scene_key = payload.semantic_scene_key
+            submitted_semantic_wardrobe_description = payload.semantic_wardrobe_description
         else:
             form = await request.form()
             script_text = str(form.get("script_text", "")).strip()
@@ -362,6 +416,14 @@ async def update_post_script(post_id: str, request: Request):
                 )
             submitted_post_type_raw = form.get("post_type", None)
             submitted_post_type = None if submitted_post_type_raw is None else str(submitted_post_type_raw).strip()
+            submitted_scene_raw = form.get("semantic_scene_key", None)
+            submitted_semantic_scene_key = (
+                None if submitted_scene_raw is None else str(submitted_scene_raw)
+            )
+            submitted_wardrobe_raw = form.get("semantic_wardrobe_description", None)
+            submitted_semantic_wardrobe_description = (
+                None if submitted_wardrobe_raw is None else str(submitted_wardrobe_raw)
+            )
         
         supabase = get_supabase().client
         
@@ -371,6 +433,10 @@ async def update_post_script(post_id: str, request: Request):
             seed_data=current_seed,
             script_text=script_text,
             submitted_post_type=submitted_post_type,
+            submitted_semantic_scene_key=submitted_semantic_scene_key,
+            submitted_semantic_wardrobe_description=(
+                submitted_semantic_wardrobe_description
+            ),
             supabase_client=supabase,
             require_valid_duration=False,
         )
@@ -410,10 +476,14 @@ async def update_post_script_review(post_id: str, request: Request):
         content_type = request.headers.get("content-type", "")
         submitted_script_text = None
         submitted_post_type = None
+        submitted_semantic_scene_key = None
+        submitted_semantic_wardrobe_description = None
         if "application/json" in content_type:
             data = await request.json()
             payload = UpdateScriptReviewRequest.model_validate(data)
             action = payload.action
+            submitted_semantic_scene_key = payload.semantic_scene_key
+            submitted_semantic_wardrobe_description = payload.semantic_wardrobe_description
         else:
             form = await request.form()
             action = str(form.get("action", "")).strip()
@@ -421,6 +491,14 @@ async def update_post_script_review(post_id: str, request: Request):
             submitted_script_text = None if script_text_raw is None else str(script_text_raw).strip()
             submitted_post_type_raw = form.get("post_type", None)
             submitted_post_type = None if submitted_post_type_raw is None else str(submitted_post_type_raw).strip()
+            submitted_scene_raw = form.get("semantic_scene_key", None)
+            submitted_semantic_scene_key = (
+                None if submitted_scene_raw is None else str(submitted_scene_raw)
+            )
+            submitted_wardrobe_raw = form.get("semantic_wardrobe_description", None)
+            submitted_semantic_wardrobe_description = (
+                None if submitted_wardrobe_raw is None else str(submitted_wardrobe_raw)
+            )
 
         allowed_actions = {"approved", "removed", "reset"}
         if action not in allowed_actions:
@@ -439,6 +517,10 @@ async def update_post_script_review(post_id: str, request: Request):
                     seed_data=seed_data,
                     script_text=submitted_script_text,
                     submitted_post_type=submitted_post_type,
+                    submitted_semantic_scene_key=submitted_semantic_scene_key,
+                    submitted_semantic_wardrobe_description=(
+                        submitted_semantic_wardrobe_description
+                    ),
                     supabase_client=supabase,
                     require_valid_duration=True,
                 )

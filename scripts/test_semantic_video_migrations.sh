@@ -42,6 +42,7 @@ cd "$ROOT_DIR"
 SEMANTIC_UGC_POSTGRES_CONTAINER="$CONTAINER_NAME" \
   python3 -m pytest \
     tests/test_semantic_batch_migration_postgres.py \
+    tests/test_semantic_actor_scene_plate_anchor_migration_postgres.py \
     tests/test_semantic_video_plan_migration_postgres.py \
     tests/test_semantic_video_worker_migration_postgres.py \
     -q
@@ -90,6 +91,14 @@ BEGIN
     SELECT 1
     FROM supabase_migrations.schema_migrations
     WHERE version = '20260713000200'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM supabase_migrations.schema_migrations
+    WHERE version = '20260720000100'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM supabase_migrations.schema_migrations
+    WHERE version = '20260720000200'
   ) THEN
     RAISE EXCEPTION 'Supabase CLI did not record all Semantic UGC migrations';
   END IF;
@@ -98,6 +107,18 @@ BEGIN
   END IF;
   IF to_regprocedure('public.reserve_semantic_video_submission(uuid,uuid,text,uuid)') IS NULL THEN
     RAISE EXCEPTION 'Supabase CLI did not install Semantic UGC worker RPCs';
+  END IF;
+  IF to_regprocedure('public.renew_semantic_video_lease(uuid,text,uuid,integer)') IS NULL THEN
+    RAISE EXCEPTION 'Supabase CLI did not install Semantic UGC lease renewal RPC';
+  END IF;
+  IF to_regclass('public.semantic_actor_scene_plate_anchors') IS NULL THEN
+    RAISE EXCEPTION 'Supabase CLI did not install Semantic actor scene-plate anchors';
+  END IF;
+  IF NOT has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'SELECT')
+     OR has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'INSERT')
+     OR has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'DELETE') THEN
+    RAISE EXCEPTION 'Semantic actor anchor table privileges are unsafe';
   END IF;
 END;
 $$;

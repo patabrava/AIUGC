@@ -10,12 +10,21 @@ from postgrest.exceptions import APIError
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import NotFoundError, StateTransitionError, ValidationError
 from app.features.characters.scene_reference import get_scene_bible
-from app.features.scenes.queries import require_canonical_scene_asset
+from app.features.scenes.queries import (
+    require_canonical_scene_asset,
+    resolve_canonical_scene_key,
+)
+from app.features.semantic_videos.visual_contract import (
+    SEMANTIC_LOCATION_ROTATION,
+    select_semantic_wardrobe,
+)
 
 
-_SEMANTIC_DEFAULT_SCENE_KEY = "home_office_advice_a"
-_SEMANTIC_DEFAULT_WARDROBE = (
-    "Use the wardrobe visible in actor reference Image 1 as the sole wardrobe reference."
+_SEMANTIC_TOPIC_FIELDS = (
+    "topic_title",
+    "canonical_topic",
+    "research_title",
+    "topic",
 )
 
 
@@ -97,9 +106,65 @@ def _image_only_actor_snapshot(
     }
 
 
-def _canonical_semantic_location() -> tuple[dict[str, Any], str]:
+def _semantic_routing_inputs(
+    post: Mapping[str, Any],
+    batch: Mapping[str, Any],
+    seed_data: Mapping[str, Any],
+) -> tuple[dict[str, Any], int]:
+    script = str(
+        seed_data.get("script")
+        or seed_data.get("dialog_script")
+        or post.get("script")
+        or post.get("topic_rotation")
+        or post.get("topic_title")
+        or ""
+    ).strip()
+    topic = next(
+        (
+            str(seed_data.get(field) or "").strip()
+            for field in _SEMANTIC_TOPIC_FIELDS
+            if str(seed_data.get(field) or "").strip()
+        ),
+        str(post.get("topic_title") or script or "semantic-video").strip(),
+    )
+    post_id = str(post.get("id") or "").strip()
+    routing_seed = deepcopy(dict(seed_data))
+    routing_seed["topic_title"] = f"{topic}|semantic-post:{post_id}"
+    if script:
+        routing_seed["script"] = script
+    target_length_tier = int(
+        seed_data.get("target_length_tier")
+        or batch.get("target_length_tier")
+        or batch.get("target_duration_seconds")
+        or 8
+    )
+    return routing_seed, target_length_tier
+
+
+def _canonical_semantic_location(
+    post: Mapping[str, Any],
+    batch: Mapping[str, Any],
+    seed_data: Mapping[str, Any],
+) -> tuple[dict[str, Any], str, str]:
+    routing_seed, target_length_tier = _semantic_routing_inputs(post, batch, seed_data)
+    explicit_scene_key = str(seed_data.get("semantic_scene_key") or "").strip()
+    rotation_index = seed_data.get("semantic_rotation_index")
+    if explicit_scene_key:
+        scene_key = explicit_scene_key
+    elif isinstance(rotation_index, int) and not isinstance(rotation_index, bool):
+        scene_key = SEMANTIC_LOCATION_ROTATION[
+            max(0, rotation_index) % len(SEMANTIC_LOCATION_ROTATION)
+        ]
+    else:
+        scene_key = resolve_canonical_scene_key(
+            scene_text=None,
+            prompt_text=str(seed_data.get("prompt_text") or "") or None,
+            post_type=str(post.get("post_type") or seed_data.get("post_type") or "value"),
+            seed_data=routing_seed,
+            target_length_tier=target_length_tier,
+        )
     asset = require_canonical_scene_asset(
-        scene_key=_SEMANTIC_DEFAULT_SCENE_KEY,
+        scene_key=scene_key,
         aspect_ratio="9:16",
         image_size="1K",
     )
@@ -114,12 +179,15 @@ def _canonical_semantic_location() -> tuple[dict[str, Any], str]:
             "scene_bible_version": asset.scene_bible_version,
         },
         bible.scene_identity,
+        asset.scene_key,
     )
 
 
 def _complete_semantic_reference(
+    post: Mapping[str, Any],
     batch: Mapping[str, Any],
     reference: Mapping[str, Any],
+    seed_data: Mapping[str, Any],
 ) -> dict[str, Any]:
     completed = deepcopy(dict(reference))
     actor = _image_only_actor_snapshot(batch, completed)
@@ -127,18 +195,53 @@ def _complete_semantic_reference(
     completed["actor"] = actor
     actor_rows = completed.get("actor_references")
     if not isinstance(actor_rows, list) or not actor_rows:
-        completed["actor_references"] = [
-            {"role": role, "storage_uri": url, "mime_type": "image/png"}
-            for role, url in zip(
-                ("actor_front", "actor_three_quarter"),
-                actor["reference_image_urls"],
-            )
-        ]
+        snapshot_actor = batch.get("actor_identity_snapshot")
+        frozen_rows = (
+            snapshot_actor.get("reference_images")
+            if isinstance(snapshot_actor, Mapping)
+            else None
+        )
+        completed["actor_references"] = (
+            deepcopy(frozen_rows)
+            if isinstance(frozen_rows, list) and frozen_rows
+            else [
+                {"role": role, "storage_uri": url, "mime_type": "image/png"}
+                for role, url in zip(
+                    ("actor_front", "actor_three_quarter"),
+                    actor["reference_image_urls"],
+                )
+            ]
+        )
     if not isinstance(completed.get("location_reference"), dict):
-        location, scene_description = _canonical_semantic_location()
+        location, scene_description, scene_key = _canonical_semantic_location(
+            post,
+            batch,
+            seed_data,
+        )
         completed["location_reference"] = location
+        completed.setdefault("scene_key", scene_key)
         completed.setdefault("scene_description", scene_description)
-    completed.setdefault("wardrobe_description", _SEMANTIC_DEFAULT_WARDROBE)
+    else:
+        location = completed["location_reference"]
+        scene_key = str(
+            completed.get("scene_key") or location.get("scene_key") or ""
+        ).strip()
+        if scene_key:
+            completed["scene_key"] = scene_key
+            completed.setdefault("scene_description", get_scene_bible(scene_key).scene_identity)
+    wardrobe_key, wardrobe_description = select_semantic_wardrobe(
+        post_id=str(post.get("id") or "semantic-video"),
+        rotation_index=(
+            seed_data.get("semantic_rotation_index")
+            if isinstance(seed_data.get("semantic_rotation_index"), int)
+            and not isinstance(seed_data.get("semantic_rotation_index"), bool)
+            else None
+        ),
+        wardrobe_key=str(completed.get("wardrobe_key") or "") or None,
+        wardrobe_description=str(completed.get("wardrobe_description") or "") or None,
+    )
+    completed["wardrobe_key"] = wardrobe_key
+    completed["wardrobe_description"] = wardrobe_description
     return completed
 
 
@@ -170,17 +273,30 @@ def load_semantic_video_context(post_id: str, *, client=None) -> dict[str, Any]:
     else:
         actor = batch.get("actor_identity_snapshot") if isinstance(batch.get("actor_identity_snapshot"), dict) else {}
         urls = actor.get("reference_image_urls") if isinstance(actor.get("reference_image_urls"), list) else []
-        location = seed_data.get("semantic_location_reference") or actor.get("location_reference")
+        location = seed_data.get("semantic_location_reference")
+        frozen_actor_references = actor.get("reference_images")
         reference = {
             "actor_identity_id": batch.get("actor_identity_id"),
             "actor": actor,
-            "actor_references": [
-                {"role": role, "storage_uri": url, "mime_type": "image/png"}
-                for role, url in zip(("actor_front", "actor_three_quarter"), urls[:2])
-            ],
+            "actor_references": (
+                deepcopy(frozen_actor_references)
+                if isinstance(frozen_actor_references, list) and frozen_actor_references
+                else [
+                    {"role": role, "storage_uri": url, "mime_type": "image/png"}
+                    for role, url in zip(("actor_front", "actor_three_quarter"), urls[:2])
+                ]
+            ),
             "location_reference": deepcopy(location) if isinstance(location, dict) else None,
         }
-    reference = _complete_semantic_reference(batch, reference)
+        for source_key, target_key in (
+            ("semantic_scene_key", "scene_key"),
+            ("semantic_scene_description", "scene_description"),
+            ("semantic_wardrobe_key", "wardrobe_key"),
+            ("semantic_wardrobe_description", "wardrobe_description"),
+        ):
+            if str(seed_data.get(source_key) or "").strip():
+                reference[target_key] = str(seed_data[source_key]).strip()
+    reference = _complete_semantic_reference(post, batch, reference, seed_data)
     master = seed_data.get("semantic_master_snapshot")
     if isinstance(master, dict):
         reference["master"] = deepcopy(master)
@@ -194,6 +310,32 @@ def get_run_by_post(post_id: str, *, client=None) -> Optional[dict[str, Any]]:
         .select("*")
         .eq("post_id", post_id)
         .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = _rows(response)
+    return rows[0] if rows else None
+
+
+def get_actor_scene_plate_anchor(
+    *,
+    actor_identity_id: str,
+    actor_reference_fingerprint: str,
+    client=None,
+) -> Optional[dict[str, Any]]:
+    """Return the immutable approved scene-plate anchor for exact actor bytes."""
+    actor_id = str(actor_identity_id or "").strip()
+    fingerprint = str(actor_reference_fingerprint or "").strip().lower()
+    if not actor_id or len(fingerprint) != 64 or any(
+        character not in "0123456789abcdef" for character in fingerprint
+    ):
+        raise ValidationError("Semantic actor scene-plate anchor identity is invalid.")
+    response = (
+        _client(client)
+        .table("semantic_actor_scene_plate_anchors")
+        .select("*")
+        .eq("actor_identity_id", actor_id)
+        .eq("actor_reference_fingerprint", fingerprint)
         .limit(1)
         .execute()
     )
@@ -902,6 +1044,38 @@ def release_worker_lease(
     )
 
 
+def renew_worker_lease(
+    *,
+    run_id: str,
+    worker_id: str,
+    lease_token: str,
+    lease_seconds: int,
+    client=None,
+) -> dict[str, Any]:
+    if (
+        isinstance(lease_seconds, bool)
+        or lease_seconds <= 0
+        or lease_seconds > 3600
+    ):
+        raise ValidationError(
+            "Semantic video lease renewal must be between 1 and 3600 seconds."
+        )
+    return _worker_rpc(
+        "renew_semantic_video_lease",
+        {
+            **_worker_fence_payload(
+                run_id=run_id,
+                take_id=None,
+                worker_id=worker_id,
+                lease_token=lease_token,
+            ),
+            "p_lease_seconds": int(lease_seconds),
+        },
+        operation="lease renewal",
+        client=client,
+    )
+
+
 def complete_worker_run(
     *,
     run_id: str,
@@ -951,6 +1125,7 @@ __all__ = [
     "persist_worker_submission_intent",
     "persist_worker_submission_unknown",
     "release_worker_lease",
+    "renew_worker_lease",
     "release_candidate_reservation",
     "reclaim_candidate_reservation",
     "reuse_prior_attempts_for_qa_review",

@@ -269,6 +269,149 @@ def test_stitch_acoustic_plan_caps_accumulated_frame_rounding(tmp_path):
     assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
 
 
+def test_stitch_acoustic_plan_allows_only_one_frame_of_exact_16_rounding(tmp_path):
+    paths = []
+    for index, color in enumerate(("red", "blue")):
+        path = str(tmp_path / f"exact-16-take-{index}.mp4")
+        _make_clip(path, seconds=8, color=color, width=90, height=160)
+        paths.append(path)
+    segment_videos = []
+    for path in paths:
+        with open(path, "rb") as fh:
+            segment_videos.append(fh.read())
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=segment_videos,
+        post_id="post_exact_16",
+        correlation_id="corr_exact_16",
+        target_duration_seconds=16.0,
+        acoustic_plan={
+            "takes": [
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 8.0,
+                    "video_start_seconds": 0.0,
+                    "video_end_seconds": 7.98,
+                    "gain_db": 0.0,
+                },
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 8.0,
+                    "video_start_seconds": 0.02,
+                    "video_end_seconds": 8.0,
+                    "gain_db": 0.0,
+                },
+            ],
+            "seams": [
+                {
+                    "overlap_seconds": 0.04,
+                    "visual_cut_position_seconds": 0.02,
+                }
+            ],
+            "target_duration_seconds": 16.0,
+            "delivery_padding_seconds": 0.04,
+        },
+    )
+
+    output_path = str(tmp_path / "exact-16.mp4")
+    with open(output_path, "wb") as fh:
+        fh.write(final_bytes)
+
+    assert _probe_duration(output_path) == pytest.approx(16.0, abs=1 / 24)
+    assert meta["stitch_delivery_target_s"] == 16.0
+    assert meta["stitch_delivery_padding_s"] == pytest.approx(0.04, abs=0.01)
+    assert meta["stitch_delivery_padding_s"] <= 1 / 24
+    assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
+
+
+def test_stitch_rejects_exact_16_delivery_that_needs_a_frozen_multi_second_outro(tmp_path):
+    segment_videos = []
+    for index, color in enumerate(("red", "blue")):
+        path = str(tmp_path / f"short-take-{index}.mp4")
+        _make_clip(path, seconds=8, color=color, width=90, height=160)
+        with open(path, "rb") as fh:
+            segment_videos.append(fh.read())
+
+    with pytest.raises(ValueError, match="more than one frame of synthetic padding"):
+        stitch_segments(
+            segment_videos=segment_videos,
+            post_id="post_short_16",
+            correlation_id="corr_short_16",
+            target_duration_seconds=16.0,
+            acoustic_plan={
+                "takes": [
+                    {
+                        "audio_start_seconds": 0.0,
+                        "audio_end_seconds": 6.5,
+                        "video_start_seconds": 0.0,
+                        "video_end_seconds": 6.48,
+                        "gain_db": 0.0,
+                    },
+                    {
+                        "audio_start_seconds": 0.2,
+                        "audio_end_seconds": 6.54,
+                        "video_start_seconds": 0.22,
+                        "video_end_seconds": 6.54,
+                        "gain_db": 0.0,
+                    },
+                ],
+                "seams": [
+                    {"overlap_seconds": 0.04, "visual_cut_position_seconds": 0.02}
+                ],
+                "target_duration_seconds": 16.0,
+                "delivery_padding_seconds": 3.2,
+            },
+        )
+
+
+def test_stitch_trims_subframe_overshoot_to_exact_16_seconds(tmp_path):
+    segment_videos = []
+    for index, color in enumerate(("red", "blue")):
+        path = str(tmp_path / f"long-take-{index}.mp4")
+        _make_clip(path, seconds=9, color=color, width=90, height=160)
+        with open(path, "rb") as fh:
+            segment_videos.append(fh.read())
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=segment_videos,
+        post_id="post_trim_16",
+        correlation_id="corr_trim_16",
+        target_duration_seconds=16.0,
+        acoustic_plan={
+            "takes": [
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 8.02,
+                    "video_start_seconds": 0.0,
+                    "video_end_seconds": 8.0,
+                    "gain_db": 0.0,
+                },
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 8.04,
+                    "video_start_seconds": 0.02,
+                    "video_end_seconds": 8.04,
+                    "gain_db": 0.0,
+                },
+            ],
+            "seams": [
+                {"overlap_seconds": 0.04, "visual_cut_position_seconds": 0.02}
+            ],
+            "target_duration_seconds": 16.0,
+            "delivery_padding_seconds": 0.0,
+        },
+    )
+
+    output_path = str(tmp_path / "trimmed-exact-16.mp4")
+    with open(output_path, "wb") as fh:
+        fh.write(final_bytes)
+
+    assert _probe_duration(output_path) == pytest.approx(16.0, abs=1 / 24)
+    assert meta["stitch_content_duration_s"] == pytest.approx(16.02)
+    assert meta["stitch_delivery_padding_s"] == 0.0
+    assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
+
+
 def test_stitch_preserves_full_framing_for_character_consistency_segments(tmp_path):
     clip_a = str(tmp_path / "a.mp4")
     clip_b = str(tmp_path / "b.mp4")

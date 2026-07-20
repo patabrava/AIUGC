@@ -29,6 +29,7 @@ def _response(**overrides) -> str:
         "hair_consistent": True,
         "wardrobe_consistent": True,
         "room_consistent": True,
+        "wheelchair_consistent": True,
         "framing_stable": True,
         "no_artifacts": True,
         "confidence": 0.93,
@@ -63,6 +64,7 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
         "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
+        "wheelchair_consistent",
         "framing_stable",
         "no_artifacts",
         "confidence",
@@ -76,6 +78,7 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
         hair_consistent=True,
         wardrobe_consistent=True,
         room_consistent=True,
+        wheelchair_consistent=True,
         framing_stable=True,
         no_artifacts=True,
         confidence=0.93,
@@ -92,8 +95,12 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     assert "same person" in prompt
     assert "apparent age" in prompt
     assert "hair" in prompt
-    assert "cream sweater" in prompt
-    assert "room" in prompt
+    assert "exact wardrobe" in prompt
+    assert "location/background" in prompt
+    assert "same manual wheelchair" in prompt
+    assert "remains visible" in prompt
+    assert "cropped out" in prompt
+    assert "standing or walking" in prompt
     assert "framing" in prompt
     assert "artifacts" in prompt
     assert "baked-in captions" in prompt
@@ -108,6 +115,29 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
         report.passed = False  # type: ignore[misc]
 
 
+def test_visual_qa_blocks_when_same_manual_wheelchair_is_not_visible_and_consistent():
+    from app.features.shot_production.visual_qa import evaluate_visual_consistency
+
+    payload = json.loads(_response(confidence=1.0, passed=True))
+    payload["wheelchair_consistent"] = False
+    llm = _FakeLLM(json.dumps(payload))
+
+    report = evaluate_visual_consistency(
+        _image(b"approved-scene-plate"),
+        _image(b"contact-sheet"),
+        llm_client=llm,
+    )
+
+    assert report.wheelchair_consistent is False
+    assert report.passed is False
+    prompt = llm.calls[0]["prompt"]
+    assert "same manual wheelchair" in prompt
+    assert "remains visible" in prompt
+    assert "standing" in prompt
+    assert "walking" in prompt
+    assert "cropped" in prompt
+
+
 @pytest.mark.parametrize(
     "failed_component",
     [
@@ -116,6 +146,7 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
         "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
+        "wheelchair_consistent",
         "framing_stable",
         "no_artifacts",
     ],
@@ -202,6 +233,7 @@ def test_visual_qa_fails_closed_for_malformed_json():
         "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
+        "wheelchair_consistent",
         "framing_stable",
         "no_artifacts",
         "confidence",
@@ -256,6 +288,7 @@ def test_visual_qa_rejects_fields_outside_the_strict_schema():
         "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
+        "wheelchair_consistent",
         "framing_stable",
         "no_artifacts",
     ],

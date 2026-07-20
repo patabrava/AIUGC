@@ -91,6 +91,12 @@ class CandidateResponse(BaseModel):
     byte_length: int
     sha256: str
     provider_model: str
+    visual_contract_hash: str
+    actor_reference_fingerprint: str
+    derivation_mode: Literal["bootstrap", "canonical_anchor"]
+    canonical_anchor_id: Optional[str] = None
+    canonical_anchor_sha256: Optional[str] = None
+    canonical_anchor_source_run_id: Optional[str] = None
 
 
 class CandidateGenerationResponse(BaseModel):

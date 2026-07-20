@@ -42,6 +42,8 @@ def _png_bytes(*, accent: int = 0) -> bytes:
 
 
 def _snapshots(*, script: str = APPROVED_50_SECOND_SCRIPT, duration: int = 50, master: bytes):
+    from app.features.semantic_videos.visual_contract import build_visual_contract
+
     master_hash = sha256(master).hexdigest()
     post = {
         "id": "00000000-0000-0000-0000-000000000101",
@@ -68,14 +70,24 @@ def _snapshots(*, script: str = APPROVED_50_SECOND_SCRIPT, duration: int = 50, m
         "location_reference": {
             "role": "location",
             "storage_uri": "semantic/references/location.png",
+            "mime_type": "image/png",
+            "byte_length": 123,
             "sha256": "3" * 64,
         },
-        "master": {
+        "scene_key": "garden_patio_a",
+        "scene_description": "the exact supplied garden patio",
+        "wardrobe_key": "grey_cardigan",
+        "wardrobe_description": "light-grey cardigan over a plain white top",
+    }
+    visual_contract = build_visual_contract(reference)
+    reference["visual_contract"] = visual_contract
+    reference["master"] = {
             "storage_uri": "semantic/masters/approved.png",
             "mime_type": "image/png",
             "byte_length": len(master),
             "sha256": master_hash,
-        },
+            "provider_model": "gemini-3.1-flash-image",
+            "visual_contract_hash": visual_contract["contract_hash"],
     }
     return post, batch, reference
 
@@ -122,6 +134,18 @@ def test_compile_semantic_video_plan_builds_canonical_seven_take_costed_payload(
     assert compiled.run_payload["plan_snapshot"]["estimated_cost_usd"] == "22.40"
     assert compiled.run_payload["estimated_cost_usd"] == "22.40"
     assert compiled.run_payload["plan_hash"] == compiled.plan_hash
+    assert compiled.run_payload["plan_snapshot"]["visual_contract_hash"] == (
+        compiled.run_payload["reference_snapshot"]["visual_contract"]["contract_hash"]
+    )
+    for take in compiled.take_payloads:
+        request = take["request_contract"]
+        assert request["visual_contract_hash"] == compiled.run_payload["plan_snapshot"][
+            "visual_contract_hash"
+        ]
+        assert "the exact supplied garden patio" in request["prompt"]
+        assert "light-grey cardigan over a plain white top" in request["prompt"]
+        assert "manual wheelchair" in request["prompt"]
+        assert "cream knit sweater" not in request["prompt"]
     assert re.fullmatch(r"[0-9a-f]{64}", compiled.plan_hash)
     json.dumps(compiled.run_payload, sort_keys=True)
     json.dumps(compiled.take_payloads, sort_keys=True)
@@ -148,6 +172,29 @@ def test_compile_semantic_video_plan_accepts_manual_semantic_batch():
 
     assert compiled.run_payload["requested_duration_seconds"] == 50
     assert compiled.run_payload["plan_snapshot"]["take_count"] == 7
+    assert compiled.run_payload["script_snapshot"] == {
+        "text": APPROVED_50_SECOND_SCRIPT,
+        "review_status": "approved",
+        "word_count": 112,
+        "source": "manual_semantic_ugc",
+        "creation_mode": "manual_semantic_ugc",
+        "script_review_status": "approved",
+        "target_duration_seconds": 50,
+    }
+
+
+def test_compile_semantic_video_plan_preserves_automated_semantic_provenance():
+    compiled = _compile()
+
+    assert compiled.run_payload["script_snapshot"] == {
+        "text": APPROVED_50_SECOND_SCRIPT,
+        "review_status": "approved",
+        "word_count": 112,
+        "source": "app.features.topics.semantic_scripts.generate_semantic_script",
+        "creation_mode": "semantic_ugc",
+        "script_review_status": "approved",
+        "target_duration_seconds": 50,
+    }
 
 
 def test_compile_semantic_video_plan_hash_changes_with_script_master_or_duration():

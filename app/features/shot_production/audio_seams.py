@@ -83,6 +83,9 @@ class AcousticSeamPlan:
     seams: Tuple[PlannedSeam, ...]
     active_speech_rms_range_db: float
     final_duration_seconds: float
+    content_duration_seconds: Optional[float] = None
+    target_duration_seconds: Optional[float] = None
+    delivery_padding_seconds: float = 0.0
 
 
 def acoustic_analysis_cache_key(
@@ -443,6 +446,9 @@ def _select_seam(
                 except ValidationError:
                     reasons.append("insufficient_boundary_evidence")
                     energy_delta = math.inf
+                candidate["short_window_energy_delta_db"] = (
+                    round(energy_delta, 6) if math.isfinite(energy_delta) else None
+                )
                 deterministic_reasons = tuple(reasons)
                 if energy_delta > _PREFERRED_SEAM_ENERGY_DELTA_DB + 1e-9:
                     reasons.append("energy_delta_exceeded")
@@ -480,9 +486,45 @@ def _select_seam(
         valid = perceptual_fallbacks
         energy_fallback = True
     if not valid:
+        rejection_reason_counts: Dict[str, int] = {}
+        observed_energy_deltas = []
+        for candidate in rejected:
+            for reason in candidate["reasons"]:
+                rejection_reason_counts[str(reason)] = (
+                    rejection_reason_counts.get(str(reason), 0) + 1
+                )
+            energy_delta = candidate.get("short_window_energy_delta_db")
+            if isinstance(energy_delta, (int, float)) and math.isfinite(float(energy_delta)):
+                observed_energy_deltas.append(float(energy_delta))
+        minimum_energy_delta = (
+            round(min(observed_energy_deltas), 6) if observed_energy_deltas else None
+        )
+        room_tone_mismatch = (
+            minimum_energy_delta is not None
+            and minimum_energy_delta > MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB + 1e-9
+        )
         raise ValidationError(
             "No transcript-safe acoustic seam candidate exists.",
-            {"seam_index": seam_index, "rejected_candidate_count": len(rejected)},
+            {
+                "seam_index": seam_index,
+                "failure_type": (
+                    "room_tone_energy_mismatch"
+                    if room_tone_mismatch
+                    else "transcript_safe_seam_unavailable"
+                ),
+                "rejected_candidate_count": len(rejected),
+                "rejection_reason_counts": rejection_reason_counts,
+                "minimum_observed_energy_delta_db": minimum_energy_delta,
+                "maximum_allowed_energy_delta_db": MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB,
+                "recommended_retry_take_indexes": [next_take.take_index],
+                "recommended_action": (
+                    "Regenerate only the incoming take with room tone matching the previous "
+                    "take after automatic room-tone normalization could not create a safe boundary."
+                    if room_tone_mismatch
+                    else "Regenerate only the incoming take with a clean pre-speech margin and "
+                    "no isolated breath at the boundary."
+                ),
+            },
         )
     island_duration, _, energy_delta, next_start, previous_end, overlap, _ = min(
         valid,
@@ -562,7 +604,13 @@ def _extend_delivery_windows(
     min_duration_seconds: float,
     max_duration_seconds: float,
     max_seam_word_gap_seconds: float,
+    max_delivery_padding_seconds: float = 0.0,
 ) -> Tuple[Tuple[PlannedTakeWindow, ...], Tuple[PlannedSeam, ...]]:
+    if (
+        not math.isfinite(max_delivery_padding_seconds)
+        or max_delivery_padding_seconds < 0.0
+    ):
+        raise ValidationError("Acoustic delivery padding allowance is invalid.")
     result = list(planned)
     adjusted_seams = list(seams)
     current_duration = _planned_duration(result, seams)
@@ -585,11 +633,13 @@ def _extend_delivery_windows(
         for index, raw_capacity in enumerate(raw_capacities)
     ]
     cadence_safe_available = sum(capacities)
-    if cadence_safe_available + 1e-9 < required:
+    native_shortfall = max(0.0, required - cadence_safe_available)
+    if native_shortfall > max_delivery_padding_seconds + 1e-9:
         fair_share = required / len(result)
         raise ValidationError(
             "Acoustic plan cannot satisfy the duration envelope.",
             {
+                "failure_type": "native_duration_shortfall",
                 "required_seconds": required,
                 "total_available_seconds": sum(raw_capacities),
                 "available_seconds_by_take": {
@@ -601,13 +651,26 @@ def _extend_delivery_windows(
                     str(window.take_index): capacity
                     for window, capacity in zip(result, capacities)
                 },
+                "delivery_shortfall_seconds": native_shortfall,
+                "maximum_encoder_padding_seconds": max_delivery_padding_seconds,
                 "under_capacity_take_indexes": [
                     window.take_index
                     for window, capacity in zip(result, capacities)
                     if capacity + 1e-9 < fair_share
                 ],
+                "recommended_retry_take_indexes": [result[-1].take_index],
+                "recommended_action": (
+                    "Regenerate only the final take with measured pacing and enough native "
+                    "post-speech motion and room tone to reach the delivery target."
+                ),
             },
         )
+    # Consume every cadence-safe source window needed before allowing the encoder to resolve a
+    # sub-frame remainder. This allowance is strictly for frame/sample quantization; it must never
+    # become a synthetic outro.
+    required = min(required, cadence_safe_available)
+    if required <= 1e-9:
+        return tuple(result), tuple(adjusted_seams)
 
     if capacities[-1] + 1e-9 >= required:
         extensions = [0.0] * len(result)
@@ -703,6 +766,7 @@ def plan_acoustic_seams(
     fps: float = 24.0,
     min_duration_seconds: float = 14.5,
     max_duration_seconds: float = 16.5,
+    target_duration_seconds: Optional[float] = None,
     min_post_word_crossfade_guard_seconds: float = _DEFAULT_POST_WORD_CROSSFADE_GUARD_SECONDS,
     max_seam_word_gap_seconds: float = _MAX_SEAM_WORD_GAP_SECONDS,
 ) -> AcousticSeamPlan:
@@ -715,6 +779,12 @@ def plan_acoustic_seams(
         or max_duration_seconds <= min_duration_seconds
     ):
         raise ValidationError("Acoustic duration envelope is invalid.")
+    if target_duration_seconds is not None and (
+        not math.isfinite(target_duration_seconds)
+        or target_duration_seconds < min_duration_seconds - 1e-9
+        or target_duration_seconds > max_duration_seconds + 1e-9
+    ):
+        raise ValidationError("Acoustic target duration is outside the duration envelope.")
     if (
         not math.isfinite(min_post_word_crossfade_guard_seconds)
         or not 0.060 <= min_post_word_crossfade_guard_seconds <= 0.100
@@ -741,17 +811,39 @@ def plan_acoustic_seams(
         for index in range(len(ordered) - 1)
     )
     planned = _derive_video_windows(ordered, seams, gains)
+    planning_floor = (
+        float(target_duration_seconds)
+        if target_duration_seconds is not None
+        else max(0.0, min_duration_seconds - (1.0 / fps))
+    )
     planned, seams = _extend_delivery_windows(
         planned,
         ordered,
         seams,
-        min_duration_seconds=max(0.0, min_duration_seconds - (1.0 / fps)),
+        min_duration_seconds=planning_floor,
         max_duration_seconds=max_duration_seconds,
         max_seam_word_gap_seconds=max_seam_word_gap_seconds,
+        max_delivery_padding_seconds=(
+            1.0 / fps if target_duration_seconds is not None else 0.0
+        ),
     )
-    final_duration = _planned_duration(planned, seams)
+    content_duration = _planned_duration(planned, seams)
+    delivery_padding = (
+        max(0.0, float(target_duration_seconds) - content_duration)
+        if target_duration_seconds is not None
+        else 0.0
+    )
+    if target_duration_seconds is not None and delivery_padding > 1.0 / fps + 1e-9:
+        raise ValidationError(
+            "Acoustic exact delivery would require more than one frame of synthetic padding."
+        )
+    final_duration = (
+        float(target_duration_seconds)
+        if target_duration_seconds is not None
+        else content_duration
+    )
     video_duration = sum(take.video_end_seconds - take.video_start_seconds for take in planned)
-    if abs(final_duration - video_duration) > 1.0 / fps + 1e-9:
+    if abs(content_duration - video_duration) > 1.0 / fps + 1e-9:
         raise ValidationError("Acoustic audio/video plan exceeds one frame of duration drift.")
     return AcousticSeamPlan(
         analyzer_version=ACOUSTIC_ANALYZER_VERSION,
@@ -759,6 +851,9 @@ def plan_acoustic_seams(
         seams=seams,
         active_speech_rms_range_db=rms_range,
         final_duration_seconds=final_duration,
+        content_duration_seconds=content_duration,
+        target_duration_seconds=target_duration_seconds,
+        delivery_padding_seconds=delivery_padding,
     )
 
 

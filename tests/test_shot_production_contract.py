@@ -212,13 +212,15 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         assert request.beat == beat
         assert request.prompt.count(beat.text) == 1
         assert "sole visual truth" in request.prompt
-        assert "cream knit sweater" in request.prompt
+        assert "cream knit sweater" not in request.prompt
+        assert "same visible manual wheelchair" in request.prompt
+        assert "rear wheel or silver hand rim" in request.prompt
         assert "native German" in request.prompt
         assert "naturally stop" in request.prompt
         assert "38-year-old" not in request.prompt
         assert "hazel" not in request.prompt
         assert "terracotta" not in request.prompt
-        assert "seated" not in request.prompt.lower()
+        assert "seated posture" in request.prompt.lower()
         assert "hands" not in request.prompt.lower()
         assert "gestures" not in request.prompt.lower()
         assert "subtle blinking" in request.prompt.lower()

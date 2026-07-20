@@ -42,11 +42,33 @@ SCRIPT = " ".join(
 )
 
 
-def _png_bytes() -> bytes:
-    image = Image.new("RGB", (90, 160), (120, 90, 60))
+def _png_bytes(*, accent: int = 0) -> bytes:
+    image = Image.new(
+        "RGB",
+        (90, 160),
+        ((120 + accent) % 256, (90 + accent) % 256, (60 + accent) % 256),
+    )
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _scene_plate_result(*, marker: str = "candidate") -> SimpleNamespace:
+    prompts = tuple(f"{marker} scene-plate prompt {index}" for index in range(1, 4))
+    return SimpleNamespace(
+        derivation_mode="bootstrap",
+        prompts=prompts,
+        candidates=[
+            SimpleNamespace(
+                index=index,
+                image_bytes=_png_bytes(accent=50 + index),
+                mime_type="image/png",
+                provider_model="gemini-3.1-flash-image",
+                prompt=prompts[index - 1],
+            )
+            for index in range(1, 4)
+        ],
+    )
 
 
 def test_retry_guidance_names_a_missing_first_word_for_paid_regeneration():
@@ -79,9 +101,9 @@ class _FakeStorage:
     def __init__(self, master: bytes):
         self.master = master
         self.objects = {
-            "https://storage/front.png": master,
-            "https://storage/three-quarter.png": b"three-quarter-reference",
-            "https://storage/location.png": b"location-reference",
+            "https://storage/front.png": _png_bytes(accent=11),
+            "https://storage/three-quarter.png": _png_bytes(accent=22),
+            "https://storage/location.png": _png_bytes(accent=33),
             "https://storage/master.png": master,
         }
         self.download_calls = []
@@ -112,15 +134,69 @@ class _FakeStorage:
 
 def _install_repository(monkeypatch):
     from app.features.semantic_videos import handlers
+    from app.features.semantic_videos.visual_contract import (
+        build_actor_reference_fingerprint,
+        build_visual_contract,
+    )
 
-    master = _png_bytes()
+    master = _png_bytes(accent=44)
     master_hash = sha256(master).hexdigest()
+    fake_storage = _FakeStorage(master)
     state = {
         "run": None,
         "takes": [],
         "approvals": [],
         "candidate_reservation": None,
         "reservation_lock": Lock(),
+    }
+    reference = {
+        "actor_identity_id": "actor-1",
+        "actor": {"name": "AYRA Actor", "character_description": "Immutable actor description."},
+        "scene_key": "home_office_advice_a",
+        "scene_description": "Bright actor-free living room beside a window.",
+        "wardrobe_key": "grey_cardigan",
+        "wardrobe_description": "Blue cotton blouse with a simple round neckline.",
+        "actor_references": [
+            {
+                "role": "actor_front",
+                "storage_uri": "https://storage/front.png",
+                "mime_type": "image/png",
+                "byte_length": len(fake_storage.objects["https://storage/front.png"]),
+                "sha256": sha256(fake_storage.objects["https://storage/front.png"]).hexdigest(),
+            },
+            {
+                "role": "actor_three_quarter",
+                "storage_uri": "https://storage/three-quarter.png",
+                "mime_type": "image/png",
+                "byte_length": len(fake_storage.objects["https://storage/three-quarter.png"]),
+                "sha256": sha256(
+                    fake_storage.objects["https://storage/three-quarter.png"]
+                ).hexdigest(),
+            },
+        ],
+        "location_reference": {
+            "role": "location",
+            "storage_uri": "https://storage/location.png",
+            "mime_type": "image/png",
+            "byte_length": len(fake_storage.objects["https://storage/location.png"]),
+            "sha256": sha256(fake_storage.objects["https://storage/location.png"]).hexdigest(),
+        },
+    }
+    visual_contract = build_visual_contract(reference)
+    reference["visual_contract"] = visual_contract
+    actor_fingerprint = build_actor_reference_fingerprint(reference["actor_references"])
+    reference["actor_reference_fingerprint"] = actor_fingerprint
+    reference["master"] = {
+        "storage_uri": "https://storage/master.png",
+        "mime_type": "image/png",
+        "byte_length": len(master),
+        "sha256": master_hash,
+        "provider_model": "gemini-3.1-flash-image",
+        "visual_contract_hash": visual_contract["contract_hash"],
+        "actor_reference_fingerprint": actor_fingerprint,
+        "derivation_mode": "bootstrap",
+        "canonical_anchor_id": None,
+        "canonical_anchor_sha256": None,
     }
     context = {
         "post": {
@@ -134,39 +210,7 @@ def _install_repository(monkeypatch):
             "creation_mode": "semantic_ugc",
             "target_duration_seconds": 50,
         },
-        "reference": {
-            "actor_identity_id": "actor-1",
-            "actor": {"name": "AYRA Actor", "character_description": "Immutable actor description."},
-            "scene_description": "Bright actor-free living room beside a window.",
-            "wardrobe_description": "Blue cotton blouse with a simple round neckline.",
-            "actor_references": [
-                {
-                    "role": "actor_front",
-                    "storage_uri": "https://storage/front.png",
-                    "mime_type": "image/png",
-                    "byte_length": len(master),
-                    "sha256": master_hash,
-                },
-                {
-                    "role": "actor_three_quarter",
-                    "storage_uri": "https://storage/three-quarter.png",
-                    "mime_type": "image/png",
-                    "sha256": sha256(b"three-quarter-reference").hexdigest(),
-                },
-            ],
-            "location_reference": {
-                "role": "location",
-                "storage_uri": "https://storage/location.png",
-                "mime_type": "image/png",
-                "sha256": sha256(b"location-reference").hexdigest(),
-            },
-            "master": {
-                "storage_uri": "https://storage/front.png",
-                "mime_type": "image/png",
-                "byte_length": len(master),
-                "sha256": master_hash,
-            },
-        },
+        "reference": reference,
     }
 
     state["context"] = context
@@ -207,10 +251,15 @@ def _install_repository(monkeypatch):
         with state["reservation_lock"]:
             if state["candidate_reservation"] is not None:
                 raise StateTransitionError("Semantic video candidate reservation is active.")
-            if state["run"] is None:
+            if state["run"] is None or str(state["run"].get("stage") or "") in {
+                "completed",
+                "failed",
+            }:
                 if expected_revision is not None:
                     raise StateTransitionError("Semantic video candidate revision conflict.")
-                state["run"] = {**deepcopy(run_create), "id": "run-1", "revision": 0}
+                previous_id = str((state["run"] or {}).get("id") or "")
+                run_id = "run-2" if previous_id else "run-1"
+                state["run"] = {**deepcopy(run_create), "id": run_id, "revision": 0}
             else:
                 if state["run"]["revision"] != expected_revision:
                     raise StateTransitionError("Semantic video candidate revision conflict.")
@@ -231,11 +280,26 @@ def _install_repository(monkeypatch):
         reservation_token,
         run_updates,
     ):
-        assert run_id == "run-1"
+        assert run_id == state["run"]["id"]
         with state["reservation_lock"]:
             assert state["candidate_reservation"] == reservation_token
             assert state["run"]["revision"] == reserved_revision
             state["run"].update(deepcopy(run_updates))
+            return deepcopy(state["run"])
+
+    def release_candidate_reservation(
+        *,
+        run_id,
+        expected_revision,
+        reservation_token,
+    ):
+        assert run_id == state["run"]["id"]
+        with state["reservation_lock"]:
+            assert state["run"]["revision"] == expected_revision
+            assert state["candidate_reservation"] == reservation_token
+            state["candidate_reservation"] = None
+            state["run"]["candidate_reservation_owner"] = None
+            state["run"]["candidate_reservation_token"] = None
             return deepcopy(state["run"])
 
     def append_approval(payload):
@@ -445,6 +509,12 @@ def _install_repository(monkeypatch):
 
     monkeypatch.setattr(handlers, "load_semantic_video_context", lambda post_id: deepcopy(state["context"]))
     monkeypatch.setattr(handlers, "get_run_by_post", get_run_by_post)
+    monkeypatch.setattr(
+        handlers,
+        "get_actor_scene_plate_anchor",
+        lambda **_kwargs: None,
+        raising=False,
+    )
     monkeypatch.setattr(handlers, "update_run", update_run, raising=False)
     monkeypatch.setattr(handlers, "persist_semantic_video_plan", persist_semantic_video_plan)
     monkeypatch.setattr(
@@ -457,6 +527,12 @@ def _install_repository(monkeypatch):
         handlers,
         "finalize_candidate_generation",
         finalize_candidate_generation,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "release_candidate_reservation",
+        release_candidate_reservation,
         raising=False,
     )
     monkeypatch.setattr(handlers, "append_approval", append_approval, raising=False)
@@ -488,18 +564,21 @@ def _install_repository(monkeypatch):
     )
     monkeypatch.setattr(handlers, "list_attempts", lambda run_id: deepcopy(state["takes"]))
     monkeypatch.setattr(handlers, "list_approvals", lambda run_id: deepcopy(state["approvals"]))
-    fake_storage = _FakeStorage(master)
     monkeypatch.setattr(handlers, "get_storage_client", lambda: fake_storage)
     return handlers, state, fake_storage
 
 
 def _seed_awaiting_paid_run(state, *, revision=0):
+    reference = deepcopy(state["context"]["reference"])
     state["run"] = {
         "id": "run-1",
         "post_id": "post-1",
         "batch_id": "batch-1",
         "revision": revision,
         "stage": "awaiting_paid_approval",
+        "reference_snapshot": reference,
+        "actor_snapshot": deepcopy(reference["actor"]),
+        "master_snapshot": deepcopy(reference["master"]),
     }
 
 
@@ -583,20 +662,8 @@ def _create_plan_from_unenriched_candidate_flow(monkeypatch, client, handlers, s
 
     monkeypatch.setattr(
         handlers,
-        "generate_shot_frame_candidates",
-        lambda **_kwargs: SimpleNamespace(
-            prompt_writer_output="Complete prompt writer result.",
-            composition_prompt="Complete composition prompt.",
-            candidates=[
-                SimpleNamespace(
-                    index=index,
-                    image_bytes=storage.master,
-                    mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
-                )
-                for index in range(1, 4)
-            ],
-        ),
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="plan-flow"),
         raising=False,
     )
     candidate_response = client.post(
@@ -723,6 +790,8 @@ def test_initial_approval_rejects_same_uri_reference_byte_replacement(
         "duration",
         "invalid_duration",
         "master_bytes",
+        "scene_key",
+        "wardrobe_key",
     ],
 )
 def test_initial_approval_rejects_every_fresh_source_mutation(monkeypatch, mutation):
@@ -758,6 +827,10 @@ def test_initial_approval_rejects_every_fresh_source_mutation(monkeypatch, mutat
     elif mutation == "master_bytes":
         master_uri = state["run"]["master_snapshot"]["storage_uri"]
         storage.objects[master_uri] = b"mutated-master-bytes"
+    elif mutation == "scene_key":
+        state["context"]["reference"]["scene_key"] = "garden_patio_a"
+    elif mutation == "wardrobe_key":
+        state["context"]["reference"]["wardrobe_key"] = "beige_blazer"
 
     approval_count = len(state["approvals"])
     response = client.post(
@@ -805,8 +878,6 @@ def test_free_plan_endpoint_persists_seven_take_plan_without_provider_calls(monk
         "acoustic_qa",
         "composing",
         "uploading",
-        "completed",
-        "failed",
     ],
 )
 def test_plan_endpoint_rejects_every_stage_except_awaiting_paid_approval_without_mutation(
@@ -826,7 +897,239 @@ def test_plan_endpoint_rejects_every_stage_except_awaiting_paid_approval_without
     assert response.status_code == 409, response.text
     assert storage.download_calls == []
     assert state["run"] == original_run
+
+
+@pytest.mark.parametrize("stage", ["completed", "failed"])
+def test_candidate_endpoint_allows_a_new_run_after_terminal_history(monkeypatch, stage):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    state["run"] = {
+        "id": "run-1",
+        "post_id": "post-1",
+        "revision": 4,
+        "stage": stage,
+    }
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs) or _scene_plate_result(),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 4},
+    )
+
+    assert response.status_code == 200, response.text
+    assert state["run"]["id"] == "run-2"
+    assert state["run"]["stage"] == "awaiting_reference_approval"
+    assert len(provider_calls) == 1
+    assert len(storage.download_calls) == 3
     assert state["takes"] == []
+
+
+def _change_current_visual_reference(state, storage):
+    new_location_uri = "https://storage/garden-location.png"
+    storage.objects[new_location_uri] = _png_bytes(accent=77)
+    reference = state["context"]["reference"]
+    reference.pop("master", None)
+    reference.update(
+        {
+            "scene_key": "garden_patio_a",
+            "scene_description": "The approved actor-free garden patio.",
+            "wardrobe_key": "custom",
+            "wardrobe_description": "navy cotton blouse with a round neckline",
+            "location_reference": {
+                "role": "location",
+                "storage_uri": new_location_uri,
+                "mime_type": "image/png",
+                "byte_length": len(storage.objects[new_location_uri]),
+                "sha256": sha256(storage.objects[new_location_uri]).hexdigest(),
+            },
+        }
+    )
+
+
+def test_visual_override_invalidates_unpaid_run_and_regenerates_from_current_sources(
+    monkeypatch,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    _change_current_visual_reference(state, storage)
+    cancelled = []
+    original_cancel = handlers.cancel_run_transition
+
+    def record_cancel(*args, **kwargs):
+        cancelled.append((args, kwargs))
+        return original_cancel(*args, **kwargs)
+
+    provider_calls = []
+    monkeypatch.setattr(handlers, "cancel_run_transition", record_cancel)
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs) or _scene_plate_result(),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(cancelled) == 1
+    assert state["run"]["id"] == "run-2"
+    assert state["run"]["reference_snapshot"]["scene_key"] == "garden_patio_a"
+    assert state["run"]["reference_snapshot"]["wardrobe_key"] == "custom"
+    assert provider_calls[0]["location_reference"].image_bytes == storage.objects[
+        "https://storage/garden-location.png"
+    ]
+
+
+def test_visual_override_cannot_cancel_ambiguous_paid_submission(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    _change_current_visual_reference(state, storage)
+    state["takes"] = [
+        {
+            "id": "take-1",
+            "run_id": "run-1",
+            "take_index": 0,
+            "attempt": 1,
+            "submission_state": "intent_persisted",
+        }
+    ]
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs) or _scene_plate_result(),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert response.status_code == 409, response.text
+    assert provider_calls == []
+    assert storage.download_calls == []
+    assert state["run"]["stage"] == "awaiting_paid_approval"
+
+
+def test_visual_override_cannot_discard_completed_paid_take(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    _change_current_visual_reference(state, storage)
+    state["takes"] = [
+        {
+            "id": "take-1",
+            "run_id": "run-1",
+            "take_index": 0,
+            "attempt": 1,
+            "submission_state": "completed",
+            "operation_id": "operations/paid-take-1",
+            "raw_artifact_uri": "https://storage/paid-take-1.mp4",
+        }
+    ]
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs) or _scene_plate_result(),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert response.status_code == 409, response.text
+    assert provider_calls == []
+    assert storage.download_calls == []
+    assert state["run"]["stage"] == "awaiting_paid_approval"
+
+
+def test_legacy_unpaid_master_without_anchor_lineage_is_restartable(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    state["run"]["reference_snapshot"].pop("actor_reference_fingerprint", None)
+    for key in (
+        "actor_reference_fingerprint",
+        "derivation_mode",
+        "canonical_anchor_id",
+        "canonical_anchor_sha256",
+    ):
+        state["run"]["master_snapshot"].pop(key, None)
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="lineage-restart"),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert response.status_code == 200, response.text
+    assert state["run"]["id"] == "run-2"
+    assert state["run"]["reference_snapshot"]["actor_reference_fingerprint"]
+
+
+def test_legacy_pending_candidates_without_anchor_lineage_are_restartable(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    reference = deepcopy(state["context"]["reference"])
+    reference.pop("master", None)
+    reference.pop("actor_reference_fingerprint", None)
+    reference.pop("visual_contract", None)
+    state["run"] = {
+        "id": "run-1",
+        "post_id": "post-1",
+        "batch_id": "batch-1",
+        "revision": 4,
+        "stage": "awaiting_reference_approval",
+        "reference_snapshot": reference,
+        "master_snapshot": {
+            "candidates": [
+                {
+                    "index": 1,
+                    "storage_uri": "https://storage/generated/legacy.png",
+                    "mime_type": "image/png",
+                    "byte_length": 10,
+                    "sha256": "a" * 64,
+                    "provider_model": "gemini-3.1-flash-image",
+                }
+            ]
+        },
+    }
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="pending-lineage-restart"),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 4},
+    )
+
+    assert response.status_code == 200, response.text
+    assert state["run"]["id"] == "run-2"
+    assert state["run"]["reference_snapshot"]["actor_reference_fingerprint"]
 
 
 def test_plan_endpoint_requires_an_existing_awaiting_paid_approval_run_without_mutation(monkeypatch):
@@ -848,13 +1151,7 @@ def test_plan_endpoint_persists_run_and_takes_through_one_atomic_query_call(monk
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
 
-    state["run"] = {
-        "id": "run-1",
-        "post_id": "post-1",
-        "batch_id": "batch-1",
-        "revision": 4,
-        "stage": "awaiting_paid_approval",
-    }
+    _seed_awaiting_paid_run(state, revision=4)
     atomic_calls = []
     legacy_calls = []
 
@@ -967,7 +1264,7 @@ def test_candidate_endpoint_requires_exactly_three_candidates_before_provider_ca
     provider_calls = []
     monkeypatch.setattr(
         handlers,
-        "generate_shot_frame_candidates",
+        "generate_scene_plate_candidates",
         lambda **kwargs: provider_calls.append(kwargs),
         raising=False,
     )
@@ -986,7 +1283,7 @@ def test_candidate_endpoint_requires_exactly_three_candidates_before_provider_ca
 
 
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
-def test_candidate_endpoint_uses_front_reference_as_canonical_master_without_generation(
+def test_candidate_endpoint_generates_three_wheelchair_scene_plates_from_ordered_references(
     monkeypatch,
     creation_mode,
 ):
@@ -999,23 +1296,11 @@ def test_candidate_endpoint_uses_front_reference_as_canonical_master_without_gen
 
     def fake_generate(**kwargs):
         generated.append(kwargs)
-        return SimpleNamespace(
-            prompt_writer_output="Generated writer output.",
-            composition_prompt="Generated composition prompt.",
-            candidates=[
-                SimpleNamespace(
-                    index=index,
-                    image_bytes=f"synthetic-actor-{index}".encode(),
-                    mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
-                )
-                for index in range(1, 4)
-            ],
-        )
+        return _scene_plate_result(marker=creation_mode)
 
     monkeypatch.setattr(
         handlers,
-        "generate_shot_frame_candidates",
+        "generate_scene_plate_candidates",
         fake_generate,
         raising=False,
     )
@@ -1027,27 +1312,197 @@ def test_candidate_endpoint_uses_front_reference_as_canonical_master_without_gen
 
     assert response.status_code == 200, response.text
     candidates = response.json()["data"]["candidates"]
-    canonical_hash = sha256(storage.objects["https://storage/front.png"]).hexdigest()
-    assert generated == []
-    assert storage.upload_calls == []
-    assert {candidate["storage_uri"] for candidate in candidates} == {
-        "https://storage/front.png"
-    }
-    assert {candidate["sha256"] for candidate in candidates} == {canonical_hash}
+    assert len(generated) == 1
+    assert [reference.role for reference in generated[0]["actor_references"]] == [
+        "actor_front",
+        "actor_three_quarter",
+    ]
+    assert generated[0]["location_reference"].role == "location"
+    assert "living room" in generated[0]["scene"]
+    assert generated[0]["wardrobe"] == "Blue cotton blouse with a simple round neckline."
+    assert len(storage.upload_calls) == 3
+    assert len({candidate["storage_uri"] for candidate in candidates}) == 3
+    assert len({candidate["sha256"] for candidate in candidates}) == 3
     assert {candidate["provider_model"] for candidate in candidates} == {
-        "canonical-actor-reference/v1"
+        "gemini-3.1-flash-image"
+    }
+    assert {candidate["visual_contract_hash"] for candidate in candidates} == {
+        state["run"]["reference_snapshot"]["visual_contract"]["contract_hash"]
+    }
+    assert {candidate["derivation_mode"] for candidate in candidates} == {"bootstrap"}
+    assert all(candidate["canonical_anchor_id"] is None for candidate in candidates)
+    expected_source = (
+        "manual_semantic_ugc"
+        if creation_mode == "manual_semantic_ugc"
+        else "app.features.topics.semantic_scripts.generate_semantic_script"
+    )
+    assert state["run"]["script_snapshot"] | {
+        "text": state["run"]["script_snapshot"]["text"],
+        "word_count": state["run"]["script_snapshot"]["word_count"],
+    } == {
+        "text": state["run"]["script_snapshot"]["text"],
+        "review_status": "approved",
+        "word_count": state["run"]["script_snapshot"]["word_count"],
+        "source": expected_source,
+        "creation_mode": creation_mode,
+        "script_review_status": "approved",
+        "target_duration_seconds": 50,
     }
 
 
-@pytest.mark.parametrize("field", ["storage_uri", "sha256", "byte_length"])
-def test_master_approval_rejects_candidate_that_differs_from_canonical_actor(
-    monkeypatch,
-    field,
-):
-    _handlers, state, _storage = _install_repository(monkeypatch)
+def test_candidate_endpoint_derives_all_candidates_from_atomic_actor_anchor(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.features.semantic_videos.visual_contract import (
+        build_actor_reference_fingerprint,
+    )
     from app.main import app
 
     state["context"]["reference"].pop("master")
+    actor_fingerprint = build_actor_reference_fingerprint(
+        state["context"]["reference"]["actor_references"]
+    )
+    anchor_bytes = _png_bytes(accent=77)
+    anchor_hash = sha256(anchor_bytes).hexdigest()
+    anchor_url = "https://storage/approved-canonical-anchor.png"
+    storage.objects[anchor_url] = anchor_bytes
+    anchor = {
+        "id": "anchor-1",
+        "actor_identity_id": "actor-1",
+        "actor_reference_fingerprint": actor_fingerprint,
+        "source_run_id": "canonical-run-1",
+        "master_storage_uri": anchor_url,
+        "master_sha256": anchor_hash,
+        "master_byte_length": len(anchor_bytes),
+        "master_mime_type": "image/png",
+        "provider_model": "gemini-3.1-flash-image",
+    }
+    monkeypatch.setattr(
+        handlers,
+        "get_actor_scene_plate_anchor",
+        lambda **_kwargs: deepcopy(anchor),
+        raising=False,
+    )
+    generated = []
+
+    def fake_generate(**kwargs):
+        generated.append(kwargs)
+        result = _scene_plate_result(marker="canonical-anchor")
+        result.derivation_mode = "canonical_anchor"
+        return result
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        fake_generate,
+        raising=False,
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(generated) == 1
+    assert generated[0]["canonical_scene_plate"].role == "canonical_scene_plate"
+    assert generated[0]["canonical_scene_plate"].image_bytes == anchor_bytes
+    candidates = state["run"]["master_snapshot"]["candidates"]
+    assert {candidate["derivation_mode"] for candidate in candidates} == {
+        "canonical_anchor"
+    }
+    assert {candidate["canonical_anchor_id"] for candidate in candidates} == {
+        "anchor-1"
+    }
+    assert {candidate["canonical_anchor_sha256"] for candidate in candidates} == {
+        anchor_hash
+    }
+    assert {candidate["actor_reference_fingerprint"] for candidate in candidates} == {
+        actor_fingerprint
+    }
+
+
+@pytest.mark.parametrize("tamper", ["sha256", "byte_length", "fingerprint"])
+def test_candidate_endpoint_rejects_changed_or_mismatched_actor_anchor(monkeypatch, tamper):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.features.semantic_videos.visual_contract import (
+        build_actor_reference_fingerprint,
+    )
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    actor_fingerprint = build_actor_reference_fingerprint(
+        state["context"]["reference"]["actor_references"]
+    )
+    anchor_bytes = _png_bytes(accent=78)
+    anchor_url = "https://storage/tampered-canonical-anchor.png"
+    storage.objects[anchor_url] = anchor_bytes
+    anchor = {
+        "id": "anchor-1",
+        "actor_identity_id": "actor-1",
+        "actor_reference_fingerprint": actor_fingerprint,
+        "source_run_id": "canonical-run-1",
+        "master_storage_uri": anchor_url,
+        "master_sha256": sha256(anchor_bytes).hexdigest(),
+        "master_byte_length": len(anchor_bytes),
+        "master_mime_type": "image/png",
+        "provider_model": "gemini-3.1-flash-image",
+    }
+    if tamper == "sha256":
+        anchor["master_sha256"] = "0" * 64
+    elif tamper == "byte_length":
+        anchor["master_byte_length"] += 1
+    else:
+        anchor["actor_reference_fingerprint"] = "1" * 64
+    monkeypatch.setattr(
+        handlers,
+        "get_actor_scene_plate_anchor",
+        lambda **_kwargs: deepcopy(anchor),
+        raising=False,
+    )
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs),
+        raising=False,
+    )
+
+    response = TestClient(
+        app,
+        base_url="http://localhost",
+        raise_server_exceptions=False,
+    ).post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 409, response.text
+    assert provider_calls == []
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "visual_contract",
+        "actor_front_passthrough",
+        "actor_three_quarter_passthrough",
+        "location_passthrough",
+    ],
+)
+def test_master_approval_rejects_unbound_or_unchanged_actor_candidate(
+    monkeypatch,
+    tamper,
+):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="approval-guard"),
+        raising=False,
+    )
     client = TestClient(app, base_url="http://localhost")
     generated = client.post(
         "/semantic-videos/posts/post-1/candidates",
@@ -1055,11 +1510,17 @@ def test_master_approval_rejects_candidate_that_differs_from_canonical_actor(
     )
     assert generated.status_code == 200, generated.text
     candidate = state["run"]["master_snapshot"]["candidates"][0]
-    candidate[field] = {
-        "storage_uri": "https://storage/different-actor.png",
-        "sha256": "0" * 64,
-        "byte_length": int(candidate["byte_length"]) + 1,
-    }[field]
+    if tamper == "visual_contract":
+        candidate["visual_contract_hash"] = "0" * 64
+    elif tamper == "location_passthrough":
+        candidate["sha256"] = state["run"]["reference_snapshot"]["location_reference"][
+            "sha256"
+        ]
+    else:
+        actor_index = 0 if tamper == "actor_front_passthrough" else 1
+        candidate["sha256"] = state["run"]["reference_snapshot"]["actor_references"][
+            actor_index
+        ]["sha256"]
 
     response = client.post(
         "/semantic-videos/posts/post-1/master-approve",
@@ -1070,7 +1531,7 @@ def test_master_approval_rejects_candidate_that_differs_from_canonical_actor(
     assert state["approvals"] == []
 
 
-def test_candidate_endpoint_verifies_ordered_references_and_persists_canonical_bytes(monkeypatch):
+def test_candidate_endpoint_verifies_ordered_references_and_persists_scene_plate_bytes(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
     from app.main import app
 
@@ -1080,38 +1541,25 @@ def test_candidate_endpoint_verifies_ordered_references_and_persists_canonical_b
 
     def fake_generate(**kwargs):
         provider_calls.append(kwargs)
-        return SimpleNamespace(
-            prompt_writer_output="Complete prompt writer result.",
-            composition_prompt="Complete composition prompt.",
-            candidates=[
-                SimpleNamespace(
-                    index=index,
-                    image_bytes=f"candidate-{index}".encode(),
-                    mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
-                )
-                for index in range(1, 4)
-            ],
-        )
+        return _scene_plate_result(marker="ordered")
 
-    monkeypatch.setattr(handlers, "generate_shot_frame_candidates", fake_generate, raising=False)
+    monkeypatch.setattr(handlers, "generate_scene_plate_candidates", fake_generate, raising=False)
     response = TestClient(app, base_url="http://localhost").post(
         "/semantic-videos/posts/post-1/candidates",
         json={"candidate_count": 3},
     )
 
     assert response.status_code == 200, response.text
-    assert provider_calls == []
+    assert len(provider_calls) == 1
     assert [url for url, _correlation_id in storage.download_calls] == [
         "https://storage/front.png",
         "https://storage/three-quarter.png",
         "https://storage/location.png",
     ]
-    assert storage.upload_calls == []
+    assert len(storage.upload_calls) == 3
     candidates = response.json()["data"]["candidates"]
-    assert {candidate["sha256"] for candidate in candidates} == {
-        sha256(storage.master).hexdigest()
-    }
+    assert len({candidate["sha256"] for candidate in candidates}) == 3
+    assert all(candidate["sha256"] != sha256(storage.objects["https://storage/front.png"]).hexdigest() for candidate in candidates)
     assert state["run"]["stage"] == "awaiting_reference_approval"
     assert state["run"]["master_snapshot"]["candidates"] == candidates
 
@@ -1123,20 +1571,8 @@ def test_candidate_endpoint_returns_the_finalized_persisted_candidate_contract(m
     state["context"]["reference"].pop("master")
     monkeypatch.setattr(
         handlers,
-        "generate_shot_frame_candidates",
-        lambda **_kwargs: SimpleNamespace(
-            prompt_writer_output="Complete prompt writer result.",
-            composition_prompt="Complete composition prompt.",
-            candidates=[
-                SimpleNamespace(
-                    index=index,
-                    image_bytes=f"candidate-{index}".encode(),
-                    mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
-                )
-                for index in range(1, 4)
-            ],
-        ),
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="persisted"),
         raising=False,
     )
 
@@ -1175,7 +1611,7 @@ def test_candidate_endpoint_returns_the_finalized_persisted_candidate_contract(m
     )
 
 
-def test_candidate_refresh_never_triggers_paid_image_generation(monkeypatch):
+def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
     from app.main import app
 
@@ -1188,7 +1624,7 @@ def test_candidate_refresh_never_triggers_paid_image_generation(monkeypatch):
 
     monkeypatch.setattr(
         handlers,
-        "generate_shot_frame_candidates",
+        "generate_scene_plate_candidates",
         fail_after_provider_invocation,
         raising=False,
     )
@@ -1198,16 +1634,24 @@ def test_candidate_refresh_never_triggers_paid_image_generation(monkeypatch):
         "/semantic-videos/posts/post-1/candidates",
         json={"candidate_count": 3},
     )
+    assert first.status_code == 500, first.text
+    assert len(provider_calls) == 1
+    assert storage.upload_calls == []
+    assert state["candidate_reservation"] is None
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="retry"),
+        raising=False,
+    )
     second = client.post(
         "/semantic-videos/posts/post-1/candidates",
         json={"candidate_count": 3, "expected_revision": 0},
     )
 
-    assert first.status_code == 200, first.text
-    assert second.status_code == 409, second.text
-    assert provider_calls == []
-    assert storage.upload_calls == []
-    assert state["run"]["candidate_reservation_token"] == state["candidate_reservation"]
+    assert second.status_code == 200, second.text
+    assert len(storage.upload_calls) == 3
 
 
 def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_call(monkeypatch):
@@ -1216,7 +1660,7 @@ def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_
 
     state["context"]["reference"]["actor_references"] = state["context"]["reference"]["actor_references"][:1]
     calls = []
-    monkeypatch.setattr(handlers, "generate_shot_frame_candidates", lambda **kwargs: calls.append(kwargs), raising=False)
+    monkeypatch.setattr(handlers, "generate_scene_plate_candidates", lambda **kwargs: calls.append(kwargs), raising=False)
 
     response = TestClient(app, base_url="http://localhost").post(
         "/semantic-videos/posts/post-1/candidates",
@@ -1232,7 +1676,6 @@ def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_
     "stage",
     [
         "awaiting_script_approval",
-        "awaiting_paid_approval",
         "generating",
         "transcript_qa",
         "identity_qa",
@@ -1241,8 +1684,6 @@ def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_
         "acoustic_qa",
         "composing",
         "uploading",
-        "completed",
-        "failed",
     ],
 )
 def test_candidate_endpoint_rejects_every_unintended_existing_stage_before_external_calls(
@@ -1273,7 +1714,7 @@ def test_candidate_endpoint_rejects_every_unintended_existing_stage_before_exter
             ],
         )
 
-    monkeypatch.setattr(handlers, "generate_shot_frame_candidates", fake_generate, raising=False)
+    monkeypatch.setattr(handlers, "generate_scene_plate_candidates", fake_generate, raising=False)
     response = TestClient(app, base_url="http://localhost").post(
         "/semantic-videos/posts/post-1/candidates",
         json={"candidate_count": 3, "expected_revision": 4},
@@ -1300,12 +1741,14 @@ def test_candidate_endpoint_rejects_missing_or_stale_existing_revision_before_ex
         "post_id": "post-1",
         "revision": 4,
         "stage": "awaiting_reference_approval",
+        "reference_snapshot": deepcopy(state["context"]["reference"]),
+        "master_snapshot": {},
     }
     original_run = deepcopy(state["run"])
     provider_calls = []
     monkeypatch.setattr(
         handlers,
-        "generate_shot_frame_candidates",
+        "generate_scene_plate_candidates",
         lambda **kwargs: provider_calls.append(kwargs)
         or SimpleNamespace(
             prompt_writer_output="Complete prompt writer result.",
@@ -1359,22 +1802,10 @@ def test_candidate_generation_reserves_before_concurrent_provider_effects(monkey
 
     def generate(**_kwargs):
         provider_calls.append(flow)
-        return SimpleNamespace(
-            prompt_writer_output="Prompt writer output.",
-            composition_prompt="Composition prompt.",
-            candidates=[
-                SimpleNamespace(
-                    index=index,
-                    image_bytes=f"{flow}-candidate-{index}".encode(),
-                    mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
-                )
-                for index in range(1, 4)
-            ],
-        )
+        return _scene_plate_result(marker=flow)
 
     monkeypatch.setattr(handlers, "load_semantic_video_context", load_context)
-    monkeypatch.setattr(handlers, "generate_shot_frame_candidates", generate, raising=False)
+    monkeypatch.setattr(handlers, "generate_scene_plate_candidates", generate, raising=False)
     payload = {"candidate_count": 3}
     if flow == "refresh":
         payload["expected_revision"] = 5
@@ -1387,8 +1818,8 @@ def test_candidate_generation_reserves_before_concurrent_provider_effects(monkey
         responses = list(pool.map(lambda _index: submit(), range(2)))
 
     assert sorted(response.status_code for response in responses) == [200, 409]
-    assert provider_calls == []
-    assert storage.upload_calls == []
+    assert provider_calls == [flow]
+    assert len(storage.upload_calls) == 3
 
 
 def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeypatch):
@@ -1398,27 +1829,21 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
     state["context"]["reference"].pop("master")
     monkeypatch.setattr(
         handlers,
-        "generate_shot_frame_candidates",
-        lambda **_kwargs: SimpleNamespace(
-            prompt_writer_output="Complete prompt writer result.",
-            composition_prompt="Complete composition prompt.",
-            candidates=[
-                SimpleNamespace(index=index, image_bytes=f"candidate-{index}".encode(), mime_type="image/png", provider_model="gemini-3.1-flash-image")
-                for index in range(1, 4)
-            ],
-        ),
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="append-only"),
         raising=False,
     )
     client = TestClient(app, base_url="http://localhost")
     assert client.post("/semantic-videos/posts/post-1/candidates", json={"candidate_count": 3}).status_code == 200
-    audit_text = "Canonical actor front reference passthrough; no image synthesis performed."
     candidate_master = state["run"]["master_snapshot"]
-    assert candidate_master["prompt_writer_system_prompt"] == audit_text
+    audit_text = candidate_master["prompt_writer_system_prompt"]
+    assert "wheelchair scene plate" in audit_text.lower()
     assert candidate_master["prompt_writer_system_prompt_sha256"] == sha256(
         audit_text.encode("utf-8")
     ).hexdigest()
-    assert candidate_master["prompt_writer_output"] == audit_text
-    assert candidate_master["composition_prompt"] == audit_text
+    assert candidate_master["prompt_writer_output"] == "append-only scene-plate prompt 1"
+    assert candidate_master["composition_prompt"] == "append-only scene-plate prompt 1"
+    selected_hash = candidate_master["candidates"][1]["sha256"]
 
     response = client.post(
         "/semantic-videos/posts/post-1/master-approve",
@@ -1427,36 +1852,49 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
 
     assert response.status_code == 200, response.text
     assert state["run"]["master_snapshot"]["approved_candidate_index"] == 2
-    assert state["run"]["master_hash"] == sha256(_storage.master).hexdigest()
+    assert state["run"]["master_hash"] == selected_hash
     assert state["run"]["stage"] == "awaiting_paid_approval"
     assert state["run"]["master_snapshot"]["prompt_writer_system_prompt"] == audit_text
     assert state["run"]["master_snapshot"]["prompt_writer_system_prompt_sha256"] == sha256(
         audit_text.encode("utf-8")
     ).hexdigest()
-    assert state["run"]["master_snapshot"]["prompt_writer_output"] == audit_text
-    assert state["run"]["master_snapshot"]["composition_prompt"] == audit_text
+    assert state["run"]["master_snapshot"]["prompt_writer_output"] == "append-only scene-plate prompt 1"
+    assert state["run"]["master_snapshot"]["composition_prompt"] == "append-only scene-plate prompt 1"
     assert state["approvals"][0]["approval_type"] == "reference"
-    assert state["approvals"][0]["contract_hash"] == sha256(_storage.master).hexdigest()
+    assert state["approvals"][0]["contract_hash"] == selected_hash
 
 
 def test_master_approval_uses_one_atomic_transition(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
 
+    actor_fingerprint = state["context"]["reference"]["actor_reference_fingerprint"]
     candidate = {
         "index": 2,
-        "storage_uri": "https://storage/front.png",
+        "storage_uri": "https://storage/master.png",
         "mime_type": "image/png",
         "byte_length": len(_storage.master),
         "sha256": sha256(_storage.master).hexdigest(),
-        "provider_model": "canonical-actor-reference/v1",
+        "provider_model": "gemini-3.1-flash-image",
+        "visual_contract_hash": state["context"]["reference"]["visual_contract"][
+            "contract_hash"
+        ],
+        "actor_reference_fingerprint": actor_fingerprint,
+        "derivation_mode": "bootstrap",
+        "canonical_anchor_id": None,
+        "canonical_anchor_sha256": None,
     }
     state["run"] = {
         "id": "run-1",
         "revision": 4,
         "stage": "awaiting_reference_approval",
         "reference_snapshot": deepcopy(state["context"]["reference"]),
-        "master_snapshot": {"candidates": [candidate]},
+        "master_snapshot": {
+            "candidates": [candidate],
+            "visual_contract_hash": candidate["visual_contract_hash"],
+            "actor_reference_fingerprint": actor_fingerprint,
+            "derivation_mode": "bootstrap",
+        },
     }
     calls = []
 
@@ -2570,11 +3008,13 @@ def test_query_helpers_cover_fenced_claim_stage_retry_release_and_completion():
         advance_worker_stage,
         complete_worker_run,
         release_worker_lease,
+        renew_worker_lease,
         require_worker_retry_approval,
     )
 
     client = _RecordingClient(
         [{"id": "run-1", "lease_owner": "worker-1", "lease_token": "lease-1"}],
+        {"id": "run-1", "lease_owner": "worker-1", "lease_token": "lease-1"},
         {"id": "run-1", "stage": "identity_qa"},
         {"id": "run-1", "stage": "retry_approval_required"},
         {"id": "run-1", "lease_owner": None},
@@ -2591,6 +3031,14 @@ def test_query_helpers_cover_fenced_claim_stage_retry_release_and_completion():
         client=client,
     )
     assert claimed["lease_owner"] == "worker-1"
+    renewed = renew_worker_lease(
+        run_id="run-1",
+        worker_id="worker-1",
+        lease_token="lease-1",
+        lease_seconds=120,
+        client=client,
+    )
+    assert renewed["lease_token"] == "lease-1"
     advanced = advance_worker_stage(
         run_id="run-1",
         worker_id="worker-1",
@@ -2640,7 +3088,17 @@ def test_query_helpers_cover_fenced_claim_stage_retry_release_and_completion():
             "requested_run_id": "run-1",
         },
     }
-    assert client.calls[1]["function"] == "advance_semantic_video_stage"
-    assert client.calls[2]["function"] == "require_semantic_video_retry_approval"
-    assert client.calls[3]["function"] == "release_semantic_video_lease"
-    assert client.calls[4]["function"] == "complete_semantic_video_run"
+    assert client.calls[1] == {
+        "kind": "rpc",
+        "function": "renew_semantic_video_lease",
+        "payload": {
+            "p_run_id": "run-1",
+            "p_worker_id": "worker-1",
+            "p_lease_token": "lease-1",
+            "p_lease_seconds": 120,
+        },
+    }
+    assert client.calls[2]["function"] == "advance_semantic_video_stage"
+    assert client.calls[3]["function"] == "require_semantic_video_retry_approval"
+    assert client.calls[4]["function"] == "release_semantic_video_lease"
+    assert client.calls[5]["function"] == "complete_semantic_video_run"

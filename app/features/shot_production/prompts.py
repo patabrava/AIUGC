@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from app.core.errors import ValidationError
 from app.features.shot_production.planner import EditorialBeat
@@ -19,6 +19,10 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "hair change",
     "wardrobe change",
     "room change",
+    "wheelchair change",
+    "cropped wheelchair",
+    "standing",
+    "walking",
     "extra person",
     "zoom",
     "push-in",
@@ -38,6 +42,7 @@ _REQUIRED_NEGATIVE_LOCKS = (
 )
 EFFECTIVE_NEGATIVE_PROMPT = (
     "face change, age change, hair change, wardrobe change, room change, extra person, "
+    "wheelchair change, cropped wheelchair, standing, walking, "
     "camera zoom, push-in, reframe, posture reset, generated text, subtitles, music, "
     "background voices, extra speech, hands entering frame, repeated dialogue, English speech, "
     "logos, watermarks, gibberish text"
@@ -69,14 +74,49 @@ class VeoTakeRequest:
         }
 
 
-def build_veo_take_prompt(beat: EditorialBeat) -> str:
+def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
+    if not visual_contract:
+        return (
+            "Preserve the exact upper-body outfit and exact location shown in the first frame. "
+            "She remains seated in the exact same visible manual wheelchair; keep at least one "
+            "armrest and part of the rear wheel or silver hand rim in frame."
+        )
+    required = (
+        "scene_description",
+        "wardrobe_description",
+        "wheelchair_description",
+        "framing_description",
+    )
+    normalized = {
+        key: " ".join(str(visual_contract.get(key) or "").split()) for key in required
+    }
+    missing = [key for key, value in normalized.items() if not value]
+    if missing:
+        raise ValidationError(
+            "Veo take prompt requires a complete frozen visual contract.",
+            {"missing_fields": missing},
+        )
+    return (
+        f"Keep the frozen location exactly as shown and described: {normalized['scene_description']} "
+        f"Keep her upper-body outfit exactly: {normalized['wardrobe_description']}. "
+        f"Keep the wheelchair exactly: {normalized['wheelchair_description']} "
+        f"Keep the framing exactly: {normalized['framing_description']}"
+    )
+
+
+def build_veo_take_prompt(
+    beat: EditorialBeat,
+    *,
+    visual_contract: Optional[Mapping[str, Any]] = None,
+) -> str:
     dialogue = str(beat.text or "").strip()
     if not dialogue:
         raise ValidationError("Veo take prompt requires a non-empty editorial beat.")
     final_word_target = beat.provider_duration_seconds - 1.0
     return (
-        "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's identity and hair, "
-        "cream knit sweater, room, posture, camera position, and framing exactly as shown. Continue as "
+        "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's exact identity, "
+        "facial geometry, apparent age, hair, seated posture, camera position, and framing exactly as shown. "
+        f"{_visual_contract_text(visual_contract)} Continue as "
         "restrained, natural phone-camera UGC with a subtle conversational expression, subtle blinking, and "
         "minimal head movement. Use the same warm adult German female voice across every take, speaking native German "
         "with natural conversational pacing and close smartphone microphone sound. Use the shot duration naturally, "
@@ -94,6 +134,7 @@ def compile_veo_take_requests(
     shot_deck: Sequence[ShotVariant],
     base_seed: int,
     negative_prompt: str = EFFECTIVE_NEGATIVE_PROMPT,
+    visual_contract: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[VeoTakeRequest, ...]:
     """Map ordered editorial beats to matching approved shot variants."""
     if not beats:
@@ -142,7 +183,10 @@ def compile_veo_take_requests(
                 index=beat.index,
                 beat=beat,
                 shot=shot,
-                prompt=build_veo_take_prompt(beat),
+                prompt=build_veo_take_prompt(
+                    beat,
+                    visual_contract=visual_contract,
+                ),
                 negative_prompt=effective_negative_prompt,
                 model=VEO_MODEL,
                 aspect_ratio=VEO_ASPECT_RATIO,

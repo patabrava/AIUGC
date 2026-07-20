@@ -334,6 +334,7 @@ def test_create_manual_draft_posts_uses_blank_post_type(monkeypatch):
     assert captured[0]["topic_title"] == "Manual Draft 1"
     assert captured[0]["seed_data"]["manual_draft"] is True
     assert captured[0]["seed_data"]["manual_post_type"] == ""
+    assert [row["seed_data"]["semantic_rotation_index"] for row in captured] == [0, 1]
 
 
 def test_duplicate_batch_preserves_manual_mode(monkeypatch):

@@ -20,13 +20,20 @@ from app.core.video_profiles import script_word_count
 from app.features.shot_frames.service import (
     ShotFrameReference,
 )
+from app.features.shot_frames.wheelchair_scene_plate import (
+    generate_scene_plate_candidates,
+)
 from app.features.shot_production.duration import build_semantic_duration_contract
+from app.features.shot_production.provenance import (
+    build_semantic_script_snapshot,
+)
 from app.features.semantic_videos.queries import (
     approve_initial_plan_transition,
     approve_master_transition,
     approve_retry_transition,
     cancel_run_transition,
     finalize_candidate_generation,
+    get_actor_scene_plate_anchor,
     get_run_by_post,
     list_approvals as list_approvals,
     list_attempts,
@@ -54,14 +61,19 @@ from app.features.semantic_videos.schemas import (
     RetryApprovalRequest,
 )
 from app.features.semantic_videos.service import compile_semantic_video_plan
+from app.features.semantic_videos.visual_contract import (
+    build_actor_reference_fingerprint,
+    build_visual_contract,
+    validate_visual_contract,
+)
 
 
 router = APIRouter(prefix="/semantic-videos/posts", tags=["semantic-videos"])
 logger = get_logger(__name__)
 
-_CANONICAL_ACTOR_PROVIDER = "canonical-actor-reference/v1"
-_CANONICAL_ACTOR_AUDIT_TEXT = (
-    "Canonical actor front reference passthrough; no image synthesis performed."
+_SCENE_PLATE_AUDIT_TEXT = (
+    "Wheelchair scene plate generated from two immutable actor references and one "
+    "actor-free location before any Veo request."
 )
 
 
@@ -197,60 +209,99 @@ def _ordered_reference_rows(reference: dict[str, Any]) -> tuple[list[dict[str, A
     return [dict(row) for row in actor_rows], dict(location)
 
 
-def _canonical_actor_candidates(actor_front: Mapping[str, Any]) -> list[dict[str, Any]]:
-    required = ("storage_uri", "mime_type", "byte_length", "sha256")
-    missing = [field for field in required if actor_front.get(field) in (None, "")]
-    if missing:
-        raise ValidationError(
-            "Canonical actor master requires verified front-reference metadata.",
-            {"missing_fields": missing},
-        )
-    base = {
-        "storage_uri": str(actor_front["storage_uri"]),
-        "storage_key": actor_front.get("storage_key"),
-        "mime_type": str(actor_front["mime_type"]),
-        "byte_length": int(actor_front["byte_length"]),
-        "sha256": str(actor_front["sha256"]).lower(),
-        "provider_model": _CANONICAL_ACTOR_PROVIDER,
-    }
-    return [{"index": index, **base} for index in range(1, 4)]
-
-
-def _assert_canonical_actor_master(
+def _assert_scene_plate_master(
     *,
     reference_snapshot: Mapping[str, Any],
     master_snapshot: Mapping[str, Any],
 ) -> None:
-    actor_rows, _location = _ordered_reference_rows(dict(reference_snapshot))
-    canonical = actor_rows[0]
-    comparisons = {
-        "storage_uri": (
-            str(canonical.get("storage_uri") or ""),
-            str(master_snapshot.get("storage_uri") or ""),
-        ),
-        "mime_type": (
-            str(canonical.get("mime_type") or "image/png").lower(),
-            str(master_snapshot.get("mime_type") or "image/png").lower(),
-        ),
-        "byte_length": (
-            int(canonical.get("byte_length") or -1),
-            int(master_snapshot.get("byte_length") or -1),
-        ),
-        "sha256": (
-            str(canonical.get("sha256") or "").lower(),
-            str(master_snapshot.get("sha256") or "").lower(),
-        ),
+    actor_rows, location = _ordered_reference_rows(dict(reference_snapshot))
+    required_reference_fields = ("sha256", "byte_length", "mime_type")
+    missing_reference_fields = {
+        str(row.get("role") or "reference"): [
+            field for field in required_reference_fields if row.get(field) in (None, "")
+        ]
+        for row in [*actor_rows, location]
     }
-    mismatches = {
-        field: {"canonical": canonical_value, "master": master_value}
-        for field, (canonical_value, master_value) in comparisons.items()
-        if canonical_value != master_value
+    missing_reference_fields = {
+        role: fields for role, fields in missing_reference_fields.items() if fields
     }
-    if mismatches:
+    if missing_reference_fields:
         raise ValidationError(
-            "Semantic video master does not match the canonical actor reference.",
-            {"mismatches": mismatches, "paid_provider_work_approved": False},
+            "Semantic scene plate requires immutable verified source references.",
+            {"missing_reference_fields": missing_reference_fields},
         )
+    actor_reference_fingerprint = build_actor_reference_fingerprint(actor_rows)
+    if (
+        str(reference_snapshot.get("actor_reference_fingerprint") or "").lower()
+        != actor_reference_fingerprint
+    ):
+        raise ValidationError(
+            "Semantic scene plate is not bound to the immutable actor references."
+        )
+    visual_contract = validate_visual_contract(reference_snapshot.get("visual_contract"))
+    master_hash = str(master_snapshot.get("sha256") or "").strip().lower()
+    if (
+        not str(master_snapshot.get("storage_uri") or "").strip()
+        or str(master_snapshot.get("mime_type") or "").lower() != "image/png"
+        or int(master_snapshot.get("byte_length") or 0) <= 0
+        or len(master_hash) != 64
+        or not str(master_snapshot.get("provider_model") or "").strip()
+    ):
+        raise ValidationError("Semantic scene-plate master metadata is incomplete.")
+    source_hashes = {
+        str(row.get("sha256") or "").strip().lower()
+        for row in [*actor_rows, location]
+    }
+    if master_hash in source_hashes:
+        raise ValidationError("Semantic scene plate cannot be an unchanged source reference.")
+    if str(master_snapshot.get("visual_contract_hash") or "").lower() != visual_contract[
+        "contract_hash"
+    ]:
+        raise ValidationError("Semantic scene plate is not bound to the frozen visual contract.")
+    if (
+        str(master_snapshot.get("actor_reference_fingerprint") or "").lower()
+        != actor_reference_fingerprint
+    ):
+        raise ValidationError("Semantic scene plate actor-reference lineage is invalid.")
+    derivation_mode = str(master_snapshot.get("derivation_mode") or "").strip()
+    if derivation_mode not in {"bootstrap", "canonical_anchor"}:
+        raise ValidationError("Semantic scene plate derivation lineage is invalid.")
+    canonical_anchor = reference_snapshot.get("canonical_anchor")
+    if derivation_mode == "bootstrap":
+        if master_snapshot.get("canonical_anchor_id") not in (None, "") or master_snapshot.get(
+            "canonical_anchor_sha256"
+        ) not in (None, ""):
+            raise ValidationError("Bootstrap scene plate cannot claim a pre-existing anchor.")
+    else:
+        if not isinstance(canonical_anchor, Mapping):
+            raise ValidationError("Derived semantic scene plate requires its canonical anchor snapshot.")
+        anchor_id = str(canonical_anchor.get("id") or "").strip()
+        anchor_hash = str(canonical_anchor.get("master_sha256") or "").strip().lower()
+        if (
+            not anchor_id
+            or len(anchor_hash) != 64
+            or str(master_snapshot.get("canonical_anchor_id") or "").strip() != anchor_id
+            or str(master_snapshot.get("canonical_anchor_sha256") or "").strip().lower()
+            != anchor_hash
+            or str(canonical_anchor.get("actor_reference_fingerprint") or "").lower()
+            != actor_reference_fingerprint
+        ):
+            raise ValidationError("Derived semantic scene plate canonical-anchor lineage is invalid.")
+        if master_hash == anchor_hash:
+            raise ValidationError("Derived semantic scene plate cannot be the unchanged canonical anchor.")
+    candidates = master_snapshot.get("candidates")
+    if isinstance(candidates, list) and candidates:
+        selected_index = int(master_snapshot.get("approved_candidate_index") or master_snapshot.get("index") or 0)
+        selected = next(
+            (
+                row
+                for row in candidates
+                if isinstance(row, Mapping) and int(row.get("index") or 0) == selected_index
+            ),
+            None,
+        )
+        if not isinstance(selected, Mapping) or str(selected.get("sha256") or "").lower() != master_hash:
+            raise ValidationError("Semantic scene plate is not one of the persisted candidates.")
 
 
 def _download_reference(row: dict[str, Any], *, role: str, request: Request) -> tuple[ShotFrameReference, dict[str, Any]]:
@@ -278,6 +329,70 @@ def _download_reference(row: dict[str, Any], *, role: str, request: Request) -> 
     return ShotFrameReference(role=role, mime_type=mime_type, image_bytes=image_bytes), snapshot
 
 
+def _download_actor_scene_plate_anchor(
+    anchor: Mapping[str, Any],
+    *,
+    actor_identity_id: str,
+    actor_reference_fingerprint: str,
+    request: Request,
+) -> tuple[ShotFrameReference, dict[str, Any]]:
+    anchor_id = str(anchor.get("id") or "").strip()
+    anchor_actor_id = str(anchor.get("actor_identity_id") or "").strip()
+    anchor_fingerprint = str(anchor.get("actor_reference_fingerprint") or "").strip().lower()
+    expected_hash = str(anchor.get("master_sha256") or "").strip().lower()
+    expected_length = int(anchor.get("master_byte_length") or 0)
+    mime_type = str(anchor.get("master_mime_type") or "").strip().lower()
+    storage_uri = str(anchor.get("master_storage_uri") or "").strip()
+    provider_model = str(anchor.get("provider_model") or "").strip()
+    if (
+        not anchor_id
+        or anchor_actor_id != actor_identity_id
+        or anchor_fingerprint != actor_reference_fingerprint
+        or not storage_uri
+        or len(expected_hash) != 64
+        or expected_length <= 0
+        or mime_type != "image/png"
+        or not provider_model
+    ):
+        raise StateTransitionError("Semantic actor scene-plate anchor metadata is invalid.")
+    image_bytes = get_storage_client().download_video(
+        video_url=storage_uri,
+        correlation_id=str(getattr(request.state, "correlation_id", "semantic-anchor")),
+    )
+    actual_hash = sha256(image_bytes).hexdigest()
+    if actual_hash != expected_hash or len(image_bytes) != expected_length:
+        raise StateTransitionError(
+            "Semantic actor scene-plate anchor bytes changed after approval.",
+            {
+                "anchor_id": anchor_id,
+                "expected_sha256": expected_hash,
+                "actual_sha256": actual_hash,
+                "expected_byte_length": expected_length,
+                "actual_byte_length": len(image_bytes),
+            },
+        )
+    snapshot = {
+        "id": anchor_id,
+        "actor_identity_id": anchor_actor_id,
+        "actor_reference_fingerprint": anchor_fingerprint,
+        "source_run_id": str(anchor.get("source_run_id") or "").strip() or None,
+        "master_storage_uri": storage_uri,
+        "master_sha256": actual_hash,
+        "master_byte_length": len(image_bytes),
+        "master_mime_type": mime_type,
+        "provider_model": provider_model,
+        "visual_contract_hash": str(anchor.get("visual_contract_hash") or "").strip().lower(),
+    }
+    return (
+        ShotFrameReference(
+            role="canonical_scene_plate",
+            mime_type=mime_type,
+            image_bytes=image_bytes,
+        ),
+        snapshot,
+    )
+
+
 def _reference_run_payload(
     *,
     context: dict[str, Any],
@@ -286,8 +401,8 @@ def _reference_run_payload(
 ) -> dict[str, Any]:
     post = context["post"]
     batch = context["batch"]
-    _script, script_snapshot = _approved_script(post)
     contract = build_semantic_duration_contract(batch.get("target_duration_seconds"))
+    script_snapshot = _approved_semantic_script_snapshot(context)
     return {
         "post_id": str(post["id"]),
         "batch_id": str(batch["id"]),
@@ -336,11 +451,117 @@ def _reference_source_identity(reference: dict[str, Any]) -> dict[str, Any]:
     actor_rows, location_row = _ordered_reference_rows(reference)
     return {
         "actor_identity_id": str(reference.get("actor_identity_id") or ""),
+        "scene_key": str(reference.get("scene_key") or location_row.get("scene_key") or ""),
         "scene_description": str(reference.get("scene_description") or ""),
+        "wardrobe_key": str(reference.get("wardrobe_key") or ""),
         "wardrobe_description": str(reference.get("wardrobe_description") or ""),
         "actor_reference_uris": [str(row["storage_uri"]) for row in actor_rows],
         "location_reference_uri": str(location_row["storage_uri"]),
     }
+
+
+def _approved_semantic_script_snapshot(context: Mapping[str, Any]) -> dict[str, Any]:
+    post = context.get("post") if isinstance(context.get("post"), Mapping) else {}
+    batch = context.get("batch") if isinstance(context.get("batch"), Mapping) else {}
+    _script, snapshot = _approved_script(dict(post))
+    contract = build_semantic_duration_contract(batch.get("target_duration_seconds"))
+    return build_semantic_script_snapshot(
+        text=str(snapshot["text"]),
+        review_status=str(snapshot["review_status"]),
+        word_count=int(snapshot["word_count"]),
+        creation_mode=str(batch.get("creation_mode") or "semantic_ugc"),
+        target_duration_seconds=contract.requested_duration_seconds,
+    )
+
+
+def _assert_reference_sources_current(
+    *,
+    context: Mapping[str, Any],
+    run: Mapping[str, Any],
+) -> None:
+    persisted_reference = run.get("reference_snapshot")
+    if not isinstance(persisted_reference, dict) or not persisted_reference:
+        raise StateTransitionError(
+            "Semantic video persisted reference snapshot is no longer available."
+        )
+    current_reference = _reference_snapshot(dict(context))
+    try:
+        current_identity = _reference_source_identity(current_reference)
+        persisted_identity = _reference_source_identity(persisted_reference)
+    except ValidationError as exc:
+        raise StateTransitionError(
+            "Semantic video reference sources changed after candidate generation."
+        ) from exc
+    if current_identity != persisted_identity:
+        raise StateTransitionError(
+            "Semantic video reference sources changed after candidate generation.",
+            {
+                "persisted_source_identity": persisted_identity,
+                "current_source_identity": current_identity,
+            },
+        )
+
+
+def _assert_visual_restart_has_no_paid_evidence(run_id: str) -> None:
+    attempts = list_attempts(run_id)
+    unpaid_states = {"", "planned", "reserved", "cancelled"}
+    paid_evidence_fields = (
+        "operation_id",
+        "provider_video_uri",
+        "raw_artifact_uri",
+        "raw_artifact_sha256",
+    )
+    unsafe = [
+        {
+            "take_index": attempt.get("take_index"),
+            "attempt": attempt.get("attempt"),
+            "submission_state": attempt.get("submission_state"),
+        }
+        for attempt in attempts
+        if str(attempt.get("submission_state") or "") not in unpaid_states
+        or any(attempt.get(field) not in (None, "") for field in paid_evidence_fields)
+    ]
+    if unsafe:
+        raise StateTransitionError(
+            "Semantic video visual restart is blocked because paid take evidence exists.",
+            {"paid_take_evidence": unsafe},
+        )
+
+
+def _assert_candidate_lineage_current(run: Mapping[str, Any]) -> None:
+    reference = run.get("reference_snapshot")
+    if not isinstance(reference, Mapping) or not reference:
+        raise ValidationError("Semantic scene-plate reference lineage is unavailable.")
+    actor_rows, _location = _ordered_reference_rows(dict(reference))
+    fingerprint = build_actor_reference_fingerprint(actor_rows)
+    if str(reference.get("actor_reference_fingerprint") or "").lower() != fingerprint:
+        raise ValidationError("Semantic scene-plate actor-reference lineage is stale.")
+    visual_contract = validate_visual_contract(reference.get("visual_contract"))
+    master = run.get("master_snapshot")
+    if not isinstance(master, Mapping) or not master:
+        return
+    candidates = master.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return
+    derivation_mode = str(master.get("derivation_mode") or "")
+    if (
+        derivation_mode not in {"bootstrap", "canonical_anchor"}
+        or str(master.get("actor_reference_fingerprint") or "").lower()
+        != fingerprint
+        or str(master.get("visual_contract_hash") or "").lower()
+        != visual_contract["contract_hash"]
+    ):
+        raise ValidationError("Semantic scene-plate candidate lineage is stale.")
+    for candidate in candidates:
+        if (
+            not isinstance(candidate, Mapping)
+            or str(candidate.get("actor_reference_fingerprint") or "").lower()
+            != fingerprint
+            or str(candidate.get("visual_contract_hash") or "").lower()
+            != visual_contract["contract_hash"]
+            or str(candidate.get("derivation_mode") or "") != derivation_mode
+        ):
+            raise ValidationError("Semantic scene-plate candidate lineage is stale.")
 
 
 def _plan_response(run: dict[str, Any], takes: list[dict[str, Any]]) -> PlanResponse:
@@ -376,8 +597,74 @@ def generate_candidates(
     payload: CandidateGenerationRequest,
     request: Request,
 ):
+    context = load_semantic_video_context(post_id)
     existing = get_run_by_post(post_id)
     effective_expected_revision = payload.expected_revision
+    if existing:
+        revision = int(existing.get("revision") or 0)
+        stage = str(existing.get("stage") or "")
+        if stage in {"completed", "failed"}:
+            existing = None
+            effective_expected_revision = None
+        elif stage in {"awaiting_reference_approval", "awaiting_paid_approval"}:
+            stale_reason: str | None = None
+            has_persisted_reference = isinstance(
+                existing.get("reference_snapshot"), dict
+            ) and bool(existing.get("reference_snapshot"))
+            if has_persisted_reference:
+                try:
+                    _assert_reference_sources_current(context=context, run=existing)
+                except StateTransitionError:
+                    stale_reason = "Location or wardrobe changed after scene-plate generation."
+            elif stage == "awaiting_paid_approval":
+                stale_reason = (
+                    "The unpaid scene plate predates the immutable reference snapshot."
+                )
+            if stale_reason is None and stage == "awaiting_paid_approval":
+                persisted_reference = existing.get("reference_snapshot")
+                persisted_master = existing.get("master_snapshot")
+                try:
+                    _assert_scene_plate_master(
+                        reference_snapshot=(
+                            persisted_reference
+                            if isinstance(persisted_reference, Mapping)
+                            else {}
+                        ),
+                        master_snapshot=(
+                            persisted_master
+                            if isinstance(persisted_master, Mapping)
+                            else {}
+                        ),
+                    )
+                except ValidationError:
+                    stale_reason = (
+                        "The unpaid scene plate predates the immutable actor-anchor lineage."
+                    )
+            if stale_reason is None and stage == "awaiting_reference_approval":
+                try:
+                    _assert_candidate_lineage_current(existing)
+                except ValidationError:
+                    stale_reason = (
+                        "The pending scene plates predate the immutable actor-anchor lineage."
+                    )
+            if stale_reason is not None:
+                _assert_visual_restart_has_no_paid_evidence(str(existing["id"]))
+                cancel_run_transition(
+                    str(existing["id"]),
+                    expected_revision=revision,
+                    cancelled_by=str(
+                        getattr(request.state, "user_email", None)
+                        or "semantic-visual-override"
+                    ),
+                    reason=(
+                        f"{stale_reason} The stale unpaid visual run was invalidated."
+                    ),
+                    correlation_id=str(
+                        getattr(request.state, "correlation_id", None) or ""
+                    ),
+                )
+                existing = None
+                effective_expected_revision = None
     if existing:
         revision = int(existing.get("revision") or 0)
         if str(existing.get("stage") or "") != "awaiting_reference_approval":
@@ -408,27 +695,52 @@ def generate_candidates(
                 )
                 effective_expected_revision = int(existing["revision"])
 
-    context = load_semantic_video_context(post_id)
     _script, _script_snapshot = _approved_script(context["post"])
     reference = deepcopy(context.get("reference") or {})
     actor_rows, location_row = _ordered_reference_rows(reference)
 
-    _actor_front, actor_front_snapshot = _download_reference(
+    actor_front, actor_front_snapshot = _download_reference(
         actor_rows[0], role="actor_front", request=request
     )
-    _actor_three_quarter, actor_three_quarter_snapshot = _download_reference(
+    actor_three_quarter, actor_three_quarter_snapshot = _download_reference(
         actor_rows[1],
         role="actor_three_quarter",
         request=request,
     )
-    _location, location_snapshot = _download_reference(
+    location, location_snapshot = _download_reference(
         location_row, role="location", request=request
     )
+    actor_reference_fingerprint = build_actor_reference_fingerprint(
+        [actor_front_snapshot, actor_three_quarter_snapshot]
+    )
+    actor_identity_id = str(reference.get("actor_identity_id") or "").strip()
+    if not actor_identity_id:
+        raise ValidationError("Semantic scene-plate generation requires an actor identity.")
+    anchor = get_actor_scene_plate_anchor(
+        actor_identity_id=actor_identity_id,
+        actor_reference_fingerprint=actor_reference_fingerprint,
+    )
+    canonical_scene_plate = None
+    canonical_anchor_snapshot = None
+    if anchor is not None:
+        canonical_scene_plate, canonical_anchor_snapshot = _download_actor_scene_plate_anchor(
+            anchor,
+            actor_identity_id=actor_identity_id,
+            actor_reference_fingerprint=actor_reference_fingerprint,
+            request=request,
+        )
     persisted_reference = {
         **reference,
         "actor_references": [actor_front_snapshot, actor_three_quarter_snapshot],
         "location_reference": location_snapshot,
+        "actor_reference_fingerprint": actor_reference_fingerprint,
     }
+    if canonical_anchor_snapshot is not None:
+        persisted_reference["canonical_anchor"] = canonical_anchor_snapshot
+    else:
+        persisted_reference.pop("canonical_anchor", None)
+    visual_contract = build_visual_contract(persisted_reference)
+    persisted_reference["visual_contract"] = visual_contract
     persisted_reference.pop("master", None)
     reservation_token = str(uuid4())
     reservation_owner = str(
@@ -448,22 +760,108 @@ def generate_candidates(
         reservation_token=reservation_token,
         reservation_seconds=1800,
     )
-    candidates = _canonical_actor_candidates(actor_front_snapshot)
-    master_snapshot = {
-        "candidates": candidates,
-        "prompt_writer_system_prompt": _CANONICAL_ACTOR_AUDIT_TEXT,
-        "prompt_writer_system_prompt_sha256": sha256(
-            _CANONICAL_ACTOR_AUDIT_TEXT.encode("utf-8")
-        ).hexdigest(),
-        "prompt_writer_output": _CANONICAL_ACTOR_AUDIT_TEXT,
-        "composition_prompt": _CANONICAL_ACTOR_AUDIT_TEXT,
-    }
-    run_payload = _reference_run_payload(
-        context=context,
-        reference_snapshot=persisted_reference,
-        master_snapshot=master_snapshot,
-    )
     try:
+        generated = generate_scene_plate_candidates(
+            actor_references=[actor_front, actor_three_quarter],
+            location_reference=location,
+            canonical_scene_plate=canonical_scene_plate,
+            scene=visual_contract["scene_description"],
+            wardrobe=visual_contract["wardrobe_description"],
+            candidate_count=payload.candidate_count,
+        )
+        if len(generated.candidates) != payload.candidate_count:
+            raise StateTransitionError(
+                "Semantic scene-plate generation returned an unexpected candidate count.",
+                {"expected": payload.candidate_count, "actual": len(generated.candidates)},
+            )
+        correlation_id = str(
+            getattr(request.state, "correlation_id", "semantic-scene-plates")
+        )
+        expected_derivation_mode = (
+            "canonical_anchor" if canonical_anchor_snapshot is not None else "bootstrap"
+        )
+        derivation_mode = str(
+            getattr(generated, "derivation_mode", expected_derivation_mode)
+        ).strip()
+        if derivation_mode != expected_derivation_mode:
+            raise StateTransitionError(
+                "Semantic scene-plate generator returned invalid anchor lineage."
+            )
+        candidates = []
+        for candidate in generated.candidates:
+            candidate_hash = sha256(candidate.image_bytes).hexdigest()
+            uploaded = get_storage_client().upload_image(
+                image_bytes=candidate.image_bytes,
+                file_name=(
+                    f"semantic-{post_id}-scene-plate-{candidate.index}-"
+                    f"{candidate_hash[:12]}.png"
+                ),
+                correlation_id=correlation_id,
+                content_type=candidate.mime_type,
+            )
+            candidates.append(
+                {
+                    "index": int(candidate.index),
+                    "storage_uri": str(uploaded["url"]),
+                    "storage_key": uploaded.get("storage_key"),
+                    "mime_type": str(candidate.mime_type),
+                    "byte_length": len(candidate.image_bytes),
+                    "sha256": candidate_hash,
+                    "provider_model": str(candidate.provider_model),
+                    "visual_contract_hash": visual_contract["contract_hash"],
+                    "actor_reference_fingerprint": actor_reference_fingerprint,
+                    "derivation_mode": derivation_mode,
+                    "canonical_anchor_id": (
+                        canonical_anchor_snapshot["id"]
+                        if canonical_anchor_snapshot is not None
+                        else None
+                    ),
+                    "canonical_anchor_sha256": (
+                        canonical_anchor_snapshot["master_sha256"]
+                        if canonical_anchor_snapshot is not None
+                        else None
+                    ),
+                    "canonical_anchor_source_run_id": (
+                        canonical_anchor_snapshot.get("source_run_id")
+                        if canonical_anchor_snapshot is not None
+                        else None
+                    ),
+                }
+            )
+        master_snapshot = {
+            "candidates": candidates,
+            "visual_contract": visual_contract,
+            "visual_contract_hash": visual_contract["contract_hash"],
+            "actor_reference_fingerprint": actor_reference_fingerprint,
+            "derivation_mode": derivation_mode,
+            "canonical_anchor_id": (
+                canonical_anchor_snapshot["id"]
+                if canonical_anchor_snapshot is not None
+                else None
+            ),
+            "canonical_anchor_sha256": (
+                canonical_anchor_snapshot["master_sha256"]
+                if canonical_anchor_snapshot is not None
+                else None
+            ),
+            "canonical_anchor_source_run_id": (
+                canonical_anchor_snapshot.get("source_run_id")
+                if canonical_anchor_snapshot is not None
+                else None
+            ),
+            "prompt_writer_system_prompt": _SCENE_PLATE_AUDIT_TEXT,
+            "prompt_writer_system_prompt_sha256": sha256(
+                _SCENE_PLATE_AUDIT_TEXT.encode("utf-8")
+            ).hexdigest(),
+            "prompt_writer_output": generated.prompts[0],
+            "composition_prompt": generated.prompts[0],
+            "scene_plate_prompts": list(generated.prompts),
+        }
+        run_payload = _reference_run_payload(
+            context=context,
+            reference_snapshot=persisted_reference,
+            master_snapshot=master_snapshot,
+        )
         run = finalize_candidate_generation(
             str(reserved["id"]),
             reserved_revision=int(reserved.get("revision") or 0),
@@ -519,6 +917,10 @@ def approve_master(post_id: str, payload: MasterApprovalRequest, request: Reques
             "Semantic video run is not awaiting master approval.",
             {"stage": run.get("stage")},
         )
+    _assert_reference_sources_current(
+        context=load_semantic_video_context(post_id),
+        run=run,
+    )
     master_state = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
     candidates = master_state.get("candidates") if isinstance(master_state.get("candidates"), list) else []
     selected = next(
@@ -530,12 +932,22 @@ def approve_master(post_id: str, payload: MasterApprovalRequest, request: Reques
             "Semantic video master candidate does not exist.",
             {"candidate_index": payload.candidate_index},
         )
+    master_contract_hash = str(master_state.get("visual_contract_hash") or "").lower()
+    selected_contract_hash = str(selected.get("visual_contract_hash") or "").lower()
+    if not master_contract_hash or selected_contract_hash != master_contract_hash:
+        raise ValidationError(
+            "Semantic scene-plate candidate is not bound to the frozen visual contract."
+        )
     reference_snapshot = run.get("reference_snapshot")
     if not isinstance(reference_snapshot, dict) or not reference_snapshot:
         raise ValidationError("Semantic video canonical actor reference is unavailable.")
-    _assert_canonical_actor_master(
+    selected_for_validation = {
+        **selected,
+        "candidates": candidates,
+    }
+    _assert_scene_plate_master(
         reference_snapshot=reference_snapshot,
-        master_snapshot=selected,
+        master_snapshot=selected_for_validation,
     )
     approved_by = str(getattr(request.state, "user_email", "unknown"))
     updated, approval = approve_master_transition(
@@ -580,6 +992,7 @@ def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request)
             {"expected_revision": payload.expected_revision, "actual_revision": existing.get("revision")},
         )
     context = load_semantic_video_context(post_id)
+    _assert_reference_sources_current(context=context, run=existing)
     reference = _reference_snapshot(context, existing)
     master = reference.get("master")
     if not isinstance(master, dict) or not str(master.get("storage_uri") or "").strip():
@@ -682,23 +1095,11 @@ def _assert_plan_sources_current(
         raise StateTransitionError(
             "Semantic video persisted reference contract changed after planning."
         )
-    try:
-        current_source_identity = _reference_source_identity(current_reference)
-        persisted_source_identity = _reference_source_identity(persisted_reference)
-    except ValidationError as exc:
-        raise StateTransitionError("Semantic video reference sources changed after candidate generation.") from exc
-    if current_source_identity != persisted_source_identity:
-        raise StateTransitionError(
-            "Semantic video reference sources changed after candidate generation.",
-            {
-                "persisted_source_identity": persisted_source_identity,
-                "current_source_identity": current_source_identity,
-            },
-        )
+    _assert_reference_sources_current(context=context, run=run)
 
     try:
-        _script, current_script_snapshot = _approved_script(context["post"])
-    except ValidationError as exc:
+        current_script_snapshot = _approved_semantic_script_snapshot(context)
+    except (ValidationError, ValueError) as exc:
         raise StateTransitionError("Semantic video approved script changed after planning.") from exc
     current_script_hash = _canonical_hash(current_script_snapshot)
     if current_script_hash != str(run.get("script_hash") or ""):
@@ -782,7 +1183,7 @@ def _assert_plan_sources_current(
     master = run.get("master_snapshot")
     if not isinstance(master, dict) or not str(master.get("storage_uri") or "").strip():
         raise StateTransitionError("Semantic video approved master is no longer available.")
-    _assert_canonical_actor_master(
+    _assert_scene_plate_master(
         reference_snapshot=persisted_reference,
         master_snapshot=master,
     )

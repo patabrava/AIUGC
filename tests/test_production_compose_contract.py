@@ -177,7 +177,7 @@ def test_github_action_deploys_on_push_to_main():
     assert '"TIKTOK_ENVIRONMENT": "production"' in step_text
     assert "Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)" in step_text
     assert "Triggered Hostinger action" in step_text
-    assert "https://lippelift.xyz/health >/dev/null" in step_text
+    assert "wait_for_url https://lippelift.xyz/health" in step_text
     assert "Production video routing verified" in step_text
     assert "tier_32_route" in step_text
     assert "veo_segmented" in step_text

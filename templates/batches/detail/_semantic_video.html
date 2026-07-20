@@ -40,7 +40,7 @@
             </div>
 
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Master</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.master_state | replace('_', ' ') }}</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Scene plate</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.master_state | replace('_', ' ') }}</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Takes</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.take_count }}</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Provider seconds</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.billable_provider_seconds }}s</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Approved plan cost</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.estimated_cost_usd }}</dd></div>
@@ -51,15 +51,55 @@
                 <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm"><span class="text-[#1C2740]/60">Verified</span><strong class="ml-2 text-[#1C2740]"><span data-field="verified-takes">{{ item.verified_takes }}</span>/<span data-field="verified-total">{{ item.take_count }}</span></strong></div>
             </div>
 
+            {% if item.final_video_url or item.final_caption_url %}
+            {% set playback_url = item.final_caption_url or item.final_video_url %}
+            <section class="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4" aria-label="Final delivery">
+                <h4 class="text-sm font-bold text-emerald-950">Final delivery</h4>
+                <p class="mt-1 text-xs text-emerald-900">Persisted completed-run artifacts. The player uses the captioned delivery when available.</p>
+                <video class="mt-3 aspect-[9/16] max-h-[34rem] w-full rounded-xl bg-black object-contain" controls preload="metadata" src="{{ playback_url }}">
+                    Your browser does not support video playback.
+                </video>
+                <div class="mt-3 flex flex-wrap gap-2 text-sm font-bold">
+                    {% if item.final_caption_url %}
+                    <a class="rounded-lg bg-emerald-800 px-3 py-2 text-white" href="{{ item.final_caption_url }}" target="_blank" rel="noopener noreferrer">Open captioned video</a>
+                    {% endif %}
+                    {% if item.final_video_url %}
+                    <a class="rounded-lg border border-emerald-800 px-3 py-2 text-emerald-900" href="{{ item.final_video_url }}" target="_blank" rel="noopener noreferrer">Open raw video</a>
+                    {% endif %}
+                </div>
+            </section>
+            {% endif %}
+
+            {% if item.visual_contract %}
+            <section class="mt-5 rounded-xl border border-[#006AAB]/15 bg-[#F6FAFF] p-4" aria-label="Frozen visual contract">
+                <h4 class="text-sm font-bold text-[#1C2740]">Frozen visual contract</h4>
+                <p class="mt-1 text-xs text-[#1C2740]/60">This approved contract, not the legacy prompt draft below, controls the Semantic video look.</p>
+                <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+                    <div>
+                        <dt class="font-bold text-[#006AAB]">Scene{% if item.visual_contract.scene_key %} · {{ item.visual_contract.scene_key }}{% endif %}</dt>
+                        <dd class="mt-1 text-[#1C2740]">{{ item.visual_contract.scene_description or '—' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-bold text-[#006AAB]">Outfit{% if item.visual_contract.wardrobe_key %} · {{ item.visual_contract.wardrobe_key }}{% endif %}</dt>
+                        <dd class="mt-1 text-[#1C2740]">{{ item.visual_contract.wardrobe_description or '—' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-bold text-[#006AAB]">Wheelchair</dt>
+                        <dd class="mt-1 text-[#1C2740]">{{ item.visual_contract.wheelchair_description or '—' }}</dd>
+                    </div>
+                </dl>
+            </section>
+            {% endif %}
+
             {% if item.candidates %}
             <fieldset class="mt-5">
-                <legend class="text-sm font-bold text-[#1C2740]">Canonical actor master</legend>
+                <legend class="text-sm font-bold text-[#1C2740]">Wheelchair scene plate candidates</legend>
                 <div class="mt-3 grid gap-3 sm:grid-cols-3">
                     {% for candidate in item.candidates %}
                     <label class="cursor-pointer rounded-xl border border-[#1C2740]/15 p-2 transition focus-within:ring-2 focus-within:ring-[#006AAB]">
-                        <input class="sr-only" type="radio" name="semantic-master-{{ item.post_id }}" value="{{ candidate.index }}" aria-label="Select canonical actor master" {% if item.master_state == 'approved' and item.master_hash_is_current and candidate.index == item.approved_candidate_index %}checked{% endif %}>
-                        <img class="aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" src="{{ candidate.storage_uri }}" alt="Canonical actor master for {{ item.topic_title }}">
-                        <span class="mt-2 block text-center text-xs font-bold text-[#1C2740]">Approved actor reference</span>
+                        <input class="sr-only" type="radio" name="semantic-master-{{ item.post_id }}" value="{{ candidate.index }}" aria-label="Select wheelchair scene plate candidate {{ candidate.index }}" {% if item.master_state == 'approved' and item.master_hash_is_current and candidate.index == item.approved_candidate_index %}checked{% endif %}>
+                        <img class="aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" src="{{ candidate.storage_uri }}" alt="Wheelchair scene plate candidate {{ candidate.index }} for {{ item.topic_title }}">
+                        <span class="mt-2 block text-center text-xs font-bold text-[#1C2740]">Wheelchair scene plate {{ candidate.index }}</span>
                     </label>
                     {% endfor %}
                 </div>
@@ -67,11 +107,37 @@
             {% endif %}
 
             <div class="mt-5 flex flex-wrap gap-2">
-                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold" data-action="generate-candidates" {% if item.stage not in ['not_started', 'awaiting_reference_approval'] %}disabled{% endif %}>Load canonical actor master</button>
-                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.candidates %}disabled{% endif %}>Approve selected master</button>
+                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold" data-action="generate-candidates" {% if item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.candidates %}disabled{% endif %}>Approve selected scene plate</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current %}disabled{% endif %}>Build free Veo plan</button>
                 <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve ${{ item.estimated_cost_usd }} generation</button>
             </div>
+            {% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}
+            <p class="mt-2 text-xs text-[#1C2740]/65" data-semantic-restart-note>
+                Use regeneration after changing location or outfit. It starts a fresh visual run and never discards paid take evidence.
+            </p>
+            {% endif %}
+
+            {% if item.provider_prompts %}
+            <section class="mt-5" aria-label="Actual provider prompts">
+                <h4 class="text-sm font-bold text-[#1C2740]">Actual provider prompts</h4>
+                <p class="mt-1 text-xs text-[#1C2740]/60">Exact prompts from the latest persisted provider request contract for each take. The state shows whether a request is planned, submitted, or complete.</p>
+                <div class="mt-3 space-y-2">
+                    {% for provider_prompt in item.provider_prompts %}
+                    <details class="rounded-xl border border-[#1C2740]/10 p-3">
+                        <summary class="cursor-pointer text-sm font-bold text-[#1C2740]">
+                            Take {{ provider_prompt.take_index + 1 }} · attempt {{ provider_prompt.attempt }} · {{ provider_prompt.submission_state | replace('_', ' ') }}{% if provider_prompt.provider_model %} · {{ provider_prompt.provider_model }}{% endif %}
+                        </summary>
+                        <p class="mt-3 whitespace-pre-wrap text-sm text-[#1C2740]">{{ provider_prompt.prompt }}</p>
+                        {% if provider_prompt.negative_prompt %}
+                        <p class="mt-3 text-xs font-bold uppercase tracking-wide text-[#1C2740]/60">Negative prompt</p>
+                        <p class="mt-1 whitespace-pre-wrap text-sm text-[#1C2740]">{{ provider_prompt.negative_prompt }}</p>
+                        {% endif %}
+                    </details>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
 
             {% if item.stage == 'retry_approval_required' %}
             <div class="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">

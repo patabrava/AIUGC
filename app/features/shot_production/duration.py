@@ -13,6 +13,8 @@ from typing import Optional
 MINIMUM_SEMANTIC_UGC_DURATION_SECONDS = 8
 DEFAULT_MAXIMUM_SEMANTIC_UGC_DURATION_SECONDS = 60
 SAFE_WORDS_PER_TAKE = 18
+EXACT_SHORT_FORM_DURATION_SECONDS = 16
+DELIVERY_CONTRACT_FPS = 24.0
 
 
 @dataclass(frozen=True)
@@ -85,8 +87,13 @@ def build_semantic_duration_contract(
             f"{configured_maximum} seconds."
         )
 
-    delivery_min_seconds = value - 1.5
-    delivery_max_seconds = value + 0.5
+    if value == EXACT_SHORT_FORM_DURATION_SECONDS:
+        frame_seconds = 1.0 / DELIVERY_CONTRACT_FPS
+        delivery_min_seconds = value - frame_seconds
+        delivery_max_seconds = value + frame_seconds
+    else:
+        delivery_min_seconds = value - 1.5
+        delivery_max_seconds = value + 0.5
     minimum_take_count = math.ceil(max(4, delivery_min_seconds) / 8)
     minimum_words = max(
         14,
@@ -117,6 +124,8 @@ def build_semantic_duration_contract(
 
 __all__ = [
     "DEFAULT_MAXIMUM_SEMANTIC_UGC_DURATION_SECONDS",
+    "DELIVERY_CONTRACT_FPS",
+    "EXACT_SHORT_FORM_DURATION_SECONDS",
     "MINIMUM_SEMANTIC_UGC_DURATION_SECONDS",
     "SAFE_WORDS_PER_TAKE",
     "SemanticDurationContract",

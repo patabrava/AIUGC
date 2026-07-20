@@ -644,6 +644,99 @@ def _semantic_money(value: object, *, default: str = "0.00") -> str:
     return format(amount, ".2f")
 
 
+def _semantic_visual_contract(
+    run: Dict[str, Any],
+    master: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    reference = (
+        run.get("reference_snapshot")
+        if isinstance(run.get("reference_snapshot"), dict)
+        else {}
+    )
+    value = reference.get("visual_contract")
+    if not isinstance(value, dict):
+        value = master.get("visual_contract")
+    if not isinstance(value, dict):
+        return None
+    fields = (
+        "version",
+        "scene_key",
+        "scene_description",
+        "wardrobe_key",
+        "wardrobe_description",
+        "wheelchair_description",
+        "framing_description",
+        "location_reference_sha256",
+        "contract_hash",
+    )
+    projected = {
+        field: str(value.get(field) or "").strip()
+        for field in fields
+        if str(value.get(field) or "").strip()
+    }
+    return projected or None
+
+
+def _semantic_provider_prompts(
+    latest_attempts: list[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    prompts: list[Dict[str, Any]] = []
+    for attempt in latest_attempts:
+        contract = attempt.get("request_contract")
+        if not isinstance(contract, dict):
+            continue
+        prompt = str(contract.get("prompt") or "").strip()
+        if not prompt:
+            continue
+        prompts.append(
+            {
+                "take_index": int(attempt.get("take_index") or 0),
+                "attempt": int(attempt.get("attempt") or 1),
+                "submission_state": str(attempt.get("submission_state") or "planned"),
+                "provider_model": str(
+                    contract.get("provider_model") or attempt.get("provider_model") or ""
+                ).strip(),
+                "prompt": prompt,
+                "negative_prompt": str(contract.get("negative_prompt") or "").strip(),
+            }
+        )
+    return prompts
+
+
+def _semantic_final_artifact_urls(
+    run: Dict[str, Any],
+    post: Dict[str, Any],
+    artifact_manifest: Dict[str, Any],
+) -> tuple[str, str]:
+    """Resolve completed raw and captioned artifacts from persisted production truth."""
+    if str(run.get("stage") or "") != "completed":
+        return "", ""
+
+    delivery = artifact_manifest.get("delivery")
+    delivery = delivery if isinstance(delivery, dict) else {}
+    raw_delivery = delivery.get("raw")
+    raw_delivery = raw_delivery if isinstance(raw_delivery, dict) else {}
+    captioned_delivery = delivery.get("captioned")
+    captioned_delivery = captioned_delivery if isinstance(captioned_delivery, dict) else {}
+    video_metadata = _load_json_object(post.get("video_metadata"))
+
+    raw_url = str(
+        run.get("final_video_uri")
+        or raw_delivery.get("url")
+        or video_metadata.get("raw_video_url")
+        or video_metadata.get("source_video_url")
+        or ""
+    ).strip()
+    captioned_url = str(
+        run.get("final_caption_uri")
+        or captioned_delivery.get("url")
+        or video_metadata.get("caption_video_url")
+        or post.get("video_url")
+        or ""
+    ).strip()
+    return raw_url, captioned_url
+
+
 def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any]:
     post_id = str(post.get("id") or "")
     base = {
@@ -660,6 +753,8 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "candidates": [],
         "requested_duration_seconds": None,
         "delivery_duration_seconds": None,
+        "final_video_url": "",
+        "final_caption_url": "",
         "take_count": 0,
         "billable_provider_seconds": 0,
         "price_per_provider_second_usd": "0.00",
@@ -670,6 +765,8 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "retry_provider_seconds": 0,
         "retry_estimated_cost_usd": "0.00",
         "latest_attempts": [],
+        "visual_contract": None,
+        "provider_prompts": [],
     }
     run = semantic_video_queries.get_run_by_post(post_id)
     if not run:
@@ -720,6 +817,17 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
     delivery_duration = artifact_manifest.get("delivery_duration_seconds")
     if delivery_duration is None:
         delivery_duration = artifact_manifest.get("actual_duration_seconds")
+    if delivery_duration is None:
+        pipeline_manifest = artifact_manifest.get("pipeline_manifest")
+        if isinstance(pipeline_manifest, dict):
+            media_qa = pipeline_manifest.get("media_qa")
+            if isinstance(media_qa, dict):
+                delivery_duration = media_qa.get("duration_seconds")
+    final_video_url, final_caption_url = _semantic_final_artifact_urls(
+        run,
+        post,
+        artifact_manifest,
+    )
 
     if current_reference_approval:
         master_state = "approved"
@@ -741,6 +849,8 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "candidates": candidates,
         "requested_duration_seconds": int(run.get("requested_duration_seconds") or 0) or None,
         "delivery_duration_seconds": delivery_duration,
+        "final_video_url": final_video_url,
+        "final_caption_url": final_caption_url,
         "take_count": int(plan.get("take_count") or len(latest)),
         "billable_provider_seconds": int(plan.get("billable_provider_seconds") or 0),
         "price_per_provider_second_usd": price,
@@ -758,14 +868,27 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "retry_provider_seconds": retry_seconds,
         "retry_estimated_cost_usd": retry_cost,
         "latest_attempts": latest,
+        "visual_contract": _semantic_visual_contract(run, master),
+        "provider_prompts": _semantic_provider_prompts(latest),
     }
 
 
 def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not is_semantic_ugc_mode(batch_detail.get("creation_mode")):
         return None
+    requested_duration_seconds = int(
+        batch_detail.get("target_duration_seconds")
+        or _semantic_ugc_duration_ui_config()["default"]
+    )
+    duration_contract = build_semantic_duration_contract(
+        requested_duration_seconds
+    )
     return {
-        "requested_duration_seconds": batch_detail.get("target_duration_seconds"),
+        "requested_duration_seconds": requested_duration_seconds,
+        "duration_contract": {
+            **duration_contract.as_dict(),
+            "contract_hash": duration_contract.contract_hash,
+        },
         "posts": [
             _build_semantic_video_post_projection(post)
             for post in (batch_detail.get("posts") or [])

@@ -51,12 +51,21 @@ from app.features.shot_production.composer import (
     evaluate_take_transcript,
     normalize_german_words,
 )
+from app.features.shot_production.duration import (
+    DELIVERY_CONTRACT_FPS,
+    EXACT_SHORT_FORM_DURATION_SECONDS,
+)
 from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
 from app.features.shot_production.prompts import (
     EFFECTIVE_NEGATIVE_PROMPT,
     SUPPORTED_DURATIONS,
     build_veo_take_prompt,
     compile_veo_take_requests,
+)
+from app.features.shot_production.provenance import (
+    APP_SCRIPT_SOURCE,
+    MANUAL_SEMANTIC_SCRIPT_SOURCE,
+    SEMANTIC_SCRIPT_SOURCE,
 )
 from app.features.shot_production.shot_deck import derive_shot_deck
 from app.features.shot_production.visual_qa import evaluate_visual_consistency
@@ -69,11 +78,6 @@ from app.features.shot_production.voice_qa import (
 
 MANIFEST_VERSION = 3
 SUPPORTED_MANIFEST_VERSIONS = frozenset({2, MANIFEST_VERSION})
-APP_SCRIPT_SOURCE = "app.features.topics.agents.generate_dialog_scripts"
-SEMANTIC_SCRIPT_SOURCE = (
-    "app.features.topics.semantic_scripts.generate_semantic_script"
-)
-MANUAL_SEMANTIC_SCRIPT_SOURCE = "manual_semantic_ugc"
 PLANNING_PROFILE = "minimum-eight-second-shots-v1"
 DEFAULT_MAX_INFLIGHT = 2
 _RUN_LOCKS = threading.local()
@@ -321,6 +325,13 @@ def _delivery_duration_contract(requested_seconds: Any) -> Dict[str, float]:
         raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.") from exc
     if not math.isfinite(requested) or requested < 4.0:
         raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.")
+    if requested == float(EXACT_SHORT_FORM_DURATION_SECONDS):
+        frame_seconds = 1.0 / DELIVERY_CONTRACT_FPS
+        return {
+            "requested": requested,
+            "minimum": requested - frame_seconds,
+            "maximum": requested + frame_seconds,
+        }
     return {
         "requested": requested,
         "minimum": max(0.5, requested - 1.5),
@@ -388,13 +399,13 @@ def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "input_sha256": script["input_sha256"],
         "text_sha256": script["text_sha256"],
         "source": script["source"],
-        "target_length_tier": script["target_length_tier"],
         "text": script["text"],
         "planned_provider_durations": script["planned_provider_durations"],
     }
     for field in (
         "creation_mode",
         "script_review_status",
+        "target_length_tier",
         "target_duration_seconds",
     ):
         if field in script:
@@ -1485,6 +1496,7 @@ def evaluate_final_media_probe(
     *,
     min_duration_seconds: float = 14.5,
     max_duration_seconds: float = 16.5,
+    target_duration_seconds: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Fail closed unless the captioned delivery satisfies the pilot media contract."""
     reasons = []
@@ -1516,11 +1528,21 @@ def evaluate_final_media_probe(
     except (KeyError, TypeError, ValueError):
         duration = math.nan
     frame_tolerance_seconds = 1.0 / 24.0
-    if (
+    outside_duration_contract = (
         not math.isfinite(duration)
-        or duration < min_duration_seconds - frame_tolerance_seconds - 1e-6
-        or duration > max_duration_seconds + frame_tolerance_seconds + 1e-6
-    ):
+        or (
+            target_duration_seconds is not None
+            and abs(duration - target_duration_seconds) > frame_tolerance_seconds + 1e-6
+        )
+        or (
+            target_duration_seconds is None
+            and (
+                duration < min_duration_seconds - frame_tolerance_seconds - 1e-6
+                or duration > max_duration_seconds + frame_tolerance_seconds + 1e-6
+            )
+        )
+    )
+    if outside_duration_contract:
         reasons.append("duration_out_of_range")
     return {
         "passed": not reasons,
@@ -1528,6 +1550,7 @@ def evaluate_final_media_probe(
         "duration_seconds": duration if math.isfinite(duration) else None,
         "min_duration_seconds": min_duration_seconds,
         "max_duration_seconds": max_duration_seconds,
+        "target_duration_seconds": target_duration_seconds,
         "video_stream": video_streams[0] if video_streams else None,
         "audio_stream": audio_streams[0] if audio_streams else None,
     }
@@ -1718,7 +1741,7 @@ def _prepare_acoustic_segment_sources(
     for position, take in enumerate(ordered_takes):
         raw_path = Path(take["raw"]["path"])
         first_word_start = float(take["transcript_qa"]["first_word_start_seconds"])
-        if position == 0 or first_word_start >= 0.100 - 1e-9:
+        if position == 0:
             sources.append(raw_path)
             timing_offsets.append(0.0)
             continue
@@ -1783,6 +1806,7 @@ def _plan_acoustic_delivery(
     plan_options = {}
     if requested == 16.0:
         plan_options["max_seam_word_gap_seconds"] = 0.480
+        plan_options["target_duration_seconds"] = requested
     if requested >= 40.0:
         plan_options["min_post_word_crossfade_guard_seconds"] = 0.060
     try:
@@ -1946,6 +1970,12 @@ def compose_and_caption(
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     duration_contract = _validate_duration_planning_contract(payload)
+    requested_duration = float(duration_contract["requested"])
+    exact_delivery_target = (
+        requested_duration
+        if requested_duration == float(EXACT_SHORT_FORM_DURATION_SECONDS)
+        else None
+    )
     minimum_duration = float(duration_contract["minimum"])
     maximum_duration = float(duration_contract["maximum"])
     existing_resolution = payload.get("delivery_resolution") or {}
@@ -1972,6 +2002,7 @@ def compose_and_caption(
             fresh_probe,
             min_duration_seconds=minimum_duration,
             max_duration_seconds=maximum_duration,
+            target_duration_seconds=exact_delivery_target,
         )
         payload["media_qa"] = media_qa
         payload["caption"]["probe"] = fresh_probe
@@ -2064,16 +2095,31 @@ def compose_and_caption(
                     take_count=len(ordered),
                 )
             else:
-                diagnostic_indexes = (exc.details or {}).get("under_capacity_take_indexes") or []
+                explicit_retry_indexes = (
+                    (exc.details or {}).get("recommended_retry_take_indexes") or []
+                )
                 recommended_retry_take_indexes = sorted(
                     {
                         int(index)
-                        for index in diagnostic_indexes
+                        for index in explicit_retry_indexes
                         if not isinstance(index, bool)
                         and isinstance(index, int)
                         and int(index) in available_take_indexes
                     }
                 )
+                if not recommended_retry_take_indexes:
+                    diagnostic_indexes = (
+                        (exc.details or {}).get("under_capacity_take_indexes") or []
+                    )
+                    recommended_retry_take_indexes = sorted(
+                        {
+                            int(index)
+                            for index in diagnostic_indexes
+                            if not isinstance(index, bool)
+                            and isinstance(index, int)
+                            and int(index) in available_take_indexes
+                        }
+                    )
                 if not recommended_retry_take_indexes:
                     recommended_retry_take_indexes = [int(ordered[-1]["index"])]
             payload["acoustic_plan_failure"] = {
@@ -2096,6 +2142,11 @@ def compose_and_caption(
         correlation_id=f"semantic_ugc_{payload['run_id']}_stitch",
         trim_windows=trim_windows,
         acoustic_plan=asdict(acoustic_plan) if acoustic_plan is not None else None,
+        **(
+            {"target_duration_seconds": exact_delivery_target}
+            if exact_delivery_target is not None
+            else {}
+        ),
     )
     stitched_path = manifest_path.parent / "stitched.mp4"
     stitched_path.write_bytes(stitched_bytes)
@@ -2270,6 +2321,7 @@ def compose_and_caption(
         caption_probe,
         min_duration_seconds=minimum_duration,
         max_duration_seconds=maximum_duration,
+        target_duration_seconds=exact_delivery_target,
     )
     payload["caption"] = {
         "captioned_path": str(captioned_path),

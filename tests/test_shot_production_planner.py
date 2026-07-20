@@ -58,6 +58,17 @@ def test_plans_minimum_two_eight_second_shots_for_approved_16_second_script():
     assert " ".join(beat.text for beat in beats) == APPROVED_RAMP_SCRIPT
 
 
+def test_32_word_16_second_script_forms_two_balanced_full_capacity_takes():
+    script = " ".join(f"Wort{index}" for index in range(32))
+
+    beats = plan_editorial_beats(script)
+
+    assert len(beats) == 2
+    assert [beat.word_count for beat in beats] == [16, 16]
+    assert [beat.provider_duration_seconds for beat in beats] == [8, 8]
+    assert " ".join(beat.text for beat in beats) == script
+
+
 def test_plans_seven_at_most_eight_second_shots_for_fifty_second_script():
     beats = plan_editorial_beats(FIFTY_SECOND_SCRIPT)
 

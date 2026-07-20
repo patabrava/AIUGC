@@ -443,6 +443,65 @@ def test_planner_reports_boundary_energy_after_gain_matching():
     assert plan.seams[0].short_window_energy_delta_db <= 6.0
 
 
+def test_planner_reports_actionable_room_tone_mismatch_details():
+    takes = (
+        _evidence(0, room_rms=-42.0),
+        _evidence(1, room_rms=-64.967152),
+    )
+
+    with pytest.raises(ValidationError, match="No transcript-safe acoustic seam candidate") as exc_info:
+        plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+    assert exc_info.value.details["failure_type"] == "room_tone_energy_mismatch"
+    assert exc_info.value.details["minimum_observed_energy_delta_db"] == pytest.approx(
+        22.967152
+    )
+    assert exc_info.value.details["maximum_allowed_energy_delta_db"] == 12.0
+    assert exc_info.value.details["rejection_reason_counts"]["energy_delta_exceeded"] > 0
+    assert exc_info.value.details["recommended_retry_take_indexes"] == [1]
+    assert "room tone" in exc_info.value.details["recommended_action"].lower()
+
+
+def test_predecessor_room_tone_bridge_eliminates_the_22_967152_db_boundary():
+    previous = _evidence(0, room_rms=-42.0)
+    raw_incoming = _evidence(
+        1,
+        first_word=0.16,
+        room_rms=-64.967152,
+    )
+    bridge_seconds = 0.12
+    bridge_frames = tuple(
+        AudioFrameMetrics(timestamp, -42.0, -34.0, 0.04, 2200.0, 0.25)
+        for timestamp in (0.0, 0.016, 0.032, 0.048, 0.064, 0.080, 0.096, 0.112)
+    )
+    shifted_frames = tuple(
+        AudioFrameMetrics(
+            frame.timestamp_seconds + bridge_seconds,
+            frame.rms_dbfs,
+            frame.peak_dbfs,
+            frame.zero_crossing_rate,
+            frame.spectral_centroid_hz,
+            frame.spectral_flatness,
+        )
+        for frame in raw_incoming.frames
+    )
+    normalized_incoming = TakeAudioEvidence(
+        take_index=1,
+        provider_duration_seconds=raw_incoming.provider_duration_seconds + bridge_seconds,
+        first_word_start_seconds=raw_incoming.first_word_start_seconds + bridge_seconds,
+        final_word_end_seconds=raw_incoming.final_word_end_seconds + bridge_seconds,
+        frames=bridge_frames + shifted_frames,
+    )
+
+    plan = plan_acoustic_seams(
+        (previous, normalized_incoming),
+        min_duration_seconds=0.0,
+        max_duration_seconds=10.0,
+    )
+
+    assert plan.seams[0].short_window_energy_delta_db <= 6.0
+
+
 def test_planner_fails_when_final_take_cannot_reach_duration_floor():
     takes = (_evidence(0, duration=2.0, final_word=1.5), _evidence(1, duration=2.0, final_word=1.5))
 
@@ -539,6 +598,53 @@ def test_planner_can_use_bounded_short_form_sentence_pause_for_16_second_deliver
     assert plan.final_duration_seconds == pytest.approx(14.5 - (1 / 24))
     assert plan.seams[0].final_word_gap_seconds <= 0.48
     assert plan.seams[0].final_word_gap_seconds > 0.32
+
+
+def test_planner_rejects_multi_second_padding_and_targets_the_final_take_for_retry():
+    takes = (
+        _evidence(0, duration=8.0, first_word=0.24, final_word=6.34),
+        _evidence(1, duration=8.0, first_word=0.40, final_word=6.58),
+    )
+
+    with pytest.raises(ValidationError, match="duration envelope") as exc_info:
+        plan_acoustic_seams(
+            takes,
+            min_duration_seconds=16 - (1 / 24),
+            max_duration_seconds=16 + (1 / 24),
+            target_duration_seconds=16.0,
+            max_seam_word_gap_seconds=0.48,
+        )
+
+    assert exc_info.value.details["failure_type"] == "native_duration_shortfall"
+    assert exc_info.value.details["delivery_shortfall_seconds"] > 1 / 24
+    assert exc_info.value.details["maximum_encoder_padding_seconds"] == pytest.approx(1 / 24)
+    assert exc_info.value.details["recommended_retry_take_indexes"] == [1]
+    assert "final take" in exc_info.value.details["recommended_action"].lower()
+
+
+def test_planner_uses_native_windows_for_exact_16_seconds_with_at_most_one_frame_rounding():
+    takes = (
+        _evidence(0, duration=8.0, first_word=0.10, final_word=7.70),
+        _evidence(1, duration=8.12, first_word=0.12, final_word=7.70),
+    )
+
+    plan = plan_acoustic_seams(
+        takes,
+        min_duration_seconds=16 - (1 / 24),
+        max_duration_seconds=16 + (1 / 24),
+        target_duration_seconds=16.0,
+        max_seam_word_gap_seconds=0.48,
+    )
+
+    assert plan.target_duration_seconds == 16.0
+    assert plan.final_duration_seconds == pytest.approx(16.0)
+    assert 16 - (1 / 24) <= plan.content_duration_seconds <= 16 + (1 / 24)
+    assert 0.0 <= plan.delivery_padding_seconds <= 1 / 24
+    assert all(
+        window.audio_end_seconds <= evidence.provider_duration_seconds
+        for window, evidence in zip(plan.takes, takes)
+    )
+    assert plan.seams[0].final_word_gap_seconds <= 0.48
 
 
 def test_planner_preserves_two_take_final_outro_when_it_has_capacity():

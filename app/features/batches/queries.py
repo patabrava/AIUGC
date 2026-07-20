@@ -436,6 +436,7 @@ def create_manual_draft_posts(
                     "script_review_status": "pending",
                     "manual_draft": True,
                     "manual_post_type": "",
+                    "semantic_rotation_index": index,
                 },
                 target_length_tier=target_length_tier,
             )

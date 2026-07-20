@@ -758,6 +758,7 @@ def _create_semantic_post_from_candidate(
     contract: Any,
     semantic_slot_id: str,
     semantic_family_identity: str,
+    semantic_rotation_index: int,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     seed_payload = _semantic_seed_payload(post_type, candidate)
     sources = _semantic_source_urls(candidate, seed_payload)
@@ -812,6 +813,7 @@ def _create_semantic_post_from_candidate(
             "semantic_planned_take_count": validation.planned_take_count,
             "semantic_slot_id": semantic_slot_id,
             "semantic_family_identity": semantic_family_identity,
+            "semantic_rotation_index": int(semantic_rotation_index),
             "semantic_planned_beats": [
                 {
                     "index": beat.index,
@@ -1710,6 +1712,7 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
                 contract=contract,
                 semantic_slot_id=slot_id,
                 semantic_family_identity=family_identity,
+                semantic_rotation_index=persisted_post_count + len(created_posts),
             )
             created_posts.append(post)
             all_generated_topics.append(topic_record)

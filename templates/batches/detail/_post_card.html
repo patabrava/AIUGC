@@ -14,6 +14,7 @@
 {% set display_post_type = manual_post_type or post.post_type or '' %}
 {% set is_manual_mode = batch.creation_mode in ['manual', 'manual_character_consistency'] %}
 {% set is_character_consistency_mode = batch.creation_mode in ['character_consistency', 'character_consistency_mid', 'character_consistency_light', 'manual_character_consistency'] %}
+{% set is_semantic_video_mode = batch.creation_mode in ['semantic_ugc', 'manual_semantic_ugc'] %}
 {% if is_manual_mode and not manual_post_type and display_post_type == 'value' %}
 {% set display_post_type = '' %}
 {% endif %}
@@ -86,7 +87,104 @@
                     <p class="mt-1 text-xs text-gray-500">Use any freeform post type you want for this manual draft.</p>
                 </div>
                 {% endif %}
-                {% if is_manual_mode %}
+                {% if is_semantic_video_mode %}
+                <div class="grid gap-3 rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 p-3 sm:grid-cols-2">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wide text-gray-600">Video location</label>
+                        <select
+                            name="semantic_scene_key"
+                            class="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#E58434]"
+                        >
+                            <option value="" {% if not seed.get('semantic_scene_key') %}selected{% endif %}>Automatic rotating location</option>
+                            <option value="bathroom_accessibility_a" {% if seed.get('semantic_scene_key') == 'bathroom_accessibility_a' %}selected{% endif %}>Accessible bathroom</option>
+                            <option value="garden_patio_a" {% if seed.get('semantic_scene_key') == 'garden_patio_a' %}selected{% endif %}>Garden patio</option>
+                            <option value="home_office_advice_a" {% if seed.get('semantic_scene_key') == 'home_office_advice_a' %}selected{% endif %}>Home office</option>
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">The selected actor-free third reference becomes the frozen background.</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wide text-gray-600">Upper-body outfit</label>
+                        <input
+                            type="text"
+                            name="semantic_wardrobe_description"
+                            value="{{ seed.get('semantic_wardrobe_description') or '' }}"
+                            maxlength="240"
+                            placeholder="e.g. navy cotton blouse with a round neckline"
+                            class="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#E58434]"
+                        >
+                        <p class="mt-1 text-xs text-gray-500">Leave blank for automatic outfit rotation. This never changes the two actor references.</p>
+                    </div>
+                </div>
+                {% endif %}
+                {% if is_semantic_video_mode and batch_view is defined and batch_view.semantic_video and batch_view.semantic_video.duration_contract %}
+                {% set semantic_duration = batch_view.semantic_video.duration_contract %}
+                <div
+                    x-data="{
+                        text: {{ primary_script | tojson | forceescape }},
+                        minimumWords: {{ semantic_duration.minimum_words }},
+                        maximumWords: {{ semantic_duration.maximum_words }},
+                        minimumStatements: {{ semantic_duration.minimum_semantic_blocks }},
+                        requestedSeconds: {{ semantic_duration.requested_duration_seconds }},
+                        get wordCount() {
+                            const matches = (this.text || '').match(/[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*/g);
+                            return matches ? matches.length : 0;
+                        },
+                        get completeStatementCount() {
+                            const normalized = (this.text || '').replace(/[»”’)}\]]+(?=\s|$)/g, '');
+                            const matches = normalized.match(/[.!?]+(?=\s|$)/g);
+                            return matches ? matches.length : 0;
+                        },
+                        get wordsReady() {
+                            return this.wordCount >= this.minimumWords && this.wordCount <= this.maximumWords;
+                        },
+                        get statementsReady() {
+                            return this.completeStatementCount >= this.minimumStatements;
+                        },
+                        get contractReady() {
+                            return this.wordsReady && this.statementsReady;
+                        },
+                        get wordStatus() {
+                            if (this.wordCount < this.minimumWords) return 'Add ' + (this.minimumWords - this.wordCount) + ' words';
+                            if (this.wordCount > this.maximumWords) return 'Remove ' + (this.wordCount - this.maximumWords) + ' words';
+                            return 'Words ready';
+                        },
+                        get statementStatus() {
+                            if (this.completeStatementCount < this.minimumStatements) return 'Add ' + (this.minimumStatements - this.completeStatementCount) + ' complete statements';
+                            return 'Statements ready';
+                        },
+                        get contractStatus() {
+                            return this.contractReady ? 'Ready for ' + this.requestedSeconds + 's production' : 'Script contract not ready';
+                        }
+                    }"
+                    class="space-y-2"
+                >
+                    <textarea
+                        class="w-full px-3 py-2 text-sm text-gray-800 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent"
+                        rows="{{ script_rows }}"
+                        maxlength="900"
+                        name="script_text"
+                        x-on:input="text = $event.target.value"
+                    >{{ primary_script }}</textarea>
+                    <div class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3 text-xs text-[#1C2740]" aria-live="polite">
+                        <p class="font-semibold text-[#006AAB]">
+                            {{ semantic_duration.requested_duration_seconds }}s target: {{ semantic_duration.minimum_words }}–{{ semantic_duration.maximum_words }} words and at least {{ semantic_duration.minimum_semantic_blocks }} complete semantic statement{% if semantic_duration.minimum_semantic_blocks != 1 %}s{% endif %}.
+                        </p>
+                        <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                            <div class="rounded-md bg-white/80 px-2 py-2">
+                                <span class="font-semibold" x-text="wordCount"></span>
+                                <span> / {{ semantic_duration.minimum_words }}–{{ semantic_duration.maximum_words }} words</span>
+                                <span class="mt-1 block" :class="wordsReady ? 'text-emerald-700' : 'text-amber-700'" x-text="wordStatus"></span>
+                            </div>
+                            <div class="rounded-md bg-white/80 px-2 py-2">
+                                <span class="font-semibold" x-text="completeStatementCount"></span>
+                                <span> / at least {{ semantic_duration.minimum_semantic_blocks }} complete statements</span>
+                                <span class="mt-1 block" :class="statementsReady ? 'text-emerald-700' : 'text-amber-700'" x-text="statementStatus"></span>
+                            </div>
+                        </div>
+                        <p class="mt-2 font-bold" :class="contractReady ? 'text-emerald-700' : 'text-amber-700'" x-text="contractStatus"></p>
+                    </div>
+                </div>
+                {% elif is_manual_mode %}
                 <div
                     x-data="{
                         text: {{ primary_script | tojson | forceescape }},
@@ -300,7 +398,7 @@
                 <div class="flex items-center gap-2">
                     {% if post.video_prompt_json %}
                     <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                        Ready for Generation
+                        {{ 'Legacy Prompt Draft' if is_semantic_video_mode else 'Ready for Generation' }}
                     </span>
                     {% else %}
                     <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
@@ -311,7 +409,11 @@
                 </div>
                 <p class="mt-2 text-sm text-gray-700">
                     {% if post.video_prompt_json %}
+                        {% if is_semantic_video_mode %}
+                        This stored legacy draft supports review and editing. Semantic production compiles separate provider prompts from the approved scene plate and frozen visual contract.
+                        {% else %}
                         Prompt assembled on prior run. Review the summary below or regenerate to refresh the template.
+                        {% endif %}
                     {% else %}
                         Generate the video prompt to convert this script into the detailed shot specification for the video providers.
                     {% endif %}
@@ -333,6 +435,7 @@
                 {% if post.video_prompt_json %}
                 {% set prompt = post.video_prompt_json %}
                 {% set prompt_audio = prompt.audio if prompt and prompt.audio else {} %}
+                {% set veo_prompt_label = 'Legacy Prompt Draft (not sent by Semantic pipeline)' if is_semantic_video_mode else 'VEO Prompt (Sent to Provider)' %}
                 {% set prompt_sections = [
                     ('Character', prompt.character),
                     ('Style', prompt.style),
@@ -340,7 +443,7 @@
                     ('Scene', prompt.scene),
                     ('Cinematography', prompt.cinematography),
                     ('Dialogue', prompt_audio.get('dialogue') if prompt_audio else None),
-                    ('VEO Prompt (Sent to Provider)', prompt.veo_prompt),
+                    (veo_prompt_label, prompt.veo_prompt),
                     ('Ending Directive', prompt.ending_directive),
                     ('Audio Block', prompt.audio_block),
                     ('Negatives', prompt.veo_negative_prompt or prompt.universal_negatives)
@@ -351,7 +454,7 @@
                     class="relative"
                 >
                     <div class="text-sm text-gray-700 space-y-2">
-                        <p class="font-semibold text-gray-900">Current Prompt</p>
+                        <p class="font-semibold text-gray-900">{{ 'Stored Legacy Prompt' if is_semantic_video_mode else 'Current Prompt' }}</p>
                         {% for title, value in prompt_sections %}
                         <div>
                             <p class="text-xs font-semibold text-gray-600 uppercase tracking-wide">{{ title }}</p>
@@ -369,7 +472,7 @@
                             class="w-full inline-flex justify-center items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm transition brand-button-primary focus:ring-2 focus:ring-offset-2 brand-focus text-white"
                         >
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                            Regenerate Prompt
+                            {{ 'Regenerate Legacy Draft' if is_semantic_video_mode else 'Regenerate Prompt' }}
                         </button>
                         <button
                             type="button"

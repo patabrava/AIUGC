@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from hashlib import sha256
 import io
+import json
+import threading
 from types import SimpleNamespace
 
 from PIL import Image
@@ -99,6 +101,9 @@ class FakeRepo:
         self.takes = takes
         self.events: list[tuple] = []
         self.reserve_error: Exception | None = None
+        self.renew_error: Exception | None = None
+        self.release_error: Exception | None = None
+        self.renewed = threading.Event()
         self.claimable = True
 
     def claim_run(self, *, run_id, worker_id, lease_seconds):
@@ -108,6 +113,13 @@ class FakeRepo:
     def list_attempts(self, run_id):
         assert run_id == self.run["id"]
         return deepcopy(self.takes)
+
+    def renew_run(self, *, run_id, worker_id, lease_token, lease_seconds):
+        self.events.append(("renew", run_id, worker_id, lease_token, lease_seconds))
+        self.renewed.set()
+        if self.renew_error:
+            raise self.renew_error
+        return deepcopy(self.run)
 
     def reserve_submission(self, *, run_id, take_id, worker_id, lease_token):
         self.events.append(("reserve", take_id))
@@ -202,6 +214,8 @@ class FakeRepo:
 
     def release_run(self, *, run_id, worker_id, lease_token):
         self.events.append(("release", run_id, worker_id, lease_token))
+        if self.release_error:
+            raise self.release_error
 
     def persist_worker_exception(
         self, *, run_id, worker_id, lease_token, stage, error
@@ -288,7 +302,7 @@ def test_worker_persists_intent_before_each_provider_call_and_acceptance_immedia
     result = worker.tick("run-1")
 
     assert result.action == "submitted"
-    assert repo.events[0] == ("claim", "run-1", "worker-1", 1800)
+    assert repo.events[0] == ("claim", "run-1", "worker-1", 120)
     assert len(vertex.submit_calls) == 2
     assert all(call["sample_count"] == 1 for call in vertex.submit_calls)
     assert all(call["generate_audio"] is True for call in vertex.submit_calls)
@@ -335,6 +349,55 @@ def test_worker_persists_a_fenced_runtime_exception_before_releasing_the_lease()
         "message": "production-only failure",
         "worker_id": "worker-1",
     }
+    assert repo.events[-1][0] == "release"
+
+
+def test_worker_renews_the_short_lease_while_a_stage_is_blocking():
+    from workers.semantic_video_worker import SemanticVideoWorker
+
+    repo = FakeRepo(stage="transcript_qa", take_count=1)
+
+    class RenewalWaitingStage:
+        def run_stage(self, *, stage, run, takes):
+            assert repo.renewed.wait(timeout=1.0), "lease heartbeat did not renew"
+            return {"passed": True, "artifacts": {}}
+
+    worker = SemanticVideoWorker(
+        repo=repo,
+        vertex=FakeVertex(),
+        storage=FakeStorage(repo.master),
+        stage_runner=RenewalWaitingStage(),
+        video_loader=lambda uri: f"video:{uri}".encode(),
+        worker_id="worker-1",
+        max_inflight=2,
+        lease_seconds=120,
+        heartbeat_seconds=0.01,
+    )
+
+    result = worker.tick("run-1")
+
+    assert result.action == "stage_advanced"
+    event_names = [event[0] for event in repo.events]
+    assert event_names.index("renew") < event_names.index("advance")
+    assert event_names[-1] == "release"
+    assert next(event for event in repo.events if event[0] == "renew") == (
+        "renew",
+        "run-1",
+        "worker-1",
+        "lease-1",
+        120,
+    )
+
+
+def test_worker_best_effort_release_does_not_mask_the_original_failure():
+    repo = FakeRepo(take_count=1)
+    repo.reserve_error = RuntimeError("production-only failure")
+    repo.release_error = RuntimeError("lease release unavailable")
+    worker = _worker(repo)
+
+    with pytest.raises(RuntimeError, match="production-only failure"):
+        worker.tick("run-1")
+
     assert repo.events[-1][0] == "release"
 
 
@@ -519,3 +582,117 @@ def test_production_stage_runner_rejects_unverified_delivery_projection():
             run={"id": "run-1", "artifact_manifest": {"delivery": {"passed": False}}},
             takes=[],
         )
+
+
+def test_production_stage_runner_materializes_canonical_exact_16s_contract(tmp_path):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    master, takes = _takes(2)
+    raw_payloads = {}
+    for index, take in enumerate(takes):
+        raw_bytes = f"raw-take-{index}".encode()
+        raw_url = f"https://storage/raw-{index}.mp4"
+        raw_payloads[raw_url] = raw_bytes
+        take.update(
+            submission_state="completed",
+            raw_artifact_uri=raw_url,
+            raw_artifact_sha256=sha256(raw_bytes).hexdigest(),
+        )
+
+    master_url = "https://storage/master.png"
+
+    class ManifestStorage:
+        def download_video(self, *, video_url, correlation_id):
+            del correlation_id
+            if video_url == master_url:
+                return master
+            return raw_payloads[video_url]
+
+    run = {
+        "id": "run-16s",
+        "created_at": "2026-07-20T12:00:00+00:00",
+        "updated_at": "2026-07-20T12:00:00+00:00",
+        "requested_duration_seconds": 16,
+        "master_hash": sha256(master).hexdigest(),
+        "master_snapshot": {
+            "storage_uri": master_url,
+            "sha256": sha256(master).hexdigest(),
+            "byte_length": len(master),
+            "mime_type": "image/png",
+        },
+        "script_hash": sha256(b"script").hexdigest(),
+        "script_snapshot": {"text": "Ein exakter Testtext fuer zwei Takes."},
+    }
+
+    runner = ProductionStageRunner(storage=ManifestStorage(), work_root=tmp_path)
+    manifest_path = runner._materialize_manifest(run, takes)  # noqa: SLF001
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["script"]["delivery_duration_seconds"] == {
+        "requested": 16.0,
+        "minimum": 16.0 - (1.0 / 24.0),
+        "maximum": 16.0 + (1.0 / 24.0),
+    }
+
+
+@pytest.mark.parametrize(
+    ("creation_mode", "source"),
+    [
+        ("manual_semantic_ugc", "manual_semantic_ugc"),
+        (
+            "semantic_ugc",
+            "app.features.topics.semantic_scripts.generate_semantic_script",
+        ),
+    ],
+)
+def test_production_stage_runner_preserves_semantic_script_provenance(
+    tmp_path,
+    creation_mode,
+    source,
+):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    master, takes = _takes(1)
+    raw_bytes = b"raw-take"
+    raw_url = "https://storage/raw.mp4"
+    takes[0].update(
+        submission_state="completed",
+        raw_artifact_uri=raw_url,
+        raw_artifact_sha256=sha256(raw_bytes).hexdigest(),
+    )
+    master_url = "https://storage/master.png"
+
+    class ManifestStorage:
+        def download_video(self, *, video_url, correlation_id):
+            del correlation_id
+            return master if video_url == master_url else raw_bytes
+
+    run = {
+        "id": f"run-{creation_mode}",
+        "requested_duration_seconds": 16,
+        "master_hash": sha256(master).hexdigest(),
+        "master_snapshot": {
+            "storage_uri": master_url,
+            "sha256": sha256(master).hexdigest(),
+            "byte_length": len(master),
+            "mime_type": "image/png",
+        },
+        "script_hash": sha256(b"script").hexdigest(),
+        "script_snapshot": {
+            "text": "Ein exakter manueller Testtext.",
+            "source": source,
+            "creation_mode": creation_mode,
+            "script_review_status": "approved",
+            "target_duration_seconds": 16,
+        },
+    }
+
+    runner = ProductionStageRunner(storage=ManifestStorage(), work_root=tmp_path)
+    manifest_path = runner._materialize_manifest(run, takes)  # noqa: SLF001
+    script = json.loads(manifest_path.read_text(encoding="utf-8"))["script"]
+
+    assert script["source"] == source
+    assert script["creation_mode"] == creation_mode
+    assert script["script_review_status"] == "approved"
+    assert script["target_duration_seconds"] == 16
+    assert "target_length_tier" not in script

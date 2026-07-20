@@ -17,6 +17,7 @@ _COMPONENT_FIELDS = (
     "hair_consistent",
     "wardrobe_consistent",
     "room_consistent",
+    "wheelchair_consistent",
     "framing_stable",
     "no_artifacts",
 )
@@ -28,11 +29,14 @@ _ALLOWED_FIELDS = _REQUIRED_FIELDS | {"passed"}
 _VISUAL_QA_PROMPT = """Image 1 is the approved master reference.
 Image 2 is the labeled multi-frame contact sheet extracted from the generated takes.
 
-Compare only the supplied references and judge whether they show the same person with consistent apparent age,
-hair, cream sweater wardrobe, room and daylight, stable UGC framing, and no visual artifacts. Inspect every labeled
-frame carefully, especially the lower third. Set no_artifacts=false if any raw frame contains baked-in captions,
-subtitles, logos, watermarks, letters, symbols, malformed glyphs, or gibberish text; identify the take and frame label
-in blocking_reasons. The contact-sheet labels above each frame are QA metadata and are not artifacts inside the video.
+Compare only the supplied references and judge whether they show the same person with consistent apparent age and
+hair, the exact wardrobe and location/background shown in the approved master, the same manual wheelchair, stable
+UGC framing, and no visual artifacts. The same manual wheelchair remains visible and consistent in every labeled
+frame. Set wheelchair_consistent=false if the wheelchair changes, disappears, is cropped out, or the actor appears
+standing or walking. Inspect every labeled frame carefully, especially the lower third. Set no_artifacts=false if any
+raw frame contains baked-in captions, subtitles, logos, watermarks, letters, symbols, malformed glyphs, or gibberish
+text; identify the take and frame label in blocking_reasons. The contact-sheet labels above each frame are QA metadata
+and are not artifacts inside the video.
 
 For framing_stable, allow small fixed crop differences between takes plus natural speaking head movement, blinking,
 and expression changes. Fail framing only for a material composition change or continuous camera zoom, push-in,
@@ -47,6 +51,7 @@ Return JSON only, without Markdown or commentary, using exactly this shape:
   "hair_consistent": true,
   "wardrobe_consistent": true,
   "room_consistent": true,
+  "wheelchair_consistent": true,
   "framing_stable": true,
   "no_artifacts": true,
   "confidence": 0.0,
@@ -63,6 +68,7 @@ class VisualQAReport:
     hair_consistent: bool
     wardrobe_consistent: bool
     room_consistent: bool
+    wheelchair_consistent: bool
     framing_stable: bool
     no_artifacts: bool
     confidence: float
@@ -174,6 +180,7 @@ def evaluate_visual_consistency(
         hair_consistent=payload["hair_consistent"],
         wardrobe_consistent=payload["wardrobe_consistent"],
         room_consistent=payload["room_consistent"],
+        wheelchair_consistent=payload["wheelchair_consistent"],
         framing_stable=payload["framing_stable"],
         no_artifacts=payload["no_artifacts"],
         confidence=confidence,

@@ -21,8 +21,10 @@ from app.core.video_profiles import script_word_count
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.shot_production.planner import plan_editorial_beats
 from app.features.shot_production.prompts import compile_veo_take_requests
+from app.features.shot_production.provenance import build_semantic_script_snapshot
 from app.features.shot_production.shot_deck import derive_shot_deck
 from app.features.characters.actor_identity import is_semantic_ugc_mode
+from app.features.semantic_videos.visual_contract import validate_visual_contract
 
 
 DEFAULT_PRICE_PER_PROVIDER_SECOND_USD = Decimal("0.40")
@@ -172,6 +174,17 @@ def compile_semantic_video_plan(
         )
 
     master_snapshot = _resolve_master_snapshot(reference)
+    visual_contract = validate_visual_contract(reference.get("visual_contract"))
+    if str(master_snapshot.get("visual_contract_hash") or "").strip().lower() != visual_contract[
+        "contract_hash"
+    ]:
+        raise ValidationError(
+            "Approved scene plate does not match the frozen visual contract.",
+            {
+                "expected_visual_contract_hash": visual_contract["contract_hash"],
+                "actual_visual_contract_hash": master_snapshot.get("visual_contract_hash"),
+            },
+        )
     master_hash = str(master_snapshot.get("sha256") or "").strip().lower()
     actual_master_hash = sha256(approved_frame_bytes).hexdigest() if isinstance(approved_frame_bytes, bytes) else ""
     if master_hash != actual_master_hash:
@@ -200,7 +213,12 @@ def compile_semantic_video_plan(
         mime_type=str(master_snapshot.get("mime_type") or ""),
         shot_count=len(beats),
     )
-    requests = compile_veo_take_requests(beats=beats, shot_deck=shot_deck, base_seed=base_seed)
+    requests = compile_veo_take_requests(
+        beats=beats,
+        shot_deck=shot_deck,
+        base_seed=base_seed,
+        visual_contract=visual_contract,
+    )
 
     price = _resolve_price(price_per_provider_second)
     billable_seconds = sum(request.duration_seconds for request in requests)
@@ -218,11 +236,13 @@ def compile_semantic_video_plan(
     normalized_reference = _json_safe(reference_basis)
     reference_hash = _canonical_hash(normalized_reference)
     actor_snapshot = _json_safe(reference_basis.get("actor") or {})
-    script_snapshot = {
-        "text": script,
-        "review_status": review_status,
-        "word_count": word_count,
-    }
+    script_snapshot = build_semantic_script_snapshot(
+        text=script,
+        review_status=review_status,
+        word_count=word_count,
+        creation_mode=str(batch.get("creation_mode") or "semantic_ugc"),
+        target_duration_seconds=duration_contract.requested_duration_seconds,
+    )
     script_hash = _canonical_hash(script_snapshot)
 
     take_payloads: list[dict[str, Any]] = []
@@ -248,6 +268,7 @@ def compile_semantic_video_plan(
             "seed": request.seed,
             "approved_master_sha256": master_hash,
             "shot_sha256": request.shot.output_sha256,
+            "visual_contract_hash": visual_contract["contract_hash"],
         }
         take_payloads.append(
             {
@@ -278,6 +299,7 @@ def compile_semantic_video_plan(
         "script_hash": script_hash,
         "reference_hash": reference_hash,
         "master_hash": master_hash,
+        "visual_contract_hash": visual_contract["contract_hash"],
         "provider_model": provider_model,
         "resolution": str(resolution),
         "price_per_provider_second_usd": price_text,
@@ -287,6 +309,7 @@ def compile_semantic_video_plan(
     plan_hash = _canonical_hash(plan_basis)
     plan_snapshot = {
         **plan_basis,
+        "visual_contract": visual_contract,
         "take_count": len(take_payloads),
         "billable_provider_seconds": billable_seconds,
         "quota_units": len(take_payloads),

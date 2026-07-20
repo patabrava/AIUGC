@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import threading
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence
 
@@ -23,13 +24,15 @@ from app.adapters.vertex_ai_client import VertexAIClient
 from app.core.errors import StateTransitionError, ValidationError
 from app.core.logging import get_logger
 from app.features.semantic_videos import queries
+from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.shot_production.runner import load_video_uri
 from app.features.shot_production.shot_deck import derive_shot_deck
 
 
 logger = get_logger(__name__)
 DEFAULT_MAX_INFLIGHT = 2
-DEFAULT_LEASE_SECONDS = 1800
+DEFAULT_LEASE_SECONDS = 120
+DEFAULT_HEARTBEAT_SECONDS = 40.0
 EXECUTABLE_STAGES = frozenset(
     {
         "generating",
@@ -103,6 +106,73 @@ class SemanticVideoRepository:
 
     def release_run(self, **kwargs):
         return queries.release_worker_lease(**kwargs)
+
+    def renew_run(self, **kwargs):
+        return queries.renew_worker_lease(**kwargs)
+
+
+class _LeaseHeartbeat:
+    """Renew one fenced worker lease while a blocking stage is in progress."""
+
+    def __init__(
+        self,
+        *,
+        repo: Any,
+        run_id: str,
+        worker_id: str,
+        lease_token: str,
+        lease_seconds: int,
+        interval_seconds: float,
+    ) -> None:
+        self.repo = repo
+        self.run_id = run_id
+        self.worker_id = worker_id
+        self.lease_token = lease_token
+        self.lease_seconds = lease_seconds
+        self.interval_seconds = interval_seconds
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"semantic-video-lease-{run_id}",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=min(10.0, max(1.0, self.lease_seconds / 4)))
+        if self._thread.is_alive():
+            logger.warning(
+                "semantic_video_lease_heartbeat_stop_timeout",
+                run_id=self.run_id,
+                worker_id=self.worker_id,
+            )
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                renewed = self.repo.renew_run(
+                    run_id=self.run_id,
+                    worker_id=self.worker_id,
+                    lease_token=self.lease_token,
+                    lease_seconds=self.lease_seconds,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "semantic_video_lease_renewal_failed",
+                    run_id=self.run_id,
+                    worker_id=self.worker_id,
+                    error=str(exc),
+                )
+                continue
+            logger.info(
+                "semantic_video_lease_renewed",
+                run_id=self.run_id,
+                worker_id=self.worker_id,
+                lease_expires_at=(renewed or {}).get("lease_expires_at"),
+            )
 
 
 class ProductionStageRunner:
@@ -322,11 +392,42 @@ class ProductionStageRunner:
         script_snapshot = run.get("script_snapshot")
         script = dict(script_snapshot) if isinstance(script_snapshot, Mapping) else {}
         script_text = str(script.get("text") or "")
+        canonical_duration = build_semantic_duration_contract(requested_duration)
         delivery_contract = {
-            "requested": float(requested_duration),
-            "minimum": max(0.5, float(requested_duration) - 1.5),
-            "maximum": float(requested_duration) + 0.5,
+            "requested": float(canonical_duration.requested_duration_seconds),
+            "minimum": canonical_duration.delivery_min_seconds,
+            "maximum": canonical_duration.delivery_max_seconds,
         }
+        source = str(script.get("source") or pipeline.APP_SCRIPT_SOURCE)
+        manifest_script: dict[str, Any] = {
+            "path": "",
+            "input_sha256": str(run.get("script_hash") or ""),
+            "text_sha256": sha256(script_text.encode("utf-8")).hexdigest(),
+            "source": source,
+            "category": "semantic_ugc",
+            "creation_mode": str(script.get("creation_mode") or "semantic_ugc"),
+            "script_review_status": str(
+                script.get("script_review_status")
+                or script.get("review_status")
+                or ""
+            ),
+            "planning_profile": pipeline.PLANNING_PROFILE,
+            "delivery_duration_seconds": delivery_contract,
+            "text": script_text,
+            "planned_provider_durations": [
+                take["duration_seconds"] for take in manifest_takes
+            ],
+            "source_payload": {**script, "source": source},
+        }
+        if source in {
+            pipeline.SEMANTIC_SCRIPT_SOURCE,
+            pipeline.MANUAL_SEMANTIC_SCRIPT_SOURCE,
+        }:
+            manifest_script["target_duration_seconds"] = requested_duration
+        else:
+            # Backward-compatible reconstruction for runs approved before semantic
+            # provenance was snapshotted.
+            manifest_script["target_length_tier"] = requested_duration
         payload: dict[str, Any] = {
             "version": pipeline.MANIFEST_VERSION,
             "run_id": run_id,
@@ -339,19 +440,7 @@ class ProductionStageRunner:
                 "sha256": master_hash,
                 "mime_type": str(master.get("mime_type") or "image/png"),
             },
-            "script": {
-                "path": "",
-                "input_sha256": str(run.get("script_hash") or ""),
-                "text_sha256": sha256(script_text.encode("utf-8")).hexdigest(),
-                "source": pipeline.APP_SCRIPT_SOURCE,
-                "category": "semantic_ugc",
-                "target_length_tier": requested_duration,
-                "planning_profile": pipeline.PLANNING_PROFILE,
-                "delivery_duration_seconds": delivery_contract,
-                "text": script_text,
-                "planned_provider_durations": [take["duration_seconds"] for take in manifest_takes],
-                "source_payload": {"source": pipeline.APP_SCRIPT_SOURCE},
-            },
+            "script": manifest_script,
             "takes": manifest_takes,
         }
         for key in self._MANIFEST_GLOBAL_KEYS:
@@ -566,11 +655,27 @@ class SemanticVideoWorker:
         worker_id: Optional[str] = None,
         max_inflight: int = DEFAULT_MAX_INFLIGHT,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        heartbeat_seconds: Optional[float] = None,
     ) -> None:
         if isinstance(max_inflight, bool) or max_inflight < 1 or max_inflight > 2:
             raise ValidationError("Semantic video max in-flight must be one or two.")
-        if isinstance(lease_seconds, bool) or lease_seconds < 1:
-            raise ValidationError("Semantic video lease duration must be positive.")
+        if isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 3600:
+            raise ValidationError(
+                "Semantic video lease duration must be between 1 and 3600 seconds."
+            )
+        resolved_heartbeat_seconds = (
+            min(DEFAULT_HEARTBEAT_SECONDS, lease_seconds / 3)
+            if heartbeat_seconds is None
+            else heartbeat_seconds
+        )
+        if (
+            isinstance(resolved_heartbeat_seconds, bool)
+            or resolved_heartbeat_seconds <= 0
+            or resolved_heartbeat_seconds >= lease_seconds
+        ):
+            raise ValidationError(
+                "Semantic video heartbeat must be positive and shorter than the lease."
+            )
         self.repo = repo or SemanticVideoRepository()
         self.vertex = vertex or VertexAIClient()
         self.storage = storage or get_storage_client()
@@ -579,6 +684,28 @@ class SemanticVideoWorker:
         self.worker_id = worker_id or f"semantic-video-{os.getpid()}"
         self.max_inflight = max_inflight
         self.lease_seconds = lease_seconds
+        self.heartbeat_seconds = float(resolved_heartbeat_seconds)
+
+    def _release_run_best_effort(self, *, run_id: str, lease_token: str) -> None:
+        try:
+            self.repo.release_run(
+                run_id=run_id,
+                worker_id=self.worker_id,
+                lease_token=lease_token,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "semantic_video_lease_release_failed",
+                run_id=run_id,
+                worker_id=self.worker_id,
+                error=str(exc),
+            )
+            return
+        logger.info(
+            "semantic_video_lease_released",
+            run_id=run_id,
+            worker_id=self.worker_id,
+        )
 
     def tick(self, run_id: Optional[str] = None) -> WorkerTickResult:
         run = self.repo.claim_run(
@@ -594,13 +721,27 @@ class SemanticVideoWorker:
         lease_token = str(run.get("lease_token") or "")
         if stage not in EXECUTABLE_STAGES or not lease_token:
             if lease_token:
-                self.repo.release_run(
-                    run_id=claimed_id,
-                    worker_id=self.worker_id,
-                    lease_token=lease_token,
+                self._release_run_best_effort(
+                    run_id=claimed_id, lease_token=lease_token
                 )
             return WorkerTickResult(run_id=claimed_id, stage=stage or None, action="not_claimed")
 
+        logger.info(
+            "semantic_video_lease_claimed",
+            run_id=claimed_id,
+            worker_id=self.worker_id,
+            lease_expires_at=run.get("lease_expires_at"),
+            lease_seconds=self.lease_seconds,
+        )
+        heartbeat = _LeaseHeartbeat(
+            repo=self.repo,
+            run_id=claimed_id,
+            worker_id=self.worker_id,
+            lease_token=lease_token,
+            lease_seconds=self.lease_seconds,
+            interval_seconds=self.heartbeat_seconds,
+        )
+        heartbeat.start()
         try:
             takes = _latest_attempts(self.repo.list_attempts(claimed_id))
             if stage == "generating":
@@ -630,11 +771,8 @@ class SemanticVideoWorker:
                 )
             raise
         finally:
-            self.repo.release_run(
-                run_id=claimed_id,
-                worker_id=self.worker_id,
-                lease_token=lease_token,
-            )
+            heartbeat.stop()
+            self._release_run_best_effort(run_id=claimed_id, lease_token=lease_token)
 
     def _run_generation_wave(
         self,
