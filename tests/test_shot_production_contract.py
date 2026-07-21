@@ -232,6 +232,8 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         assert f"final spoken word near {expected_final_word_time:.1f} seconds" in request.prompt.lower()
         assert "do not speak any other words" in request.prompt.lower()
         assert "do not freeze" in request.prompt.lower()
+        assert "camera remains locked" in request.prompt.lower()
+        assert "no pan, tilt, zoom, dolly, orbit, or reframing" in request.prompt.lower()
         assert "every frame completely free of on-screen text" in request.prompt.lower()
         assert "captions, subtitles, logos, watermarks" in request.prompt.lower()
         assert "hold the unchanged frame" not in request.prompt.lower()
@@ -259,6 +261,11 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         "room change",
         "extra person",
         "zoom",
+        "pan",
+        "tilt",
+        "dolly",
+        "orbit",
+        "camera movement",
         "push-in",
         "reframe",
         "posture reset",

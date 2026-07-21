@@ -25,6 +25,11 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "walking",
     "extra person",
     "zoom",
+    "pan",
+    "tilt",
+    "dolly",
+    "orbit",
+    "camera movement",
     "push-in",
     "reframe",
     "posture reset",
@@ -43,7 +48,8 @@ _REQUIRED_NEGATIVE_LOCKS = (
 EFFECTIVE_NEGATIVE_PROMPT = (
     "face change, age change, hair change, wardrobe change, room change, extra person, "
     "wheelchair change, cropped wheelchair, standing, walking, "
-    "camera zoom, push-in, reframe, posture reset, generated text, subtitles, music, "
+    "camera movement, camera pan, camera tilt, camera zoom, push-in, dolly, orbit, reframe, "
+    "posture reset, generated text, subtitles, music, "
     "background voices, extra speech, hands entering frame, repeated dialogue, English speech, "
     "logos, watermarks, gibberish text"
 )
@@ -127,7 +133,9 @@ def build_veo_take_prompt(
         f"pacing the beat to place the final spoken word near {final_word_target:.1f} seconds without sounding slow or theatrical. "
         "She says exactly this German beat once: "
         f"“{dialogue}” Do not speak any other words or any English. After the final word, naturally stop speaking, "
-        "close her mouth, and keep quiet eye contact. Do not freeze or perform an artificial end pose. Keep every frame "
+        "close her mouth, and keep quiet eye contact. The camera remains locked in the exact same position after the final "
+        "word: no pan, tilt, zoom, dolly, orbit, or reframing. She may keep subtle blinking and natural breathing without "
+        "moving the camera. Do not freeze or perform an artificial end pose. Keep every frame "
         "completely free of on-screen text: no captions, subtitles, logos, watermarks, letters, symbols, or gibberish glyphs."
     )
 

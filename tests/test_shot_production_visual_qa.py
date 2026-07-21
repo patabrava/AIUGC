@@ -98,6 +98,8 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     assert "exact wardrobe" in prompt
     assert "location/background" in prompt
     assert "same manual wheelchair" in prompt
+    assert "delivered-tail" in prompt
+    assert "pan, tilt, dolly, orbit" in prompt
     assert "remains visible" in prompt
     assert "cropped out" in prompt
     assert "standing or walking" in prompt

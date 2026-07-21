@@ -376,6 +376,9 @@ def test_stitch_uses_bounded_av_retime_for_live_exact_16_shortfall(tmp_path):
     assert meta["stitch_delivery_audio_tempo"] == pytest.approx(1.0 / retime_ratio)
     assert meta["stitch_delivery_native_shortfall_s"] == pytest.approx(0.78)
     assert meta["stitch_delivery_padding_s"] == 0.0
+    assert meta["stitch_end_pan_tail_exclusion_s"] == 0.5
+    assert meta["stitch_end_pan_retime_ratio"] == pytest.approx(16.0 / 15.5)
+    assert meta["stitch_end_pan_protection_applied"] is True
     assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
 
 

@@ -24,6 +24,10 @@ from app.core.logging import get_logger
 from app.features.shot_production.audio_seams import (
     MAX_EXACT_DELIVERY_RETIME_RATIO,
 )
+from app.features.shot_production.duration import (
+    EXACT_SHORT_FORM_DURATION_SECONDS,
+    SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS,
+)
 
 logger = get_logger(__name__)
 
@@ -483,6 +487,9 @@ def stitch_segments(
         delivery_padding_seconds = 0.0
         delivery_audio_tempo = 1.0
         delivery_mode = "native"
+        end_pan_protection_applied = False
+        end_pan_retime_ratio = 1.0
+        final_video_label = "vout"
         if target_duration_seconds is not None:
             frame_duration_seconds = 1.0 / fps
             if content_duration > target_duration_seconds + frame_duration_seconds + 1e-6:
@@ -576,6 +583,41 @@ def stitch_segments(
                     "asetpts=PTS-STARTPTS[adelivery]"
                 )
             final_audio_label = "adelivery"
+
+        if (
+            acoustic_plan is not None
+            and target_duration_seconds is not None
+            and math.isclose(
+                target_duration_seconds,
+                EXACT_SHORT_FORM_DURATION_SECONDS,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            )
+        ):
+            protected_content_duration = (
+                target_duration_seconds - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+            )
+            if protected_content_duration <= 0:
+                raise ValueError("End-pan protection requires a positive retained duration")
+            end_pan_retime_ratio = target_duration_seconds / protected_content_duration
+            end_pan_audio_tempo = 1.0 / end_pan_retime_ratio
+            filter_parts.append(
+                f"[vout]trim=duration={protected_content_duration:.6f},"
+                "setpts=PTS-STARTPTS,"
+                f"setpts={end_pan_retime_ratio:.9f}*PTS,fps={fps:.5f},"
+                f"trim=duration={target_duration_seconds:.6f},"
+                "setpts=PTS-STARTPTS[vprotected]"
+            )
+            filter_parts.append(
+                f"[{final_audio_label}]atrim=duration={protected_content_duration:.6f},"
+                "asetpts=PTS-STARTPTS,"
+                f"atempo={end_pan_audio_tempo:.9f},"
+                f"atrim=duration={target_duration_seconds:.6f},"
+                "asetpts=PTS-STARTPTS[aprotected]"
+            )
+            final_video_label = "vprotected"
+            final_audio_label = "aprotected"
+            end_pan_protection_applied = True
         filter_complex = ";".join(filter_parts)
 
         output_path = os.path.join(temp_dir, "stitched.mp4")
@@ -583,7 +625,7 @@ def stitch_segments(
             "-filter_complex",
             filter_complex,
             "-map",
-            "[vout]",
+            f"[{final_video_label}]",
             "-map",
             f"[{final_audio_label}]",
             "-c:v",
@@ -659,6 +701,13 @@ def stitch_segments(
         "stitch_delivery_retime_ratio": round(delivery_retime_ratio, 9),
         "stitch_delivery_audio_tempo": round(delivery_audio_tempo, 9),
         "stitch_delivery_mode": delivery_mode,
+        "stitch_end_pan_protection_applied": end_pan_protection_applied,
+        "stitch_end_pan_tail_exclusion_s": (
+            SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+            if end_pan_protection_applied
+            else 0.0
+        ),
+        "stitch_end_pan_retime_ratio": round(end_pan_retime_ratio, 9),
     }
     logger.info(
         "stitch_segments_completed",

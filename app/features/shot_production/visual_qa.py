@@ -39,10 +39,11 @@ text; identify the take and frame label in blocking_reasons. The contact-sheet l
 and are not artifacts inside the video.
 
 For framing_stable, allow small fixed crop differences between takes plus natural speaking head movement, blinking,
-and expression changes. Fail framing only for a material composition change or continuous camera zoom, push-in,
-pull-back, pan, or reframe within a take. Report every observed difference, including non-blocking natural expression
-or pose changes. This is visual continuity comparison only: make no face-recognition identification beyond the
-supplied references.
+and expression changes. Treat each delivered-tail frame as the final eligible frame that can appear in the delivery
+and compare it closely with the preceding final-word frame. Fail framing for a material composition change,
+continuous camera zoom, or any pan, tilt, dolly, orbit, push-in, pull-back, or reframe within a take, especially
+between final-word and delivered-tail. Report every observed difference, including natural expression or pose changes. This is
+visual continuity comparison only: make no face-recognition identification beyond the supplied references.
 
 Return JSON only, without Markdown or commentary, using exactly this shape:
 {

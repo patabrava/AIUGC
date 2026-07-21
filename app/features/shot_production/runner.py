@@ -1166,6 +1166,11 @@ def _extract_frame(video_path: Path, output_path: Path, seconds: float) -> None:
 
 @_manifest_locked
 def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
+    from app.features.shot_production.duration import (
+        DELIVERY_CONTRACT_FPS,
+        SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS,
+    )
+
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
     existing = payload.get("contact_sheet") or {}
@@ -1188,22 +1193,37 @@ def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
         if not qa.get("passed"):
             raise ValidationError("Contact sheet requires transcript-passed takes.", {"take_index": take["index"]})
         final_word_end = float(qa["final_word_end_seconds"])
-        provider_end = max(float(take["duration_seconds"]) - 0.1, 0.0)
+        raw_path = Path(take["raw"]["path"])
+        raw_probe = _probe_media(raw_path)
+        try:
+            actual_duration = float((raw_probe.get("format") or {})["duration"])
+        except (KeyError, TypeError, ValueError):
+            actual_duration = float(take["duration_seconds"])
+        provider_end = max(actual_duration - 0.1, 0.0)
+        delivered_tail = max(
+            0.0,
+            actual_duration
+            - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+            - (1.0 / DELIVERY_CONTRACT_FPS),
+        )
         sample_times = (
             min(0.5, provider_end),
             min(max(final_word_end / 2.0, 0.1), provider_end),
             min(final_word_end, provider_end),
+            min(delivered_tail, provider_end),
         )
         take_frames = []
-        for label, seconds in zip(("early", "middle", "final-word"), sample_times):
+        for label, seconds in zip(
+            ("early", "middle", "final-word", "delivered-tail"), sample_times
+        ):
             frame_path = frame_dir / f"take-{take['index']}-{label}.jpg"
-            _extract_frame(Path(take["raw"]["path"]), frame_path, seconds)
+            _extract_frame(raw_path, frame_path, seconds)
             take_frames.append((label, seconds, frame_path))
         per_take_frames.append(take_frames)
 
     cell_width, cell_height, label_height = 270, 480, 30
     columns = len(per_take_frames)
-    rows = 3
+    rows = 4
     sheet = Image.new("RGB", (columns * cell_width, rows * (cell_height + label_height)), "white")
     draw = ImageDraw.Draw(sheet)
     font = ImageFont.load_default()

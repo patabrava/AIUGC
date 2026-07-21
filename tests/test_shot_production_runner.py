@@ -1000,7 +1000,12 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     assert Path(contact["path"]).is_file()
     with Image.open(contact["path"]) as sheet:
         assert sheet.width == len(payload["takes"]) * 270
-        assert sheet.height == 3 * 510
+        assert sheet.height == 4 * 510
+    tail_frames = [
+        frame for frame in contact["frames"] if frame["label"] == "delivered-tail"
+    ]
+    assert len(tail_frames) == len(payload["takes"])
+    assert all(frame["seconds"] == pytest.approx(0.5 - (1 / 24), abs=0.002) for frame in tail_frames)
 
     calls = []
 
