@@ -113,6 +113,7 @@ def test_render_comparison_index_labels_both_prompts_and_all_scenes():
     )
 
     assert html.startswith("<!doctype html>")
+    assert '<link rel="icon" href="data:,">' in html
     assert "Current · Reality-First" in html
     assert "Test · Raw Camera Casting Realism" in html
     assert "home/side-by-side.png" in html

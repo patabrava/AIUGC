@@ -149,6 +149,7 @@ def render_comparison_index(rows: list[dict[str, str]]) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>Background reference prompt comparison</title>
   <style>
     :root {{ color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #17202a; background: #eeeae2; }}
