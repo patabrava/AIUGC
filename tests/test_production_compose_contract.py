@@ -188,3 +188,12 @@ def test_github_action_deploys_on_push_to_main():
     assert "Missing HOSTINGER_API_TOKEN" in step_text
     assert "PROD_MAGNIFIC_API_KEY" in step_text
     assert "Missing PROD_MAGNIFIC_API_KEY" in step_text
+
+
+def test_github_deploy_additively_merges_allowed_emails():
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "PROD_ADDITIONAL_ALLOWED_EMAILS: ${{ secrets.PROD_ADDITIONAL_ALLOWED_EMAILS }}" in workflow_text
+    assert 'env_map.get("ALLOWED_EMAILS", "")' in workflow_text
+    assert 'os.environ.get("PROD_ADDITIONAL_ALLOWED_EMAILS", "")' in workflow_text
+    assert 'env_map["ALLOWED_EMAILS"] = ",".join(allowed_emails)' in workflow_text

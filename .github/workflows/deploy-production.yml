@@ -19,6 +19,7 @@ jobs:
       HOSTINGER_PROJECT_NAME: aiugc-prod
       HOSTINGER_VPS_ID: "1498567"
       PROD_ENV_FILE_B64: ${{ secrets.PROD_ENV_FILE_B64 }}
+      PROD_ADDITIONAL_ALLOWED_EMAILS: ${{ secrets.PROD_ADDITIONAL_ALLOWED_EMAILS }}
       PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64: ${{ secrets.PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 }}
       PROD_MAGNIFIC_API_KEY: ${{ secrets.PROD_MAGNIFIC_API_KEY }}
     steps:
@@ -29,6 +30,7 @@ jobs:
         run: |
           test -n "$HOSTINGER_API_TOKEN" || { echo "Missing HOSTINGER_API_TOKEN GitHub secret."; exit 1; }
           test -n "$PROD_ENV_FILE_B64" || { echo "Missing PROD_ENV_FILE_B64 GitHub secret."; exit 1; }
+          test -n "$PROD_ADDITIONAL_ALLOWED_EMAILS" || { echo "Missing PROD_ADDITIONAL_ALLOWED_EMAILS GitHub secret."; exit 1; }
           test -n "$PROD_MAGNIFIC_API_KEY" || { echo "Missing PROD_MAGNIFIC_API_KEY GitHub secret."; exit 1; }
           test -n "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" || { echo "Missing PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 GitHub secret."; exit 1; }
 
@@ -92,6 +94,18 @@ jobs:
 
           env_text = base64.b64decode(os.environ["PROD_ENV_FILE_B64"]).decode()
           env_map = parse_env_lines(env_text)
+          allowed_emails = list(
+              dict.fromkeys(
+                  email.strip().lower()
+                  for source in (
+                      env_map.get("ALLOWED_EMAILS", ""),
+                      os.environ.get("PROD_ADDITIONAL_ALLOWED_EMAILS", ""),
+                  )
+                  for email in source.split(",")
+                  if email.strip()
+              )
+          )
+          env_map["ALLOWED_EMAILS"] = ",".join(allowed_emails)
           env_map.update(
               {
                   "DISABLE_BACKGROUND_SCHEDULERS": "true",
