@@ -1358,6 +1358,35 @@ def test_progress_endpoint_reports_persisted_generated_and_verified_counts(monke
     assert payload["verified_takes"] == 1
 
 
+def test_progress_endpoint_reports_scene_plate_generation_state(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    state["run"]["stage"] = "awaiting_reference_approval"
+    state["run"]["master_snapshot"] = {
+        "candidates": [{"index": 1}, {"index": 2}, {"index": 3}],
+    }
+    state["run"]["candidate_reservation_token"] = "reservation-1"
+    state["run"]["candidate_reservation_expires_at"] = "2999-01-01T00:00:00+00:00"
+    state["run"]["updated_at"] = "2998-12-31T23:30:00+00:00"
+
+    generating = client.get("/semantic-videos/posts/post-1/progress")
+
+    assert generating.status_code == 200, generating.text
+    assert generating.json()["data"]["candidate_generation_status"] == "generating"
+    assert generating.json()["data"]["candidate_count"] == 3
+
+    state["run"]["updated_at"] = "2998-12-31T23:31:30+00:00"
+
+    ready = client.get("/semantic-videos/posts/post-1/progress")
+
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["data"]["candidate_generation_status"] == "ready"
+    assert ready.json()["data"]["candidate_count"] == 3
+
+
 def test_initial_approval_appends_exact_hash_and_moves_run_to_generating(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app

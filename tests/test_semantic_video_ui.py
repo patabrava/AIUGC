@@ -621,3 +621,6 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "verified-takes" in source
     assert "retry-approve" in source
     assert "master-approve" in source
+    assert "candidate_generation_status" in source
+    assert "startPolling(root, true)" in source
+    assert "Scene plates are still generating" in source

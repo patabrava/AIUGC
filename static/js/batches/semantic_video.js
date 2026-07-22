@@ -44,6 +44,7 @@
         root.dataset.revision = progress.revision;
         root.dataset.stage = progress.stage;
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
+        root.dataset.candidateGenerationStatus = progress.candidate_generation_status || 'idle';
     }
 
     async function pollProgress(root) {
@@ -52,6 +53,10 @@
             const postId = root.dataset.postId;
             const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(postId)}/progress`, {method: 'GET'});
             updateProgress(root, progress);
+            if (root.dataset.waitingForCandidates === 'true' && progress.candidate_generation_status === 'ready') {
+                window.location.reload();
+                return;
+            }
             if (progress.stage === 'retry_approval_required' || progress.stage === 'completed') {
                 window.location.reload();
             }
@@ -60,8 +65,15 @@
         }
     }
 
-    function startPolling(root) {
-        if (activePolls.has(root) || ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage)) return;
+    function stopPolling(root) {
+        const timer = activePolls.get(root);
+        if (!timer) return;
+        window.clearInterval(timer);
+        activePolls.delete(root);
+    }
+
+    function startPolling(root, force = false) {
+        if (activePolls.has(root) || (!force && ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage))) return;
         const timer = window.setInterval(() => pollProgress(root), 8000);
         activePolls.set(root, timer);
         pollProgress(root);
@@ -77,6 +89,15 @@
             });
             window.location.reload();
         } catch (error) {
+            if (path === 'candidates') {
+                await pollProgress(root);
+                if (root.dataset.candidateGenerationStatus === 'generating') {
+                    setStatus(root, 'Scene plates are still generating. This page will refresh automatically when they are ready.');
+                    return;
+                }
+                root.dataset.waitingForCandidates = 'false';
+                stopPolling(root);
+            }
             button.disabled = false;
             setStatus(root, error.message, true);
         }
@@ -89,6 +110,8 @@
 
         action(root, 'generate-candidates')?.addEventListener('click', (event) => {
             const expected = root.dataset.revision === '' ? null : revision();
+            root.dataset.waitingForCandidates = 'true';
+            startPolling(root, true);
             runAction(root, event.currentTarget, 'candidates', {candidate_count: 3, expected_revision: expected}, 'Locking the approved actor reference as the canonical master…');
         });
         action(root, 'approve-master')?.addEventListener('click', (event) => {

@@ -70,6 +70,8 @@ class ProgressResponse(BaseModel):
     run_id: str
     revision: int
     stage: str
+    candidate_generation_status: Literal["idle", "generating", "ready", "stalled"]
+    candidate_count: int = Field(ge=0)
     plan_hash: Optional[str] = None
     total_takes: int
     generated_takes: int

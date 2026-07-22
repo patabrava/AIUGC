@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
 import json
@@ -84,6 +84,7 @@ _FINAL_WORD_TARGET_PATTERN = re.compile(
 )
 _MAX_RETRY_SPEECH_WORDS_PER_SECOND = 3.0
 _MIN_RETRY_ESTIMATED_SPEECH_RATIO = 0.80
+_CANDIDATE_RESERVATION_SECONDS = 1800
 
 
 def _canonical_json(value: Any) -> str:
@@ -973,7 +974,7 @@ def generate_candidates(
         ),
         reservation_owner=reservation_owner,
         reservation_token=reservation_token,
-        reservation_seconds=1800,
+        reservation_seconds=_CANDIDATE_RESERVATION_SECONDS,
     )
     try:
         generated = generate_scene_plate_candidates(
@@ -1238,6 +1239,36 @@ def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request)
 def get_progress(post_id: str):
     run = _run_or_404(post_id)
     takes = list_attempts(str(run["id"]))
+    master_snapshot = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
+    candidates = master_snapshot.get("candidates") if isinstance(master_snapshot.get("candidates"), list) else []
+    candidate_count = len(candidates)
+    reservation_token = str(run.get("candidate_reservation_token") or "").strip()
+    reservation_expires_at = str(run.get("candidate_reservation_expires_at") or "").strip()
+    if reservation_token and reservation_expires_at:
+        try:
+            reservation_expiry = datetime.fromisoformat(reservation_expires_at.replace("Z", "+00:00"))
+            if reservation_expiry.tzinfo is None:
+                reservation_expiry = reservation_expiry.replace(tzinfo=timezone.utc)
+            reservation_started = reservation_expiry - timedelta(seconds=_CANDIDATE_RESERVATION_SECONDS)
+            updated_at = datetime.fromisoformat(str(run.get("updated_at") or "").replace("Z", "+00:00"))
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            finalization_persisted = (
+                candidate_count == 3
+                and updated_at > reservation_started + timedelta(seconds=1)
+            )
+            if finalization_persisted:
+                candidate_generation_status = "ready"
+            else:
+                candidate_generation_status = (
+                    "generating" if reservation_expiry > datetime.now(timezone.utc) else "stalled"
+                )
+        except ValueError:
+            candidate_generation_status = "stalled"
+    elif candidate_count == 3:
+        candidate_generation_status = "ready"
+    else:
+        candidate_generation_status = "idle"
     latest: dict[int, dict[str, Any]] = {}
     for take in takes:
         index = int(take["take_index"])
@@ -1250,6 +1281,8 @@ def get_progress(post_id: str):
         run_id=str(run["id"]),
         revision=int(run.get("revision") or 0),
         stage=str(run.get("stage") or ""),
+        candidate_generation_status=candidate_generation_status,
+        candidate_count=candidate_count,
         plan_hash=run.get("plan_hash"),
         total_takes=len(ordered),
         generated_takes=sum(str(take.get("submission_state")) in generated_states for take in ordered),
