@@ -757,13 +757,13 @@ def test_all_canonical_scenes_build_valid_person_free_prompts():
         build_scene_bible_provider_metadata,
         build_scene_consistency_contract,
     )
-    from app.features.scenes.handlers import _build_canonical_scene_prompt
+    from app.features.scenes.background_comparison import build_raw_camera_background_brief
 
     assert len(SCENE_BIBLES) >= 10
     for scene_id, bible in SCENE_BIBLES.items():
-        prompt = _build_canonical_scene_prompt(scene_id)
-        assert "no person in frame" in prompt, scene_id
-        assert "people, hands, wheelchair" in prompt, scene_id
+        prompt = build_raw_camera_background_brief(scene_id)
+        assert "environment-only" in prompt, scene_id
+        assert "No people, faces, bodies, body parts, hands, or wheelchairs" in prompt, scene_id
         assert bible.generation_anchor[:25] in prompt, scene_id
 
         metadata = build_scene_bible_provider_metadata(scene_id)

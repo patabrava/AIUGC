@@ -70,6 +70,19 @@ def test_generate_raw_camera_background_uses_long_prompt_then_generates_one_imag
     assert result.provider_model == "gemini-3.1-flash-image"
 
 
+def test_generate_raw_camera_background_allows_production_one_k_contract():
+    from app.features.scenes.background_comparison import generate_raw_camera_background
+
+    client = FakeBackgroundLLMClient()
+    generate_raw_camera_background(
+        scene_key="home_living_room_advice_a",
+        llm_client=client,
+        image_size="1K",
+    )
+
+    assert client.image_calls[0]["image_size"] == "1K"
+
+
 def _png_bytes(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
     output = BytesIO()
     Image.new("RGB", size, color).save(output, format="PNG")
@@ -192,3 +205,59 @@ def test_live_comparison_script_rejects_missing_control_asset(tmp_path):
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["scenes"][0]["status"] == "failed"
     assert "generated control asset" in manifest["scenes"][0]["error"]
+
+
+def test_canonical_scene_generation_uses_raw_camera_prompt_at_one_k(monkeypatch):
+    from app.features.scenes import handlers as scene_handlers
+    from app.features.scenes.background_comparison import RawCameraBackgroundResult
+
+    captured: dict = {}
+    generated = RawCameraBackgroundResult(
+        scene_key="home_living_room_advice_a",
+        prompt_writer_brief="actor-free scene brief",
+        prompt_writer_output="Finished Raw Camera background prompt.",
+        image_bytes=b"production-background",
+        mime_type="image/png",
+        provider_model="gemini-3.1-flash-image",
+    )
+
+    monkeypatch.setattr(scene_handlers.scene_queries, "get_canonical_scene_asset", lambda **_kwargs: None)
+
+    def fake_generate(**kwargs):
+        captured["generate"] = kwargs
+        return generated
+
+    monkeypatch.setattr(scene_handlers, "generate_raw_camera_background", fake_generate, raising=False)
+
+    class FakeStorage:
+        image_prefix = "images"
+
+        def ensure_image(self, **kwargs):
+            captured["upload"] = kwargs
+            return {"url": "https://cdn.example.com/raw-camera-scene.png", "storage_key": "scene.png"}
+
+    monkeypatch.setattr(scene_handlers, "get_storage_client", lambda: FakeStorage())
+
+    def fake_create(**kwargs):
+        captured["create"] = kwargs
+        return SimpleNamespace(**kwargs, id="asset-1", status="generated")
+
+    monkeypatch.setattr(scene_handlers.scene_queries, "create_canonical_scene_asset", fake_create)
+
+    result = scene_handlers.generate_canonical_scene_asset(
+        scene_key="home_living_room_advice_a",
+        correlation_id="corr-1",
+    )
+
+    assert captured["generate"] == {
+        "scene_key": "home_living_room_advice_a",
+        "image_size": "1K",
+    }
+    assert captured["upload"]["image_bytes"] == b"production-background"
+    assert captured["create"]["provider_model"] == "gemini-3.1-flash-image"
+    assert captured["create"]["system_prompt_name"] == "raw_camera_casting_realism_v2"
+    assert captured["create"]["prompt_text"] == "Finished Raw Camera background prompt."
+    assert captured["create"]["image_size"] == "1K"
+    assert captured["create"]["provider_metadata"]["prompt_writer_brief"] == "actor-free scene brief"
+    assert captured["create"]["provider_metadata"]["production_prompt_default"] is True
+    assert result.image_url == "https://cdn.example.com/raw-camera-scene.png"

@@ -57,6 +57,7 @@ def generate_raw_camera_background(
     scene_key: str,
     llm_client: Optional[Any] = None,
     image_model: str = "gemini-3.1-flash-image",
+    image_size: str = "2K",
 ) -> RawCameraBackgroundResult:
     client = llm_client or get_llm_client()
     brief = build_raw_camera_background_brief(scene_key)
@@ -79,7 +80,7 @@ def generate_raw_camera_background(
         model=image_model,
         temperature=0.7,
         aspect_ratio="9:16",
-        image_size="2K",
+        image_size=image_size,
     )
     return RawCameraBackgroundResult(
         scene_key=get_scene_bible(scene_key).scene_id,
