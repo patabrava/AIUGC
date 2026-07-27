@@ -357,6 +357,30 @@ def _retry_guidance_text(
         raise StateTransitionError(
             "Semantic video retry requires persisted QA retry guidance."
         )
+    if isinstance(value, dict):
+        qa_failure = value.get("qa_failure")
+        details = qa_failure.get("details") if isinstance(qa_failure, Mapping) else None
+        blocking_reasons = (
+            details.get("blocking_reasons")
+            if isinstance(details, Mapping)
+            else None
+        )
+        if (
+            isinstance(qa_failure, Mapping)
+            and qa_failure.get("stage") == "identity_qa"
+            and isinstance(blocking_reasons, list)
+        ):
+            blockers = [
+                " ".join(str(reason).split())
+                for reason in blocking_reasons
+                if str(reason).strip()
+            ]
+            if blockers:
+                text = (
+                    f"{text} Correct these exact identity-QA blockers: "
+                    f"{'; '.join(blockers)}. Preserve natural, unretouched skin texture; "
+                    "do not smooth, beautify, retouch, or stylize the face."
+                )
     if isinstance(value, dict) and (value.get("qa_failure") or {}).get("stage") == "transcript_qa":
         manifest = value.get("pipeline_manifest")
         takes = manifest.get("takes") if isinstance(manifest, dict) else []
