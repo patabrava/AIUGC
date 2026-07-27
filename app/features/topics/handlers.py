@@ -69,6 +69,7 @@ from app.features.characters.actor_identity import is_manual_creation_mode, is_s
 from app.features.topics.semantic_scripts import (
     generate_semantic_script,
     validate_semantic_script,
+    validate_semantic_script_audience_copy,
 )
 from app.features.topics.hub import (
     _build_script_variants,
@@ -782,6 +783,7 @@ def _create_semantic_post_from_candidate(
         requested_duration_seconds=contract.requested_duration_seconds,
         maximum_seconds=contract.maximum_duration_seconds,
     )
+    validate_semantic_script_audience_copy(generated.script)
     if generated.contract_hash != contract.contract_hash:
         raise ValueError("Semantic script result does not match the batch duration contract.")
 

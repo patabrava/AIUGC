@@ -176,6 +176,59 @@ def test_deepgram_numeric_formatting_does_not_reject_german_achte():
     assert qa.actual_words[0] == "8"
 
 
+@pytest.mark.parametrize("dimension_connector", ["mal", "k", "kann"])
+def test_written_german_dimension_matches_spoken_asr_forms(dimension_connector):
+    beat = _beat(
+        0,
+        (
+            "Eine barrierefreie Toilette benötigt 150x150 cm Bewegungsfläche "
+            "und eine 90 cm breite Tür."
+        ),
+    )
+    transcript = _transcript(
+        ("Eine", 0.08, 0.24),
+        ("barrierefreie", 0.24, 0.72),
+        ("Toilette", 0.72, 1.12),
+        ("benötigt", 1.12, 1.52),
+        ("150", 1.52, 1.92),
+        (dimension_connector, 1.92, 2.12),
+        ("150", 2.12, 2.52),
+        ("Zentimeter", 2.52, 2.92),
+        ("Bewegungsfläche", 2.92, 3.42),
+        ("und", 3.42, 3.62),
+        ("eine", 3.62, 3.82),
+        ("90", 3.82, 4.12),
+        ("Zentimeter", 4.12, 4.52),
+        ("breite", 4.52, 4.82),
+        ("Tür", 4.82, 5.12),
+    )
+
+    qa = evaluate_take_transcript(beat, transcript, other_beats=[])
+
+    assert qa.passed is True
+    assert qa.word_error_rate == 0.0
+    assert qa.expected_words == qa.actual_words
+    assert qa.expected_words[4:8] == ("150", "mal", "150", "zentimeter")
+    assert qa.final_word_end_seconds == 5.12
+
+
+def test_kann_outside_a_numeric_dimension_remains_a_real_word():
+    beat = _beat(0, "Sie kann 150 Zentimeter erreichen.")
+    transcript = _transcript(
+        ("Sie", 0.08, 0.24),
+        ("kann", 0.24, 0.48),
+        ("150", 0.48, 0.82),
+        ("Zentimeter", 0.82, 1.20),
+        ("erreichen", 1.20, 1.62),
+    )
+
+    qa = evaluate_take_transcript(beat, transcript, other_beats=[])
+
+    assert qa.passed is True
+    assert qa.word_error_rate == 0.0
+    assert qa.actual_words[1] == "kann"
+
+
 @pytest.mark.parametrize(
     ("words", "missing_reason", "first_present", "last_present"),
     [

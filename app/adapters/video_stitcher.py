@@ -44,6 +44,10 @@ _REFRAME_PROFILES: List[Tuple[str, float, float, float]] = [
     ("punch_in_right", 1.09, 0.64, 0.5),
     ("tight_center", 1.17, 0.5, 0.43),
 ]
+_REFRAME_PROFILE_BY_NAME = {
+    name: (zoom, x_anchor, y_anchor)
+    for name, zoom, x_anchor, y_anchor in _REFRAME_PROFILES
+}
 
 
 def _probe_video_geometry(video_path: str) -> Tuple[int, int, float]:
@@ -169,13 +173,26 @@ def _trim_window(
     return start, min(duration, end), "default"
 
 
-def _reframe_filter(index: int, width: int, height: int) -> Tuple[str, str]:
-    name, zoom, x_anchor, y_anchor = _REFRAME_PROFILES[0]
+def _reframe_filter(
+    index: int,
+    width: int,
+    height: int,
+    *,
+    profile_name: str = "full",
+) -> Tuple[str, str]:
+    del index
+    try:
+        zoom, x_anchor, y_anchor = _REFRAME_PROFILE_BY_NAME[profile_name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown stitch reframe profile: {profile_name}") from exc
     scaled_width = _even_dimension(width * zoom)
     scaled_height = _even_dimension(height * zoom)
     crop_x = max(0, int(round((scaled_width - width) * x_anchor)))
     crop_y = max(0, int(round((scaled_height - height) * y_anchor)))
-    return name, f"scale={scaled_width}:{scaled_height},crop={width}:{height}:{crop_x}:{crop_y}"
+    return (
+        profile_name,
+        f"scale={scaled_width}:{scaled_height},crop={width}:{height}:{crop_x}:{crop_y}",
+    )
 
 
 def _finite_plan_seconds(value: Any, *, field: str) -> float:
@@ -193,7 +210,7 @@ def _validate_acoustic_plan(
     *,
     count: int,
     durations: List[float],
-) -> Tuple[List[Dict[str, float]], List[Dict[str, float]]]:
+) -> Tuple[List[Dict[str, float]], List[Dict[str, float]], List[str]]:
     if not isinstance(acoustic_plan, dict):
         raise ValueError("Acoustic plan must be a mapping")
     raw_takes = acoustic_plan.get("takes")
@@ -242,7 +259,27 @@ def _validate_acoustic_plan(
                 "visual_cut_position_seconds": visual_position,
             }
         )
-    return takes, seams
+    raw_reframe_profiles = acoustic_plan.get("visual_reframe_profiles")
+    if raw_reframe_profiles is None:
+        reframe_profiles = ["full"] * count
+    else:
+        if (
+            not isinstance(raw_reframe_profiles, (list, tuple))
+            or len(raw_reframe_profiles) != count
+        ):
+            raise ValueError(
+                "Acoustic plan visual reframe count must match segment count"
+            )
+        reframe_profiles = [str(name) for name in raw_reframe_profiles]
+        unknown_profiles = [
+            name for name in reframe_profiles if name not in _REFRAME_PROFILE_BY_NAME
+        ]
+        if unknown_profiles:
+            raise ValueError(
+                f"Acoustic plan contains unknown visual reframe profile: "
+                f"{unknown_profiles[0]}"
+            )
+    return takes, seams, reframe_profiles
 
 
 def extract_anchor_frame(
@@ -368,8 +405,13 @@ def stitch_segments(
         segment_durations = [_probe_duration(path) for path in input_paths]
         planned_takes: Optional[List[Dict[str, float]]] = None
         planned_seams: Optional[List[Dict[str, float]]] = None
+        planned_reframe_profiles = ["full"] * len(input_paths)
         if acoustic_plan is not None:
-            planned_takes, planned_seams = _validate_acoustic_plan(
+            (
+                planned_takes,
+                planned_seams,
+                planned_reframe_profiles,
+            ) = _validate_acoustic_plan(
                 acoustic_plan,
                 count=len(input_paths),
                 durations=segment_durations,
@@ -439,7 +481,12 @@ def stitch_segments(
             tail_trims.append(round(max(segment_durations[index] - audio_end, 0.0), 3))
             audio_window_durations.append(audio_end - audio_start)
             trim_sources.append(trim_source)
-            reframe_name, reframe = _reframe_filter(index, width, height)
+            reframe_name, reframe = _reframe_filter(
+                index,
+                width,
+                height,
+                profile_name=planned_reframe_profiles[index],
+            )
             reframe_names.append(reframe_name)
             filter_parts.append(
                 f"[{index}:v]trim=start={video_start:.3f}:end={video_end:.3f},setpts=PTS-STARTPTS,"
@@ -674,6 +721,9 @@ def stitch_segments(
         "stitch_height": height,
         "stitch_fps": round(fps, 3),
         "stitch_cut_softening_applied": planned_seams is not None,
+        "stitch_visual_jump_cut_reframe_applied": any(
+            name != "full" for name in reframe_names
+        ),
         "stitch_head_trim_s": head_trims,
         "stitch_tail_trim_s": tail_trims,
         "stitch_trim_window_source": trim_sources,

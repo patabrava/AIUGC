@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
 import unicodedata
 from typing import Dict, Optional, Sequence, Tuple
 
@@ -106,6 +107,13 @@ _GERMAN_ASR_NUMERIC_HOMOPHONES = {
     "achte": frozenset({"8"}),
 }
 
+_GERMAN_SPOKEN_UNITS = {
+    "cm": "zentimeter",
+}
+
+_GERMAN_DIMENSION_CONNECTORS = frozenset({"x", "mal", "k", "kann"})
+_COMPACT_DIMENSION_PATTERN = re.compile(r"^(\d+)x(\d+)$")
+
 
 @dataclass(frozen=True)
 class TakeTranscriptQA:
@@ -132,6 +140,33 @@ def normalize_german_words(text: str) -> Tuple[str, ...]:
         if word:
             normalized_words.append(word)
     return tuple(normalized_words)
+
+
+def _canonicalize_german_measurements(words: Sequence[str]) -> Tuple[str, ...]:
+    """Make written dimensions comparable with their ordinary German speech forms."""
+    expanded = []
+    for word in words:
+        compact_dimension = _COMPACT_DIMENSION_PATTERN.fullmatch(word)
+        if compact_dimension:
+            expanded.extend(
+                (
+                    compact_dimension.group(1),
+                    "mal",
+                    compact_dimension.group(2),
+                )
+            )
+            continue
+        expanded.append(_GERMAN_SPOKEN_UNITS.get(word, word))
+
+    canonical = list(expanded)
+    for index in range(1, len(canonical) - 1):
+        if (
+            canonical[index] in _GERMAN_DIMENSION_CONNECTORS
+            and canonical[index - 1].isdigit()
+            and canonical[index + 1].isdigit()
+        ):
+            canonical[index] = "mal"
+    return tuple(canonical)
 
 
 def _words_match(expected: str, actual: str) -> bool:
@@ -164,8 +199,10 @@ def _transcript_words_with_sources(
     source_words = []
     for source_word in transcript.words or []:
         for normalized_word in normalize_german_words(source_word.word):
-            normalized_words.append(normalized_word)
-            source_words.append(source_word)
+            canonical_words = _canonicalize_german_measurements((normalized_word,))
+            normalized_words.extend(canonical_words)
+            source_words.extend(source_word for _ in canonical_words)
+    normalized_words = list(_canonicalize_german_measurements(normalized_words))
     return tuple(normalized_words), tuple(source_words)
 
 
@@ -193,7 +230,7 @@ def evaluate_take_transcript(
     if not math.isfinite(threshold) or threshold < 0:
         raise ValueError("Maximum word-error rate must be a finite non-negative number.")
 
-    expected_words = normalize_german_words(beat.text)
+    expected_words = _canonicalize_german_measurements(normalize_german_words(beat.text))
     actual_words, source_words = _transcript_words_with_sources(transcript)
     edit_distance = _levenshtein_distance(expected_words, actual_words)
     word_error_rate = edit_distance / max(len(expected_words), 1)
@@ -268,7 +305,9 @@ def evaluate_take_transcript(
     other_beat_words = {
         word
         for other_beat in other_beats
-        for word in normalize_german_words(other_beat.text)
+        for word in _canonicalize_german_measurements(
+            normalize_german_words(other_beat.text)
+        )
     }
     foreign_candidates = other_beat_words - expected_word_set - _GERMAN_STOPWORDS
     foreign_words = tuple(

@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 from typing import Optional
 from types import SimpleNamespace
 
@@ -41,6 +42,26 @@ def test_gemini_provider_defaults_to_vertex_without_legacy_fallback(monkeypatch,
     assert settings.vertex_gemini_image_model == "gemini-2.5-flash-image"
     assert settings.vertex_grounded_research_model == "gemini-2.5-pro"
     assert settings.vertex_grounded_research_location == "global"
+    assert settings.semantic_scene_plate_model == "gemini-3-pro-image"
+    assert settings.semantic_scene_plate_image_size == "2K"
+    assert settings.semantic_scene_plate_contract_version == "pro-identity-v1"
+    assert settings.semantic_scene_identity_gate_model == "gemini-3.6-flash"
+    assert settings.semantic_scene_identity_min_confidence == 0.90
+    assert settings.semantic_video_identity_min_confidence == 0.90
+
+
+def test_semantic_identity_confidence_rejects_non_finite_values(monkeypatch, tmp_path: Path):
+    import pytest
+    from pydantic import ValidationError as PydanticValidationError
+
+    monkeypatch.chdir(tmp_path)
+    _write_minimal_env(
+        tmp_path,
+        ["SEMANTIC_SCENE_IDENTITY_MIN_CONFIDENCE=nan"],
+    )
+
+    with pytest.raises(PydanticValidationError):
+        Settings()
 
 
 def test_gemini_provider_accepts_legacy_fallback(monkeypatch, tmp_path: Path):
@@ -147,6 +168,9 @@ def test_vertex_settings_respect_app_env_file_override(monkeypatch, tmp_path: Pa
 def test_vertex_settings_materialize_google_application_credentials_json(monkeypatch, tmp_path: Path):
     adc_json = '{"type":"authorized_user","client_id":"abc","client_secret":"def","refresh_token":"ghi"}'
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", raising=False)
+    monkeypatch.delenv("APP_ENV_FILE", raising=False)
     _write_minimal_env(
         tmp_path,
         [

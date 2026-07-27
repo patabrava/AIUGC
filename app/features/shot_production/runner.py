@@ -33,6 +33,7 @@ from app.adapters.deepgram_client import Word, WordLevelTranscript
 from app.adapters.storage_client import get_storage_client
 from app.adapters.video_stitcher import stitch_segments
 from app.core.errors import ValidationError
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.shot_production.acoustic_qa import (
     DEFAULT_ACOUSTIC_QA_MODEL,
@@ -41,6 +42,7 @@ from app.features.shot_production.acoustic_qa import (
 )
 from app.features.shot_production.audio_seams import (
     MAX_EXACT_DELIVERY_RETIME_RATIO,
+    MAX_MEASURED_TERMINAL_RESET_ENERGY_DELTA_DB,
     MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB,
     TakeAudioEvidence,
     analyze_audio_frames,
@@ -71,6 +73,11 @@ from app.features.shot_production.provenance import (
 )
 from app.features.shot_production.shot_deck import derive_shot_deck
 from app.features.shot_production.visual_qa import evaluate_visual_consistency
+from app.features.shot_production.visual_seams import (
+    evaluate_delivered_visual_seams,
+    evaluate_source_terminal_reset,
+)
+from app.features.shot_frames.identity_qa import evaluate_video_actor_identity
 from app.features.shot_production.voice_qa import (
     DEFAULT_VOICE_QA_MODEL,
     VOICE_QA_RUBRIC_VERSION,
@@ -82,6 +89,12 @@ MANIFEST_VERSION = 3
 SUPPORTED_MANIFEST_VERSIONS = frozenset({2, MANIFEST_VERSION})
 PLANNING_PROFILE = "minimum-eight-second-shots-v1"
 DEFAULT_MAX_INFLIGHT = 2
+SEMANTIC_VISUAL_REFRAME_PROFILES = (
+    "full",
+    "punch_in_center",
+    "punch_in_left",
+    "punch_in_right",
+)
 _RUN_LOCKS = threading.local()
 logger = get_logger(__name__)
 
@@ -140,14 +153,18 @@ def _artifact_matches(record: Dict[str, Any], *, path_key: str = "path") -> bool
 def _clear_downstream_artifacts(payload: Dict[str, Any]) -> None:
     for key in (
         "contact_sheet",
+        "actor_identity_qa",
+        "scene_continuity_qa",
         "visual_qa",
         "voice_qa",
         "stitch",
         "final_transcript",
         "final_transcript_qa",
         "seam_qa",
+        "source_visual_tail_qa",
         "acoustic_seam_plan",
         "acoustic_seam_qa",
+        "delivery_visual_qa",
         "acoustic_plan_failure",
         "caption",
         "media_qa",
@@ -1049,8 +1066,10 @@ def transcribe_and_validate_takes(
             "final_transcript",
             "final_transcript_qa",
             "seam_qa",
+            "source_visual_tail_qa",
             "acoustic_seam_plan",
             "acoustic_seam_qa",
+            "delivery_visual_qa",
             "caption",
             "media_qa",
             "upload",
@@ -1164,6 +1183,96 @@ def _extract_frame(video_path: Path, output_path: Path, seconds: float) -> None:
         raise ValidationError("FFmpeg could not extract a pilot QA frame.", {"error": result.stderr[-400:]})
 
 
+def _delivered_visual_cut_times(
+    acoustic_plan: Any,
+    stitch_metadata: Dict[str, Any],
+) -> list[float]:
+    delivery_retime_ratio = float(
+        getattr(acoustic_plan, "delivery_retime_ratio", 1.0)
+    )
+    end_pan_retime_ratio = (
+        float(stitch_metadata.get("stitch_end_pan_retime_ratio") or 1.0)
+        if stitch_metadata.get("stitch_end_pan_protection_applied")
+        else 1.0
+    )
+    delivered_timeline_ratio = delivery_retime_ratio * end_pan_retime_ratio
+    cut_times = []
+    elapsed = 0.0
+    for take in acoustic_plan.takes[:-1]:
+        elapsed += (
+            take.video_end_seconds - take.video_start_seconds
+        ) * delivered_timeline_ratio
+        cut_times.append(elapsed)
+    return cut_times
+
+
+def _build_delivery_visual_seam_sheet(
+    video_path: Path,
+    output_path: Path,
+    *,
+    cut_times_seconds: Sequence[float],
+    fps: float,
+) -> Dict[str, Any]:
+    offsets_in_frames = (-3, -1, 1, 3)
+    frame_records = []
+    cells = []
+    frame_dir = output_path.parent / "delivery-seam-frames"
+    for seam_index, cut_seconds in enumerate(cut_times_seconds):
+        row = []
+        for offset in offsets_in_frames:
+            seconds = max(0.0, float(cut_seconds) + offset / fps)
+            frame_path = frame_dir / f"seam-{seam_index}-{offset:+d}f.jpg"
+            _extract_frame(video_path, frame_path, seconds)
+            row.append((offset, seconds, frame_path))
+            frame_records.append(
+                {
+                    "seam_index": seam_index,
+                    "frame_offset": offset,
+                    "seconds": round(seconds, 6),
+                    "path": str(frame_path),
+                    "sha256": _file_sha256(frame_path),
+                    "bytes": frame_path.stat().st_size,
+                }
+            )
+        cells.append(row)
+    cell_width, cell_height, label_height = 270, 480, 30
+    sheet = Image.new(
+        "RGB",
+        (
+            len(offsets_in_frames) * cell_width,
+            len(cells) * (cell_height + label_height),
+        ),
+        "white",
+    )
+    draw = ImageDraw.Draw(sheet)
+    font = ImageFont.load_default()
+    for row_index, row in enumerate(cells):
+        for column, (offset, seconds, frame_path) in enumerate(row):
+            with Image.open(frame_path) as source:
+                fitted = ImageOps.fit(
+                    source.convert("RGB"),
+                    (cell_width, cell_height),
+                    method=Image.Resampling.LANCZOS,
+                )
+            x = column * cell_width
+            y = row_index * (cell_height + label_height)
+            sheet.paste(fitted, (x, y + label_height))
+            draw.text(
+                (x + 6, y + 8),
+                f"SEAM {row_index} · {offset:+d}f · {seconds:.3f}s",
+                fill="black",
+                font=font,
+            )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path, format="JPEG", quality=92)
+    return {
+        "path": str(output_path),
+        "sha256": _file_sha256(output_path),
+        "bytes": output_path.stat().st_size,
+        "frames": frame_records,
+    }
+
+
 @_manifest_locked
 def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
     from app.features.shot_production.duration import (
@@ -1178,6 +1287,8 @@ def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
         return existing
     if existing:
         payload.pop("contact_sheet", None)
+        payload.pop("actor_identity_qa", None)
+        payload.pop("scene_continuity_qa", None)
         payload.pop("visual_qa", None)
         payload.pop("upload", None)
         payload.pop("upload_verification", None)
@@ -1258,9 +1369,12 @@ def build_contact_sheet(manifest_path: Path) -> Dict[str, Any]:
 def run_visual_qa(
     manifest_path: Path,
     *,
-    evaluator: Callable[..., Any] = evaluate_visual_consistency,
+    identity_evaluator: Callable[..., Any] = evaluate_video_actor_identity,
+    scene_evaluator: Callable[..., Any] = evaluate_visual_consistency,
     llm_client: Optional[Any] = None,
-    model: Optional[str] = None,
+    identity_model: Optional[str] = None,
+    scene_model: Optional[str] = None,
+    identity_minimum_confidence: Optional[float] = None,
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
@@ -1271,27 +1385,121 @@ def run_visual_qa(
     if not _artifact_matches(contact):
         raise ValidationError("Pilot contact sheet failed its recorded checksum; rebuild it before visual QA.")
     existing_report = payload.get("visual_qa") or {}
-    if existing_report:
+    current_cached_report = bool(
+        isinstance(existing_report.get("actor_identity_gate"), dict)
+        and isinstance(existing_report.get("scene_continuity_gate"), dict)
+        and payload.get("actor_identity_qa")
+        == existing_report.get("actor_identity_gate")
+        and payload.get("scene_continuity_qa")
+        == existing_report.get("scene_continuity_gate")
+    )
+    if existing_report and current_cached_report:
         if existing_report.get("passed"):
             return existing_report
         raise ValidationError(
             "Pilot visual QA failed.",
             {"blocking_reasons": list(existing_report.get("blocking_reasons") or [])},
         )
+    if existing_report:
+        # Legacy combined reports compare only the generated plate and contact
+        # sheet. They cannot satisfy the current dual-authority identity contract.
+        for key in (
+            "actor_identity_qa",
+            "scene_continuity_qa",
+            "visual_qa",
+            "voice_qa",
+            "stitch",
+            "final_transcript",
+            "final_transcript_qa",
+            "seam_qa",
+            "acoustic_seam_plan",
+            "acoustic_seam_qa",
+            "delivery_visual_qa",
+            "caption",
+            "media_qa",
+            "upload",
+            "upload_verification",
+        ):
+            payload.pop(key, None)
+        _atomic_write_json(manifest_path, payload)
     contact_path = Path(contact.get("path") or "")
-    report = evaluator(
+    actor_inputs = payload.get("actor_references")
+    if not isinstance(actor_inputs, list) or len(actor_inputs) != 2:
+        raise ValidationError(
+            "Pilot visual QA requires two immutable original actor references."
+        )
+    actor_images = []
+    expected_roles = ("actor_front", "actor_three_quarter")
+    for index, (record, expected_role) in enumerate(zip(actor_inputs, expected_roles)):
+        if not isinstance(record, dict) or record.get("role") != expected_role:
+            raise ValidationError(
+                "Pilot original actor reference order is invalid.",
+                {"index": index, "expected_role": expected_role},
+            )
+        path = Path(str(record.get("path") or ""))
+        if (
+            not path.is_file()
+            or _file_sha256(path) != str(record.get("sha256") or "")
+            or path.stat().st_size != int(record.get("byte_length") or -1)
+        ):
+            raise ValidationError(
+                "Pilot original actor reference changed before visual QA.",
+                {"role": expected_role},
+            )
+        actor_images.append(
+            {
+                "mime_type": str(record.get("mime_type") or ""),
+                "image_bytes": path.read_bytes(),
+                "byte_length": int(record["byte_length"]),
+                "sha256": str(record["sha256"]),
+            }
+        )
+    settings = get_settings()
+    identity_report = identity_evaluator(
+        actor_images[0],
+        actor_images[1],
+        {
+            "mime_type": "image/jpeg",
+            "image_bytes": contact_path.read_bytes(),
+            "byte_length": int(contact["bytes"]),
+            "sha256": str(contact["sha256"]),
+        },
+        llm_client=llm_client,
+        model=identity_model or settings.semantic_scene_identity_gate_model,
+        minimum_confidence=(
+            settings.semantic_video_identity_min_confidence
+            if identity_minimum_confidence is None
+            else identity_minimum_confidence
+        ),
+    )
+    scene_report = scene_evaluator(
         {"mime_type": payload["approved_master"]["mime_type"], "image_bytes": master_path.read_bytes()},
         {"mime_type": "image/jpeg", "image_bytes": contact_path.read_bytes()},
         llm_client=llm_client,
-        model=model,
+        model=scene_model,
     )
-    report_payload = asdict(report)
+    actor_payload = asdict(identity_report)
+    scene_payload = asdict(scene_report)
+    report_payload = {
+        "passed": bool(identity_report.passed and scene_report.passed),
+        "actor_identity_gate": actor_payload,
+        "scene_continuity_gate": scene_payload,
+        "blocking_reasons": [
+            *[f"actor_identity:{reason}" for reason in identity_report.blocking_reasons],
+            *[f"scene_continuity:{reason}" for reason in scene_report.blocking_reasons],
+        ],
+    }
+    payload["actor_identity_qa"] = actor_payload
+    payload["scene_continuity_qa"] = scene_payload
     payload["visual_qa"] = report_payload
-    payload["status"] = "visual_qa_passed" if report.passed else "visual_qa_failed"
+    payload["status"] = "visual_qa_passed" if report_payload["passed"] else "visual_qa_failed"
     payload["updated_at"] = _utc_now()
     _atomic_write_json(manifest_path, payload)
-    if not report.passed:
-        raise ValidationError("Pilot visual QA failed.", {"blocking_reasons": list(report.blocking_reasons)})
+    if not report_payload["passed"]:
+        raise ValidationError(
+            "Pilot visual QA failed.",
+            {"blocking_reasons": report_payload["blocking_reasons"]},
+        )
     return report_payload
 
 
@@ -1427,6 +1635,7 @@ def run_voice_qa(
             "seam_qa",
             "acoustic_seam_plan",
             "acoustic_seam_qa",
+            "delivery_visual_qa",
             "caption",
             "media_qa",
             "upload",
@@ -1609,12 +1818,25 @@ def _evaluate_acoustic_plan_contract_details(
         reasons.append("delivery_retime_ratio_out_of_range")
         failed_seam_indexes.update(all_seam_indexes)
         delivery_retime_ratio = 1.0
+    end_pan_retime_ratio = 1.0
+    if stitch_metadata.get("stitch_end_pan_protection_applied"):
+        try:
+            end_pan_retime_ratio = float(
+                stitch_metadata.get("stitch_end_pan_retime_ratio") or 1.0
+            )
+        except (TypeError, ValueError):
+            end_pan_retime_ratio = math.nan
+        if not math.isfinite(end_pan_retime_ratio) or end_pan_retime_ratio < 1.0:
+            reasons.append("end_pan_retime_ratio_out_of_range")
+            failed_seam_indexes.update(all_seam_indexes)
+            end_pan_retime_ratio = 1.0
+    delivered_timeline_ratio = delivery_retime_ratio * end_pan_retime_ratio
     if acoustic_plan.active_speech_rms_range_db > 1.5:
         reasons.append("active_speech_rms_range_exceeded")
         failed_seam_indexes.update(all_seam_indexes)
     timing_failures = delivered_seam_timing_failures(
         acoustic_plan.seams,
-        delivery_retime_ratio=delivery_retime_ratio,
+        delivery_retime_ratio=delivered_timeline_ratio,
         max_seam_word_gap_seconds=maximum_word_gap,
     )
     for reason in (
@@ -1638,7 +1860,15 @@ def _evaluate_acoustic_plan_contract_details(
                 and (
                     not getattr(seam, "energy_fallback", False)
                     or seam.short_window_energy_delta_db
-                    > MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB
+                    > (
+                        MAX_MEASURED_TERMINAL_RESET_ENERGY_DELTA_DB
+                        if getattr(
+                            seam,
+                            "measured_terminal_reset_recovery",
+                            False,
+                        )
+                        else MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB
+                    )
                 )
             ),
         ),
@@ -1781,9 +2011,10 @@ def _prepare_acoustic_segment_sources(
     output_root: Path,
     *,
     normalize_fn: Callable[..., None] = _prepend_acoustic_preroll,
-) -> tuple[tuple[Path, ...], tuple[float, ...], list[Dict[str, Any]]]:
+) -> tuple[tuple[Path, ...], tuple[float, ...], tuple[float, ...], list[Dict[str, Any]]]:
     sources: list[Path] = []
     timing_offsets: list[float] = []
+    duration_offsets: list[float] = []
     records: list[Dict[str, Any]] = []
     for position, take in enumerate(ordered_takes):
         raw_path = Path(take["raw"]["path"])
@@ -1791,6 +2022,7 @@ def _prepare_acoustic_segment_sources(
         if position == 0:
             sources.append(raw_path)
             timing_offsets.append(0.0)
+            duration_offsets.append(0.0)
             continue
 
         padding_seconds = round(max(0.120, 0.120 - first_word_start), 3)
@@ -1805,10 +2037,26 @@ def _prepare_acoustic_segment_sources(
         latest_bridge_start = previous_duration - padding_seconds
         bridge_start = min(previous_final_word + 0.100, latest_bridge_start)
         if bridge_start < previous_final_word - 1e-9:
-            raise ValidationError(
-                "Previous take has no transcript-safe room tone for an acoustic bridge.",
-                {"take_index": take["index"], "source_take_index": previous_take["index"]},
+            # Never extend the predecessor's video to manufacture acoustic
+            # margin. Keep both original sources untouched and let the seam
+            # planner emit the localized predecessor retry with its exact
+            # transcript-safe deadline.
+            sources.append(raw_path)
+            timing_offsets.append(0.0)
+            duration_offsets.append(0.0)
+            records.append(
+                {
+                    "take_index": take["index"],
+                    "source_take_index": previous_take["index"],
+                    "source_path": str(raw_path),
+                    "source_sha256": str(take["raw"]["sha256"]),
+                    "mode": "unsafe_predecessor_tail_left_unmodified",
+                    "available_incoming_preroll_seconds": first_word_start,
+                    "required_preroll_seconds": padding_seconds,
+                    "synthetic_visual_padding_seconds": 0.0,
+                }
             )
+            continue
         output_path = output_root / "normalized" / f"take-{take['index']}-acoustic-preroll.mp4"
         normalize_fn(
             previous_path,
@@ -1824,6 +2072,7 @@ def _prepare_acoustic_segment_sources(
             )
         sources.append(output_path)
         timing_offsets.append(padding_seconds)
+        duration_offsets.append(padding_seconds)
         records.append(
             {
                 "take_index": take["index"],
@@ -1838,7 +2087,7 @@ def _prepare_acoustic_segment_sources(
                 "bytes": output_path.stat().st_size,
             }
         )
-    return tuple(sources), tuple(timing_offsets), records
+    return tuple(sources), tuple(timing_offsets), tuple(duration_offsets), records
 
 
 def _plan_acoustic_delivery(
@@ -1985,9 +2234,9 @@ def _accept_final_transcript_consensus(
 def _seam_word_counts_for_final_transcript(
     ordered_takes: Sequence[Dict[str, Any]],
     *,
-    consensus_passed: bool,
+    transcript_validated: bool,
 ) -> tuple[int, ...]:
-    if consensus_passed and len(ordered_takes) > 1:
+    if transcript_validated and len(ordered_takes) > 1:
         actual_counts = tuple(
             len((take.get("transcript_qa") or {}).get("actual_words") or ())
             for take in ordered_takes
@@ -2013,6 +2262,15 @@ def compose_and_caption(
     acoustic_evaluator: Callable[..., Any] = evaluate_acoustic_seam_continuity,
     acoustic_llm_client: Optional[Any] = None,
     acoustic_model: Optional[str] = DEFAULT_ACOUSTIC_QA_MODEL,
+    visual_seam_evaluator: Callable[..., Dict[str, Any]] = (
+        evaluate_delivered_visual_seams
+    ),
+    visual_seam_sheet_fn: Callable[..., Dict[str, Any]] = (
+        _build_delivery_visual_seam_sheet
+    ),
+    source_visual_tail_evaluator: Callable[..., Dict[str, Any]] = (
+        evaluate_source_terminal_reset
+    ),
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
@@ -2056,7 +2314,21 @@ def compose_and_caption(
         payload["updated_at"] = _utc_now()
         _atomic_write_json(manifest_path, payload)
         acoustic_ready = not acoustic_seams or (payload.get("acoustic_seam_qa") or {}).get("passed")
-        if (payload.get("seam_qa") or {}).get("passed") and acoustic_ready and media_qa["passed"]:
+        delivery_visual_report = payload.get("delivery_visual_qa") or {}
+        delivery_visual_ready = (
+            not acoustic_seams
+            or (
+                delivery_visual_report.get("passed")
+                and delivery_visual_report.get("video_sha256")
+                == (payload.get("stitch") or {}).get("sha256")
+            )
+        )
+        if (
+            (payload.get("seam_qa") or {}).get("passed")
+            and acoustic_ready
+            and delivery_visual_ready
+            and media_qa["passed"]
+        ):
             return existing_caption
     if cached_delivery_invalid:
         invalidate_composition(
@@ -2083,7 +2355,12 @@ def compose_and_caption(
     segment_paths = tuple(Path(take["raw"]["path"]) for take in ordered)
     timing_offsets = tuple(0.0 for _take in ordered)
     if acoustic_seams:
-        segment_paths, timing_offsets, normalization_records = _prepare_acoustic_segment_sources(
+        (
+            segment_paths,
+            timing_offsets,
+            duration_offsets,
+            normalization_records,
+        ) = _prepare_acoustic_segment_sources(
             ordered,
             manifest_path.parent,
             normalize_fn=normalize_preroll_fn,
@@ -2095,10 +2372,39 @@ def compose_and_caption(
     trim_windows = [take["trim_window"] for take in ordered]
     acoustic_plan = None
     if acoustic_seams:
+        source_visual_tail_records = []
+        for position, take in enumerate(ordered[:-1]):
+            try:
+                tail_report = source_visual_tail_evaluator(
+                    segment_paths[position]
+                )
+            except (ValueError, ValidationError) as exc:
+                # Detection is a recovery optimization, never a prerequisite
+                # for safety. An unavailable analyzer leaves the conservative
+                # 350 ms exclusion active in the acoustic planner.
+                tail_report = {
+                    "status": "unavailable",
+                    "reset_detected": False,
+                    "safe_video_end_seconds": None,
+                    "error": str(exc),
+                }
+            tail_report = {
+                **dict(tail_report),
+                "take_index": int(take["index"]),
+                "attempt": int(take.get("attempt") or 1),
+                "source_raw_sha256": str((take.get("raw") or {}).get("sha256") or ""),
+            }
+            source_visual_tail_records.append(tail_report)
+        payload["source_visual_tail_qa"] = {
+            "status": "evaluated",
+            "passed": True,
+            "takes": source_visual_tail_records,
+        }
+        _atomic_write_json(manifest_path, payload)
         evidence = tuple(
             TakeAudioEvidence(
                 take_index=take["index"],
-                provider_duration_seconds=float(take["duration_seconds"]) + timing_offsets[position],
+                provider_duration_seconds=float(take["duration_seconds"]) + duration_offsets[position],
                 first_word_start_seconds=(
                     float(take["transcript_qa"]["first_word_start_seconds"])
                     + timing_offsets[position]
@@ -2108,6 +2414,24 @@ def compose_and_caption(
                     + timing_offsets[position]
                 ),
                 frames=tuple(analyze_audio_fn(segment_paths[position])),
+                latest_safe_video_end_seconds=(
+                    float(
+                        source_visual_tail_records[position][
+                            "safe_video_end_seconds"
+                        ]
+                    )
+                    if (
+                        position < len(source_visual_tail_records)
+                        and source_visual_tail_records[position].get(
+                            "reset_detected"
+                        )
+                        and source_visual_tail_records[position].get(
+                            "safe_video_end_seconds"
+                        )
+                        is not None
+                    )
+                    else None
+                ),
             )
             for position, take in enumerate(ordered)
         )
@@ -2137,10 +2461,24 @@ def compose_and_caption(
             seam_retry_map = []
             if localized_seam_failure:
                 failed_seam_indexes = [int(raw_seam_index)]
-                seam_retry_map, recommended_retry_take_indexes = _acoustic_retry_map(
+                seam_retry_map, adjacent_retry_take_indexes = _acoustic_retry_map(
                     failed_seam_indexes,
                     take_count=len(ordered),
                 )
+                explicit_retry_indexes = (
+                    (exc.details or {}).get("recommended_retry_take_indexes") or []
+                )
+                recommended_retry_take_indexes = sorted(
+                    {
+                        int(index)
+                        for index in explicit_retry_indexes
+                        if not isinstance(index, bool)
+                        and isinstance(index, int)
+                        and int(index) in available_take_indexes
+                    }
+                )
+                if not recommended_retry_take_indexes:
+                    recommended_retry_take_indexes = adjacent_retry_take_indexes
             else:
                 explicit_retry_indexes = (
                     (exc.details or {}).get("recommended_retry_take_indexes") or []
@@ -2181,14 +2519,25 @@ def compose_and_caption(
             payload["updated_at"] = _utc_now()
             _atomic_write_json(manifest_path, payload)
             raise
-        payload["acoustic_seam_plan"] = asdict(acoustic_plan)
+        acoustic_plan_payload = asdict(acoustic_plan)
+        acoustic_plan_payload["visual_reframe_profiles"] = [
+            SEMANTIC_VISUAL_REFRAME_PROFILES[
+                min(position, len(SEMANTIC_VISUAL_REFRAME_PROFILES) - 1)
+            ]
+            for position in range(len(ordered))
+        ]
+        payload["acoustic_seam_plan"] = acoustic_plan_payload
         _atomic_write_json(manifest_path, payload)
     stitched_bytes, stitch_metadata = stitch_fn(
         segment_videos=segment_videos,
         post_id=payload["run_id"],
         correlation_id=f"semantic_ugc_{payload['run_id']}_stitch",
         trim_windows=trim_windows,
-        acoustic_plan=asdict(acoustic_plan) if acoustic_plan is not None else None,
+        acoustic_plan=(
+            payload["acoustic_seam_plan"]
+            if acoustic_plan is not None
+            else None
+        ),
         **(
             {"target_duration_seconds": exact_delivery_target}
             if exact_delivery_target is not None
@@ -2204,6 +2553,59 @@ def compose_and_caption(
         "probe": _probe_media(stitched_path),
     }
     _atomic_write_json(manifest_path, payload)
+
+    if acoustic_plan is not None:
+        cut_times = _delivered_visual_cut_times(acoustic_plan, stitch_metadata)
+        reframe_profiles = list(
+            payload["acoustic_seam_plan"]["visual_reframe_profiles"]
+        )
+        delivery_visual_qa = visual_seam_evaluator(
+            stitched_path,
+            cut_times_seconds=cut_times,
+            reframe_profiles=reframe_profiles,
+            fps=float(stitch_metadata.get("stitch_fps") or DELIVERY_CONTRACT_FPS),
+        )
+        delivery_visual_qa["sheet"] = visual_seam_sheet_fn(
+            stitched_path,
+            manifest_path.parent / "qa" / "delivery-visual-seams.jpg",
+            cut_times_seconds=cut_times,
+            fps=float(stitch_metadata.get("stitch_fps") or DELIVERY_CONTRACT_FPS),
+        )
+        freeze_failed_seams = [
+            int(item["seam_index"])
+            for item in delivery_visual_qa.get("seams") or []
+            if "frozen_frames_intersect_visual_boundary"
+            in (item.get("failure_reasons") or [])
+        ]
+        delivery_visual_qa["recommended_retry_take_indexes"] = (
+            freeze_failed_seams
+        )
+        delivery_visual_qa["requires_paid_regeneration"] = bool(
+            freeze_failed_seams
+        )
+        payload["delivery_visual_qa"] = delivery_visual_qa
+        _atomic_write_json(manifest_path, payload)
+        if not delivery_visual_qa.get("passed"):
+            payload["status"] = "delivery_visual_qa_failed"
+            payload["updated_at"] = _utc_now()
+            _atomic_write_json(manifest_path, payload)
+            raise ValidationError(
+                "Final stitched visual seam QA failed.",
+                {
+                    "failed_seam_indexes": list(
+                        delivery_visual_qa.get("failed_seam_indexes") or []
+                    ),
+                    "recommended_retry_take_indexes": list(
+                        delivery_visual_qa.get(
+                            "recommended_retry_take_indexes"
+                        )
+                        or []
+                    ),
+                    "requires_paid_regeneration": bool(
+                        delivery_visual_qa.get("requires_paid_regeneration")
+                    ),
+                },
+            )
 
     final_transcript = deepgram_client.transcribe(
         audio_bytes=stitched_bytes,
@@ -2259,7 +2661,7 @@ def compose_and_caption(
             final_transcript,
             beat_word_counts=_seam_word_counts_for_final_transcript(
                 ordered,
-                consensus_passed=consensus_passed,
+                transcript_validated=bool(final_qa_payload["passed"]),
             ),
             max_gap_seconds=0.6,
         )
@@ -2274,19 +2676,7 @@ def compose_and_caption(
         )
 
     if acoustic_plan is not None:
-        delivery_retime_ratio = float(
-            getattr(acoustic_plan, "delivery_retime_ratio", 1.0)
-        )
-        video_durations = [
-            (take.video_end_seconds - take.video_start_seconds)
-            * delivery_retime_ratio
-            for take in acoustic_plan.takes
-        ]
-        cut_times = []
-        elapsed = 0.0
-        for duration in video_durations[:-1]:
-            elapsed += duration
-            cut_times.append(elapsed)
+        cut_times = _delivered_visual_cut_times(acoustic_plan, stitch_metadata)
         qa_dir = manifest_path.parent / "qa" / "acoustic"
         clips = []
         clip_records = []
@@ -2415,6 +2805,12 @@ def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> D
         raise ValidationError("Captioned pilot has not passed voice QA before upload.")
     if payload.get("acoustic_seam_plan") and not (payload.get("acoustic_seam_qa") or {}).get("passed"):
         raise ValidationError("Captioned pilot has not passed acoustic seam QA before upload.")
+    if payload.get("acoustic_seam_plan") and not (
+        payload.get("delivery_visual_qa") or {}
+    ).get("passed"):
+        raise ValidationError(
+            "Captioned pilot has not passed delivered visual seam QA before upload."
+        )
     captioned_path = Path(caption.get("captioned_path") or "")
     if not captioned_path.is_file():
         raise ValidationError("Captioned pilot video is missing before upload.")
@@ -2595,6 +2991,7 @@ def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any
         "seam_qa",
         "acoustic_seam_plan",
         "acoustic_seam_qa",
+        "delivery_visual_qa",
         "caption",
         "media_qa",
         "upload_intent",
@@ -2646,6 +3043,7 @@ def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any
         "seam_qa",
         "acoustic_seam_plan",
         "acoustic_seam_qa",
+        "delivery_visual_qa",
         "caption",
         "media_qa",
         "upload_intent",
@@ -2921,6 +3319,17 @@ def reset_failed_take(
         and acoustic_seam_report.get("passed") is False
         and index in (acoustic_seam_report.get("recommended_retry_take_indexes") or [])
     )
+    delivery_visual_report = payload.get("delivery_visual_qa") or {}
+    failed_delivery_visual_qa = (
+        take_status == "transcribed"
+        and payload.get("status") == "delivery_visual_qa_failed"
+        and delivery_visual_report.get("passed") is False
+        and index
+        in (
+            delivery_visual_report.get("recommended_retry_take_indexes")
+            or []
+        )
+    )
     voice_report = payload.get("voice_qa") or {}
     failed_voice_gate = (
         take_status == "transcribed"
@@ -2934,6 +3343,7 @@ def reset_failed_take(
         or failed_final_transcript
         or failed_acoustic_plan
         or failed_acoustic_seam_qa
+        or failed_delivery_visual_qa
     ):
         raise ValidationError(
             "Take is not in a retryable failed state; refusing to orphan an existing paid operation.",
@@ -3003,6 +3413,17 @@ def reset_failed_take(
                 "stage": "acoustic_seam_qa",
                 "selected_take_indexes": [index],
                 "report": acoustic_seam_report,
+                "archived_at": _utc_now(),
+            }
+        )
+        payload["qa_failure_history"] = failure_history
+    if failed_delivery_visual_qa:
+        failure_history = list(payload.get("qa_failure_history") or [])
+        failure_history.append(
+            {
+                "stage": "delivery_visual_qa",
+                "selected_take_indexes": [index],
+                "report": delivery_visual_report,
                 "archived_at": _utc_now(),
             }
         )

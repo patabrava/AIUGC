@@ -90,6 +90,28 @@ def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _passing_delivery_visual_qa(video_path, **_kwargs):
+    video_bytes = Path(video_path).read_bytes()
+    return {
+        "passed": True,
+        "status": "passed",
+        "video_sha256": sha256(video_bytes).hexdigest(),
+        "failed_seam_indexes": [],
+        "seams": [],
+    }
+
+
+def _fake_delivery_visual_sheet(_video_path, output_path, **_kwargs):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"delivery-visual-sheet")
+    return {
+        "path": str(output_path),
+        "sha256": sha256(output_path.read_bytes()).hexdigest(),
+        "bytes": output_path.stat().st_size,
+        "frames": [],
+    }
+
+
 def test_initialize_pilot_fails_hash_before_any_provider_boundary(tmp_path):
     from app.features.shot_production.runner import initialize_pilot
 
@@ -734,6 +756,20 @@ def _manifest_with_raw_takes(
     )
     submit_pending_takes(manifest_path, _SubmitClient(), max_inflight=4)
     payload = _read(manifest_path)
+    actor_references = []
+    for role in ("actor_front", "actor_three_quarter"):
+        actor_path = manifest_path.parent / f"{role}.png"
+        actor_sha256 = _approved_png(actor_path)
+        actor_references.append(
+            {
+                "role": role,
+                "path": str(actor_path),
+                "mime_type": "image/png",
+                "byte_length": actor_path.stat().st_size,
+                "sha256": actor_sha256,
+            }
+        )
+    payload["actor_references"] = actor_references
     raw_dir = manifest_path.parent / "raw"
     raw_dir.mkdir()
     for take in payload["takes"]:
@@ -981,6 +1017,7 @@ def _valid_final_probe(duration: str = "16.0") -> dict:
 
 def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_path):
     from app.features.shot_production.runner import build_contact_sheet, run_visual_qa
+    from app.features.shot_frames.identity_qa import VideoIdentityQAReport
     from app.features.shot_production.visual_qa import VisualQAReport
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
@@ -1007,16 +1044,32 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     assert len(tail_frames) == len(payload["takes"])
     assert all(frame["seconds"] == pytest.approx(0.5 - (1 / 24), abs=0.002) for frame in tail_frames)
 
-    calls = []
+    identity_calls = []
+    scene_calls = []
 
-    def evaluator(master, sheet, **_kwargs):
-        calls.append((master, sheet))
-        return VisualQAReport(True, True, True, True, True, True, True, True, 0.95, (), (), True)
+    def identity_evaluator(front, three_quarter, sheet, **_kwargs):
+        identity_calls.append((front, three_quarter, sheet))
+        return VideoIdentityQAReport(
+            True, True, True, True, True, True, True, True, 0.95, (), (), True
+        )
 
-    report = run_visual_qa(manifest_path, evaluator=evaluator)
+    def scene_evaluator(master, sheet, **_kwargs):
+        scene_calls.append((master, sheet))
+        return VisualQAReport(True, True, True, True, True, 0.95, (), (), True)
+
+    report = run_visual_qa(
+        manifest_path,
+        identity_evaluator=identity_evaluator,
+        scene_evaluator=scene_evaluator,
+    )
     assert report["passed"] is True
-    assert calls[0][0]["image_bytes"] == Path(_read(manifest_path)["approved_master"]["path"]).read_bytes()
-    assert calls[0][1]["image_bytes"] == Path(contact["path"]).read_bytes()
+    assert identity_calls[0][0]["sha256"] == payload["actor_references"][0]["sha256"]
+    assert identity_calls[0][1]["sha256"] == payload["actor_references"][1]["sha256"]
+    assert identity_calls[0][2]["image_bytes"] == Path(contact["path"]).read_bytes()
+    assert scene_calls[0][0]["image_bytes"] == Path(
+        _read(manifest_path)["approved_master"]["path"]
+    ).read_bytes()
+    assert scene_calls[0][1]["image_bytes"] == Path(contact["path"]).read_bytes()
 
     Path(contact["path"]).write_bytes(b"corrupt contact sheet")
     rebuilt = build_contact_sheet(manifest_path)
@@ -1027,12 +1080,87 @@ def test_contact_sheet_and_visual_gate_are_persisted_and_block_on_failure(tmp_pa
     failing_payload["contact_sheet"] = contact
     failing_manifest.write_text(json.dumps(failing_payload), encoding="utf-8")
 
-    def fail_evaluator(*_args, **_kwargs):
-        return VisualQAReport(False, True, True, True, True, True, True, True, 0.99, ("face drift",), (), False)
+    def fail_identity_evaluator(*_args, **_kwargs):
+        return VideoIdentityQAReport(
+            False,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            0.99,
+            ("face drift",),
+            (),
+            False,
+        )
 
     with pytest.raises(ValidationError, match="visual QA"):
-        run_visual_qa(failing_manifest, evaluator=fail_evaluator)
-    assert _read(failing_manifest)["visual_qa"]["passed"] is False
+        run_visual_qa(
+            failing_manifest,
+            identity_evaluator=fail_identity_evaluator,
+            scene_evaluator=scene_evaluator,
+        )
+    failed_payload = _read(failing_manifest)
+    assert failed_payload["actor_identity_qa"]["passed"] is False
+    assert failed_payload["scene_continuity_qa"]["passed"] is True
+    assert failed_payload["visual_qa"]["passed"] is False
+
+
+def test_visual_qa_replaces_legacy_combined_cache_with_dual_gates(tmp_path):
+    from app.features.shot_frames.identity_qa import VideoIdentityQAReport
+    from app.features.shot_production.runner import run_visual_qa
+    from app.features.shot_production.visual_qa import VisualQAReport
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    contact_path = manifest_path.parent / "legacy-contact.jpg"
+    contact_path.write_bytes(b"legacy-contact")
+    payload["contact_sheet"] = {
+        "path": str(contact_path),
+        "sha256": sha256(contact_path.read_bytes()).hexdigest(),
+        "bytes": contact_path.stat().st_size,
+    }
+    payload["visual_qa"] = {
+        "passed": True,
+        "identity_same_person": True,
+        "room_consistent": True,
+    }
+    payload["voice_qa"] = {"passed": True}
+    payload["stitch"] = {"path": "stale.mp4"}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    calls = []
+
+    def identity_evaluator(*_args, **_kwargs):
+        calls.append("identity")
+        return VideoIdentityQAReport(
+            True, True, True, True, True, True, True, True, 0.95, (), (), True
+        )
+
+    def scene_evaluator(*_args, **_kwargs):
+        calls.append("scene")
+        return VisualQAReport(True, True, True, True, True, 0.96, (), (), True)
+
+    report = run_visual_qa(
+        manifest_path,
+        identity_evaluator=identity_evaluator,
+        scene_evaluator=scene_evaluator,
+    )
+
+    saved = _read(manifest_path)
+    assert calls == ["identity", "scene"]
+    assert report["passed"] is True
+    assert report["actor_identity_gate"]["confidence"] == 0.95
+    assert report["scene_continuity_gate"]["confidence"] == 0.96
+    assert saved["actor_identity_qa"]["passed"] is True
+    assert saved["actor_identity_qa"]["confidence"] == 0.95
+    assert saved["actor_identity_qa"]["blocking_reasons"] == []
+    assert saved["scene_continuity_qa"]["passed"] is True
+    assert saved["scene_continuity_qa"]["confidence"] == 0.96
+    assert saved["scene_continuity_qa"]["blocking_reasons"] == []
+    assert "voice_qa" not in saved
+    assert "stitch" not in saved
 
 
 def test_voice_gate_extracts_full_takes_caches_by_contract_and_blocks_on_failure(tmp_path, monkeypatch):
@@ -1584,6 +1712,8 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
             "stitch_segment_count": 2,
             "stitch_audio_video_duration_delta_s": 0.02,
             "stitch_delivery_retime_ratio": retime_ratio,
+            "stitch_end_pan_protection_applied": True,
+            "stitch_end_pan_retime_ratio": 16.0 / 15.5,
         }
 
     extracted_centers = []
@@ -1623,9 +1753,15 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         stitch_fn=stitch_fn,
         caption_fn=caption_fn,
         probe_fn=lambda _path: _valid_final_probe("16.0"),
+        visual_seam_evaluator=_passing_delivery_visual_qa,
+        visual_seam_sheet_fn=_fake_delivery_visual_sheet,
     )
 
     assert stitch_calls[0]["acoustic_plan"]["analyzer_version"] == "test-v1"
+    assert stitch_calls[0]["acoustic_plan"]["visual_reframe_profiles"] == [
+        "full",
+        "punch_in_center",
+    ]
     assert stitch_calls[0]["target_duration_seconds"] == 16.0
     assert stitch_calls[0]["segment_videos"][1] == b"room-tone-bridged"
     saved = _read(manifest_path)
@@ -1635,7 +1771,9 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     assert saved["acoustic_seam_plan"]["delivery_retime_ratio"] == pytest.approx(
         retime_ratio
     )
-    assert extracted_centers == [pytest.approx(7.54 * retime_ratio)]
+    assert extracted_centers == [
+        pytest.approx(7.54 * retime_ratio * (16.0 / 15.5))
+    ]
     assert saved["acoustic_preroll_normalization"][0]["take_index"] == 1
 
 
@@ -1657,7 +1795,7 @@ def test_acoustic_source_preparation_always_bridges_cross_take_room_tone(tmp_pat
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"room-tone-bridged")
 
-    paths, timing_offsets, records = _prepare_acoustic_segment_sources(
+    paths, timing_offsets, duration_offsets, records = _prepare_acoustic_segment_sources(
         takes,
         manifest_path.parent,
         normalize_fn=normalize,
@@ -1666,6 +1804,7 @@ def test_acoustic_source_preparation_always_bridges_cross_take_room_tone(tmp_pat
     assert paths[0] == Path(takes[0]["raw"]["path"])
     assert paths[1].read_bytes() == b"room-tone-bridged"
     assert timing_offsets == (0.0, 0.12)
+    assert duration_offsets == (0.0, 0.12)
     assert calls[0][0] == paths[0]
     assert calls[0][1] == Path(takes[1]["raw"]["path"])
     assert calls[0][3] == {
@@ -1675,6 +1814,50 @@ def test_acoustic_source_preparation_always_bridges_cross_take_room_tone(tmp_pat
     assert records[0]["take_index"] == 1
     assert records[0]["padding_seconds"] == pytest.approx(0.12)
     assert records[0]["source_take_index"] == 0
+
+
+def test_acoustic_source_preparation_never_clones_video_when_previous_take_ends_on_word(
+    tmp_path,
+):
+    from app.features.shot_production.runner import _prepare_acoustic_segment_sources
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    takes = sorted(_read(manifest_path)["takes"], key=lambda take: take["index"])
+    takes[0]["transcript_qa"] = {
+        "passed": True,
+        "first_word_start_seconds": 0.08,
+        "final_word_end_seconds": 7.94,
+    }
+    takes[1]["transcript_qa"] = {
+        "passed": True,
+        "first_word_start_seconds": 0.40,
+        "final_word_end_seconds": 6.42,
+    }
+    paths, timing_offsets, duration_offsets, records = (
+        _prepare_acoustic_segment_sources(
+            takes,
+            manifest_path.parent,
+            normalize_fn=lambda *_args, **_kwargs: pytest.fail(
+                "unsafe predecessor must not be normalized with cloned video"
+            ),
+        )
+    )
+
+    assert paths == tuple(Path(take["raw"]["path"]) for take in takes)
+    assert timing_offsets == (0.0, 0.0)
+    assert duration_offsets == (0.0, 0.0)
+    assert records == [
+        {
+            "take_index": 1,
+            "source_take_index": 0,
+            "source_path": takes[1]["raw"]["path"],
+            "source_sha256": takes[1]["raw"]["sha256"],
+            "mode": "unsafe_predecessor_tail_left_unmodified",
+            "available_incoming_preroll_seconds": 0.4,
+            "required_preroll_seconds": 0.12,
+            "synthetic_visual_padding_seconds": 0.0,
+        }
+    ]
 
 
 def test_long_form_acoustic_planning_uses_cadence_floor_before_requesting_regeneration():
@@ -1886,7 +2069,7 @@ def test_sixteen_second_final_transcript_accepts_only_the_passed_take_consensus(
     ) is True
     assert _seam_word_counts_for_final_transcript(
         takes,
-        consensus_passed=True,
+        transcript_validated=True,
     ) == (16, 17)
 
     final_qa["actual_words"] = [*first_actual, "new-word", *second_actual[1:]]
@@ -1962,6 +2145,56 @@ def test_acoustic_plan_contract_defers_bounded_energy_fallback_to_perceptual_qa(
         {"stitch_audio_video_duration_delta_s": 0.02},
         fps=24.0,
     ) == []
+
+
+def test_acoustic_plan_contract_allows_measured_reset_energy_only_for_recovery():
+    from dataclasses import replace
+
+    from app.features.shot_production.audio_seams import (
+        AcousticSeamPlan,
+        PlannedSeam,
+        PlannedTakeWindow,
+    )
+    from app.features.shot_production.runner import _evaluate_acoustic_plan_contract
+
+    seam = PlannedSeam(
+        0,
+        7.94,
+        0.38,
+        0.06,
+        0.03,
+        0.10,
+        17.0,
+        0.0,
+        False,
+        (),
+        energy_fallback=True,
+        measured_terminal_reset_recovery=True,
+    )
+    plan = AcousticSeamPlan(
+        "test-v1",
+        (
+            PlannedTakeWindow(0, 0.0, 8.0, 0.0, 7.916667, 0.0),
+            PlannedTakeWindow(1, 0.38, 7.94, 0.356667, 7.94, 0.06),
+        ),
+        (seam,),
+        1.0,
+        15.56,
+    )
+
+    assert _evaluate_acoustic_plan_contract(
+        plan,
+        {"stitch_audio_video_duration_delta_s": 0.02},
+        fps=24.0,
+    ) == []
+    assert _evaluate_acoustic_plan_contract(
+        replace(
+            plan,
+            seams=(replace(seam, measured_terminal_reset_recovery=False),),
+        ),
+        {"stitch_audio_video_duration_delta_s": 0.02},
+        fps=24.0,
+    ) == ["seam_energy_delta_exceeded"]
 
 
 def test_acoustic_plan_contract_uses_the_approved_16_second_word_gap_ceiling():
@@ -2121,6 +2354,8 @@ def test_composition_persists_failed_seam_verdict_and_adjacent_retry_indexes(tmp
                     "stitch_audio_video_duration_delta_s": 0.02,
                 },
             ),
+            visual_seam_evaluator=_passing_delivery_visual_qa,
+            visual_seam_sheet_fn=_fake_delivery_visual_sheet,
         )
 
     saved = _read(manifest_path)
@@ -2240,6 +2475,54 @@ def test_transcript_safe_planning_failure_persists_adjacent_retry_indexes(tmp_pa
     )
     assert reset["takes"][1]["status"] == "planned"
     assert reset["qa_failure_history"][-1]["stage"] == "acoustic_plan"
+
+
+def test_localized_acoustic_failure_preserves_explicit_incoming_take_retry(tmp_path):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.5,
+            "final_word_end_seconds": 6.8,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 7.0,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def fail_plan(_evidence, **_kwargs):
+        raise ValidationError(
+            "No transcript-safe acoustic seam candidate exists.",
+            {
+                "seam_index": 0,
+                "failure_type": "room_tone_energy_mismatch",
+                "recommended_retry_take_indexes": [1],
+            },
+        )
+
+    with pytest.raises(ValidationError, match="transcript-safe"):
+        compose_and_caption(
+            manifest_path,
+            _DeepgramByCall([]),
+            acoustic_seams=True,
+            analyze_audio_fn=lambda _path: (),
+            plan_acoustic_fn=fail_plan,
+            normalize_preroll_fn=_fake_acoustic_preroll,
+        )
+
+    failure = _read(manifest_path)["acoustic_plan_failure"]
+    assert failure["seam_retry_map"] == [
+        {"seam_index": 0, "adjacent_take_indexes": [0, 1]},
+    ]
+    assert failure["recommended_retry_take_indexes"] == [1]
 
 
 @pytest.mark.parametrize(
@@ -2618,7 +2901,11 @@ def test_visual_qa_rechecks_approved_master_hash(tmp_path):
     master_path.write_bytes(b"not the approved master")
 
     with pytest.raises(ValidationError, match="approved master changed"):
-        run_visual_qa(manifest_path, evaluator=lambda *_args, **_kwargs: None)
+        run_visual_qa(
+            manifest_path,
+            identity_evaluator=lambda *_args, **_kwargs: None,
+            scene_evaluator=lambda *_args, **_kwargs: None,
+        )
 
 
 def test_reset_failed_take_archives_only_that_take_and_invalidates_downstream(tmp_path):

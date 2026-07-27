@@ -739,9 +739,16 @@ def _semantic_final_artifact_urls(
 
 def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any]:
     post_id = str(post.get("id") or "")
+    seed_data = post.get("seed_data") if isinstance(post.get("seed_data"), dict) else {}
+    script_review_status = str(
+        post.get("script_review_status")
+        or seed_data.get("script_review_status")
+        or "pending"
+    ).strip().lower()
     base = {
         "post_id": post_id,
         "topic_title": str(post.get("topic_title") or "Untitled post"),
+        "script_review_status": script_review_status,
         "run_id": None,
         "revision": None,
         "stage": "not_started",
@@ -751,6 +758,12 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "master_hash_is_current": False,
         "initial_plan_is_approved": False,
         "candidates": [],
+        "actor_references": [],
+        "approved_master_url": "",
+        "contact_sheet_url": "",
+        "actor_identity_qa": None,
+        "scene_continuity_qa": None,
+        "has_passed_candidate": False,
         "requested_duration_seconds": None,
         "delivery_duration_seconds": None,
         "final_video_url": "",
@@ -777,6 +790,17 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
     approvals = semantic_video_queries.list_approvals(run_id)
     latest = _latest_semantic_attempts(attempts)
     master = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
+    reference = (
+        run.get("reference_snapshot")
+        if isinstance(run.get("reference_snapshot"), dict)
+        else {}
+    )
+    actor_references = reference.get("actor_references")
+    actor_references = [
+        dict(row)
+        for row in actor_references
+        if isinstance(row, dict)
+    ] if isinstance(actor_references, list) else []
     candidates = master.get("candidates") if isinstance(master.get("candidates"), list) else []
     candidates = [dict(candidate) for candidate in candidates if isinstance(candidate, dict)]
     unique_candidates: Dict[str, Dict[str, Any]] = {}
@@ -828,6 +852,16 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         post,
         artifact_manifest,
     )
+    pipeline_manifest = (
+        artifact_manifest.get("pipeline_manifest")
+        if isinstance(artifact_manifest.get("pipeline_manifest"), dict)
+        else {}
+    )
+    contact_sheet = (
+        pipeline_manifest.get("contact_sheet")
+        if isinstance(pipeline_manifest.get("contact_sheet"), dict)
+        else {}
+    )
 
     if current_reference_approval:
         master_state = "approved"
@@ -847,6 +881,26 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "master_hash_is_current": current_reference_approval,
         "initial_plan_is_approved": current_initial_approval,
         "candidates": candidates,
+        "actor_references": actor_references,
+        "approved_master_url": str(master.get("storage_uri") or ""),
+        "contact_sheet_url": str(
+            contact_sheet.get("storage_uri") or contact_sheet.get("url") or ""
+        ),
+        "actor_identity_qa": (
+            dict(pipeline_manifest["actor_identity_qa"])
+            if isinstance(pipeline_manifest.get("actor_identity_qa"), dict)
+            else None
+        ),
+        "scene_continuity_qa": (
+            dict(pipeline_manifest["scene_continuity_qa"])
+            if isinstance(pipeline_manifest.get("scene_continuity_qa"), dict)
+            else None
+        ),
+        "has_passed_candidate": any(
+            (candidate.get("identity_gate_result") or {}).get("passed") is True
+            for candidate in candidates
+            if isinstance(candidate.get("identity_gate_result"), dict)
+        ),
         "requested_duration_seconds": int(run.get("requested_duration_seconds") or 0) or None,
         "delivery_duration_seconds": delivery_duration,
         "final_video_url": final_video_url,

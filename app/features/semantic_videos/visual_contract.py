@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from hashlib import sha256
 import json
+import math
 from typing import Any, Mapping
 
+from app.core.config import Settings, get_settings
 from app.core.errors import ValidationError
 from app.features.shot_frames.wheelchair_scene_plate import (
     FRAMING_CONTRACT,
@@ -14,6 +17,23 @@ from app.features.shot_frames.wheelchair_scene_plate import (
 
 
 VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v1"
+SCENE_PLATE_REFERENCE_ROLE_CONTRACT = (
+    "actor_front",
+    "actor_three_quarter",
+    "actor_free_location",
+)
+SCENE_PLATE_ASPECT_RATIO = "9:16"
+SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION = "semantic-scene-identity-v2"
+SCENE_IDENTITY_ATTESTATION_VERSION = "semantic-actor-identity-v1"
+SCENE_IDENTITY_COMPONENT_FIELDS = (
+    "same_person",
+    "facial_geometry_consistent",
+    "apparent_age_consistent",
+    "hairline_and_hair_consistent",
+    "skin_texture_natural",
+    "not_beautified_or_stylized",
+    "no_face_artifacts",
+)
 SEMANTIC_WARDROBES = {
     "cream_sweater": "cream crewneck knit sweater",
     "grey_cardigan": "light-grey cardigan over a plain white top",
@@ -63,6 +83,143 @@ def build_actor_reference_fingerprint(actor_references: Any) -> str:
             raise ValidationError("Semantic actor fingerprint reference is incomplete.")
         normalized.append(row)
     return _canonical_hash({"ordered_actor_references": normalized})
+
+
+def build_scene_plate_generation_contract(
+    *,
+    actor_reference_fingerprint: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    resolved = settings or get_settings()
+    fingerprint = str(actor_reference_fingerprint or "").strip().lower()
+    if len(fingerprint) != 64 or any(
+        character not in "0123456789abcdef" for character in fingerprint
+    ):
+        raise ValidationError(
+            "Semantic scene-plate generation contract requires an actor fingerprint."
+        )
+    fields = {
+        "version": str(resolved.semantic_scene_plate_contract_version).strip(),
+        "model": str(resolved.semantic_scene_plate_model).strip(),
+        "prompt_contract_version": str(
+            resolved.semantic_scene_plate_contract_version
+        ).strip(),
+        "reference_roles": list(SCENE_PLATE_REFERENCE_ROLE_CONTRACT),
+        "aspect_ratio": SCENE_PLATE_ASPECT_RATIO,
+        "image_size": str(resolved.semantic_scene_plate_image_size),
+        "identity_evaluator_model": str(
+            resolved.semantic_scene_identity_gate_model
+        ).strip(),
+        "identity_evaluator_contract_version": (
+            SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION
+        ),
+        "minimum_identity_confidence": float(
+            resolved.semantic_scene_identity_min_confidence
+        ),
+        "actor_reference_fingerprint": fingerprint,
+    }
+    if not fields["version"] or not fields["model"] or not fields[
+        "identity_evaluator_model"
+    ]:
+        raise ValidationError("Semantic scene-plate generation contract is incomplete.")
+    return {**fields, "contract_hash": _canonical_hash(fields)}
+
+
+def validate_scene_plate_generation_contract(
+    value: Mapping[str, Any] | None,
+    *,
+    actor_reference_fingerprint: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValidationError(
+            "Semantic scene-plate generation contract is unavailable."
+        )
+    expected = build_scene_plate_generation_contract(
+        actor_reference_fingerprint=actor_reference_fingerprint,
+        settings=settings,
+    )
+    if dict(value) != expected:
+        raise ValidationError(
+            "Semantic scene-plate generation contract is stale.",
+            {
+                "expected_contract_hash": expected["contract_hash"],
+                "actual_contract_hash": value.get("contract_hash"),
+            },
+        )
+    return expected
+
+
+def validate_scene_identity_gate(
+    candidate: Mapping[str, Any],
+    *,
+    actor_reference_fingerprint: str,
+    generation_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate server-computed scene identity evidence against current inputs."""
+    gate = candidate.get("identity_gate_result")
+    candidate_hash = str(candidate.get("sha256") or "").strip().lower()
+    if not isinstance(gate, Mapping):
+        raise ValidationError("Semantic scene-plate candidate has no identity result.")
+    components = gate.get("component_results")
+    confidence = gate.get("confidence")
+    if (
+        not isinstance(components, Mapping)
+        or set(components) != set(SCENE_IDENTITY_COMPONENT_FIELDS)
+        or any(components.get(field) is not True for field in SCENE_IDENTITY_COMPONENT_FIELDS)
+        or not isinstance(confidence, (int, float))
+        or isinstance(confidence, bool)
+        or not math.isfinite(float(confidence))
+        or float(confidence)
+        < float(generation_contract.get("minimum_identity_confidence") or 0.0)
+        or gate.get("passed") is not True
+        or str(gate.get("status") or "") != "passed"
+        or str(gate.get("candidate_sha256") or "").lower() != candidate_hash
+        or str(gate.get("evaluated_actor_reference_fingerprint") or "").lower()
+        != actor_reference_fingerprint
+        or str(gate.get("evaluator_model") or "")
+        != str(generation_contract.get("identity_evaluator_model") or "")
+        or str(gate.get("evaluator_contract_version") or "")
+        != SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION
+        or list(gate.get("blocking_reasons") or [])
+    ):
+        raise ValidationError(
+            "Semantic scene-plate candidate did not pass the current original-actor identity gate."
+        )
+    return dict(gate)
+
+
+def validate_approved_scene_plate_identity(
+    master: Mapping[str, Any],
+    *,
+    actor_reference_fingerprint: str,
+    generation_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Require current machine evidence plus an explicit attributable human attestation."""
+    gate = validate_scene_identity_gate(
+        master,
+        actor_reference_fingerprint=actor_reference_fingerprint,
+        generation_contract=generation_contract,
+    )
+    approved_by = str(master.get("approved_by") or "").strip()
+    approved_at = str(master.get("approved_at") or "").strip()
+    try:
+        parsed_approved_at = datetime.fromisoformat(approved_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError(
+            "Semantic scene-plate approval timestamp is invalid."
+        ) from exc
+    if (
+        master.get("identity_attestation") is not True
+        or str(master.get("attestation_version") or "")
+        != SCENE_IDENTITY_ATTESTATION_VERSION
+        or not approved_by
+        or parsed_approved_at.tzinfo is None
+    ):
+        raise ValidationError(
+            "Semantic scene plate requires an attributable human identity attestation."
+        )
+    return gate
 
 
 def select_semantic_wardrobe(
@@ -146,9 +303,18 @@ def validate_visual_contract(value: Mapping[str, Any] | None) -> dict[str, Any]:
 __all__ = [
     "SEMANTIC_WARDROBES",
     "SEMANTIC_LOCATION_ROTATION",
+    "SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION",
+    "SCENE_IDENTITY_ATTESTATION_VERSION",
+    "SCENE_IDENTITY_COMPONENT_FIELDS",
+    "SCENE_PLATE_ASPECT_RATIO",
+    "SCENE_PLATE_REFERENCE_ROLE_CONTRACT",
     "VISUAL_CONTRACT_VERSION",
     "build_actor_reference_fingerprint",
+    "build_scene_plate_generation_contract",
     "build_visual_contract",
     "select_semantic_wardrobe",
+    "validate_scene_plate_generation_contract",
+    "validate_scene_identity_gate",
+    "validate_approved_scene_plate_identity",
     "validate_visual_contract",
 ]

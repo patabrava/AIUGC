@@ -379,8 +379,31 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
                         "master_state": "approved",
                         "master_hash_is_current": False,
                         "initial_plan_is_approved": False,
+                        "actor_references": [
+                            {
+                                "role": "actor_front",
+                                "storage_uri": "https://cdn/front.png",
+                            },
+                            {
+                                "role": "actor_three_quarter",
+                                "storage_uri": "https://cdn/three-quarter.png",
+                            },
+                        ],
+                        "has_passed_candidate": True,
                         "candidates": [
-                            {"index": 1, "storage_uri": "https://cdn/one.png", "sha256": "1" * 64}
+                            {
+                                "index": 1,
+                                "storage_uri": "https://cdn/one.png",
+                                "sha256": "1" * 64,
+                                "identity_gate_result": {
+                                    "passed": True,
+                                    "confidence": 0.96,
+                                    "blocking_reasons": [],
+                                    "observed_differences": [
+                                        "Natural expression differs slightly."
+                                    ],
+                                },
+                            }
                         ],
                         "requested_duration_seconds": 50,
                         "delivery_duration_seconds": None,
@@ -419,6 +442,11 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert 'aria-live="polite"' in html
     assert "Wheelchair scene plate candidates" in html
     assert 'aria-label="Select wheelchair scene plate candidate 1"' in html
+    assert "Original-actor identity review" in html
+    assert "Original front reference" in html
+    assert "Original three-quarter reference" in html
+    assert "Identity gate passed · 96% confidence" in html
+    assert "same actor as both original references" in html
     assert "Regenerate wheelchair scene plates" in html
     assert "Approve selected scene plate" in html
     assert "Frozen visual contract" in html
@@ -622,5 +650,32 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "retry-approve" in source
     assert "master-approve" in source
     assert "candidate_generation_status" in source
-    assert "startPolling(root, true)" in source
+    assert "payload?.message" in source
+    assert "startPolling(root, true, false)" in source
     assert "Scene plates are still generating" in source
+
+
+def test_pending_script_blocks_scene_plate_generation_with_visible_guidance(monkeypatch):
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda post_id: None,
+    )
+    batch = _semantic_batch()
+    batch["state"] = "S2_SEEDED"
+    batch["posts"][0]["seed_data"]["script_review_status"] = "pending"
+
+    view = batch_handlers._build_batch_detail_view(batch)
+    item = view["semantic_video"]["posts"][0]
+
+    assert item["script_review_status"] == "pending"
+
+    env = Environment(loader=FileSystemLoader("templates"))
+    html = env.get_template("batches/detail/_semantic_video.html").render(
+        batch=batch,
+        batch_view=view,
+    )
+
+    assert 'data-action="generate-candidates" disabled' in html
+    assert "Approve this post’s script in Script Review" in html
+    assert "data-semantic-script-prerequisite" in html

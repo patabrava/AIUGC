@@ -44,14 +44,17 @@ def build_canonical_scene_plate_prompt(*, scene: str, wardrobe: str) -> str:
         "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
         "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Place exactly "
         "the same adult woman from Images 1 and 2 inside Image 3. Preserve her exact facial geometry, "
-        "hairline, hair, apparent age, body proportions, and ordinary natural skin texture; do not average "
-        "her into a new face. She is seated upright in a manual wheelchair. "
+        "hairline, hair, apparent age, body proportions, and ordinary camera-file skin texture with visible "
+        "pores, natural tonal variation, natural under-eye and lip texture, mild facial asymmetry, and "
+        "realistic hairline flyaways. Do not average her into a new face. She is seated upright in a manual "
+        "wheelchair. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Her upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
         "Her hands and wheelchair geometry are physically plausible. Use natural available light and a "
         "quiet conversational expression immediately before speaking, with her mouth closed. Render no "
-        "other person, text, logo, watermark, mobility device, standing pose, walking pose, beauty polish, "
-        "camera tilt, wide shot, full-body shot, or cropped-out wheelchair."
+        "other person, text, logo, watermark, mobility device, standing pose, walking pose, beauty "
+        "retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, camera tilt, wide "
+        "shot, full-body shot, or cropped-out wheelchair."
     )
 
 
@@ -65,9 +68,12 @@ def build_derived_scene_plate_prompt(*, scene: str, wardrobe: str) -> str:
         "and 2 and preserve the exact manual wheelchair, seated pose, face size, and framing from Image 1. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
-        "Keep her mouth closed with a quiet conversational expression. Keep hands, wheelchair, and room "
-        "perspective physically plausible. Render no other person, text, logo, watermark, standing pose, "
-        "walking pose, wide shot, full-body shot, beauty polish, camera movement, or cropped-out wheelchair."
+        "Keep her mouth closed with a quiet conversational expression. Preserve ordinary camera-file skin "
+        "texture, visible pores, natural tonal variation, natural under-eye and lip texture, mild facial "
+        "asymmetry, and realistic hairline flyaways under ordinary indoor optics and available light. Keep "
+        "hands, wheelchair, and room perspective physically plausible. Render no other person, text, logo, "
+        "watermark, standing pose, walking pose, wide shot, full-body shot, beauty retouching, poreless skin, "
+        "glamour lighting, CGI smoothness, face averaging, camera movement, or cropped-out wheelchair."
     )
 
 
@@ -76,7 +82,8 @@ def generate_scene_plate(
     references: Sequence[ShotFrameReference],
     prompt: str,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3.1-flash-image",
+    image_model: str = "gemini-3-pro-image",
+    image_size: str = "2K",
 ) -> dict[str, Any]:
     if len(references) != 3 or tuple(item.role for item in references) != _REFERENCE_ROLES:
         raise ValidationError(
@@ -102,7 +109,7 @@ def generate_scene_plate(
         model=image_model,
         temperature=0.2,
         aspect_ratio="9:16",
-        image_size="2K",
+        image_size=image_size,
         input_images=[item.as_gemini_input() for item in references],
     )
 
@@ -124,9 +131,10 @@ def generate_scene_plate_candidates(
     wardrobe: str,
     candidate_count: int = 3,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3.1-flash-image",
+    image_model: str = "gemini-3-pro-image",
+    image_size: str = "2K",
 ) -> ScenePlateGenerationResult:
-    """Generate one canonical plate, then identity-locked alternatives from it."""
+    """Generate three independent plates, or three derivatives from an approved anchor."""
     if len(actor_references) != 2:
         raise ValidationError(
             "Scene-plate generation requires exactly two immutable actor references.",
@@ -158,42 +166,31 @@ def generate_scene_plate_candidates(
             scene=scene,
             wardrobe=wardrobe,
         )
-        canonical = generate_scene_plate(
-            references=(
+        candidates = []
+        canonical_reference = None
+        start_index = 1
+        derivation_mode = "bootstrap"
+    for index in range(start_index, candidate_count + 1):
+        if derivation_mode == "bootstrap":
+            references = (
                 _as_role(actor_references[0], "identity_primary"),
                 _as_role(actor_references[1], "identity_support"),
                 _as_role(location_reference, "location"),
-            ),
-            prompt=canonical_prompt,
-            llm_client=client,
-            image_model=image_model,
-        )
-        candidates = [
-            ScenePlateCandidate(
-                index=1,
-                image_bytes=canonical["image_bytes"],
-                mime_type=str(canonical["mime_type"]),
-                provider_model=str(canonical["model"]),
-                prompt=canonical_prompt,
             )
-        ]
-        canonical_reference = ShotFrameReference(
-            role="identity_primary",
-            mime_type=str(canonical["mime_type"]),
-            image_bytes=canonical["image_bytes"],
-        )
-        start_index = 2
-        derivation_mode = "bootstrap"
-    for index in range(start_index, candidate_count + 1):
-        generated = generate_scene_plate(
-            references=(
+            prompt = canonical_prompt
+        else:
+            references = (
                 canonical_reference,
                 _as_role(actor_references[0], "identity_support"),
                 _as_role(location_reference, "location"),
-            ),
-            prompt=derived_prompt,
+            )
+            prompt = derived_prompt
+        generated = generate_scene_plate(
+            references=references,
+            prompt=prompt,
             llm_client=client,
             image_model=image_model,
+            image_size=image_size,
         )
         candidates.append(
             ScenePlateCandidate(
@@ -201,7 +198,7 @@ def generate_scene_plate_candidates(
                 image_bytes=generated["image_bytes"],
                 mime_type=str(generated["mime_type"]),
                 provider_model=str(generated["model"]),
-                prompt=derived_prompt,
+                prompt=prompt,
             )
         )
     return ScenePlateGenerationResult(

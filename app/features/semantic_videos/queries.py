@@ -321,13 +321,21 @@ def get_actor_scene_plate_anchor(
     *,
     actor_identity_id: str,
     actor_reference_fingerprint: str,
+    generation_contract_hash: str,
     client=None,
 ) -> Optional[dict[str, Any]]:
     """Return the immutable approved scene-plate anchor for exact actor bytes."""
     actor_id = str(actor_identity_id or "").strip()
     fingerprint = str(actor_reference_fingerprint or "").strip().lower()
-    if not actor_id or len(fingerprint) != 64 or any(
-        character not in "0123456789abcdef" for character in fingerprint
+    contract_hash = str(generation_contract_hash or "").strip().lower()
+    if (
+        not actor_id
+        or len(fingerprint) != 64
+        or len(contract_hash) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in f"{fingerprint}{contract_hash}"
+        )
     ):
         raise ValidationError("Semantic actor scene-plate anchor identity is invalid.")
     response = (
@@ -336,6 +344,8 @@ def get_actor_scene_plate_anchor(
         .select("*")
         .eq("actor_identity_id", actor_id)
         .eq("actor_reference_fingerprint", fingerprint)
+        .eq("generation_contract_hash", contract_hash)
+        .eq("verification_status", "verified")
         .limit(1)
         .execute()
     )
@@ -443,6 +453,8 @@ def approve_master_transition(
     expected_revision: int,
     candidate_index: int,
     approved_by: str,
+    identity_attestation: bool,
+    attestation_version: str,
     reason: Optional[str],
     client=None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -454,6 +466,8 @@ def approve_master_transition(
                 "p_expected_revision": expected_revision,
                 "p_candidate_index": candidate_index,
                 "p_approved_by": approved_by,
+                "p_identity_attestation": identity_attestation,
+                "p_attestation_version": attestation_version,
                 "p_reason": reason,
             },
         ),

@@ -24,7 +24,12 @@ from app.features.shot_production.prompts import compile_veo_take_requests
 from app.features.shot_production.provenance import build_semantic_script_snapshot
 from app.features.shot_production.shot_deck import derive_shot_deck
 from app.features.characters.actor_identity import is_semantic_ugc_mode
-from app.features.semantic_videos.visual_contract import validate_visual_contract
+from app.features.semantic_videos.visual_contract import (
+    build_actor_reference_fingerprint,
+    validate_approved_scene_plate_identity,
+    validate_scene_plate_generation_contract,
+    validate_visual_contract,
+)
 
 
 DEFAULT_PRICE_PER_PROVIDER_SECOND_USD = Decimal("0.40")
@@ -174,6 +179,36 @@ def compile_semantic_video_plan(
         )
 
     master_snapshot = _resolve_master_snapshot(reference)
+    actor_reference_fingerprint = build_actor_reference_fingerprint(
+        reference.get("actor_references")
+    )
+    if (
+        str(reference.get("actor_reference_fingerprint") or "").strip().lower()
+        != actor_reference_fingerprint
+    ):
+        raise ValidationError(
+            "Semantic video planning requires the current immutable actor references."
+        )
+    generation_contract = validate_scene_plate_generation_contract(
+        reference.get("scene_plate_generation_contract"),
+        actor_reference_fingerprint=actor_reference_fingerprint,
+    )
+    if (
+        str(master_snapshot.get("generation_contract_hash") or "").strip().lower()
+        != generation_contract["contract_hash"]
+        or str(master_snapshot.get("actor_reference_fingerprint") or "").strip().lower()
+        != actor_reference_fingerprint
+        or str(master_snapshot.get("provider_model") or "")
+        != generation_contract["model"]
+    ):
+        raise ValidationError(
+            "Approved scene plate does not match the current generation contract."
+        )
+    validate_approved_scene_plate_identity(
+        master_snapshot,
+        actor_reference_fingerprint=actor_reference_fingerprint,
+        generation_contract=generation_contract,
+    )
     visual_contract = validate_visual_contract(reference.get("visual_contract"))
     if str(master_snapshot.get("visual_contract_hash") or "").strip().lower() != visual_contract[
         "contract_hash"
@@ -300,6 +335,8 @@ def compile_semantic_video_plan(
         "reference_hash": reference_hash,
         "master_hash": master_hash,
         "visual_contract_hash": visual_contract["contract_hash"],
+        "generation_contract_hash": generation_contract["contract_hash"],
+        "actor_reference_fingerprint": actor_reference_fingerprint,
         "provider_model": provider_model,
         "resolution": str(resolution),
         "price_per_provider_second_usd": price_text,
@@ -310,6 +347,7 @@ def compile_semantic_video_plan(
     plan_snapshot = {
         **plan_basis,
         "visual_contract": visual_contract,
+        "scene_plate_generation_contract": generation_contract,
         "take_count": len(take_payloads),
         "billable_provider_seconds": billable_seconds,
         "quota_units": len(take_payloads),

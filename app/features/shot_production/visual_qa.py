@@ -1,4 +1,4 @@
-"""Gemini vision gate for visual consistency across independent semantic takes."""
+"""Gemini vision gate for scene continuity across independent semantic takes."""
 
 from __future__ import annotations
 
@@ -12,9 +12,6 @@ from app.core.errors import ValidationError
 
 
 _COMPONENT_FIELDS = (
-    "identity_same_person",
-    "apparent_age_consistent",
-    "hair_consistent",
     "wardrobe_consistent",
     "room_consistent",
     "wheelchair_consistent",
@@ -26,13 +23,14 @@ _REQUIRED_FIELDS = frozenset(
 )
 _ALLOWED_FIELDS = _REQUIRED_FIELDS | {"passed"}
 
-_VISUAL_QA_PROMPT = """Image 1 is the approved master reference.
+_VISUAL_QA_PROMPT = """Image 1 is the approved scene-plate master reference.
 Image 2 is the labeled multi-frame contact sheet extracted from the generated takes.
 
-Compare only the supplied references and judge whether they show the same person with consistent apparent age and
-hair, the exact wardrobe and location/background shown in the approved master, the same manual wheelchair, stable
-UGC framing, and no visual artifacts. The same manual wheelchair remains visible and consistent in every labeled
-frame. Set wheelchair_consistent=false if the wheelchair changes, disappears, is cropped out, or the actor appears
+Compare only the supplied references and judge whether they preserve the exact wardrobe and location/background
+shown in the approved scene plate, the same manual wheelchair, stable UGC framing, and no visual artifacts.
+Actor identity is evaluated separately against the immutable original actor references. The same manual wheelchair
+remains visible and consistent in every labeled frame. Set wheelchair_consistent=false if the wheelchair changes,
+disappears, is cropped out, or the actor appears
 standing or walking. Inspect every labeled frame carefully, especially the lower third. Set no_artifacts=false if any
 raw frame contains baked-in captions, subtitles, logos, watermarks, letters, symbols, malformed glyphs, or gibberish
 text; identify the take and frame label in blocking_reasons. The contact-sheet labels above each frame are QA metadata
@@ -42,14 +40,11 @@ For framing_stable, allow small fixed crop differences between takes plus natura
 and expression changes. Treat each delivered-tail frame as the final eligible frame that can appear in the delivery
 and compare it closely with the preceding final-word frame. Fail framing for a material composition change,
 continuous camera zoom, or any pan, tilt, dolly, orbit, push-in, pull-back, or reframe within a take, especially
-between final-word and delivered-tail. Report every observed difference, including natural expression or pose changes. This is
-visual continuity comparison only: make no face-recognition identification beyond the supplied references.
+between final-word and delivered-tail. Report every observed difference, including natural expression or pose changes.
+This is scene-continuity comparison only.
 
 Return JSON only, without Markdown or commentary, using exactly this shape:
 {
-  "identity_same_person": true,
-  "apparent_age_consistent": true,
-  "hair_consistent": true,
   "wardrobe_consistent": true,
   "room_consistent": true,
   "wheelchair_consistent": true,
@@ -63,10 +58,7 @@ Use booleans for every component, a confidence number from 0 through 1, and arra
 
 
 @dataclass(frozen=True)
-class VisualQAReport:
-    identity_same_person: bool
-    apparent_age_consistent: bool
-    hair_consistent: bool
+class SceneContinuityQAReport:
     wardrobe_consistent: bool
     room_consistent: bool
     wheelchair_consistent: bool
@@ -98,8 +90,8 @@ def evaluate_visual_consistency(
     contact_sheet: Dict[str, Any],
     llm_client: Optional[Any] = None,
     model: Optional[str] = None,
-) -> VisualQAReport:
-    """Compare a generated take contact sheet with its approved master reference."""
+) -> SceneContinuityQAReport:
+    """Compare a generated take contact sheet with its approved scene plate."""
     _validate_image_input(master_image, label="approved_master")
     _validate_image_input(contact_sheet, label="contact_sheet")
     client = llm_client or get_llm_client()
@@ -175,10 +167,7 @@ def evaluate_visual_consistency(
         and confidence >= 0.75
         and not blocking_reasons
     )
-    return VisualQAReport(
-        identity_same_person=payload["identity_same_person"],
-        apparent_age_consistent=payload["apparent_age_consistent"],
-        hair_consistent=payload["hair_consistent"],
+    return SceneContinuityQAReport(
         wardrobe_consistent=payload["wardrobe_consistent"],
         room_consistent=payload["room_consistent"],
         wheelchair_consistent=payload["wheelchair_consistent"],
@@ -191,4 +180,13 @@ def evaluate_visual_consistency(
     )
 
 
-__all__ = ["VisualQAReport", "evaluate_visual_consistency"]
+VisualQAReport = SceneContinuityQAReport
+evaluate_scene_continuity = evaluate_visual_consistency
+
+
+__all__ = [
+    "SceneContinuityQAReport",
+    "VisualQAReport",
+    "evaluate_scene_continuity",
+    "evaluate_visual_consistency",
+]

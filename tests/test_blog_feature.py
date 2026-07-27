@@ -192,10 +192,10 @@ def test_gemini_image_generation_maps_nanobananapro_alias():
     with patch.object(client.gemini_http_client, "post", return_value=mock_response) as mock_post:
         result = client.generate_gemini_image(prompt="Quadratisches Coverbild", model="nanobananapro")
 
-    assert result["model"] == "gemini-3-pro-image-preview"
+    assert result["model"] == "gemini-3-pro-image"
     assert result["image_bytes"] == b"png-bytes"
     call = mock_post.call_args
-    assert call.args[0] == "/models/gemini-3-pro-image-preview:generateContent"
+    assert call.args[0] == "/models/gemini-3-pro-image:generateContent"
     assert call.kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
     assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
 

@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
@@ -49,9 +51,17 @@ def test_is_email_allowed_domain():
     assert is_email_allowed("anyone@lippelift.de") is True
 
 
-def test_is_email_allowed_explicit():
+@pytest.mark.parametrize("email", ["caposk817@gmail.com", "sarahlippe8@gmail.com"])
+def test_is_email_allowed_explicit(email, monkeypatch):
+    import app.core.config as config_module
     from app.features.auth.queries import is_email_allowed
-    assert is_email_allowed("caposk817@gmail.com") is True
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv(
+        "ALLOWED_EMAILS",
+        "caposk817@gmail.com,sarahlippe8@gmail.com",
+    )
+    assert is_email_allowed(email) is True
 
 
 def test_is_email_allowed_case_insensitive():

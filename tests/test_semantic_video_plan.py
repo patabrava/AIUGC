@@ -42,7 +42,12 @@ def _png_bytes(*, accent: int = 0) -> bytes:
 
 
 def _snapshots(*, script: str = APPROVED_50_SECOND_SCRIPT, duration: int = 50, master: bytes):
-    from app.features.semantic_videos.visual_contract import build_visual_contract
+    from app.features.semantic_videos.visual_contract import (
+        SCENE_IDENTITY_COMPONENT_FIELDS,
+        build_actor_reference_fingerprint,
+        build_scene_plate_generation_contract,
+        build_visual_contract,
+    )
 
     master_hash = sha256(master).hexdigest()
     post = {
@@ -60,10 +65,18 @@ def _snapshots(*, script: str = APPROVED_50_SECOND_SCRIPT, duration: int = 50, m
         "actor_identity_id": "00000000-0000-0000-0000-000000000301",
         "actor": {"name": "AYRA Actor", "character_description": "Immutable actor description."},
         "actor_references": [
-            {"role": "actor_front", "storage_uri": "semantic/references/front.png", "sha256": "1" * 64},
+            {
+                "role": "actor_front",
+                "storage_uri": "semantic/references/front.png",
+                "mime_type": "image/png",
+                "byte_length": 101,
+                "sha256": "1" * 64,
+            },
             {
                 "role": "actor_three_quarter",
                 "storage_uri": "semantic/references/three-quarter.png",
+                "mime_type": "image/png",
+                "byte_length": 102,
                 "sha256": "2" * 64,
             },
         ],
@@ -81,13 +94,42 @@ def _snapshots(*, script: str = APPROVED_50_SECOND_SCRIPT, duration: int = 50, m
     }
     visual_contract = build_visual_contract(reference)
     reference["visual_contract"] = visual_contract
+    actor_fingerprint = build_actor_reference_fingerprint(reference["actor_references"])
+    reference["actor_reference_fingerprint"] = actor_fingerprint
+    generation_contract = build_scene_plate_generation_contract(
+        actor_reference_fingerprint=actor_fingerprint
+    )
+    reference["scene_plate_generation_contract"] = generation_contract
     reference["master"] = {
             "storage_uri": "semantic/masters/approved.png",
             "mime_type": "image/png",
             "byte_length": len(master),
             "sha256": master_hash,
-            "provider_model": "gemini-3.1-flash-image",
+            "provider_model": generation_contract["model"],
             "visual_contract_hash": visual_contract["contract_hash"],
+            "actor_reference_fingerprint": actor_fingerprint,
+            "generation_contract_hash": generation_contract["contract_hash"],
+            "identity_gate_result": {
+                "status": "passed",
+                "passed": True,
+                "evaluator_model": generation_contract["identity_evaluator_model"],
+                "evaluator_contract_version": generation_contract[
+                    "identity_evaluator_contract_version"
+                ],
+                "evaluated_actor_reference_fingerprint": actor_fingerprint,
+                "candidate_sha256": master_hash,
+                "component_results": {
+                    field: True for field in SCENE_IDENTITY_COMPONENT_FIELDS
+                },
+                "confidence": 0.99,
+                "blocking_reasons": [],
+                "observed_differences": [],
+                "evaluated_at": "2026-07-26T00:00:00+00:00",
+            },
+            "identity_attestation": True,
+            "attestation_version": "semantic-actor-identity-v1",
+            "approved_by": "operator@example.com",
+            "approved_at": "2026-07-26T00:00:00+00:00",
     }
     return post, batch, reference
 
@@ -213,9 +255,19 @@ def test_compile_semantic_video_plan_never_loads_provider_magnific_or_lora_colla
         "app.adapters.vertex_ai_client",
         "app.features.characters.scene_reference",
     }
-    for module_name in forbidden_modules:
-        sys.modules.pop(module_name, None)
+    previously_loaded = {
+        module_name: sys.modules[module_name]
+        for module_name in forbidden_modules
+        if module_name in sys.modules
+    }
+    try:
+        for module_name in forbidden_modules:
+            sys.modules.pop(module_name, None)
 
-    _compile()
+        _compile()
 
-    assert forbidden_modules.isdisjoint(sys.modules)
+        assert forbidden_modules.isdisjoint(sys.modules)
+    finally:
+        # This test verifies plan compilation in isolation; it must not evict
+        # modules imported during collection and poison later adapter tests.
+        sys.modules.update(previously_loaded)

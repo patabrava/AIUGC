@@ -24,6 +24,12 @@ from app.adapters.vertex_ai_client import VertexAIClient
 from app.core.errors import StateTransitionError, ValidationError
 from app.core.logging import get_logger
 from app.features.semantic_videos import queries
+from app.features.semantic_videos.visual_contract import (
+    build_actor_reference_fingerprint,
+    validate_approved_scene_plate_identity,
+    validate_scene_plate_generation_contract,
+    validate_visual_contract,
+)
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.shot_production.runner import load_video_uri
 from app.features.shot_production.shot_deck import derive_shot_deck
@@ -180,6 +186,8 @@ class ProductionStageRunner:
 
     _MANIFEST_GLOBAL_KEYS = (
         "contact_sheet",
+        "actor_identity_qa",
+        "scene_continuity_qa",
         "visual_qa",
         "voice_qa",
         "stitch",
@@ -188,6 +196,7 @@ class ProductionStageRunner:
         "seam_qa",
         "acoustic_seam_plan",
         "acoustic_seam_qa",
+        "delivery_visual_qa",
         "caption",
         "media_qa",
         "upload_intent",
@@ -239,6 +248,51 @@ class ProductionStageRunner:
                 pipeline = self._runner()
                 pipeline.build_contact_sheet(manifest_path)
                 pipeline.run_visual_qa(manifest_path)
+                identity_payload = self._read_manifest(manifest_path)
+                contact = identity_payload.get("contact_sheet")
+                if not isinstance(contact, Mapping):
+                    raise ValidationError(
+                        "Semantic video identity QA did not persist a contact sheet."
+                    )
+                contact_path = Path(str(contact.get("path") or ""))
+                contact_bytes = contact_path.read_bytes()
+                contact_hash = sha256(contact_bytes).hexdigest()
+                if (
+                    contact_hash != str(contact.get("sha256") or "")
+                    or len(contact_bytes) != int(contact.get("bytes") or -1)
+                ):
+                    raise StateTransitionError(
+                        "Semantic video identity contact sheet changed before publication."
+                    )
+                contact_upload = self.storage.upload_image(
+                    image_bytes=contact_bytes,
+                    file_name=f"semantic-video-{run['id']}-identity-{contact_hash}.jpg",
+                    correlation_id=f"semantic_ugc_{run['id']}_identity_contact",
+                    content_type="image/jpeg",
+                )
+                identity_payload["contact_sheet"] = {
+                    **dict(contact),
+                    "storage_uri": str(contact_upload.get("url") or ""),
+                    "storage_key": str(contact_upload.get("storage_key") or ""),
+                }
+                pipeline._atomic_write_json(manifest_path, identity_payload)  # noqa: SLF001
+                logger.info(
+                    "semantic_video_identity_qa_completed",
+                    run_id=str(run["id"]),
+                    contact_sha256=contact_hash[:12],
+                    actor_identity_passed=bool(
+                        (identity_payload.get("actor_identity_qa") or {}).get("passed")
+                    ),
+                    actor_identity_confidence=(
+                        identity_payload.get("actor_identity_qa") or {}
+                    ).get("confidence"),
+                    scene_continuity_passed=bool(
+                        (identity_payload.get("scene_continuity_qa") or {}).get("passed")
+                    ),
+                    scene_continuity_confidence=(
+                        identity_payload.get("scene_continuity_qa") or {}
+                    ).get("confidence"),
+                )
             elif stage == "voice_qa":
                 self._runner().run_voice_qa(manifest_path)
             else:
@@ -305,6 +359,54 @@ class ProductionStageRunner:
             raise StateTransitionError("Semantic video approved master changed during production.")
         master_path = run_dir / "approved-master.png"
         master_path.write_bytes(master_bytes)
+
+        reference_snapshot = run.get("reference_snapshot")
+        actor_rows = (
+            reference_snapshot.get("actor_references")
+            if isinstance(reference_snapshot, Mapping)
+            else None
+        )
+        if not isinstance(actor_rows, list) or len(actor_rows) != 2:
+            raise StateTransitionError(
+                "Semantic video production requires two immutable actor references."
+            )
+        actor_dir = run_dir / "actor-references"
+        actor_dir.mkdir(parents=True, exist_ok=True)
+        actor_references = []
+        for row, expected_role in zip(
+            actor_rows, ("actor_front", "actor_three_quarter")
+        ):
+            if not isinstance(row, Mapping) or row.get("role") != expected_role:
+                raise StateTransitionError(
+                    "Semantic video actor reference order changed during production."
+                )
+            actor_bytes = self.storage.download_video(
+                video_url=str(row.get("storage_uri") or ""),
+                correlation_id=f"semantic_ugc_{run_id}_{expected_role}",
+            )
+            actor_hash = sha256(actor_bytes).hexdigest()
+            if (
+                actor_hash != str(row.get("sha256") or "")
+                or len(actor_bytes) != int(row.get("byte_length") or -1)
+                or not str(row.get("mime_type") or "").startswith("image/")
+            ):
+                raise StateTransitionError(
+                    "Semantic video original actor reference changed during production.",
+                    {"role": expected_role},
+                )
+            suffix = ".jpg" if str(row.get("mime_type")) == "image/jpeg" else ".png"
+            actor_path = actor_dir / f"{expected_role}-{actor_hash}{suffix}"
+            actor_path.write_bytes(actor_bytes)
+            actor_references.append(
+                {
+                    "role": expected_role,
+                    "path": str(actor_path),
+                    "storage_uri": str(row.get("storage_uri") or ""),
+                    "mime_type": str(row.get("mime_type") or ""),
+                    "byte_length": len(actor_bytes),
+                    "sha256": actor_hash,
+                }
+            )
 
         artifact_manifest = run.get("artifact_manifest")
         artifacts = dict(artifact_manifest) if isinstance(artifact_manifest, Mapping) else {}
@@ -440,6 +542,7 @@ class ProductionStageRunner:
                 "sha256": master_hash,
                 "mime_type": str(master.get("mime_type") or "image/png"),
             },
+            "actor_references": actor_references,
             "script": manifest_script,
             "takes": manifest_takes,
         }
@@ -476,6 +579,7 @@ class ProductionStageRunner:
             "voice_qa_failed",
             "acoustic_plan_failed",
             "acoustic_seam_qa_failed",
+            "delivery_visual_qa_failed",
             "final_transcript_failed",
             "seam_qa_failed",
             "media_qa_failed",
@@ -494,7 +598,10 @@ class ProductionStageRunner:
         elif stage == "acoustic_qa":
             failed = [
                 int(index)
-                for index in (payload.get("acoustic_seam_qa") or {}).get(
+                for index in (payload.get("delivery_visual_qa") or {}).get(
+                    "recommended_retry_take_indexes"
+                )
+                or (payload.get("acoustic_seam_qa") or {}).get(
                     "recommended_retry_take_indexes"
                 )
                 or (payload.get("acoustic_plan_failure") or {}).get(
@@ -577,6 +684,9 @@ class ProductionStageRunner:
                 "acoustic_qa": payload.get("acoustic_seam_qa")
                 or {"passed": True, "status": "not_applicable"},
                 "delivery": delivery,
+                # A successful recomposition supersedes any prior retry evidence.
+                # Persist JSON null so merge-style stage RPCs clear the stale value.
+                "qa_failure": None,
             },
         }
 
@@ -903,6 +1013,83 @@ class SemanticVideoWorker:
         master = run.get("master_snapshot")
         if not isinstance(master, Mapping):
             raise ValidationError("Semantic video approved master snapshot is missing.")
+        reference = run.get("reference_snapshot")
+        if not isinstance(reference, Mapping):
+            raise ValidationError("Semantic video immutable reference snapshot is missing.")
+        actor_references = reference.get("actor_references")
+        if not isinstance(actor_references, list) or len(actor_references) != 2:
+            raise ValidationError(
+                "Semantic video requires two immutable actor references before paid submission."
+            )
+        expected_roles = ("actor_front", "actor_three_quarter")
+        verified_actor_rows: list[dict[str, Any]] = []
+        for index, (row, expected_role) in enumerate(
+            zip(actor_references, expected_roles)
+        ):
+            if not isinstance(row, Mapping) or str(row.get("role") or "") != expected_role:
+                raise StateTransitionError(
+                    "Semantic video actor reference order changed before paid submission.",
+                    {"index": index, "expected_role": expected_role},
+                )
+            reference_bytes = self.storage.download_video(
+                video_url=str(row.get("storage_uri") or ""),
+                correlation_id=f"semantic_ugc_{run['id']}_{expected_role}",
+            )
+            if (
+                sha256(reference_bytes).hexdigest()
+                != str(row.get("sha256") or "").lower()
+                or len(reference_bytes) != int(row.get("byte_length") or -1)
+                or not str(row.get("mime_type") or "").lower().startswith("image/")
+            ):
+                raise StateTransitionError(
+                    "Semantic video actor reference changed before paid submission.",
+                    {"role": expected_role},
+                )
+            verified_actor_rows.append(dict(row))
+        actor_fingerprint = build_actor_reference_fingerprint(verified_actor_rows)
+        if (
+            actor_fingerprint
+            != str(reference.get("actor_reference_fingerprint") or "").lower()
+        ):
+            raise StateTransitionError(
+                "Semantic video actor-reference fingerprint changed before paid submission."
+            )
+        generation_contract = validate_scene_plate_generation_contract(
+            reference.get("scene_plate_generation_contract"),
+            actor_reference_fingerprint=actor_fingerprint,
+        )
+        visual_contract = validate_visual_contract(reference.get("visual_contract"))
+        if (
+            str(master.get("generation_contract_hash") or "").lower()
+            != generation_contract["contract_hash"]
+            or str(master.get("visual_contract_hash") or "").lower()
+            != visual_contract["contract_hash"]
+            or str(master.get("actor_reference_fingerprint") or "").lower()
+            != actor_fingerprint
+            or str(master.get("provider_model") or "")
+            != generation_contract["model"]
+        ):
+            raise StateTransitionError(
+                "Semantic video approved master contract changed before paid submission."
+            )
+        validate_approved_scene_plate_identity(
+            master,
+            actor_reference_fingerprint=actor_fingerprint,
+            generation_contract=generation_contract,
+        )
+        plan = run.get("plan_snapshot")
+        if (
+            not isinstance(plan, Mapping)
+            or str(plan.get("generation_contract_hash") or "").lower()
+            != generation_contract["contract_hash"]
+            or str(plan.get("actor_reference_fingerprint") or "").lower()
+            != actor_fingerprint
+            or str(plan.get("visual_contract_hash") or "").lower()
+            != visual_contract["contract_hash"]
+        ):
+            raise StateTransitionError(
+                "Semantic video paid plan no longer matches its identity contracts."
+            )
         master_uri = str(master.get("storage_uri") or "")
         master_bytes = self.storage.download_video(
             video_url=master_uri,

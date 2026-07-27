@@ -202,6 +202,7 @@ def _evidence(
     room_rms=-60.0,
     breath_start=None,
     breath_end=None,
+    latest_safe_video_end=None,
 ):
     frames = []
     timestamp = 0.0
@@ -228,6 +229,7 @@ def _evidence(
         first_word_start_seconds=first_word,
         final_word_end_seconds=final_word,
         frames=tuple(frames),
+        latest_safe_video_end_seconds=latest_safe_video_end,
     )
 
 
@@ -465,6 +467,70 @@ def test_planner_reports_actionable_room_tone_mismatch_details():
     assert "room tone" in exc_info.value.details["recommended_action"].lower()
 
 
+def test_planner_targets_predecessor_when_its_final_word_leaves_no_safe_tail():
+    takes = (
+        _evidence(0, duration=8.0, first_word=0.08, final_word=7.94, room_rms=-42.0),
+        _evidence(1, duration=8.0, first_word=0.48, final_word=6.42, room_rms=-64.0),
+    )
+
+    with pytest.raises(ValidationError, match="No transcript-safe acoustic seam candidate") as exc_info:
+        plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=16.0)
+
+    details = exc_info.value.details
+    assert details["recommended_retry_take_indexes"] == [0]
+    assert details["latest_safe_predecessor_final_word_end_seconds"] == pytest.approx(7.49)
+    assert details["latest_usable_predecessor_video_seconds"] == pytest.approx(7.65)
+    assert details["internal_visual_tail_exclusion_seconds"] == pytest.approx(0.35)
+    assert "Regenerate only take 0" in details["recommended_action"]
+    assert "overrides any earlier final-word timing target" in details["recommended_action"]
+    assert "no later than 7.49 seconds" in details["recommended_action"]
+    assert "room tone through 8.00 seconds" in details["recommended_action"]
+
+
+def test_planner_recovers_measured_two_frame_terminal_reset_with_bounded_l_cut():
+    takes = (
+        _evidence(
+            0,
+            duration=8.0,
+            first_word=0.08,
+            final_word=7.94,
+            room_rms=-42.0,
+            latest_safe_video_end=7.916667,
+        ),
+        _evidence(
+            1,
+            duration=8.0,
+            first_word=0.48,
+            final_word=6.42,
+            room_rms=-42.0,
+        ),
+    )
+
+    plan = plan_acoustic_seams(
+        takes,
+        fps=24.0,
+        min_duration_seconds=0.0,
+        max_duration_seconds=16.0,
+    )
+
+    assert plan.takes[0].video_end_seconds == pytest.approx(7.916667)
+    assert plan.takes[0].audio_end_seconds == pytest.approx(8.0)
+    assert (
+        takes[0].final_word_end_seconds - plan.takes[0].video_end_seconds
+    ) <= 1 / 24
+    assert plan.takes[1].video_start_seconds < plan.takes[1].audio_start_seconds
+    video_duration = sum(
+        take.video_end_seconds - take.video_start_seconds
+        for take in plan.takes
+    )
+    audio_duration = sum(
+        take.audio_end_seconds - take.audio_start_seconds
+        for take in plan.takes
+    ) - sum(seam.overlap_seconds for seam in plan.seams)
+    assert video_duration == pytest.approx(audio_duration)
+    assert plan.seams[0].speech_overlap is False
+
+
 def test_predecessor_room_tone_bridge_eliminates_the_22_967152_db_boundary():
     previous = _evidence(0, room_rms=-42.0)
     raw_incoming = _evidence(
@@ -513,7 +579,7 @@ def test_planner_fails_when_final_take_cannot_reach_duration_floor():
 
     assert exc_info.value.details["required_seconds"] > exc_info.value.details["total_available_seconds"]
     assert exc_info.value.details["available_seconds_by_take"] == {
-        "0": pytest.approx(0.36),
+        "0": pytest.approx(0.01),
         "1": pytest.approx(0.42),
     }
     assert exc_info.value.details["under_capacity_take_indexes"] == [0, 1]
@@ -769,9 +835,9 @@ def test_native_shortfall_guidance_reproduces_live_6_60_second_deadline():
     assert "final word ends no later than 6.60 seconds" in details["recommended_action"]
 
 
-def test_planner_uses_native_windows_for_exact_16_seconds_with_at_most_one_frame_rounding():
+def test_planner_keeps_internal_tail_excluded_during_exact_16_second_retime():
     takes = (
-        _evidence(0, duration=8.0, first_word=0.10, final_word=7.70),
+        _evidence(0, duration=8.0, first_word=0.10, final_word=7.35),
         _evidence(1, duration=8.12, first_word=0.12, final_word=7.70),
     )
 
@@ -785,8 +851,13 @@ def test_planner_uses_native_windows_for_exact_16_seconds_with_at_most_one_frame
 
     assert plan.target_duration_seconds == 16.0
     assert plan.final_duration_seconds == pytest.approx(16.0)
-    assert 16 - (1 / 24) <= plan.content_duration_seconds <= 16 + (1 / 24)
-    assert 0.0 <= plan.delivery_padding_seconds <= 1 / 24
+    assert plan.content_duration_seconds * plan.delivery_retime_ratio == pytest.approx(
+        16.0
+    )
+    assert 1.0 < plan.delivery_retime_ratio <= 1.06
+    assert plan.delivery_padding_seconds == 0.0
+    assert plan.takes[0].audio_end_seconds <= 7.65 + 1e-9
+    assert plan.takes[0].video_end_seconds <= 7.65 + 1e-9
     assert all(
         window.audio_end_seconds <= evidence.provider_duration_seconds
         for window, evidence in zip(plan.takes, takes)

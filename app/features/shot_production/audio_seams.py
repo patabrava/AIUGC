@@ -14,8 +14,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from app.core.errors import ValidationError
 
 
-ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v1"
+ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v2"
 MAX_EXACT_DELIVERY_RETIME_RATIO = 1.06
+SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS = 0.350
+MAX_MEASURED_TERMINAL_RESET_AUDIO_L_CUT_SECONDS = 0.100
+_MEASURED_TERMINAL_RESET_POST_WORD_GUARD_SECONDS = 0.0
+_MEASURED_TERMINAL_RESET_PRE_WORD_GUARD_SECONDS = 0.040
 _ANALYSIS_TIMEOUT_SECONDS = 120
 _MAX_SEAM_WORD_GAP_SECONDS = 0.320
 _MAX_SHORT_FORM_SEAM_WORD_GAP_SECONDS = 0.480
@@ -24,6 +28,7 @@ _FINAL_TAKE_POST_WORD_GUARD_SECONDS = 0.080
 _MAX_ENCODER_PREROLL_SECONDS = 0.100
 _DIGITAL_SILENCE_DBFS = -120.0
 MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB = 12.0
+MAX_MEASURED_TERMINAL_RESET_ENERGY_DELTA_DB = 18.0
 _PREFERRED_SEAM_ENERGY_DELTA_DB = 6.0
 _FRAME_TAGS = {
     "rms_dbfs": "lavfi.astats.1.RMS_level",
@@ -51,6 +56,7 @@ class TakeAudioEvidence:
     first_word_start_seconds: float
     final_word_end_seconds: float
     frames: Tuple[AudioFrameMetrics, ...]
+    latest_safe_video_end_seconds: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +82,7 @@ class PlannedSeam:
     speech_overlap: bool
     rejected_candidates: Tuple[Dict[str, object], ...]
     energy_fallback: bool = False
+    measured_terminal_reset_recovery: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,11 +113,11 @@ def delivered_seam_timing_failures(
             seam.retained_island_duration_seconds * delivery_retime_ratio
         )
         reasons = []
-        if not 0.04 <= delivered_overlap <= 0.07:
+        if not 0.04 - 1e-9 <= delivered_overlap <= 0.07 + 1e-9:
             reasons.append("audio_overlap_out_of_range")
-        if not 0.10 <= delivered_word_gap <= max_seam_word_gap_seconds + 1e-9:
+        if not 0.10 - 1e-9 <= delivered_word_gap <= max_seam_word_gap_seconds + 1e-9:
             reasons.append("word_gap_out_of_range")
-        if delivered_island > 0.08:
+        if delivered_island > 0.08 + 1e-9:
             reasons.append("retained_breath_island_too_long")
         if reasons:
             failures[index] = tuple(reasons)
@@ -273,6 +280,19 @@ def _validate_take_evidence(takes: Sequence[TakeAudioEvidence]) -> Tuple[TakeAud
             )
         if not take.frames:
             raise ValidationError("Acoustic take evidence requires frame metrics.")
+        safe_video_end = take.latest_safe_video_end_seconds
+        if safe_video_end is not None and (
+            not math.isfinite(safe_video_end)
+            or safe_video_end <= 0.0
+            or safe_video_end > take.provider_duration_seconds
+        ):
+            raise ValidationError(
+                "Measured terminal-reset video boundary is invalid.",
+                {
+                    "take_index": take.take_index,
+                    "latest_safe_video_end_seconds": safe_video_end,
+                },
+            )
     return ordered
 
 
@@ -419,9 +439,54 @@ def _select_seam(
     valid = []
     perceptual_fallbacks = []
     rejected: List[Dict[str, object]] = []
+    # Veo can introduce a terminal reframe or artificial end pose during the
+    # final frames of a generated take. Without measured frame evidence, keep
+    # the conservative historical tail outside both audio and video planning.
+    # When a deterministic whole-frame reset boundary is measured, audio may
+    # continue for at most 100 ms while picture cuts before the reset. That
+    # bounded L-cut recovers a completed final phoneme without ever delivering
+    # the defective frame or manufacturing a frozen talking-head tail.
+    measured_safe_video_end = previous.latest_safe_video_end_seconds
+    measured_terminal_reset = measured_safe_video_end is not None
+    previous_usable_end = (
+        float(measured_safe_video_end)
+        if measured_terminal_reset
+        else max(
+            0.0,
+            previous.provider_duration_seconds
+            - SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS,
+        )
+    )
+    previous_audio_usable_end = (
+        min(
+            previous.provider_duration_seconds,
+            previous_usable_end
+            + MAX_MEASURED_TERMINAL_RESET_AUDIO_L_CUT_SECONDS,
+        )
+        if measured_terminal_reset
+        else previous_usable_end
+    )
+    effective_post_word_guard = (
+        min(
+            min_post_word_crossfade_guard_seconds,
+            _MEASURED_TERMINAL_RESET_POST_WORD_GUARD_SECONDS,
+        )
+        if measured_terminal_reset
+        else min_post_word_crossfade_guard_seconds
+    )
+    effective_pre_word_guard = (
+        _MEASURED_TERMINAL_RESET_PRE_WORD_GUARD_SECONDS
+        if measured_terminal_reset
+        else 0.060
+    )
+    maximum_energy_delta_db = (
+        MAX_MEASURED_TERMINAL_RESET_ENERGY_DELTA_DB
+        if measured_terminal_reset
+        else MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB
+    )
     for tail_context in tail_contexts:
         previous_end = min(
-            previous.provider_duration_seconds,
+            previous_audio_usable_end,
             previous.final_word_end_seconds + tail_context,
         )
         for head_context in head_contexts:
@@ -456,10 +521,15 @@ def _select_seam(
                     previous_end
                     - previous.final_word_end_seconds
                     - overlap
-                    < min_post_word_crossfade_guard_seconds - 1e-9
+                    < effective_post_word_guard - 1e-9
                 ):
                     reasons.append("post_word_crossfade_guard")
-                if next_take.first_word_start_seconds - next_start - overlap < 0.060 - 1e-9:
+                if (
+                    next_take.first_word_start_seconds
+                    - next_start
+                    - overlap
+                    < effective_pre_word_guard - 1e-9
+                ):
                     reasons.append("pre_word_crossfade_guard")
                 if island_duration > 0.080 + 1e-9:
                     reasons.append("retained_breath_island")
@@ -483,7 +553,7 @@ def _select_seam(
                     reasons.append("energy_delta_exceeded")
                     if (
                         not deterministic_reasons
-                        and energy_delta <= MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB + 1e-9
+                        and energy_delta <= maximum_energy_delta_db + 1e-9
                     ):
                         perceptual_fallbacks.append(
                             (
@@ -530,8 +600,53 @@ def _select_seam(
         )
         room_tone_mismatch = (
             minimum_energy_delta is not None
-            and minimum_energy_delta > MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB + 1e-9
+            and minimum_energy_delta > maximum_energy_delta_db + 1e-9
         )
+        rejected_candidate_count = len(rejected)
+        predecessor_tail_blocks_every_candidate = (
+            rejected_candidate_count > 0
+            and rejection_reason_counts.get("post_word_crossfade_guard", 0)
+            == rejected_candidate_count
+        )
+        incoming_preroll_blocks_every_candidate = (
+            rejected_candidate_count > 0
+            and rejection_reason_counts.get("pre_word_crossfade_guard", 0)
+            == rejected_candidate_count
+        )
+        recommended_retry_take_indexes = []
+        if predecessor_tail_blocks_every_candidate:
+            recommended_retry_take_indexes.append(previous.take_index)
+        if incoming_preroll_blocks_every_candidate:
+            recommended_retry_take_indexes.append(next_take.take_index)
+        if not recommended_retry_take_indexes:
+            recommended_retry_take_indexes.append(next_take.take_index)
+
+        minimum_overlap_seconds = min(overlaps)
+        latest_safe_predecessor_final_word = max(
+            0.0,
+            previous_audio_usable_end
+            - effective_post_word_guard
+            - minimum_overlap_seconds
+            - 0.020,
+        )
+        if predecessor_tail_blocks_every_candidate:
+            recommended_action = (
+                "For this retry, this timing overrides any earlier final-word timing "
+                f"target. Regenerate only take {previous.take_index}. Pace its exact spoken beat so "
+                f"the final word ends no later than {latest_safe_predecessor_final_word:.2f} "
+                f"seconds, then continue natural silent motion and matching room tone through "
+                f"{previous.provider_duration_seconds:.2f} seconds. Do not add speech or freeze."
+            )
+        elif room_tone_mismatch:
+            recommended_action = (
+                "Regenerate only the incoming take with room tone matching the previous "
+                "take after automatic room-tone normalization could not create a safe boundary."
+            )
+        else:
+            recommended_action = (
+                "Regenerate only the incoming take with a clean pre-speech margin and "
+                "no isolated breath at the boundary."
+            )
         raise ValidationError(
             "No transcript-safe acoustic seam candidate exists.",
             {
@@ -541,23 +656,43 @@ def _select_seam(
                     if room_tone_mismatch
                     else "transcript_safe_seam_unavailable"
                 ),
-                "rejected_candidate_count": len(rejected),
+                "rejected_candidate_count": rejected_candidate_count,
                 "rejection_reason_counts": rejection_reason_counts,
                 "minimum_observed_energy_delta_db": minimum_energy_delta,
-                "maximum_allowed_energy_delta_db": MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB,
-                "recommended_retry_take_indexes": [next_take.take_index],
-                "recommended_action": (
-                    "Regenerate only the incoming take with room tone matching the previous "
-                    "take after automatic room-tone normalization could not create a safe boundary."
-                    if room_tone_mismatch
-                    else "Regenerate only the incoming take with a clean pre-speech margin and "
-                    "no isolated breath at the boundary."
+                "maximum_allowed_energy_delta_db": maximum_energy_delta_db,
+                "internal_visual_tail_exclusion_seconds": (
+                    SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS
                 ),
+                "latest_usable_predecessor_video_seconds": round(
+                    previous_usable_end,
+                    6,
+                ),
+                "measured_terminal_reset_recovery": measured_terminal_reset,
+                "recommended_retry_take_indexes": recommended_retry_take_indexes,
+                "latest_safe_predecessor_final_word_end_seconds": (
+                    round(latest_safe_predecessor_final_word, 6)
+                    if predecessor_tail_blocks_every_candidate
+                    else None
+                ),
+                "recommended_action": recommended_action,
             },
         )
-    island_duration, _, energy_delta, next_start, previous_end, overlap, _ = min(
-        valid,
-        key=lambda candidate: candidate[:6],
+    if measured_terminal_reset:
+        selected = min(
+            valid,
+            key=lambda candidate: (
+                candidate[0],
+                abs(candidate[5] - 0.060),
+                abs(float(candidate[6]["word_gap_seconds"]) - 0.100),
+                candidate[2],
+                candidate[3],
+                candidate[4],
+            ),
+        )
+    else:
+        selected = min(valid, key=lambda candidate: candidate[:6])
+    island_duration, _, energy_delta, next_start, previous_end, overlap, _ = (
+        selected
     )
     visual_position = overlap / 2.0
     word_gap = (
@@ -579,6 +714,7 @@ def _select_seam(
         speech_overlap=False,
         rejected_candidates=tuple(rejected),
         energy_fallback=energy_fallback,
+        measured_terminal_reset_recovery=measured_terminal_reset,
     )
 
 
@@ -586,6 +722,8 @@ def _derive_video_windows(
     takes: Sequence[TakeAudioEvidence],
     seams: Sequence[PlannedSeam],
     gains: Sequence[float],
+    *,
+    fps: float,
 ) -> Tuple[PlannedTakeWindow, ...]:
     planned = []
     for index, take in enumerate(takes):
@@ -613,6 +751,78 @@ def _derive_video_windows(
                 video_end_seconds=video_end,
                 gain_db=float(gains[index]),
             )
+        )
+    for index, take in enumerate(takes[:-1]):
+        safe_video_end = take.latest_safe_video_end_seconds
+        if safe_video_end is None:
+            continue
+        previous_window = planned[index]
+        if previous_window.video_end_seconds <= safe_video_end + 1e-9:
+            continue
+        speech_overhang = max(
+            0.0,
+            take.final_word_end_seconds - safe_video_end,
+        )
+        audio_l_cut = max(
+            0.0,
+            previous_window.audio_end_seconds - safe_video_end,
+        )
+        maximum_speech_overhang = 1.0 / fps
+        if (
+            speech_overhang > maximum_speech_overhang + 1e-9
+            or audio_l_cut
+            > MAX_MEASURED_TERMINAL_RESET_AUDIO_L_CUT_SECONDS + 1e-9
+        ):
+            raise ValidationError(
+                "Measured terminal reset overlaps too much transcript-bearing content.",
+                {
+                    "seam_index": index,
+                    "failure_type": "measured_terminal_reset_speech_overlap",
+                    "latest_usable_predecessor_video_seconds": round(
+                        safe_video_end,
+                        6,
+                    ),
+                    "speech_overhang_seconds": round(speech_overhang, 6),
+                    "maximum_speech_overhang_seconds": round(
+                        maximum_speech_overhang,
+                        6,
+                    ),
+                    "audio_l_cut_seconds": round(audio_l_cut, 6),
+                    "maximum_audio_l_cut_seconds": (
+                        MAX_MEASURED_TERMINAL_RESET_AUDIO_L_CUT_SECONDS
+                    ),
+                    "recommended_retry_take_indexes": [take.take_index],
+                    "recommended_action": (
+                        f"Regenerate only take {take.take_index}. Pace its exact "
+                        "spoken beat so the final word ends before the measured "
+                        f"terminal reset at {safe_video_end:.2f} seconds."
+                    ),
+                },
+            )
+        visual_shift = previous_window.video_end_seconds - safe_video_end
+        incoming_window = planned[index + 1]
+        shifted_incoming_start = incoming_window.video_start_seconds - visual_shift
+        if shifted_incoming_start < -1e-9:
+            raise ValidationError(
+                "Measured terminal reset has insufficient incoming visual preroll.",
+                {
+                    "seam_index": index,
+                    "failure_type": "measured_terminal_reset_preroll_shortfall",
+                    "required_incoming_preroll_seconds": round(visual_shift, 6),
+                    "available_incoming_preroll_seconds": round(
+                        incoming_window.video_start_seconds,
+                        6,
+                    ),
+                    "recommended_retry_take_indexes": [take.take_index],
+                },
+            )
+        planned[index] = replace(
+            previous_window,
+            video_end_seconds=float(safe_video_end),
+        )
+        planned[index + 1] = replace(
+            incoming_window,
+            video_start_seconds=max(0.0, shifted_incoming_start),
         )
     return tuple(planned)
 
@@ -655,8 +865,31 @@ def _extend_delivery_windows(
         return tuple(result), tuple(adjusted_seams)
     required = min_duration_seconds - current_duration
     raw_capacities = [
-        max(0.0, take.provider_duration_seconds - window.audio_end_seconds)
-        for window, take in zip(result, evidence)
+        max(
+            0.0,
+            (
+                take.provider_duration_seconds
+                - (
+                    SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS
+                    if (
+                        index < len(seams)
+                        and take.latest_safe_video_end_seconds is None
+                    )
+                    else 0.0
+                )
+                - window.audio_end_seconds
+            ),
+        )
+        for index, (window, take) in enumerate(zip(result, evidence))
+    ]
+    raw_capacities = [
+        0.0
+        if (
+            index < len(seams)
+            and evidence[index].latest_safe_video_end_seconds is not None
+        )
+        else capacity
+        for index, capacity in enumerate(raw_capacities)
     ]
     native_seam_gap_ceiling = (
         max_seam_word_gap_seconds / max_delivery_retime_ratio
@@ -887,7 +1120,7 @@ def plan_acoustic_seams(
         )
         for index in range(len(ordered) - 1)
     )
-    planned = _derive_video_windows(ordered, seams, gains)
+    planned = _derive_video_windows(ordered, seams, gains, fps=fps)
     planning_floor = (
         float(target_duration_seconds)
         if target_duration_seconds is not None
@@ -968,7 +1201,10 @@ def plan_acoustic_seams(
 __all__ = [
     "ACOUSTIC_ANALYZER_VERSION",
     "MAX_EXACT_DELIVERY_RETIME_RATIO",
+    "MAX_MEASURED_TERMINAL_RESET_ENERGY_DELTA_DB",
+    "MAX_MEASURED_TERMINAL_RESET_AUDIO_L_CUT_SECONDS",
     "MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB",
+    "SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS",
     "AcousticSeamPlan",
     "AudioFrameMetrics",
     "PlannedSeam",

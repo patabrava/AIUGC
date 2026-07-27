@@ -95,6 +95,8 @@ class CandidateResponse(BaseModel):
     provider_model: str
     visual_contract_hash: str
     actor_reference_fingerprint: str
+    generation_contract_hash: str
+    identity_gate_result: dict[str, Any]
     derivation_mode: Literal["bootstrap", "canonical_anchor"]
     canonical_anchor_id: Optional[str] = None
     canonical_anchor_sha256: Optional[str] = None
@@ -111,6 +113,10 @@ class CandidateGenerationResponse(BaseModel):
 class MasterApprovalRequest(BaseModel):
     candidate_index: int = Field(ge=1)
     expected_revision: int = Field(ge=0)
+    identity_attestation: Literal[True]
+    attestation_version: Literal["semantic-actor-identity-v1"] = (
+        "semantic-actor-identity-v1"
+    )
     reason: Optional[str] = Field(default=None, max_length=500)
 
 

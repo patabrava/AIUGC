@@ -11,6 +11,7 @@ from app.features.topics.semantic_scripts import (
     build_semantic_script_prompt,
     generate_semantic_script,
     validate_semantic_script,
+    validate_semantic_script_audience_copy,
 )
 import app.features.topics.semantic_scripts as semantic_scripts
 
@@ -176,6 +177,48 @@ def test_invalid_provider_draft_gets_one_contract_repair_attempt():
     assert "90" in fake_llm.calls[1]["prompt"]
     assert "viel zu kurze" in fake_llm.calls[1]["prompt"]
     assert result.provenance["source"] == "gemini_repair"
+
+
+def test_two_invalid_drafts_get_a_final_audience_safe_recovery():
+    valid_script = _complete_semantic_script([16, 16])
+
+    class _RecoveringLLM:
+        def __init__(self):
+            self.calls = []
+
+        def generate_gemini_text(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) < 3:
+                return "Dieser viel zu kurze Entwurf erfüllt den Vertrag nicht."
+            return valid_script
+
+    client = _RecoveringLLM()
+    result = generate_semantic_script(
+        post_type="value",
+        title="Treppenlift als Alltagshilfe",
+        cta="Prüfe das zulässige Gewicht.",
+        facts=[
+            "Ein Treppenlift kann Einkäufe transportieren, wenn seine zulässige "
+            "Traglast und die Herstellerhinweise eingehalten werden."
+        ],
+        requested_duration_seconds=16,
+        llm_client=client,
+    )
+
+    assert result.script == valid_script
+    assert result.provenance["source"] == "gemini_recovery"
+    assert len(client.calls) == 3
+    assert "keine Quellenhinweise" in client.calls[2]["prompt"]
+
+
+def test_audience_copy_gate_rejects_internal_excerpt_scaffolding():
+    broken_script = (
+        "Gekürzter Quellenauszug: „Als…“ und Gekürzter Quellenauszug: „…wenn…“. "
+        "Prüfe den Hinweis direkt an der bereitgestellten vollständigen Quelle nach."
+    )
+
+    with pytest.raises(ValueError, match="internal fallback copy"):
+        validate_semantic_script_audience_copy(broken_script)
 
 
 @pytest.mark.parametrize("word_count", [108, 119])
@@ -379,7 +422,7 @@ def test_eight_second_fallback_uses_complete_opening_sentence_from_saved_script(
     assert result.provenance["source"] == "fallback"
 
 
-def test_sixteen_second_value_fallback_handles_marker_dense_canonical_script():
+def test_sixteen_second_invalid_recovery_fails_closed_instead_of_saving_excerpt_scaffolding():
     class _InvalidTwiceLLM:
         def __init__(self):
             self.calls = 0
@@ -398,32 +441,19 @@ def test_sixteen_second_value_fallback_handles_marker_dense_canonical_script():
     research_provenance = {"dossier_id": "value-live-regression"}
     source_urls = ["https://example.test/value-source"]
 
-    result = generate_semantic_script(
-        post_type="value",
-        title="Barrierefreie Wege",
-        cta="Prüfe die Route.",
-        facts=[canonical_script],
-        requested_duration_seconds=16,
-        llm_client=client,
-        research_provenance=research_provenance,
-        source_urls=source_urls,
-    )
-    validation = validate_semantic_script(
-        result.script,
-        requested_duration_seconds=16,
-    )
-    sentences = _sentences(result.script)
+    with pytest.raises(ValueError, match="audience-safe recovery attempts"):
+        generate_semantic_script(
+            post_type="value",
+            title="Barrierefreie Wege",
+            cta="Prüfe die Route.",
+            facts=[canonical_script],
+            requested_duration_seconds=16,
+            llm_client=client,
+            research_provenance=research_provenance,
+            source_urls=source_urls,
+        )
 
-    assert client.calls == 2
-    assert 32 <= validation.word_count <= 36
-    assert validation.planned_take_count == validation.minimum_take_count == 2
-    assert len(sentences) == len(set(sentences)) == 2
-    assert all(sentence.endswith((".", "!", "?")) for sentence in sentences)
-    assert "nicht" in result.script
-    assert "niemand" in result.script
-    assert result.provenance["source"] == "fallback"
-    assert result.provenance["research"] == research_provenance
-    assert result.provenance["source_urls"] == source_urls
+    assert client.calls == 3
 
 
 @pytest.mark.parametrize("provider_available", [True, False])

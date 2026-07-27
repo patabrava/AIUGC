@@ -63,7 +63,7 @@ def _scene_plate_result(*, marker: str = "candidate") -> SimpleNamespace:
                 index=index,
                 image_bytes=_png_bytes(accent=50 + index),
                 mime_type="image/png",
-                provider_model="gemini-3.1-flash-image",
+                provider_model="gemini-3-pro-image",
                 prompt=prompts[index - 1],
             )
             for index in range(1, 4)
@@ -269,8 +269,10 @@ def _install_repository(monkeypatch):
     from app.features.semantic_videos import handlers
     from app.features.semantic_videos.visual_contract import (
         build_actor_reference_fingerprint,
+        build_scene_plate_generation_contract,
         build_visual_contract,
     )
+    from app.features.shot_frames.identity_qa import SceneIdentityQAReport
 
     master = _png_bytes(accent=44)
     master_hash = sha256(master).hexdigest()
@@ -319,14 +321,43 @@ def _install_repository(monkeypatch):
     reference["visual_contract"] = visual_contract
     actor_fingerprint = build_actor_reference_fingerprint(reference["actor_references"])
     reference["actor_reference_fingerprint"] = actor_fingerprint
+    generation_contract = build_scene_plate_generation_contract(
+        actor_reference_fingerprint=actor_fingerprint
+    )
+    reference["scene_plate_generation_contract"] = generation_contract
+    master_identity_gate = {
+        "status": "passed",
+        "passed": True,
+        "evaluator_model": generation_contract["identity_evaluator_model"],
+        "evaluator_contract_version": generation_contract[
+            "identity_evaluator_contract_version"
+        ],
+        "evaluated_actor_reference_fingerprint": actor_fingerprint,
+        "candidate_sha256": master_hash,
+        "component_results": {
+            "same_person": True,
+            "facial_geometry_consistent": True,
+            "apparent_age_consistent": True,
+            "hairline_and_hair_consistent": True,
+            "skin_texture_natural": True,
+            "not_beautified_or_stylized": True,
+            "no_face_artifacts": True,
+        },
+        "confidence": 0.99,
+        "blocking_reasons": [],
+        "observed_differences": [],
+        "evaluated_at": "2026-07-26T00:00:00+00:00",
+    }
     reference["master"] = {
         "storage_uri": "https://storage/master.png",
         "mime_type": "image/png",
         "byte_length": len(master),
         "sha256": master_hash,
-        "provider_model": "gemini-3.1-flash-image",
+        "provider_model": "gemini-3-pro-image",
         "visual_contract_hash": visual_contract["contract_hash"],
         "actor_reference_fingerprint": actor_fingerprint,
+        "generation_contract_hash": generation_contract["contract_hash"],
+        "identity_gate_result": master_identity_gate,
         "derivation_mode": "bootstrap",
         "canonical_anchor_id": None,
         "canonical_anchor_sha256": None,
@@ -462,8 +493,12 @@ def _install_repository(monkeypatch):
         expected_revision,
         candidate_index,
         approved_by,
+        identity_attestation,
+        attestation_version,
         reason,
     ):
+        assert identity_attestation is True
+        assert attestation_version == "semantic-actor-identity-v1"
         if state["run"]["revision"] != expected_revision:
             raise StateTransitionError("Semantic video master approval revision conflict.")
         candidates = state["run"]["master_snapshot"].get("candidates") or []
@@ -490,6 +525,9 @@ def _install_repository(monkeypatch):
             ),
             "approved_candidate_index": candidate_index,
             "approved_by": approved_by,
+            "identity_attestation": True,
+            "attestation_version": attestation_version,
+            "approved_at": "2026-07-26T00:00:00+00:00",
         }
         approval = append_approval(
             {
@@ -698,11 +736,37 @@ def _install_repository(monkeypatch):
     monkeypatch.setattr(handlers, "list_attempts", lambda run_id: deepcopy(state["takes"]))
     monkeypatch.setattr(handlers, "list_approvals", lambda run_id: deepcopy(state["approvals"]))
     monkeypatch.setattr(handlers, "get_storage_client", lambda: fake_storage)
+    monkeypatch.setattr(
+        handlers,
+        "evaluate_scene_plate_identity",
+        lambda *_args, **_kwargs: SceneIdentityQAReport(
+            same_person=True,
+            facial_geometry_consistent=True,
+            apparent_age_consistent=True,
+            hairline_and_hair_consistent=True,
+            skin_texture_natural=True,
+            not_beautified_or_stylized=True,
+            no_face_artifacts=True,
+            confidence=0.99,
+            blocking_reasons=(),
+            observed_differences=(),
+            passed=True,
+        ),
+        raising=False,
+    )
     return handlers, state, fake_storage
 
 
 def _seed_awaiting_paid_run(state, *, revision=0):
     reference = deepcopy(state["context"]["reference"])
+    reference["master"].update(
+        {
+            "identity_attestation": True,
+            "attestation_version": "semantic-actor-identity-v1",
+            "approved_by": "operator@example.com",
+            "approved_at": "2026-07-26T00:00:00+00:00",
+        }
+    )
     state["run"] = {
         "id": "run-1",
         "post_id": "post-1",
@@ -814,7 +878,11 @@ def _create_plan_from_unenriched_candidate_flow(monkeypatch, client, handlers, s
 
     master_response = client.post(
         "/semantic-videos/posts/post-1/master-approve",
-        json={"candidate_index": 1, "expected_revision": 0},
+        json={
+            "candidate_index": 1,
+            "expected_revision": 0,
+            "identity_attestation": True,
+        },
     )
     assert master_response.status_code == 200, master_response.text
 
@@ -1244,7 +1312,7 @@ def test_legacy_pending_candidates_without_anchor_lineage_are_restartable(monkey
                     "mime_type": "image/png",
                     "byte_length": 10,
                     "sha256": "a" * 64,
-                    "provider_model": "gemini-3.1-flash-image",
+                    "provider_model": "gemini-3-pro-image",
                 }
             ]
         },
@@ -1486,7 +1554,7 @@ def test_candidate_endpoint_generates_three_wheelchair_scene_plates_from_ordered
     assert len({candidate["storage_uri"] for candidate in candidates}) == 3
     assert len({candidate["sha256"] for candidate in candidates}) == 3
     assert {candidate["provider_model"] for candidate in candidates} == {
-        "gemini-3.1-flash-image"
+        "gemini-3-pro-image"
     }
     assert {candidate["visual_contract_hash"] for candidate in candidates} == {
         state["run"]["reference_snapshot"]["visual_contract"]["contract_hash"]
@@ -1536,7 +1604,14 @@ def test_candidate_endpoint_derives_all_candidates_from_atomic_actor_anchor(monk
         "master_sha256": anchor_hash,
         "master_byte_length": len(anchor_bytes),
         "master_mime_type": "image/png",
-        "provider_model": "gemini-3.1-flash-image",
+        "provider_model": "gemini-3-pro-image",
+        "generation_contract_hash": state["context"]["reference"][
+            "scene_plate_generation_contract"
+        ]["contract_hash"],
+        "verification_status": "verified",
+        "identity_gate_result": {"passed": True},
+        "approved_by": "operator@example.com",
+        "approved_at": "2026-07-26T00:00:00+00:00",
     }
     monkeypatch.setattr(
         handlers,
@@ -1602,12 +1677,33 @@ def test_candidate_endpoint_rejects_changed_or_mismatched_actor_anchor(monkeypat
         "id": "anchor-1",
         "actor_identity_id": "actor-1",
         "actor_reference_fingerprint": actor_fingerprint,
+        "generation_contract_hash": state["context"]["reference"][
+            "scene_plate_generation_contract"
+        ]["contract_hash"],
+        "identity_gate_result": {
+            "status": "passed",
+            "passed": True,
+            "evaluator_model": state["context"]["reference"][
+                "scene_plate_generation_contract"
+            ]["identity_evaluator_model"],
+            "evaluator_contract_version": "semantic-scene-identity-v2",
+            "evaluated_actor_reference_fingerprint": actor_fingerprint,
+            "candidate_sha256": sha256(anchor_bytes).hexdigest(),
+            "component_results": {},
+            "confidence": 0.99,
+            "blocking_reasons": [],
+            "observed_differences": [],
+            "evaluated_at": "2026-07-26T00:00:00+00:00",
+        },
         "source_run_id": "canonical-run-1",
         "master_storage_uri": anchor_url,
         "master_sha256": sha256(anchor_bytes).hexdigest(),
         "master_byte_length": len(anchor_bytes),
         "master_mime_type": "image/png",
-        "provider_model": "gemini-3.1-flash-image",
+        "provider_model": "gemini-3-pro-image",
+        "verification_status": "verified",
+        "approved_by": "operator@example.com",
+        "approved_at": "2026-07-26T00:00:00+00:00",
     }
     if tamper == "sha256":
         anchor["master_sha256"] = "0" * 64
@@ -1686,7 +1782,11 @@ def test_master_approval_rejects_unbound_or_unchanged_actor_candidate(
 
     response = client.post(
         "/semantic-videos/posts/post-1/master-approve",
-        json={"candidate_index": 1, "expected_revision": 0},
+        json={
+            "candidate_index": 1,
+            "expected_revision": 0,
+            "identity_attestation": True,
+        },
     )
 
     assert response.status_code == 422, response.text
@@ -1870,7 +1970,7 @@ def test_candidate_endpoint_rejects_every_unintended_existing_stage_before_exter
                     index=index,
                     image_bytes=f"candidate-{index}".encode(),
                     mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
+                    provider_model="gemini-3-pro-image",
                 )
                 for index in range(1, 4)
             ],
@@ -1920,7 +2020,7 @@ def test_candidate_endpoint_rejects_missing_or_stale_existing_revision_before_ex
                     index=index,
                     image_bytes=f"candidate-{index}".encode(),
                     mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
+                    provider_model="gemini-3-pro-image",
                 )
                 for index in range(1, 4)
             ],
@@ -2009,7 +2109,12 @@ def test_master_approval_is_append_only_and_snapshots_selected_candidate(monkeyp
 
     response = client.post(
         "/semantic-videos/posts/post-1/master-approve",
-        json={"candidate_index": 2, "expected_revision": 0, "reason": "Best identity match"},
+        json={
+            "candidate_index": 2,
+            "expected_revision": 0,
+            "identity_attestation": True,
+            "reason": "Best identity match",
+        },
     )
 
     assert response.status_code == 200, response.text
@@ -2037,11 +2142,17 @@ def test_master_approval_uses_one_atomic_transition(monkeypatch):
         "mime_type": "image/png",
         "byte_length": len(_storage.master),
         "sha256": sha256(_storage.master).hexdigest(),
-        "provider_model": "gemini-3.1-flash-image",
+        "provider_model": "gemini-3-pro-image",
         "visual_contract_hash": state["context"]["reference"]["visual_contract"][
             "contract_hash"
         ],
         "actor_reference_fingerprint": actor_fingerprint,
+        "generation_contract_hash": state["context"]["reference"][
+            "scene_plate_generation_contract"
+        ]["contract_hash"],
+        "identity_gate_result": deepcopy(
+            state["context"]["reference"]["master"]["identity_gate_result"]
+        ),
         "derivation_mode": "bootstrap",
         "canonical_anchor_id": None,
         "canonical_anchor_sha256": None,
@@ -2055,6 +2166,7 @@ def test_master_approval_uses_one_atomic_transition(monkeypatch):
             "candidates": [candidate],
             "visual_contract_hash": candidate["visual_contract_hash"],
             "actor_reference_fingerprint": actor_fingerprint,
+            "generation_contract_hash": candidate["generation_contract_hash"],
             "derivation_mode": "bootstrap",
         },
     }
@@ -2066,9 +2178,21 @@ def test_master_approval_uses_one_atomic_transition(monkeypatch):
         expected_revision,
         candidate_index,
         approved_by,
+        identity_attestation,
+        attestation_version,
         reason,
     ):
-        calls.append((run_id, expected_revision, candidate_index, approved_by, reason))
+        calls.append(
+            (
+                run_id,
+                expected_revision,
+                candidate_index,
+                approved_by,
+                identity_attestation,
+                attestation_version,
+                reason,
+            )
+        )
         approved = {
             **candidate,
             "candidates": [candidate],
@@ -2118,6 +2242,7 @@ def test_master_approval_uses_one_atomic_transition(monkeypatch):
         json={
             "candidate_index": 2,
             "expected_revision": 4,
+            "identity_attestation": True,
             "reason": "Best identity match",
         },
     )
@@ -3253,6 +3378,8 @@ def test_approval_retry_and_cancel_queries_use_transactional_rpcs_and_map_only_c
         expected_revision=1,
         candidate_index=2,
         approved_by="operator@example.com",
+        identity_attestation=True,
+        attestation_version="semantic-actor-identity-v1",
         reason="Best match",
         client=client,
     )
@@ -3318,6 +3445,8 @@ def test_approval_retry_and_cancel_queries_use_transactional_rpcs_and_map_only_c
             expected_revision=1,
             candidate_index=2,
             approved_by="operator@example.com",
+            identity_attestation=True,
+            attestation_version="semantic-actor-identity-v1",
             reason=None,
             client=_RecordingClient(conflict),
         )

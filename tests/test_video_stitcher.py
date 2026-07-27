@@ -505,6 +505,51 @@ def test_stitch_preserves_full_framing_for_character_consistency_segments(tmp_pa
     assert 8.8 <= duration <= 9.2, duration
 
 
+def test_stitch_applies_semantic_jump_cut_reframe_only_when_opted_in(tmp_path):
+    clip_a = str(tmp_path / "semantic-a.mp4")
+    clip_b = str(tmp_path / "semantic-b.mp4")
+    _make_clip(clip_a, seconds=3, color="red")
+    _make_clip(clip_b, seconds=3, color="blue")
+    segment_videos = []
+    for path in (clip_a, clip_b):
+        with open(path, "rb") as handle:
+            segment_videos.append(handle.read())
+
+    _bytes, metadata = stitch_segments(
+        segment_videos=segment_videos,
+        post_id="semantic-reframe",
+        correlation_id="semantic-reframe",
+        acoustic_plan={
+            "takes": [
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 2.8,
+                    "video_start_seconds": 0.0,
+                    "video_end_seconds": 2.78,
+                    "gain_db": 0.0,
+                },
+                {
+                    "audio_start_seconds": 0.1,
+                    "audio_end_seconds": 2.9,
+                    "video_start_seconds": 0.12,
+                    "video_end_seconds": 2.9,
+                    "gain_db": 0.0,
+                },
+            ],
+            "seams": [
+                {
+                    "overlap_seconds": 0.04,
+                    "visual_cut_position_seconds": 0.02,
+                }
+            ],
+            "visual_reframe_profiles": ["full", "punch_in_center"],
+        },
+    )
+
+    assert metadata["stitch_reframe_profile"] == ["full", "punch_in_center"]
+    assert metadata["stitch_visual_jump_cut_reframe_applied"] is True
+
+
 def test_stitch_normalizes_mismatched_resolution(tmp_path):
     """Segments from independent generations may differ slightly; the stitcher must normalize."""
     clip_a = str(tmp_path / "a.mp4")

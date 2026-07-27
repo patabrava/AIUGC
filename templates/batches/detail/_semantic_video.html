@@ -70,6 +70,39 @@
             </section>
             {% endif %}
 
+            {% if item.contact_sheet_url %}
+            <section class="mt-5 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-4" aria-label="Final actor and scene quality evidence">
+                <h4 class="text-sm font-bold text-[#1C2740]">Final identity and continuity evidence</h4>
+                <p class="mt-1 text-xs text-[#1C2740]/65">The final contact sheet is compared independently with both original actor references and the approved scene plate.</p>
+                <div class="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {% for actor_reference in item.actor_references %}
+                    <figure class="rounded-xl border border-[#006AAB]/15 bg-white p-2">
+                        <img class="aspect-[9/16] w-full rounded-lg object-cover" src="{{ actor_reference.storage_uri }}" alt="{{ actor_reference.role | replace('_', ' ') }}">
+                        <figcaption class="mt-2 text-center text-xs font-bold text-[#1C2740]">{{ actor_reference.role | replace('_', ' ') }}</figcaption>
+                    </figure>
+                    {% endfor %}
+                    <figure class="rounded-xl border border-[#006AAB]/15 bg-white p-2">
+                        <img class="aspect-[9/16] w-full rounded-lg object-cover" src="{{ item.approved_master_url }}" alt="Approved Semantic UGC scene plate">
+                        <figcaption class="mt-2 text-center text-xs font-bold text-[#1C2740]">Approved scene plate</figcaption>
+                    </figure>
+                    <figure class="rounded-xl border border-[#006AAB]/15 bg-white p-2">
+                        <img class="aspect-[9/16] w-full rounded-lg object-contain" src="{{ item.contact_sheet_url }}" alt="Labeled final video identity contact sheet">
+                        <figcaption class="mt-2 text-center text-xs font-bold text-[#1C2740]">Final video contact sheet</figcaption>
+                    </figure>
+                </div>
+                <div class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                    <p class="rounded-lg bg-white p-3 font-bold {% if item.actor_identity_qa and item.actor_identity_qa.passed %}text-emerald-800{% else %}text-red-800{% endif %}">
+                        Actor identity: {{ 'passed' if item.actor_identity_qa and item.actor_identity_qa.passed else 'failed' }}
+                        {% if item.actor_identity_qa %} · {{ '%.0f' | format(item.actor_identity_qa.confidence * 100) }}% confidence{% endif %}
+                    </p>
+                    <p class="rounded-lg bg-white p-3 font-bold {% if item.scene_continuity_qa and item.scene_continuity_qa.passed %}text-emerald-800{% else %}text-red-800{% endif %}">
+                        Scene continuity: {{ 'passed' if item.scene_continuity_qa and item.scene_continuity_qa.passed else 'failed' }}
+                        {% if item.scene_continuity_qa %} · {{ '%.0f' | format(item.scene_continuity_qa.confidence * 100) }}% confidence{% endif %}
+                    </p>
+                </div>
+            </section>
+            {% endif %}
+
             {% if item.visual_contract %}
             <section class="mt-5 rounded-xl border border-[#006AAB]/15 bg-[#F6FAFF] p-4" aria-label="Frozen visual contract">
                 <h4 class="text-sm font-bold text-[#1C2740]">Frozen visual contract</h4>
@@ -92,26 +125,62 @@
             {% endif %}
 
             {% if item.candidates %}
+            <section class="mt-5 rounded-2xl border border-[#006AAB]/15 bg-[#F6FAFF] p-4" aria-labelledby="identity-review-{{ item.post_id }}">
+                <h4 id="identity-review-{{ item.post_id }}" class="text-sm font-bold text-[#1C2740]">Original-actor identity review</h4>
+                <p class="mt-1 text-xs text-[#1C2740]/65">Compare every candidate directly with both immutable actor references. Scene, outfit, wheelchair, and framing must also match the frozen contract.</p>
+                <div class="mt-3 grid grid-cols-2 gap-3" aria-label="Original actor references">
+                    {% for actor_reference in item.actor_references %}
+                    <figure class="rounded-xl border border-[#006AAB]/15 bg-white p-2">
+                        <img class="aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" src="{{ actor_reference.storage_uri }}" alt="{% if actor_reference.role == 'actor_front' %}Original front actor reference{% else %}Original three-quarter actor reference{% endif %} for {{ item.topic_title }}">
+                        <figcaption class="mt-2 text-center text-xs font-bold text-[#1C2740]">{% if actor_reference.role == 'actor_front' %}Original front reference{% else %}Original three-quarter reference{% endif %}</figcaption>
+                    </figure>
+                    {% endfor %}
+                </div>
+            </section>
+
             <fieldset class="mt-5">
                 <legend class="text-sm font-bold text-[#1C2740]">Wheelchair scene plate candidates</legend>
                 <div class="mt-3 grid gap-3 sm:grid-cols-3">
                     {% for candidate in item.candidates %}
-                    <label class="cursor-pointer rounded-xl border border-[#1C2740]/15 p-2 transition focus-within:ring-2 focus-within:ring-[#006AAB]">
-                        <input class="sr-only" type="radio" name="semantic-master-{{ item.post_id }}" value="{{ candidate.index }}" aria-label="Select wheelchair scene plate candidate {{ candidate.index }}" {% if item.master_state == 'approved' and item.master_hash_is_current and candidate.index == item.approved_candidate_index %}checked{% endif %}>
+                    {% set gate = candidate.identity_gate_result or {} %}
+                    <label class="{% if gate.passed %}cursor-pointer{% else %}cursor-not-allowed opacity-70{% endif %} rounded-xl border {% if gate.passed %}border-emerald-300{% else %}border-red-300{% endif %} bg-white p-2 transition focus-within:ring-2 focus-within:ring-[#006AAB]">
+                        <input class="sr-only" type="radio" name="semantic-master-{{ item.post_id }}" value="{{ candidate.index }}" data-identity-passed="{{ 'true' if gate.passed else 'false' }}" aria-label="Select wheelchair scene plate candidate {{ candidate.index }}{% if not gate.passed %}; identity gate failed{% endif %}" {% if not gate.passed %}disabled{% endif %} {% if item.master_state == 'approved' and item.master_hash_is_current and candidate.index == item.approved_candidate_index %}checked{% endif %}>
                         <img class="aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" src="{{ candidate.storage_uri }}" alt="Wheelchair scene plate candidate {{ candidate.index }} for {{ item.topic_title }}">
                         <span class="mt-2 block text-center text-xs font-bold text-[#1C2740]">Wheelchair scene plate {{ candidate.index }}</span>
+                        <span class="mt-2 block rounded-lg px-2 py-1 text-center text-xs font-bold {% if gate.passed %}bg-emerald-100 text-emerald-900{% else %}bg-red-100 text-red-900{% endif %}" data-candidate-gate-status>
+                            Identity gate {{ 'passed' if gate.passed else 'failed' }}{% if gate.confidence is defined %} · {{ '%.0f' | format(gate.confidence * 100) }}% confidence{% endif %}
+                        </span>
+                        {% if gate.blocking_reasons %}
+                        <span class="mt-2 block text-xs text-red-800">{{ gate.blocking_reasons | join(' · ') }}</span>
+                        {% endif %}
+                        {% if gate.observed_differences %}
+                        <span class="mt-2 block text-xs text-[#1C2740]/70">{{ gate.observed_differences | join(' · ') }}</span>
+                        {% endif %}
                     </label>
                     {% endfor %}
                 </div>
             </fieldset>
+
+            <label class="mt-4 flex items-start gap-3 rounded-xl border border-[#006AAB]/15 bg-white p-3 text-sm text-[#1C2740]">
+                <input type="checkbox" class="mt-0.5 h-4 w-4 rounded border-[#006AAB]/40 text-[#006AAB] focus:ring-[#006AAB]" data-identity-attestation {% if item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>
+                <span>I confirm that this is the same actor as both original references, without material age, facial-geometry, or realism drift.</span>
+            </label>
+            {% if not item.has_passed_candidate %}
+            <p class="mt-2 text-sm font-semibold text-red-800" role="alert">No candidate passed the original-actor identity gate. Regenerate all three candidates.</p>
+            {% endif %}
             {% endif %}
 
             <div class="mt-5 flex flex-wrap gap-2">
-                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold" data-action="generate-candidates" {% if item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
-                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.candidates %}disabled{% endif %}>Approve selected scene plate</button>
+                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" {% if item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve selected scene plate</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current %}disabled{% endif %}>Build free Veo plan</button>
                 <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve ${{ item.estimated_cost_usd }} generation</button>
             </div>
+            {% if item.script_review_status == 'pending' %}
+            <p class="mt-2 text-sm text-amber-800" data-semantic-script-prerequisite>
+                Approve this post’s script in Script Review before generating its scene plates.
+            </p>
+            {% endif %}
             {% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}
             <p class="mt-2 text-xs text-[#1C2740]/65" data-semantic-restart-note>
                 Use regeneration after changing location or outfit. It starts a fresh visual run and never discards paid take evidence.

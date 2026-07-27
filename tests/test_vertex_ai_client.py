@@ -434,6 +434,41 @@ def test_vertex_client_loads_vertex_settings_from_shared_env(monkeypatch):
     assert client._settings.vertex_ai_location == "europe-west4"
 
 
+def test_vertex_video_identity_lock_accepts_required_principal():
+    client = object.__new__(VertexAIClient)
+    client._settings = SimpleNamespace(
+        vertex_required_principal_email="sarahlippe8@gmail.com"
+    )
+    client._credential_principal_verified = False
+    response = MagicMock()
+    response.json.return_value = {"email": "sarahlippe8@gmail.com"}
+    response.raise_for_status.return_value = None
+    client._http_client = MagicMock()
+    client._http_client.get.return_value = response
+
+    client._verify_required_principal(SimpleNamespace(token="secret-token"))
+
+    assert client._credential_principal_verified is True
+
+
+def test_vertex_video_identity_lock_rejects_any_other_principal():
+    client = object.__new__(VertexAIClient)
+    client._settings = SimpleNamespace(
+        vertex_required_principal_email="sarahlippe8@gmail.com"
+    )
+    client._credential_principal_verified = False
+    response = MagicMock()
+    response.json.return_value = {"email": "someone-else@example.com"}
+    response.raise_for_status.return_value = None
+    client._http_client = MagicMock()
+    client._http_client.get.return_value = response
+
+    with pytest.raises(ValidationError, match="does not match"):
+        client._verify_required_principal(SimpleNamespace(token="secret-token"))
+
+    assert client._credential_principal_verified is False
+
+
 def test_vertex_gemini_client_singleton_is_thread_safe(monkeypatch):
     import app.adapters.vertex_gemini_client as gemini_module
 

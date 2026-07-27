@@ -5,6 +5,7 @@ Per Constitution § III: Deterministic Execution
 """
 
 import hashlib
+import math
 import os
 import tempfile
 from decimal import Decimal
@@ -284,6 +285,39 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SEMANTIC_UGC_VEO_PRICE_PER_PROVIDER_SECOND_USD"),
         description="Trusted Veo price per provider second for Semantic UGC approvals",
     )
+    semantic_scene_plate_model: str = Field(
+        default="gemini-3-pro-image",
+        validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_MODEL"),
+        min_length=1,
+        description="Stable Gemini image model used only for Semantic UGC scene plates.",
+    )
+    semantic_scene_plate_image_size: Literal["2K", "4K"] = Field(
+        default="2K",
+        validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_IMAGE_SIZE"),
+    )
+    semantic_scene_plate_contract_version: str = Field(
+        default="pro-identity-v1",
+        validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_CONTRACT_VERSION"),
+        min_length=1,
+    )
+    semantic_scene_identity_gate_model: str = Field(
+        default="gemini-3.6-flash",
+        validation_alias=AliasChoices("SEMANTIC_SCENE_IDENTITY_GATE_MODEL"),
+        min_length=1,
+        description="Current stable multimodal Gemini model used for scene and final-video identity QA.",
+    )
+    semantic_scene_identity_min_confidence: float = Field(
+        default=0.90,
+        validation_alias=AliasChoices("SEMANTIC_SCENE_IDENTITY_MIN_CONFIDENCE"),
+        ge=0.0,
+        le=1.0,
+    )
+    semantic_video_identity_min_confidence: float = Field(
+        default=0.90,
+        validation_alias=AliasChoices("SEMANTIC_VIDEO_IDENTITY_MIN_CONFIDENCE"),
+        ge=0.0,
+        le=1.0,
+    )
 
     # Caption reliability
     value_caption_informative_mode: bool = Field(
@@ -324,7 +358,10 @@ class Settings(BaseSettings):
 
     # Auth
     allowed_email_domain: str = Field("lippelift.de", description="Email domain allowed for login")
-    allowed_emails: str = Field("caposk817@gmail.com", description="Comma-separated list of explicitly allowed emails")
+    allowed_emails: str = Field(
+        "caposk817@gmail.com,sarahlippe8@gmail.com",
+        description="Comma-separated list of explicitly allowed emails",
+    )
     reviewer_login_email: str = Field(
         "",
         description="Optional fixed reviewer account email for passwordless review-only login",
@@ -373,6 +410,16 @@ class Settings(BaseSettings):
         if not (v.startswith("https://") or v.startswith("http://localhost")):
             raise ValueError("Integration URLs must start with https:// or use localhost for local callbacks")
         return v.rstrip("/")
+
+    @field_validator(
+        "semantic_scene_identity_min_confidence",
+        "semantic_video_identity_min_confidence",
+    )
+    @classmethod
+    def validate_semantic_identity_confidence(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("Semantic identity confidence must be finite.")
+        return value
     
     @property
     def is_production(self) -> bool:

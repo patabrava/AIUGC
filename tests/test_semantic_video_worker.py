@@ -10,6 +10,8 @@ from types import SimpleNamespace
 from PIL import Image
 import pytest
 
+from app.core.errors import StateTransitionError, ValidationError
+
 
 def _png_bytes() -> bytes:
     image = Image.new("RGB", (90, 160))
@@ -75,9 +77,86 @@ def _takes(count: int = 7) -> tuple[bytes, list[dict]]:
     return master, takes
 
 
+def _actor_reference_snapshot(image_bytes: bytes) -> dict:
+    digest = sha256(image_bytes).hexdigest()
+    return {
+        "actor_references": [
+            {
+                "role": "actor_front",
+                "storage_uri": "https://storage/actor-front.png",
+                "mime_type": "image/png",
+                "byte_length": len(image_bytes),
+                "sha256": digest,
+            },
+            {
+                "role": "actor_three_quarter",
+                "storage_uri": "https://storage/actor-three-quarter.png",
+                "mime_type": "image/png",
+                "byte_length": len(image_bytes),
+                "sha256": digest,
+            },
+        ]
+    }
+
+
 class FakeRepo:
     def __init__(self, *, stage: str = "generating", take_count: int = 7):
+        from app.features.semantic_videos.visual_contract import (
+            SCENE_IDENTITY_COMPONENT_FIELDS,
+            build_actor_reference_fingerprint,
+            build_scene_plate_generation_contract,
+            build_visual_contract,
+        )
+
         master, takes = _takes(take_count)
+        actor_references = [
+            {
+                "role": "actor_front",
+                "storage_uri": "https://storage/actor-front.png",
+                "mime_type": "image/png",
+                "byte_length": len(master),
+                "sha256": sha256(master).hexdigest(),
+            },
+            {
+                "role": "actor_three_quarter",
+                "storage_uri": "https://storage/actor-three-quarter.png",
+                "mime_type": "image/png",
+                "byte_length": len(master),
+                "sha256": sha256(master).hexdigest(),
+            },
+        ]
+        actor_fingerprint = build_actor_reference_fingerprint(actor_references)
+        generation_contract = build_scene_plate_generation_contract(
+            actor_reference_fingerprint=actor_fingerprint
+        )
+        visual_reference = {
+            "scene_key": "garden_patio_a",
+            "scene_description": "the exact supplied garden patio",
+            "wardrobe_key": "grey_cardigan",
+            "wardrobe_description": "light-grey cardigan over a plain white top",
+            "location_reference": {
+                "scene_key": "garden_patio_a",
+                "sha256": "3" * 64,
+            },
+        }
+        visual_contract = build_visual_contract(visual_reference)
+        identity_gate = {
+            "status": "passed",
+            "passed": True,
+            "evaluator_model": generation_contract["identity_evaluator_model"],
+            "evaluator_contract_version": generation_contract[
+                "identity_evaluator_contract_version"
+            ],
+            "evaluated_actor_reference_fingerprint": actor_fingerprint,
+            "candidate_sha256": sha256(master).hexdigest(),
+            "component_results": {
+                field: True for field in SCENE_IDENTITY_COMPONENT_FIELDS
+            },
+            "confidence": 0.99,
+            "blocking_reasons": [],
+            "observed_differences": [],
+            "evaluated_at": "2026-07-26T00:00:00+00:00",
+        }
         self.master = master
         self.run = {
             "id": "run-1",
@@ -91,6 +170,27 @@ class FakeRepo:
                 "sha256": sha256(master).hexdigest(),
                 "byte_length": len(master),
                 "mime_type": "image/png",
+                "provider_model": generation_contract["model"],
+                "visual_contract_hash": visual_contract["contract_hash"],
+                "generation_contract_hash": generation_contract["contract_hash"],
+                "actor_reference_fingerprint": actor_fingerprint,
+                "identity_gate_result": identity_gate,
+                "identity_attestation": True,
+                "attestation_version": "semantic-actor-identity-v1",
+                "approved_by": "operator@example.com",
+                "approved_at": "2026-07-26T00:00:00+00:00",
+            },
+            "reference_snapshot": {
+                **visual_reference,
+                "actor_references": actor_references,
+                "actor_reference_fingerprint": actor_fingerprint,
+                "scene_plate_generation_contract": generation_contract,
+                "visual_contract": visual_contract,
+            },
+            "plan_snapshot": {
+                "generation_contract_hash": generation_contract["contract_hash"],
+                "actor_reference_fingerprint": actor_fingerprint,
+                "visual_contract_hash": visual_contract["contract_hash"],
             },
             "artifact_prefix": "semantic-videos/batch-1/post-1",
             "lease_owner": "worker-1",
@@ -257,7 +357,11 @@ class FakeStorage:
         self.upload_calls: list[dict] = []
 
     def download_video(self, *, video_url, correlation_id):
-        assert video_url == "https://storage/master.png"
+        assert video_url in {
+            "https://storage/master.png",
+            "https://storage/actor-front.png",
+            "https://storage/actor-three-quarter.png",
+        }
         return self.master
 
     def upload_video(self, **kwargs):
@@ -317,6 +421,35 @@ def test_worker_persists_intent_before_each_provider_call_and_acceptance_immedia
         "accepted",
         "release",
     ]
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "legacy_generation_contract",
+        "changed_actor_reference",
+        "failed_identity_gate",
+        "missing_human_attestation",
+    ],
+)
+def test_worker_blocks_invalid_identity_evidence_before_any_paid_call(tamper):
+    repo = FakeRepo(take_count=1)
+    if tamper == "legacy_generation_contract":
+        repo.run["reference_snapshot"].pop("scene_plate_generation_contract")
+    elif tamper == "changed_actor_reference":
+        repo.run["reference_snapshot"]["actor_references"][0]["sha256"] = "f" * 64
+    elif tamper == "failed_identity_gate":
+        repo.run["master_snapshot"]["identity_gate_result"]["passed"] = False
+    else:
+        repo.run["master_snapshot"]["identity_attestation"] = False
+    vertex = FakeVertex()
+    worker = _worker(repo, vertex)
+
+    with pytest.raises((ValidationError, StateTransitionError)):
+        worker.tick("run-1")
+
+    assert vertex.submit_calls == []
+    assert not any(event[0] in {"reserve", "intent", "accepted"} for event in repo.events)
 
 
 def test_worker_processes_fifty_second_run_in_bounded_submission_waves():
@@ -604,7 +737,11 @@ def test_production_stage_runner_materializes_canonical_exact_16s_contract(tmp_p
     class ManifestStorage:
         def download_video(self, *, video_url, correlation_id):
             del correlation_id
-            if video_url == master_url:
+            if video_url in {
+                master_url,
+                "https://storage/actor-front.png",
+                "https://storage/actor-three-quarter.png",
+            }:
                 return master
             return raw_payloads[video_url]
 
@@ -620,6 +757,7 @@ def test_production_stage_runner_materializes_canonical_exact_16s_contract(tmp_p
             "byte_length": len(master),
             "mime_type": "image/png",
         },
+        "reference_snapshot": _actor_reference_snapshot(master),
         "script_hash": sha256(b"script").hexdigest(),
         "script_snapshot": {"text": "Ein exakter Testtext fuer zwei Takes."},
     }
@@ -665,7 +803,16 @@ def test_production_stage_runner_preserves_semantic_script_provenance(
     class ManifestStorage:
         def download_video(self, *, video_url, correlation_id):
             del correlation_id
-            return master if video_url == master_url else raw_bytes
+            return (
+                master
+                if video_url
+                in {
+                    master_url,
+                    "https://storage/actor-front.png",
+                    "https://storage/actor-three-quarter.png",
+                }
+                else raw_bytes
+            )
 
     run = {
         "id": f"run-{creation_mode}",
@@ -677,6 +824,7 @@ def test_production_stage_runner_preserves_semantic_script_provenance(
             "byte_length": len(master),
             "mime_type": "image/png",
         },
+        "reference_snapshot": _actor_reference_snapshot(master),
         "script_hash": sha256(b"script").hexdigest(),
         "script_snapshot": {
             "text": "Ein exakter manueller Testtext.",

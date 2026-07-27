@@ -1,4 +1,4 @@
-"""Derive deterministic, non-generative crops from one approved PNG master."""
+"""Derive deterministic, non-generative PNG crops from one approved image master."""
 
 from __future__ import annotations
 
@@ -16,6 +16,11 @@ from app.core.errors import ValidationError
 
 _CROP_ZOOM = 1.05
 _PNG_MIME_TYPE = "image/png"
+_JPEG_MIME_TYPE = "image/jpeg"
+_SUPPORTED_MASTER_FORMATS = {
+    _PNG_MIME_TYPE: "PNG",
+    _JPEG_MIME_TYPE: "JPEG",
+}
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 _TARGET_ASPECT_RATIO = 9 / 16
 _ASPECT_RATIO_RELATIVE_TOLERANCE = 0.01
@@ -34,17 +39,19 @@ class ShotVariant:
     image_bytes: bytes
 
 
-def _load_approved_png(
+def _load_approved_image(
     *,
     approved_master_bytes: bytes,
     expected_sha256: str,
     mime_type: str,
 ) -> Tuple[Image.Image, str]:
     if not isinstance(approved_master_bytes, bytes) or not approved_master_bytes:
-        raise ValidationError("Approved shot master requires non-empty PNG bytes.")
-    if str(mime_type or "").strip().lower() != _PNG_MIME_TYPE:
+        raise ValidationError("Approved shot master requires non-empty image bytes.")
+    normalized_mime_type = str(mime_type or "").strip().lower()
+    expected_format = _SUPPORTED_MASTER_FORMATS.get(normalized_mime_type)
+    if expected_format is None:
         raise ValidationError(
-            "Approved shot master requires the image/png PNG MIME type.",
+            "Approved shot master requires an image/png or image/jpeg MIME type.",
             {"mime_type": mime_type},
         )
     if not isinstance(expected_sha256, str) or not _SHA256_PATTERN.fullmatch(expected_sha256):
@@ -59,18 +66,22 @@ def _load_approved_png(
 
     try:
         with Image.open(io.BytesIO(approved_master_bytes)) as source:
-            if source.format != "PNG":
+            if source.format != expected_format:
                 raise ValidationError(
-                    "Approved shot master bytes must contain a valid PNG image.",
-                    {"detected_format": source.format},
+                    "Approved shot master bytes must match the declared image MIME type.",
+                    {
+                        "mime_type": normalized_mime_type,
+                        "expected_format": expected_format,
+                        "detected_format": source.format,
+                    },
                 )
             source.load()
-            image = source.copy()
+            image = source.convert("RGB")
     except ValidationError:
         raise
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValidationError(
-            "Approved shot master bytes must contain a valid PNG image.",
+            "Approved shot master bytes must contain a valid PNG or JPEG image.",
             {"error": str(exc)},
         ) from exc
 
@@ -111,7 +122,7 @@ def derive_shot_deck(
     """Return the requested number of deterministic restrained master crops."""
     if isinstance(shot_count, bool) or not isinstance(shot_count, int) or shot_count < 1:
         raise ValidationError("Approved shot deck requires a positive integer shot count.")
-    master, source_sha256 = _load_approved_png(
+    master, source_sha256 = _load_approved_image(
         approved_master_bytes=approved_master_bytes,
         expected_sha256=expected_sha256,
         mime_type=mime_type,
@@ -132,8 +143,10 @@ def derive_shot_deck(
 
     profiles = []
     for profile_index, (name, crop_box) in enumerate(zip(names, crop_boxes)):
-        if profile_index == 0:
+        if profile_index == 0 and str(mime_type or "").strip().lower() == _PNG_MIME_TYPE:
             image_bytes = approved_master_bytes
+        elif profile_index == 0:
+            image_bytes = _encode_png(master)
         else:
             cropped = master.crop(crop_box)
             resized = cropped.resize((width, height), Image.Resampling.LANCZOS)

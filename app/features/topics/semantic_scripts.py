@@ -33,6 +33,12 @@ _RESPONSE_LABEL = re.compile(
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _COMPLETE_STATEMENT_END = re.compile(r"[.!?](?:[\"'»”’)\]}]+)?$")
+_INTERNAL_FALLBACK_COPY = re.compile(
+    r"\b(?:gekürzter\s+quellenauszug|quellenauszug|"
+    r"bereitgestellte[snr]?\s+vollständige[snr]?\s+quelle|"
+    r"vollständige[snr]?\s+belegte[snr]?\s+quellenmaterial)\b",
+    re.IGNORECASE,
+)
 _WORD_PATTERN = re.compile(
     r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*"
 )
@@ -228,6 +234,31 @@ Ursprünglicher Auftrag:
 {original_prompt}"""
 
 
+def _build_semantic_recovery_prompt(
+    *,
+    original_prompt: str,
+    invalid_script: str,
+    contract: SemanticDurationContract,
+) -> str:
+    return f"""Schreibe jetzt einen neuen, natürlich gesprochenen deutschen Sprechtext.
+Der vorherige Reparaturversuch ist unbrauchbar. Verwende ihn nicht als Vorlage.
+
+Verbindliche Ausgabe:
+- ausschließlich der finale Sprechtext
+- exakt {contract.minimum_take_count} vollständige Sätze
+- exakt 16 Wörter pro Satz
+- insgesamt exakt {contract.minimum_take_count * 16} Wörter
+- jeder Satz ist eigenständig verständlich und vermittelt einen konkreten belegten Nutzen oder Sicherheitshinweis
+- verwende ausschließlich Aussagen aus dem ursprünglichen Auftrag
+- keine Quellenhinweise, Zitate, Auslassungszeichen, Labels, Metatexte oder Prüfanweisungen
+
+Unbrauchbarer Reparaturversuch:
+{invalid_script}
+
+Ursprünglicher Auftrag:
+{original_prompt}"""
+
+
 def _normalized_sentences(script: str) -> list[str]:
     return [
         re.sub(r"[^\wÄÖÜäöüß]+", " ", sentence, flags=re.UNICODE)
@@ -314,6 +345,17 @@ def validate_semantic_script(
         planned_take_count=planned_take_count,
         take_count_exception=take_count_exception,
     )
+
+
+def validate_semantic_script_audience_copy(script: str) -> None:
+    """Reject recovery/debug scaffolding that must never become spoken UGC copy."""
+    cleaned = " ".join(str(script or "").split())
+    match = _INTERNAL_FALLBACK_COPY.search(cleaned)
+    if match:
+        raise ValueError(
+            "Semantic UGC script contains internal fallback copy and is not audience-safe: "
+            f"{match.group(0)!r}."
+        )
 
 
 _FALLBACK_ACTIONS: Sequence[tuple[str, str, str]] = (
@@ -1233,13 +1275,32 @@ def generate_semantic_script(
                 maximum_seconds=contract.maximum_duration_seconds,
             )
         except ValueError:
-            script = _build_fallback_script(
-                title=title,
-                cta=cta,
-                facts=fact_values,
+            recovery_prompt = _build_semantic_recovery_prompt(
+                original_prompt=prompt,
+                invalid_script=repaired_script,
                 contract=contract,
             )
-            source = "fallback"
+            recovery_raw_text = client.generate_gemini_text(
+                prompt=recovery_prompt,
+                system_prompt=SEMANTIC_SCRIPT_SYSTEM_PROMPT,
+                temperature=0,
+                thinking_budget=0,
+            )
+            recovery_script = _strip_response_wrappers(recovery_raw_text)
+            try:
+                validate_semantic_script(
+                    recovery_script,
+                    requested_duration_seconds=requested_duration_seconds,
+                    maximum_seconds=contract.maximum_duration_seconds,
+                )
+                validate_semantic_script_audience_copy(recovery_script)
+            except ValueError as recovery_validation_error:
+                raise ValueError(
+                    "Semantic UGC generation exhausted its audience-safe recovery attempts; "
+                    "the post was not created."
+                ) from recovery_validation_error
+            script = recovery_script
+            source = "gemini_recovery"
         else:
             script = repaired_script
             source = "gemini_repair"
@@ -1261,4 +1322,5 @@ __all__ = [
     "build_semantic_script_prompt",
     "generate_semantic_script",
     "validate_semantic_script",
+    "validate_semantic_script_audience_copy",
 ]

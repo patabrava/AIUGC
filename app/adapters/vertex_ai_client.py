@@ -49,6 +49,10 @@ class VertexSettings(BaseSettings):
         validation_alias=AliasChoices("VERTEX_AI_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"),
     )
     vertex_ai_location: str = Field(default="us-central1", validation_alias=AliasChoices("VERTEX_AI_LOCATION"))
+    vertex_required_principal_email: str = Field(
+        default="",
+        validation_alias=AliasChoices("VERTEX_REQUIRED_PRINCIPAL_EMAIL"),
+    )
     google_application_credentials: str = Field(
         default="",
         validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS"),
@@ -76,6 +80,7 @@ class VertexAIClient:
         self._settings = self._load_vertex_settings()
         self._http_client = httpx.Client(timeout=120.0, follow_redirects=True)
         self._credentials = None
+        self._credential_principal_verified = False
         self._initialized = True
         logger.info("vertex_ai_client_initialized")
 
@@ -487,7 +492,40 @@ class VertexAIClient:
                 self._credentials = self._credentials.with_quota_project(quota_project_id)
         if self._credentials.expired or not self._credentials.token:
             self._credentials.refresh(Request())
+        self._verify_required_principal(self._credentials)
         return self._credentials
+
+    def _verify_required_principal(self, credentials: Any) -> None:
+        expected_email = str(
+            getattr(self._settings, "vertex_required_principal_email", "") or ""
+        ).strip().casefold()
+        if not expected_email or self._credential_principal_verified:
+            return
+        try:
+            response = self._http_client.get(
+                "https://openidconnect.googleapis.com/v1/userinfo",
+                headers={"Authorization": f"Bearer {credentials.token}"},
+            )
+            response.raise_for_status()
+            actual_email = str(response.json().get("email") or "").strip().casefold()
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            raise ValidationError(
+                "Vertex AI credential identity could not be verified; video submission is blocked.",
+                {"required_principal_email": expected_email, "error": str(exc)},
+            ) from exc
+        if actual_email != expected_email:
+            raise ValidationError(
+                "Vertex AI credential identity does not match the required video principal.",
+                {
+                    "required_principal_email": expected_email,
+                    "actual_principal_email": actual_email or "unknown",
+                },
+            )
+        self._credential_principal_verified = True
+        logger.info(
+            "vertex_ai_credential_principal_verified",
+            principal_email=actual_email,
+        )
 
     def _build_headers(self, include_json: bool = False) -> Dict[str, str]:
         creds = self._get_credentials()

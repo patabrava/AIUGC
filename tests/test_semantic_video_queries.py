@@ -134,12 +134,14 @@ def test_get_actor_scene_plate_anchor_uses_exact_actor_and_reference_fingerprint
     from app.features.semantic_videos.queries import get_actor_scene_plate_anchor
 
     fingerprint = "a" * 64
+    contract_hash = "b" * 64
     row = {"id": "anchor-1", "actor_reference_fingerprint": fingerprint}
     client = _AnchorClient([row])
 
     result = get_actor_scene_plate_anchor(
         actor_identity_id="actor-1",
         actor_reference_fingerprint=fingerprint.upper(),
+        generation_contract_hash=contract_hash.upper(),
         client=client,
     )
 
@@ -147,6 +149,8 @@ def test_get_actor_scene_plate_anchor_uses_exact_actor_and_reference_fingerprint
     assert client.query.filters == [
         ("actor_identity_id", "actor-1"),
         ("actor_reference_fingerprint", fingerprint),
+        ("generation_contract_hash", contract_hash),
+        ("verification_status", "verified"),
     ]
 
 
@@ -164,6 +168,7 @@ def test_get_actor_scene_plate_anchor_rejects_ambiguous_identity(
         get_actor_scene_plate_anchor(
             actor_identity_id=actor_identity_id,
             actor_reference_fingerprint=fingerprint,
+            generation_contract_hash="b" * 64,
             client=_AnchorClient([]),
         )
 

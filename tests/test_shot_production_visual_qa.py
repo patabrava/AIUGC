@@ -24,9 +24,6 @@ def _image(image_bytes: bytes, mime_type: str = "image/png") -> dict:
 
 def _response(**overrides) -> str:
     payload = {
-        "identity_same_person": True,
-        "apparent_age_consistent": True,
-        "hair_consistent": True,
         "wardrobe_consistent": True,
         "room_consistent": True,
         "wheelchair_consistent": True,
@@ -59,9 +56,6 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     )
 
     assert [field.name for field in fields(VisualQAReport)] == [
-        "identity_same_person",
-        "apparent_age_consistent",
-        "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
         "wheelchair_consistent",
@@ -73,9 +67,6 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
         "passed",
     ]
     assert report == VisualQAReport(
-        identity_same_person=True,
-        apparent_age_consistent=True,
-        hair_consistent=True,
         wardrobe_consistent=True,
         room_consistent=True,
         wheelchair_consistent=True,
@@ -90,11 +81,9 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     assert llm.calls[0]["model"] == "gemini-2.5-flash"
     assert llm.calls[0]["temperature"] == 0
     prompt = llm.calls[0]["prompt"]
-    assert "Image 1 is the approved master" in prompt
+    assert "Image 1 is the approved scene-plate master" in prompt
     assert "Image 2 is the labeled multi-frame contact sheet" in prompt
-    assert "same person" in prompt
-    assert "apparent age" in prompt
-    assert "hair" in prompt
+    assert "Actor identity is evaluated separately" in prompt
     assert "exact wardrobe" in prompt
     assert "location/background" in prompt
     assert "same manual wheelchair" in prompt
@@ -111,7 +100,7 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     assert "small fixed crop differences" in prompt
     assert "natural speaking head movement" in prompt
     assert "continuous camera zoom" in prompt
-    assert "no face-recognition identification" in prompt
+    assert "scene-continuity comparison only" in prompt
     assert "JSON only" in prompt
     with pytest.raises(FrozenInstanceError):
         report.passed = False  # type: ignore[misc]
@@ -143,9 +132,6 @@ def test_visual_qa_blocks_when_same_manual_wheelchair_is_not_visible_and_consist
 @pytest.mark.parametrize(
     "failed_component",
     [
-        "identity_same_person",
-        "apparent_age_consistent",
-        "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
         "wheelchair_consistent",
@@ -230,9 +216,6 @@ def test_visual_qa_fails_closed_for_malformed_json():
 @pytest.mark.parametrize(
     "missing_field",
     [
-        "identity_same_person",
-        "apparent_age_consistent",
-        "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
         "wheelchair_consistent",
@@ -285,9 +268,6 @@ def test_visual_qa_rejects_fields_outside_the_strict_schema():
 @pytest.mark.parametrize(
     "component",
     [
-        "identity_same_person",
-        "apparent_age_consistent",
-        "hair_consistent",
         "wardrobe_consistent",
         "room_consistent",
         "wheelchair_consistent",

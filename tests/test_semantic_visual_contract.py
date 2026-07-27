@@ -50,7 +50,7 @@ def test_take_prompt_uses_frozen_scene_outfit_and_wheelchair_without_old_room_lo
     assert "room, posture" not in prompt
 
 
-def test_scene_plate_candidates_keep_actor_inputs_immutable_and_chain_from_first_plate():
+def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_inputs():
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
@@ -92,14 +92,19 @@ def test_scene_plate_candidates_keep_actor_inputs_immutable_and_chain_from_first
         b"support",
         b"location",
     ]
-    assert [item["image_bytes"] for item in client.calls[1]["input_images"]] == [
-        b"plate-1",
-        b"front",
-        b"location",
-    ]
+    assert len(client.calls) == 3
+    assert all(
+        [item["image_bytes"] for item in call["input_images"]]
+        == [b"front", b"support", b"location"]
+        for call in client.calls
+    )
+    assert all(call["model"] == "gemini-3-pro-image" for call in client.calls)
+    assert all(call["image_size"] == "2K" for call in client.calls)
     assert actor_front.image_bytes == b"front"
     assert actor_support.image_bytes == b"support"
     assert all("manual wheelchair" in call["prompt"] for call in client.calls)
+    assert all("visible pores" in call["prompt"] for call in client.calls)
+    assert all("face averaging" in call["prompt"] for call in client.calls)
 
 
 def test_scene_plate_candidates_derive_every_option_from_established_actor_anchor():
@@ -182,6 +187,43 @@ def test_actor_reference_fingerprint_is_ordered_and_byte_bound():
     )
 
 
+def test_scene_plate_generation_contract_binds_model_gate_and_actor_fingerprint():
+    from app.core.config import Settings
+    from app.features.semantic_videos.visual_contract import (
+        build_scene_plate_generation_contract,
+        validate_scene_plate_generation_contract,
+    )
+
+    settings = Settings(
+        supabase_url="https://example.supabase.co",
+        supabase_key="x",
+        supabase_service_key="y",
+        cloudflare_r2_public_base_url="https://r2.example.com",
+    )
+    contract = build_scene_plate_generation_contract(
+        actor_reference_fingerprint="a" * 64,
+        settings=settings,
+    )
+
+    assert contract["model"] == "gemini-3-pro-image"
+    assert contract["image_size"] == "2K"
+    assert contract["reference_roles"] == [
+        "actor_front",
+        "actor_three_quarter",
+        "actor_free_location",
+    ]
+    assert contract["minimum_identity_confidence"] == 0.90
+    assert len(contract["contract_hash"]) == 64
+    assert (
+        validate_scene_plate_generation_contract(
+            contract,
+            actor_reference_fingerprint="a" * 64,
+            settings=settings,
+        )
+        == contract
+    )
+
+
 def test_semantic_wardrobe_rotation_is_distinct_for_first_three_posts_and_override_wins():
     from app.features.semantic_videos.visual_contract import select_semantic_wardrobe
 
@@ -202,7 +244,9 @@ def test_semantic_wardrobe_rotation_is_distinct_for_first_three_posts_and_overri
 def test_scene_plate_master_is_bound_to_frozen_visual_contract_not_actor_front_bytes():
     from app.features.semantic_videos.handlers import _assert_scene_plate_master
     from app.features.semantic_videos.visual_contract import (
+        SCENE_IDENTITY_COMPONENT_FIELDS,
         build_actor_reference_fingerprint,
+        build_scene_plate_generation_contract,
         build_visual_contract,
     )
 
@@ -239,20 +283,48 @@ def test_scene_plate_master_is_bound_to_frozen_visual_contract_not_actor_front_b
     reference["visual_contract"] = contract
     actor_fingerprint = build_actor_reference_fingerprint(reference["actor_references"])
     reference["actor_reference_fingerprint"] = actor_fingerprint
+    generation_contract = build_scene_plate_generation_contract(
+        actor_reference_fingerprint=actor_fingerprint
+    )
+    reference["scene_plate_generation_contract"] = generation_contract
+    master_hash = sha256(b"scene-plate").hexdigest()
     scene_plate = {
         "index": 1,
         "storage_uri": "https://cdn/scene-plate.png",
         "mime_type": "image/png",
         "byte_length": 11,
-        "sha256": sha256(b"scene-plate").hexdigest(),
-        "provider_model": "gemini-3.1-flash-image",
+        "sha256": master_hash,
+        "provider_model": generation_contract["model"],
         "visual_contract_hash": contract["contract_hash"],
+        "generation_contract_hash": generation_contract["contract_hash"],
         "actor_reference_fingerprint": actor_fingerprint,
+        "identity_gate_result": {
+            "status": "passed",
+            "passed": True,
+            "evaluator_model": generation_contract["identity_evaluator_model"],
+            "evaluator_contract_version": generation_contract[
+                "identity_evaluator_contract_version"
+            ],
+            "evaluated_actor_reference_fingerprint": actor_fingerprint,
+            "candidate_sha256": master_hash,
+            "component_results": {
+                field: True for field in SCENE_IDENTITY_COMPONENT_FIELDS
+            },
+            "confidence": 0.99,
+            "blocking_reasons": [],
+            "observed_differences": [],
+        },
         "derivation_mode": "bootstrap",
         "canonical_anchor_id": None,
         "canonical_anchor_sha256": None,
     }
 
+    _assert_scene_plate_master(
+        reference_snapshot=reference,
+        master_snapshot=scene_plate,
+    )
+    scene_plate["storage_uri"] = "https://cdn/scene-plate.jpg"
+    scene_plate["mime_type"] = "image/jpeg"
     _assert_scene_plate_master(
         reference_snapshot=reference,
         master_snapshot=scene_plate,

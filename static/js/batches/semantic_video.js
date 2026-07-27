@@ -19,7 +19,7 @@
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const message = payload?.error?.message || payload?.detail || 'Semantic video request failed.';
+            const message = payload?.error?.message || payload?.message || payload?.detail || 'Semantic video request failed.';
             throw new Error(typeof message === 'string' ? message : 'Semantic video request failed.');
         }
         return payload.data || payload;
@@ -72,11 +72,11 @@
         activePolls.delete(root);
     }
 
-    function startPolling(root, force = false) {
+    function startPolling(root, force = false, immediate = true) {
         if (activePolls.has(root) || (!force && ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage))) return;
         const timer = window.setInterval(() => pollProgress(root), 8000);
         activePolls.set(root, timer);
-        pollProgress(root);
+        if (immediate) pollProgress(root);
     }
 
     async function runAction(root, button, path, body, pendingMessage) {
@@ -107,17 +107,36 @@
         if (root.dataset.semanticBound === 'true') return;
         root.dataset.semanticBound = 'true';
         const revision = () => Number(root.dataset.revision || 0);
+        const approvalButton = action(root, 'approve-master');
+        const attestation = root.querySelector('[data-identity-attestation]');
+        const updateMasterApprovalState = () => {
+            if (!approvalButton || root.dataset.stage !== 'awaiting_reference_approval') return;
+            const selected = root.querySelector('input[type="radio"][data-identity-passed="true"]:checked');
+            approvalButton.disabled = !(selected && attestation?.checked);
+        };
+        root.querySelectorAll('input[type="radio"][data-identity-passed="true"]').forEach((input) => {
+            input.addEventListener('change', updateMasterApprovalState);
+        });
+        attestation?.addEventListener('change', updateMasterApprovalState);
+        updateMasterApprovalState();
 
         action(root, 'generate-candidates')?.addEventListener('click', (event) => {
             const expected = root.dataset.revision === '' ? null : revision();
             root.dataset.waitingForCandidates = 'true';
-            startPolling(root, true);
+            startPolling(root, true, false);
             runAction(root, event.currentTarget, 'candidates', {candidate_count: 3, expected_revision: expected}, 'Locking the approved actor reference as the canonical master…');
         });
         action(root, 'approve-master')?.addEventListener('click', (event) => {
-            const selected = root.querySelector('input[type="radio"]:checked');
-            if (!selected) return setStatus(root, 'Select one master candidate first.', true);
-            runAction(root, event.currentTarget, 'master-approve', {candidate_index: Number(selected.value), expected_revision: revision(), reason: null}, 'Approving master frame…');
+            const selected = root.querySelector('input[type="radio"][data-identity-passed="true"]:checked');
+            if (!selected) return setStatus(root, 'Select a candidate whose identity gate passed.', true);
+            if (!attestation?.checked) return setStatus(root, 'Confirm the original-actor identity attestation first.', true);
+            runAction(root, event.currentTarget, 'master-approve', {
+                candidate_index: Number(selected.value),
+                expected_revision: revision(),
+                identity_attestation: true,
+                attestation_version: 'semantic-actor-identity-v1',
+                reason: null,
+            }, 'Approving identity-verified master frame…');
         });
         action(root, 'create-plan')?.addEventListener('click', (event) => {
             runAction(root, event.currentTarget, 'plan', {expected_revision: revision(), base_seed: 240713, resolution: '1080p'}, 'Building the free deterministic plan…');

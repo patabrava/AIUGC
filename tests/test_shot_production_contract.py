@@ -25,6 +25,20 @@ def _png_bytes(width: int = 90, height: int = 160) -> bytes:
     return buffer.getvalue()
 
 
+def _jpeg_bytes(width: int = 90, height: int = 160) -> bytes:
+    image = Image.new("RGB", (width, height))
+    image.putdata(
+        [
+            (x * 255 // max(width - 1, 1), y * 255 // max(height - 1, 1), (x + y) % 256)
+            for y in range(height)
+            for x in range(width)
+        ]
+    )
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=95)
+    return buffer.getvalue()
+
+
 def _beats() -> list[EditorialBeat]:
     texts = [
         "Kennst du das auch, wenn jede Stufe plötzlich zum Hindernis wird?",
@@ -100,6 +114,28 @@ def test_derive_shot_deck_returns_four_deterministic_immutable_png_variants():
         first[0].name = "changed"  # type: ignore[misc]
 
 
+def test_derive_shot_deck_accepts_jpeg_master_and_normalizes_variants_to_png():
+    from app.features.shot_production.shot_deck import derive_shot_deck
+
+    source = _jpeg_bytes()
+    expected_hash = sha256(source).hexdigest()
+
+    deck = derive_shot_deck(
+        approved_master_bytes=source,
+        expected_sha256=expected_hash,
+        mime_type="image/jpeg",
+    )
+
+    assert len(deck) == 4
+    assert deck[0].image_bytes != source
+    assert {variant.source_sha256 for variant in deck} == {expected_hash}
+    assert {variant.mime_type for variant in deck} == {"image/png"}
+    for variant in deck:
+        with Image.open(io.BytesIO(variant.image_bytes)) as image:
+            assert image.format == "PNG"
+            assert image.size == (90, 160)
+
+
 @pytest.mark.parametrize(
     ("shot_count", "expected_names"),
     [
@@ -143,9 +179,9 @@ def test_compile_veo_take_requests_requires_exact_beat_and_shot_cardinality():
     ("image_bytes", "mime_type", "expected_hash", "message"),
     [
         (_png_bytes(), "image/png", "0" * 64, "SHA-256"),
-        (_png_bytes(), "image/jpeg", sha256(_png_bytes()).hexdigest(), "PNG MIME"),
+        (_png_bytes(), "image/jpeg", sha256(_png_bytes()).hexdigest(), "declared image MIME"),
         (b"", "image/png", sha256(b"").hexdigest(), "non-empty"),
-        (b"not-an-image", "image/png", sha256(b"not-an-image").hexdigest(), "valid PNG"),
+        (b"not-an-image", "image/png", sha256(b"not-an-image").hexdigest(), "valid PNG or JPEG"),
         (_png_bytes(160, 90), "image/png", sha256(_png_bytes(160, 90)).hexdigest(), "vertical"),
         (_png_bytes(100, 120), "image/png", sha256(_png_bytes(100, 120)).hexdigest(), "9:16"),
     ],

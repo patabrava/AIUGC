@@ -29,9 +29,9 @@ GEMINI_IMAGE_MODEL_ALIASES = {
     "nano-banana-2": "gemini-2.5-flash-image",
     "nano banana 2": "gemini-2.5-flash-image",
     "nanobanana2": "gemini-2.5-flash-image",
-    "nanobananapro": "gemini-3-pro-image-preview",
-    "nano-banana-pro": "gemini-3-pro-image-preview",
-    "nano banana pro": "gemini-3-pro-image-preview",
+    "nanobananapro": "gemini-3-pro-image",
+    "nano-banana-pro": "gemini-3-pro-image",
+    "nano banana pro": "gemini-3-pro-image",
     "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
 }
 

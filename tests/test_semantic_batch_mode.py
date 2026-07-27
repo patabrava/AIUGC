@@ -38,6 +38,10 @@ RECOVERY_COALESCE_FIX_MIGRATION = (
 CANDIDATE_RELEASE_MIGRATION = (
     ROOT / "supabase/migrations/20260715000800_semantic_video_candidate_release.sql"
 )
+IDENTITY_QA_RESUME_MIGRATION = (
+    ROOT
+    / "supabase/migrations/20260726010000_semantic_video_identity_qa_resume.sql"
+)
 
 
 @pytest.fixture
@@ -881,3 +885,21 @@ def test_visual_remediation_migration_replaces_no_paid_request_and_invalidates_v
     assert "set stage = 'identity_qa'" in sql
     assert "insert into public.semantic_video_takes" not in sql
     assert "reserved_submission_count" not in sql
+
+
+def test_identity_qa_resume_migration_reuses_durable_paid_takes_without_new_submission():
+    sql = IDENTITY_QA_RESUME_MIGRATION.read_text().lower()
+
+    assert "resume_semantic_video_qa_review" in sql
+    assert "'transcript_qa', 'identity_qa', 'acoustic_qa'" in sql
+    assert "submission_state = 'completed'" in sql
+    assert "raw_artifact_sha256 !~ '^[0-9a-f]{64}$'" in sql
+    assert "then pg_catalog.jsonb_set(" in sql
+    assert "coalesce(run.artifact_manifest, '{}'::jsonb) - 'identity_qa'" in sql
+    assert "- 'actor_identity_qa'" in sql
+    assert "- 'scene_continuity_qa'" in sql
+    assert "pg_catalog.coalesce" not in sql
+    assert "- 'visual_qa'" in sql
+    assert "insert into public.semantic_video_takes" not in sql
+    assert "reserved_submission_count" not in sql
+    assert "to service_role" in sql
