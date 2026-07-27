@@ -126,6 +126,33 @@ def test_retry_guidance_keeps_rpc_guidance_and_appends_recommended_action():
     assert guidance.count(recommended_action) == 1
 
 
+def test_retry_guidance_includes_identity_blockers_in_paid_provider_prompt():
+    from app.features.semantic_videos.handlers import _retry_guidance_text
+
+    guidance = _retry_guidance_text(
+        {
+            "guidance": (
+                "Regenerate only the failed semantic beat and correct the "
+                "identity_qa evidence: Pilot visual QA failed."
+            ),
+            "qa_failure": {
+                "stage": "identity_qa",
+                "details": {
+                    "blocking_reasons": [
+                        "actor_identity:Skin texture is unnaturally smooth.",
+                        "actor_identity:The face appears synthetically beautified.",
+                    ]
+                },
+            },
+        }
+    )
+
+    assert "Correct these exact identity-QA blockers" in guidance
+    assert "Skin texture is unnaturally smooth" in guidance
+    assert "face appears synthetically beautified" in guidance
+    assert "do not smooth, beautify, retouch, or stylize the face" in guidance
+
+
 def test_retry_guidance_derives_exact_legacy_native_duration_deadline():
     from app.features.semantic_videos.handlers import _retry_guidance_text
 
