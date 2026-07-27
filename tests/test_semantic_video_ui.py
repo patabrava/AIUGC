@@ -529,6 +529,7 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     )
 
     assert 'id="semantic-video-workflow"' in html
+    assert 'id="semantic-video-post-post-1"' in html
     assert 'aria-live="polite"' in html
     assert "Wheelchair scene plate candidates" in html
     assert 'aria-label="Select wheelchair scene plate candidate 1"' in html
@@ -547,6 +548,8 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert "Continue the approved garden scene and preserve the grey cardigan." in html
     assert "standing, walking, different wheelchair" in html
     assert 'data-action="approve-master"' in html
+    assert "Continue: Build free Veo plan" in html
+    assert "Approve &amp; generate video · $0.00" in html
     assert 'data-action="approve-plan"' in html
     assert 'data-action="approve-retry"' in html
     assert 'data-cost-usd="0.00"' in html
@@ -631,10 +634,25 @@ def test_semantic_post_card_labels_stored_legacy_prompt_as_not_sent(creation_mod
             "publish_caption": None,
             "caption_source_links": [],
         },
+        batch_view={
+            "semantic_video": {
+                "posts": [
+                    {
+                        "post_id": "post-1",
+                        "stage": "awaiting_paid_approval",
+                        "plan_hash": "",
+                        "estimated_cost_usd": "0.00",
+                    }
+                ]
+            }
+        },
     )
 
     assert "Legacy Prompt Draft (not sent by Semantic pipeline)" in html
     assert "VEO Prompt (Sent to Provider)" not in html
+    assert 'href="#semantic-video-post-post-1"' in html
+    assert 'data-semantic-next-action' in html
+    assert "Continue: Build free Veo plan" in html
 
 
 def test_manual_semantic_script_form_exposes_location_and_outfit_overrides():
@@ -744,6 +762,8 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "payload?.message" in source
     assert "startPolling(root, true, false)" in source
     assert "Scene plates are still generating" in source
+    assert "reloadAtWorkflow(root)" in source
+    assert "#semantic-video-post-" in source
 
 
 def test_pending_script_blocks_scene_plate_generation_with_visible_guidance(monkeypatch):

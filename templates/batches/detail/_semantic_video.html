@@ -19,6 +19,7 @@
     <div class="space-y-5 p-4 sm:p-6">
         {% for item in semantic.posts %}
         <article
+            id="semantic-video-post-{{ item.post_id }}"
             class="rounded-2xl border border-[#1C2740]/10 p-4 sm:p-5"
             data-semantic-video-controller
             data-post-id="{{ item.post_id }}"
@@ -175,8 +176,8 @@
             <div class="mt-5 flex flex-wrap gap-2">
                 <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" {% if item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve selected scene plate</button>
-                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current %}disabled{% endif %}>Build free Veo plan</button>
-                <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve ${{ item.estimated_cost_usd }} generation</button>
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or item.plan_hash %}disabled{% endif %}>Continue: Build free Veo plan</button>
+                <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve &amp; generate video · ${{ item.estimated_cost_usd }}</button>
             </div>
             {% if item.script_review_status == 'pending' %}
             <p class="mt-2 text-sm text-amber-800" data-semantic-script-prerequisite>
