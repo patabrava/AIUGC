@@ -11,6 +11,16 @@
         target.classList.toggle('text-red-700', isError);
     }
 
+    function reloadAtWorkflow(root) {
+        const target = `#semantic-video-post-${encodeURIComponent(root.dataset.postId)}`;
+        window.history.replaceState(
+            null,
+            '',
+            `${window.location.pathname}${window.location.search}${target}`,
+        );
+        window.location.reload();
+    }
+
     async function requestJson(url, options = {}) {
         const response = await fetch(url, {
             credentials: 'same-origin',
@@ -87,7 +97,7 @@
                 method: 'POST',
                 body: JSON.stringify(body),
             });
-            window.location.reload();
+            reloadAtWorkflow(root);
         } catch (error) {
             if (path === 'candidates') {
                 await pollProgress(root);

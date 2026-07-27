@@ -15,6 +15,13 @@
 {% set is_manual_mode = batch.creation_mode in ['manual', 'manual_character_consistency'] %}
 {% set is_character_consistency_mode = batch.creation_mode in ['character_consistency', 'character_consistency_mid', 'character_consistency_light', 'manual_character_consistency'] %}
 {% set is_semantic_video_mode = batch.creation_mode in ['semantic_ugc', 'manual_semantic_ugc'] %}
+{% set semantic_video_item = none %}
+{% if is_semantic_video_mode and batch_view is defined and batch_view.semantic_video %}
+{% set semantic_video_matches = batch_view.semantic_video.posts | selectattr('post_id', 'equalto', post.id) | list %}
+{% if semantic_video_matches %}
+{% set semantic_video_item = semantic_video_matches[0] %}
+{% endif %}
+{% endif %}
 {% if is_manual_mode and not manual_post_type and display_post_type == 'value' %}
 {% set display_post_type = '' %}
 {% endif %}
@@ -728,7 +735,27 @@
                 {% endif %}
             </div>
 
-            {% if batch.state in ['S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_status in ['pending', 'failed'] %}
+            {% if is_semantic_video_mode and semantic_video_item %}
+            <div>
+                <a
+                    href="#semantic-video-post-{{ post.id }}"
+                    class="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium brand-button-primary focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition brand-focus text-white"
+                    data-semantic-next-action
+                >
+                    {% if semantic_video_item.stage == 'not_started' %}
+                    Continue: Generate scene plates
+                    {% elif semantic_video_item.stage == 'awaiting_reference_approval' %}
+                    Continue: Approve scene plate
+                    {% elif semantic_video_item.stage == 'awaiting_paid_approval' and not semantic_video_item.plan_hash %}
+                    Continue: Build free Veo plan
+                    {% elif semantic_video_item.stage == 'awaiting_paid_approval' %}
+                    Approve &amp; generate video · ${{ semantic_video_item.estimated_cost_usd }}
+                    {% else %}
+                    View Semantic video status
+                    {% endif %}
+                </a>
+            </div>
+            {% elif batch.state in ['S6_QA', 'S7_PUBLISH_PLAN', 'S8_COMPLETE'] and post.video_status in ['pending', 'failed'] %}
             <div>
                 <button
                     hx-post="/videos/{{ post.id }}/generate"
