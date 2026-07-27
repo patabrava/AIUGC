@@ -67,7 +67,6 @@
         <p>Reference provider: {{ actor.provider }}</p>
         {% if actor.provider == "gemini" %}
         <p>Generator: {{ actor.reference_generation_metadata.get("generator_model", "pending") }}</p>
-        <p>Generated 3/4 options: {{ actor.reference_generation_metadata.get("candidates", []) | length }}</p>
         {% else %}
         <p>Legacy provider LoRA: {{ actor.provider_lora_id or "pending" }}</p>
         <p>Legacy training task: {{ actor.provider_training_task_id or "pending" }}</p>

@@ -639,17 +639,16 @@ def test_actor_settings_shows_front_and_generated_three_quarter_for_review(monke
     response = TestClient(app, base_url="http://localhost").get("/settings/actor")
 
     assert response.status_code == 200
-    assert "Canonical front" in response.text
-    assert "Gemini Pro 3/4" in response.text
+    assert "Portrait view" in response.text
+    assert "3/4 view" in response.text
     assert "Identity gate passed" in response.text
     assert "96%" in response.text
     assert "https://cdn.example.com/front.png" in response.text
     assert "https://cdn.example.com/three-quarter.png" in response.text
-    assert "All Gemini Pro 3/4 options" in response.text
-    assert "Option 2" in response.text
-    assert "selected" in response.text
-    assert "https://cdn.example.com/option-1.png" in response.text
-    assert "https://cdn.example.com/option-3.png" in response.text
+    assert "All Gemini Pro 3/4 options" not in response.text
+    assert "Option 2" not in response.text
+    assert "https://cdn.example.com/option-1.png" not in response.text
+    assert "https://cdn.example.com/option-3.png" not in response.text
 
 
 def test_actor_settings_selector_layout_handles_long_actor_metadata(monkeypatch):
