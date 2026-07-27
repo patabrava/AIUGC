@@ -594,10 +594,16 @@ def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
 def _build_batch_video_generation_settings(batch_detail: Dict[str, Any], posts: list[Dict[str, Any]]) -> Dict[str, Any]:
     """Derive batch-level video settings so the UI can rehydrate across HTMX rerenders."""
     initial_model = "veo-3.1-fast-generate-001"
-    if is_character_consistency_mode(batch_detail.get("creation_mode")):
+    if (
+        is_character_consistency_mode(batch_detail.get("creation_mode"))
+        or is_semantic_ugc_mode(batch_detail.get("creation_mode"))
+    ):
         initial_model = "veo-3.1-generate-001"
 
-    if not is_character_consistency_mode(batch_detail.get("creation_mode")):
+    if (
+        not is_character_consistency_mode(batch_detail.get("creation_mode"))
+        and not is_semantic_ugc_mode(batch_detail.get("creation_mode"))
+    ):
         for post in reversed(posts):
             video_metadata = post.get("video_metadata") or {}
             if not isinstance(video_metadata, dict):
@@ -770,7 +776,8 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "final_caption_url": "",
         "take_count": 0,
         "billable_provider_seconds": 0,
-        "price_per_provider_second_usd": "0.00",
+        "provider_model": "veo-3.1-generate-001",
+        "price_per_provider_second_usd": "0.40",
         "estimated_cost_usd": "0.00",
         "generated_takes": 0,
         "verified_takes": 0,
@@ -839,7 +846,10 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         for attempt in latest
         if int(attempt.get("take_index") or 0) in failed
     )
-    price = _semantic_money(plan.get("price_per_provider_second_usd"))
+    price = _semantic_money(
+        plan.get("price_per_provider_second_usd"),
+        default="0.40",
+    )
     retry_cost = _semantic_money(Decimal(price) * retry_seconds)
     delivery_duration = artifact_manifest.get("delivery_duration_seconds")
     if delivery_duration is None:
@@ -923,6 +933,11 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "final_caption_url": final_caption_url,
         "take_count": int(plan.get("take_count") or len(latest)),
         "billable_provider_seconds": int(plan.get("billable_provider_seconds") or 0),
+        "provider_model": str(
+            plan.get("provider_model")
+            or run.get("provider_model")
+            or "veo-3.1-generate-001"
+        ),
         "price_per_provider_second_usd": price,
         "estimated_cost_usd": _semantic_money(
             plan.get("estimated_cost_usd", run.get("estimated_cost_usd"))
