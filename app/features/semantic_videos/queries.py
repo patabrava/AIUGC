@@ -1119,6 +1119,41 @@ def complete_worker_run(
     )
 
 
+def repair_completed_delivery(
+    *,
+    run_id: str,
+    expected_revision: int,
+    expected_final_video_sha256: str,
+    expected_final_caption_sha256: str,
+    final_video_uri: str,
+    final_video_sha256: str,
+    final_caption_uri: str,
+    final_caption_sha256: str,
+    artifact_manifest: Mapping[str, Any],
+    client=None,
+) -> dict[str, Any]:
+    """Atomically project QA-passed artifacts over an already-paid completed run."""
+    if expected_revision < 0:
+        raise ValidationError("Semantic video delivery repair requires a valid revision.")
+    return _transition_result(
+        _client(client).rpc(
+            "repair_completed_semantic_video_delivery",
+            {
+                "p_run_id": str(run_id),
+                "p_expected_revision": int(expected_revision),
+                "p_expected_final_video_sha256": str(expected_final_video_sha256),
+                "p_expected_final_caption_sha256": str(expected_final_caption_sha256),
+                "p_final_video_uri": str(final_video_uri),
+                "p_final_video_sha256": str(final_video_sha256),
+                "p_final_caption_uri": str(final_caption_uri),
+                "p_final_caption_sha256": str(final_caption_sha256),
+                "p_artifact_manifest": dict(artifact_manifest),
+            },
+        ),
+        operation="completed delivery repair",
+    )
+
+
 __all__ = [
     "approve_initial_plan_transition",
     "approve_master_transition",
@@ -1139,6 +1174,7 @@ __all__ = [
     "persist_worker_submission_intent",
     "persist_worker_submission_unknown",
     "release_worker_lease",
+    "repair_completed_delivery",
     "renew_worker_lease",
     "release_candidate_reservation",
     "reclaim_candidate_reservation",

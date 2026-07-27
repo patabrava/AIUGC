@@ -14,6 +14,9 @@ API_MIGRATION = ROOT / "supabase/migrations/20260713000100_semantic_video_api_tr
 WORKER_MIGRATION = ROOT / "supabase/migrations/20260713000200_semantic_video_worker.sql"
 LEASE_RENEWAL_MIGRATION = ROOT / "supabase/migrations/20260720000100_semantic_video_lease_renewal.sql"
 RECOVERY_MIGRATION = ROOT / "supabase/migrations/20260714000100_semantic_video_provider_recovery.sql"
+COMPLETED_REPAIR_MIGRATION = (
+    ROOT / "supabase/migrations/20260728000000_semantic_video_completed_delivery_repair.sql"
+)
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_worker_rpc_test"
 BATCH_ID = "00000000-0000-0000-0000-000000000101"
@@ -45,6 +48,19 @@ def test_lease_renewal_migration_is_token_fenced_and_service_role_only():
     assert "run.lease_token = p_lease_token" in sql
     assert "p_lease_seconds <= 0 OR p_lease_seconds > 3600" in sql
     assert "GRANT EXECUTE ON FUNCTION public.renew_semantic_video_lease" in sql
+    assert "TO service_role" in sql
+
+
+def test_completed_delivery_repair_is_revision_fenced_and_cannot_submit_paid_work():
+    sql = COMPLETED_REPAIR_MIGRATION.read_text()
+
+    assert "CREATE OR REPLACE FUNCTION public.repair_completed_semantic_video_delivery" in sql
+    assert "locked_run.stage IS DISTINCT FROM 'completed'" in sql
+    assert "locked_run.revision IS DISTINCT FROM p_expected_revision" in sql
+    assert "requires_paid_regeneration" in sql
+    assert "stitch_end_pan_protection_applied" in sql
+    assert "'provider_submission_created', FALSE" in sql
+    assert "GRANT EXECUTE ON FUNCTION public.repair_completed_semantic_video_delivery" in sql
     assert "TO service_role" in sql
 
 

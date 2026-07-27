@@ -3735,3 +3735,46 @@ def test_query_helpers_cover_fenced_claim_stage_retry_release_and_completion():
     assert client.calls[3]["function"] == "require_semantic_video_retry_approval"
     assert client.calls[4]["function"] == "release_semantic_video_lease"
     assert client.calls[5]["function"] == "complete_semantic_video_run"
+
+
+def test_completed_delivery_repair_helper_uses_fenced_non_provider_rpc():
+    from app.features.semantic_videos.queries import repair_completed_delivery
+
+    client = _RecordingClient(
+        {
+            "run": {"id": "run-1", "stage": "completed", "revision": 12},
+            "post_id": "post-1",
+            "provider_submission_created": False,
+        }
+    )
+    result = repair_completed_delivery(
+        run_id="run-1",
+        expected_revision=11,
+        expected_final_video_sha256="a" * 64,
+        expected_final_caption_sha256="b" * 64,
+        final_video_uri="https://storage/protected.mp4",
+        final_video_sha256="c" * 64,
+        final_caption_uri="https://storage/protected-captioned.mp4",
+        final_caption_sha256="d" * 64,
+        artifact_manifest={"delivery": {"passed": True}},
+        client=client,
+    )
+
+    assert result["provider_submission_created"] is False
+    assert client.calls == [
+        {
+            "kind": "rpc",
+            "function": "repair_completed_semantic_video_delivery",
+            "payload": {
+                "p_run_id": "run-1",
+                "p_expected_revision": 11,
+                "p_expected_final_video_sha256": "a" * 64,
+                "p_expected_final_caption_sha256": "b" * 64,
+                "p_final_video_uri": "https://storage/protected.mp4",
+                "p_final_video_sha256": "c" * 64,
+                "p_final_caption_uri": "https://storage/protected-captioned.mp4",
+                "p_final_caption_sha256": "d" * 64,
+                "p_artifact_manifest": {"delivery": {"passed": True}},
+            },
+        }
+    ]
