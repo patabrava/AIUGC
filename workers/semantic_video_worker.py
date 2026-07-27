@@ -197,6 +197,7 @@ class ProductionStageRunner:
         "acoustic_seam_plan",
         "acoustic_seam_qa",
         "delivery_visual_qa",
+        "delivery_terminal_qa",
         "caption",
         "media_qa",
         "upload_intent",

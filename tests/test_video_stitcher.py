@@ -585,6 +585,35 @@ def test_single_segment_passthrough():
     assert meta["stitch_segment_count"] == 1
 
 
+def test_single_semantic_take_excludes_terminal_drift_and_retimes_to_exact_8s(
+    tmp_path,
+):
+    clip = str(tmp_path / "single-semantic.mp4")
+    _make_clip(clip, seconds=8, color="red", width=90, height=160)
+    with open(clip, "rb") as fh:
+        source_bytes = fh.read()
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=[source_bytes],
+        post_id="single-semantic",
+        correlation_id="single-semantic",
+        target_duration_seconds=8.0,
+        terminal_tail_exclusion_seconds=0.5,
+    )
+    output_path = str(tmp_path / "single-semantic-protected.mp4")
+    with open(output_path, "wb") as fh:
+        fh.write(final_bytes)
+
+    assert final_bytes != source_bytes
+    assert _probe_duration(output_path) == pytest.approx(8.0, abs=1 / 24)
+    assert meta["stitch_applied"] is True
+    assert meta["stitch_segment_count"] == 1
+    assert meta["stitch_end_pan_protection_applied"] is True
+    assert meta["stitch_end_pan_tail_exclusion_s"] == 0.5
+    assert meta["stitch_end_pan_retime_ratio"] == pytest.approx(8.0 / 7.5)
+    assert meta["stitch_delivery_mode"] == "native_trim"
+
+
 def test_empty_input_raises():
     with pytest.raises(ValueError):
         stitch_segments(segment_videos=[], post_id="p", correlation_id="c")

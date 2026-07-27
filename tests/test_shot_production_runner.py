@@ -1522,18 +1522,53 @@ def test_compose_single_take_marks_seam_qa_not_applicable(tmp_path):
         output.write_bytes(b"captioned")
         return str(output)
 
+    stitch_calls = []
+
+    def stitch_fn(**kwargs):
+        stitch_calls.append(kwargs)
+        return (
+            b"stitched-video",
+            {
+                "stitch_final_duration_s": 8.0,
+                "stitch_segment_count": 1,
+                "stitch_end_pan_protection_applied": True,
+                "stitch_end_pan_tail_exclusion_s": 0.5,
+                "stitch_end_pan_retime_ratio": 8.0 / 7.5,
+            },
+        )
+
+    terminal_evaluations = []
+
+    def terminal_evaluator(video_path):
+        terminal_evaluations.append(Path(video_path).name)
+        reset_detected = Path(video_path).name != "stitched.mp4"
+        return {
+            "status": "reset_detected" if reset_detected else "not_detected",
+            "reset_detected": reset_detected,
+            "safe_video_end_seconds": 7.75 if reset_detected else None,
+            "video_sha256": sha256(Path(video_path).read_bytes()).hexdigest(),
+        }
+
     compose_and_caption(
         manifest_path,
         _DeepgramByCall([SINGLE_TAKE_SCRIPT]),
-        stitch_fn=lambda **_kwargs: (
-            b"stitched-video",
-            {"stitch_final_duration_s": 8.0, "stitch_segment_count": 1},
-        ),
+        stitch_fn=stitch_fn,
         caption_fn=caption_fn,
         probe_fn=lambda _path: _valid_final_probe("8.0"),
+        source_visual_tail_evaluator=terminal_evaluator,
     )
 
     saved = _read(manifest_path)
+    assert stitch_calls[0]["trim_windows"] is None
+    assert stitch_calls[0]["target_duration_seconds"] == 8.0
+    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == 0.5
+    assert terminal_evaluations == [
+        Path(take["raw"]["path"]).name,
+        "stitched.mp4",
+    ]
+    assert saved["source_visual_tail_qa"]["takes"][0]["reset_detected"] is True
+    assert saved["delivery_terminal_qa"]["passed"] is True
+    assert saved["delivery_terminal_qa"]["reset_detected"] is False
     assert saved["seam_qa"] == {
         "status": "not_applicable",
         "passed": True,

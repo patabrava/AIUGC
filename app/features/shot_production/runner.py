@@ -58,6 +58,8 @@ from app.features.shot_production.composer import (
 from app.features.shot_production.duration import (
     DELIVERY_CONTRACT_FPS,
     EXACT_SHORT_FORM_DURATION_SECONDS,
+    MINIMUM_SEMANTIC_UGC_DURATION_SECONDS,
+    SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS,
 )
 from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
 from app.features.shot_production.prompts import (
@@ -165,6 +167,7 @@ def _clear_downstream_artifacts(payload: Dict[str, Any]) -> None:
         "acoustic_seam_plan",
         "acoustic_seam_qa",
         "delivery_visual_qa",
+        "delivery_terminal_qa",
         "acoustic_plan_failure",
         "caption",
         "media_qa",
@@ -1070,6 +1073,7 @@ def transcribe_and_validate_takes(
             "acoustic_seam_plan",
             "acoustic_seam_qa",
             "delivery_visual_qa",
+            "delivery_terminal_qa",
             "caption",
             "media_qa",
             "upload",
@@ -2276,9 +2280,16 @@ def compose_and_caption(
     payload = _load_manifest(manifest_path)
     duration_contract = _validate_duration_planning_contract(payload)
     requested_duration = float(duration_contract["requested"])
+    single_take_terminal_protection = bool(
+        len(payload.get("takes") or []) == 1
+        and requested_duration == float(MINIMUM_SEMANTIC_UGC_DURATION_SECONDS)
+    )
     exact_delivery_target = (
         requested_duration
-        if requested_duration == float(EXACT_SHORT_FORM_DURATION_SECONDS)
+        if (
+            requested_duration == float(EXACT_SHORT_FORM_DURATION_SECONDS)
+            or single_take_terminal_protection
+        )
         else None
     )
     minimum_duration = float(duration_contract["minimum"])
@@ -2323,10 +2334,20 @@ def compose_and_caption(
                 == (payload.get("stitch") or {}).get("sha256")
             )
         )
+        delivery_terminal_report = payload.get("delivery_terminal_qa") or {}
+        delivery_terminal_ready = (
+            not single_take_terminal_protection
+            or (
+                delivery_terminal_report.get("passed") is True
+                and delivery_terminal_report.get("video_sha256")
+                == (payload.get("stitch") or {}).get("sha256")
+            )
+        )
         if (
             (payload.get("seam_qa") or {}).get("passed")
             and acoustic_ready
             and delivery_visual_ready
+            and delivery_terminal_ready
             and media_qa["passed"]
         ):
             return existing_caption
@@ -2370,6 +2391,48 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
     segment_videos = [path.read_bytes() for path in segment_paths]
     trim_windows = [take["trim_window"] for take in ordered]
+    if single_take_terminal_protection:
+        protected_source_end = (
+            requested_duration - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+        )
+        transcript_safe_end = float(
+            ordered[0]["trim_window"]["end_seconds"]
+        )
+        if transcript_safe_end > protected_source_end + 1e-6:
+            raise ValidationError(
+                "Single-take terminal protection would cut transcript-safe context.",
+                {
+                    "failure_type": "terminal_tail_speech_overlap",
+                    "take_index": int(ordered[0]["index"]),
+                    "transcript_safe_end_seconds": transcript_safe_end,
+                    "protected_source_end_seconds": protected_source_end,
+                    "recommended_retry_take_indexes": [int(ordered[0]["index"])],
+                },
+            )
+        try:
+            source_tail_report = source_visual_tail_evaluator(segment_paths[0])
+        except (ValueError, ValidationError) as exc:
+            source_tail_report = {
+                "status": "unavailable",
+                "reset_detected": False,
+                "safe_video_end_seconds": None,
+                "error": str(exc),
+            }
+        payload["source_visual_tail_qa"] = {
+            "status": "evaluated",
+            "passed": True,
+            "takes": [
+                {
+                    **dict(source_tail_report),
+                    "take_index": int(ordered[0]["index"]),
+                    "attempt": int(ordered[0].get("attempt") or 1),
+                    "source_raw_sha256": str(
+                        (ordered[0].get("raw") or {}).get("sha256") or ""
+                    ),
+                }
+            ],
+        }
+        _atomic_write_json(manifest_path, payload)
     acoustic_plan = None
     if acoustic_seams:
         source_visual_tail_records = []
@@ -2532,7 +2595,9 @@ def compose_and_caption(
         segment_videos=segment_videos,
         post_id=payload["run_id"],
         correlation_id=f"semantic_ugc_{payload['run_id']}_stitch",
-        trim_windows=trim_windows,
+        trim_windows=(
+            None if single_take_terminal_protection else trim_windows
+        ),
         acoustic_plan=(
             payload["acoustic_seam_plan"]
             if acoustic_plan is not None
@@ -2541,6 +2606,20 @@ def compose_and_caption(
         **(
             {"target_duration_seconds": exact_delivery_target}
             if exact_delivery_target is not None
+            else {}
+        ),
+        **(
+            {
+                "terminal_tail_exclusion_seconds": (
+                    SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+                )
+            }
+            if single_take_terminal_protection
+            or (
+                acoustic_plan is not None
+                and exact_delivery_target
+                == float(EXACT_SHORT_FORM_DURATION_SECONDS)
+            )
             else {}
         ),
     )
@@ -2553,6 +2632,51 @@ def compose_and_caption(
         "probe": _probe_media(stitched_path),
     }
     _atomic_write_json(manifest_path, payload)
+
+    if single_take_terminal_protection:
+        try:
+            delivery_terminal_qa = dict(
+                source_visual_tail_evaluator(stitched_path)
+            )
+        except (ValueError, ValidationError) as exc:
+            payload["delivery_terminal_qa"] = {
+                "status": "unavailable",
+                "passed": False,
+                "reset_detected": False,
+                "video_sha256": sha256(stitched_bytes).hexdigest(),
+                "requires_paid_regeneration": False,
+                "failure_type": "qa_service_unavailable",
+                "error": str(exc),
+            }
+            _atomic_write_json(manifest_path, payload)
+            raise ValidationError(
+                "Final single-take terminal visual QA is unavailable.",
+                {
+                    "failure_type": "qa_service_unavailable",
+                    "retry_mode": "qa_only",
+                    "requires_paid_regeneration": False,
+                },
+            ) from exc
+        delivery_terminal_qa.update(
+            {
+                "passed": not bool(
+                    delivery_terminal_qa.get("reset_detected")
+                ),
+                "video_sha256": sha256(stitched_bytes).hexdigest(),
+                "requires_paid_regeneration": False,
+            }
+        )
+        payload["delivery_terminal_qa"] = delivery_terminal_qa
+        _atomic_write_json(manifest_path, payload)
+        if delivery_terminal_qa["passed"] is not True:
+            raise ValidationError(
+                "Final single-take delivery still contains terminal camera drift.",
+                {
+                    "failure_type": "delivery_terminal_reset",
+                    "retry_mode": "qa_only",
+                    "requires_paid_regeneration": False,
+                },
+            )
 
     if acoustic_plan is not None:
         cut_times = _delivered_visual_cut_times(acoustic_plan, stitch_metadata)

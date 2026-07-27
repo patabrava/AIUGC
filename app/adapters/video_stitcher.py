@@ -356,6 +356,7 @@ def stitch_segments(
     trim_windows: Optional[List[Dict[str, Any]]] = None,
     acoustic_plan: Optional[Dict[str, Any]] = None,
     target_duration_seconds: Optional[float] = None,
+    terminal_tail_exclusion_seconds: Optional[float] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """Concatenate ordered segment videos into one mp4.
 
@@ -370,6 +371,8 @@ def stitch_segments(
             never shortened by more than one source frame. Cadence-safe source windows are used
             first, then a bounded whole-output A/V retime may fill the remaining duration. At most
             one frame/sample interval may be resolved as encoder rounding.
+        terminal_tail_exclusion_seconds: Optional source-tail margin to remove before
+            pitch-preservingly retiming the retained content to the exact delivery target.
 
     Returns:
         (final_video_bytes, stitch_metadata).
@@ -380,8 +383,13 @@ def stitch_segments(
     if not segment_videos:
         raise ValueError("stitch_segments requires at least one segment")
 
-    # A single segment needs no concatenation — return it untouched.
-    if len(segment_videos) == 1:
+    # Preserve the historical passthrough only when no delivery processing is requested.
+    if (
+        len(segment_videos) == 1
+        and not trim_windows
+        and target_duration_seconds is None
+        and terminal_tail_exclusion_seconds is None
+    ):
         logger.info(
             "stitch_single_segment_passthrough",
             post_id=post_id,
@@ -434,6 +442,34 @@ def stitch_segments(
                 raise ValueError("Acoustic plan target duration does not match stitch target")
         if target_duration_seconds is not None and target_duration_seconds <= 0:
             raise ValueError("Stitch target duration must be positive")
+        terminal_tail_exclusion = 0.0
+        if (
+            terminal_tail_exclusion_seconds is None
+            and acoustic_plan is not None
+            and target_duration_seconds is not None
+            and math.isclose(
+                target_duration_seconds,
+                EXACT_SHORT_FORM_DURATION_SECONDS,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            )
+        ):
+            terminal_tail_exclusion = (
+                SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+            )
+        elif terminal_tail_exclusion_seconds is not None:
+            terminal_tail_exclusion = _finite_plan_seconds(
+                terminal_tail_exclusion_seconds,
+                field="terminal tail exclusion",
+            )
+            if terminal_tail_exclusion <= 0:
+                raise ValueError(
+                    "Terminal tail exclusion must be a finite positive number"
+                )
+            if target_duration_seconds is None:
+                raise ValueError(
+                    "Terminal tail exclusion requires an exact delivery target"
+                )
         delivery_retime_ratio = 1.0
         if acoustic_plan is not None and acoustic_plan.get("delivery_retime_ratio") is not None:
             delivery_retime_ratio = _finite_plan_seconds(
@@ -631,18 +667,9 @@ def stitch_segments(
                 )
             final_audio_label = "adelivery"
 
-        if (
-            acoustic_plan is not None
-            and target_duration_seconds is not None
-            and math.isclose(
-                target_duration_seconds,
-                EXACT_SHORT_FORM_DURATION_SECONDS,
-                rel_tol=0.0,
-                abs_tol=1e-6,
-            )
-        ):
+        if terminal_tail_exclusion > 0 and target_duration_seconds is not None:
             protected_content_duration = (
-                target_duration_seconds - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+                target_duration_seconds - terminal_tail_exclusion
             )
             if protected_content_duration <= 0:
                 raise ValueError("End-pan protection requires a positive retained duration")
@@ -753,7 +780,7 @@ def stitch_segments(
         "stitch_delivery_mode": delivery_mode,
         "stitch_end_pan_protection_applied": end_pan_protection_applied,
         "stitch_end_pan_tail_exclusion_s": (
-            SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+            terminal_tail_exclusion
             if end_pan_protection_applied
             else 0.0
         ),
