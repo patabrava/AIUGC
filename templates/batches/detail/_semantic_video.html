@@ -39,7 +39,9 @@
                 </span>
             </div>
 
-            <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Veo model</dt><dd class="mt-1 font-bold text-[#1C2740]">Veo 3.1</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Video + audio rate</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.price_per_provider_second_usd }}/s</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Scene plate</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.master_state | replace('_', ' ') }}</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Takes</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.take_count }}</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Provider seconds</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.billable_provider_seconds }}s</dd></div>

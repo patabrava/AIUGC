@@ -92,6 +92,8 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
     assert item["initial_plan_is_approved"] is True
     assert item["take_count"] == 7
     assert item["billable_provider_seconds"] == 56
+    assert item["provider_model"] == "veo-3.1-generate-001"
+    assert item["price_per_provider_second_usd"] == "0.40"
     assert item["estimated_cost_usd"] == "22.40"
     assert item["generated_takes"] == 7
     assert item["verified_takes"] == 6
@@ -99,6 +101,13 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
     assert item["retry_provider_seconds"] == 16
     assert item["retry_estimated_cost_usd"] == "6.40"
     assert item["latest_attempts"][2]["attempt"] == 1
+
+    html = Environment(loader=FileSystemLoader("templates")).get_template(
+        "batches/detail/_semantic_video.html"
+    ).render(batch=_semantic_batch(), batch_view=view)
+    assert "Veo 3.1" in html
+    assert "$0.40/s" in html
+    assert "$22.40" in html
 
 
 def test_semantic_projection_reads_delivery_duration_from_worker_manifest(monkeypatch):
@@ -139,6 +148,8 @@ def test_semantic_projection_reads_delivery_duration_from_worker_manifest(monkey
     )
 
     assert item["delivery_duration_seconds"] == 16.0
+    assert item["provider_model"] == "veo-3.1-generate-001"
+    assert item["price_per_provider_second_usd"] == "0.40"
 
 
 def test_identity_qa_service_failure_renders_free_resume_instead_of_paid_retry(
@@ -410,17 +421,22 @@ def test_legacy_projection_does_not_query_or_render_semantic_workflow(monkeypatc
     assert "semantic_video.js" not in html
 
 
-def test_manual_semantic_projection_and_template_render_semantic_workflow(monkeypatch):
+@pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
+def test_semantic_modes_render_workflow_without_generic_model_selector(
+    monkeypatch,
+    creation_mode,
+):
     monkeypatch.setattr(
         batch_handlers.semantic_video_queries,
         "get_run_by_post",
         lambda post_id: None,
     )
     batch = _semantic_batch()
-    batch["creation_mode"] = "manual_semantic_ugc"
+    batch["creation_mode"] = creation_mode
 
     view = batch_handlers._build_batch_detail_view(batch)
     assert view["semantic_video"] is not None
+    assert view["video_generation_settings"]["initial_model"] == "veo-3.1-generate-001"
 
     env = Environment(loader=FileSystemLoader("templates"))
     html = env.get_template("batches/detail.html").render(
@@ -430,6 +446,9 @@ def test_manual_semantic_projection_and_template_render_semantic_workflow(monkey
     )
     assert "semantic-video-workflow" in html
     assert "semantic_video.js" in html
+    assert "Batch Video Generation Settings" not in html
+    assert "Veo 3.1 Fast" not in html
+    assert "Veo 3.1 Lite" not in html
 
 
 def test_semantic_partial_has_accessible_hash_gated_approval_controls():
