@@ -406,8 +406,8 @@ _FALLBACK_NEGATION_MARKERS = frozenset(
         "ohne",
     }
 )
-_FALLBACK_EXCERPT_LABEL = "Quellenauszug:"
-_FALLBACK_SHORTENED_LABEL = "Gekürzter Quellenauszug:"
+_FALLBACK_EXCERPT_LABEL = "Wichtig:"
+_FALLBACK_SHORTENED_LABEL = "Wichtig bleibt:"
 _FALLBACK_ANCHOR_STOPWORDS = _FALLBACK_SAFE_MARKERS | frozenset(
     {
         "am",
@@ -454,13 +454,13 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
         (
             "Prüfe",
             _FALLBACK_SOURCE_PLACEHOLDER,
-            "direkt",
-            "an",
-            "der",
-            "bereitgestellten",
-            "vollständigen",
-            "Quelle",
-            "nach",
+            "rechtzeitig",
+            "und",
+            "plane",
+            "deine",
+            "sichere",
+            "Alternative",
+            "sorgfältig",
         ),
     ),
     (
@@ -468,13 +468,13 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
         (
             "Vergleiche",
             _FALLBACK_SOURCE_PLACEHOLDER,
-            "vorab",
-            "sorgfältig",
+            "früh",
             "mit",
-            "dem",
-            "vollständigen",
-            "belegten",
-            "Quellenmaterial",
+            "deinem",
+            "konkreten",
+            "Reiseplan",
+            "und",
+            "Bedarf",
         ),
     ),
     (
@@ -482,12 +482,12 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
         (
             "Nutze",
             _FALLBACK_SOURCE_PLACEHOLDER,
-            "nur",
-            "mit",
-            "seinem",
-            "vollständigen",
-            "belegten",
-            "Kontext",
+            "bewusst",
+            "für",
+            "deine",
+            "nächste",
+            "sichere",
+            "Entscheidung",
             "weiter",
         ),
     ),
@@ -500,9 +500,9 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
             _FALLBACK_SOURCE_PLACEHOLDER,
             "konsequent",
             "an",
-            "die",
-            "belegte",
-            "Quelle",
+            "deinen",
+            "abgestimmten",
+            "Plan",
         ),
     ),
     (
@@ -510,12 +510,12 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
         (
             "Bewahre",
             _FALLBACK_SOURCE_PLACEHOLDER,
-            "unverändert",
+            "griffbereit",
             "für",
             "deine",
-            "weitere",
+            "nächste",
             "sorgfältige",
-            "Prüfung",
+            "Planung",
             "auf",
         ),
     ),
@@ -526,10 +526,10 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
             _FALLBACK_SOURCE_PLACEHOLDER,
             "sorgfältig",
             "in",
-            "seinen",
-            "ursprünglichen",
-            "Quellenzusammenhang",
-            "wieder",
+            "deinen",
+            "persönlichen",
+            "Reiseablauf",
+            "heute",
             "ein",
         ),
     ),
@@ -540,11 +540,11 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
             _FALLBACK_SOURCE_PLACEHOLDER,
             "nochmals",
             "direkt",
-            "am",
-            "vollständigen",
-            "bereitgestellten",
-            "Ausgangstext",
-            "sorgfältig",
+            "vor",
+            "deinem",
+            "nächsten",
+            "wichtigen",
+            "Schritt",
         ),
     ),
     (
@@ -553,11 +553,11 @@ _FALLBACK_FACT_AWARE_WRAPPERS: Sequence[tuple[int, Sequence[str]]] = (
             "Verwende",
             _FALLBACK_SOURCE_PLACEHOLDER,
             "nur",
-            "in",
-            "seiner",
-            "hier",
-            "belegten",
-            "Quellenbedeutung",
+            "passend",
+            "zu",
+            "deiner",
+            "konkreten",
+            "Situation",
             "weiter",
         ),
     ),
@@ -1168,6 +1168,23 @@ def _build_fallback_script(
     return script
 
 
+def _build_audience_safe_fallback_script(
+    *,
+    title: str,
+    cta: str,
+    facts: tuple[str, ...],
+    contract: SemanticDurationContract,
+) -> str:
+    script = _build_fallback_script(
+        title=title,
+        cta=cta,
+        facts=facts,
+        contract=contract,
+    )
+    validate_semantic_script_audience_copy(script)
+    return script
+
+
 def generate_semantic_script(
     *,
     post_type: str,
@@ -1209,7 +1226,7 @@ def generate_semantic_script(
             thinking_budget=0,
         )
     except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
-        script = _build_fallback_script(
+        script = _build_audience_safe_fallback_script(
             title=title,
             cta=cta,
             facts=fact_values,
@@ -1235,6 +1252,7 @@ def generate_semantic_script(
             requested_duration_seconds=requested_duration_seconds,
             maximum_seconds=contract.maximum_duration_seconds,
         )
+        validate_semantic_script_audience_copy(script)
     except ValueError as validation_error:
         repair_prompt = _build_semantic_repair_prompt(
             original_prompt=prompt,
@@ -1250,7 +1268,7 @@ def generate_semantic_script(
                 thinking_budget=0,
             )
         except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
-            script = _build_fallback_script(
+            script = _build_audience_safe_fallback_script(
                 title=title,
                 cta=cta,
                 facts=fact_values,
@@ -1274,18 +1292,38 @@ def generate_semantic_script(
                 requested_duration_seconds=requested_duration_seconds,
                 maximum_seconds=contract.maximum_duration_seconds,
             )
+            validate_semantic_script_audience_copy(repaired_script)
         except ValueError:
             recovery_prompt = _build_semantic_recovery_prompt(
                 original_prompt=prompt,
                 invalid_script=repaired_script,
                 contract=contract,
             )
-            recovery_raw_text = client.generate_gemini_text(
-                prompt=recovery_prompt,
-                system_prompt=SEMANTIC_SCRIPT_SYSTEM_PROMPT,
-                temperature=0,
-                thinking_budget=0,
-            )
+            try:
+                recovery_raw_text = client.generate_gemini_text(
+                    prompt=recovery_prompt,
+                    system_prompt=SEMANTIC_SCRIPT_SYSTEM_PROMPT,
+                    temperature=0,
+                    thinking_budget=0,
+                )
+            except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
+                script = _build_audience_safe_fallback_script(
+                    title=title,
+                    cta=cta,
+                    facts=fact_values,
+                    contract=contract,
+                )
+                return SemanticScriptResult(
+                    script=script,
+                    contract_hash=contract.contract_hash,
+                    provenance=_build_result_provenance(
+                        source="fallback",
+                        post_type=normalized_post_type,
+                        research_provenance=research_provenance,
+                        source_urls=source_urls,
+                        provider_error_type=type(exc).__name__,
+                    ),
+                )
             recovery_script = _strip_response_wrappers(recovery_raw_text)
             try:
                 validate_semantic_script(
@@ -1294,13 +1332,17 @@ def generate_semantic_script(
                     maximum_seconds=contract.maximum_duration_seconds,
                 )
                 validate_semantic_script_audience_copy(recovery_script)
-            except ValueError as recovery_validation_error:
-                raise ValueError(
-                    "Semantic UGC generation exhausted its audience-safe recovery attempts; "
-                    "the post was not created."
-                ) from recovery_validation_error
-            script = recovery_script
-            source = "gemini_recovery"
+            except ValueError:
+                script = _build_audience_safe_fallback_script(
+                    title=title,
+                    cta=cta,
+                    facts=fact_values,
+                    contract=contract,
+                )
+                source = "fallback"
+            else:
+                script = recovery_script
+                source = "gemini_recovery"
         else:
             script = repaired_script
             source = "gemini_repair"

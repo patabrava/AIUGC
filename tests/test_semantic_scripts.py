@@ -422,7 +422,7 @@ def test_eight_second_fallback_uses_complete_opening_sentence_from_saved_script(
     assert result.provenance["source"] == "fallback"
 
 
-def test_sixteen_second_invalid_recovery_fails_closed_instead_of_saving_excerpt_scaffolding():
+def test_sixteen_second_invalid_recovery_uses_audience_safe_fallback():
     class _InvalidTwiceLLM:
         def __init__(self):
             self.calls = 0
@@ -441,19 +441,63 @@ def test_sixteen_second_invalid_recovery_fails_closed_instead_of_saving_excerpt_
     research_provenance = {"dossier_id": "value-live-regression"}
     source_urls = ["https://example.test/value-source"]
 
-    with pytest.raises(ValueError, match="audience-safe recovery attempts"):
-        generate_semantic_script(
-            post_type="value",
-            title="Barrierefreie Wege",
-            cta="Prüfe die Route.",
-            facts=[canonical_script],
-            requested_duration_seconds=16,
-            llm_client=client,
-            research_provenance=research_provenance,
-            source_urls=source_urls,
-        )
+    result = generate_semantic_script(
+        post_type="value",
+        title="Barrierefreie Wege",
+        cta="Prüfe die Route.",
+        facts=[canonical_script],
+        requested_duration_seconds=16,
+        llm_client=client,
+        research_provenance=research_provenance,
+        source_urls=source_urls,
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=16,
+    )
 
     assert client.calls == 3
+    assert validation.planned_take_count == validation.minimum_take_count == 2
+    assert result.provenance["source"] == "fallback"
+    assert result.provenance["research"] == research_provenance
+    assert result.provenance["source_urls"] == source_urls
+    assert "Quellenauszug" not in result.script
+    validate_semantic_script_audience_copy(result.script)
+
+
+def test_sixteen_second_recovery_provider_failure_uses_audience_safe_fallback():
+    class _RecoveryUnavailableLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_gemini_text(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 3:
+                raise ThirdPartyError("provider unavailable during recovery")
+            return "Dieser Entwurf ist zu kurz."
+
+    client = _RecoveryUnavailableLLM()
+    result = generate_semantic_script(
+        post_type="lifestyle",
+        title="Sichere Reiseplanung",
+        cta="Prüfe deinen Plan.",
+        facts=[
+            "Wenn ein Aufzug ausfällt, hilft eine früh geprüfte alternative Route "
+            "bei der sicheren Ankunft."
+        ],
+        requested_duration_seconds=16,
+        llm_client=client,
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=16,
+    )
+
+    assert client.calls == 3
+    assert validation.planned_take_count == validation.minimum_take_count == 2
+    assert result.provenance["source"] == "fallback"
+    assert result.provenance["provider_error_type"] == "ThirdPartyError"
+    validate_semantic_script_audience_copy(result.script)
 
 
 @pytest.mark.parametrize("provider_available", [True, False])
@@ -697,11 +741,11 @@ def test_generic_provider_fallback_is_contract_safe_for_fact_length_matrix(
     if fact_word_count <= maximum_block_words:
         assert sentences[0].startswith(f'„{" ".join(source_words)}')
     if fact_word_count > maximum_block_words:
-        assert "Quellenauszug" in result.script
+        assert "Wichtig" in result.script
     assert result.provenance["source"] == "fallback"
 
 
-def test_fallback_quellenauszug_quotes_contain_only_ordered_source_tokens():
+def test_fallback_labeled_quotes_contain_only_ordered_source_tokens():
     class _UnavailableLLM:
         def generate_gemini_text(self, **_kwargs):
             raise ThirdPartyError("provider unavailable")
@@ -719,10 +763,13 @@ def test_fallback_quellenauszug_quotes_contain_only_ordered_source_tokens():
         requested_duration_seconds=50,
         llm_client=_UnavailableLLM(),
     )
-    quoted_spans = re.findall(r'Quellenauszug:\s*[„"]([^“”"]+)[“”"]', result.script)
+    quoted_spans = re.findall(
+        r'Wichtig(?:\s+bleibt)?:\s*[„"]([^“”"]+)[“”"]',
+        result.script,
+    )
 
-    assert result.script.count("Quellenauszug:") > 0
-    assert len(quoted_spans) == result.script.count("Quellenauszug:")
+    assert result.script.count("Wichtig") > 0
+    assert len(quoted_spans) == result.script.count("Wichtig")
     source_words = _word_tokens(fact)
     assert all(
         _is_ordered_subsequence(_word_tokens(span), source_words)
@@ -768,7 +815,7 @@ def test_shortened_fallback_quotes_are_contiguous_and_keep_middle_negation(negat
         for span in quoted_spans
     )
     assert any(negation in _word_tokens(span) for span in quoted_spans)
-    assert "Gekürzter Quellenauszug:" in result.script
+    assert "Wichtig bleibt:" in result.script
     assert "…" in result.script
 
 
@@ -831,7 +878,7 @@ def test_long_conditional_fallback_preserves_complete_clauses_in_every_beat():
     assert len(beats) == 7
     assert all(beat.text.endswith((".", "!", "?")) for beat in beats)
     assert all(
-        "Wenn" not in beat.text or "Quellenauszug" in beat.text
+        "Wenn" not in beat.text or "Wichtig" in beat.text
         for beat in beats
     )
 

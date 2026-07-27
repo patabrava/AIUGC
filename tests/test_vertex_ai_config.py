@@ -1,5 +1,4 @@
 from pathlib import Path
-import math
 from typing import Optional
 from types import SimpleNamespace
 
@@ -45,7 +44,7 @@ def test_gemini_provider_defaults_to_vertex_without_legacy_fallback(monkeypatch,
     assert settings.semantic_scene_plate_model == "gemini-3-pro-image"
     assert settings.semantic_scene_plate_image_size == "2K"
     assert settings.semantic_scene_plate_contract_version == "pro-identity-v1"
-    assert settings.semantic_scene_identity_gate_model == "gemini-3.6-flash"
+    assert settings.semantic_scene_identity_gate_model == "gemini-2.5-flash"
     assert settings.semantic_scene_identity_min_confidence == 0.90
     assert settings.semantic_video_identity_min_confidence == 0.90
 

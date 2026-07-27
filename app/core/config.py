@@ -301,7 +301,7 @@ class Settings(BaseSettings):
         min_length=1,
     )
     semantic_scene_identity_gate_model: str = Field(
-        default="gemini-3.6-flash",
+        default="gemini-2.5-flash",
         validation_alias=AliasChoices("SEMANTIC_SCENE_IDENTITY_GATE_MODEL"),
         min_length=1,
         description="Current stable multimodal Gemini model used for scene and final-video identity QA.",
