@@ -29,6 +29,7 @@ ENV/
 # Environment Variables
 .env
 .env.local
+docker-compose.override.yml
 
 # IDE
 .vscode/
