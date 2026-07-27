@@ -48,6 +48,7 @@ from app.features.semantic_videos.queries import (
     persist_semantic_video_plan,
     reclaim_candidate_reservation,
     release_candidate_reservation,
+    resume_qa_review,
     reserve_candidate_generation,
 )
 from app.features.semantic_videos.schemas import (
@@ -65,6 +66,7 @@ from app.features.semantic_videos.schemas import (
     PlanTakeResponse,
     ProgressResponse,
     ProgressTakeResponse,
+    QAReviewResumeRequest,
     RetryApprovalRequest,
 )
 from app.features.semantic_videos.service import compile_semantic_video_plan
@@ -1974,6 +1976,63 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
         estimated_cost_usd=persisted_cost,
     )
     return SuccessResponse(data=response.model_dump(mode="json"))
+
+
+@router.post("/{post_id}/qa-resume", response_model=SuccessResponse)
+def resume_qa_only_review(post_id: str, payload: QAReviewResumeRequest):
+    run = _run_or_404(post_id)
+    revision = int(run.get("revision") or 0)
+    if revision != payload.expected_revision:
+        raise StateTransitionError(
+            "Semantic video QA resume revision is stale.",
+            {
+                "expected_revision": payload.expected_revision,
+                "actual_revision": revision,
+            },
+        )
+    if str(run.get("stage") or "") != "retry_approval_required":
+        raise StateTransitionError(
+            "Semantic video run is not awaiting QA recovery.",
+            {"stage": run.get("stage")},
+        )
+    if str(run.get("plan_hash") or "") != payload.plan_hash:
+        raise StateTransitionError(
+            "Semantic video QA resume plan hash is stale.",
+            {
+                "approved_hash": payload.plan_hash,
+                "current_hash": run.get("plan_hash"),
+            },
+        )
+    artifacts = (
+        run.get("artifact_manifest")
+        if isinstance(run.get("artifact_manifest"), dict)
+        else {}
+    )
+    qa_failure = (
+        artifacts.get("qa_failure")
+        if isinstance(artifacts.get("qa_failure"), dict)
+        else {}
+    )
+    if (
+        qa_failure.get("retry_mode") != "qa_only"
+        or qa_failure.get("failure_type") != "qa_service_unavailable"
+        or qa_failure.get("stage") != "identity_qa"
+    ):
+        raise StateTransitionError(
+            "Semantic video run does not have a resumable QA-only failure."
+        )
+    updated = resume_qa_review(
+        run_id=str(run["id"]),
+        expected_revision=payload.expected_revision,
+        plan_hash=payload.plan_hash,
+    )
+    return SuccessResponse(
+        data={
+            "run_id": str(updated["id"]),
+            "revision": int(updated.get("revision") or 0),
+            "stage": str(updated.get("stage") or ""),
+        }
+    )
 
 
 @router.post("/{post_id}/cancel", response_model=SuccessResponse)

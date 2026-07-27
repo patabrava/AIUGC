@@ -21,7 +21,7 @@ import httpx
 
 from app.adapters.storage_client import get_storage_client
 from app.adapters.vertex_ai_client import VertexAIClient
-from app.core.errors import StateTransitionError, ValidationError
+from app.core.errors import StateTransitionError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
 from app.features.semantic_videos import queries
 from app.features.semantic_videos.visual_contract import (
@@ -1193,7 +1193,40 @@ class SemanticVideoWorker:
     ) -> WorkerTickResult:
         run_id = str(run["id"])
         stage = str(run["stage"])
-        result = self.stage_runner.run_stage(stage=stage, run=dict(run), takes=deepcopy_rows(takes))
+        try:
+            result = self.stage_runner.run_stage(
+                stage=stage,
+                run=dict(run),
+                takes=deepcopy_rows(takes),
+            )
+        except ThirdPartyError as exc:
+            if stage != "identity_qa":
+                raise
+            failed_indexes = sorted(
+                {int(take["take_index"]) for take in takes}
+            )
+            if not failed_indexes:
+                raise StateTransitionError(
+                    "Identity QA service failure requires durable take indexes."
+                ) from exc
+            result = {
+                "passed": False,
+                "failed_take_indexes": failed_indexes,
+                "artifacts": {
+                    "qa_failure": {
+                        "stage": stage,
+                        "message": exc.message,
+                        "details": exc.details,
+                        "failed_take_indexes": failed_indexes,
+                        "failure_type": "qa_service_unavailable",
+                        "retry_mode": "qa_only",
+                    },
+                    "guidance": (
+                        "Retry identity QA using the existing checksum-addressed "
+                        "takes. Do not submit new paid Veo work."
+                    ),
+                },
+            }
         if not isinstance(result, Mapping):
             raise StateTransitionError("Semantic video stage runner returned an invalid contract.")
         artifacts = dict(result.get("artifacts") or {})

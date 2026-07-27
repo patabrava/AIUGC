@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from PIL import Image
 import pytest
 
-from app.core.errors import StateTransitionError, ValidationError
+from app.core.errors import StateTransitionError, ThirdPartyError, ValidationError
 
 
 def _png_bytes() -> bytes:
@@ -482,6 +482,57 @@ def test_worker_persists_a_fenced_runtime_exception_before_releasing_the_lease()
         "message": "production-only failure",
         "worker_id": "worker-1",
     }
+    assert repo.events[-1][0] == "release"
+
+
+def test_identity_qa_provider_failure_stops_reclaim_loop_and_requires_free_qa_resume():
+    from workers.semantic_video_worker import SemanticVideoWorker, WorkerTickResult
+
+    repo = FakeRepo(stage="identity_qa", take_count=2)
+    for take in repo.takes:
+        take["submission_state"] = "completed"
+
+    class UnavailableIdentityQA:
+        def run_stage(self, *, stage, run, takes):
+            assert stage == "identity_qa"
+            raise ThirdPartyError(
+                "Vertex Gemini generateContent failed",
+                {"status_code": 503, "model": "gemini-2.5-flash"},
+            )
+
+    worker = SemanticVideoWorker(
+        repo=repo,
+        vertex=FakeVertex(),
+        storage=FakeStorage(repo.master),
+        stage_runner=UnavailableIdentityQA(),
+        video_loader=lambda uri: f"video:{uri}".encode(),
+        worker_id="worker-1",
+        max_inflight=2,
+        lease_seconds=120,
+    )
+
+    result = worker.tick("run-1")
+
+    assert result == WorkerTickResult(
+        run_id="run-1",
+        stage="retry_approval_required",
+        action="retry_approval_required",
+    )
+    retry_event = next(event for event in repo.events if event[0] == "retry_required")
+    assert retry_event[1] == (0, 1)
+    assert retry_event[2]["qa_failure"] == {
+        "stage": "identity_qa",
+        "message": "Vertex Gemini generateContent failed",
+        "details": {
+            "status_code": 503,
+            "model": "gemini-2.5-flash",
+        },
+        "failed_take_indexes": [0, 1],
+        "failure_type": "qa_service_unavailable",
+        "retry_mode": "qa_only",
+    }
+    assert "Do not submit new paid Veo work" in retry_event[2]["guidance"]
+    assert not any(event[0] == "worker_exception" for event in repo.events)
     assert repo.events[-1][0] == "release"
 
 

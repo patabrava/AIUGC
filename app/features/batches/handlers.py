@@ -777,6 +777,9 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "failed_take_indexes": [],
         "retry_provider_seconds": 0,
         "retry_estimated_cost_usd": "0.00",
+        "qa_resume_available": False,
+        "qa_resume_stage": "",
+        "qa_resume_message": "",
         "latest_attempts": [],
         "visual_contract": None,
         "provider_prompts": [],
@@ -857,6 +860,19 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         if isinstance(artifact_manifest.get("pipeline_manifest"), dict)
         else {}
     )
+    qa_failure = (
+        artifact_manifest.get("qa_failure")
+        if isinstance(artifact_manifest.get("qa_failure"), dict)
+        else {}
+    )
+    qa_resume_available = bool(
+        str(run.get("stage") or "") == "retry_approval_required"
+        and current_initial_approval
+        and plan_hash
+        and qa_failure.get("retry_mode") == "qa_only"
+        and qa_failure.get("failure_type") == "qa_service_unavailable"
+        and qa_failure.get("stage") == "identity_qa"
+    )
     contact_sheet = (
         pipeline_manifest.get("contact_sheet")
         if isinstance(pipeline_manifest.get("contact_sheet"), dict)
@@ -921,6 +937,9 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "failed_take_indexes": failed,
         "retry_provider_seconds": retry_seconds,
         "retry_estimated_cost_usd": retry_cost,
+        "qa_resume_available": qa_resume_available,
+        "qa_resume_stage": str(qa_failure.get("stage") or ""),
+        "qa_resume_message": str(qa_failure.get("message") or ""),
         "latest_attempts": latest,
         "visual_contract": _semantic_visual_contract(run, master),
         "provider_prompts": _semantic_provider_prompts(latest),

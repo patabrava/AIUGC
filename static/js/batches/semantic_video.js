@@ -152,6 +152,12 @@
             const failed = (button.dataset.failedIndexes || '').split(',').filter(Boolean).map(Number);
             runAction(root, button, 'retry-approve', {plan_hash: root.dataset.planHash, expected_revision: revision(), failed_take_indexes: failed, reason: null}, 'Persisting failed-take retry approval…');
         });
+        action(root, 'resume-qa')?.addEventListener('click', (event) => {
+            runAction(root, event.currentTarget, 'qa-resume', {
+                plan_hash: root.dataset.planHash,
+                expected_revision: revision(),
+            }, 'Resuming identity QA with the existing videos…');
+        });
         startPolling(root);
     }
 
