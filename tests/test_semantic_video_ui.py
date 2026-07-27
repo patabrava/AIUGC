@@ -159,6 +159,124 @@ def test_semantic_projection_reads_delivery_duration_from_worker_manifest(monkey
     assert item["price_per_provider_second_usd"] == "0.40"
 
 
+def test_semantic_projection_reads_verified_latest_take_from_pipeline_evidence(
+    monkeypatch,
+):
+    run = {
+        "id": "run-completed-8s",
+        "revision": 101,
+        "stage": "completed",
+        "requested_duration_seconds": 8,
+        "master_snapshot": {},
+        "plan_snapshot": {"take_count": 1},
+        "artifact_manifest": {
+            "pipeline_manifest": {
+                "takes": [
+                    {
+                        "index": 0,
+                        "attempt": 2,
+                        "transcript_qa": {"passed": True},
+                    }
+                ]
+            }
+        },
+    }
+    attempts = [
+        {
+            "take_index": 0,
+            "attempt": 1,
+            "submission_state": "qa_failed",
+            "transcript_result": None,
+        },
+        {
+            "take_index": 0,
+            "attempt": 2,
+            "submission_state": "completed",
+            "transcript_result": None,
+        },
+    ]
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: run,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_attempts",
+        lambda _run_id: attempts,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_approvals",
+        lambda _run_id: [],
+    )
+
+    item = batch_handlers._build_semantic_video_post_projection(
+        {"id": "post-completed-8s", "topic_title": "Verified delivery"}
+    )
+
+    assert item["generated_takes"] == 1
+    assert item["verified_takes"] == 1
+    assert item["latest_attempts"][0]["attempt"] == 2
+
+
+def test_semantic_projection_ignores_stale_pipeline_qa_attempt(monkeypatch):
+    run = {
+        "id": "run-latest-not-verified",
+        "revision": 4,
+        "stage": "generating",
+        "master_snapshot": {},
+        "plan_snapshot": {"take_count": 1},
+        "artifact_manifest": {
+            "pipeline_manifest": {
+                "takes": [
+                    {
+                        "index": 0,
+                        "attempt": 1,
+                        "transcript_qa": {"passed": True},
+                    }
+                ]
+            }
+        },
+    }
+    attempts = [
+        {
+            "take_index": 0,
+            "attempt": 1,
+            "submission_state": "completed",
+            "transcript_result": None,
+        },
+        {
+            "take_index": 0,
+            "attempt": 2,
+            "submission_state": "submitted",
+            "transcript_result": None,
+        },
+    ]
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: run,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_attempts",
+        lambda _run_id: attempts,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_approvals",
+        lambda _run_id: [],
+    )
+
+    item = batch_handlers._build_semantic_video_post_projection(
+        {"id": "post-latest-not-verified", "topic_title": "Pending retry"}
+    )
+
+    assert item["verified_takes"] == 0
+    assert item["latest_attempts"][0]["attempt"] == 2
+
+
 def test_identity_qa_service_failure_renders_free_resume_instead_of_paid_retry(
     monkeypatch,
 ):

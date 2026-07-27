@@ -709,6 +709,34 @@ def _semantic_provider_prompts(
     return prompts
 
 
+def _semantic_verified_take_count(
+    latest_attempts: list[Dict[str, Any]],
+    pipeline_manifest: Dict[str, Any],
+) -> int:
+    """Count verified latest attempts from database or persisted pipeline QA evidence."""
+    manifest_takes = pipeline_manifest.get("takes")
+    manifest_takes = manifest_takes if isinstance(manifest_takes, list) else []
+    passed_manifest_attempts = {
+        (int(take.get("index") or 0), int(take.get("attempt") or 1))
+        for take in manifest_takes
+        if isinstance(take, dict)
+        and isinstance(take.get("transcript_qa"), dict)
+        and take["transcript_qa"].get("passed") is True
+    }
+    return sum(
+        (
+            isinstance(attempt.get("transcript_result"), dict)
+            and attempt["transcript_result"].get("passed") is True
+        )
+        or (
+            int(attempt.get("take_index") or 0),
+            int(attempt.get("attempt") or 1),
+        )
+        in passed_manifest_attempts
+        for attempt in latest_attempts
+    )
+
+
 def _semantic_final_artifact_urls(
     run: Dict[str, Any],
     post: Dict[str, Any],
@@ -945,10 +973,7 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "generated_takes": sum(
             str(attempt.get("submission_state") or "") in generated_states for attempt in latest
         ),
-        "verified_takes": sum(
-            bool((attempt.get("transcript_result") or {}).get("passed"))
-            for attempt in latest
-        ),
+        "verified_takes": _semantic_verified_take_count(latest, pipeline_manifest),
         "failed_take_indexes": failed,
         "retry_provider_seconds": retry_seconds,
         "retry_estimated_cost_usd": retry_cost,
