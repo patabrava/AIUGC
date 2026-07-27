@@ -109,7 +109,7 @@
             {% if item.visual_contract %}
             <section class="mt-5 rounded-xl border border-[#006AAB]/15 bg-[#F6FAFF] p-4" aria-label="Frozen visual contract">
                 <h4 class="text-sm font-bold text-[#1C2740]">Frozen visual contract</h4>
-                <p class="mt-1 text-xs text-[#1C2740]/60">This approved contract, not the legacy prompt draft below, controls the Semantic video look.</p>
+                <p class="mt-1 text-xs text-[#1C2740]/60">This approved contract controls the Semantic video look.</p>
                 <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-3">
                     <div>
                         <dt class="font-bold text-[#006AAB]">Scene{% if item.visual_contract.scene_key %} · {{ item.visual_contract.scene_key }}{% endif %}</dt>
@@ -198,7 +198,7 @@
                     {% for provider_prompt in item.provider_prompts %}
                     <details class="rounded-xl border border-[#1C2740]/10 p-3">
                         <summary class="cursor-pointer text-sm font-bold text-[#1C2740]">
-                            Take {{ provider_prompt.take_index + 1 }} · attempt {{ provider_prompt.attempt }} · {{ provider_prompt.submission_state | replace('_', ' ') }}{% if provider_prompt.provider_model %} · {{ provider_prompt.provider_model }}{% endif %}
+                            Take {{ provider_prompt.take_index + 1 }} · attempt {{ provider_prompt.attempt }} · {% if provider_prompt.submission_state == 'qa_failed' %}video generated · QA needs attention{% elif provider_prompt.submission_state == 'failed' %}provider generation failed{% else %}{{ provider_prompt.submission_state | replace('_', ' ') }}{% endif %}{% if provider_prompt.provider_model %} · {{ provider_prompt.provider_model }}{% endif %}
                         </summary>
                         <p class="mt-3 whitespace-pre-wrap text-sm text-[#1C2740]">{{ provider_prompt.prompt }}</p>
                         {% if provider_prompt.negative_prompt %}
@@ -222,7 +222,7 @@
                 <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="resume-qa" {% if not item.initial_plan_is_approved or not item.plan_hash %}disabled{% endif %}>Retry identity QA · $0.00</button>
                 <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
                 {% else %}
-                <p class="text-sm font-bold text-amber-950">Retry only failed takes: {{ item.failed_take_indexes | join(', ') }}</p>
+                <p class="text-sm font-bold text-amber-950">Retry only failed takes: {% for take_index in item.failed_take_indexes %}{{ take_index + 1 }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
                 <p class="mt-1 text-sm text-amber-900">{{ item.retry_provider_seconds }} provider seconds · incremental cost ${{ item.retry_estimated_cost_usd }}</p>
                 <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Approve failed-take retry</button>
                 {% endif %}
@@ -230,6 +230,16 @@
             {% else %}
             <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
             <button type="button" class="hidden" data-action="resume-qa" disabled aria-hidden="true">Retry identity QA · $0.00</button>
+            {% endif %}
+
+            {% if item.stage in ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning'] %}
+            <p class="mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3 text-sm font-semibold text-[#006AAB]" role="status">
+                {% if item.stage == 'generating' %}
+                Veo is generating the approved video. An 8-second take can take several minutes; this page updates automatically.
+                {% else %}
+                The video has been generated. Automated {{ item.stage | replace('_', ' ') }} is running; this page updates automatically.
+                {% endif %}
+            </p>
             {% endif %}
 
             <p class="mt-3 min-h-5 text-sm text-[#1C2740]/70" data-field="status" aria-live="polite"></p>

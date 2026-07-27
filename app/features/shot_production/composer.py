@@ -206,6 +206,46 @@ def _transcript_words_with_sources(
     return tuple(normalized_words), tuple(source_words)
 
 
+def _expand_asr_compounds(
+    expected_words: Sequence[str],
+    actual_words: Sequence[str],
+    source_words: Sequence[Word],
+) -> Tuple[Tuple[str, ...], Tuple[Word, ...]]:
+    """Split ASR compounds when they exactly join adjacent approved-script words.
+
+    German ASR commonly emits one orthographic compound for two separately written
+    script words (for example ``Pseudo Hilfe`` -> ``Pseudohilfe``). Treating that
+    formatting choice as a missing final word both inflates WER and loses the real
+    final-word timestamp. Expansion is deliberately bounded to exact, adjacent
+    approved-script tokens so it cannot forgive changed or invented speech.
+    """
+    compound_parts: dict[str, Tuple[str, ...]] = {}
+    ambiguous_compounds: set[str] = set()
+    for start in range(len(expected_words)):
+        for width in range(2, min(4, len(expected_words) - start) + 1):
+            parts = tuple(expected_words[start : start + width])
+            compound = "".join(parts)
+            if len(compound) < 6:
+                continue
+            existing = compound_parts.get(compound)
+            if existing is not None and existing != parts:
+                ambiguous_compounds.add(compound)
+            else:
+                compound_parts[compound] = parts
+
+    expanded_words: list[str] = []
+    expanded_sources: list[Word] = []
+    for actual_word, source_word in zip(actual_words, source_words):
+        parts = compound_parts.get(actual_word)
+        if parts is None or actual_word in ambiguous_compounds:
+            expanded_words.append(actual_word)
+            expanded_sources.append(source_word)
+            continue
+        expanded_words.extend(parts)
+        expanded_sources.extend(source_word for _ in parts)
+    return tuple(expanded_words), tuple(expanded_sources)
+
+
 def _finite_non_negative_seconds(value: object) -> Optional[float]:
     try:
         seconds = float(value)
@@ -232,6 +272,11 @@ def evaluate_take_transcript(
 
     expected_words = _canonicalize_german_measurements(normalize_german_words(beat.text))
     actual_words, source_words = _transcript_words_with_sources(transcript)
+    actual_words, source_words = _expand_asr_compounds(
+        expected_words,
+        actual_words,
+        source_words,
+    )
     edit_distance = _levenshtein_distance(expected_words, actual_words)
     word_error_rate = edit_distance / max(len(expected_words), 1)
 

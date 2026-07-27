@@ -398,7 +398,7 @@
     <p class="mt-3 text-xs text-gray-500">Disclaimer: {{ seed.get('disclaimer') }}</p>
     {% endif %}
 
-    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] and not post_removed %}
+    {% if batch.state in ['S4_SCRIPTED', 'S5_PROMPTS_BUILT'] and not post_removed and not is_semantic_video_mode %}
     <div class="mt-4 sm:mt-6 border-t border-gray-200 pt-4">
         <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
             <div class="flex-1">

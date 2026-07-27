@@ -157,6 +157,39 @@ def test_one_substitution_contributes_one_word_error():
     assert evaluate_take_transcript(beat, transcript, other_beats=[], max_wer=0.25).passed
 
 
+def test_german_asr_compound_does_not_create_false_missing_last_word():
+    beat = _beat(
+        0,
+        (
+            "Der Paritätische Hessen zeigt: Respekt heißt Natürlichkeit, nicht Mitleid. "
+            "Schluss mit übergriffiger Pseudo Hilfe."
+        ),
+    )
+    transcript = _transcript(
+        ("Der", 0.08, 0.24),
+        ("Paritätische", 0.24, 0.74),
+        ("Hessen", 1.04, 1.36),
+        ("zeugt", 1.36, 1.86),
+        ("Respekt", 2.08, 2.58),
+        ("heißt", 2.64, 2.96),
+        ("Natürlichkeit", 2.96, 3.46),
+        ("nicht", 3.84, 4.16),
+        ("Mitleid", 4.16, 4.66),
+        ("Schluss", 5.04, 5.36),
+        ("mit", 5.36, 5.60),
+        ("übergriffiger", 5.60, 6.10),
+        ("Pseudohilfe", 6.40, 6.90),
+    )
+
+    qa = evaluate_take_transcript(beat, transcript, other_beats=[])
+
+    assert qa.passed is True
+    assert qa.word_error_rate == pytest.approx(1 / 14)
+    assert qa.actual_words[-2:] == ("pseudo", "hilfe")
+    assert qa.last_word_present is True
+    assert qa.final_word_end_seconds == 6.90
+
+
 def test_deepgram_numeric_formatting_does_not_reject_german_achte():
     beat = _beat(0, "Achte deshalb auf erreichbare Displays.")
     transcript = _transcript(

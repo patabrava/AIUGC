@@ -70,6 +70,10 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
             "provider_duration_seconds": 8,
             "transcript_result": {"passed": index != 2},
             "identity_qa_result": {"passed": index != 5},
+            "request_contract": {
+                "prompt": f"Persisted provider prompt {index}",
+                "provider_model": "veo-3.1-generate-001",
+            },
         }
         for index in range(7)
     ]
@@ -108,6 +112,9 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
     assert "Veo 3.1" in html
     assert "$0.40/s" in html
     assert "$22.40" in html
+    assert "video generated · QA needs attention" in html
+    assert "Retry only failed takes: 3, 6" in html
+    assert "Retry only failed takes: 2, 5" not in html
 
 
 def test_semantic_projection_reads_delivery_duration_from_worker_manifest(monkeypatch):
@@ -599,7 +606,7 @@ def test_awaiting_paid_visual_can_be_regenerated_from_live_panel():
 
 
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
-def test_semantic_post_card_labels_stored_legacy_prompt_as_not_sent(creation_mode):
+def test_semantic_post_card_omits_unused_legacy_prompt(creation_mode):
     env = Environment(loader=FileSystemLoader("templates"))
     template = env.get_template("batches/detail/_post_card.html")
     html = template.render(
@@ -648,7 +655,8 @@ def test_semantic_post_card_labels_stored_legacy_prompt_as_not_sent(creation_mod
         },
     )
 
-    assert "Legacy Prompt Draft (not sent by Semantic pipeline)" in html
+    assert "Legacy Prompt" not in html
+    assert "This is the stored legacy prompt draft." not in html
     assert "VEO Prompt (Sent to Provider)" not in html
     assert 'href="#semantic-video-post-post-1"' in html
     assert 'data-semantic-next-action' in html
