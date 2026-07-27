@@ -27,9 +27,9 @@
         {% if actor_context_error %}
           {{ actor_context_error }}
         {% elif actor_ready %}
-          Character consistency is ready for new batches.
+          Actor references are ready for new batches.
         {% else %}
-          Character consistency is blocked until training finishes.
+          Actor references are not ready yet.
         {% endif %}
       </p>
     </div>
@@ -48,7 +48,7 @@
     <div
       class="mt-2 h-3 overflow-hidden rounded-full bg-[rgba(28,39,64,0.08)]"
       role="progressbar"
-      aria-label="Actor training progress"
+      aria-label="Actor reference readiness"
       aria-valuemin="0"
       aria-valuemax="100"
       aria-valuenow="{{ actor.training_progress_percent }}"
@@ -64,9 +64,14 @@
       <summary class="cursor-pointer font-medium">Technical details</summary>
       <div class="mt-2 space-y-1">
         <p>Provider: {{ actor.provider }}</p>
-        <p>Provider LoRA: {{ actor.provider_lora_id or "pending" }}</p>
-        <p>Training task: {{ actor.provider_training_task_id or "pending" }}</p>
-        <p>Uploaded training images: {{ actor.training_images | length }}</p>
+        <p>Reference provider: {{ actor.provider }}</p>
+        {% if actor.provider == "gemini" %}
+        <p>Generator: {{ actor.reference_generation_metadata.get("generator_model", "pending") }}</p>
+        <p>Generated 3/4 options: {{ actor.reference_generation_metadata.get("candidates", []) | length }}</p>
+        {% else %}
+        <p>Legacy provider LoRA: {{ actor.provider_lora_id or "pending" }}</p>
+        <p>Legacy training task: {{ actor.provider_training_task_id or "pending" }}</p>
+        {% endif %}
       </div>
     </details>
   </div>

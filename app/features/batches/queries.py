@@ -77,24 +77,57 @@ def _semantic_actor_snapshot_from_active(actor_identity) -> tuple[str, Dict[str,
         )
 
     reference_urls = _usable_semantic_reference_urls(
-        getattr(actor_identity, "training_images", None)
+        [
+            getattr(actor_identity, "reference_front_image_url", None),
+            getattr(actor_identity, "reference_three_quarter_image_url", None),
+        ]
     )
-    if len(reference_urls) < 2:
+    reference_metadata = getattr(
+        actor_identity, "reference_generation_metadata", None
+    )
+    reference_metadata = (
+        reference_metadata if isinstance(reference_metadata, dict) else {}
+    )
+    identity_gate = reference_metadata.get("identity_gate_result")
+    identity_gate = identity_gate if isinstance(identity_gate, dict) else {}
+    reference_contract_valid = (
+        reference_metadata.get("source")
+        == "canonical_front_gemini_pro_derivative"
+        and reference_metadata.get("generator_model") == "gemini-3-pro-image"
+        and identity_gate.get("passed") is True
+    )
+    if len(reference_urls) != 2 or not reference_contract_valid:
         raise ValidationError(
-            "Cannot create a Semantic UGC batch: the active ActorIdentity needs at least two usable reference images.",
+            "Cannot create a Semantic UGC batch: the active ActorIdentity needs a canonical front reference and its verified Gemini Pro three-quarter derivative.",
             {
                 "creation_mode": "semantic_ugc",
                 "actor_identity_id": str(actor_identity.id),
                 "usable_reference_image_count": len(reference_urls),
+                "reference_contract_valid": reference_contract_valid,
                 "settings_url": "/settings/actor",
             },
         )
 
     actor_identity_id = str(actor_identity.id)
+    front_mime_type = str(
+        reference_metadata.get("front_mime_type") or "image/png"
+    )
+    three_quarter_mime_type = str(
+        reference_metadata.get("three_quarter_mime_type") or "image/png"
+    )
     return actor_identity_id, {
         "actor_identity_id": actor_identity_id,
         "name": str(actor_identity.name),
-        "reference_image_urls": reference_urls[:2],
+        "reference_image_urls": reference_urls,
+        "reference_images": [
+            {"role": "actor_front", "storage_uri": reference_urls[0], "mime_type": front_mime_type},
+            {
+                "role": "actor_three_quarter",
+                "storage_uri": reference_urls[1],
+                "mime_type": three_quarter_mime_type,
+            },
+        ],
+        "reference_contract": reference_metadata,
     }
 
 
@@ -122,11 +155,18 @@ def _validated_semantic_actor_snapshot(
             "Semantic UGC actor snapshot must match the actor and contain exactly two usable reference image URLs.",
             {"creation_mode": "semantic_ugc", "actor_identity_id": str(actor_identity_id)},
         )
-    return {
+    result = {
         "actor_identity_id": snapshot_actor_id,
         "name": name,
         "reference_image_urls": reference_urls,
     }
+    reference_images = snapshot.get("reference_images")
+    if isinstance(reference_images, list):
+        result["reference_images"] = reference_images
+    reference_contract = snapshot.get("reference_contract")
+    if isinstance(reference_contract, dict):
+        result["reference_contract"] = reference_contract
+    return result
 
 
 def _batch_has_started_video_submission(batch_id: str) -> bool:

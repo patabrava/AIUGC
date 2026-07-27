@@ -45,12 +45,15 @@ class ActorIdentityRecord(BaseModel):
     id: str
     name: str
     is_active: bool
-    provider: Literal["magnific"]
+    provider: Literal["magnific", "gemini"]
     provider_lora_id: Optional[str] = None
     provider_lora_name: Optional[str] = None
     provider_training_task_id: Optional[str] = None
     portrait_image_url: Optional[str] = None
     cover_image_url: Optional[str] = None
+    reference_front_image_url: Optional[str] = None
+    reference_three_quarter_image_url: Optional[str] = None
+    reference_generation_metadata: dict[str, Any] = Field(default_factory=dict)
     training_status: str
     training_phase: str
     training_progress_percent: int

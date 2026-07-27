@@ -61,6 +61,29 @@ def actor_identity_training_ready(identity: Optional[ActorIdentityRecord]) -> bo
     )
 
 
+def actor_identity_reference_ready(identity: Optional[ActorIdentityRecord]) -> bool:
+    if identity is None:
+        return False
+    metadata = (
+        identity.reference_generation_metadata
+        if isinstance(identity.reference_generation_metadata, dict)
+        else {}
+    )
+    gate = metadata.get("identity_gate_result")
+    gate = gate if isinstance(gate, dict) else {}
+    return bool(
+        identity.reference_front_image_url
+        and identity.reference_three_quarter_image_url
+        and metadata.get("source") == "canonical_front_gemini_pro_derivative"
+        and metadata.get("generator_model") == "gemini-3-pro-image"
+        and gate.get("passed") is True
+    )
+
+
+def actor_identity_selectable(identity: Optional[ActorIdentityRecord]) -> bool:
+    return actor_identity_training_ready(identity) or actor_identity_reference_ready(identity)
+
+
 def actor_identity_is_ready(identity: Optional[ActorIdentityRecord]) -> bool:
     return bool(identity and identity.is_active is True and actor_identity_training_ready(identity))
 
@@ -83,7 +106,7 @@ def actor_identity_preview_image_url(identity: Optional[ActorIdentityRecord]) ->
 def actor_identity_status_group(identity: ActorIdentityRecord) -> str:
     if identity.is_active:
         return "active"
-    if actor_identity_training_ready(identity):
+    if actor_identity_selectable(identity):
         return "ready"
     if identity.training_error or identity.training_phase == "failed" or identity.training_status == "failed":
         return "failed"

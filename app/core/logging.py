@@ -69,6 +69,11 @@ def configure_logging() -> None:
         stream=sys.stdout,
         level=getattr(logging, settings.log_level),
     )
+    # HTTPX logs complete request URLs at INFO, including provider API keys
+    # carried in query parameters. Provider adapters emit their own redacted,
+    # structured success and failure events.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:

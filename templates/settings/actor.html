@@ -6,7 +6,7 @@
     <p class="brand-section-eyebrow">Character Consistency</p>
     <h1 class="mt-2 text-3xl font-brand-heading font-bold text-[var(--lippe-deep-blue)]">Select the actor for new batches</h1>
     <p class="mt-3 max-w-3xl text-sm text-[color:rgba(28,39,64,0.78)]">
-      Choose the current actor, start training for a new one, and track when character consistency is ready to use.
+      Choose the current actor or create a verified Gemini image pair from one canonical frontal photo.
     </p>
   </div>
 </div>
@@ -35,23 +35,44 @@
       </p>
 
       {% if actor %}
-      <div class="mt-5 flex min-w-0 flex-col gap-4 rounded-[1.5rem] border border-[var(--lippe-border)] bg-white/70 p-4 sm:flex-row sm:items-center">
-        <div class="h-28 w-28 shrink-0 overflow-hidden rounded-[1.5rem] bg-[rgba(28,39,64,0.06)]">
-          {% if actor.primary_image_url %}
-          <img src="{{ actor.primary_image_url }}" alt="{{ actor.name }} portrait" class="h-full w-full object-cover" />
-          {% else %}
-          <div class="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-[0.22em] text-[color:rgba(28,39,64,0.55)]">
-            No portrait
-          </div>
-          {% endif %}
+      <div class="mt-5 min-w-0 rounded-[1.5rem] border border-[var(--lippe-border)] bg-white/70 p-4">
+        {% if actor.reference_front_image_url and actor.reference_three_quarter_image_url %}
+        <div class="grid grid-cols-2 gap-3" aria-label="{{ actor.name }} verified production reference pair">
+          <figure>
+            <img src="{{ actor.reference_front_image_url }}" alt="{{ actor.name }} canonical frontal reference" class="aspect-[3/4] w-full rounded-[1.25rem] bg-[rgba(28,39,64,0.06)] object-cover" />
+            <figcaption class="mt-2 text-center text-xs font-semibold text-[var(--lippe-deep-blue)]">Canonical front</figcaption>
+          </figure>
+          <figure>
+            <img src="{{ actor.reference_three_quarter_image_url }}" alt="{{ actor.name }} Gemini Pro three-quarter reference" class="aspect-[3/4] w-full rounded-[1.25rem] bg-[rgba(28,39,64,0.06)] object-cover" />
+            <figcaption class="mt-2 text-center text-xs font-semibold text-[var(--lippe-deep-blue)]">Gemini Pro 3/4</figcaption>
+          </figure>
         </div>
-        <div class="min-w-0 flex-1">
+        {% else %}
+        <div class="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
+          <div class="h-28 w-28 shrink-0 overflow-hidden rounded-[1.5rem] bg-[rgba(28,39,64,0.06)]">
+            {% if actor.primary_image_url %}
+            <img src="{{ actor.primary_image_url }}" alt="{{ actor.name }} portrait" class="h-full w-full object-cover" />
+            {% else %}
+            <div class="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-[0.22em] text-[color:rgba(28,39,64,0.55)]">
+              No portrait
+            </div>
+            {% endif %}
+          </div>
+        {% endif %}
+        <div class="mt-4 min-w-0 flex-1">
           <p class="text-sm font-semibold text-[var(--lippe-deep-blue)]">{{ actor.name }}</p>
           <p class="mt-1 break-words text-xs text-[color:rgba(28,39,64,0.66)]">Consent source: {{ actor.consent_source or "not recorded" }}</p>
           <p class="mt-3 text-sm text-[color:rgba(28,39,64,0.78)]">
-            This portrait is the quick visual reference for the actor when choosing who should run future batches.
+            {% if actor.reference_front_image_url and actor.reference_three_quarter_image_url %}
+            Review both production references before using this actor. The three-quarter view was derived from the canonical front and passed the identity gate.
+            {% else %}
+            This legacy actor does not yet have a visible verified Gemini Pro reference pair.
+            {% endif %}
           </p>
         </div>
+        {% if not (actor.reference_front_image_url and actor.reference_three_quarter_image_url) %}
+        </div>
+        {% endif %}
       </div>
       {% else %}
       <p class="mt-4 text-sm text-[color:rgba(28,39,64,0.72)]">No active actor selected yet.</p>
@@ -131,21 +152,23 @@
 <section class="brand-panel mt-6 rounded-[1.75rem] p-5 sm:p-6">
   <div class="flex items-center justify-between gap-4">
     <div>
-      <p class="brand-section-eyebrow">Actor training</p>
+      <p class="brand-section-eyebrow">Actor references</p>
       <h2 class="mt-2 text-2xl font-brand-heading font-bold text-[var(--lippe-deep-blue)]">Roster</h2>
-      <p class="mt-2 text-sm text-[color:rgba(28,39,64,0.78)]">Active first, then ready actors, training actors, and failed actors.</p>
+      <p class="mt-2 text-sm text-[color:rgba(28,39,64,0.78)]">Active first, then actors with verified Gemini reference pairs and legacy actors.</p>
     </div>
     <span class="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-[var(--lippe-deep-blue)]">{{ actors | length }} total</span>
   </div>
 
   {% if actors | length == 0 %}
   <p class="mt-4 rounded-2xl border border-dashed border-[var(--lippe-border)] px-4 py-4 text-sm text-[color:rgba(28,39,64,0.72)]">
-    No ActorIdentity rows exist yet. Train a new actor below.
+    No actor reference pairs exist yet. Create one below from a canonical frontal photo.
   </p>
   {% else %}
   <div class="mt-4 divide-y divide-[var(--lippe-border)]">
     {% for row in actors %}
-    {% set row_ready = row.training_phase == "ready" and row.training_progress_percent == 100 and row.provider_lora_id and not row.training_error %}
+    {% set row_reference_gate = row.reference_generation_metadata.get("identity_gate_result", {}) %}
+    {% set row_reference_ready = row.reference_front_image_url and row.reference_three_quarter_image_url and row.reference_generation_metadata.get("generator_model") == "gemini-3-pro-image" and row_reference_gate.get("passed") %}
+    {% set row_ready = row_reference_ready or (row.training_phase == "ready" and row.training_progress_percent == 100 and row.provider_lora_id and not row.training_error) %}
     <article class="py-4">
       <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div class="flex min-w-0 gap-3">
@@ -183,7 +206,7 @@
           <div
             class="h-2 overflow-hidden rounded-full bg-[rgba(28,39,64,0.08)]"
             role="progressbar"
-            aria-label="{{ row.name }} training progress"
+            aria-label="{{ row.name }} reference readiness"
             aria-valuemin="0"
             aria-valuemax="100"
             aria-valuenow="{{ row.training_progress_percent }}"
@@ -195,6 +218,48 @@
           </p>
         </div>
       </div>
+      {% if row.reference_front_image_url and row.reference_three_quarter_image_url %}
+      {% set reference_gate = row.reference_generation_metadata.get("identity_gate_result", {}) %}
+      <div class="mt-4 rounded-2xl border border-[var(--lippe-border)] bg-white/70 p-3" aria-label="{{ row.name }} production identity references">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--lippe-deep-blue)]">Production reference review</p>
+          <span class="rounded-full px-2 py-1 text-[11px] font-semibold {% if reference_gate.get('passed') %}bg-emerald-100 text-emerald-900{% else %}bg-rose-100 text-rose-900{% endif %}">
+            Identity gate {{ "passed" if reference_gate.get("passed") else "not verified" }}
+            {% if reference_gate.get("confidence") is not none %} · {{ "%.0f"|format(reference_gate.get("confidence") * 100) }}%{% endif %}
+          </span>
+        </div>
+        <div class="mt-3 grid max-w-xl grid-cols-2 gap-3">
+          <figure>
+            <img src="{{ row.reference_front_image_url }}" alt="{{ row.name }} canonical frontal production reference" class="aspect-[3/4] w-full rounded-xl bg-[rgba(28,39,64,0.06)] object-cover" />
+            <figcaption class="mt-2 text-center text-xs font-semibold text-[var(--lippe-deep-blue)]">Canonical front</figcaption>
+          </figure>
+          <figure>
+            <img src="{{ row.reference_three_quarter_image_url }}" alt="{{ row.name }} Gemini Pro generated three-quarter production reference" class="aspect-[3/4] w-full rounded-xl bg-[rgba(28,39,64,0.06)] object-cover" />
+            <figcaption class="mt-2 text-center text-xs font-semibold text-[var(--lippe-deep-blue)]">Gemini Pro 3/4</figcaption>
+          </figure>
+        </div>
+        {% set reference_candidates = row.reference_generation_metadata.get("candidates", []) %}
+        {% if reference_candidates %}
+        <div class="mt-4 border-t border-[var(--lippe-border)] pt-4">
+          <p class="text-xs font-semibold text-[var(--lippe-deep-blue)]">All Gemini Pro 3/4 options</p>
+          <div class="mt-3 grid grid-cols-3 gap-3">
+            {% for candidate in reference_candidates %}
+            <figure class="{% if candidate.get('selected') %}rounded-xl ring-2 ring-[var(--lippe-orange)] ring-offset-2{% endif %}">
+              <img src="{{ candidate.get('image_url') }}" alt="{{ row.name }} Gemini Pro three-quarter option {{ candidate.get('index') }}" class="aspect-[3/4] w-full rounded-xl bg-[rgba(28,39,64,0.06)] object-cover" />
+              <figcaption class="mt-2 text-center text-[11px] font-semibold text-[var(--lippe-deep-blue)]">
+                Option {{ candidate.get("index") }}
+                {% if candidate.get("selected") %} · selected{% endif %}
+                {% if candidate.get("identity_gate_result", {}).get("confidence") is not none %}
+                · {{ "%.0f"|format(candidate.get("identity_gate_result", {}).get("confidence") * 100) }}%
+                {% endif %}
+              </figcaption>
+            </figure>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
     </article>
     {% endfor %}
   </div>
@@ -202,10 +267,10 @@
 </section>
 
 <section class="brand-panel mt-8 rounded-[1.75rem] p-5 sm:p-6">
-  <p class="brand-section-eyebrow">Training</p>
-  <h2 class="mt-2 text-2xl font-brand-heading font-bold text-[var(--lippe-deep-blue)]">Train new actor</h2>
+  <p class="brand-section-eyebrow">Gemini actor references</p>
+  <h2 class="mt-2 text-2xl font-brand-heading font-bold text-[var(--lippe-deep-blue)]">Create actor reference pair</h2>
   <p class="mt-2 text-sm text-[color:rgba(28,39,64,0.78)]">
-    Start one LoRA training job. The new actor starts inactive until you select it here.
+    Upload one frontal authority. Gemini Pro creates three 3/4 options, identity-checks each against the front, and selects the closest passing face. No LoRA is trained.
   </p>
 
   {% if actor_form_error %}
@@ -221,45 +286,25 @@
         <input type="text" name="name" value="{{ actor_form_values.name }}" class="mt-1 w-full rounded-xl border border-[var(--lippe-border)] bg-white px-3 py-2 text-sm focus:border-[var(--lippe-orange)] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
       </label>
       <label class="block">
-        <span class="text-sm font-medium text-[var(--lippe-deep-blue)]">Quality</span>
-        <select name="quality" class="mt-1 w-full rounded-xl border border-[var(--lippe-border)] bg-white px-3 py-2 text-sm focus:border-[var(--lippe-orange)] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20">
-          <option value="high" {% if actor_form_values.quality == "high" %}selected{% endif %}>High</option>
-          <option value="medium" {% if actor_form_values.quality == "medium" %}selected{% endif %}>Medium</option>
-          <option value="low" {% if actor_form_values.quality == "low" %}selected{% endif %}>Low</option>
-        </select>
-      </label>
-      <label class="block">
-        <span class="text-sm font-medium text-[var(--lippe-deep-blue)]">Gender</span>
-        <select name="gender" class="mt-1 w-full rounded-xl border border-[var(--lippe-border)] bg-white px-3 py-2 text-sm focus:border-[var(--lippe-orange)] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20">
-          <option value="woman" {% if actor_form_values.gender == "woman" %}selected{% endif %}>Woman</option>
-          <option value="man" {% if actor_form_values.gender == "man" %}selected{% endif %}>Man</option>
-          <option value="non-binary" {% if actor_form_values.gender == "non-binary" %}selected{% endif %}>Non-binary</option>
-        </select>
-      </label>
-      <label class="block">
         <span class="text-sm font-medium text-[var(--lippe-deep-blue)]">Consent source</span>
         <input type="text" name="consent_source" value="{{ actor_form_values.consent_source }}" class="mt-1 w-full rounded-xl border border-[var(--lippe-border)] bg-white px-3 py-2 text-sm focus:border-[var(--lippe-orange)] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" />
       </label>
     </div>
 
     <label class="block">
-      <span class="text-sm font-medium text-[var(--lippe-deep-blue)]">Description</span>
-      <textarea name="description" rows="3" class="mt-1 w-full rounded-xl border border-[var(--lippe-border)] bg-white px-3 py-2 text-sm focus:border-[var(--lippe-orange)] focus:outline-none focus:ring-2 focus:ring-[#E58434]/20" placeholder="Optional training description or guardrails.">{{ actor_form_values.description }}</textarea>
-    </label>
-
-    <label class="block">
-      <span class="text-sm font-medium text-[var(--lippe-deep-blue)]">Training images</span>
-      <input type="file" name="training_images" accept="image/png,image/jpeg" multiple required class="mt-1 w-full text-sm" />
+      <span class="text-sm font-medium text-[var(--lippe-deep-blue)]">Canonical frontal identity photo</span>
+      <input type="file" name="canonical_front_image" accept="image/png,image/jpeg" required class="mt-1 w-full text-sm" />
+      <span class="mt-1 block text-xs text-[color:rgba(28,39,64,0.65)]">Gemini Pro derives and identity-checks the three-quarter production reference from this exact face.</span>
     </label>
 
     <ol class="space-y-2 text-sm text-[color:rgba(28,39,64,0.78)]">
-      <li>1. Upload 8 to 20 clear training photos.</li>
-      <li>2. Start training and wait until the actor is marked ready.</li>
-      <li>3. Return here to switch the active actor for future batches.</li>
+      <li>1. Upload one clear frontal authority.</li>
+      <li>2. Gemini Pro generates three 3/4 options and the identity gate ranks them.</li>
+      <li>3. Review every option above, then select the actor for future Semantic batches.</li>
     </ol>
 
     <button type="submit" class="inline-flex min-h-11 items-center justify-center rounded-full bg-[var(--lippe-orange)] px-5 py-3 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-[#E58434]/30">
-      Start training
+      Generate and review 3/4 options
     </button>
   </form>
 </section>

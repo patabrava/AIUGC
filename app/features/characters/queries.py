@@ -12,7 +12,7 @@ from app.adapters.supabase_client import get_supabase
 from app.core.errors import ErrorCode, FlowForgeException
 from app.core.logging import get_logger
 from app.features.characters.actor_identity import (
-    actor_identity_training_ready,
+    actor_identity_selectable,
     derive_actor_identity_preview_images,
     sort_actor_identity_roster,
 )
@@ -291,6 +291,9 @@ def create_actor_identity(
     training_started_at: Optional[str] = None,
     training_completed_at: Optional[str] = None,
     is_active: bool = False,
+    reference_front_image_url: Optional[str] = None,
+    reference_three_quarter_image_url: Optional[str] = None,
+    reference_generation_metadata: Optional[dict[str, Any]] = None,
 ) -> ActorIdentityRecord:
     now = datetime.now(timezone.utc).isoformat()
     portrait_image_url, cover_image_url = derive_actor_identity_preview_images(training_images)
@@ -301,6 +304,9 @@ def create_actor_identity(
         "training_images": training_images,
         "portrait_image_url": portrait_image_url,
         "cover_image_url": cover_image_url,
+        "reference_front_image_url": reference_front_image_url,
+        "reference_three_quarter_image_url": reference_three_quarter_image_url,
+        "reference_generation_metadata": reference_generation_metadata or {},
         "consent_source": (consent_source or "").strip() or None,
         "training_status": training_status,
         "training_phase": training_phase,
@@ -393,7 +399,7 @@ def set_active_actor_identity(*, actor_identity_id: str, correlation_id: str) ->
             details={"actor_identity_id": actor_identity_id},
             status_code=422,
         )
-    if not actor_identity_training_ready(target):
+    if not actor_identity_selectable(target):
         logger.warning(
             "actor_identity_switch_rejected_not_ready",
             correlation_id=correlation_id,
@@ -403,7 +409,7 @@ def set_active_actor_identity(*, actor_identity_id: str, correlation_id: str) ->
         )
         raise FlowForgeException(
             code=ErrorCode.VALIDATION_ERROR,
-            message="Only ready ActorIdentity rows can be activated.",
+            message="Only actors with a ready LoRA or a verified Gemini production reference pair can be activated.",
             details={"actor_identity_id": actor_identity_id, "training_phase": target.training_phase},
             status_code=422,
         )

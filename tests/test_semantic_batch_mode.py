@@ -220,9 +220,16 @@ def test_create_batch_persists_semantic_duration_and_route(monkeypatch):
         lambda: SimpleNamespace(
             id="actor-semantic",
             name="Semantic Actor",
-            character_description="Immutable actor description.",
-            is_active=True,
-            training_images=[
+                character_description="Immutable actor description.",
+                is_active=True,
+                reference_front_image_url="https://cdn.example.com/actor-front.png",
+                reference_three_quarter_image_url="https://cdn.example.com/actor-gemini-three-quarter.png",
+                reference_generation_metadata={
+                    "source": "canonical_front_gemini_pro_derivative",
+                    "generator_model": "gemini-3-pro-image",
+                    "identity_gate_result": {"passed": True},
+                },
+                training_images=[
                 "https://cdn.example.com/actor-a.png",
                 "https://cdn.example.com/actor-b.png",
             ],
@@ -259,9 +266,16 @@ def test_create_batch_persists_manual_semantic_duration_and_route(monkeypatch):
         lambda: SimpleNamespace(
             id="actor-semantic",
             name="Semantic Actor",
-            character_description="Immutable actor description.",
-            is_active=True,
-            training_images=[
+                character_description="Immutable actor description.",
+                is_active=True,
+                reference_front_image_url="https://cdn.example.com/actor-front.png",
+                reference_three_quarter_image_url="https://cdn.example.com/actor-gemini-three-quarter.png",
+                reference_generation_metadata={
+                    "source": "canonical_front_gemini_pro_derivative",
+                    "generator_model": "gemini-3-pro-image",
+                    "identity_gate_result": {"passed": True},
+                },
+                training_images=[
                 "https://cdn.example.com/actor-a.png",
                 "https://cdn.example.com/actor-b.png",
             ],
@@ -324,13 +338,20 @@ def test_semantic_batch_requires_active_actor_with_two_usable_reference_images(m
     assert exc_info.value.status_code == 422
 
 
-def test_semantic_batch_persists_active_actor_with_exactly_two_ordered_images_without_description_or_lora(monkeypatch):
+def test_semantic_batch_persists_explicit_front_and_gemini_three_quarter_pair(monkeypatch):
     captured = {}
     actor = SimpleNamespace(
         id="actor-semantic",
         name="Semantic Actor",
         character_description=None,
         is_active=True,
+        reference_front_image_url="https://cdn.example.com/actor-front.png",
+        reference_three_quarter_image_url="https://cdn.example.com/actor-gemini-three-quarter.png",
+        reference_generation_metadata={
+            "source": "canonical_front_gemini_pro_derivative",
+            "generator_model": "gemini-3-pro-image",
+            "identity_gate_result": {"passed": True},
+        },
         training_images=[
             " https://cdn.example.com/actor-a.png ",
             "https://cdn.example.com/actor-b.png",
@@ -358,9 +379,26 @@ def test_semantic_batch_persists_active_actor_with_exactly_two_ordered_images_wi
         "actor_identity_id": "actor-semantic",
         "name": "Semantic Actor",
         "reference_image_urls": [
-            "https://cdn.example.com/actor-a.png",
-            "https://cdn.example.com/actor-b.png",
+            "https://cdn.example.com/actor-front.png",
+            "https://cdn.example.com/actor-gemini-three-quarter.png",
         ],
+        "reference_images": [
+            {
+                "role": "actor_front",
+                "storage_uri": "https://cdn.example.com/actor-front.png",
+                "mime_type": "image/png",
+            },
+            {
+                "role": "actor_three_quarter",
+                "storage_uri": "https://cdn.example.com/actor-gemini-three-quarter.png",
+                "mime_type": "image/png",
+            },
+        ],
+        "reference_contract": {
+            "source": "canonical_front_gemini_pro_derivative",
+            "generator_model": "gemini-3-pro-image",
+            "identity_gate_result": {"passed": True},
+        },
     }
 
 

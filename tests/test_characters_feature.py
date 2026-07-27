@@ -578,8 +578,6 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
             image_url="https://cdn.example.com/training.png",
         )
     )
-    sync_calls = []
-    monkeypatch.setattr(character_queries, "sync_actor_identity_roster_from_provider", lambda correlation_id: sync_calls.append(correlation_id))
     monkeypatch.setattr(character_queries, "refresh_active_actor_identity_status", lambda correlation_id: active)
     monkeypatch.setattr(character_queries, "get_active_actor_identity", lambda: active)
     monkeypatch.setattr(character_queries, "list_actor_identities", lambda: [active, ready, training])
@@ -594,8 +592,64 @@ def test_actor_settings_page_renders_ready_selector_and_full_roster(monkeypatch)
     assert 'https://cdn.example.com/active.png' in response.text
     assert 'https://cdn.example.com/ready.png' in response.text
     assert 'name="actor_identity_id" value="training"' not in response.text
-    assert "Train new actor" in response.text
-    assert sync_calls
+    assert "Create actor reference pair" in response.text
+
+
+def test_actor_settings_shows_front_and_generated_three_quarter_for_review(monkeypatch):
+    payload = _actor_row(
+        "verified",
+        is_active=True,
+        image_url="https://cdn.example.com/portrait.png",
+    )
+    payload.update(
+        {
+            "reference_front_image_url": "https://cdn.example.com/front.png",
+            "reference_three_quarter_image_url": "https://cdn.example.com/three-quarter.png",
+            "reference_generation_metadata": {
+                "source": "canonical_front_gemini_pro_derivative",
+                "generator_model": "gemini-3-pro-image",
+                "identity_gate_result": {"passed": True, "confidence": 0.96},
+                "selected_candidate_index": 2,
+                "candidates": [
+                    {
+                        "index": 1,
+                        "image_url": "https://cdn.example.com/option-1.png",
+                        "identity_gate_result": {"passed": True, "confidence": 0.93},
+                        "selected": False,
+                    },
+                    {
+                        "index": 2,
+                        "image_url": "https://cdn.example.com/three-quarter.png",
+                        "identity_gate_result": {"passed": True, "confidence": 0.96},
+                        "selected": True,
+                    },
+                    {
+                        "index": 3,
+                        "image_url": "https://cdn.example.com/option-3.png",
+                        "identity_gate_result": {"passed": True, "confidence": 0.94},
+                        "selected": False,
+                    },
+                ],
+            },
+        }
+    )
+    actor = ActorIdentityRecord.model_validate(payload)
+    _patch_actor_settings_context(monkeypatch, active=actor)
+
+    response = TestClient(app, base_url="http://localhost").get("/settings/actor")
+
+    assert response.status_code == 200
+    assert "Canonical front" in response.text
+    assert "Gemini Pro 3/4" in response.text
+    assert "Identity gate passed" in response.text
+    assert "96%" in response.text
+    assert "https://cdn.example.com/front.png" in response.text
+    assert "https://cdn.example.com/three-quarter.png" in response.text
+    assert "All Gemini Pro 3/4 options" in response.text
+    assert "Option 2" in response.text
+    assert "selected" in response.text
+    assert "https://cdn.example.com/option-1.png" in response.text
+    assert "https://cdn.example.com/option-3.png" in response.text
 
 
 def test_actor_settings_selector_layout_handles_long_actor_metadata(monkeypatch):
@@ -679,7 +733,7 @@ def test_actor_training_poll_returns_partial_with_progressbar(monkeypatch):
     response = TestClient(app, base_url="http://localhost").post("/settings/actor/poll")
 
     assert response.status_code == 200
-    assert "Character consistency is blocked until training finishes." in response.text
+    assert "Actor references are not ready yet." in response.text
     assert 'role="progressbar"' in response.text
     assert "<html" not in response.text.lower()
 
@@ -761,7 +815,7 @@ def test_generate_scene_reference_uses_lora_id_prompt_handle_and_no_seed(monkeyp
     monkeypatch.setattr(
         character_handlers.character_queries,
         "create_scene_reference_candidate",
-        lambda **kwargs: created.append(kwargs) or SimpleNamespace(**kwargs),
+        lambda **kwargs: created.append(kwargs) or kwargs,
     )
 
     response = character_handlers.generate_scene_reference("post-1")
@@ -814,6 +868,11 @@ def test_htmx_scene_reference_poll_refreshes_when_image_is_ready(monkeypatch):
 
     monkeypatch.setattr(character_handlers.character_queries, "get_scene_reference_by_id", lambda _reference_id: reference)
     monkeypatch.setattr(character_handlers, "get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr(
+        character_handlers,
+        "_store_scene_reference_image_url",
+        lambda **kwargs: (kwargs["image_url"], {"storage_status": "test"}),
+    )
     monkeypatch.setattr(
         character_handlers.character_queries,
         "mark_scene_reference_generated",
@@ -875,11 +934,9 @@ def test_refresh_active_actor_identity_status_recovers_from_poll_failure(monkeyp
     assert refreshed == actor
 
 
-def test_upload_actor_identity_submits_training_set(monkeypatch):
+def test_upload_actor_identity_creates_gemini_reference_pair(monkeypatch):
     uploaded = []
-    training_payloads = []
     creations = []
-    status_updates = []
 
     class _FakeStorage:
         def upload_image(self, **kwargs):
@@ -888,20 +945,6 @@ def test_upload_actor_identity_submits_training_set(monkeypatch):
                 "url": f"https://cdn.example.com/{kwargs['file_name']}",
                 "storage_key": f"images/{kwargs['file_name']}",
             }
-
-    class _FakeMagnific:
-        def train_character_lora(self, **kwargs):
-            training_payloads.append(kwargs)
-            from app.adapters.magnific_client import MagnificTrainingStatus
-
-            return MagnificTrainingStatus(
-                provider_training_task_id="task-123",
-                provider_lora_id="lora-123",
-                provider_lora_name="ayra_actor_test",
-                training_status="queued",
-                training_phase="queued",
-                training_progress_percent=10,
-            )
 
     def _fake_create(**kwargs):
         creations.append(kwargs)
@@ -921,69 +964,79 @@ def test_upload_actor_identity_submits_training_set(monkeypatch):
             training_error=kwargs.get("training_error"),
             training_images=list(kwargs["training_images"]),
             consent_source=kwargs.get("consent_source"),
+            reference_front_image_url=kwargs["reference_front_image_url"],
+            reference_three_quarter_image_url=kwargs["reference_three_quarter_image_url"],
+            reference_generation_metadata=kwargs["reference_generation_metadata"],
             created_at="2026-05-21T00:00:00Z",
             updated_at="2026-05-21T00:00:00Z",
         )
 
     monkeypatch.setattr(character_handlers, "get_storage_client", lambda: _FakeStorage())
     monkeypatch.setattr(character_handlers.character_queries, "create_actor_identity", _fake_create)
-    monkeypatch.setattr(character_handlers.character_queries, "update_actor_training_status", lambda **kwargs: status_updates.append(kwargs))
-    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda _actor_id: None)
-    monkeypatch.setattr(character_handlers.character_queries, "get_active_actor_identity", lambda: None)
-    monkeypatch.setattr("app.adapters.magnific_client.get_magnific_client", lambda: _FakeMagnific())
+    monkeypatch.setattr(
+        character_handlers,
+        "generate_verified_three_quarter_reference",
+        lambda *_args, **_kwargs: {
+            "image_bytes": b"three-quarter-2",
+            "mime_type": "image/png",
+            "model": "gemini-3-pro-image",
+            "identity_gate_result": {"passed": True, "confidence": 0.97},
+            "selected_index": 2,
+            "candidates": [
+                {
+                    "index": index,
+                    "image_bytes": f"three-quarter-{index}".encode(),
+                    "mime_type": "image/png",
+                    "identity_gate_result": {
+                        "passed": True,
+                        "confidence": confidence,
+                    },
+                }
+                for index, confidence in ((1, 0.94), (2, 0.97), (3, 0.95))
+            ],
+        },
+    )
 
     response = TestClient(app, base_url="http://localhost").post(
         "/settings/actor",
         data={
             "name": "AYRA Actor Identity",
-            "quality": "high",
-            "gender": "woman",
             "consent_source": "operator",
-            "description": "Test run",
         },
-        files=[
-            ("training_images", ("img1.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img2.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img3.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img4.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img5.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img6.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img7.png", io.BytesIO(_png_bytes()), "image/png")),
-            ("training_images", ("img8.png", io.BytesIO(_png_bytes()), "image/png")),
-        ],
+        files={
+            "canonical_front_image": (
+                "front.png",
+                io.BytesIO(_png_bytes()),
+                "image/png",
+            )
+        },
         follow_redirects=False,
     )
 
-    assert response.status_code in {200, 303}, response.text
-    assert len(uploaded) == 8
-    assert len(training_payloads) == 1
+    assert response.status_code == 303, response.text
+    assert len(uploaded) == 4
     assert len(creations) == 1
-    assert len(status_updates) == 1
-    assert training_payloads[0]["name"] == "AYRA Actor Identity"
-    assert training_payloads[0]["quality"] == "high"
-    assert training_payloads[0]["gender"] == "woman"
-    assert len(training_payloads[0]["image_urls"]) == 8
+    assert creations[0]["provider"] == "gemini"
+    assert creations[0]["provider_lora_id"] is None
+    assert creations[0]["provider_lora_name"] is None
+    assert creations[0]["provider_training_task_id"] is None
+    assert creations[0]["training_phase"] == "ready"
+    assert creations[0]["reference_three_quarter_image_url"].endswith(
+        "actor-gemini-pro-three-quarter-2.png"
+    )
+    assert len(creations[0]["reference_generation_metadata"]["candidates"]) == 3
     assert creations[0]["is_active"] is False
-    assert status_updates[0]["provider_training_task_id"] == "task-123"
 
 
-def test_upload_actor_identity_re_renders_inline_error_for_invalid_image_count(monkeypatch):
-    _patch_actor_settings_context(monkeypatch)
-
+def test_upload_actor_identity_rejects_missing_canonical_front():
     response = TestClient(app, base_url="http://localhost").post(
         "/settings/actor",
         data={
             "name": "Actor",
-            "quality": "high",
-            "gender": "woman",
             "consent_source": "operator",
         },
-        files=[
-            ("training_images", ("img1.png", io.BytesIO(_png_bytes()), "image/png")),
-        ],
         follow_redirects=False,
     )
 
     assert response.status_code == 422
-    assert "Upload between 8 and 20 images." in response.text
-    assert 'value="Actor"' in response.text
+    assert "canonical_front_image" in response.text

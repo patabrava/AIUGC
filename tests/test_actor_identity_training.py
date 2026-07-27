@@ -120,13 +120,12 @@ def _png_bytes() -> bytes:
     return b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 
 
-def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch):
+def test_actor_reference_endpoint_persists_ranked_gemini_options_without_lora(monkeypatch):
     from app.features.characters import handlers as character_handlers
-    from app.adapters.magnific_client import MagnificTrainingStatus
     from app.features.characters.schemas import ActorIdentityRecord
 
     uploaded_urls = []
-    submitted = {}
+    created = {}
 
     class _FakeStorage:
         def upload_image(self, **kwargs):
@@ -134,56 +133,77 @@ def test_actor_training_endpoint_uploads_public_urls_before_magnific(monkeypatch
             uploaded_urls.append(url)
             return {"url": url, "storage_key": f"images/{kwargs['file_name']}"}
 
-    class _FakeMagnific:
-        def train_character_lora(self, **kwargs):
-            submitted.update(kwargs)
-            return MagnificTrainingStatus(
-                raw_status="in_progress",
-                phase="training",
-                progress_percent=50,
-                provider_training_task_id="train-task-1",
-                provider_lora_name="AYRA",
-            )
-
     def fake_create(**kwargs):
+        created.update(kwargs)
         return ActorIdentityRecord(
             id="actor-1",
             name=kwargs["name"],
             is_active=kwargs.get("is_active", False),
-            provider="magnific",
-            training_status="not_started",
-            training_phase="not_started",
-            training_progress_percent=0,
+            provider=kwargs["provider"],
+            training_status=kwargs["training_status"],
+            training_phase=kwargs["training_phase"],
+            training_progress_percent=kwargs["training_progress_percent"],
             training_images=kwargs["training_images"],
             consent_source=kwargs["consent_source"],
+            reference_front_image_url=kwargs["reference_front_image_url"],
+            reference_three_quarter_image_url=kwargs["reference_three_quarter_image_url"],
+            reference_generation_metadata=kwargs["reference_generation_metadata"],
             created_at="2026-05-20T00:00:00Z",
             updated_at="2026-05-20T00:00:00Z",
         )
 
-    updated = {}
     monkeypatch.setattr(character_handlers, "get_storage_client", lambda: _FakeStorage())
-    monkeypatch.setattr("app.adapters.magnific_client.get_magnific_client", lambda: _FakeMagnific())
     monkeypatch.setattr(character_handlers.character_queries, "create_actor_identity", fake_create)
-    monkeypatch.setattr(character_handlers.character_queries, "get_actor_identity_by_id", lambda actor_id: fake_create(name="AYRA", training_images=uploaded_urls, consent_source="owned training set", is_active=False, correlation_id="test") if actor_id == "actor-1" else None)
-    monkeypatch.setattr(character_handlers.character_queries, "update_actor_training_status", lambda **kwargs: updated.update(kwargs))
+    monkeypatch.setattr(
+        character_handlers,
+        "generate_verified_three_quarter_reference",
+        lambda *_args, **_kwargs: {
+            "image_bytes": b"three-quarter-2",
+            "mime_type": "image/png",
+            "model": "gemini-3-pro-image",
+            "identity_gate_result": {"passed": True, "confidence": 0.97},
+            "selected_index": 2,
+            "candidates": [
+                {
+                    "index": index,
+                    "image_bytes": f"three-quarter-{index}".encode(),
+                    "mime_type": "image/png",
+                    "identity_gate_result": {
+                        "passed": True,
+                        "confidence": confidence,
+                    },
+                }
+                for index, confidence in ((1, 0.93), (2, 0.97), (3, 0.95))
+            ],
+        },
+    )
 
-    files = [
-        ("training_images", (f"actor-{idx}.png", io.BytesIO(_png_bytes()), "image/png"))
-        for idx in range(8)
-    ]
     response = TestClient(app, base_url="http://localhost").post(
         "/settings/actor",
         data={
             "name": "AYRA",
-            "gender": "female",
-            "quality": "high",
             "consent_source": "owned training set",
         },
-        files=files,
+        files={
+            "canonical_front_image": (
+                "actor-front.png",
+                io.BytesIO(_png_bytes()),
+                "image/png",
+            )
+        },
         follow_redirects=False,
     )
 
-    assert response.status_code in {200, 303}, response.text
-    assert len(uploaded_urls) == 8
-    assert submitted["image_urls"] == uploaded_urls
-    assert updated["provider_training_task_id"] == "train-task-1"
+    assert response.status_code == 303, response.text
+    assert len(uploaded_urls) == 4
+    assert created["provider"] == "gemini"
+    assert created["provider_lora_id"] is None
+    assert created["provider_lora_name"] is None
+    assert created["provider_training_task_id"] is None
+    assert created["training_phase"] == "ready"
+    assert created["training_progress_percent"] == 100
+    assert created["reference_front_image_url"] == uploaded_urls[0]
+    assert created["reference_three_quarter_image_url"] == uploaded_urls[2]
+    candidates = created["reference_generation_metadata"]["candidates"]
+    assert len(candidates) == 3
+    assert [candidate["selected"] for candidate in candidates] == [False, True, False]

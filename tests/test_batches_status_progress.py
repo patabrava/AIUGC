@@ -1273,9 +1273,9 @@ def test_batch_detail_template_explains_strategy_a_without_scene_preview_control
     )
 
     assert "Character Consistency Strategy A" in rendered
-    assert "Actor LoRA anchors" in rendered
-    assert "Gemini scene anchor" in rendered
-    assert "No separate scene-preview selection is required in this mode." in rendered
+    assert "Hybrid reference set" in rendered
+    assert "Two Magnific Laura actor-in-scene stills plus one scene-only plate are sent to VEO." in rendered
+    assert "Fallback blocked" in rendered
     assert "selected actor scene stills" not in rendered
     assert "0/3 approved stills" not in rendered
     assert "Generate 3 scene stills" not in rendered

@@ -30,6 +30,10 @@ _VIDEO_COMPONENTS = (
     *_SCENE_COMPONENTS,
     "speech_facial_transitions_natural",
 )
+_REFERENCE_PAIR_COMPONENTS = (
+    *_SCENE_COMPONENTS,
+    "three_quarter_pose",
+)
 _COMMON_FIELDS = ("confidence", "blocking_reasons", "observed_differences")
 _CONFIDENCE_CONSISTENCY_CORRECTION = """
 
@@ -101,6 +105,31 @@ Return JSON only with exactly this shape:
 }
 Use booleans for every component, a finite confidence number from 0 through 1, and arrays of specific strings."""
 
+_REFERENCE_PAIR_PROMPT = """Image 1 is the canonical frontal identity authority for the consented actor.
+Image 2 is a generated three-quarter reference that must depict that exact same person.
+
+Compare only the supplied images. Fail any change to facial geometry, skull or jaw proportions, eyes, eyebrows,
+nose, lips, ears, hairline, hair, apparent age, skin tone, natural skin texture, asymmetry, or body proportions.
+Fail beautification, face averaging, synthetic smoothing, identity substitution, or facial artifacts. Require
+Image 2 to show a clear approximately 30-degree three-quarter head view while retaining an identity-readable face.
+Treat the intended viewpoint change as non-identity variation.
+
+Return JSON only with exactly this shape:
+{
+  "same_person": true,
+  "facial_geometry_consistent": true,
+  "apparent_age_consistent": true,
+  "hairline_and_hair_consistent": true,
+  "skin_texture_natural": true,
+  "not_beautified_or_stylized": true,
+  "no_face_artifacts": true,
+  "three_quarter_pose": true,
+  "confidence": 0.0,
+  "blocking_reasons": [],
+  "observed_differences": []
+}
+Use booleans for every component, a finite confidence number from 0 through 1, and arrays of specific strings."""
+
 
 @dataclass(frozen=True)
 class SceneIdentityQAReport:
@@ -127,6 +156,22 @@ class VideoIdentityQAReport:
     not_beautified_or_stylized: bool
     no_face_artifacts: bool
     speech_facial_transitions_natural: bool
+    confidence: float
+    blocking_reasons: Tuple[str, ...]
+    observed_differences: Tuple[str, ...]
+    passed: bool
+
+
+@dataclass(frozen=True)
+class ActorReferencePairQAReport:
+    same_person: bool
+    facial_geometry_consistent: bool
+    apparent_age_consistent: bool
+    hairline_and_hair_consistent: bool
+    skin_texture_natural: bool
+    not_beautified_or_stylized: bool
+    no_face_artifacts: bool
+    three_quarter_pose: bool
     confidence: float
     blocking_reasons: Tuple[str, ...]
     observed_differences: Tuple[str, ...]
@@ -323,6 +368,30 @@ def evaluate_video_actor_identity(
     )
 
 
+def evaluate_actor_reference_pair(
+    actor_front: Mapping[str, Any],
+    actor_three_quarter: Mapping[str, Any],
+    *,
+    llm_client: Optional[Any] = None,
+    model: str,
+    minimum_confidence: float = 0.90,
+) -> ActorReferencePairQAReport:
+    images = [
+        _validated_image(actor_front, label="actor_front"),
+        _validated_image(actor_three_quarter, label="actor_three_quarter"),
+    ]
+    return ActorReferencePairQAReport(
+        **_evaluate_report_with_consistency_retry(
+            llm_client=llm_client or get_llm_client(),
+            prompt=_REFERENCE_PAIR_PROMPT,
+            model=model,
+            images=images,
+            component_fields=_REFERENCE_PAIR_COMPONENTS,
+            minimum_confidence=minimum_confidence,
+        )
+    )
+
+
 def failed_scene_identity_result(
     *,
     evaluator_model: str,
@@ -372,10 +441,12 @@ def scene_identity_result_metadata(
 
 
 __all__ = [
+    "ActorReferencePairQAReport",
     "SceneIdentityQAReport",
     "VIDEO_IDENTITY_EVALUATOR_CONTRACT_VERSION",
     "VideoIdentityQAReport",
     "evaluate_scene_plate_identity",
+    "evaluate_actor_reference_pair",
     "evaluate_video_actor_identity",
     "failed_scene_identity_result",
     "scene_identity_result_metadata",

@@ -18,14 +18,13 @@ from app.core.errors import ErrorCode, FlowForgeException
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.characters.actor_identity import (
-    actor_identity_is_ready,
+    actor_identity_selectable,
     actor_identity_training_ready,
     passed_manual_gate,
     pending_manual_gate,
 )
 from app.features.characters import queries as character_queries
 from app.features.characters.schemas import (
-    ActorTrainingSet,
     SceneReferenceSetSummary,
     VIDEO_ACTOR_REFERENCE_ANGLE_KEYS,
 )
@@ -41,6 +40,9 @@ from app.features.characters.scene_reference import (
     get_scene_reference_angle,
     map_script_to_scene_intent,
     scene_reference_style_loras_for,
+)
+from app.features.characters.reference_generation import (
+    generate_verified_three_quarter_reference,
 )
 
 router = APIRouter(prefix="/settings", tags=["characters"])
@@ -73,14 +75,13 @@ def _actor_settings_context(*, request: Request, correlation_id: str) -> dict:
     actor, actor_context_error = _actor_identity_context_result(correlation_id=correlation_id)
     roster_error = None
     try:
-        character_queries.sync_actor_identity_roster_from_provider(correlation_id=correlation_id)
         actors = character_queries.list_actor_identities()
         actors = character_queries.refresh_actor_identity_roster_statuses(actors, correlation_id=correlation_id)
     except Exception as exc:  # noqa: BLE001 - settings page must keep training available
         actors = []
         roster_error = "Actor roster could not be loaded. Training form is still available."
         logger.warning("actor_identity_roster_load_failed", correlation_id=correlation_id, error=str(exc))
-    ready_actors = [row for row in actors if actor_identity_training_ready(row)]
+    ready_actors = [row for row in actors if actor_identity_selectable(row)]
     return {
         "request": request,
         "actor": actor,
@@ -95,10 +96,7 @@ def _actor_settings_context(*, request: Request, correlation_id: str) -> dict:
 def _actor_form_defaults(request: Request) -> dict:
     return {
         "name": request.query_params.get("name") or "AYRA Actor Identity",
-        "quality": request.query_params.get("quality") or "high",
-        "gender": request.query_params.get("gender") or "woman",
         "consent_source": request.query_params.get("consent_source") or "Operator-provided reference set",
-        "description": request.query_params.get("description") or "",
     }
 
 
@@ -116,7 +114,7 @@ def _actor_settings_response(
     context.update(
         {
             "settings_section": "actor",
-            "actor_ready": actor_identity_is_ready(actor),
+            "actor_ready": bool(actor and actor.is_active and actor_identity_selectable(actor)),
             "actor_form_error": actor_form_error,
             "actor_activation_error": actor_activation_error,
             "actor_form_values": actor_form_values or _actor_form_defaults(request),
@@ -695,86 +693,88 @@ def create_scene_reference_set_for_video_review(
 async def train_actor_identity(
     request: Request,
     name: str = Form(default="Default Actor"),
-    gender: str = Form(default="female"),
-    quality: str = Form(default="high"),
     consent_source: str = Form(default=""),
-    description: str = Form(default=""),
-    training_images: list[UploadFile] = File(...),
+    canonical_front_image: UploadFile = File(...),
 ):
     correlation_id = str(uuid4())
-    actor_form_values = {
-        "name": name,
-        "gender": gender,
-        "quality": quality,
-        "consent_source": consent_source,
-        "description": description,
-    }
-    if len(training_images) < 8 or len(training_images) > 20:
-        return _actor_settings_response(
-            request=request,
-            correlation_id=correlation_id,
-            status_code=422,
-            actor_form_error="Upload between 8 and 20 images.",
-            actor_form_values=actor_form_values,
-        )
 
-    for idx, upload in enumerate(training_images, start=1):
-        _validate_upload(f"training_image_{idx}", upload)
+    _validate_upload("canonical_front_image", canonical_front_image)
 
     storage = get_storage_client()
-    uploaded_urls: list[str] = []
-    for idx, upload in enumerate(training_images, start=1):
-        result = storage.upload_image(
-            image_bytes=_read_capped(f"training_image_{idx}", upload),
-            file_name=upload.filename or f"actor-{idx}.png",
+    canonical_front_bytes = _read_capped("canonical_front_image", canonical_front_image)
+    canonical_front_mime_type = canonical_front_image.content_type or "image/png"
+    canonical_front_upload = storage.upload_image(
+        image_bytes=canonical_front_bytes,
+        file_name=canonical_front_image.filename or "actor-canonical-front.png",
+        correlation_id=correlation_id,
+        content_type=canonical_front_mime_type,
+    )
+    settings = get_settings()
+    derived_reference = generate_verified_three_quarter_reference(
+        {
+            "mime_type": canonical_front_mime_type,
+            "image_bytes": canonical_front_bytes,
+        },
+        identity_model=settings.semantic_scene_identity_gate_model,
+        minimum_confidence=settings.semantic_scene_identity_min_confidence,
+    )
+    uploaded_candidates = []
+    for candidate in derived_reference["candidates"]:
+        extension = "jpg" if candidate["mime_type"] == "image/jpeg" else "png"
+        upload = storage.upload_image(
+            image_bytes=candidate["image_bytes"],
+            file_name=f"actor-gemini-pro-three-quarter-{candidate['index']}.{extension}",
             correlation_id=correlation_id,
-            content_type=upload.content_type or "image/png",
+            content_type=candidate["mime_type"],
         )
-        uploaded_urls.append(result["url"])
-
-    training = ActorTrainingSet(images=uploaded_urls, consent_source=consent_source)
-    from app.adapters import magnific_client as magnific_adapter
+        uploaded_candidates.append(
+            {
+                "index": candidate["index"],
+                "image_url": upload["url"],
+                "mime_type": candidate["mime_type"],
+                "identity_gate_result": candidate["identity_gate_result"],
+                "selected": candidate["index"] == derived_reference["selected_index"],
+            }
+        )
+    selected_candidate = next(
+        candidate for candidate in uploaded_candidates if candidate["selected"]
+    )
 
     identity = character_queries.create_actor_identity(
         name=name,
-        provider="magnific",
+        provider="gemini",
         provider_training_task_id=None,
         provider_lora_id=None,
         provider_lora_name=None,
-        training_status="queued",
-        training_phase="queued",
-        training_progress_percent=10,
-        training_images=training.images,
-        consent_source=training.consent_source,
+        training_status="ready",
+        training_phase="ready",
+        training_progress_percent=100,
+        training_images=[
+            canonical_front_upload["url"],
+            selected_candidate["image_url"],
+        ],
+        consent_source=consent_source,
         training_error=None,
         correlation_id=correlation_id,
         is_active=False,
+        reference_front_image_url=canonical_front_upload["url"],
+        reference_three_quarter_image_url=selected_candidate["image_url"],
+        reference_generation_metadata={
+            "source": "canonical_front_gemini_pro_derivative",
+            "generator_model": derived_reference["model"],
+            "front_mime_type": canonical_front_mime_type,
+            "three_quarter_mime_type": derived_reference["mime_type"],
+            "identity_gate_result": derived_reference["identity_gate_result"],
+            "selected_candidate_index": derived_reference["selected_index"],
+            "candidates": uploaded_candidates,
+        },
     )
-    status = magnific_adapter.get_magnific_client().train_character_lora(
-        name=name,
-        quality=quality,
-        gender=gender,
-        image_urls=training.images,
-        correlation_id=correlation_id,
-        description=description or None,
-    )
-    character_queries.update_actor_training_status(
-        actor_identity_id=identity.id,
-        provider_training_task_id=status.provider_training_task_id,
-        provider_lora_id=status.provider_lora_id,
-        provider_lora_name=status.provider_lora_name,
-        training_status=str(status.training_status or status.raw_status),
-        training_phase=str(status.training_phase or status.phase),
-        training_progress_percent=int(status.training_progress_percent or status.progress_percent or 0),
-        training_error=status.training_error,
-        correlation_id=correlation_id,
-    )
-    identity = character_queries.get_actor_identity_by_id(identity.id) or identity
     logger.info(
-        "actor_identity_training_started",
+        "actor_identity_reference_pair_created",
         correlation_id=correlation_id,
         actor_identity_id=identity.id,
-        training_image_count=len(training.images),
+        candidate_count=len(uploaded_candidates),
+        selected_candidate_index=derived_reference["selected_index"],
     )
     return RedirectResponse(url="/settings/actor", status_code=303)
 
@@ -788,7 +788,7 @@ def poll_actor_settings_training(request: Request):
         {
             "request": request,
             "actor": actor,
-            "actor_ready": actor_identity_is_ready(actor),
+            "actor_ready": bool(actor and actor.is_active and actor_identity_selectable(actor)),
             "actor_context_error": actor_context_error,
         },
     )
