@@ -146,6 +146,11 @@ class RetryApprovalRequest(BaseModel):
         return sorted(value)
 
 
+class QAReviewResumeRequest(BaseModel):
+    plan_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    expected_revision: int = Field(ge=0)
+
+
 class CancellationRequest(BaseModel):
     expected_revision: int = Field(ge=0)
     reason: str = Field(min_length=1, max_length=500)
@@ -174,5 +179,6 @@ __all__ = [
     "PlanTakeResponse",
     "ProgressResponse",
     "ProgressTakeResponse",
+    "QAReviewResumeRequest",
     "RetryApprovalRequest",
 ]

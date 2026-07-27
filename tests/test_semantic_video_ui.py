@@ -141,6 +141,77 @@ def test_semantic_projection_reads_delivery_duration_from_worker_manifest(monkey
     assert item["delivery_duration_seconds"] == 16.0
 
 
+def test_identity_qa_service_failure_renders_free_resume_instead_of_paid_retry(
+    monkeypatch,
+):
+    run = {
+        "id": "run-identity-service-failure",
+        "revision": 12,
+        "stage": "retry_approval_required",
+        "requested_duration_seconds": 16,
+        "plan_hash": "a" * 64,
+        "master_hash": "b" * 64,
+        "master_snapshot": {},
+        "plan_snapshot": {
+            "take_count": 2,
+            "billable_provider_seconds": 16,
+            "price_per_provider_second_usd": "0.40",
+            "estimated_cost_usd": "6.40",
+        },
+        "artifact_manifest": {
+            "qa_failure": {
+                "stage": "identity_qa",
+                "message": "Vertex Gemini generateContent failed",
+                "failure_type": "qa_service_unavailable",
+                "retry_mode": "qa_only",
+            }
+        },
+    }
+    attempts = [
+        {
+            "take_index": index,
+            "attempt": 1,
+            "submission_state": "qa_failed",
+            "provider_duration_seconds": 8,
+        }
+        for index in range(2)
+    ]
+    approvals = [
+        {"approval_type": "reference", "contract_hash": "b" * 64},
+        {"approval_type": "initial_plan", "contract_hash": "a" * 64},
+    ]
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: run,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_attempts",
+        lambda _run_id: attempts,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_approvals",
+        lambda _run_id: approvals,
+    )
+
+    view = batch_handlers._build_batch_detail_view(_semantic_batch())
+    item = view["semantic_video"]["posts"][0]
+
+    assert item["qa_resume_available"] is True
+    assert item["qa_resume_stage"] == "identity_qa"
+    assert item["qa_resume_message"] == "Vertex Gemini generateContent failed"
+
+    html = Environment(loader=FileSystemLoader("templates")).get_template(
+        "batches/detail/_semantic_video.html"
+    ).render(batch=_semantic_batch(), batch_view=view)
+    assert 'data-action="resume-qa"' in html
+    assert "Retry identity QA · $0.00" in html
+    assert "submits no new Veo work" in html
+    assert 'data-action="approve-retry" data-cost-usd="6.40"' not in html
+
+
 def test_completed_semantic_panel_renders_run_artifact_urls_without_legacy_prompt(monkeypatch):
     run = {
         "id": "run-completed-artifacts",
@@ -648,6 +719,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "generated-takes" in source
     assert "verified-takes" in source
     assert "retry-approve" in source
+    assert "qa-resume" in source
     assert "master-approve" in source
     assert "candidate_generation_status" in source
     assert "payload?.message" in source

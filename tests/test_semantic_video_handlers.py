@@ -2542,6 +2542,81 @@ def test_retry_approval_targets_only_failed_indexes_and_incremental_cost(monkeyp
     assert rejected.status_code == 409, rejected.text
 
 
+def test_identity_qa_resume_reuses_durable_takes_without_paid_approval(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state, revision=4)
+    state["run"].update(
+        {
+            "stage": "retry_approval_required",
+            "plan_hash": "a" * 64,
+            "artifact_manifest": {
+                "qa_failure": {
+                    "stage": "identity_qa",
+                    "message": "Vertex Gemini generateContent failed",
+                    "failure_type": "qa_service_unavailable",
+                    "retry_mode": "qa_only",
+                }
+            },
+        }
+    )
+    calls = []
+
+    def resume_qa_review(*, run_id, expected_revision, plan_hash):
+        calls.append((run_id, expected_revision, plan_hash))
+        state["run"]["stage"] = "identity_qa"
+        state["run"]["revision"] += 1
+        return deepcopy(state["run"])
+
+    monkeypatch.setattr(handlers, "resume_qa_review", resume_qa_review)
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/qa-resume",
+        json={"plan_hash": "a" * 64, "expected_revision": 4},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {
+        "run_id": "run-1",
+        "revision": 5,
+        "stage": "identity_qa",
+    }
+    assert calls == [("run-1", 4, "a" * 64)]
+    assert state["approvals"] == []
+
+
+def test_identity_qa_resume_rejects_paid_take_failure(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state, revision=4)
+    state["run"].update(
+        {
+            "stage": "retry_approval_required",
+            "plan_hash": "a" * 64,
+            "artifact_manifest": {
+                "qa_failure": {
+                    "stage": "identity_qa",
+                    "message": "Actor identity changed.",
+                    "retry_mode": "paid_take",
+                }
+            },
+        }
+    )
+    monkeypatch.setattr(
+        handlers,
+        "resume_qa_review",
+        lambda **_kwargs: pytest.fail("paid retry must not enter QA-only resume"),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/qa-resume",
+        json={"plan_hash": "a" * 64, "expected_revision": 4},
+    )
+
+    assert response.status_code == 409, response.text
+
+
 def test_retry_approval_recovers_provider_internal_failure_without_qa_guidance(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
