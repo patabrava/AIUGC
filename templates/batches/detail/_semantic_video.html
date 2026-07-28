@@ -49,20 +49,34 @@
             </div>
 
             {% if semantic_step in ['plan', 'production'] %}
+            {% set generation_busy_stages = ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'] %}
+            {% set generation_blocked_stages = ['failed', 'retry_approval_required'] %}
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
-                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Veo model</dt><dd class="mt-1 font-bold text-[#1C2740]">Veo 3.1</dd></div>
-                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Video + audio rate</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.price_per_provider_second_usd }}/s</dd></div>
-                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Scene plate</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.master_state | replace('_', ' ') }}</dd></div>
-                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Takes</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.take_count }}</dd></div>
-                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Provider seconds</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.billable_provider_seconds }}s</dd></div>
-                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Approved plan cost</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.estimated_cost_usd }}</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Veo model</dt><dd class="mt-1 font-bold text-[#1C2740]">Veo 3.1</dd><dd class="mt-2 text-[11px] font-bold text-emerald-800">Ready</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Video + audio rate</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.price_per_provider_second_usd }}/s</dd><dd class="mt-2 text-[11px] font-bold text-emerald-800">Rate ready</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Scene plate</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.master_state | replace('_', ' ') }}</dd><dd class="mt-2 text-[11px] font-bold {% if item.master_hash_is_current %}text-emerald-800{% else %}text-[#1C2740]/55{% endif %}">{{ 'Approved' if item.master_hash_is_current else 'Pending approval' }}</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Takes</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.take_count }}</dd><dd class="mt-2 flex items-center gap-1.5 text-[11px] font-bold {% if item.take_count %}text-emerald-800{% else %}text-[#1C2740]/55{% endif %}" data-field="plan-takes-status"><span class="hidden h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="plan-takes-spinner" aria-hidden="true"></span>{{ 'Planned' if item.take_count else 'Pending plan' }}</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Provider seconds</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.billable_provider_seconds }}s</dd><dd class="mt-2 flex items-center gap-1.5 text-[11px] font-bold {% if item.billable_provider_seconds %}text-emerald-800{% else %}text-[#1C2740]/55{% endif %}" data-field="plan-seconds-status"><span class="hidden h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="plan-seconds-spinner" aria-hidden="true"></span>{{ 'Calculated' if item.billable_provider_seconds else 'Pending plan' }}</dd></div>
+                <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Approved plan cost</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.estimated_cost_usd }}</dd><dd class="mt-2 flex items-center gap-1.5 text-[11px] font-bold {% if item.initial_plan_is_approved %}text-emerald-800{% else %}text-[#1C2740]/55{% endif %}" data-field="plan-cost-status"><span class="hidden h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="plan-cost-spinner" aria-hidden="true"></span>{{ 'Approved' if item.initial_plan_is_approved else ('Awaiting approval' if item.plan_hash else 'Pending plan') }}</dd></div>
             </dl>
             {% endif %}
 
             {% if semantic_step == 'production' %}
             <div class="mt-4 grid grid-cols-2 gap-3" aria-label="Video generation progress">
-                <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm"><span class="text-[#1C2740]/60">Generated</span><strong class="ml-2 text-[#1C2740]"><span data-field="generated-takes">{{ item.generated_takes }}</span>/<span data-field="total-takes">{{ item.take_count }}</span></strong></div>
-                <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm"><span class="text-[#1C2740]/60">Verified</span><strong class="ml-2 text-[#1C2740]"><span data-field="verified-takes">{{ item.verified_takes }}</span>/<span data-field="verified-total">{{ item.take_count }}</span></strong></div>
+                <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm">
+                    <span class="text-[#1C2740]/60">Generated</span><strong class="ml-2 text-[#1C2740]"><span data-field="generated-takes">{{ item.generated_takes }}</span>/<span data-field="total-takes">{{ item.take_count }}</span></strong>
+                    <span class="mt-2 flex items-center gap-2 text-xs font-bold {% if item.stage in generation_blocked_stages %}text-amber-800{% elif item.generated_takes >= item.take_count and item.take_count %}text-emerald-800{% elif item.stage in generation_busy_stages %}text-[#006AAB]{% else %}text-[#1C2740]/55{% endif %}" data-field="generated-status">
+                        <span class="{% if item.stage not in generation_busy_stages or item.generated_takes >= item.take_count %}hidden {% endif %}h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="generated-spinner" aria-hidden="true"></span>
+                        {% if item.stage in generation_blocked_stages %}Needs review{% elif item.generated_takes >= item.take_count and item.take_count %}Complete{% elif item.stage in generation_busy_stages %}Generating{% else %}Queued{% endif %}
+                    </span>
+                </div>
+                <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm">
+                    <span class="text-[#1C2740]/60">Verified</span><strong class="ml-2 text-[#1C2740]"><span data-field="verified-takes">{{ item.verified_takes }}</span>/<span data-field="verified-total">{{ item.take_count }}</span></strong>
+                    <span class="mt-2 flex items-center gap-2 text-xs font-bold {% if item.stage in generation_blocked_stages %}text-amber-800{% elif item.verified_takes >= item.take_count and item.take_count %}text-emerald-800{% elif item.stage in ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'] %}text-[#006AAB]{% else %}text-[#1C2740]/55{% endif %}" data-field="verified-status">
+                        <span class="{% if item.stage not in ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'] or item.verified_takes >= item.take_count %}hidden {% endif %}h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="verified-spinner" aria-hidden="true"></span>
+                        {% if item.stage in generation_blocked_stages %}Needs review{% elif item.verified_takes >= item.take_count and item.take_count %}Complete{% elif item.stage in ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'] %}Verifying{% elif item.stage == 'generating' %}Waiting for takes{% else %}Queued{% endif %}
+                    </span>
+                </div>
             </div>
 
             <section class="mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3" aria-label="Live generation status">
@@ -224,11 +238,60 @@
                 <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" {% if semantic_locked or item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if semantic_locked or item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve selected scene plate</button>
             </div>
+            <section
+                class="{% if not item.candidates %}hidden {% endif %}mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3"
+                data-field="candidate-progress"
+                aria-label="Scene-plate generation status"
+                aria-live="polite"
+            >
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex min-w-0 items-center gap-2">
+                        <span class="hidden h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="candidate-spinner" aria-hidden="true"></span>
+                        <p class="font-bold text-[#1C2740]" data-field="candidate-status-label">
+                            {% if item.candidates %}Ready for identity review{% else %}Preparing references{% endif %}
+                        </p>
+                    </div>
+                    <span class="shrink-0 text-sm font-bold text-[#006AAB]" data-field="candidate-percent">{{ 100 if item.candidates else 5 }}%</span>
+                </div>
+                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[#006AAB]/10">
+                    <div
+                        class="h-full rounded-full bg-[#006AAB] transition-[width] duration-500"
+                        data-field="candidate-progress-bar"
+                        role="progressbar"
+                        aria-label="Scene-plate generation progress"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="{{ 100 if item.candidates else 5 }}"
+                        style="width: {{ 100 if item.candidates else 5 }}%"
+                    ></div>
+                </div>
+                <p class="mt-2 text-sm text-[#1C2740]/70" data-field="candidate-status-detail">
+                    {% if item.candidates %}Three scene plates are ready. Select one that passed the identity gate.{% else %}Loading and verifying the actor and location references.{% endif %}
+                </p>
+            </section>
             {% elif semantic_step == 'plan' %}
             <div class="mt-5 flex flex-wrap gap-2">
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if semantic_locked or item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or item.plan_hash %}disabled{% endif %}>Continue: Build free Veo plan</button>
                 <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if semantic_locked or item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve &amp; generate video · ${{ item.estimated_cost_usd }}</button>
             </div>
+            <section
+                class="mt-3 hidden rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3"
+                data-field="plan-progress"
+                aria-label="Production plan build status"
+                aria-live="polite"
+            >
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex min-w-0 items-center gap-2">
+                        <span class="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="plan-spinner" aria-hidden="true"></span>
+                        <p class="font-bold text-[#1C2740]" data-field="plan-status-label">Building production plan</p>
+                    </div>
+                    <span class="shrink-0 text-xs font-bold uppercase tracking-wide text-[#006AAB]" data-field="plan-status-badge">In progress</span>
+                </div>
+                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[#006AAB]/10" role="progressbar" aria-label="Production plan build progress">
+                    <div class="h-full w-2/3 animate-pulse rounded-full bg-[#006AAB]" data-field="plan-progress-bar"></div>
+                </div>
+                <p class="mt-2 text-sm text-[#1C2740]/70" data-field="plan-status-detail">Validating the approved scene, calculating takes and provider seconds, and preparing the exact cost.</p>
+            </section>
             {% endif %}
             {% if semantic_step == 'scene' %}
             {% if item.script_review_status == 'pending' %}

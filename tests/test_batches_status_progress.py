@@ -1846,6 +1846,9 @@ def test_batch_detail_progress_renders_semantic_operator_steps_from_projection()
     )
 
     assert "Production workflow" in html
+    assert "Complete" in html
+    assert "In progress" in html
+    assert "animate-spin" in html
     assert "Step 2 of 2" in html
     assert 'aria-current="step"' in html
     assert "Go to current step" in html

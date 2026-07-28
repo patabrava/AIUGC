@@ -20,6 +20,7 @@
 
     <ol class="mt-5 hidden items-start lg:flex">
         {% for step in workflow.steps %}
+        {% set step_status_label = 'Complete' if step.status == 'complete' else ('In progress' if step.status == 'current' else 'Pending') %}
         <li class="contents">
             <a
                 href="{{ step.href }}"
@@ -32,12 +33,21 @@
                         <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                     </svg>
                     <span class="sr-only">Completed:</span>
+                    {% elif step.status == 'current' %}
+                    <span class="h-5 w-5 animate-spin rounded-full border-2 border-white/35 border-t-white" aria-hidden="true"></span>
+                    <span class="sr-only">In progress:</span>
                     {% else %}
                     {{ step.number }}
                     {% endif %}
                 </span>
                 <span class="mt-2 text-xs font-bold {% if step.status == 'current' %}text-[#006AAB]{% elif step.status == 'complete' %}text-[#1C2740]{% else %}text-[#1C2740]/55{% endif %}">
                     {{ step.label }}
+                </span>
+                <span class="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold {% if step.status == 'complete' %}bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200{% elif step.status == 'current' %}bg-[#EAF3FB] text-[#006AAB] ring-1 ring-[#006AAB]/20{% else %}bg-[#F1F5F9] text-[#1C2740]/60 ring-1 ring-[#1C2740]/10{% endif %}">
+                    {% if step.status == 'current' %}
+                    <span class="h-2 w-2 animate-pulse rounded-full bg-[#006AAB]" aria-hidden="true"></span>
+                    {% endif %}
+                    {{ step_status_label }}
                 </span>
             </a>
             {% if not loop.last %}
@@ -49,6 +59,7 @@
 
     <ol class="mt-5 space-y-2 lg:hidden">
         {% for step in workflow.steps %}
+        {% set step_status_label = 'Complete' if step.status == 'complete' else ('In progress' if step.status == 'current' else 'Pending') %}
         <li>
             <a
                 href="{{ step.href }}"
@@ -60,12 +71,21 @@
                     <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
                         <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                     </svg>
+                    {% elif step.status == 'current' %}
+                    <span class="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" aria-hidden="true"></span>
+                    <span class="sr-only">In progress:</span>
                     {% else %}
                     {{ step.number }}
                     {% endif %}
                 </span>
                 <span>
                     <span class="block text-sm font-bold {% if step.status == 'current' %}text-[#006AAB]{% else %}text-[#1C2740]{% endif %}">{{ step.label }}</span>
+                    <span class="mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold {% if step.status == 'complete' %}bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200{% elif step.status == 'current' %}bg-[#EAF3FB] text-[#006AAB] ring-1 ring-[#006AAB]/20{% else %}bg-[#F1F5F9] text-[#1C2740]/60 ring-1 ring-[#1C2740]/10{% endif %}">
+                        {% if step.status == 'current' %}
+                        <span class="h-2 w-2 animate-pulse rounded-full bg-[#006AAB]" aria-hidden="true"></span>
+                        {% endif %}
+                        {{ step_status_label }}
+                    </span>
                     {% if step.status == 'current' %}
                     <span class="block text-xs text-[#1C2740]/65">{{ step.description }}</span>
                     {% endif %}

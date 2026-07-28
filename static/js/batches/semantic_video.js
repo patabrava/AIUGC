@@ -77,7 +77,9 @@
         const progressMessage = field(root, 'progress-message');
         const progressSpinner = field(root, 'progress-spinner');
         const isBusy = progress.candidate_generation_status === 'generating'
-            || ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'uploading'].includes(progress.stage);
+            || ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'].includes(progress.stage);
+        updateCandidateStatus(root, progress);
+        updateStatStatus(root, progress);
         if (progressBar) {
             progressBar.style.width = `${progress.progress_percent}%`;
             progressBar.setAttribute('aria-valuenow', String(progress.progress_percent));
@@ -101,7 +103,93 @@
         root.dataset.candidateGenerationPhase = progress.candidate_generation_phase || '';
     }
 
+    function updateCandidateStatus(root, progress) {
+        const panel = field(root, 'candidate-progress');
+        if (!panel) return;
+        const status = String(progress.candidate_generation_status || 'idle');
+        const phase = String(progress.candidate_generation_phase || '');
+        const labels = {
+            preparing_references: 'Preparing references',
+            generating_images: 'Generating 3 scene plates',
+            checking_diversity: 'Checking scene diversity',
+            regenerating_duplicates: 'Replacing similar scene plates',
+            checking_identity: 'Verifying actor identity',
+            saving_candidates: 'Saving verified scene plates',
+            ready: 'Ready for identity review',
+        };
+        const label = field(root, 'candidate-status-label');
+        const detail = field(root, 'candidate-status-detail');
+        const spinner = field(root, 'candidate-spinner');
+        const percent = field(root, 'candidate-percent');
+        const progressBar = field(root, 'candidate-progress-bar');
+        const isGenerating = status === 'generating';
+        const isVisible = isGenerating || status === 'ready' || status === 'stalled';
+
+        panel.classList.toggle('hidden', !isVisible);
+        if (!isVisible) return;
+        panel.classList.toggle('border-amber-300', status === 'stalled');
+        panel.classList.toggle('bg-amber-50', status === 'stalled');
+        if (label) {
+            label.textContent = status === 'stalled'
+                ? 'Generation needs attention'
+                : (labels[phase] || (status === 'ready' ? labels.ready : 'Preparing scene plates'));
+        }
+        if (detail) detail.textContent = progress.status_message || '';
+        if (spinner) spinner.classList.toggle('hidden', !isGenerating);
+        if (percent) percent.textContent = `${progress.progress_percent}%`;
+        if (progressBar) {
+            progressBar.style.width = `${progress.progress_percent}%`;
+            progressBar.setAttribute('aria-valuenow', String(progress.progress_percent));
+        }
+    }
+
+    function updateStatStatus(root, progress) {
+        const total = Number(progress.total_takes || 0);
+        const generatedCount = Number(progress.generated_takes || 0);
+        const verifiedCount = Number(progress.verified_takes || 0);
+        const stage = String(progress.stage || '');
+        const blocked = ['failed', 'retry_approval_required'].includes(stage);
+        const generationBusy = stage === 'generating';
+        const verificationBusy = ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'].includes(stage);
+
+        const generatedStatus = field(root, 'generated-status');
+        const generatedSpinner = field(root, 'generated-spinner');
+        const verifiedStatus = field(root, 'verified-status');
+        const verifiedSpinner = field(root, 'verified-spinner');
+
+        setStatStatus(generatedStatus, generatedSpinner, {
+            text: blocked ? 'Needs review' : (total && generatedCount >= total ? 'Complete' : (generationBusy ? 'Generating' : 'Queued')),
+            tone: blocked ? 'attention' : (total && generatedCount >= total ? 'complete' : (generationBusy ? 'active' : 'pending')),
+            loading: generationBusy && !(total && generatedCount >= total),
+        });
+        setStatStatus(verifiedStatus, verifiedSpinner, {
+            text: blocked ? 'Needs review' : (total && verifiedCount >= total ? 'Complete' : (verificationBusy ? 'Verifying' : (generationBusy ? 'Waiting for takes' : 'Queued'))),
+            tone: blocked ? 'attention' : (total && verifiedCount >= total ? 'complete' : (verificationBusy ? 'active' : 'pending')),
+            loading: verificationBusy && !(total && verifiedCount >= total),
+        });
+    }
+
+    function setStatStatus(target, spinner, next) {
+        if (target) {
+            target.childNodes.forEach((node) => {
+                if (node.nodeType === Node.TEXT_NODE) node.textContent = '';
+            });
+            target.append(document.createTextNode(next.text));
+            target.classList.toggle('text-emerald-800', next.tone === 'complete');
+            target.classList.toggle('text-[#006AAB]', next.tone === 'active');
+            target.classList.toggle('text-amber-800', next.tone === 'attention');
+            target.classList.toggle('text-[#1C2740]/55', next.tone === 'pending');
+        }
+        if (spinner) spinner.classList.toggle('hidden', !next.loading);
+    }
+
     function showCandidateLoading(root) {
+        const candidatePanel = field(root, 'candidate-progress');
+        const candidateLabel = field(root, 'candidate-status-label');
+        const candidateDetail = field(root, 'candidate-status-detail');
+        const candidateSpinner = field(root, 'candidate-spinner');
+        const candidatePercent = field(root, 'candidate-percent');
+        const candidateProgressBar = field(root, 'candidate-progress-bar');
         const progressBar = field(root, 'progress-bar');
         const progressPercent = field(root, 'progress-percent');
         const progressMessage = field(root, 'progress-message');
@@ -111,6 +199,15 @@
         root.dataset.candidateGenerationStatus = 'generating';
         root.dataset.candidateGenerationPhase = 'preparing_references';
         root.setAttribute('aria-busy', 'true');
+        if (candidatePanel) candidatePanel.classList.remove('hidden');
+        if (candidateLabel) candidateLabel.textContent = 'Preparing references';
+        if (candidateDetail) candidateDetail.textContent = 'Loading and verifying the actor and location references.';
+        if (candidateSpinner) candidateSpinner.classList.remove('hidden');
+        if (candidatePercent) candidatePercent.textContent = '5%';
+        if (candidateProgressBar) {
+            candidateProgressBar.style.width = '5%';
+            candidateProgressBar.setAttribute('aria-valuenow', '5');
+        }
         if (progressBar) {
             progressBar.style.width = '5%';
             progressBar.setAttribute('aria-valuenow', '5');
@@ -122,6 +219,54 @@
         if (progressSpinner) progressSpinner.classList.remove('hidden');
         if (elapsed) elapsed.textContent = '0s';
         if (remaining) remaining.textContent = 'Calculating…';
+    }
+
+    function setPlanStatLoading(root, name, isLoading) {
+        const target = field(root, `plan-${name}-status`);
+        const spinner = field(root, `plan-${name}-spinner`);
+        if (target) {
+            target.childNodes.forEach((node) => {
+                if (node.nodeType === Node.TEXT_NODE) node.textContent = '';
+            });
+            target.append(document.createTextNode(isLoading ? 'Calculating' : 'Pending plan'));
+            target.classList.toggle('text-[#006AAB]', isLoading);
+            target.classList.toggle('text-[#1C2740]/55', !isLoading);
+        }
+        if (spinner) spinner.classList.toggle('hidden', !isLoading);
+    }
+
+    function showPlanLoading(root) {
+        const panel = field(root, 'plan-progress');
+        const spinner = field(root, 'plan-spinner');
+        const label = field(root, 'plan-status-label');
+        const badge = field(root, 'plan-status-badge');
+        const detail = field(root, 'plan-status-detail');
+        if (panel) {
+            panel.classList.remove('hidden', 'border-amber-300', 'bg-amber-50');
+        }
+        if (spinner) spinner.classList.remove('hidden');
+        if (label) label.textContent = 'Building production plan';
+        if (badge) badge.textContent = 'In progress';
+        if (detail) {
+            detail.textContent = 'Validating the approved scene, calculating takes and provider seconds, and preparing the exact cost.';
+        }
+        ['takes', 'seconds', 'cost'].forEach((name) => setPlanStatLoading(root, name, true));
+        root.setAttribute('aria-busy', 'true');
+    }
+
+    function showPlanError(root, message) {
+        const panel = field(root, 'plan-progress');
+        const spinner = field(root, 'plan-spinner');
+        const label = field(root, 'plan-status-label');
+        const badge = field(root, 'plan-status-badge');
+        const detail = field(root, 'plan-status-detail');
+        if (panel) panel.classList.add('border-amber-300', 'bg-amber-50');
+        if (spinner) spinner.classList.add('hidden');
+        if (label) label.textContent = 'Plan could not be built';
+        if (badge) badge.textContent = 'Needs attention';
+        if (detail) detail.textContent = message;
+        ['takes', 'seconds', 'cost'].forEach((name) => setPlanStatLoading(root, name, false));
+        root.setAttribute('aria-busy', 'false');
     }
 
     function formatDuration(value) {
@@ -150,6 +295,20 @@
         }
     }
 
+    async function recoverCandidateProgress(root) {
+        if (!field(root, 'candidate-progress')) return;
+        try {
+            const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`, {method: 'GET'});
+            updateProgress(root, progress);
+            if (progress.candidate_generation_status === 'generating') {
+                root.dataset.waitingForCandidates = 'true';
+                startPolling(root, true, false);
+            }
+        } catch (_error) {
+            // The ordinary action status remains the error surface for explicit user actions.
+        }
+    }
+
     function stopPolling(root) {
         const timer = activePolls.get(root);
         if (!timer) return;
@@ -166,7 +325,7 @@
 
     async function runAction(root, button, path, body, pendingMessage) {
         button.disabled = true;
-        setStatus(root, pendingMessage);
+        if (!['candidates', 'plan'].includes(path)) setStatus(root, pendingMessage);
         try {
             await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
                 method: 'POST',
@@ -177,14 +336,14 @@
             if (path === 'candidates') {
                 await pollProgress(root);
                 if (root.dataset.candidateGenerationStatus === 'generating') {
-                    setStatus(root, 'Scene plates are still generating. This page will refresh automatically when they are ready.');
                     return;
                 }
                 root.dataset.waitingForCandidates = 'false';
                 stopPolling(root);
             }
+            if (path === 'plan') showPlanError(root, error.message);
             button.disabled = false;
-            setStatus(root, error.message, true);
+            if (path !== 'plan') setStatus(root, error.message, true);
         }
     }
 
@@ -225,6 +384,7 @@
             }, 'Approving identity-verified master frame…');
         });
         action(root, 'create-plan')?.addEventListener('click', (event) => {
+            showPlanLoading(root);
             runAction(root, event.currentTarget, 'plan', {expected_revision: revision(), base_seed: 240713, resolution: '1080p'}, 'Building the free deterministic plan…');
         });
         action(root, 'approve-plan')?.addEventListener('click', (event) => {
@@ -244,6 +404,7 @@
                 expected_revision: revision(),
             }, 'Continuing with the existing generated videos at no additional Veo cost…');
         });
+        recoverCandidateProgress(root);
         startPolling(root);
     }
 

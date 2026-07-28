@@ -948,10 +948,19 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "candidate_generation_status" in source
     assert "candidate_generation_phase" in source
     assert "showCandidateLoading(root)" in source
+    assert "recoverCandidateProgress(root)" in source
+    assert "updateCandidateStatus(root, progress)" in source
+    assert "Generating 3 scene plates" in source
+    assert "Checking scene diversity" in source
+    assert "Verifying actor identity" in source
+    assert "showPlanLoading(root)" in source
+    assert "showPlanError(root, error.message)" in source
+    assert "Building production plan" in source
+    assert "Plan could not be built" in source
+    assert "['takes', 'seconds', 'cost']" in source
     assert "force ? 2000 : 8000" in source
     assert "payload?.message" in source
     assert "startPolling(root, true, false)" in source
-    assert "Scene plates are still generating" in source
     assert "reloadAtWorkflow(root)" in source
     assert "#semantic-video-post-" in source
     assert "handleSemanticDeliveryDecision" in source
@@ -960,8 +969,25 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "window.handleSemanticDeliveryDecision" in template_source
     assert "progress.estimated_remaining_seconds" in source
     assert "progress.progress_percent" in source
+    assert "updateStatStatus(root, progress)" in source
+    assert "generated-status" in source
+    assert "verified-status" in source
+    assert "generated-spinner" in template_source
+    assert "verified-spinner" in template_source
+    assert "Generating" in template_source
+    assert "Verifying" in template_source
     assert "Typical time remaining" in template_source
     assert 'data-field="progress-spinner"' in template_source
+    assert 'data-field="candidate-progress"' in template_source
+    assert 'data-field="candidate-spinner"' in template_source
+    assert 'data-field="candidate-status-label"' in template_source
+    assert 'aria-label="Scene-plate generation progress"' in template_source
+    assert 'data-field="plan-progress"' in template_source
+    assert 'data-field="plan-spinner"' in template_source
+    assert 'data-field="plan-takes-spinner"' in template_source
+    assert 'data-field="plan-seconds-spinner"' in template_source
+    assert 'data-field="plan-cost-spinner"' in template_source
+    assert 'aria-label="Production plan build progress"' in template_source
     assert 'role="progressbar"' in template_source
 
 
