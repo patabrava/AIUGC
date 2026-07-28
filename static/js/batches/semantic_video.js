@@ -223,7 +223,7 @@
             runAction(root, event.currentTarget, 'qa-resume', {
                 plan_hash: root.dataset.planHash,
                 expected_revision: revision(),
-            }, 'Resuming identity QA with the existing videos…');
+            }, 'Continuing with the existing generated videos at no additional Veo cost…');
         });
         startPolling(root);
     }

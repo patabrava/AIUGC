@@ -2764,7 +2764,7 @@ def test_identity_qa_resume_reuses_durable_takes_without_paid_approval(monkeypat
     assert state["approvals"] == []
 
 
-def test_identity_qa_resume_rejects_paid_take_failure(monkeypatch):
+def test_identity_qa_failure_can_resume_without_a_paid_take_retry(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
 
@@ -2785,7 +2785,11 @@ def test_identity_qa_resume_rejects_paid_take_failure(monkeypatch):
     monkeypatch.setattr(
         handlers,
         "resume_qa_review",
-        lambda **_kwargs: pytest.fail("paid retry must not enter QA-only resume"),
+        lambda **_kwargs: {
+            **state["run"],
+            "revision": 5,
+            "stage": "identity_qa",
+        },
     )
 
     response = TestClient(app, base_url="http://localhost").post(
@@ -2793,7 +2797,8 @@ def test_identity_qa_resume_rejects_paid_take_failure(monkeypatch):
         json={"plan_hash": "a" * 64, "expected_revision": 4},
     )
 
-    assert response.status_code == 409, response.text
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["stage"] == "identity_qa"
 
 
 def test_retry_approval_recovers_provider_internal_failure_without_qa_guidance(monkeypatch):

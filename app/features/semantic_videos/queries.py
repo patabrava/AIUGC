@@ -14,10 +14,7 @@ from app.features.scenes.queries import (
     require_canonical_scene_asset,
     resolve_canonical_scene_key,
 )
-from app.features.semantic_videos.visual_contract import (
-    SEMANTIC_LOCATION_ROTATION,
-    select_semantic_wardrobe,
-)
+from app.features.semantic_videos.visual_contract import select_semantic_wardrobe
 
 
 _SEMANTIC_TOPIC_FIELDS = (
@@ -148,14 +145,12 @@ def _canonical_semantic_location(
 ) -> tuple[dict[str, Any], str, str]:
     routing_seed, target_length_tier = _semantic_routing_inputs(post, batch, seed_data)
     explicit_scene_key = str(seed_data.get("semantic_scene_key") or "").strip()
-    rotation_index = seed_data.get("semantic_rotation_index")
     if explicit_scene_key:
         scene_key = explicit_scene_key
-    elif isinstance(rotation_index, int) and not isinstance(rotation_index, bool):
-        scene_key = SEMANTIC_LOCATION_ROTATION[
-            max(0, rotation_index) % len(SEMANTIC_LOCATION_ROTATION)
-        ]
     else:
+        # Scene choice is semantic, not ordinal. Most production batches contain one
+        # post, so using semantic_rotation_index here makes every batch's first post
+        # resolve to the first rotation entry (the bathroom) regardless of content.
         scene_key = resolve_canonical_scene_key(
             scene_text=None,
             prompt_text=str(seed_data.get("prompt_text") or "") or None,

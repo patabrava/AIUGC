@@ -694,6 +694,7 @@ def _semantic_provider_prompts(
         prompt = str(contract.get("prompt") or "").strip()
         if not prompt:
             continue
+        raw_artifact_uri = str(attempt.get("raw_artifact_uri") or "").strip()
         prompts.append(
             {
                 "take_index": int(attempt.get("take_index") or 0),
@@ -704,6 +705,16 @@ def _semantic_provider_prompts(
                 ).strip(),
                 "prompt": prompt,
                 "negative_prompt": str(contract.get("negative_prompt") or "").strip(),
+                **(
+                    {
+                        "raw_artifact_uri": raw_artifact_uri,
+                        "raw_artifact_sha256": str(
+                            attempt.get("raw_artifact_sha256") or ""
+                        ).strip(),
+                    }
+                    if raw_artifact_uri
+                    else {}
+                ),
             }
         )
     return prompts
@@ -913,9 +924,7 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         str(run.get("stage") or "") == "retry_approval_required"
         and current_initial_approval
         and plan_hash
-        and qa_failure.get("retry_mode") == "qa_only"
-        and qa_failure.get("failure_type") == "qa_service_unavailable"
-        and qa_failure.get("stage") == "identity_qa"
+        and qa_failure.get("stage") in {"transcript_qa", "identity_qa", "voice_qa"}
     )
     contact_sheet = (
         pipeline_manifest.get("contact_sheet")

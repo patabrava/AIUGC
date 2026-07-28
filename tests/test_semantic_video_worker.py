@@ -486,7 +486,7 @@ def test_worker_persists_a_fenced_runtime_exception_before_releasing_the_lease()
     assert repo.events[-1][0] == "release"
 
 
-def test_identity_qa_provider_failure_stops_reclaim_loop_and_requires_free_qa_resume():
+def test_identity_qa_provider_failure_becomes_advisory_without_paid_retry():
     from workers.semantic_video_worker import SemanticVideoWorker, WorkerTickResult
 
     repo = FakeRepo(stage="identity_qa", take_count=2)
@@ -516,23 +516,20 @@ def test_identity_qa_provider_failure_stops_reclaim_loop_and_requires_free_qa_re
 
     assert result == WorkerTickResult(
         run_id="run-1",
-        stage="retry_approval_required",
-        action="retry_approval_required",
+        stage="voice_qa",
+        action="stage_advanced_with_qa_advisory",
     )
-    retry_event = next(event for event in repo.events if event[0] == "retry_required")
-    assert retry_event[1] == (0, 1)
-    assert retry_event[2]["qa_failure"] == {
+    advance_event = next(event for event in repo.events if event[0] == "advance")
+    assert advance_event[1:3] == ("identity_qa", "voice_qa")
+    assert advance_event[3]["qa_advisory"] == {
+        "required": True,
         "stage": "identity_qa",
-        "message": "Vertex Gemini generateContent failed",
-        "details": {
-            "status_code": 503,
-            "model": "gemini-2.5-flash",
-        },
         "failed_take_indexes": [0, 1],
-        "failure_type": "qa_service_unavailable",
-        "retry_mode": "qa_only",
+        "message": "Vertex Gemini generateContent failed",
+        "paid_retry_required": False,
     }
-    assert "Do not submit new paid Veo work" in retry_event[2]["guidance"]
+    assert advance_event[3]["qa_failure"] is None
+    assert not any(event[0] == "retry_required" for event in repo.events)
     assert not any(event[0] == "worker_exception" for event in repo.events)
     assert repo.events[-1][0] == "release"
 
@@ -684,7 +681,7 @@ def test_worker_provider_operation_failure_stops_and_requires_retry_approval():
     assert vertex.submit_calls == []
 
 
-def test_worker_multitake_qa_failure_requires_approval_and_never_auto_retries():
+def test_worker_multitake_evaluator_qa_failure_is_advisory_and_never_auto_retries():
     repo = FakeRepo(stage="identity_qa", take_count=2)
     stages = FakeStages(
         {
@@ -699,9 +696,40 @@ def test_worker_multitake_qa_failure_requires_approval_and_never_auto_retries():
     result = worker.tick("run-1")
     second = worker.tick("run-1")
 
-    assert result.action == "retry_approval_required"
-    assert second.action == "not_claimed"
+    assert result.action == "stage_advanced_with_qa_advisory"
+    assert result.stage == "voice_qa"
+    assert second.action == "stage_advanced_with_qa_advisory"
     assert vertex.submit_calls == []
+    assert not any(event[0] == "retry_required" for event in repo.events)
+    advisory = next(
+        event[3]["qa_advisory"]
+        for event in repo.events
+        if event[0] == "advance" and event[1] == "identity_qa"
+    )
+    assert advisory == {
+        "required": True,
+        "stage": "identity_qa",
+        "failed_take_indexes": [0],
+        "message": "Automated QA recommends manual review.",
+        "paid_retry_required": False,
+    }
+
+
+def test_worker_still_blocks_when_composition_qa_cannot_produce_delivery():
+    repo = FakeRepo(stage="acoustic_qa", take_count=2)
+    stages = FakeStages(
+        {
+            "passed": False,
+            "failed_take_indexes": [0],
+            "artifacts": {"qa_failure": {"message": "Composition is not playable."}},
+        }
+    )
+    worker = _worker(repo, FakeVertex(), stages)
+
+    result = worker.tick("run-1")
+
+    assert result.action == "retry_approval_required"
+    assert any(event[0] == "retry_required" for event in repo.events)
 
 
 def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():

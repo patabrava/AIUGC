@@ -1240,6 +1240,46 @@ class SemanticVideoWorker:
                     failed_stage=stage,
                     artifacts=artifacts,
                 )
+            if stage in {"transcript_qa", "identity_qa", "voice_qa"}:
+                failed_indexes = sorted(
+                    {int(index) for index in result.get("failed_take_indexes") or []}
+                )
+                qa_failure = artifacts.get("qa_failure")
+                advisory = {
+                    "required": True,
+                    "stage": stage,
+                    "failed_take_indexes": failed_indexes,
+                    "message": (
+                        str(qa_failure.get("message") or "")
+                        if isinstance(qa_failure, Mapping)
+                        else "Automated QA recommends manual review."
+                    ),
+                    "paid_retry_required": False,
+                }
+                next_stage = NEXT_STAGE[stage]
+                self.repo.advance_stage(
+                    run_id=run_id,
+                    worker_id=self.worker_id,
+                    lease_token=lease_token,
+                    expected_stage=stage,
+                    next_stage=next_stage,
+                    artifacts={
+                        **artifacts,
+                        "qa_advisory": advisory,
+                        "qa_failure": None,
+                    },
+                )
+                logger.warning(
+                    "semantic_video_qa_delivered_as_advisory",
+                    run_id=run_id,
+                    failed_stage=stage,
+                    failed_take_indexes=failed_indexes,
+                )
+                return WorkerTickResult(
+                    run_id,
+                    next_stage,
+                    "stage_advanced_with_qa_advisory",
+                )
             failed_indexes = sorted({int(index) for index in result.get("failed_take_indexes") or []})
             if not failed_indexes:
                 raise StateTransitionError("Failed semantic video QA requires failed take indexes.")

@@ -173,7 +173,7 @@ def test_get_actor_scene_plate_anchor_rejects_ambiguous_identity(
         )
 
 
-def test_semantic_location_rotation_is_distinct_for_first_three_posts_and_override_wins(
+def test_semantic_location_uses_script_intent_before_batch_ordinal_and_override_wins(
     monkeypatch,
 ):
     from app.features.semantic_videos import queries
@@ -196,24 +196,52 @@ def test_semantic_location_rotation_is_distinct_for_first_three_posts_and_overri
         lambda scene_key: SimpleNamespace(scene_identity=f"Scene {scene_key}"),
     )
 
-    for index in range(3):
-        queries._canonical_semantic_location(  # noqa: SLF001
-            {"id": f"post-{index}", "post_type": "value"},
-            {"target_duration_seconds": 16},
-            {"semantic_rotation_index": index},
-        )
+    queries._canonical_semantic_location(  # noqa: SLF001
+        {"id": "post-car", "post_type": "value"},
+        {"target_duration_seconds": 16},
+        {
+            "script": "So gelingt der sichere Transfer ins Auto.",
+            "semantic_rotation_index": 0,
+        },
+    )
+    queries._canonical_semantic_location(  # noqa: SLF001
+        {"id": "post-bathroom", "post_type": "value"},
+        {"target_duration_seconds": 16},
+        {
+            "script": "Ein Duschsitz schafft Sicherheit im Badezimmer.",
+            "semantic_rotation_index": 1,
+        },
+    )
+    queries._canonical_semantic_location(  # noqa: SLF001
+        {
+            "id": "post-generic-single-batch",
+            "post_type": "value",
+            "topic_title": "Assistenzleistungen und Pflegeleistungen",
+        },
+        {"target_duration_seconds": 16},
+        {
+            "script": "So findest du die passende Unterstützung für deinen Alltag.",
+            "semantic_rotation_index": 0,
+        },
+    )
     queries._canonical_semantic_location(  # noqa: SLF001
         {"id": "post-override", "post_type": "value"},
         {"target_duration_seconds": 16},
         {
+            "script": "So gelingt der sichere Transfer ins Auto.",
             "semantic_rotation_index": 0,
             "semantic_scene_key": "home_office_advice_a",
         },
     )
 
-    assert requested_scene_keys[:3] == [
+    assert requested_scene_keys[:2] == [
+        "car_transfer_residential_a",
         "bathroom_accessibility_a",
-        "garden_patio_a",
-        "home_office_advice_a",
     ]
+    assert requested_scene_keys[2] in {
+        "home_living_room_advice_a",
+        "home_kitchen_advice_a",
+        "home_dining_nook_advice_a",
+        "home_office_advice_a",
+    }
     assert requested_scene_keys[3] == "home_office_advice_a"

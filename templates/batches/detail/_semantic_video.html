@@ -239,6 +239,15 @@
                         <p class="mt-3 text-xs font-bold uppercase tracking-wide text-[#1C2740]/60">Negative prompt</p>
                         <p class="mt-1 whitespace-pre-wrap text-sm text-[#1C2740]">{{ provider_prompt.negative_prompt }}</p>
                         {% endif %}
+                        {% if provider_prompt.raw_artifact_uri %}
+                        <div class="mt-4 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
+                            <p class="text-xs font-bold uppercase tracking-wide text-emerald-900">Paid generated take</p>
+                            <video class="mt-2 aspect-[9/16] max-h-[32rem] w-full rounded-lg bg-black object-contain" controls preload="metadata" src="{{ provider_prompt.raw_artifact_uri }}">
+                                Your browser does not support video playback.
+                            </video>
+                            <a class="mt-2 inline-flex rounded-lg border border-emerald-800 px-3 py-2 text-xs font-bold text-emerald-900" href="{{ provider_prompt.raw_artifact_uri }}" target="_blank" rel="noopener noreferrer">Open generated take</a>
+                        </div>
+                        {% endif %}
                     </details>
                     {% endfor %}
                 </div>
@@ -248,12 +257,12 @@
             {% if item.stage == 'retry_approval_required' %}
             <div class="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
                 {% if item.qa_resume_available %}
-                <p class="text-sm font-bold text-amber-950">Identity QA service unavailable</p>
-                <p class="mt-1 text-sm text-amber-900">Retry QA with the existing checksum-verified videos. This submits no new Veo work and costs $0.00.</p>
+                <p class="text-sm font-bold text-amber-950">Generated videos are ready for manual review</p>
+                <p class="mt-1 text-sm text-amber-900">Continue with the existing checksum-verified videos. Automated {{ item.qa_resume_stage | replace('_', ' ') }} will be advisory and no new Veo work will be submitted.</p>
                 {% if item.qa_resume_message %}
                 <p class="mt-1 text-xs text-amber-800">{{ item.qa_resume_message }}</p>
                 {% endif %}
-                <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="resume-qa" {% if not item.initial_plan_is_approved or not item.plan_hash %}disabled{% endif %}>Retry identity QA · $0.00</button>
+                <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="resume-qa" {% if not item.initial_plan_is_approved or not item.plan_hash %}disabled{% endif %}>Continue with generated videos · $0.00</button>
                 <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
                 {% else %}
                 <p class="text-sm font-bold text-amber-950">Retry only failed takes: {% for take_index in item.failed_take_indexes %}{{ take_index + 1 }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
@@ -263,7 +272,7 @@
             </div>
             {% else %}
             <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
-            <button type="button" class="hidden" data-action="resume-qa" disabled aria-hidden="true">Retry identity QA · $0.00</button>
+            <button type="button" class="hidden" data-action="resume-qa" disabled aria-hidden="true">Continue with generated videos · $0.00</button>
             {% endif %}
 
             {% if item.stage in ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning'] %}

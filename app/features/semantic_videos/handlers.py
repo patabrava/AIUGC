@@ -2286,13 +2286,13 @@ def resume_qa_only_review(post_id: str, payload: QAReviewResumeRequest):
         if isinstance(artifacts.get("qa_failure"), dict)
         else {}
     )
-    if (
-        qa_failure.get("retry_mode") != "qa_only"
-        or qa_failure.get("failure_type") != "qa_service_unavailable"
-        or qa_failure.get("stage") != "identity_qa"
-    ):
+    if qa_failure.get("stage") not in {
+        "transcript_qa",
+        "identity_qa",
+        "voice_qa",
+    }:
         raise StateTransitionError(
-            "Semantic video run does not have a resumable QA-only failure."
+            "Semantic video run does not have a resumable advisory QA failure."
         )
     updated = resume_qa_review(
         run_id=str(run["id"]),

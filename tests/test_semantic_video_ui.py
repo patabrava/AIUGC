@@ -68,6 +68,8 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
             "attempt": 1,
             "submission_state": "qa_failed" if index in {2, 5} else "completed",
             "provider_duration_seconds": 8,
+            "raw_artifact_uri": f"https://cdn.example.com/take-{index}.mp4",
+            "raw_artifact_sha256": f"{index}" * 64,
             "transcript_result": {"passed": index != 2},
             "identity_qa_result": {"passed": index != 5},
             "request_contract": {
@@ -105,6 +107,9 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
     assert item["retry_provider_seconds"] == 16
     assert item["retry_estimated_cost_usd"] == "6.40"
     assert item["latest_attempts"][2]["attempt"] == 1
+    assert item["provider_prompts"][2]["raw_artifact_uri"] == (
+        "https://cdn.example.com/take-2.mp4"
+    )
 
     html = Environment(loader=FileSystemLoader("templates")).get_template(
         "batches/detail/_semantic_video.html"
@@ -113,6 +118,8 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
     assert "$0.40/s" in html
     assert "$22.40" in html
     assert "video generated · QA needs attention" in html
+    assert 'src="https://cdn.example.com/take-2.mp4"' in html
+    assert "Open generated take" in html
     assert "Retry only failed takes: 3, 6" in html
     assert "Retry only failed takes: 2, 5" not in html
 
@@ -343,8 +350,8 @@ def test_identity_qa_service_failure_renders_free_resume_instead_of_paid_retry(
         "batches/detail/_semantic_video.html"
     ).render(batch=_semantic_batch(), batch_view=view)
     assert 'data-action="resume-qa"' in html
-    assert "Retry identity QA · $0.00" in html
-    assert "submits no new Veo work" in html
+    assert "Continue with generated videos · $0.00" in html
+    assert "no new Veo work will be submitted" in html
     assert 'data-action="approve-retry" data-cost-usd="6.40"' not in html
 
 
