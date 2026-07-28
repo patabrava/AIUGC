@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 import io
@@ -1442,15 +1443,46 @@ def test_progress_endpoint_reports_persisted_generated_and_verified_counts(monke
     ).status_code == 200
     state["takes"][0]["submission_state"] = "completed"
     state["takes"][0]["transcript_result"] = {"passed": True}
+    state["run"]["stage"] = "generating"
 
     response = client.get("/semantic-videos/posts/post-1/progress")
 
     assert response.status_code == 200, response.text
     payload = response.json()["data"]
-    assert payload["stage"] == "awaiting_paid_approval"
+    assert payload["stage"] == "generating"
     assert payload["total_takes"] == 7
     assert payload["generated_takes"] == 1
     assert payload["verified_takes"] == 1
+    assert payload["progress_percent"] == 8
+    assert payload["elapsed_seconds"] >= 0
+    assert payload["estimated_remaining_seconds"] == 180
+    assert "queued" in payload["status_message"]
+
+
+def test_progress_endpoint_exposes_elapsed_and_estimated_remaining_time(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    assert client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).status_code == 200
+    state["run"]["stage"] = "generating"
+    state["takes"][0].update(
+        submission_state="submitted",
+        operation_accepted_at=(
+            datetime.now(timezone.utc) - timedelta(seconds=75)
+        ).isoformat(),
+    )
+
+    payload = client.get("/semantic-videos/posts/post-1/progress").json()["data"]
+
+    assert 74 <= payload["elapsed_seconds"] <= 77
+    assert 103 <= payload["estimated_remaining_seconds"] <= 106
+    assert 12 <= payload["progress_percent"] < 90
+    assert "estimate" in payload["status_message"].lower()
 
 
 def test_progress_endpoint_reports_scene_plate_generation_state(monkeypatch):

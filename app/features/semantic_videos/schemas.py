@@ -76,6 +76,10 @@ class ProgressResponse(BaseModel):
     total_takes: int
     generated_takes: int
     verified_takes: int
+    progress_percent: int = Field(ge=0, le=100)
+    elapsed_seconds: int = Field(ge=0)
+    estimated_remaining_seconds: Optional[int] = Field(default=None, ge=0)
+    status_message: str
     failed_take_indexes: list[int]
     takes: list[ProgressTakeResponse]
 

@@ -875,6 +875,9 @@ def test_semantic_s2_script_editor_uses_live_16s_duration_contract_guidance(
 
 def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     source = open("static/js/batches/semantic_video.js", encoding="utf-8").read()
+    template_source = open(
+        "templates/batches/detail/_semantic_video.html", encoding="utf-8"
+    ).read()
 
     assert "/progress" in source
     assert "confirm(" in source
@@ -890,6 +893,10 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "Scene plates are still generating" in source
     assert "reloadAtWorkflow(root)" in source
     assert "#semantic-video-post-" in source
+    assert "progress.estimated_remaining_seconds" in source
+    assert "progress.progress_percent" in source
+    assert "Typical time remaining" in template_source
+    assert 'role="progressbar"' in template_source
 
 
 def test_pending_script_blocks_scene_plate_generation_with_visible_guidance(monkeypatch):

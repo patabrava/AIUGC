@@ -51,10 +51,37 @@
         if (verified) verified.textContent = progress.verified_takes;
         if (total) total.textContent = progress.total_takes;
         if (verifiedTotal) verifiedTotal.textContent = progress.total_takes;
+        const progressBar = field(root, 'progress-bar');
+        const progressPercent = field(root, 'progress-percent');
+        const elapsed = field(root, 'elapsed');
+        const remaining = field(root, 'remaining');
+        const progressMessage = field(root, 'progress-message');
+        if (progressBar) {
+            progressBar.style.width = `${progress.progress_percent}%`;
+            progressBar.setAttribute('aria-valuenow', String(progress.progress_percent));
+        }
+        if (progressPercent) progressPercent.textContent = `${progress.progress_percent}%`;
+        if (elapsed) elapsed.textContent = formatDuration(progress.elapsed_seconds);
+        if (remaining) {
+            remaining.textContent = progress.estimated_remaining_seconds === null
+                ? 'Not available'
+                : (progress.estimated_remaining_seconds === 0
+                    ? 'Less than a minute'
+                    : `About ${formatDuration(progress.estimated_remaining_seconds)}`);
+        }
+        if (progressMessage) progressMessage.textContent = progress.status_message;
         root.dataset.revision = progress.revision;
         root.dataset.stage = progress.stage;
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
         root.dataset.candidateGenerationStatus = progress.candidate_generation_status || 'idle';
+    }
+
+    function formatDuration(value) {
+        const seconds = Math.max(0, Number(value) || 0);
+        if (seconds < 60) return `${Math.round(seconds)}s`;
+        const minutes = Math.floor(seconds / 60);
+        const remainder = Math.round(seconds % 60);
+        return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
     }
 
     async function pollProgress(root) {

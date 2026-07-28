@@ -163,6 +163,7 @@ class FakeRepo:
             "post_id": "post-1",
             "batch_id": "batch-1",
             "stage": stage,
+            "requested_duration_seconds": take_count * 8,
             "plan_hash": "a" * 64,
             "master_hash": sha256(master).hexdigest(),
             "master_snapshot": {
@@ -683,8 +684,8 @@ def test_worker_provider_operation_failure_stops_and_requires_retry_approval():
     assert vertex.submit_calls == []
 
 
-def test_worker_qa_failure_requires_approval_and_never_auto_retries():
-    repo = FakeRepo(stage="identity_qa", take_count=1)
+def test_worker_multitake_qa_failure_requires_approval_and_never_auto_retries():
+    repo = FakeRepo(stage="identity_qa", take_count=2)
     stages = FakeStages(
         {
             "passed": False,
@@ -701,6 +702,49 @@ def test_worker_qa_failure_requires_approval_and_never_auto_retries():
     assert result.action == "retry_approval_required"
     assert second.action == "not_claimed"
     assert vertex.submit_calls == []
+
+
+def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():
+    repo = FakeRepo(stage="identity_qa", take_count=1)
+    raw_hash = "d" * 64
+    repo.takes[0].update(
+        submission_state="completed",
+        raw_artifact_uri="https://storage/paid-8s.mp4",
+        raw_artifact_sha256=raw_hash,
+    )
+    stages = FakeStages(
+        {
+            "passed": False,
+            "failed_take_indexes": [0],
+            "artifacts": {
+                "qa_failure": {
+                    "stage": "identity_qa",
+                    "message": "Automated identity score was below the advisory threshold.",
+                }
+            },
+        }
+    )
+    vertex = FakeVertex()
+    worker = _worker(repo, vertex, stages)
+
+    result = worker.tick("run-1")
+
+    assert result.action == "completed_with_qa_advisory"
+    assert repo.run["stage"] == "completed"
+    assert vertex.submit_calls == []
+    assert not any(event[0] == "retry_required" for event in repo.events)
+    advances = [event[1:3] for event in repo.events if event[0] == "advance"]
+    assert advances == [
+        ("identity_qa", "voice_qa"),
+        ("voice_qa", "acoustic_qa"),
+        ("acoustic_qa", "composing"),
+        ("composing", "uploading"),
+    ]
+    completion = next(event for event in repo.events if event[0] == "complete_run")
+    assert completion[1] == "https://storage/paid-8s.mp4"
+    assert completion[2] == "https://storage/paid-8s.mp4"
+    assert completion[3]["qa_advisory"]["paid_retry_required"] is False
+    assert completion[3]["delivery"]["mode"] == "single_paid_take_manual_review"
 
 
 def test_worker_final_captioned_artifact_completes_post_directly():

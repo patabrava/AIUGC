@@ -88,6 +88,75 @@ _SCENE_PLATE_AUDIT_TEXT = (
     "Wheelchair scene plate generated from two immutable actor references and one "
     "actor-free location before any Veo request."
 )
+_TYPICAL_EIGHT_SECOND_VEO_SECONDS = 180
+
+
+def _parse_progress_time(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+
+def _generation_progress(
+    *,
+    stage: str,
+    takes: list[dict[str, Any]],
+    run: Mapping[str, Any],
+) -> tuple[int, int, Optional[int], str]:
+    """Return an honest operator estimate; Veo does not expose exact percentage."""
+    now = datetime.now(timezone.utc)
+    accepted_times = [
+        parsed
+        for take in takes
+        if (parsed := _parse_progress_time(take.get("operation_accepted_at")))
+    ]
+    started_at = min(accepted_times) if accepted_times else _parse_progress_time(
+        run.get("updated_at") or run.get("created_at")
+    )
+    elapsed = max(0, int((now - started_at).total_seconds())) if started_at else 0
+
+    if stage == "completed":
+        return 100, elapsed, 0, "Video ready. No additional generation is pending."
+    if stage == "generating":
+        submitted = any(
+            str(take.get("submission_state") or "") == "submitted" for take in takes
+        )
+        generated = sum(
+            str(take.get("submission_state") or "") in {"completed", "qa_failed"}
+            for take in takes
+        )
+        if generated and generated == len(takes):
+            return 90, elapsed, 0, "Veo generation complete. Preparing the delivery."
+        if submitted:
+            remaining = max(0, _TYPICAL_EIGHT_SECOND_VEO_SECONDS - elapsed)
+            percent = min(89, max(12, int((elapsed / _TYPICAL_EIGHT_SECOND_VEO_SECONDS) * 85)))
+            return (
+                percent,
+                elapsed,
+                remaining,
+                "Veo is generating the approved video. Remaining time is an estimate.",
+            )
+        return 8, elapsed, _TYPICAL_EIGHT_SECOND_VEO_SECONDS, "Paid request is queued for Veo."
+
+    stage_progress = {
+        "transcript_qa": 92,
+        "identity_qa": 94,
+        "voice_qa": 96,
+        "acoustic_qa": 97,
+        "composing": 98,
+        "uploading": 99,
+        "retry_approval_required": 100,
+        "failed": 100,
+    }
+    percent = stage_progress.get(stage, 5)
+    if stage in {"retry_approval_required", "failed"}:
+        return percent, elapsed, None, "Generation stopped. Review the available result and status."
+    return percent, elapsed, 0, "The paid video is generated. Finishing delivery checks."
 _FINAL_WORD_TARGET_PATTERN = re.compile(
     r"(?:final spoken word near|final word ends no later than)\s+"
     r"([0-9]+(?:\.[0-9]+)?)\s+seconds",
@@ -1487,6 +1556,9 @@ def get_progress(post_id: str):
     ordered = [latest[index] for index in sorted(latest)]
     generated_states = {"completed", "qa_failed", "failed"}
     failed_states = {"qa_failed", "failed"}
+    progress_percent, elapsed_seconds, estimated_remaining_seconds, status_message = (
+        _generation_progress(stage=str(run.get("stage") or ""), takes=ordered, run=run)
+    )
     progress = ProgressResponse(
         run_id=str(run["id"]),
         revision=int(run.get("revision") or 0),
@@ -1500,6 +1572,10 @@ def get_progress(post_id: str):
             bool((take.get("transcript_result") or {}).get("passed"))
             for take in ordered
         ),
+        progress_percent=progress_percent,
+        elapsed_seconds=elapsed_seconds,
+        estimated_remaining_seconds=estimated_remaining_seconds,
+        status_message=status_message,
         failed_take_indexes=[
             int(take["take_index"])
             for take in ordered

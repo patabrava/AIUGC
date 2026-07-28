@@ -818,6 +818,7 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "latest_attempts": [],
         "visual_contract": None,
         "provider_prompts": [],
+        "qa_advisory": None,
     }
     run = semantic_video_queries.get_run_by_post(post_id)
     if not run:
@@ -903,6 +904,11 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         if isinstance(artifact_manifest.get("qa_failure"), dict)
         else {}
     )
+    qa_advisory = (
+        artifact_manifest.get("qa_advisory")
+        if isinstance(artifact_manifest.get("qa_advisory"), dict)
+        else None
+    )
     qa_resume_available = bool(
         str(run.get("stage") or "") == "retry_approval_required"
         and current_initial_approval
@@ -983,6 +989,7 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "latest_attempts": latest,
         "visual_contract": _semantic_visual_contract(run, master),
         "provider_prompts": _semantic_provider_prompts(latest),
+        "qa_advisory": qa_advisory,
     }
 
 

@@ -1232,6 +1232,14 @@ class SemanticVideoWorker:
             raise StateTransitionError("Semantic video stage runner returned an invalid contract.")
         artifacts = dict(result.get("artifacts") or {})
         if not result.get("passed"):
+            if self._is_single_paid_eight_second_delivery(run, takes):
+                return self._complete_advisory_delivery(
+                    run=run,
+                    takes=takes,
+                    lease_token=lease_token,
+                    failed_stage=stage,
+                    artifacts=artifacts,
+                )
             failed_indexes = sorted({int(index) for index in result.get("failed_take_indexes") or []})
             if not failed_indexes:
                 raise StateTransitionError("Failed semantic video QA requires failed take indexes.")
@@ -1266,6 +1274,92 @@ class SemanticVideoWorker:
             artifacts=artifacts,
         )
         return WorkerTickResult(run_id, next_stage, "stage_advanced")
+
+    @staticmethod
+    def _is_single_paid_eight_second_delivery(
+        run: Mapping[str, Any],
+        takes: Sequence[Mapping[str, Any]],
+    ) -> bool:
+        if int(run.get("requested_duration_seconds") or 0) != 8 or len(takes) != 1:
+            return False
+        take = takes[0]
+        return (
+            int(take.get("provider_duration_seconds") or 0) == 8
+            and str(take.get("submission_state") or "") == "completed"
+            and bool(str(take.get("raw_artifact_uri") or "").strip())
+            and bool(re.fullmatch(r"[0-9a-f]{64}", str(take.get("raw_artifact_sha256") or "")))
+        )
+
+    def _complete_advisory_delivery(
+        self,
+        *,
+        run: Mapping[str, Any],
+        takes: Sequence[Mapping[str, Any]],
+        lease_token: str,
+        failed_stage: str,
+        artifacts: Mapping[str, Any],
+    ) -> WorkerTickResult:
+        """Deliver one paid 8s take even when evaluator QA recommends manual review."""
+        run_id = str(run["id"])
+        take = takes[0]
+        raw_uri = str(take["raw_artifact_uri"])
+        raw_hash = str(take["raw_artifact_sha256"])
+        qa_failure = artifacts.get("qa_failure")
+        advisory = {
+            "required": True,
+            "stage": failed_stage,
+            "message": (
+                str(qa_failure.get("message") or "")
+                if isinstance(qa_failure, Mapping)
+                else "Automated QA recommends manual review."
+            ),
+            "paid_retry_required": False,
+        }
+        delivery = {
+            "passed": True,
+            "mode": "single_paid_take_manual_review",
+            "raw": {"url": raw_uri, "sha256": raw_hash},
+            # The raw take is deliberately projected as the playable delivery.
+            # Manual-review fallback does not pretend that captions were verified.
+            "captioned": {"url": raw_uri, "sha256": raw_hash},
+            "qa_advisory": advisory,
+        }
+        completion_artifacts = {
+            **dict(artifacts),
+            "delivery": delivery,
+            "qa_advisory": advisory,
+            "qa_failure": None,
+        }
+
+        current_stage = failed_stage
+        while current_stage != "uploading":
+            next_stage = NEXT_STAGE[current_stage]
+            self.repo.advance_stage(
+                run_id=run_id,
+                worker_id=self.worker_id,
+                lease_token=lease_token,
+                expected_stage=current_stage,
+                next_stage=next_stage,
+                artifacts=completion_artifacts if current_stage == failed_stage else {},
+            )
+            current_stage = next_stage
+        self.repo.complete_run(
+            run_id=run_id,
+            worker_id=self.worker_id,
+            lease_token=lease_token,
+            final_video_uri=raw_uri,
+            final_video_sha256=raw_hash,
+            final_caption_uri=raw_uri,
+            final_caption_sha256=raw_hash,
+            artifact_manifest=completion_artifacts,
+        )
+        logger.warning(
+            "semantic_video_single_take_delivered_with_qa_advisory",
+            run_id=run_id,
+            failed_stage=failed_stage,
+            raw_sha256=raw_hash[:12],
+        )
+        return WorkerTickResult(run_id, "completed", "completed_with_qa_advisory")
 
 
 def deepcopy_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
