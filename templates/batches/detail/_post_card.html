@@ -32,7 +32,7 @@
 {% set post_removed = review_status == 'removed' or seed.get('video_excluded') == True %}
 
 <div id="post-{{ post.id }}" class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:border-[#006AAB]/30 transition" data-post-card="post-{{ post.id }}">
-    <div class="flex items-center space-x-3 text-xs text-gray-500">
+    <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#006AAB]/10 text-[#006AAB] uppercase tracking-wide">
             {{ display_post_type or ('Manual Draft' if is_manual_mode else 'Unassigned') }}
         </span>

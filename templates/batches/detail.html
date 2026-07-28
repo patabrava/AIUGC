@@ -18,10 +18,21 @@
     {% include "batches/detail/_breadcrumbs.html" %}
     {% include "batches/detail/_progress_stepper.html" %}
     {% if batch.creation_mode in ['semantic_ugc', 'manual_semantic_ugc'] and batch_view.semantic_video %}
-    {% include "batches/detail/_semantic_video.html" %}
+        {% set semantic_step = batch_view.semantic_workflow.current_step.key if batch_view.semantic_workflow else 'scripts' %}
+        {% if semantic_step == 'scripts' %}
+            {% include "batches/detail/_workflow_panels.html" %}
+            {% include "batches/detail/_posts_section.html" %}
+        {% elif semantic_step in ['scene', 'plan', 'production', 'delivery'] %}
+            {% include "batches/detail/_semantic_video.html" %}
+        {% elif semantic_step == 'publish' and batch.state == 'S6_QA' %}
+            {% include "batches/detail/_workflow_panels.html" %}
+        {% else %}
+            {% include "batches/detail/_posts_section.html" %}
+        {% endif %}
+    {% else %}
+        {% include "batches/detail/_workflow_panels.html" %}
+        {% include "batches/detail/_posts_section.html" %}
     {% endif %}
-    {% include "batches/detail/_workflow_panels.html" %}
-    {% include "batches/detail/_posts_section.html" %}
     {% if batch.creation_mode not in ['semantic_ugc', 'manual_semantic_ugc'] %}
     {% include "batches/detail/_video_settings.html" %}
     {% endif %}

@@ -106,6 +106,44 @@ async def test_approving_last_active_video_advances_when_removed_post_exists(mon
 
 
 @pytest.mark.asyncio
+async def test_qa_approval_recovers_stale_semantic_batch_directly_to_publish(monkeypatch):
+    db = {
+        "batches": [
+            {
+                "id": "batch-1",
+                "state": "S4_SCRIPTED",
+                "creation_mode": "semantic_ugc",
+            }
+        ],
+        "posts": [
+            {
+                "id": "post-final",
+                "batch_id": "batch-1",
+                "qa_pass": None,
+                "video_prompt_json": None,
+                "video_status": "caption_completed",
+                "seed_data": {"script_review_status": "approved"},
+            }
+        ],
+    }
+    fake_client = _FakeSupabaseClient(db)
+    monkeypatch.setattr(
+        qa_handlers,
+        "get_supabase",
+        lambda: SimpleNamespace(client=fake_client),
+    )
+
+    response = await qa_handlers.approve_qa(
+        "post-final",
+        _JsonRequest({"approved": True}),
+    )
+
+    assert response.data["batch_advanced"] is True
+    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
+    assert db["posts"][0]["qa_pass"] is True
+
+
+@pytest.mark.asyncio
 async def test_rejecting_video_excludes_it_and_advances_with_remaining_approved_posts(monkeypatch):
     db = {
         "batches": [{"id": "batch-1", "state": "S6_QA"}],

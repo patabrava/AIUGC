@@ -1,4 +1,6 @@
 {% set semantic = batch_view.semantic_video %}
+{% set semantic_locked = batch.state in ['S1_SETUP', 'S2_SEEDED'] %}
+{% set semantic_step = batch_view.semantic_workflow.current_step.key if batch_view.semantic_workflow else 'scene' %}
 <section
     id="semantic-video-workflow"
     class="brand-panel mb-6 overflow-hidden rounded-2xl border border-[#006AAB]/15 bg-white shadow-sm"
@@ -8,7 +10,13 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
                 <p class="text-xs font-bold uppercase tracking-[0.16em] text-[#006AAB]">Semantic UGC · Veo 3.1</p>
-                <h2 id="semantic-video-heading" class="mt-1 text-xl font-bold text-[#1C2740]">Character-consistent video production</h2>
+                <h2 id="semantic-video-heading" class="mt-1 text-xl font-bold text-[#1C2740]">
+                    {% if semantic_step == 'scene' %}Create and approve the scene
+                    {% elif semantic_step == 'plan' %}Review the production plan
+                    {% elif semantic_step == 'production' %}Generate and verify the video
+                    {% elif semantic_step == 'delivery' %}Review the final delivery
+                    {% else %}Character-consistent video production{% endif %}
+                </h2>
             </div>
             <div class="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[#1C2740] ring-1 ring-[#006AAB]/15">
                 Requested delivery: {{ semantic.requested_duration_seconds }}s
@@ -40,6 +48,7 @@
                 </span>
             </div>
 
+            {% if semantic_step in ['plan', 'production'] %}
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Veo model</dt><dd class="mt-1 font-bold text-[#1C2740]">Veo 3.1</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Video + audio rate</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.price_per_provider_second_usd }}/s</dd></div>
@@ -48,7 +57,9 @@
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Provider seconds</dt><dd class="mt-1 font-bold text-[#1C2740]">{{ item.billable_provider_seconds }}s</dd></div>
                 <div class="rounded-xl bg-[#F6FAFF] p-3"><dt class="text-[#1C2740]/60">Approved plan cost</dt><dd class="mt-1 font-bold text-[#1C2740]">${{ item.estimated_cost_usd }}</dd></div>
             </dl>
+            {% endif %}
 
+            {% if semantic_step == 'production' %}
             <div class="mt-4 grid grid-cols-2 gap-3" aria-label="Video generation progress">
                 <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm"><span class="text-[#1C2740]/60">Generated</span><strong class="ml-2 text-[#1C2740]"><span data-field="generated-takes">{{ item.generated_takes }}</span>/<span data-field="total-takes">{{ item.take_count }}</span></strong></div>
                 <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm"><span class="text-[#1C2740]/60">Verified</span><strong class="ml-2 text-[#1C2740]"><span data-field="verified-takes">{{ item.verified_takes }}</span>/<span data-field="verified-total">{{ item.take_count }}</span></strong></div>
@@ -79,8 +90,9 @@
                     <div><dt>Typical time remaining</dt><dd class="font-bold text-[#1C2740]" data-field="remaining">{% if item.stage == 'completed' %}Ready{% else %}Calculating…{% endif %}</dd></div>
                 </dl>
             </section>
+            {% endif %}
 
-            {% if item.final_video_url or item.final_caption_url %}
+            {% if semantic_step == 'delivery' and (item.final_video_url or item.final_caption_url) %}
             {% set playback_url = item.final_caption_url or item.final_video_url %}
             <section class="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4" aria-label="Final delivery">
                 <h4 class="text-sm font-bold text-emerald-950">Final delivery</h4>
@@ -99,7 +111,7 @@
             </section>
             {% endif %}
 
-            {% if item.qa_advisory %}
+            {% if semantic_step == 'delivery' and item.qa_advisory %}
             <section class="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Manual quality review">
                 <h4 class="text-sm font-bold text-amber-950">Video delivered — manual review recommended</h4>
                 <p class="mt-1 text-sm text-amber-900">{{ item.qa_advisory.message or 'Automated QA flagged a possible issue.' }}</p>
@@ -107,7 +119,7 @@
             </section>
             {% endif %}
 
-            {% if item.contact_sheet_url %}
+            {% if semantic_step == 'delivery' and item.contact_sheet_url %}
             <section class="mt-5 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-4" aria-label="Final actor and scene quality evidence">
                 <h4 class="text-sm font-bold text-[#1C2740]">Final identity and continuity evidence</h4>
                 <p class="mt-1 text-xs text-[#1C2740]/65">The final contact sheet is compared independently with both original actor references and the approved scene plate.</p>
@@ -140,7 +152,7 @@
             </section>
             {% endif %}
 
-            {% if item.visual_contract %}
+            {% if semantic_step == 'scene' and item.visual_contract %}
             <section class="mt-5 rounded-xl border border-[#006AAB]/15 bg-[#F6FAFF] p-4" aria-label="Frozen visual contract">
                 <h4 class="text-sm font-bold text-[#1C2740]">Frozen visual contract</h4>
                 <p class="mt-1 text-xs text-[#1C2740]/60">This approved contract controls the Semantic video look.</p>
@@ -161,7 +173,7 @@
             </section>
             {% endif %}
 
-            {% if item.candidates %}
+            {% if semantic_step == 'scene' and item.candidates %}
             <section class="mt-5 rounded-2xl border border-[#006AAB]/15 bg-[#F6FAFF] p-4" aria-labelledby="identity-review-{{ item.post_id }}">
                 <h4 id="identity-review-{{ item.post_id }}" class="text-sm font-bold text-[#1C2740]">Original-actor identity review</h4>
                 <p class="mt-1 text-xs text-[#1C2740]/65">Compare every candidate directly with both immutable actor references. Scene, outfit, wheelchair, and framing must also match the frozen contract.</p>
@@ -207,12 +219,18 @@
             {% endif %}
             {% endif %}
 
+            {% if semantic_step == 'scene' %}
             <div class="mt-5 flex flex-wrap gap-2">
-                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" {% if item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
-                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve selected scene plate</button>
-                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or item.plan_hash %}disabled{% endif %}>Continue: Build free Veo plan</button>
-                <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve &amp; generate video · ${{ item.estimated_cost_usd }}</button>
+                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" {% if semantic_locked or item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if semantic_locked or item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve selected scene plate</button>
             </div>
+            {% elif semantic_step == 'plan' %}
+            <div class="mt-5 flex flex-wrap gap-2">
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if semantic_locked or item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or item.plan_hash %}disabled{% endif %}>Continue: Build free Veo plan</button>
+                <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if semantic_locked or item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve &amp; generate video · ${{ item.estimated_cost_usd }}</button>
+            </div>
+            {% endif %}
+            {% if semantic_step == 'scene' %}
             {% if item.script_review_status == 'pending' %}
             <p class="mt-2 text-sm text-amber-800" data-semantic-script-prerequisite>
                 Approve this post’s script in Script Review before generating its scene plates.
@@ -223,8 +241,9 @@
                 Use regeneration after changing location or outfit. It starts a fresh visual run and never discards paid take evidence.
             </p>
             {% endif %}
+            {% endif %}
 
-            {% if item.provider_prompts %}
+            {% if semantic_step in ['plan', 'production'] and item.provider_prompts %}
             <section class="mt-5" aria-label="Actual provider prompts">
                 <h4 class="text-sm font-bold text-[#1C2740]">Actual provider prompts</h4>
                 <p class="mt-1 text-xs text-[#1C2740]/60">Exact prompts from the latest persisted provider request contract for each take. The state shows whether a request is planned, submitted, or complete.</p>
@@ -254,7 +273,7 @@
             </section>
             {% endif %}
 
-            {% if item.stage == 'retry_approval_required' %}
+            {% if semantic_step == 'production' and item.stage == 'retry_approval_required' %}
             <div class="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
                 {% if item.qa_resume_available %}
                 <p class="text-sm font-bold text-amber-950">Generated videos are ready for manual review</p>
@@ -270,12 +289,12 @@
                 <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Approve failed-take retry</button>
                 {% endif %}
             </div>
-            {% else %}
+            {% elif semantic_step == 'production' %}
             <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
             <button type="button" class="hidden" data-action="resume-qa" disabled aria-hidden="true">Continue with generated videos · $0.00</button>
             {% endif %}
 
-            {% if item.stage in ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning'] %}
+            {% if semantic_step == 'production' and item.stage in ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning'] %}
             <p class="mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3 text-sm font-semibold text-[#006AAB]" role="status">
                 {% if item.stage == 'generating' %}
                 Veo is generating the approved video. An 8-second take can take several minutes; this page updates automatically.
@@ -283,6 +302,44 @@
                 The video has been generated. Automated {{ item.stage | replace('_', ' ') }} is running; this page updates automatically.
                 {% endif %}
             </p>
+            {% endif %}
+
+            {% if semantic_step == 'delivery' %}
+            <section class="mt-5 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-4" aria-label="Delivery approval">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h4 class="text-sm font-bold text-[#1C2740]">Delivery approval</h4>
+                        <p class="mt-1 text-sm text-[#1C2740]/70">
+                            Review the final video and continuity evidence, then record your decision.
+                        </p>
+                    </div>
+                    {% if item.qa_pass %}
+                    <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">Approved</span>
+                    {% endif %}
+                </div>
+                <div class="mt-4 flex flex-wrap gap-2">
+                    {% if not item.qa_pass %}
+                    <button
+                        hx-put="/qa/{{ item.post_id }}/approve"
+                        hx-vals='{"approved": true}'
+                        hx-swap="none"
+                        hx-on::after-request="window.handleSemanticDeliveryDecision(event, {{ item.post_id | tojson }})"
+                        class="brand-button-primary brand-focus rounded-xl px-4 py-2 text-sm font-bold text-white"
+                    >
+                        Approve delivery
+                    </button>
+                    {% endif %}
+                    <button
+                        hx-put="/qa/{{ item.post_id }}/approve"
+                        hx-vals='{"approved": false}'
+                        hx-swap="none"
+                        hx-on::after-request="window.handleSemanticDeliveryDecision(event, {{ item.post_id | tojson }})"
+                        class="rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-bold text-red-700"
+                    >
+                        Reject delivery
+                    </button>
+                </div>
+            </section>
             {% endif %}
 
             <p class="mt-3 min-h-5 text-sm text-[#1C2740]/70" data-field="status" aria-live="polite"></p>

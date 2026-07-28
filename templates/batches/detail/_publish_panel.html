@@ -1,5 +1,5 @@
 {# Batch-level publish scheduling panel for S7_PUBLISH_PLAN #}
-<div x-data='batchPublishComponent({
+<div id="publish-workflow" x-data='batchPublishComponent({
     batchId: {{ batch.id | tojson }},
     posts: {{ batch_view.publish_posts_json | tojson }},
     metaState: {{ batch_view.meta_publish_state | tojson }},

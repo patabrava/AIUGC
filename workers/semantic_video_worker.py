@@ -24,6 +24,7 @@ from app.adapters.vertex_ai_client import VertexAIClient
 from app.core.errors import StateTransitionError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
 from app.features.semantic_videos import queries
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.semantic_videos.visual_contract import (
     build_actor_reference_fingerprint,
     validate_approved_scene_plate_identity,
@@ -109,6 +110,12 @@ class SemanticVideoRepository:
 
     def complete_run(self, **kwargs):
         return queries.complete_worker_run(**kwargs)
+
+    def reconcile_batch_state(self, *, batch_id: str, correlation_id: str):
+        return reconcile_batch_video_pipeline_state(
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+        )
 
     def release_run(self, **kwargs):
         return queries.release_worker_lease(**kwargs)
@@ -691,6 +698,231 @@ class ProductionStageRunner:
             },
         }
 
+    def caption_advisory_single_take(
+        self,
+        *,
+        run: Mapping[str, Any],
+        takes: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Protect the terminal frame, then burn captions for an advisory delivery."""
+        if len(takes) != 1:
+            raise StateTransitionError(
+                "Advisory caption delivery requires exactly one paid take."
+            )
+
+        from app.adapters.caption_aligner import align_transcript_to_script
+        from app.adapters.caption_renderer import burn_captions
+        from app.adapters.deepgram_client import Word, WordLevelTranscript
+        from app.adapters.video_stitcher import stitch_segments
+        from app.features.shot_production.duration import (
+            SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS,
+        )
+        from app.features.shot_production.visual_seams import (
+            evaluate_source_terminal_reset,
+        )
+
+        pipeline = self._runner()
+        manifest_path = self._materialize_manifest(run, takes)
+        payload = self._read_manifest(manifest_path)
+        take = payload["takes"][0]
+        transcript_payload = take.get("transcript")
+        if not isinstance(transcript_payload, Mapping):
+            raise StateTransitionError(
+                "Advisory caption delivery requires a persisted transcript."
+            )
+        transcript = pipeline._deserialize_transcript(dict(transcript_payload))  # noqa: SLF001
+        aligned = align_transcript_to_script(
+            transcript=transcript,
+            script=str((payload.get("script") or {}).get("text") or ""),
+        )
+        if not aligned.words:
+            raise StateTransitionError(
+                "Advisory caption delivery requires at least one aligned word."
+            )
+
+        requested_duration = int(run.get("requested_duration_seconds") or 0)
+        if requested_duration != 8:
+            raise StateTransitionError(
+                "Advisory single-take terminal protection requires an 8s delivery."
+            )
+        trim_window = take.get("trim_window")
+        transcript_qa = take.get("transcript_qa")
+        if (
+            not isinstance(trim_window, Mapping)
+            or not isinstance(transcript_qa, Mapping)
+            or transcript_qa.get("passed") is not True
+            or trim_window.get("source") != "deepgram_word_window"
+        ):
+            raise StateTransitionError(
+                "Advisory terminal protection requires a verified speech window."
+            )
+        protected_source_end = (
+            float(requested_duration)
+            - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+        )
+        transcript_safe_end = float(trim_window.get("end_seconds") or 0.0)
+        if transcript_safe_end > protected_source_end + 1e-6:
+            raise StateTransitionError(
+                "Advisory terminal protection would cut transcript-safe context.",
+                {
+                    "transcript_safe_end_seconds": transcript_safe_end,
+                    "protected_source_end_seconds": protected_source_end,
+                },
+            )
+
+        raw_path = Path(str((take.get("raw") or {}).get("path") or ""))
+        if not raw_path.is_file():
+            raise StateTransitionError(
+                "Advisory caption delivery raw artifact is unavailable."
+            )
+        raw_bytes = raw_path.read_bytes()
+        raw_hash = str(takes[0].get("raw_artifact_sha256") or "")
+        if sha256(raw_bytes).hexdigest() != raw_hash:
+            raise StateTransitionError(
+                "Advisory caption delivery raw checksum changed."
+            )
+
+        source_terminal_qa = dict(evaluate_source_terminal_reset(raw_path))
+        source_terminal_qa.update(
+            {
+                "passed": True,
+                "source_raw_sha256": raw_hash,
+                "take_index": int(take.get("index") or 0),
+                "attempt": int(take.get("attempt") or 1),
+            }
+        )
+        stitched_bytes, stitch_metadata = stitch_segments(
+            segment_videos=[raw_bytes],
+            post_id=str(run["id"]),
+            correlation_id=f"semantic_ugc_{run['id']}_advisory_stitch",
+            trim_windows=None,
+            acoustic_plan=None,
+            target_duration_seconds=float(requested_duration),
+            terminal_tail_exclusion_seconds=(
+                SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+            ),
+        )
+        stitched_path = manifest_path.parent / "stitched-advisory.mp4"
+        stitched_path.write_bytes(stitched_bytes)
+        stitched_hash = sha256(stitched_bytes).hexdigest()
+        delivery_terminal_qa = dict(
+            evaluate_source_terminal_reset(stitched_path)
+        )
+        delivery_terminal_qa.update(
+            {
+                "passed": not bool(delivery_terminal_qa.get("reset_detected")),
+                "video_sha256": stitched_hash,
+                "requires_paid_regeneration": False,
+            }
+        )
+        if delivery_terminal_qa["passed"] is not True:
+            raise StateTransitionError(
+                "Protected advisory delivery still contains terminal camera drift.",
+                {
+                    "failure_type": "delivery_terminal_reset",
+                    "requires_paid_regeneration": False,
+                },
+            )
+
+        retime_ratio = float(
+            stitch_metadata.get("stitch_end_pan_retime_ratio") or 1.0
+        )
+        retimed_aligned = WordLevelTranscript(
+            words=[
+                Word(
+                    word=word.word,
+                    start=float(word.start) * retime_ratio,
+                    end=float(word.end) * retime_ratio,
+                )
+                for word in aligned.words
+            ],
+            full_text=aligned.full_text,
+        )
+        rendered_path = Path(
+            burn_captions(
+                video_path=str(stitched_path),
+                transcript=retimed_aligned,
+                correlation_id=f"semantic_ugc_{run['id']}_advisory_captions",
+            )
+        )
+        captioned_bytes = rendered_path.read_bytes()
+        caption_hash = sha256(captioned_bytes).hexdigest()
+        if caption_hash == raw_hash:
+            raise StateTransitionError(
+                "Advisory caption renderer returned the unchanged raw artifact."
+            )
+
+        captioned_path = manifest_path.parent / "final-captioned.mp4"
+        captioned_path.write_bytes(captioned_bytes)
+        probe = pipeline._probe_media(captioned_path)  # noqa: SLF001
+        duration = build_semantic_duration_contract(
+            int(run.get("requested_duration_seconds") or 0)
+        )
+        media_qa = pipeline.evaluate_final_media_probe(
+            probe,
+            min_duration_seconds=duration.delivery_min_seconds,
+            max_duration_seconds=duration.delivery_max_seconds,
+            target_duration_seconds=float(duration.requested_duration_seconds),
+        )
+        if media_qa.get("passed") is not True:
+            raise StateTransitionError(
+                "Advisory captioned delivery failed media validation.",
+                {"failure_reasons": media_qa.get("failure_reasons") or []},
+            )
+
+        object_key = (
+            f"{str(run.get('artifact_prefix') or '').strip('/')}/final/"
+            f"captioned/{caption_hash}.mp4"
+        )
+        upload = self.storage.upload_video(
+            video_bytes=captioned_bytes,
+            file_name=f"{caption_hash}.mp4",
+            correlation_id=f"semantic_ugc_{run['id']}_advisory_captioned",
+            object_key=object_key,
+        )
+        if (
+            str(upload.get("storage_key") or "") != object_key
+            or str(upload.get("sha256") or "") != caption_hash
+            or int(upload.get("size") or -1) != len(captioned_bytes)
+        ):
+            raise StateTransitionError(
+                "Advisory captioned upload receipt is invalid."
+            )
+
+        payload["caption"] = {
+            "captioned_path": str(captioned_path),
+            "sha256": caption_hash,
+            "bytes": len(captioned_bytes),
+            "word_count": len(retimed_aligned.words),
+            "aligned_transcript": pipeline._serialize_transcript(retimed_aligned),  # noqa: SLF001
+            "probe": probe,
+        }
+        payload["source_visual_tail_qa"] = {
+            "status": "evaluated",
+            "passed": True,
+            "takes": [source_terminal_qa],
+        }
+        payload["stitch"] = {
+            "path": str(stitched_path),
+            "sha256": stitched_hash,
+            "metadata": stitch_metadata,
+            "probe": pipeline._probe_media(stitched_path),  # noqa: SLF001
+        }
+        payload["delivery_terminal_qa"] = delivery_terminal_qa
+        payload["seam_qa"] = {
+            "status": "not_applicable",
+            "passed": True,
+            "gaps_seconds": [],
+        }
+        payload["media_qa"] = media_qa
+        payload["status"] = "captioned"
+        pipeline._atomic_write_json(manifest_path, payload)  # noqa: SLF001
+        return {
+            "url": str(upload["url"]),
+            "sha256": caption_hash,
+            "pipeline_manifest": payload,
+        }
+
     @staticmethod
     def _delivery(run: Mapping[str, Any]) -> dict[str, Any]:
         artifact_manifest = run.get("artifact_manifest")
@@ -816,6 +1048,18 @@ class SemanticVideoWorker:
             "semantic_video_lease_released",
             run_id=run_id,
             worker_id=self.worker_id,
+        )
+
+    def _reconcile_completed_batch(self, run: Mapping[str, Any]) -> None:
+        reconcile = getattr(self.repo, "reconcile_batch_state", None)
+        if not callable(reconcile):
+            return
+        batch_id = str(run.get("batch_id") or "").strip()
+        if not batch_id:
+            return
+        reconcile(
+            batch_id=batch_id,
+            correlation_id=f"semantic_complete_{run.get('id')}",
         )
 
     def tick(self, run_id: Optional[str] = None) -> WorkerTickResult:
@@ -1303,6 +1547,7 @@ class SemanticVideoWorker:
                 final_caption_sha256=str(result.get("final_caption_sha256") or ""),
                 artifact_manifest=artifacts,
             )
+            self._reconcile_completed_batch(run)
             return WorkerTickResult(run_id, "completed", "completed")
         next_stage = NEXT_STAGE[stage]
         self.repo.advance_stage(
@@ -1344,6 +1589,20 @@ class SemanticVideoWorker:
         take = takes[0]
         raw_uri = str(take["raw_artifact_uri"])
         raw_hash = str(take["raw_artifact_sha256"])
+        captioned = self.stage_runner.caption_advisory_single_take(
+            run=dict(run),
+            takes=deepcopy_rows(takes),
+        )
+        caption_uri = str(captioned.get("url") or "")
+        caption_hash = str(captioned.get("sha256") or "")
+        if (
+            not caption_uri
+            or not re.fullmatch(r"[0-9a-f]{64}", caption_hash)
+            or caption_hash == raw_hash
+        ):
+            raise StateTransitionError(
+                "Advisory delivery requires a distinct captioned artifact."
+            )
         qa_failure = artifacts.get("qa_failure")
         advisory = {
             "required": True,
@@ -1359,13 +1618,12 @@ class SemanticVideoWorker:
             "passed": True,
             "mode": "single_paid_take_manual_review",
             "raw": {"url": raw_uri, "sha256": raw_hash},
-            # The raw take is deliberately projected as the playable delivery.
-            # Manual-review fallback does not pretend that captions were verified.
-            "captioned": {"url": raw_uri, "sha256": raw_hash},
+            "captioned": {"url": caption_uri, "sha256": caption_hash},
             "qa_advisory": advisory,
         }
         completion_artifacts = {
             **dict(artifacts),
+            "pipeline_manifest": captioned.get("pipeline_manifest"),
             "delivery": delivery,
             "qa_advisory": advisory,
             "qa_failure": None,
@@ -1389,10 +1647,11 @@ class SemanticVideoWorker:
             lease_token=lease_token,
             final_video_uri=raw_uri,
             final_video_sha256=raw_hash,
-            final_caption_uri=raw_uri,
-            final_caption_sha256=raw_hash,
+            final_caption_uri=caption_uri,
+            final_caption_sha256=caption_hash,
             artifact_manifest=completion_artifacts,
         )
+        self._reconcile_completed_batch(run)
         logger.warning(
             "semantic_video_single_take_delivered_with_qa_advisory",
             run_id=run_id,

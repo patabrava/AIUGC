@@ -20,7 +20,11 @@
     {% elif batch_view.visible_posts %}
     <div class="space-y-4">
         {% for post in batch_view.visible_posts %}
+        {% if batch.creation_mode in ['semantic_ugc', 'manual_semantic_ugc'] and batch_view.semantic_workflow and batch_view.semantic_workflow.current_step.key == 'scripts' %}
+        {% include "batches/detail/_semantic_script_review_card.html" %}
+        {% else %}
         {% include "batches/detail/_post_card.html" %}
+        {% endif %}
         {% endfor %}
     </div>
     {% else %}

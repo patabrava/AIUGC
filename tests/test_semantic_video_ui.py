@@ -401,6 +401,9 @@ def test_completed_semantic_panel_renders_run_artifact_urls_without_legacy_promp
     html = env.get_template("batches/detail/_semantic_video.html").render(
         batch=_semantic_batch(),
         batch_view={
+            "semantic_workflow": {
+                "current_step": {"key": "delivery"},
+            },
             "semantic_video": {
                 "requested_duration_seconds": 16,
                 "duration_contract": {},
@@ -456,6 +459,56 @@ def test_semantic_projection_falls_back_to_persisted_post_artifact_urls(monkeypa
 
     assert item["final_video_url"] == "https://cdn.example.com/post-raw.mp4"
     assert item["final_caption_url"] == "https://cdn.example.com/post-captioned.mp4"
+
+
+def test_semantic_projection_rejects_raw_file_mislabeled_as_captioned(monkeypatch):
+    raw_url = "https://cdn.example.com/raw.mp4"
+    repaired_url = "https://cdn.example.com/repaired-captioned.mp4"
+    run = {
+        "id": "run-caption-alias",
+        "revision": 8,
+        "stage": "completed",
+        "requested_duration_seconds": 8,
+        "final_video_uri": raw_url,
+        "final_video_sha256": "a" * 64,
+        "final_caption_uri": raw_url,
+        "final_caption_sha256": "a" * 64,
+        "master_snapshot": {},
+        "plan_snapshot": {},
+        "artifact_manifest": {},
+    }
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: run,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_attempts",
+        lambda _run_id: [],
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_approvals",
+        lambda _run_id: [],
+    )
+
+    item = batch_handlers._build_semantic_video_post_projection(
+        {
+            "id": "post-caption-alias",
+            "topic_title": "Caption recovery",
+            "video_url": repaired_url,
+            "video_metadata": {
+                "raw_video_url": raw_url,
+                "raw_video_sha256": "a" * 64,
+                "caption_video_url": repaired_url,
+                "caption_video_sha256": "b" * 64,
+            },
+        }
+    )
+
+    assert item["final_video_url"] == raw_url
+    assert item["final_caption_url"] == repaired_url
 
 
 def test_semantic_projection_exposes_frozen_visual_contract_and_provider_prompts(monkeypatch):
@@ -589,6 +642,9 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     html = template.render(
         batch=_semantic_batch(),
         batch_view={
+            "semantic_workflow": {
+                "current_step": {"key": "scene"},
+            },
             "semantic_video": {
                 "requested_duration_seconds": 50,
                 "posts": [
@@ -676,15 +732,10 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert "An accessible garden patio in soft daylight." in html
     assert "light-grey cardigan over a plain white top" in html
     assert "the same compact black manual wheelchair" in html
-    assert "Actual provider prompts" in html
-    assert "Continue the approved garden scene and preserve the grey cardigan." in html
-    assert "standing, walking, different wheelchair" in html
+    assert "Actual provider prompts" not in html
     assert 'data-action="approve-master"' in html
-    assert "Continue: Build free Veo plan" in html
-    assert "Approve &amp; generate video · $0.00" in html
-    assert 'data-action="approve-plan"' in html
-    assert 'data-action="approve-retry"' in html
-    assert 'data-cost-usd="0.00"' in html
+    assert "Continue: Build free Veo plan" not in html
+    assert 'data-action="approve-plan"' not in html
     assert "disabled" in html
 
 
@@ -903,6 +954,10 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "Scene plates are still generating" in source
     assert "reloadAtWorkflow(root)" in source
     assert "#semantic-video-post-" in source
+    assert "handleSemanticDeliveryDecision" in source
+    assert "'#publish-workflow'" in source
+    assert "payload?.data?.batch_advanced" in source
+    assert "window.handleSemanticDeliveryDecision" in template_source
     assert "progress.estimated_remaining_seconds" in source
     assert "progress.progress_percent" in source
     assert "Typical time remaining" in template_source
@@ -910,7 +965,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert 'role="progressbar"' in template_source
 
 
-def test_pending_script_blocks_scene_plate_generation_with_visible_guidance(monkeypatch):
+def test_pending_script_keeps_semantic_production_out_of_the_script_step(monkeypatch):
     monkeypatch.setattr(
         batch_handlers.semantic_video_queries,
         "get_run_by_post",
@@ -931,6 +986,6 @@ def test_pending_script_blocks_scene_plate_generation_with_visible_guidance(monk
         batch_view=view,
     )
 
-    assert 'data-action="generate-candidates" disabled' in html
-    assert "Approve this post’s script in Script Review" in html
-    assert "data-semantic-script-prerequisite" in html
+    assert view["semantic_workflow"]["current_step"]["key"] == "scripts"
+    assert 'data-action="generate-candidates"' not in html
+    assert "Create and approve the scene" not in html

@@ -16,6 +16,7 @@ from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ErrorCode
 from app.core.logging import get_logger
 from app.core.video_profiles import VIDEO_STATUS_CAPTION_COMPLETED, VIDEO_STATUS_COMPLETED
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.characters.actor_identity import is_actor_identity_video_source, passed_manual_gate
 from app.features.qa.schemas import (
     AutoQAChecks,
@@ -284,42 +285,23 @@ async def approve_qa(post_id: str, req: Request):
             has_notes=bool(qa_request.notes)
         )
         
-        # Check if all remaining active posts in the batch are approved.
-        # If so, automatically advance batch to S7_PUBLISH_PLAN.
+        # Reconcile from persisted post truth so a stale S4/S5 batch can recover
+        # through QA and enter publishing in the same approval request.
         should_advance = False
         if batch_id:
-            # Get all posts in batch
-            all_posts_response = supabase.table("posts").select("id, qa_pass, seed_data").eq(
-                "batch_id", batch_id
-            ).execute()
-            
-            if all_posts_response.data:
-                all_posts = all_posts_response.data or []
-                if _active_posts_ready_for_publish(all_posts):
-                    # Check if batch is in S6_QA state
-                    batch_response = supabase.table("batches").select("state").eq(
-                        "id", batch_id
-                    ).execute()
-                    
-                    if batch_response.data:
-                        current_state = batch_response.data[0].get("state")
-                        
-                        if current_state == "S6_QA":
-                            # Advance batch to S7_PUBLISH_PLAN
-                            supabase.table("batches").update({
-                                "state": "S7_PUBLISH_PLAN",
-                                "updated_at": datetime.now(timezone.utc).isoformat()
-                            }).eq("id", batch_id).execute()
-                            
-                            should_advance = True
-                            
-                            logger.info(
-                                "batch_auto_advanced_to_publish",
-                                batch_id=batch_id,
-                                post_id=post_id,
-                                correlation_id=correlation_id,
-                                total_posts=len(all_posts)
-                            )
+            reconciled_state = reconcile_batch_video_pipeline_state(
+                batch_id=batch_id,
+                correlation_id=correlation_id,
+                supabase_client=supabase,
+            )
+            should_advance = reconciled_state == "S7_PUBLISH_PLAN"
+            if should_advance:
+                logger.info(
+                    "batch_auto_advanced_to_publish",
+                    batch_id=batch_id,
+                    post_id=post_id,
+                    correlation_id=correlation_id,
+                )
         
         return SuccessResponse(
             data={

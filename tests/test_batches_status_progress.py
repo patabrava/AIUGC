@@ -1569,6 +1569,149 @@ def test_reconcile_batch_video_pipeline_state_promotes_stale_s4_to_s6_when_video
     assert db["batches"][0]["state"] == "S6_QA"
 
 
+def test_reconcile_semantic_batch_promotes_completed_delivery_without_legacy_prompt():
+    db = {
+        "batches": [
+            {
+                "id": "batch-1",
+                "state": "S4_SCRIPTED",
+                "creation_mode": "semantic_ugc",
+            }
+        ],
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "video_prompt_json": None,
+                "video_status": "caption_completed",
+                "seed_data": {"script_review_status": "approved"},
+            }
+        ],
+    }
+
+    state = reconcile_batch_video_pipeline_state(
+        batch_id="batch-1",
+        correlation_id="test-semantic-corr",
+        supabase_client=_FakeSupabaseClient(db),
+    )
+
+    assert state == "S6_QA"
+    assert db["batches"][0]["state"] == "S6_QA"
+
+
+def test_reconcile_semantic_batch_recovers_stale_state_through_publish_plan():
+    db = {
+        "batches": [
+            {
+                "id": "batch-1",
+                "state": "S4_SCRIPTED",
+                "creation_mode": "semantic_ugc",
+            }
+        ],
+        "posts": [
+            {
+                "id": "post-1",
+                "batch_id": "batch-1",
+                "video_prompt_json": None,
+                "video_status": "caption_completed",
+                "qa_pass": True,
+                "seed_data": {"script_review_status": "approved"},
+            }
+        ],
+    }
+
+    state = reconcile_batch_video_pipeline_state(
+        batch_id="batch-1",
+        correlation_id="test-semantic-publish-recovery",
+        supabase_client=_FakeSupabaseClient(db),
+    )
+
+    assert state == "S7_PUBLISH_PLAN"
+    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
+
+
+def test_semantic_workflow_keeps_scripts_current_until_batch_approval():
+    semantic = {
+        "posts": [
+            {
+                "script_review_status": "approved",
+                "master_hash_is_current": True,
+                "initial_plan_is_approved": True,
+                "stage": "completed",
+                "final_caption_url": "https://storage/final.mp4",
+                "qa_pass": True,
+            }
+        ]
+    }
+
+    workflow = batch_handlers._build_semantic_workflow(
+        {"state": "S2_SEEDED"},
+        semantic,
+    )
+
+    assert workflow["current_step"]["key"] == "scripts"
+    assert [step["status"] for step in workflow["steps"]] == [
+        "current",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+    ]
+
+
+def test_semantic_workflow_uses_run_truth_and_points_completed_delivery_to_publish():
+    semantic = {
+        "posts": [
+            {
+                "script_review_status": "approved",
+                "master_hash_is_current": True,
+                "initial_plan_is_approved": True,
+                "stage": "completed",
+                "final_caption_url": "https://storage/final.mp4",
+                "qa_pass": True,
+            }
+        ]
+    }
+
+    workflow = batch_handlers._build_semantic_workflow(
+        {"state": "S6_QA"},
+        semantic,
+    )
+
+    assert workflow["current_step"]["key"] == "publish"
+    assert [step["status"] for step in workflow["steps"][:5]] == [
+        "complete",
+        "complete",
+        "complete",
+        "complete",
+        "complete",
+    ]
+    assert workflow["steps"][5]["status"] == "current"
+
+
+def test_semantic_workflow_requires_operator_qa_before_publish_step():
+    workflow = batch_handlers._build_semantic_workflow(
+        {"state": "S6_QA"},
+        {
+            "posts": [
+                {
+                    "script_review_status": "approved",
+                    "master_hash_is_current": True,
+                    "initial_plan_is_approved": True,
+                    "stage": "completed",
+                    "final_caption_url": "https://storage/final.mp4",
+                    "qa_pass": False,
+                }
+            ]
+        },
+    )
+
+    assert workflow["current_step"]["key"] == "delivery"
+    assert workflow["steps"][4]["status"] == "current"
+    assert workflow["steps"][5]["status"] == "upcoming"
+
+
 def test_batches_routes_return_full_documents_for_history_restore(monkeypatch):
     client = TestClient(app)
 
@@ -1665,6 +1808,65 @@ def test_batch_detail_progress_uses_lippe_lift_stepper_classes():
     assert "brand-progress-label" in html
 
 
+def test_batch_detail_progress_renders_semantic_operator_steps_from_projection():
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("batches/detail/_progress_stepper.html")
+    steps = [
+        {
+            "key": "scripts",
+            "label": "Scripts",
+            "title": "Approve scripts",
+            "description": "Review every script.",
+            "href": "#script-review-workflow",
+            "number": 1,
+            "status": "complete",
+        },
+        {
+            "key": "scene",
+            "label": "Scene",
+            "title": "Approve scene plates",
+            "description": "Approve the scene.",
+            "href": "#semantic-video-workflow",
+            "number": 2,
+            "status": "current",
+        },
+    ]
+
+    html = template.render(
+        batch={"state": "S4_SCRIPTED"},
+        batch_view={
+            "semantic_workflow": {
+                "steps": steps,
+                "current_step": steps[1],
+                "current_step_number": 2,
+                "total_steps": 2,
+                "needs_attention": False,
+            }
+        },
+    )
+
+    assert "Production workflow" in html
+    assert "Step 2 of 2" in html
+    assert 'aria-current="step"' in html
+    assert "Go to current step" in html
+
+
+def test_semantic_detail_renders_only_the_current_workflow_workspace():
+    source = Path("templates/batches/detail.html").read_text()
+    scripts_branch = source.split(
+        "{% if semantic_step == 'scripts' %}",
+        1,
+    )[1].split("{% elif semantic_step", 1)[0]
+
+    assert "_workflow_panels.html" in scripts_branch
+    assert "_posts_section.html" in scripts_branch
+    assert "_semantic_video.html" not in scripts_branch
+    assert "semantic_step in ['scene', 'plan', 'production', 'delivery']" in source
+    assert 'id="publish-workflow"' in Path(
+        "templates/batches/detail/_publish_panel.html"
+    ).read_text()
+
+
 def test_batch_detail_workflow_panels_use_branded_status_classes():
     env = Environment(loader=FileSystemLoader("templates"))
     template = env.get_template("batches/detail/_workflow_panels.html")
@@ -1685,7 +1887,7 @@ def test_batch_detail_workflow_panels_use_branded_status_classes():
 
     assert "brand-panel brand-workflow-banner" in html
     assert "brand-workflow-banner--review" in html
-    assert "brand-button-primary" in html
+    assert "the workflow advances to Scene automatically" in html
     assert "rounded-2xl border border-[#006AAB]/12" in html
     assert "bg-[#F6FAFF]" in html
 

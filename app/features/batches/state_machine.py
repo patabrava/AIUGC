@@ -31,7 +31,12 @@ def reconcile_batch_video_pipeline_state(
     """Advance stale batches through prompt/video milestones based on active post state."""
     supabase = supabase_client or get_supabase().client
 
-    batch_response = supabase.table("batches").select("state").eq("id", batch_id).execute()
+    batch_response = (
+        supabase.table("batches")
+        .select("state,creation_mode")
+        .eq("id", batch_id)
+        .execute()
+    )
     if not batch_response.data:
         logger.warning(
             "batch_not_found_for_video_pipeline_reconcile",
@@ -41,6 +46,8 @@ def reconcile_batch_video_pipeline_state(
         return None
 
     current_state = batch_response.data[0].get("state")
+    creation_mode = str(batch_response.data[0].get("creation_mode") or "")
+    is_semantic = creation_mode in {"semantic_ugc", "manual_semantic_ugc"}
     if current_state not in {
         BatchState.S4_SCRIPTED.value,
         BatchState.S5_PROMPTS_BUILT.value,
@@ -50,7 +57,7 @@ def reconcile_batch_video_pipeline_state(
 
     posts_response = (
         supabase.table("posts")
-        .select("id, video_prompt_json, video_status, seed_data")
+        .select("id, video_prompt_json, video_status, seed_data, qa_pass")
         .eq("batch_id", batch_id)
         .execute()
     )
@@ -80,8 +87,11 @@ def reconcile_batch_video_pipeline_state(
 
     prompts_ready = all(post.get("video_prompt_json") for post in active_posts)
     videos_ready = all(post.get("video_status") == VIDEO_STATUS_CAPTION_COMPLETED for post in active_posts)
+    qa_ready = all(post.get("qa_pass") is True for post in active_posts)
 
-    if current_state == BatchState.S4_SCRIPTED.value and prompts_ready:
+    if current_state == BatchState.S4_SCRIPTED.value and (
+        prompts_ready or (is_semantic and videos_ready)
+    ):
         supabase.table("batches").update({"state": BatchState.S5_PROMPTS_BUILT.value}).eq("id", batch_id).execute()
         current_state = BatchState.S5_PROMPTS_BUILT.value
         logger.info(
@@ -103,6 +113,19 @@ def reconcile_batch_video_pipeline_state(
             active_posts=len(active_posts),
         )
 
+    if current_state == BatchState.S6_QA.value and qa_ready:
+        supabase.table("batches").update(
+            {"state": BatchState.S7_PUBLISH_PLAN.value}
+        ).eq("id", batch_id).execute()
+        current_state = BatchState.S7_PUBLISH_PLAN.value
+        logger.info(
+            "batch_transitioned_to_publish_plan",
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            new_state=current_state,
+            active_posts=len(active_posts),
+        )
+
     logger.debug(
         "batch_video_pipeline_reconciled",
         batch_id=batch_id,
@@ -110,6 +133,7 @@ def reconcile_batch_video_pipeline_state(
         state=current_state,
         prompts_ready=prompts_ready,
         videos_ready=videos_ready,
+        qa_ready=qa_ready,
         active_posts=len(active_posts),
     )
     return current_state

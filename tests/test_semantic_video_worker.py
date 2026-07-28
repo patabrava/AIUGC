@@ -4,6 +4,7 @@ from copy import deepcopy
 from hashlib import sha256
 import io
 import json
+from pathlib import Path
 import threading
 from types import SimpleNamespace
 
@@ -313,6 +314,10 @@ class FakeRepo:
         self.events.append(("complete_run", final_video_uri, final_caption_uri, deepcopy(artifact_manifest)))
         return deepcopy(self.run)
 
+    def reconcile_batch_state(self, *, batch_id, correlation_id):
+        self.events.append(("reconcile_batch", batch_id, correlation_id))
+        return "S6_QA"
+
     def release_run(self, *, run_id, worker_id, lease_token):
         self.events.append(("release", run_id, worker_id, lease_token))
         if self.release_error:
@@ -379,10 +384,19 @@ class FakeStages:
     def __init__(self, result=None):
         self.result = result or {"passed": True, "artifacts": {}}
         self.calls = []
+        self.advisory_caption_calls = []
 
     def run_stage(self, *, stage, run, takes):
         self.calls.append((stage, deepcopy(run), deepcopy(takes)))
         return deepcopy(self.result)
+
+    def caption_advisory_single_take(self, *, run, takes):
+        self.advisory_caption_calls.append((deepcopy(run), deepcopy(takes)))
+        return {
+            "url": "https://storage/paid-8s-captioned.mp4",
+            "sha256": "e" * 64,
+            "pipeline_manifest": {"status": "captioned"},
+        }
 
 
 def _worker(repo: FakeRepo, vertex: FakeVertex | None = None, stages: FakeStages | None = None):
@@ -770,9 +784,11 @@ def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():
     ]
     completion = next(event for event in repo.events if event[0] == "complete_run")
     assert completion[1] == "https://storage/paid-8s.mp4"
-    assert completion[2] == "https://storage/paid-8s.mp4"
+    assert completion[2] == "https://storage/paid-8s-captioned.mp4"
+    assert completion[1] != completion[2]
     assert completion[3]["qa_advisory"]["paid_retry_required"] is False
     assert completion[3]["delivery"]["mode"] == "single_paid_take_manual_review"
+    assert stages.advisory_caption_calls
 
 
 def test_worker_final_captioned_artifact_completes_post_directly():
@@ -794,6 +810,10 @@ def test_worker_final_captioned_artifact_completes_post_directly():
     assert result.action == "completed"
     completion = next(event for event in repo.events if event[0] == "complete_run")
     assert completion[2] == "https://storage/final-captioned.mp4"
+    assert any(
+        event[0] == "reconcile_batch" and event[1] == "batch-1"
+        for event in repo.events
+    )
     assert not any(event[0] == "advance" for event in repo.events)
 
 
@@ -838,6 +858,151 @@ def test_production_stage_runner_rejects_unverified_delivery_projection():
             run={"id": "run-1", "artifact_manifest": {"delivery": {"passed": False}}},
             takes=[],
         )
+
+
+def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
+    tmp_path,
+    monkeypatch,
+):
+    from app.adapters import caption_renderer, video_stitcher
+    from app.features.shot_production import runner as pipeline
+    from app.features.shot_production import visual_seams
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    raw_bytes = b"provider-video"
+    raw_hash = sha256(raw_bytes).hexdigest()
+    raw_path = tmp_path / "raw.mp4"
+    raw_path.write_bytes(raw_bytes)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "script": {"text": "Hallo Welt"},
+                "takes": [
+                    {
+                        "index": 0,
+                        "attempt": 1,
+                        "raw": {"path": str(raw_path), "sha256": raw_hash},
+                        "transcript": {
+                            "full_text": "Hallo Welt",
+                            "words": [
+                                {"word": "Hallo", "start": 0.5, "end": 1.0},
+                                {"word": "Welt", "start": 1.1, "end": 7.1},
+                            ],
+                        },
+                        "transcript_qa": {"passed": True},
+                        "trim_window": {
+                            "start_seconds": 0.4,
+                            "end_seconds": 7.2,
+                            "source": "deepgram_word_window",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stitch_calls = []
+
+    def stitch_fn(**kwargs):
+        stitch_calls.append(kwargs)
+        return (
+            b"terminal-protected-video",
+            {
+                "stitch_end_pan_protection_applied": True,
+                "stitch_end_pan_tail_exclusion_s": 0.5,
+                "stitch_end_pan_retime_ratio": 8.0 / 7.5,
+            },
+        )
+
+    caption_calls = []
+
+    def caption_fn(**kwargs):
+        caption_calls.append(kwargs)
+        output = tmp_path / "rendered-captioned.mp4"
+        output.write_bytes(b"terminal-protected-captioned-video")
+        return str(output)
+
+    terminal_paths = []
+
+    def terminal_evaluator(path):
+        terminal_paths.append(Path(path).name)
+        return {
+            "status": (
+                "reset_detected"
+                if Path(path).name == "raw.mp4"
+                else "not_detected"
+            ),
+            "reset_detected": Path(path).name == "raw.mp4",
+        }
+
+    class UploadStorage:
+        def upload_video(self, **kwargs):
+            return {
+                "url": f"https://storage/{kwargs['object_key']}",
+                "storage_key": kwargs["object_key"],
+                "sha256": sha256(kwargs["video_bytes"]).hexdigest(),
+                "size": len(kwargs["video_bytes"]),
+            }
+
+    monkeypatch.setattr(video_stitcher, "stitch_segments", stitch_fn)
+    monkeypatch.setattr(caption_renderer, "burn_captions", caption_fn)
+    monkeypatch.setattr(
+        visual_seams,
+        "evaluate_source_terminal_reset",
+        terminal_evaluator,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_probe_media",
+        lambda _path: {
+            "format": {
+                "duration": "8.0",
+                "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            },
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1080,
+                    "height": 1920,
+                },
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+        },
+    )
+    runner = ProductionStageRunner(storage=UploadStorage(), work_root=tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "_materialize_manifest",
+        lambda run, takes: manifest_path,
+    )
+
+    result = runner.caption_advisory_single_take(
+        run={
+            "id": "run-1",
+            "requested_duration_seconds": 8,
+            "artifact_prefix": "semantic/run-1",
+        },
+        takes=[{"raw_artifact_sha256": raw_hash}],
+    )
+
+    assert stitch_calls[0]["trim_windows"] is None
+    assert stitch_calls[0]["target_duration_seconds"] == 8.0
+    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == 0.5
+    assert terminal_paths == ["raw.mp4", "stitched-advisory.mp4"]
+    assert caption_calls[0]["video_path"].endswith("stitched-advisory.mp4")
+    assert caption_calls[0]["transcript"].words[-1].end == pytest.approx(
+        7.1 * (8.0 / 7.5)
+    )
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert saved["delivery_terminal_qa"]["passed"] is True
+    assert saved["stitch"]["metadata"]["stitch_end_pan_protection_applied"] is True
+    assert result["sha256"] == sha256(
+        b"terminal-protected-captioned-video"
+    ).hexdigest()
 
 
 def test_production_stage_runner_materializes_canonical_exact_16s_contract(tmp_path):

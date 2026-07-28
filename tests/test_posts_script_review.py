@@ -81,7 +81,14 @@ def test_remove_script_review_marks_post_removed_and_returns_success(monkeypatch
                 "video_prompt_json": {"existing": True},
                 "video_status": "pending",
             }
-        ]
+        ],
+        "batches": [
+            {
+                "id": "batch-1",
+                "state": "S2_SEEDED",
+                "creation_mode": "standard",
+            }
+        ],
     }
 
     monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
@@ -254,6 +261,43 @@ def test_approve_semantic_script_refreshes_duration_contract_and_editorial_beats
     assert seed_data["semantic_duration_contract"]["requested_duration_seconds"] == 50
     assert seed_data["semantic_duration_contract_hash"]
     assert storage["posts"][0]["video_prompt_json"] is None
+
+
+def test_final_semantic_script_approval_advances_batch_without_second_confirmation(
+    monkeypatch,
+):
+    storage = {
+        "posts": [
+            {
+                "id": "post-semantic-final",
+                "batch_id": "batch-semantic-final",
+                "post_type": "value",
+                "seed_data": {
+                    "script": "Ein klarer kurzer Satz erklärt den wichtigsten Punkt direkt und verständlich für alle.",
+                    "script_review_status": "pending",
+                },
+                "video_prompt_json": None,
+                "video_status": "pending",
+            }
+        ],
+        "batches": [
+            {
+                "id": "batch-semantic-final",
+                "state": "S2_SEEDED",
+                "creation_mode": "semantic_ugc",
+            }
+        ],
+    }
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    response = TestClient(app, base_url="http://localhost").put(
+        "/posts/post-semantic-final/script-review",
+        data={"action": "approved"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["batch_state"] == "S4_SCRIPTED"
+    assert storage["batches"][0]["state"] == "S4_SCRIPTED"
 
 
 def test_approve_manual_semantic_script_persists_scene_and_outfit_overrides(monkeypatch):

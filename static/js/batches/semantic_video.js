@@ -21,6 +21,25 @@
         window.location.reload();
     }
 
+    window.handleSemanticDeliveryDecision = function (event, postId) {
+        if (!event.detail.successful) return;
+        let payload = {};
+        try {
+            payload = JSON.parse(event.detail.xhr.responseText || '{}');
+        } catch (_error) {
+            payload = {};
+        }
+        const target = payload?.data?.batch_advanced
+            ? '#publish-workflow'
+            : `#semantic-video-post-${encodeURIComponent(postId)}`;
+        window.history.replaceState(
+            null,
+            '',
+            `${window.location.pathname}${window.location.search}${target}`,
+        );
+        window.location.reload();
+    };
+
     async function requestJson(url, options = {}) {
         const response = await fetch(url, {
             credentials: 'same-origin',

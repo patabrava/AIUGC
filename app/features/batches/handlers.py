@@ -68,6 +68,7 @@ from app.features.shot_production.duration import (
     build_semantic_duration_contract,
 )
 from app.features.semantic_videos import queries as semantic_video_queries
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 
 try:
     from app.features.publish.tiktok import get_tiktok_publish_state
@@ -779,6 +780,37 @@ def _semantic_final_artifact_urls(
         or post.get("video_url")
         or ""
     ).strip()
+    raw_hash = str(
+        run.get("final_video_sha256")
+        or raw_delivery.get("sha256")
+        or video_metadata.get("raw_video_sha256")
+        or ""
+    ).strip()
+    captioned_hash = str(
+        run.get("final_caption_sha256")
+        or captioned_delivery.get("sha256")
+        or video_metadata.get("caption_video_sha256")
+        or ""
+    ).strip()
+    if captioned_url and (
+        captioned_url == raw_url
+        or (raw_hash and captioned_hash and captioned_hash == raw_hash)
+    ):
+        repaired_url = str(
+            video_metadata.get("caption_video_url")
+            or post.get("video_url")
+            or ""
+        ).strip()
+        repaired_hash = str(
+            video_metadata.get("caption_video_sha256") or ""
+        ).strip()
+        captioned_url = (
+            repaired_url
+            if repaired_url
+            and repaired_url != raw_url
+            and (not raw_hash or not repaired_hash or repaired_hash != raw_hash)
+            else ""
+        )
     return raw_url, captioned_url
 
 
@@ -830,6 +862,7 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "visual_contract": None,
         "provider_prompts": [],
         "qa_advisory": None,
+        "qa_pass": bool(post.get("qa_pass")),
     }
     run = semantic_video_queries.get_run_by_post(post_id)
     if not run:
@@ -1025,6 +1058,123 @@ def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[D
     }
 
 
+def _build_semantic_workflow(
+    batch_detail: Dict[str, Any],
+    semantic_video: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Project the operator-facing Semantic UGC flow from persisted production truth."""
+    if not semantic_video:
+        return None
+
+    posts = [
+        post
+        for post in semantic_video.get("posts") or []
+        if post.get("script_review_status") != "removed"
+    ]
+    batch_state = str(batch_detail.get("state") or "")
+    has_posts = bool(posts)
+    scripts_ready = (
+        has_posts
+        and batch_state not in {
+            BatchState.S1_SETUP.value,
+            BatchState.S2_SEEDED.value,
+        }
+        and all(post.get("script_review_status") == "approved" for post in posts)
+    )
+    scenes_ready = scripts_ready and all(
+        post.get("master_hash_is_current") is True for post in posts
+    )
+    plans_ready = scenes_ready and all(
+        post.get("initial_plan_is_approved") is True for post in posts
+    )
+    production_ready = plans_ready and all(
+        post.get("stage") == "completed" for post in posts
+    )
+    deliveries_ready = production_ready and all(
+        bool(post.get("final_caption_url") or post.get("final_video_url"))
+        and post.get("qa_pass") is True
+        for post in posts
+    )
+    publish_ready = batch_state == BatchState.S8_COMPLETE.value
+
+    definitions = [
+        {
+            "key": "scripts",
+            "label": "Scripts",
+            "title": "Approve scripts",
+            "description": "Approve or remove every script. The final review unlocks scene production automatically.",
+            "href": "#script-review-workflow",
+            "complete": scripts_ready,
+        },
+        {
+            "key": "scene",
+            "label": "Scene",
+            "title": "Approve scene plates",
+            "description": "Generate and approve one identity-verified scene plate for each active post.",
+            "href": "#semantic-video-workflow",
+            "complete": scenes_ready,
+        },
+        {
+            "key": "plan",
+            "label": "Plan",
+            "title": "Approve the Veo plan",
+            "description": "Review the free production plan and its exact cost before paid work starts.",
+            "href": "#semantic-video-workflow",
+            "complete": plans_ready,
+        },
+        {
+            "key": "production",
+            "label": "Produce",
+            "title": "Generate and verify",
+            "description": "Veo generation, automated QA, composition, and captions run from the approved plan.",
+            "href": "#semantic-video-workflow",
+            "complete": production_ready,
+        },
+        {
+            "key": "delivery",
+            "label": "Delivery",
+            "title": "Review and approve delivery",
+            "description": "Review the final video and its continuity evidence, then approve QA for each post.",
+            "href": "#semantic-video-workflow",
+            "complete": deliveries_ready,
+        },
+        {
+            "key": "publish",
+            "label": "Publish",
+            "title": "Plan publishing",
+            "description": "Approve QA, choose channels and schedule, then confirm publishing.",
+            "href": "#publish-workflow",
+            "complete": publish_ready,
+        },
+    ]
+
+    current_index = next(
+        (index for index, step in enumerate(definitions) if not step["complete"]),
+        len(definitions) - 1,
+    )
+    steps = []
+    for index, step in enumerate(definitions):
+        if step["complete"]:
+            status_name = "complete"
+        elif index == current_index:
+            status_name = "current"
+        else:
+            status_name = "upcoming"
+        steps.append({**step, "number": index + 1, "status": status_name})
+
+    attention_stages = {"failed", "retry_approval_required"}
+    needs_attention = any(post.get("stage") in attention_stages for post in posts)
+    current = steps[current_index]
+    return {
+        "steps": steps,
+        "current_step": current,
+        "current_step_number": current_index + 1,
+        "total_steps": len(steps),
+        "needs_attention": needs_attention,
+        "active_posts_count": len(posts),
+    }
+
+
 def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     """Prepare template-only derived data for the batch detail page."""
     batch_state = batch_detail.get("state")
@@ -1095,6 +1245,7 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     meta_publish_state = batch_detail.get("meta_connection") or {}
     tiktok_publish_state = batch_detail.get("tiktok_connection") or {}
 
+    semantic_video = _build_semantic_video_projection(batch_detail)
     return {
         "should_poll_prompts": batch_state == BatchState.S5_PROMPTS_BUILT.value,
         "should_poll_videos": batch_state in {
@@ -1138,7 +1289,11 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
         "selected_instagram_account": meta_publish_state.get("selected_instagram") or {},
         "available_meta_pages": meta_publish_state.get("available_pages") or [],
         "video_generation_settings": _build_batch_video_generation_settings(batch_detail, posts),
-        "semantic_video": _build_semantic_video_projection(batch_detail),
+        "semantic_video": semantic_video,
+        "semantic_workflow": _build_semantic_workflow(
+            batch_detail,
+            semantic_video,
+        ),
         "tiktok_defaults": _load_json_object(batch_detail.get("tiktok_defaults")),
     }
 
@@ -1690,6 +1845,12 @@ async def approve_scripts_endpoint(batch_id: str, request: Request):
                 )
 
             updated_batch = update_batch_state(batch_id, BatchState.S4_SCRIPTED)
+            reconciled_state = reconcile_batch_video_pipeline_state(
+                batch_id=batch_id,
+                correlation_id=f"approve_scripts_{batch_id}",
+            )
+            if reconciled_state:
+                updated_batch = {**updated_batch, "state": reconciled_state}
 
         logger.info(
             "scripts_approved",
