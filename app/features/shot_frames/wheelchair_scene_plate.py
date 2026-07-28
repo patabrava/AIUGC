@@ -64,6 +64,11 @@ class ScenePlateGenerationResult:
     candidates: Tuple[ScenePlateCandidate, ...]
     prompts: Tuple[str, ...]
     derivation_mode: str
+    remaining_duplicate_candidate_indexes: Tuple[int, ...] = ()
+
+    @property
+    def diversity_recovery_exhausted(self) -> bool:
+        return bool(self.remaining_duplicate_candidate_indexes)
 
 
 def build_canonical_scene_plate_prompt(
@@ -390,22 +395,14 @@ def generate_scene_plate_candidates(
             completed_candidates=candidate_count,
         )
     remaining_duplicates = _duplicate_candidate_positions(candidates)
-    if remaining_duplicates:
-        raise ValidationError(
-            "Gemini returned perceptually duplicate scene-plate candidates after "
-            "bounded diversity recovery.",
-            {
-                "duplicate_candidate_indexes": [
-                    candidates[position].index
-                    for position in remaining_duplicates
-                ],
-                "attempts": _MAX_DIVERSITY_ATTEMPTS,
-            },
-        )
+    remaining_duplicate_candidate_indexes = tuple(
+        candidates[position].index for position in remaining_duplicates
+    )
     return ScenePlateGenerationResult(
         candidates=tuple(candidates),
         prompts=tuple(candidate.prompt for candidate in candidates),
         derivation_mode=derivation_mode,
+        remaining_duplicate_candidate_indexes=remaining_duplicate_candidate_indexes,
     )
 
 

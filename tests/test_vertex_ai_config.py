@@ -43,7 +43,10 @@ def test_gemini_provider_defaults_to_vertex_without_legacy_fallback(monkeypatch,
     assert settings.vertex_grounded_research_location == "global"
     assert settings.semantic_scene_plate_model == "gemini-3-pro-image"
     assert settings.semantic_scene_plate_image_size == "2K"
-    assert settings.semantic_scene_plate_contract_version == "pro-identity-diverse-v2"
+    assert (
+        settings.semantic_scene_plate_contract_version
+        == "pro-identity-diverse-advisory-v3"
+    )
     assert settings.semantic_scene_identity_gate_model == "gemini-2.5-flash"
     assert settings.semantic_scene_identity_min_confidence == 0.90
     assert settings.semantic_video_identity_min_confidence == 0.90

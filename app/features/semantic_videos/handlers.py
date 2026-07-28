@@ -1246,6 +1246,18 @@ def generate_candidates(
             raise StateTransitionError(
                 "Semantic scene-plate generator returned invalid anchor lineage."
             )
+        remaining_duplicate_candidate_indexes = list(
+            getattr(generated, "remaining_duplicate_candidate_indexes", ())
+        )
+        if remaining_duplicate_candidate_indexes:
+            logger.warning(
+                "semantic_scene_plate_diversity_recovery_exhausted",
+                post_id=post_id,
+                run_id=str(reserved.get("id") or ""),
+                duplicate_candidate_indexes=remaining_duplicate_candidate_indexes,
+                action="continuing_with_identity_validation",
+            )
+
         def validate_and_store_candidate(candidate: Any) -> dict[str, Any]:
             candidate_hash = sha256(candidate.image_bytes).hexdigest()
             candidate_mime_type = str(candidate.mime_type).strip().lower()
@@ -1402,6 +1414,16 @@ def generate_candidates(
             "prompt_writer_output": generated.prompts[0],
             "composition_prompt": generated.prompts[0],
             "scene_plate_prompts": list(generated.prompts),
+            "diversity_recovery": {
+                "status": (
+                    "exhausted_advisory"
+                    if remaining_duplicate_candidate_indexes
+                    else "passed"
+                ),
+                "remaining_duplicate_candidate_indexes": (
+                    remaining_duplicate_candidate_indexes
+                ),
+            },
         }
         run_payload = _reference_run_payload(
             context=context,

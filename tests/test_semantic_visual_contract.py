@@ -268,6 +268,40 @@ def test_scene_plate_candidates_regenerate_perceptual_duplicates_with_distinct_p
     )
 
 
+def test_scene_plate_candidates_keep_valid_images_when_diversity_recovery_is_exhausted():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    class ConvergingClient:
+        def generate_gemini_image(self, **kwargs):
+            return {
+                "image_bytes": _png(value=128),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        candidate_count=3,
+        llm_client=ConvergingClient(),
+    )
+
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert result.remaining_duplicate_candidate_indexes == (2, 3)
+    assert result.diversity_recovery_exhausted is True
+    assert all(
+        "DIVERSITY RECOVERY ATTEMPT 3" in prompt
+        for prompt in result.prompts[1:]
+    )
+
+
 def test_scene_plate_candidates_derive_every_option_from_established_actor_anchor():
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,

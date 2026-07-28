@@ -2095,6 +2095,34 @@ def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monke
     assert len(storage.upload_calls) == 3
 
 
+def test_candidate_endpoint_persists_exhausted_diversity_as_advisory(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    generated = _scene_plate_result(marker="converged")
+    generated.remaining_duplicate_candidate_indexes = (2, 3)
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: generated,
+        raising=False,
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["data"]["candidates"]) == 3
+    assert len(storage.upload_calls) == 3
+    assert state["run"]["master_snapshot"]["diversity_recovery"] == {
+        "status": "exhausted_advisory",
+        "remaining_duplicate_candidate_indexes": [2, 3],
+    }
+
+
 def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_call(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
