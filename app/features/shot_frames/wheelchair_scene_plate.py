@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Tuple
+from io import BytesIO
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
+
+from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ValidationError
@@ -20,6 +24,30 @@ FRAMING_CONTRACT = (
     "rear wheel or silver hand rim remain clearly visible."
 )
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
+_CANDIDATE_VARIATIONS = (
+    (
+        "Candidate 1 composition: use the centered baseline view. Keep her shoulders "
+        "square to camera, direct eye contact, and both the near armrest and part of "
+        "one rear wheel clearly readable."
+    ),
+    (
+        "Candidate 2 composition: move the camera modestly to the actor's left for a "
+        "clearly visible 10-degree right three-quarter view. Keep seated eye-level, "
+        "the same camera distance and face size, direct eye contact, and the near "
+        "armrest plus rear wheel clearly readable."
+    ),
+    (
+        "Candidate 3 composition: move the camera modestly to the actor's right for a "
+        "clearly visible 10-degree left three-quarter view. Keep seated eye-level, "
+        "the same camera distance and face size, direct eye contact, and the near "
+        "armrest plus rear wheel clearly readable."
+    ),
+)
+_MAX_DIVERSITY_ATTEMPTS = 3
+_PERCEPTUAL_HASH_WIDTH = 16
+_PERCEPTUAL_HASH_HEIGHT = 16
+_NEAR_DUPLICATE_HASH_DISTANCE = 8
+_NEAR_DUPLICATE_MEAN_RGB_DELTA = 3.0
 
 
 @dataclass(frozen=True)
@@ -38,7 +66,12 @@ class ScenePlateGenerationResult:
     derivation_mode: str
 
 
-def build_canonical_scene_plate_prompt(*, scene: str, wardrobe: str) -> str:
+def build_canonical_scene_plate_prompt(
+    *,
+    scene: str,
+    wardrobe: str,
+    variation_directive: str = "",
+) -> str:
     return (
         "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
         "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
@@ -54,18 +87,26 @@ def build_canonical_scene_plate_prompt(*, scene: str, wardrobe: str) -> str:
         "quiet conversational expression immediately before speaking, with her mouth closed. Render no "
         "other person, text, logo, watermark, mobility device, standing pose, walking pose, beauty "
         "retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, camera tilt, wide "
-        "shot, full-body shot, or cropped-out wheelchair."
+        "shot, full-body shot, or cropped-out wheelchair. "
+        f"{variation_directive}"
     )
 
 
-def build_derived_scene_plate_prompt(*, scene: str, wardrobe: str) -> str:
+def build_derived_scene_plate_prompt(
+    *,
+    scene: str,
+    wardrobe: str,
+    variation_directive: str = "",
+) -> str:
     return (
         "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
         "Image 1 is the canonical scene plate and is the authoritative source for the exact woman, exact "
-        "manual wheelchair, seated posture, camera height, camera distance, facial geometry, and scale. "
+        "manual wheelchair, seated posture, facial geometry, and scale. "
         "Image 2 is the unchanged front identity reference for the same woman and exists only to prevent "
         "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact woman from Images 1 "
-        "and 2 and preserve the exact manual wheelchair, seated pose, face size, and framing from Image 1. "
+        "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
+        "face size from Image 1. Apply only the modest candidate-specific horizontal viewpoint and shoulder "
+        "angle described below; preserve the overall medium-close-up framing contract. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
         "Keep her mouth closed with a quiet conversational expression. Preserve ordinary camera-file skin "
@@ -74,7 +115,83 @@ def build_derived_scene_plate_prompt(*, scene: str, wardrobe: str) -> str:
         "hands, wheelchair, and room perspective physically plausible. Render no other person, text, logo, "
         "watermark, standing pose, walking pose, wide shot, full-body shot, beauty retouching, poreless skin, "
         "glamour lighting, CGI smoothness, face averaging, camera movement, or cropped-out wheelchair."
+        f" {variation_directive}"
     )
+
+
+def _variation_directive(*, index: int, attempt: int) -> str:
+    try:
+        directive = _CANDIDATE_VARIATIONS[index - 1]
+    except IndexError as exc:
+        raise ValidationError(
+            "Semantic scene-plate candidate index is outside the variation contract.",
+            {"candidate_index": index},
+        ) from exc
+    if attempt <= 1:
+        return directive
+    return (
+        f"{directive} DIVERSITY RECOVERY ATTEMPT {attempt}: the prior render was "
+        "perceptually indistinguishable from another option. Make the specified "
+        "left/right camera offset and shoulder angle unmistakably visible while "
+        "preserving actor identity, wheelchair, outfit, room, face size, and crop."
+    )
+
+
+def _perceptual_signature(image_bytes: bytes) -> tuple[tuple[bool, ...], Image.Image] | None:
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            rgb = image.convert("RGB")
+            comparison = rgb.resize((64, 64))
+            grayscale = rgb.convert("L").resize(
+                (_PERCEPTUAL_HASH_WIDTH + 1, _PERCEPTUAL_HASH_HEIGHT)
+            )
+    except (OSError, UnidentifiedImageError):
+        return None
+    pixels = list(grayscale.getdata())
+    row_width = _PERCEPTUAL_HASH_WIDTH + 1
+    difference_hash = tuple(
+        pixels[(row * row_width) + column]
+        < pixels[(row * row_width) + column + 1]
+        for row in range(_PERCEPTUAL_HASH_HEIGHT)
+        for column in range(_PERCEPTUAL_HASH_WIDTH)
+    )
+    return difference_hash, comparison
+
+
+def scene_plates_are_near_duplicates(first: bytes, second: bytes) -> bool:
+    """Detect the same composition with only provider-level pixel variation."""
+    first_signature = _perceptual_signature(first)
+    second_signature = _perceptual_signature(second)
+    if first_signature is None or second_signature is None:
+        return False
+    first_hash, first_image = first_signature
+    second_hash, second_image = second_signature
+    hash_distance = sum(
+        first_bit != second_bit
+        for first_bit, second_bit in zip(first_hash, second_hash)
+    )
+    difference = ImageChops.difference(first_image, second_image)
+    mean_rgb_delta = sum(ImageStat.Stat(difference).mean) / 3
+    return (
+        hash_distance <= _NEAR_DUPLICATE_HASH_DISTANCE
+        and mean_rgb_delta <= _NEAR_DUPLICATE_MEAN_RGB_DELTA
+    )
+
+
+def _duplicate_candidate_positions(
+    candidates: Sequence[ScenePlateCandidate],
+) -> tuple[int, ...]:
+    duplicate_positions = []
+    for candidate_position, candidate in enumerate(candidates):
+        if any(
+            scene_plates_are_near_duplicates(
+                previous.image_bytes,
+                candidate.image_bytes,
+            )
+            for previous in candidates[:candidate_position]
+        ):
+            duplicate_positions.append(candidate_position)
+    return tuple(duplicate_positions)
 
 
 def generate_scene_plate(
@@ -133,6 +250,9 @@ def generate_scene_plate_candidates(
     llm_client: Optional[Any] = None,
     image_model: str = "gemini-3-pro-image",
     image_size: str = "2K",
+    progress_callback: Optional[
+        Callable[[str, Mapping[str, Any]], None]
+    ] = None,
 ) -> ScenePlateGenerationResult:
     """Generate three independent plates, or three derivatives from an approved anchor."""
     if len(actor_references) != 2:
@@ -151,7 +271,6 @@ def generate_scene_plate_candidates(
         raise ValidationError("Scene-plate location reference must use the location role.")
 
     client = llm_client or get_llm_client()
-    derived_prompt = build_derived_scene_plate_prompt(scene=scene, wardrobe=wardrobe)
     if canonical_scene_plate is not None:
         if canonical_scene_plate.role != "canonical_scene_plate":
             raise ValidationError(
@@ -162,29 +281,35 @@ def generate_scene_plate_candidates(
         start_index = 1
         derivation_mode = "canonical_anchor"
     else:
-        canonical_prompt = build_canonical_scene_plate_prompt(
-            scene=scene,
-            wardrobe=wardrobe,
-        )
         candidates = []
         canonical_reference = None
         start_index = 1
         derivation_mode = "bootstrap"
-    for index in range(start_index, candidate_count + 1):
+    def generate_candidate(specification: tuple[int, int]) -> ScenePlateCandidate:
+        index, attempt = specification
+        variation_directive = _variation_directive(index=index, attempt=attempt)
         if derivation_mode == "bootstrap":
             references = (
                 _as_role(actor_references[0], "identity_primary"),
                 _as_role(actor_references[1], "identity_support"),
                 _as_role(location_reference, "location"),
             )
-            prompt = canonical_prompt
+            prompt = build_canonical_scene_plate_prompt(
+                scene=scene,
+                wardrobe=wardrobe,
+                variation_directive=variation_directive,
+            )
         else:
             references = (
                 canonical_reference,
                 _as_role(actor_references[0], "identity_support"),
                 _as_role(location_reference, "location"),
             )
-            prompt = derived_prompt
+            prompt = build_derived_scene_plate_prompt(
+                scene=scene,
+                wardrobe=wardrobe,
+                variation_directive=variation_directive,
+            )
         generated = generate_scene_plate(
             references=references,
             prompt=prompt,
@@ -192,14 +317,90 @@ def generate_scene_plate_candidates(
             image_model=image_model,
             image_size=image_size,
         )
-        candidates.append(
-            ScenePlateCandidate(
-                index=index,
-                image_bytes=generated["image_bytes"],
-                mime_type=str(generated["mime_type"]),
-                provider_model=str(generated["model"]),
-                prompt=prompt,
+        return ScenePlateCandidate(
+            index=index,
+            image_bytes=generated["image_bytes"],
+            mime_type=str(generated["mime_type"]),
+            provider_model=str(generated["model"]),
+            prompt=prompt,
+        )
+
+    def report_progress(phase: str, **details: Any) -> None:
+        if progress_callback is not None:
+            progress_callback(phase, details)
+
+    # Every candidate is an independent provider request over immutable inputs.
+    # Run the fixed set together so operator latency is one image-generation wait,
+    # rather than the sum of three provider waits. executor.map preserves indexes.
+    report_progress(
+        "generating_images",
+        candidate_count=candidate_count,
+        completed_candidates=0,
+    )
+    with ThreadPoolExecutor(
+        max_workers=candidate_count,
+        thread_name_prefix="semantic-scene-plate",
+    ) as executor:
+        candidates = list(
+            executor.map(
+                generate_candidate,
+                (
+                    (index, 1)
+                    for index in range(start_index, candidate_count + 1)
+                ),
             )
+        )
+    report_progress(
+        "checking_diversity",
+        candidate_count=candidate_count,
+        completed_candidates=candidate_count,
+    )
+    for attempt in range(2, _MAX_DIVERSITY_ATTEMPTS + 1):
+        duplicate_positions = _duplicate_candidate_positions(candidates)
+        if not duplicate_positions:
+            break
+        duplicate_indexes = [
+            candidates[position].index for position in duplicate_positions
+        ]
+        report_progress(
+            "regenerating_duplicates",
+            attempt=attempt,
+            candidate_count=candidate_count,
+            duplicate_candidate_indexes=duplicate_indexes,
+        )
+        with ThreadPoolExecutor(
+            max_workers=len(duplicate_positions),
+            thread_name_prefix="semantic-scene-plate-diversity",
+        ) as executor:
+            replacements = list(
+                executor.map(
+                    generate_candidate,
+                    (
+                        (candidates[position].index, attempt)
+                        for position in duplicate_positions
+                    ),
+                )
+        )
+        for position, replacement in zip(duplicate_positions, replacements):
+            candidates[position] = replacement
+        report_progress(
+            "checking_diversity",
+            attempt=attempt,
+            candidate_count=candidate_count,
+            completed_candidates=candidate_count,
+        )
+    remaining_duplicates = _duplicate_candidate_positions(candidates)
+    if remaining_duplicates:
+        raise ValidationError(
+            "Gemini returned perceptually duplicate scene-plate candidates after "
+            "bounded diversity recovery.",
+            {
+                "duplicate_candidate_indexes": [
+                    candidates[position].index
+                    for position in remaining_duplicates
+                ],
+                "attempts": _MAX_DIVERSITY_ATTEMPTS,
+            },
         )
     return ScenePlateGenerationResult(
         candidates=tuple(candidates),
@@ -217,4 +418,5 @@ __all__ = [
     "build_derived_scene_plate_prompt",
     "generate_scene_plate",
     "generate_scene_plate_candidates",
+    "scene_plates_are_near_duplicates",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -50,6 +51,7 @@ from app.features.semantic_videos.queries import (
     release_candidate_reservation,
     resume_qa_review,
     reserve_candidate_generation,
+    update_candidate_generation_progress,
 )
 from app.features.semantic_videos.schemas import (
     ApprovalResponse,
@@ -89,6 +91,37 @@ _SCENE_PLATE_AUDIT_TEXT = (
     "actor-free location before any Veo request."
 )
 _TYPICAL_EIGHT_SECOND_VEO_SECONDS = 180
+_TYPICAL_SCENE_PLATE_SECONDS = 90
+_CANDIDATE_PHASE_PROGRESS = {
+    "preparing_references": (
+        5,
+        "Loading and verifying the actor and location references.",
+    ),
+    "generating_images": (
+        20,
+        "Generating all three wheelchair scene plates in parallel.",
+    ),
+    "checking_diversity": (
+        58,
+        "Checking that the three scene plates are visually distinct.",
+    ),
+    "regenerating_duplicates": (
+        68,
+        "Replacing only the scene plates that looked too similar.",
+    ),
+    "checking_identity": (
+        80,
+        "Checking actor identity and uploading all three candidates in parallel.",
+    ),
+    "saving_candidates": (
+        94,
+        "Saving the verified scene-plate choices.",
+    ),
+    "ready": (
+        100,
+        "Wheelchair scene plates are ready for identity review.",
+    ),
+}
 
 
 def _parse_progress_time(value: Any) -> Optional[datetime]:
@@ -1073,17 +1106,32 @@ def generate_candidates(
     reference = deepcopy(context.get("reference") or {})
     actor_rows, location_row = _ordered_reference_rows(reference)
 
-    actor_front, actor_front_snapshot = _download_reference(
-        actor_rows[0], role="actor_front", request=request
-    )
-    actor_three_quarter, actor_three_quarter_snapshot = _download_reference(
-        actor_rows[1],
-        role="actor_three_quarter",
-        request=request,
-    )
-    location, location_snapshot = _download_reference(
-        location_row, role="location", request=request
-    )
+    def download_reference(
+        specification: tuple[dict[str, Any], str],
+    ) -> tuple[ShotFrameReference, dict[str, Any]]:
+        row, role = specification
+        return _download_reference(row, role=role, request=request)
+
+    # Reference objects are immutable and independently checksummed. Fetch them
+    # together so cold object-storage latency is paid once instead of three times.
+    with ThreadPoolExecutor(
+        max_workers=3,
+        thread_name_prefix="semantic-scene-reference",
+    ) as executor:
+        downloaded_references = list(
+            executor.map(
+                download_reference,
+                (
+                    (actor_rows[0], "actor_front"),
+                    (actor_rows[1], "actor_three_quarter"),
+                    (location_row, "location"),
+                ),
+            )
+        )
+    (actor_front, actor_front_snapshot), (
+        actor_three_quarter,
+        actor_three_quarter_snapshot,
+    ), (location, location_snapshot) = downloaded_references
     actor_reference_fingerprint = build_actor_reference_fingerprint(
         [actor_front_snapshot, actor_three_quarter_snapshot]
     )
@@ -1142,6 +1190,32 @@ def generate_candidates(
         reservation_token=reservation_token,
         reservation_seconds=_CANDIDATE_RESERVATION_SECONDS,
     )
+    reserved_revision = int(reserved.get("revision") or 0)
+
+    def persist_candidate_progress(
+        phase: str,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        progress_payload = {
+            "phase": phase,
+            "details": dict(details or {}),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            update_candidate_generation_progress(
+                run_id=str(reserved["id"]),
+                reserved_revision=reserved_revision,
+                reservation_token=reservation_token,
+                progress=progress_payload,
+            )
+        except Exception as exc:  # progress must never delay or fail generation
+            logger.warning(
+                "semantic_video_candidate_progress_update_failed",
+                run_id=str(reserved.get("id") or ""),
+                phase=phase,
+                error=str(exc),
+            )
+
     try:
         generated = generate_scene_plate_candidates(
             actor_references=[actor_front, actor_three_quarter],
@@ -1152,6 +1226,7 @@ def generate_candidates(
             candidate_count=payload.candidate_count,
             image_model=settings.semantic_scene_plate_model,
             image_size=settings.semantic_scene_plate_image_size,
+            progress_callback=persist_candidate_progress,
         )
         if len(generated.candidates) != payload.candidate_count:
             raise StateTransitionError(
@@ -1171,8 +1246,7 @@ def generate_candidates(
             raise StateTransitionError(
                 "Semantic scene-plate generator returned invalid anchor lineage."
             )
-        candidates = []
-        for candidate in generated.candidates:
+        def validate_and_store_candidate(candidate: Any) -> dict[str, Any]:
             candidate_hash = sha256(candidate.image_bytes).hexdigest()
             candidate_mime_type = str(candidate.mime_type).strip().lower()
             if candidate_mime_type not in {"image/png", "image/jpeg"}:
@@ -1229,43 +1303,41 @@ def generate_candidates(
             uploaded = get_storage_client().upload_image(
                 image_bytes=candidate.image_bytes,
                 file_name=(
-                        f"semantic-{post_id}-scene-plate-{candidate.index}-"
-                        f"{candidate_hash[:12]}.{candidate_extension}"
-                    ),
-                    correlation_id=correlation_id,
-                    content_type=candidate_mime_type,
+                    f"semantic-{post_id}-scene-plate-{candidate.index}-"
+                    f"{candidate_hash[:12]}.{candidate_extension}"
+                ),
+                correlation_id=correlation_id,
+                content_type=candidate_mime_type,
             )
-            candidates.append(
-                {
-                    "index": int(candidate.index),
-                    "storage_uri": str(uploaded["url"]),
-                    "storage_key": uploaded.get("storage_key"),
-                    "mime_type": candidate_mime_type,
-                    "byte_length": len(candidate.image_bytes),
-                    "sha256": candidate_hash,
-                    "provider_model": str(candidate.provider_model),
-                    "visual_contract_hash": visual_contract["contract_hash"],
-                    "actor_reference_fingerprint": actor_reference_fingerprint,
-                    "generation_contract_hash": generation_contract["contract_hash"],
-                    "identity_gate_result": identity_gate_result,
-                    "derivation_mode": derivation_mode,
-                    "canonical_anchor_id": (
-                        canonical_anchor_snapshot["id"]
-                        if canonical_anchor_snapshot is not None
-                        else None
-                    ),
-                    "canonical_anchor_sha256": (
-                        canonical_anchor_snapshot["master_sha256"]
-                        if canonical_anchor_snapshot is not None
-                        else None
-                    ),
-                    "canonical_anchor_source_run_id": (
-                        canonical_anchor_snapshot.get("source_run_id")
-                        if canonical_anchor_snapshot is not None
-                        else None
-                    ),
-                }
-            )
+            persisted_candidate = {
+                "index": int(candidate.index),
+                "storage_uri": str(uploaded["url"]),
+                "storage_key": uploaded.get("storage_key"),
+                "mime_type": candidate_mime_type,
+                "byte_length": len(candidate.image_bytes),
+                "sha256": candidate_hash,
+                "provider_model": str(candidate.provider_model),
+                "visual_contract_hash": visual_contract["contract_hash"],
+                "actor_reference_fingerprint": actor_reference_fingerprint,
+                "generation_contract_hash": generation_contract["contract_hash"],
+                "identity_gate_result": identity_gate_result,
+                "derivation_mode": derivation_mode,
+                "canonical_anchor_id": (
+                    canonical_anchor_snapshot["id"]
+                    if canonical_anchor_snapshot is not None
+                    else None
+                ),
+                "canonical_anchor_sha256": (
+                    canonical_anchor_snapshot["master_sha256"]
+                    if canonical_anchor_snapshot is not None
+                    else None
+                ),
+                "canonical_anchor_source_run_id": (
+                    canonical_anchor_snapshot.get("source_run_id")
+                    if canonical_anchor_snapshot is not None
+                    else None
+                ),
+            }
             logger.info(
                 "semantic_scene_identity_gate_completed",
                 post_id=post_id,
@@ -1281,6 +1353,25 @@ def generate_candidates(
                 confidence=identity_gate_result["confidence"],
                 blocking_reasons=list(identity_gate_result["blocking_reasons"]),
             )
+            return persisted_candidate
+
+        persist_candidate_progress(
+            "checking_identity",
+            {"candidate_count": len(generated.candidates)},
+        )
+        # Identity checks and uploads are candidate-local. Keep the output ordered
+        # while avoiding another three-call serial provider chain after generation.
+        with ThreadPoolExecutor(
+            max_workers=len(generated.candidates),
+            thread_name_prefix="semantic-scene-plate-qa",
+        ) as executor:
+            candidates = list(
+                executor.map(validate_and_store_candidate, generated.candidates)
+            )
+        persist_candidate_progress(
+            "saving_candidates",
+            {"candidate_count": len(candidates)},
+        )
         master_snapshot = {
             "candidates": candidates,
             "visual_contract": visual_contract,
@@ -1319,9 +1410,13 @@ def generate_candidates(
         )
         run = finalize_candidate_generation(
             str(reserved["id"]),
-            reserved_revision=int(reserved.get("revision") or 0),
+            reserved_revision=reserved_revision,
             reservation_token=reservation_token,
             run_updates=run_payload,
+        )
+        persist_candidate_progress(
+            "ready",
+            {"candidate_count": len(candidates)},
         )
     except Exception:
         try:
@@ -1523,6 +1618,14 @@ def get_progress(post_id: str):
     candidate_count = len(candidates)
     reservation_token = str(run.get("candidate_reservation_token") or "").strip()
     reservation_expires_at = str(run.get("candidate_reservation_expires_at") or "").strip()
+    candidate_progress = (
+        run.get("candidate_generation_progress")
+        if isinstance(run.get("candidate_generation_progress"), dict)
+        else {}
+    )
+    candidate_generation_phase = str(candidate_progress.get("phase") or "").strip()
+    if candidate_generation_phase not in _CANDIDATE_PHASE_PROGRESS:
+        candidate_generation_phase = ""
     if reservation_token and reservation_expires_at:
         try:
             reservation_expiry = datetime.fromisoformat(reservation_expires_at.replace("Z", "+00:00"))
@@ -1532,16 +1635,27 @@ def get_progress(post_id: str):
             updated_at = datetime.fromisoformat(str(run.get("updated_at") or "").replace("Z", "+00:00"))
             if updated_at.tzinfo is None:
                 updated_at = updated_at.replace(tzinfo=timezone.utc)
-            finalization_persisted = (
-                candidate_count == 3
-                and updated_at > reservation_started + timedelta(seconds=1)
-            )
-            if finalization_persisted:
+            if candidate_generation_phase == "ready" and candidate_count == 3:
                 candidate_generation_status = "ready"
+            elif (
+                candidate_generation_phase
+                and candidate_generation_phase != "ready"
+                and reservation_expiry > datetime.now(timezone.utc)
+            ):
+                candidate_generation_status = "generating"
             else:
-                candidate_generation_status = (
-                    "generating" if reservation_expiry > datetime.now(timezone.utc) else "stalled"
+                finalization_persisted = (
+                    candidate_count == 3
+                    and updated_at > reservation_started + timedelta(seconds=1)
                 )
+                if finalization_persisted:
+                    candidate_generation_status = "ready"
+                else:
+                    candidate_generation_status = (
+                        "generating"
+                        if reservation_expiry > datetime.now(timezone.utc)
+                        else "stalled"
+                    )
         except ValueError:
             candidate_generation_status = "stalled"
     elif candidate_count == 3:
@@ -1559,11 +1673,70 @@ def get_progress(post_id: str):
     progress_percent, elapsed_seconds, estimated_remaining_seconds, status_message = (
         _generation_progress(stage=str(run.get("stage") or ""), takes=ordered, run=run)
     )
+    if candidate_generation_status == "generating":
+        reservation_expiry_time = _parse_progress_time(reservation_expires_at)
+        reservation_started_at = (
+            reservation_expiry_time
+            - timedelta(seconds=_CANDIDATE_RESERVATION_SECONDS)
+            if reservation_expiry_time
+            else _parse_progress_time(run.get("updated_at") or run.get("created_at"))
+        )
+        elapsed_seconds = (
+            max(
+                0,
+                int(
+                    (
+                        datetime.now(timezone.utc) - reservation_started_at
+                    ).total_seconds()
+                ),
+            )
+            if reservation_started_at
+            else 0
+        )
+        estimated_remaining_seconds = max(
+            0,
+            _TYPICAL_SCENE_PLATE_SECONDS - elapsed_seconds,
+        )
+        if candidate_generation_phase:
+            progress_percent, status_message = _CANDIDATE_PHASE_PROGRESS[
+                candidate_generation_phase
+            ]
+        else:
+            progress_percent = min(
+                95,
+                max(
+                    10,
+                    int(
+                        (elapsed_seconds / _TYPICAL_SCENE_PLATE_SECONDS)
+                        * 90
+                    ),
+                ),
+            )
+            status_message = (
+                "Generating three distinct wheelchair scene plates and checking "
+                "composition plus actor identity. Remaining time is an estimate."
+            )
+    elif (
+        candidate_generation_status == "ready"
+        and str(run.get("stage") or "") == "awaiting_reference_approval"
+    ):
+        progress_percent = 100
+        estimated_remaining_seconds = 0
+        status_message = "Wheelchair scene plates are ready for identity review."
+    elif candidate_generation_status == "stalled":
+        estimated_remaining_seconds = None
+        status_message = (
+            "Scene-plate generation did not finish before its reservation expired. "
+            "Retry generation."
+        )
     progress = ProgressResponse(
         run_id=str(run["id"]),
         revision=int(run.get("revision") or 0),
         stage=str(run.get("stage") or ""),
         candidate_generation_status=candidate_generation_status,
+        candidate_generation_phase=(
+            candidate_generation_phase or None
+        ),
         candidate_count=candidate_count,
         plan_hash=run.get("plan_hash"),
         total_takes=len(ordered),

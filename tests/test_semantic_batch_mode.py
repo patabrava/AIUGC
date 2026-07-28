@@ -38,6 +38,9 @@ RECOVERY_COALESCE_FIX_MIGRATION = (
 CANDIDATE_RELEASE_MIGRATION = (
     ROOT / "supabase/migrations/20260715000800_semantic_video_candidate_release.sql"
 )
+CANDIDATE_PROGRESS_MIGRATION = (
+    ROOT / "supabase/migrations/20260728020000_semantic_scene_plate_progress.sql"
+)
 IDENTITY_QA_RESUME_MIGRATION = (
     ROOT
     / "supabase/migrations/20260726010000_semantic_video_identity_qa_resume.sql"
@@ -910,6 +913,18 @@ def test_candidate_release_migration_requires_the_exact_empty_reservation_token(
     assert "jsonb_array_length" in sql
     assert "candidate_reservation_owner = null" in sql
     assert "candidate_reservation_token = null" in sql
+    assert "to service_role" in sql
+
+
+def test_candidate_progress_migration_is_token_fenced_and_service_role_only():
+    sql = CANDIDATE_PROGRESS_MIGRATION.read_text().lower()
+
+    assert "candidate_generation_progress jsonb" in sql
+    assert "update_semantic_video_candidate_progress" in sql
+    assert "run.revision = p_reserved_revision" in sql
+    assert "run.candidate_reservation_token = p_reservation_token" in sql
+    assert "candidate_reservation_expires_at > pg_catalog.clock_timestamp()" in sql
+    assert "'regenerating_duplicates'" in sql
     assert "to service_role" in sql
 
 

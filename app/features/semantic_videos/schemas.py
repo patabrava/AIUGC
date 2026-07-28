@@ -71,6 +71,17 @@ class ProgressResponse(BaseModel):
     revision: int
     stage: str
     candidate_generation_status: Literal["idle", "generating", "ready", "stalled"]
+    candidate_generation_phase: Optional[
+        Literal[
+            "preparing_references",
+            "generating_images",
+            "checking_diversity",
+            "regenerating_duplicates",
+            "checking_identity",
+            "saving_candidates",
+            "ready",
+        ]
+    ] = None
     candidate_count: int = Field(ge=0)
     plan_hash: Optional[str] = None
     total_takes: int

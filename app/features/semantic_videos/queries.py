@@ -380,6 +380,36 @@ def reserve_candidate_generation(
     return _one_affected(response, operation="candidate reservation")
 
 
+def update_candidate_generation_progress(
+    *,
+    run_id: str,
+    reserved_revision: int,
+    reservation_token: str,
+    progress: Mapping[str, Any],
+    client=None,
+) -> dict[str, Any]:
+    if (
+        reserved_revision < 0
+        or not str(run_id or "").strip()
+        or not str(reservation_token or "").strip()
+        or not isinstance(progress, Mapping)
+    ):
+        raise ValidationError("Semantic video candidate progress contract is invalid.")
+    response = _execute_transition_rpc(
+        _client(client).rpc(
+            "update_semantic_video_candidate_progress",
+            {
+                "p_run_id": str(run_id),
+                "p_reserved_revision": int(reserved_revision),
+                "p_reservation_token": str(reservation_token),
+                "p_progress": dict(progress),
+            },
+        ),
+        operation="candidate progress update",
+    )
+    return _one_affected(response, operation="candidate progress update")
+
+
 def reclaim_candidate_reservation(
     *,
     run_id: str,

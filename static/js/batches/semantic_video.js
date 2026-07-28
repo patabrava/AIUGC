@@ -56,6 +56,9 @@
         const elapsed = field(root, 'elapsed');
         const remaining = field(root, 'remaining');
         const progressMessage = field(root, 'progress-message');
+        const progressSpinner = field(root, 'progress-spinner');
+        const isBusy = progress.candidate_generation_status === 'generating'
+            || ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'uploading'].includes(progress.stage);
         if (progressBar) {
             progressBar.style.width = `${progress.progress_percent}%`;
             progressBar.setAttribute('aria-valuenow', String(progress.progress_percent));
@@ -70,10 +73,36 @@
                     : `About ${formatDuration(progress.estimated_remaining_seconds)}`);
         }
         if (progressMessage) progressMessage.textContent = progress.status_message;
+        if (progressSpinner) progressSpinner.classList.toggle('hidden', !isBusy);
+        root.setAttribute('aria-busy', String(isBusy));
         root.dataset.revision = progress.revision;
         root.dataset.stage = progress.stage;
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
         root.dataset.candidateGenerationStatus = progress.candidate_generation_status || 'idle';
+        root.dataset.candidateGenerationPhase = progress.candidate_generation_phase || '';
+    }
+
+    function showCandidateLoading(root) {
+        const progressBar = field(root, 'progress-bar');
+        const progressPercent = field(root, 'progress-percent');
+        const progressMessage = field(root, 'progress-message');
+        const progressSpinner = field(root, 'progress-spinner');
+        const elapsed = field(root, 'elapsed');
+        const remaining = field(root, 'remaining');
+        root.dataset.candidateGenerationStatus = 'generating';
+        root.dataset.candidateGenerationPhase = 'preparing_references';
+        root.setAttribute('aria-busy', 'true');
+        if (progressBar) {
+            progressBar.style.width = '5%';
+            progressBar.setAttribute('aria-valuenow', '5');
+        }
+        if (progressPercent) progressPercent.textContent = '5%';
+        if (progressMessage) {
+            progressMessage.textContent = 'Loading and verifying the actor and location references.';
+        }
+        if (progressSpinner) progressSpinner.classList.remove('hidden');
+        if (elapsed) elapsed.textContent = '0s';
+        if (remaining) remaining.textContent = 'Calculating…';
     }
 
     function formatDuration(value) {
@@ -111,7 +140,7 @@
 
     function startPolling(root, force = false, immediate = true) {
         if (activePolls.has(root) || (!force && ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage))) return;
-        const timer = window.setInterval(() => pollProgress(root), 8000);
+        const timer = window.setInterval(() => pollProgress(root), force ? 2000 : 8000);
         activePolls.set(root, timer);
         if (immediate) pollProgress(root);
     }
@@ -160,8 +189,9 @@
         action(root, 'generate-candidates')?.addEventListener('click', (event) => {
             const expected = root.dataset.revision === '' ? null : revision();
             root.dataset.waitingForCandidates = 'true';
+            showCandidateLoading(root);
             startPolling(root, true, false);
-            runAction(root, event.currentTarget, 'candidates', {candidate_count: 3, expected_revision: expected}, 'Locking the approved actor reference as the canonical master…');
+            runAction(root, event.currentTarget, 'candidates', {candidate_count: 3, expected_revision: expected}, 'Preparing scene-plate generation…');
         });
         action(root, 'approve-master')?.addEventListener('click', (event) => {
             const selected = root.querySelector('input[type="radio"][data-identity-passed="true"]:checked');

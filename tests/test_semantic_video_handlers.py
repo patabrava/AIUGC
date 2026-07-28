@@ -479,6 +479,20 @@ def _install_repository(monkeypatch):
             state["run"].update(deepcopy(run_updates))
             return deepcopy(state["run"])
 
+    def update_candidate_generation_progress(
+        *,
+        run_id,
+        reserved_revision,
+        reservation_token,
+        progress,
+    ):
+        assert run_id == state["run"]["id"]
+        with state["reservation_lock"]:
+            assert state["candidate_reservation"] == reservation_token
+            assert state["run"]["revision"] == reserved_revision
+            state["run"]["candidate_generation_progress"] = deepcopy(progress)
+            return deepcopy(state["run"])
+
     def release_candidate_reservation(
         *,
         run_id,
@@ -726,6 +740,12 @@ def _install_repository(monkeypatch):
         handlers,
         "finalize_candidate_generation",
         finalize_candidate_generation,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "update_candidate_generation_progress",
+        update_candidate_generation_progress,
         raising=False,
     )
     monkeypatch.setattr(
@@ -1160,6 +1180,37 @@ def test_candidate_endpoint_allows_a_new_run_after_terminal_history(monkeypatch,
     assert state["takes"] == []
 
 
+def test_candidate_endpoint_downloads_scene_references_concurrently(monkeypatch):
+    handlers, _state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    barrier = Barrier(3)
+    roles: list[str] = []
+    roles_lock = Lock()
+    original_download = handlers._download_reference
+
+    def concurrent_download(row, *, role, request):
+        with roles_lock:
+            roles.append(role)
+        barrier.wait(timeout=2)
+        return original_download(row, role=role, request=request)
+
+    monkeypatch.setattr(handlers, "_download_reference", concurrent_download)
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="parallel-references"),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    assert sorted(roles) == ["actor_front", "actor_three_quarter", "location"]
+
+
 def _change_current_visual_reference(state, storage):
     new_location_uri = "https://storage/garden-location.png"
     storage.objects[new_location_uri] = _png_bytes(accent=77)
@@ -1498,20 +1549,41 @@ def test_progress_endpoint_reports_scene_plate_generation_state(monkeypatch):
     state["run"]["candidate_reservation_token"] = "reservation-1"
     state["run"]["candidate_reservation_expires_at"] = "2999-01-01T00:00:00+00:00"
     state["run"]["updated_at"] = "2998-12-31T23:30:00+00:00"
+    state["run"]["candidate_generation_progress"] = {
+        "phase": "checking_diversity",
+        "details": {"candidate_count": 3},
+    }
 
     generating = client.get("/semantic-videos/posts/post-1/progress")
 
     assert generating.status_code == 200, generating.text
-    assert generating.json()["data"]["candidate_generation_status"] == "generating"
-    assert generating.json()["data"]["candidate_count"] == 3
+    generating_payload = generating.json()["data"]
+    assert generating_payload["candidate_generation_status"] == "generating"
+    assert generating_payload["candidate_generation_phase"] == "checking_diversity"
+    assert generating_payload["candidate_count"] == 3
+    assert generating_payload["progress_percent"] == 58
+    assert generating_payload["estimated_remaining_seconds"] == 90
+    assert "visually distinct" in generating_payload["status_message"]
+    assert "paid video" not in generating_payload["status_message"].lower()
 
     state["run"]["updated_at"] = "2998-12-31T23:31:30+00:00"
+    state["run"]["candidate_generation_progress"] = {
+        "phase": "ready",
+        "details": {"candidate_count": 3},
+    }
 
     ready = client.get("/semantic-videos/posts/post-1/progress")
 
     assert ready.status_code == 200, ready.text
-    assert ready.json()["data"]["candidate_generation_status"] == "ready"
-    assert ready.json()["data"]["candidate_count"] == 3
+    ready_payload = ready.json()["data"]
+    assert ready_payload["candidate_generation_status"] == "ready"
+    assert ready_payload["candidate_generation_phase"] == "ready"
+    assert ready_payload["candidate_count"] == 3
+    assert ready_payload["progress_percent"] == 100
+    assert ready_payload["estimated_remaining_seconds"] == 0
+    assert ready_payload["status_message"] == (
+        "Wheelchair scene plates are ready for identity review."
+    )
 
 
 def test_initial_approval_appends_exact_hash_and_moves_run_to_generating(monkeypatch):
@@ -1637,6 +1709,54 @@ def test_candidate_endpoint_generates_three_wheelchair_scene_plates_from_ordered
         "script_review_status": "approved",
         "target_duration_seconds": 50,
     }
+
+
+def test_candidate_endpoint_evaluates_identity_gates_concurrently(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.features.shot_frames.identity_qa import SceneIdentityQAReport
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="parallel-qa"),
+        raising=False,
+    )
+    barrier = Barrier(3)
+
+    def concurrent_identity_gate(*_args, **_kwargs):
+        barrier.wait(timeout=2)
+        return SceneIdentityQAReport(
+            same_person=True,
+            facial_geometry_consistent=True,
+            apparent_age_consistent=True,
+            hairline_and_hair_consistent=True,
+            skin_texture_natural=True,
+            not_beautified_or_stylized=True,
+            no_face_artifacts=True,
+            confidence=0.99,
+            blocking_reasons=(),
+            observed_differences=(),
+            passed=True,
+        )
+
+    monkeypatch.setattr(
+        handlers,
+        "evaluate_scene_plate_identity",
+        concurrent_identity_gate,
+        raising=False,
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    candidates = response.json()["data"]["candidates"]
+    assert [candidate["index"] for candidate in candidates] == [1, 2, 3]
+    assert all(candidate["identity_gate_result"]["passed"] for candidate in candidates)
 
 
 def test_candidate_endpoint_derives_all_candidates_from_atomic_actor_anchor(monkeypatch):

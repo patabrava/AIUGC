@@ -888,6 +888,9 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "qa-resume" in source
     assert "master-approve" in source
     assert "candidate_generation_status" in source
+    assert "candidate_generation_phase" in source
+    assert "showCandidateLoading(root)" in source
+    assert "force ? 2000 : 8000" in source
     assert "payload?.message" in source
     assert "startPolling(root, true, false)" in source
     assert "Scene plates are still generating" in source
@@ -896,6 +899,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "progress.estimated_remaining_seconds" in source
     assert "progress.progress_percent" in source
     assert "Typical time remaining" in template_source
+    assert 'data-field="progress-spinner"' in template_source
     assert 'role="progressbar"' in template_source
 
 

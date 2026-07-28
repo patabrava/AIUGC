@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from io import BytesIO
+from threading import Barrier, Lock
+
+from PIL import Image, ImageDraw
 
 from app.features.shot_frames.service import ShotFrameReference
 from app.features.shot_production.planner import EditorialBeat
@@ -8,6 +12,17 @@ from app.features.shot_production.planner import EditorialBeat
 
 def _reference(role: str, marker: bytes) -> ShotFrameReference:
     return ShotFrameReference(role=role, mime_type="image/png", image_bytes=marker)
+
+
+def _png(*, block: str | None = None, value: int = 128) -> bytes:
+    image = Image.new("RGB", (64, 64), (value, value, value))
+    if block:
+        draw = ImageDraw.Draw(image)
+        x = 4 if block == "left" else 44
+        draw.rectangle((x, 8, x + 15, 55), fill=(15, 15, 15))
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
 
 
 def _visual_contract() -> dict:
@@ -105,6 +120,152 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
     assert all("manual wheelchair" in call["prompt"] for call in client.calls)
     assert all("visible pores" in call["prompt"] for call in client.calls)
     assert all("face averaging" in call["prompt"] for call in client.calls)
+    assert len(set(result.prompts)) == 3
+    assert all(
+        f"Candidate {index} composition:" in prompt
+        for index, prompt in enumerate(result.prompts, start=1)
+    )
+
+
+def test_scene_plate_candidates_generate_concurrently_and_keep_candidate_order():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    barrier = Barrier(3)
+    call_lock = Lock()
+    call_number = 0
+
+    class ConcurrentClient:
+        def generate_gemini_image(self, **kwargs):
+            nonlocal call_number
+            with call_lock:
+                call_number += 1
+                marker = call_number
+            barrier.wait(timeout=2)
+            return {
+                "image_bytes": f"parallel-{marker}".encode(),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        candidate_count=3,
+        llm_client=ConcurrentClient(),
+    )
+
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert len({candidate.image_bytes for candidate in result.candidates}) == 3
+
+
+def test_scene_plate_candidate_progress_reports_real_generation_phases():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    phases: list[tuple[str, dict]] = []
+
+    class DistinctClient:
+        def generate_gemini_image(self, **kwargs):
+            prompt = kwargs["prompt"]
+            index = next(
+                index
+                for index in range(1, 4)
+                if f"Candidate {index} composition:" in prompt
+            )
+            return {
+                "image_bytes": _png(block="left" if index == 1 else "right", value=80 + (index * 40)),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=DistinctClient(),
+        progress_callback=lambda phase, details: phases.append(
+            (phase, dict(details))
+        ),
+    )
+
+    assert [phase for phase, _details in phases] == [
+        "generating_images",
+        "checking_diversity",
+    ]
+    assert phases[0][1]["candidate_count"] == 3
+
+
+def test_scene_plate_near_duplicate_gate_detects_pixel_only_variation():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        scene_plates_are_near_duplicates,
+    )
+
+    assert scene_plates_are_near_duplicates(
+        _png(value=128),
+        _png(value=129),
+    )
+    assert not scene_plates_are_near_duplicates(
+        _png(block="left"),
+        _png(block="right"),
+    )
+
+
+def test_scene_plate_candidates_regenerate_perceptual_duplicates_with_distinct_prompts():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    calls: list[str] = []
+    calls_lock = Lock()
+
+    class DiversityClient:
+        def generate_gemini_image(self, **kwargs):
+            prompt = kwargs["prompt"]
+            with calls_lock:
+                calls.append(prompt)
+            if "DIVERSITY RECOVERY" not in prompt:
+                image_bytes = _png(value=128)
+            elif "Candidate 2 composition:" in prompt:
+                image_bytes = _png(block="left")
+            else:
+                image_bytes = _png(block="right")
+            return {
+                "image_bytes": image_bytes,
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        candidate_count=3,
+        llm_client=DiversityClient(),
+    )
+
+    assert len(calls) == 5
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert "DIVERSITY RECOVERY ATTEMPT 2" not in result.prompts[0]
+    assert all(
+        "DIVERSITY RECOVERY ATTEMPT 2" in prompt
+        for prompt in result.prompts[1:]
+    )
 
 
 def test_scene_plate_candidates_derive_every_option_from_established_actor_anchor():
@@ -153,6 +314,7 @@ def test_scene_plate_candidates_derive_every_option_from_established_actor_ancho
         for item in call["input_images"]
     }
     assert all("canonical scene plate" in call["prompt"] for call in client.calls)
+    assert len(set(result.prompts)) == 3
 
 
 def test_actor_reference_fingerprint_is_ordered_and_byte_bound():
