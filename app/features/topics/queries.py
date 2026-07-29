@@ -19,7 +19,10 @@ from app.core.logging import get_logger
 
 _POSTS_INSERT_RETRY_DELAYS = (0.15, 0.35, 0.75, 1.5)
 from app.features.topics.captions import resolve_selected_caption
-from app.features.topics.semantic_scripts import semantic_script_uses_recovery_source
+from app.features.topics.semantic_scripts import (
+    semantic_recovery_title_for_script,
+    semantic_script_uses_recovery_source,
+)
 from app.features.topics.seed_builders import clean_source_url, select_relevant_sources
 from app.features.topics.topic_validation import (
     classify_script_overlap,
@@ -591,13 +594,31 @@ def create_post_for_batch(
         resolve_effective_script_text(resolved_seed_data)
         or str(topic_rotation or "").strip()
     )
+    semantic_slot_id = str(
+        resolved_seed_data.get("semantic_slot_id") or ""
+    ).strip()
+    try:
+        semantic_slot_index = max(
+            0,
+            int(semantic_slot_id.rsplit(":", 1)[-1]) - 1,
+        )
+    except ValueError:
+        semantic_slot_index = 0
+    inferred_recovery_title = semantic_recovery_title_for_script(
+        post_type=post_type,
+        slot_index=semantic_slot_index,
+        script=effective_script,
+    )
+    if inferred_recovery_title:
+        topic_title = inferred_recovery_title
+        resolved_seed_data["canonical_topic"] = inferred_recovery_title
     if (
         recovery_source
         and recovery_title
         and semantic_script_uses_recovery_source(effective_script, recovery_source)
     ):
-        topic_title = recovery_title
-        resolved_seed_data["canonical_topic"] = recovery_title
+        topic_title = inferred_recovery_title or recovery_title
+        resolved_seed_data["canonical_topic"] = topic_title
         recovery_cta = str(
             resolved_seed_data.get("semantic_recovery_cta") or ""
         ).strip()
@@ -615,7 +636,6 @@ def create_post_for_batch(
         "seed_data": resolved_seed_data,
         "publish_caption": resolve_selected_caption(resolved_seed_data) or topic_rotation or topic_cta or topic_title,
     }
-    semantic_slot_id = str(resolved_seed_data.get("semantic_slot_id") or "").strip()
     if semantic_slot_id:
         # Semantic discovery may resume after an insert succeeded but its HTTP
         # response was lost. A stable primary key makes every retry and concurrent

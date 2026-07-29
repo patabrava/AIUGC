@@ -23,6 +23,7 @@ from app.features.topics import handlers, queries
 from app.features.topics.semantic_scripts import (
     SemanticScriptResult,
     generate_semantic_script,
+    semantic_recovery_title_for_script,
     validate_semantic_script,
 )
 
@@ -544,6 +545,50 @@ def test_recovery_source_detection_accepts_cropped_rotated_scripts(post_type):
         cropped_script,
         recovery_source,
     )
+
+
+@pytest.mark.parametrize(
+    ("post_type", "script", "expected_titles"),
+    [
+        (
+            "value",
+            "Teile geprüfte Zugänge, damit andere verlässliche Wege schneller finden.",
+            (
+                "Barrieren früh erkennen und Wege besser planen",
+                "Geprüfte Zugänge teilen und Umwege vermeiden",
+            ),
+        ),
+        (
+            "lifestyle",
+            "Plane Rückweg und Akkureserve gemeinsam für deinen nächsten Ausflug.",
+            (
+                "Unbekannte Wege ohne unnötigen Zusatzdruck planen",
+                "Ausflüge mit Pausen und Alternativen absichern",
+            ),
+        ),
+        (
+            "product",
+            "Prüfe Stromanschluss, Parkposition und freie Durchgänge vor dem Einbau.",
+            (
+                "Plattformlift passend für den Alltag planen",
+                "Liftbetrieb, Wartung und freie Wege abstimmen",
+            ),
+        ),
+    ],
+)
+def test_recovery_copy_derives_family_title_without_candidate_metadata(
+    post_type,
+    script,
+    expected_titles,
+):
+    assert [
+        semantic_recovery_title_for_script(
+            post_type=post_type,
+            slot_index=slot_index,
+            script=script,
+        )
+        for slot_index in (0, 1)
+    ] == list(expected_titles)
 
 
 def test_semantic_provider_failure_builds_distinct_fact_aware_fallback():

@@ -509,6 +509,68 @@ def semantic_script_uses_recovery_source(script: str, recovery_source: str) -> b
     return matched >= max(2, (len(script_statements) + 1) // 2)
 
 
+_SEMANTIC_RECOVERY_TITLES_BY_SLOT = {
+    "value": (
+        "Barrieren früh erkennen und Wege besser planen",
+        "Geprüfte Zugänge teilen und Umwege vermeiden",
+    ),
+    "lifestyle": (
+        "Unbekannte Wege ohne unnötigen Zusatzdruck planen",
+        "Ausflüge mit Pausen und Alternativen absichern",
+    ),
+    "product": (
+        "Plattformlift passend für den Alltag planen",
+        "Liftbetrieb, Wartung und freie Wege abstimmen",
+    ),
+}
+
+_SEMANTIC_RECOVERY_MARKERS = {
+    "value": (
+        "abgesenkte bordsteine",
+        "konkrete barrieren mit ort",
+        "veranstaltern oder behörden",
+        "bestätigte öffnungszeiten",
+        "erreichbare routen",
+        "geprüfte zugänge",
+        "ladegerät, medikamente",
+    ),
+    "lifestyle": (
+        "unbekannte wege vorab",
+        "eine kurze pause",
+        "adressen und telefonnummern",
+        "wetter, untergrund und ruheplätze",
+        "begleitung und treffpunkte",
+        "rückweg und akkureserve",
+        "funktionierende zugänge",
+    ),
+    "product": (
+        "ein plattformlift kann",
+        "einbau des lifts",
+        "liftsteuerung",
+        "liftlösung",
+        "notabsenkung",
+        "stromanschluss, parkposition",
+        "lift-wartungsintervalle",
+        "lift-kontaktdaten",
+    ),
+}
+
+
+def semantic_recovery_title_for_script(
+    *,
+    post_type: str,
+    slot_index: int,
+    script: str,
+) -> Optional[str]:
+    normalized_post_type = _normalize_post_type(post_type)
+    normalized_script = re.sub(r"\s+", " ", str(script or "")).strip().casefold()
+    markers = _SEMANTIC_RECOVERY_MARKERS.get(normalized_post_type, ())
+    if not normalized_script or not any(marker in normalized_script for marker in markers):
+        return None
+    titles = _SEMANTIC_RECOVERY_TITLES_BY_SLOT[normalized_post_type]
+    return titles[max(0, int(slot_index)) % len(titles)]
+
+
 def validate_semantic_script_audience_copy(
     script: str,
     *,
@@ -1869,6 +1931,7 @@ __all__ = [
     "SemanticScriptValidationResult",
     "build_semantic_script_prompt",
     "generate_semantic_script",
+    "semantic_recovery_title_for_script",
     "semantic_script_uses_recovery_source",
     "validate_semantic_script",
     "validate_semantic_script_audience_copy",
