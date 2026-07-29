@@ -459,6 +459,76 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
 
 
 @pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
+def test_deterministic_recovery_prefers_assigned_slot_title(monkeypatch, post_type):
+    class FailingClient:
+        def generate_gemini_text(self, **_kwargs):
+            raise httpx.ConnectError(
+                "offline",
+                request=httpx.Request("POST", "https://provider.invalid"),
+            )
+
+    contract = build_semantic_duration_contract(50)
+    candidate = _candidate(post_type)
+    candidate.update(
+        {
+            "semantic_recovery": True,
+            "semantic_recovery_source": "Unrelated legacy recovery source.",
+            "semantic_recovery_title": handlers._semantic_slot_recovery_title(
+                post_type,
+                1,
+            ),
+            "semantic_recovery_cta": handlers._SEMANTIC_RECOVERY_COPY[post_type]["cta"],
+        }
+    )
+    recovery_source = handlers._semantic_slot_recovery_source(post_type, 1)
+    recovery_script = generate_semantic_script(
+        post_type=post_type,
+        title=candidate["title"],
+        cta=candidate["cta"],
+        facts=["Kurzer Hinweis."],
+        recovery_facts=[recovery_source],
+        requested_duration_seconds=50,
+        llm_client=FailingClient(),
+    ).script
+    monkeypatch.setattr(
+        handlers,
+        "generate_semantic_script",
+        lambda **_kwargs: SemanticScriptResult(
+            script=recovery_script,
+            contract_hash=contract.contract_hash,
+            provenance={
+                "source": "deterministic_recovery",
+                "post_type": post_type,
+            },
+        ),
+    )
+    monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *_args: None)
+    monkeypatch.setattr(handlers, "mark_topic_script_used", lambda **_kwargs: None)
+    created_posts = []
+    monkeypatch.setattr(
+        handlers,
+        "create_post_for_batch",
+        lambda **kwargs: created_posts.append(kwargs) or {"id": "post-recovery"},
+    )
+
+    handlers._create_semantic_post_from_candidate(
+        batch={"id": "batch-recovery", "actor_identity_snapshot": {"name": "Nora"}},
+        post_type=post_type,
+        candidate=candidate,
+        contract=contract,
+        semantic_slot_id=f"{post_type}:2",
+        semantic_family_identity=f"family:{post_type}",
+        semantic_rotation_index=1,
+    )
+
+    created = created_posts[0]
+    expected_title = handlers._semantic_slot_recovery_title(post_type, 1)
+    assert created["topic_title"] == expected_title
+    assert created["seed_data"]["canonical_topic"] == expected_title
+    assert created["topic_title"] != candidate["title"]
+
+
+@pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
 def test_recovery_source_detection_accepts_cropped_rotated_scripts(post_type):
     recovery_source = handlers._semantic_slot_recovery_source(post_type, 1)
     recovery_statements = re.split(r"(?<=[.!?])\s+", recovery_source)

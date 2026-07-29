@@ -1054,8 +1054,11 @@ def _create_semantic_post_from_candidate(
     uses_candidate_recovery = overlaps_recovery(candidate_recovery_source)
     uses_canonical_recovery = overlaps_recovery(canonical_recovery_source)
     uses_recovery = uses_candidate_recovery or uses_canonical_recovery
-    if (
+    uses_deterministic_recovery = (
         generated.provenance.get("source") == "deterministic_recovery"
+    )
+    if (
+        uses_deterministic_recovery
         or uses_recovery
     ):
         recovery_copy = _SEMANTIC_RECOVERY_COPY[post_type]
@@ -1063,20 +1066,23 @@ def _create_semantic_post_from_candidate(
             0,
             int(str(semantic_slot_id).rsplit(":", 1)[-1]) - 1,
         )
-        if uses_canonical_recovery:
+        if uses_deterministic_recovery or uses_canonical_recovery:
             recovery_copy = {
-                "title": _semantic_slot_recovery_title(post_type, slot_index),
+                "title": (
+                    candidate.get("semantic_recovery_title")
+                    or _semantic_slot_recovery_title(post_type, slot_index)
+                ),
+                "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
+            }
+        elif candidate.get("semantic_recovery_title"):
+            recovery_copy = {
+                "title": candidate["semantic_recovery_title"],
                 "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
             }
         elif candidate.get("semantic_recovery"):
             recovery_copy = {
                 "title": candidate.get("title"),
                 "cta": candidate.get("cta"),
-            }
-        elif candidate.get("semantic_recovery_title"):
-            recovery_copy = {
-                "title": candidate["semantic_recovery_title"],
-                "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
             }
         title = str(recovery_copy["title"])
         cta = str(recovery_copy["cta"])
