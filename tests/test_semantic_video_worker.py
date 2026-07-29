@@ -1236,6 +1236,98 @@ def test_materialized_identity_manifest_preserves_accepted_transcript_advisory(t
     assert manifest["takes"][1]["transcript_qa"]["passed"] is True
 
 
+def test_accept_transcript_advisory_derives_the_real_spoken_word_window(
+    tmp_path,
+    monkeypatch,
+):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "transcript_failed",
+                "takes": [
+                    {
+                        "index": 1,
+                        "duration_seconds": 8,
+                        "status": "transcript_failed",
+                        "transcript": {
+                            "full_text": "Mit einer Hand öffnet sie die Tür. Okay?",
+                            "words": [
+                                {"word": "Mit", "start": 0.4, "end": 0.6},
+                                {"word": "Okay", "start": 6.4, "end": 6.8},
+                            ],
+                        },
+                        "transcript_qa": {
+                            "passed": False,
+                            "first_word_start_seconds": 0.4,
+                            "final_word_end_seconds": None,
+                            "failure_reasons": ["missing_last_word"],
+                        },
+                        "trim_window": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = ProductionStageRunner(work_root=tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "_materialize_manifest",
+        lambda run, takes: manifest_path,
+    )
+
+    result = runner.accept_transcript_advisory(run={}, takes=[])
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    take = saved["takes"][0]
+
+    assert result["passed"] is True
+    assert take["transcript_qa"]["automated_passed"] is False
+    assert take["transcript_qa"]["manual_review_accepted"] is True
+    assert take["transcript_qa"]["first_word_start_seconds"] == 0.4
+    assert take["transcript_qa"]["final_word_end_seconds"] == 6.8
+    assert take["trim_window"]["start_seconds"] == pytest.approx(0.15)
+    assert take["trim_window"]["end_seconds"] == pytest.approx(7.05)
+    assert take["trim_window"]["source"] == "deepgram_word_window"
+    assert saved["status"] == "transcript_qa_passed"
+
+
+def test_identity_advisory_becomes_an_explicit_downstream_visual_gate():
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    payload = {
+        "status": "visual_qa_failed",
+        "visual_qa": {
+            "passed": False,
+            "blocking_reasons": ["actor identity differs from approved references"],
+            "observed_differences": ["face geometry changed"],
+        },
+    }
+
+    ProductionStageRunner._apply_downstream_qa_advisory(  # noqa: SLF001
+        payload,
+        {
+            "required": True,
+            "stage": "identity_qa",
+            "failed_take_indexes": [0, 1],
+        },
+    )
+
+    report = payload["visual_qa"]
+    assert report["passed"] is True
+    assert report["provider_passed"] is False
+    assert report["provider_blocking_reasons"] == [
+        "actor identity differs from approved references"
+    ]
+    assert report["manual_review_accepted"] is True
+    assert report["accepted_by"] == "paid_generated_take_qa_advisory"
+    assert report["observed_differences"] == ["face geometry changed"]
+    assert report["blocking_reasons"] == []
+    assert payload["status"] == "visual_qa_passed"
+
+
 @pytest.mark.parametrize(
     ("creation_mode", "source"),
     [

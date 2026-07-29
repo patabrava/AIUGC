@@ -17,6 +17,9 @@ RECOVERY_MIGRATION = ROOT / "supabase/migrations/20260714000100_semantic_video_p
 COMPLETED_REPAIR_MIGRATION = (
     ROOT / "supabase/migrations/20260728000000_semantic_video_completed_delivery_repair.sql"
 )
+TRANSCRIPT_ADVISORY_RESUME_MIGRATION = (
+    ROOT / "supabase/migrations/20260730000000_semantic_video_transcript_advisory_resume.sql"
+)
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_worker_rpc_test"
 BATCH_ID = "00000000-0000-0000-0000-000000000101"
@@ -61,6 +64,18 @@ def test_completed_delivery_repair_is_revision_fenced_and_cannot_submit_paid_wor
     assert "stitch_end_pan_protection_applied" in sql
     assert "'provider_submission_created', FALSE" in sql
     assert "GRANT EXECUTE ON FUNCTION public.repair_completed_semantic_video_delivery" in sql
+    assert "TO service_role" in sql
+
+
+def test_transcript_advisory_resume_persists_the_worker_control_marker():
+    sql = TRANSCRIPT_ADVISORY_RESUME_MIGRATION.read_text()
+
+    assert "CREATE OR REPLACE FUNCTION public.resume_semantic_video_qa_review" in sql
+    assert "failed_take_indexes INTEGER[]" in sql
+    assert "WHEN resume_stage = 'transcript_qa'" in sql
+    assert "'qa_advisory'" in sql
+    assert "'paid_retry_required', FALSE" in sql
+    assert "GRANT EXECUTE ON FUNCTION public.resume_semantic_video_qa_review" in sql
     assert "TO service_role" in sql
 
 

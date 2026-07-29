@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -340,9 +341,63 @@ class ProductionStageRunner:
             transcript_qa = take.get("transcript_qa")
             if not isinstance(transcript_qa, dict) or transcript_qa.get("passed") is True:
                 continue
+            transcript = take.get("transcript")
+            words = (
+                transcript.get("words")
+                if isinstance(transcript, Mapping)
+                else None
+            )
+            if (
+                not isinstance(words, list)
+                or not words
+                or not isinstance(words[0], Mapping)
+                or not isinstance(words[-1], Mapping)
+            ):
+                raise StateTransitionError(
+                    "Transcript advisory resume requires persisted word timestamps.",
+                    {"take_index": take.get("index")},
+                )
+            try:
+                first_word_start = float(words[0].get("start"))
+                final_word_end = float(words[-1].get("end"))
+                duration_seconds = float(take.get("duration_seconds"))
+            except (TypeError, ValueError) as exc:
+                raise StateTransitionError(
+                    "Transcript advisory resume requires valid word timestamps.",
+                    {"take_index": take.get("index")},
+                ) from exc
+            if (
+                not math.isfinite(first_word_start)
+                or not math.isfinite(final_word_end)
+                or not math.isfinite(duration_seconds)
+                or first_word_start < 0
+                or final_word_end < first_word_start
+                or duration_seconds <= 0
+            ):
+                raise StateTransitionError(
+                    "Transcript advisory resume requires valid word timestamps.",
+                    {"take_index": take.get("index")},
+                )
             transcript_qa["automated_passed"] = False
             transcript_qa["manual_review_accepted"] = True
             transcript_qa["passed"] = True
+            transcript_qa["first_word_start_seconds"] = first_word_start
+            transcript_qa["final_word_end_seconds"] = min(
+                duration_seconds,
+                final_word_end,
+            )
+            take["trim_window"] = {
+                "start_seconds": (
+                    max(0.0, first_word_start - 0.25)
+                    if int(take["index"]) > 0
+                    else 0.0
+                ),
+                "end_seconds": min(
+                    duration_seconds,
+                    final_word_end + 0.25,
+                ),
+                "source": "deepgram_word_window",
+            }
             take["status"] = "transcribed"
             reviewed_indexes.append(int(take["index"]))
         if not reviewed_indexes:
@@ -367,6 +422,31 @@ class ProductionStageRunner:
                 },
             },
         }
+
+    @staticmethod
+    def _apply_downstream_qa_advisory(
+        payload: dict[str, Any],
+        qa_advisory: Any,
+    ) -> None:
+        """Convert an advisory evaluator result into an explicit accepted gate."""
+        if (
+            not isinstance(qa_advisory, Mapping)
+            or qa_advisory.get("required") is not True
+            or qa_advisory.get("stage") != "identity_qa"
+        ):
+            return
+        report = payload.get("visual_qa")
+        if not isinstance(report, dict) or report.get("passed") is not False:
+            return
+        report["provider_passed"] = False
+        report["provider_blocking_reasons"] = list(
+            report.get("blocking_reasons") or []
+        )
+        report["manual_review_accepted"] = True
+        report["accepted_by"] = "paid_generated_take_qa_advisory"
+        report["passed"] = True
+        report["blocking_reasons"] = []
+        payload["status"] = "visual_qa_passed"
 
     @staticmethod
     def _runner():
@@ -666,6 +746,7 @@ class ProductionStageRunner:
         for key in self._MANIFEST_GLOBAL_KEYS:
             if key in prior_manifest:
                 payload[key] = prior_manifest[key]
+        self._apply_downstream_qa_advisory(payload, qa_advisory)
         payload["request_contract_sha256"] = pipeline._canonical_sha256(  # noqa: SLF001
             pipeline._request_contract_payload(payload)  # noqa: SLF001
         )

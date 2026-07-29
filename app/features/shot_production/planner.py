@@ -24,6 +24,12 @@ MIN_SCRIPT_WORDS = 4
 
 _TRAILING_CLOSERS = "\"'»”’)]}"
 _COORDINATING_WORDS = frozenset({"aber", "denn", "doch", "oder", "sondern", "und"})
+_COMPACT_TWO_LETTER_ABBREVIATION = re.compile(
+    r"\b([A-Za-zÄÖÜäöüß])\.([A-Za-zÄÖÜäöüß])\."
+)
+_MISSING_SENTENCE_BOUNDARY_WHITESPACE = re.compile(
+    r"(?<=[.!?])(?=[A-Za-zÀ-ÿÄÖÜäöüß])"
+)
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,16 @@ def provider_duration_for_estimate(estimated_speech_seconds: float) -> int:
     if estimated_speech_seconds <= 5.25:
         return 6
     return 8
+
+
+def validate_spoken_punctuation_spacing(script: str) -> None:
+    """Reject merged sentence boundaries while preserving compact abbreviations."""
+    cleaned = " ".join(str(script or "").split())
+    boundary_probe = _COMPACT_TWO_LETTER_ABBREVIATION.sub(r"\1\2", cleaned)
+    if _MISSING_SENTENCE_BOUNDARY_WHITESPACE.search(boundary_probe):
+        raise ValueError(
+            "Semantic UGC script requires whitespace after sentence punctuation."
+        )
 
 
 def _terminal_mark(token: str) -> str:
@@ -164,6 +180,7 @@ def plan_editorial_beats(script: str) -> List[EditorialBeat]:
     cleaned = " ".join(str(script or "").split())
     if not cleaned:
         raise ValueError("Editorial beat planning requires a non-empty script.")
+    validate_spoken_punctuation_spacing(cleaned)
 
     total_words = script_word_count(cleaned)
     if total_words < MIN_SCRIPT_WORDS:
@@ -199,4 +216,5 @@ __all__ = [
     "estimate_speech_seconds",
     "plan_editorial_beats",
     "provider_duration_for_estimate",
+    "validate_spoken_punctuation_spacing",
 ]

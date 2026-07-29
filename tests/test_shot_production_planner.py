@@ -134,6 +134,19 @@ def test_does_not_treat_german_example_abbreviations_as_terminal_boundaries(exam
     assert all("z." not in beat.text or "B." in beat.text for beat in beats)
 
 
+def test_rejects_a_spoken_word_merged_into_terminal_punctuation():
+    script = (
+        "Die Herausforderungen reichen von der Kraft bis zur sicheren Koordination der Bewegungen. "
+        "Mit einer Hand stützt man sich am Rahmen ab, während die andere die Tür aufzieht.Ok?"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires whitespace after sentence punctuation",
+    ):
+        plan_editorial_beats(script)
+
+
 def test_keeps_a_complete_concise_ending_inside_the_minimum_shot_plan():
     script = (
         "Jeder, der einen Rollstuhl nutzt, weiß genau: "

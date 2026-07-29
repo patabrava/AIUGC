@@ -256,6 +256,22 @@ def test_validation_rejects_planner_fragments_without_terminal_punctuation():
         )
 
 
+def test_validation_rejects_missing_whitespace_at_spoken_sentence_boundary():
+    script = (
+        "Die Herausforderungen reichen von der Kraft bis zur sicheren Koordination der Bewegungen. "
+        "Mit einer Hand stützt man sich am Rahmen ab, während die andere die Tür aufzieht.Ok?"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires whitespace after sentence punctuation",
+    ):
+        validate_semantic_script(
+            script,
+            requested_duration_seconds=16,
+        )
+
+
 def test_validation_rejects_a_take_over_eighteen_words_or_seven_point_five_seconds():
     first_sentence = [
         *[f"Quelle{index}/Zusatz{index}" for index in range(9)],

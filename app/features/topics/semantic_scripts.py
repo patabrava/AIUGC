@@ -23,6 +23,7 @@ from app.features.shot_production.duration import (
 from app.features.shot_production.planner import (
     estimate_speech_seconds,
     plan_editorial_beats,
+    validate_spoken_punctuation_spacing,
 )
 
 
@@ -421,6 +422,7 @@ def validate_semantic_script(
         maximum_seconds=maximum_seconds,
     )
     cleaned = " ".join(str(script or "").split())
+    validate_spoken_punctuation_spacing(cleaned)
     word_count = script_word_count(cleaned)
     if not contract.minimum_words <= word_count <= contract.maximum_words:
         raise ValueError(
