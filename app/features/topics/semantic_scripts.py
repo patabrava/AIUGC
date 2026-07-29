@@ -41,6 +41,7 @@ _INTERNAL_FALLBACK_COPY = re.compile(
     re.IGNORECASE,
 )
 _AUDIENCE_COPY_SCAFFOLDING = re.compile(
+    r"(?:\(|\[)?\s*take\s*\d+\s*(?:\)|\]|:|-)|"
     r"\b(?:wichtig\s+bleibt|wichtig)\s*:\s*[„\"]|"
     r"\bprüfe\s+für\s+deine\s+nächste\s+wichtige\s+entscheidung\s+bitte\s+erneut\b|"
     r"\baußerdem\s+gilt\s*:|"

@@ -218,6 +218,11 @@ def test_audited_32_second_source_with_raw_url_uses_family_recovery():
             "sammelt Fakten und zur schnellen Bewertung von WC-Anlagen.",
             "recovery scaffolding",
         ),
+        (
+            "(TAKE 1) Eine Treppe schien mir oft unüberwindbar. "
+            "(TAKE 2) Mit einem passenden Lift wird sie wieder nutzbar.",
+            "recovery scaffolding",
+        ),
     ],
 )
 def test_non_substantive_source_sentences_are_rejected(script, message):
