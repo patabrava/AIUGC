@@ -1424,7 +1424,7 @@ def is_batch_discovery_active(batch_id: str) -> bool:
         return True
 
 
-_DISCOVERY_TRANSIENT_MAX_ATTEMPTS = 5
+_DISCOVERY_TRANSIENT_MAX_ATTEMPTS = 7
 _DISCOVERY_TRANSIENT_RETRY_BASE_SECONDS = 0.5
 _DISCOVERY_TRANSIENT_ERROR_MARKERS = (
     "remoteprotocolerror",
@@ -1440,6 +1440,7 @@ _DISCOVERY_TRANSIENT_ERROR_MARKERS = (
     "connection refused",
     "unexpected eof",
     "json could not be generated",
+    "database unavailable",
 )
 
 

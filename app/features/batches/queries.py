@@ -7,6 +7,7 @@ Per Constitution § V: Locality & Vertical Slices
 import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from uuid import uuid4
 import httpx
 from postgrest.exceptions import APIError
 from app.adapters.supabase_client import get_supabase
@@ -25,6 +26,7 @@ from app.features.shot_production.duration import build_semantic_duration_contra
 logger = get_logger(__name__)
 
 _QUERY_RETRY_DELAYS = (0.15, 0.35, 0.75)
+_INSERT_RETRY_DELAYS = (0.25, 0.75, 1.5, 3.0, 6.0)
 BATCH_LIST_FIELDS = (
     "id,brand,state,creation_mode,post_type_counts,manual_post_count,"
     "target_length_tier,target_duration_seconds,video_pipeline_route,"
@@ -323,24 +325,64 @@ def _execute_with_retry(operation_name: str, callback):
 
 
 def _insert_batch_row(payload: Dict[str, Any], legacy_payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    supabase = get_supabase()
-    try:
-        response = supabase.client.table("batches").insert(payload).execute()
-    except APIError as exc:
-        error_text = str(exc)
-        if exc.code == "PGRST204" and legacy_payload is not None:
-            logger.warning(
-                "batch_insert_schema_missing_fallback",
-                error=error_text,
-                omitted_fields=sorted(set(payload) - set(legacy_payload)),
-            )
-            response = supabase.client.table("batches").insert(legacy_payload).execute()
-        else:
-            raise
+    stable_payload = dict(payload)
+    stable_payload.setdefault("id", str(uuid4()))
+    stable_legacy_payload = dict(legacy_payload) if legacy_payload is not None else None
+    if stable_legacy_payload is not None:
+        stable_legacy_payload["id"] = stable_payload["id"]
 
-    if not response.data:
-        raise Exception("Failed to create batch")
-    return response.data[0]
+    last_error: Optional[Exception] = None
+    for attempt, delay in enumerate((0.0, *_INSERT_RETRY_DELAYS), start=1):
+        if delay:
+            time.sleep(delay)
+        supabase = get_supabase()
+        try:
+            try:
+                response = supabase.client.table("batches").insert(stable_payload).execute()
+            except APIError as exc:
+                error_text = str(exc)
+                if exc.code == "PGRST204" and stable_legacy_payload is not None:
+                    logger.warning(
+                        "batch_insert_schema_missing_fallback",
+                        error=error_text,
+                        omitted_fields=sorted(set(stable_payload) - set(stable_legacy_payload)),
+                    )
+                    response = (
+                        supabase.client.table("batches")
+                        .insert(stable_legacy_payload)
+                        .execute()
+                    )
+                elif exc.code == "23505":
+                    response = (
+                        supabase.client.table("batches")
+                        .select("*")
+                        .eq("id", stable_payload["id"])
+                        .execute()
+                    )
+                else:
+                    raise
+
+            if not response.data:
+                raise RuntimeError("Failed to create batch")
+            return response.data[0]
+        except httpx.RequestError as exc:
+            last_error = exc
+            logger.warning(
+                "batch_insert_retryable_request_error",
+                batch_id=stable_payload["id"],
+                attempt=attempt,
+                max_attempts=len(_INSERT_RETRY_DELAYS) + 1,
+                error=str(exc),
+            )
+
+    raise ThirdPartyError(
+        message="Database unavailable while creating batch",
+        details={
+            "operation": "create_batch",
+            "batch_id": stable_payload["id"],
+            "error": str(last_error) if last_error else "unknown",
+        },
+    )
 
 
 def create_batch(

@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.core.config import get_settings
+from app.core.errors import ThirdPartyError
 from app.features.batches import handlers as batch_handlers
 from app.features.batches import queries as batch_queries
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
@@ -62,6 +63,33 @@ def test_batch_discovery_retries_transient_transport_failures(monkeypatch):
     assert [progress["attempt"] for _, progress in progress_updates] == [2, 3]
     assert all(progress["is_retrying"] is True for _, progress in progress_updates)
     assert topic_handlers.is_batch_discovery_active("batch-transport-retry") is False
+
+
+def test_batch_discovery_retries_temporary_database_unavailability(monkeypatch):
+    calls = []
+    sleep_delays = []
+
+    async def fake_discover(batch_id):
+        calls.append(batch_id)
+        if len(calls) == 1:
+            raise ThirdPartyError(
+                message="Database unavailable while loading batch data for get_batch_by_id",
+                details={"operation": "get_batch_by_id"},
+            )
+        return {"posts_created": 3, "state": "S2_SEEDED"}
+
+    async def fake_sleep(delay):
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr(topic_handlers, "discover_topics_for_batch", fake_discover)
+    monkeypatch.setattr(topic_handlers.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(topic_handlers, "update_seeding_progress", lambda *_args, **_kwargs: None)
+
+    asyncio.run(topic_handlers._run_batch_discovery_task("batch-database-retry"))
+
+    assert calls == ["batch-database-retry", "batch-database-retry"]
+    assert sleep_delays == [0.5]
+    assert topic_handlers.is_batch_discovery_active("batch-database-retry") is False
 
 
 def test_semantic_video_projection_deduplicates_canonical_compatibility_candidates(
