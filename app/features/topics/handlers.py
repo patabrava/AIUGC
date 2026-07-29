@@ -1441,6 +1441,12 @@ _DISCOVERY_TRANSIENT_ERROR_MARKERS = (
     "unexpected eof",
     "json could not be generated",
     "database unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "service unavailable",
+    "pgrst000",
+    "pgrst001",
+    "pgrst002",
 )
 
 

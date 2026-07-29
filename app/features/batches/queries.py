@@ -27,6 +27,15 @@ logger = get_logger(__name__)
 
 _QUERY_RETRY_DELAYS = (0.15, 0.35, 0.75)
 _INSERT_RETRY_DELAYS = (0.25, 0.75, 1.5, 3.0, 6.0)
+_TRANSIENT_INSERT_API_ERROR_MARKERS = (
+    "bad gateway",
+    "connection",
+    "gateway timeout",
+    "service unavailable",
+    "temporarily unavailable",
+    "timeout",
+    "upstream",
+)
 BATCH_LIST_FIELDS = (
     "id,brand,state,creation_mode,post_type_counts,manual_post_count,"
     "target_length_tier,target_duration_seconds,video_pipeline_route,"
@@ -324,6 +333,14 @@ def _execute_with_retry(operation_name: str, callback):
     )
 
 
+def _is_transient_insert_api_error(exc: APIError) -> bool:
+    code = str(getattr(exc, "code", "") or "").strip().upper()
+    if code in {"PGRST000", "PGRST001", "PGRST002"} or code.startswith("5"):
+        return True
+    error_text = str(exc).casefold()
+    return any(marker in error_text for marker in _TRANSIENT_INSERT_API_ERROR_MARKERS)
+
+
 def _insert_batch_row(payload: Dict[str, Any], legacy_payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     stable_payload = dict(payload)
     stable_payload.setdefault("id", str(uuid4()))
@@ -372,6 +389,18 @@ def _insert_batch_row(payload: Dict[str, Any], legacy_payload: Optional[Dict[str
                 batch_id=stable_payload["id"],
                 attempt=attempt,
                 max_attempts=len(_INSERT_RETRY_DELAYS) + 1,
+                error=str(exc),
+            )
+        except APIError as exc:
+            if not _is_transient_insert_api_error(exc):
+                raise
+            last_error = exc
+            logger.warning(
+                "batch_insert_retryable_api_error",
+                batch_id=stable_payload["id"],
+                attempt=attempt,
+                max_attempts=len(_INSERT_RETRY_DELAYS) + 1,
+                error_code=getattr(exc, "code", None),
                 error=str(exc),
             )
 

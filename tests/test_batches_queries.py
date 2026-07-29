@@ -198,6 +198,50 @@ def test_batch_insert_retries_timeout_with_one_stable_id(monkeypatch):
     assert sleeps == [0.25]
 
 
+def test_batch_insert_retries_transient_postgrest_api_error(monkeypatch):
+    inserted_payloads = []
+    sleeps = []
+
+    class InsertQuery:
+        def __init__(self):
+            self.payload = None
+
+        def insert(self, payload):
+            self.payload = dict(payload)
+            inserted_payloads.append(self.payload)
+            return self
+
+        def execute(self):
+            if len(inserted_payloads) == 1:
+                raise APIError(
+                    {
+                        "code": "PGRST000",
+                        "details": None,
+                        "hint": None,
+                        "message": "Service unavailable while connecting to the database",
+                    }
+                )
+            return SimpleNamespace(data=[self.payload])
+
+    class InsertClient:
+        def table(self, name):
+            assert name == "batches"
+            return InsertQuery()
+
+    monkeypatch.setattr(
+        batch_queries,
+        "get_supabase",
+        lambda: SimpleNamespace(client=InsertClient()),
+    )
+    monkeypatch.setattr(batch_queries.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    created = batch_queries._insert_batch_row({"brand": "PostgREST Stress"})
+
+    assert created["id"]
+    assert inserted_payloads[0]["id"] == inserted_payloads[1]["id"] == created["id"]
+    assert sleeps == [0.25]
+
+
 def test_get_batch_posts_summary_retries_transient_request_errors(monkeypatch):
     fake_adapter = SimpleNamespace(
         client=_FakeClient(
