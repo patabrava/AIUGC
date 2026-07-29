@@ -51,6 +51,18 @@ _AUDIENCE_EXTERNAL_REFERENCE = re.compile(
     r"\b(?:quelle|source|weitere\s+informationen)\s*:\s*\S+",
     re.IGNORECASE,
 )
+_AUDIENCE_ANAPHORIC_OPENING = re.compile(
+    r"^(?:sie|er|es|diese?|dieses|das)\s+(?:führt|führen)\s+zu\b",
+    re.IGNORECASE,
+)
+_AUDIENCE_GENERIC_PADDING = re.compile(
+    r"(?:^|(?<=[.!?])\s+)(?:"
+    r"(?:doch\s+)?es\s+gibt\s+eine\s+lösung|"
+    r"so\s+ist\s+man\s+(?:immer\s+)?gut\s+unterwegs|"
+    r"eine\s+sorge\s+weniger(?:\s+im\s+alltag)?"
+    r")[.!?](?=\s|$)",
+    re.IGNORECASE,
+)
 _WORD_PATTERN = re.compile(
     r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*"
 )
@@ -420,6 +432,18 @@ def validate_semantic_script_audience_copy(script: str) -> None:
         raise ValueError(
             "Semantic UGC script contains an external reference instead of spoken "
             f"audience copy: {reference_match.group(0)!r}."
+        )
+    anaphoric_match = _AUDIENCE_ANAPHORIC_OPENING.search(cleaned)
+    if anaphoric_match:
+        raise ValueError(
+            "Semantic UGC script opens with an unresolved source reference instead "
+            f"of a self-contained statement: {anaphoric_match.group(0)!r}."
+        )
+    padding_match = _AUDIENCE_GENERIC_PADDING.search(cleaned)
+    if padding_match:
+        raise ValueError(
+            "Semantic UGC script contains generic padding instead of a substantive "
+            f"audience statement: {padding_match.group(0)!r}."
         )
     if "…" in cleaned or "..." in cleaned:
         raise ValueError(

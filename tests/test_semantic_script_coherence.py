@@ -190,6 +190,60 @@ def test_audited_32_second_source_with_raw_url_uses_family_recovery():
     assert "http" not in result.script.casefold()
 
 
+@pytest.mark.parametrize(
+    ("script", "message"),
+    [
+        (
+            "Sie führen zu falschen Behandlungen und vermeidbaren "
+            "Krankenhauseinweisungen.",
+            "unresolved source reference",
+        ),
+        (
+            "Als Rollstuhlnutzerin suchst du oft lange nach passenden Orten. "
+            "Doch es gibt eine Lösung!",
+            "generic padding",
+        ),
+        (
+            "Dieser individuell gefertigte Lift passt sich jeder Treppe an. "
+            "So ist man immer gut unterwegs.",
+            "generic padding",
+        ),
+    ],
+)
+def test_non_substantive_source_sentences_are_rejected(script, message):
+    with pytest.raises(ValueError, match=message):
+        validate_semantic_script_audience_copy(script)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            "Sie führen zu falschen Behandlungen und vermeidbaren "
+            "Krankenhauseinweisungen. Die korrekte Verwaltung deiner Unterlagen ist "
+            "entscheidend für deine Gesundheit."
+        ),
+        (
+            "Dieser individuell gefertigte Lift passt sich jeder Treppe an. "
+            "So ist man immer gut unterwegs."
+        ),
+    ],
+)
+def test_eight_second_source_fragment_or_padding_uses_family_recovery(source):
+    result = generate_semantic_script(
+        post_type="value",
+        title="Planbare Entscheidungen",
+        cta="Speichere dir die Hinweise.",
+        facts=[source],
+        recovery_facts=[VALUE_RECOVERY_SOURCE],
+        requested_duration_seconds=8,
+        llm_client=_UnavailableLLM(),
+    )
+
+    validate_semantic_script_audience_copy(result.script)
+    assert result.provenance["source"] == "deterministic_recovery"
+
+
 @pytest.mark.parametrize("seconds", [8, 16, 32])
 def test_provider_failure_recovers_only_from_complete_kassenschalter_statements(seconds):
     result = generate_semantic_script(
