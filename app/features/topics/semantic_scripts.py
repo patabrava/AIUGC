@@ -16,6 +16,7 @@ from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError
 from app.core.video_profiles import script_word_count
 from app.features.shot_production.duration import (
+    SAFE_WORDS_PER_TAKE,
     SemanticDurationContract,
     build_semantic_duration_contract,
 )
@@ -39,6 +40,11 @@ _INTERNAL_FALLBACK_COPY = re.compile(
     r"vollständige[snr]?\s+belegte[snr]?\s+quellenmaterial)\b",
     re.IGNORECASE,
 )
+_AUDIENCE_COPY_SCAFFOLDING = re.compile(
+    r"\b(?:wichtig\s+bleibt|wichtig)\s*:\s*[„\"]|"
+    r"\bprüfe\s+für\s+deine\s+nächste\s+wichtige\s+entscheidung\s+bitte\s+erneut\b",
+    re.IGNORECASE,
+)
 _WORD_PATTERN = re.compile(
     r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*"
 )
@@ -48,10 +54,12 @@ _EXPECTED_LLM_FALLBACK_ERRORS = (
     google.auth.exceptions.TransportError,
     google.auth.exceptions.RefreshError,
 )
+_MINIMUM_COHERENT_WORDS_PER_TAKE = 8
 
 SEMANTIC_SCRIPT_SYSTEM_PROMPT = """Du schreibst natürlich gesprochene UGC-Skripte auf Basis belegter Fakten.
-Gib ausschließlich den finalen Sprechtext aus. Jeder Satz trägt eine neue vollständige Aussage bei.
-Halte die angegebene Wortspanne und die semantische Take-Struktur exakt ein."""
+Gib ausschließlich den finalen Sprechtext aus. Jeder Satz ist ohne Zusatzkontext verständlich, trägt eine neue
+vollständige Aussage bei und führt logisch zum nächsten Satz. Verwende niemals Satzfragmente, Auslassungszeichen,
+Quellenauszüge, Zitat-Collagen oder generische Füllsätze. Halte die angegebene Wortspanne und Take-Struktur exakt ein."""
 
 
 @dataclass(frozen=True, init=False)
@@ -166,6 +174,25 @@ def build_semantic_script_prompt(
     fact_values = _normalize_facts(facts)
     fact_lines = "\n".join(f"- {fact}" for fact in fact_values) or "- Keine Zusatzfakten."
     template = _load_semantic_template(normalized_post_type)
+    if contract.minimum_take_count == 1:
+        narrative_structure = (
+            "Ein vollständiger Satz verbindet einen klaren Einstieg logisch direkt mit einem konkreten Nutzen."
+        )
+    elif contract.minimum_take_count == 2:
+        narrative_structure = (
+            "Satz 1 setzt Thema und nachvollziehbaren Zusammenhang; Satz 2 erklärt die konkrete Folge "
+            "oder Handlung. Beide Sätze müssen zusammen einen logischen Mini-Bogen bilden."
+        )
+    else:
+        narrative_structure = (
+            f"Schreibe exakt {contract.minimum_take_count} logisch aufeinander aufbauende Sätze: "
+            "Einstieg, Kontext, belegte Erklärung und konkrete Konsequenz oder Handlung. "
+            "Verteile zusätzliche Sätze auf weitere neue Belege, nicht auf Wiederholungen."
+        )
+    minimum_words_per_take = max(
+        _MINIMUM_COHERENT_WORDS_PER_TAKE,
+        contract.minimum_words // contract.minimum_take_count,
+    )
     return template.format(
         requested_duration_seconds=contract.requested_duration_seconds,
         delivery_min_seconds=contract.delivery_min_seconds,
@@ -175,6 +202,9 @@ def build_semantic_script_prompt(
         minimum_take_count=contract.minimum_take_count,
         minimum_semantic_blocks=contract.minimum_semantic_blocks,
         maximum_semantic_blocks=contract.maximum_semantic_blocks,
+        minimum_words_per_take=minimum_words_per_take,
+        maximum_words_per_take=SAFE_WORDS_PER_TAKE,
+        narrative_structure=narrative_structure,
         contract_json=json.dumps(
             contract.as_dict(),
             ensure_ascii=False,
@@ -218,8 +248,9 @@ Gib ausschließlich den finalen deutschen Sprechtext aus.
 Vertrag:
 - {contract.minimum_words} bis {contract.maximum_words} Wörter
 - exakt {contract.minimum_take_count} vollständige, unterschiedliche Sätze als semantische Takes
-- schreibe jeden dieser {contract.minimum_take_count} Sätze mit exakt 16 Wörtern; der finale Text hat damit exakt {contract.minimum_take_count * 16} Wörter
-- höchstens 18 Wörter und höchstens 7,5 Sekunden geschätzte Sprechzeit pro Take
+- jeder Satz hat mindestens {_MINIMUM_COHERENT_WORDS_PER_TAKE} und höchstens {SAFE_WORDS_PER_TAKE} Wörter
+- keine Zitat-Collagen, Auslassungszeichen, Fragmente, Quellenlabels oder generischen Füllsätze
+- Satz 1 führt das Thema ein; jeder folgende Satz erklärt logisch eine Folge, einen Beleg oder eine Handlung
 - jeder Take endet mit Satzzeichen und trägt eine neue vollständige Aussage bei
 - verwende ausschließlich die Fakten und die CTA aus dem ursprünglichen Auftrag
 - zähle die Wörter intern vor der Ausgabe und erweitere den Entwurf; kürze ihn nicht erneut
@@ -246,9 +277,10 @@ Der vorherige Reparaturversuch ist unbrauchbar. Verwende ihn nicht als Vorlage.
 Verbindliche Ausgabe:
 - ausschließlich der finale Sprechtext
 - exakt {contract.minimum_take_count} vollständige Sätze
-- exakt 16 Wörter pro Satz
-- insgesamt exakt {contract.minimum_take_count * 16} Wörter
+- mindestens {_MINIMUM_COHERENT_WORDS_PER_TAKE} und höchstens {SAFE_WORDS_PER_TAKE} Wörter pro Satz
+- insgesamt {contract.minimum_words} bis {contract.maximum_words} Wörter
 - jeder Satz ist eigenständig verständlich und vermittelt einen konkreten belegten Nutzen oder Sicherheitshinweis
+- alle Sätze bilden gemeinsam einen logischen Bogen statt einer Liste unabhängiger Fragmente
 - verwende ausschließlich Aussagen aus dem ursprünglichen Auftrag
 - keine Quellenhinweise, Zitate, Auslassungszeichen, Labels, Metatexte oder Prüfanweisungen
 
@@ -298,13 +330,18 @@ def validate_semantic_script(
     for beat in beats:
         beat_word_count = script_word_count(beat.text)
         estimated_speech_seconds = estimate_speech_seconds(beat_word_count)
-        if beat_word_count > 18 or estimated_speech_seconds > 7.5:
+        if (
+            beat_word_count < _MINIMUM_COHERENT_WORDS_PER_TAKE
+            or beat_word_count > SAFE_WORDS_PER_TAKE
+            or estimated_speech_seconds > 7.5
+        ):
             unsafe_beats.append(
                 (beat.index, beat_word_count, estimated_speech_seconds)
             )
     if unsafe_beats:
         raise ValueError(
-            "Every Semantic UGC beat must stay within 18 words and 7.5 seconds; "
+            "Every Semantic UGC beat must be a complete 8-18 word statement "
+            "within 7.5 seconds; "
             f"unsafe beats: {unsafe_beats}."
         )
     incomplete_beat_indexes = [
@@ -355,6 +392,16 @@ def validate_semantic_script_audience_copy(script: str) -> None:
         raise ValueError(
             "Semantic UGC script contains internal fallback copy and is not audience-safe: "
             f"{match.group(0)!r}."
+        )
+    scaffold_match = _AUDIENCE_COPY_SCAFFOLDING.search(cleaned)
+    if scaffold_match:
+        raise ValueError(
+            "Semantic UGC script contains recovery scaffolding instead of audience copy: "
+            f"{scaffold_match.group(0)!r}."
+        )
+    if "…" in cleaned or "..." in cleaned:
+        raise ValueError(
+            "Semantic UGC script must use complete statements without omitted source fragments."
         )
 
 
@@ -1168,6 +1215,100 @@ def _build_fallback_script(
     return script
 
 
+def _complete_source_sentences(values: Sequence[str]) -> tuple[str, ...]:
+    """Extract intact, audience-readable source sentences without inventing copy."""
+    sentences: list[str] = []
+    for value in values:
+        cleaned_value = re.sub(r"\[cite:[^\]]+\]", "", str(value or ""), flags=re.IGNORECASE)
+        cleaned_value = re.sub(r"\*+", "", cleaned_value)
+        cleaned_value = " ".join(cleaned_value.split())
+        source_sentences = [
+            sentence.strip(" -")
+            for sentence in _SENTENCE_SPLIT.split(cleaned_value)
+            if _COMPLETE_STATEMENT_END.search(sentence.strip())
+        ]
+        index = 0
+        while index < len(source_sentences):
+            sentence = source_sentences[index]
+            sentence = sentence.strip(" -")
+            word_count = script_word_count(sentence)
+            if index + 1 < len(source_sentences):
+                next_sentence = source_sentences[index + 1]
+                next_word_count = script_word_count(next_sentence)
+                merged_word_count = word_count + next_word_count + 2
+                if (
+                    min(word_count, next_word_count) < _MINIMUM_COHERENT_WORDS_PER_TAKE
+                    and _MINIMUM_COHERENT_WORDS_PER_TAKE
+                    <= merged_word_count
+                    <= SAFE_WORDS_PER_TAKE
+                ):
+                    sentence = (
+                        f"{sentence.rstrip('.!?')}; außerdem gilt: {next_sentence}"
+                    )
+                    word_count = merged_word_count
+                    index += 1
+            index += 1
+            if not (
+                _MINIMUM_COHERENT_WORDS_PER_TAKE
+                <= word_count
+                <= SAFE_WORDS_PER_TAKE
+            ):
+                continue
+            if _AUDIENCE_COPY_SCAFFOLDING.search(sentence) or "…" in sentence or "..." in sentence:
+                continue
+            if sentence not in sentences:
+                sentences.append(sentence)
+    return tuple(sentences)
+
+
+def _build_complete_statement_fallback_script(
+    *,
+    title: str,
+    cta: str,
+    facts: tuple[str, ...],
+    contract: SemanticDurationContract,
+) -> str:
+    """Select complete sourced statements; fail closed instead of splicing fragments."""
+    source_sentences = _complete_source_sentences(
+        (*facts, str(cta or ""), str(title or ""))
+    )
+    required_count = contract.minimum_take_count
+    best: Optional[tuple[str, ...]] = None
+
+    def search(start: int, selected: tuple[str, ...], total_words: int) -> None:
+        nonlocal best
+        if best is not None:
+            return
+        remaining = required_count - len(selected)
+        if remaining == 0:
+            if contract.minimum_words <= total_words <= contract.maximum_words:
+                best = selected
+            return
+        if len(source_sentences) - start < remaining:
+            return
+        for index in range(start, len(source_sentences)):
+            sentence = source_sentences[index]
+            sentence_words = script_word_count(sentence)
+            next_total = total_words + sentence_words
+            if next_total > contract.maximum_words:
+                continue
+            search(index + 1, (*selected, sentence), next_total)
+
+    search(0, (), 0)
+    if best is None:
+        raise ValueError(
+            "Semantic UGC generation could not build the requested duration from "
+            "complete sourced statements; refusing fragment-based fallback copy."
+        )
+    script = " ".join(best)
+    validate_semantic_script(
+        script,
+        requested_duration_seconds=contract.requested_duration_seconds,
+        maximum_seconds=contract.maximum_duration_seconds,
+    )
+    return script
+
+
 def _build_audience_safe_fallback_script(
     *,
     title: str,
@@ -1175,7 +1316,7 @@ def _build_audience_safe_fallback_script(
     facts: tuple[str, ...],
     contract: SemanticDurationContract,
 ) -> str:
-    script = _build_fallback_script(
+    script = _build_complete_statement_fallback_script(
         title=title,
         cta=cta,
         facts=facts,

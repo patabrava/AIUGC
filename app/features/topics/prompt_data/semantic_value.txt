@@ -16,7 +16,8 @@ DAUER-CONTRACT:
 - Wortspanne: {minimum_words} bis {maximum_words} Wörter
 - Minimale Veo-Takes: {minimum_take_count}
 - Erlaubte semantische Blöcke: {minimum_semantic_blocks} bis {maximum_semantic_blocks}
+- Satzlänge: {minimum_words_per_take} bis {maximum_words_per_take} Wörter
 - Contract-Hash: {contract_hash}
 - Canonical JSON: {contract_json}
 
-Forme vollständige, unterschiedliche Aussagen ohne wiederholte Füllsätze. Plane mindestens {minimum_take_count} klare semantische Beats, die jeweils unabhängig gesprochen werden können. Verwende nur die gelieferten Fakten. Integriere die CTA natürlich und gib ausschließlich den finalen Sprechtext aus.
+Forme exakt {minimum_take_count} vollständige, unterschiedliche Aussagen ohne wiederholte Füllsätze. {narrative_structure} Verwende nur die gelieferten Fakten. Keine Zitat-Collagen, Auslassungszeichen, Fragmente oder Quellenlabels. Integriere die CTA natürlich und gib ausschließlich den finalen Sprechtext aus.

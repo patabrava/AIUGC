@@ -500,13 +500,8 @@ def _semantic_fact_inputs(
     canonical_script = " ".join(
         str(candidate.get("script") or candidate.get("rotation") or "").split()
     )
-    if canonical_script:
-        # The audited bank script is the duration-neutral fact summary. Passing the
-        # entire research dossier can exceed the requested script's word budget and
-        # makes both the provider repair and deterministic fallback impossible.
-        return [canonical_script]
-
     facts: List[str] = []
+    maximum_fact_inputs = 8
 
     def append_fact(value: Any) -> None:
         if isinstance(value, (list, tuple)):
@@ -514,14 +509,17 @@ def _semantic_fact_inputs(
                 append_fact(item)
             return
         text = " ".join(str(value or "").split())
-        if text and text not in facts:
+        if text and text not in facts and len(facts) < maximum_fact_inputs:
             facts.append(text)
 
+    # Keep the audited duration-neutral script as the primary source, but retain a
+    # bounded set of complete research statements. If provider recovery is needed,
+    # those extra statements let the system select coherent duration-sized copy
+    # instead of cutting the canonical script into word fragments.
+    append_fact(canonical_script)
     for payload in (candidate, seed_payload):
         for key in (
-            "facts",
             "support_facts",
-            "strict_fact",
             "source_context",
             "source_summary",
             "product_angle",

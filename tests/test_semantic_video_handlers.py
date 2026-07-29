@@ -72,6 +72,33 @@ def _scene_plate_result(*, marker: str = "candidate") -> SimpleNamespace:
     )
 
 
+def test_semantic_fact_inputs_keep_canonical_script_and_bounded_recovery_evidence():
+    from app.features.topics.handlers import _semantic_fact_inputs
+
+    canonical_script = "Der geprüfte Kassenschaltertext bleibt die primäre Quelle."
+    candidate = {
+        "script": canonical_script,
+        "support_facts": [
+            "Vollständige Zusatzaussage eins liefert belastbaren Kontext.",
+            "Vollständige Zusatzaussage zwei erklärt eine weitere Konsequenz.",
+        ],
+        "source_summary": "Die Quellenzusammenfassung bleibt als Recovery-Evidenz erhalten.",
+    }
+    seed_payload = {
+        "source_context": "Der Seed ergänzt einen vollständigen Hintergrundsatz.",
+        "strict_seed": {
+            "facts": [f"Zusätzlicher vollständiger Fakt Nummer {index}." for index in range(12)]
+        },
+    }
+
+    facts = _semantic_fact_inputs(candidate, seed_payload)
+
+    assert facts[0] == canonical_script
+    assert candidate["source_summary"] in facts
+    assert seed_payload["source_context"] in facts
+    assert len(facts) == 8
+
+
 def test_retry_guidance_names_a_missing_first_word_for_paid_regeneration():
     from app.features.semantic_videos.handlers import _retry_guidance_text
 
