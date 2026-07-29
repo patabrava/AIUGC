@@ -30,6 +30,40 @@ from app.features.topics import handlers as topic_handlers
 from app.features.topics import queries as topic_queries
 
 
+def test_batch_discovery_retries_transient_transport_failures(monkeypatch):
+    calls = []
+    progress_updates = []
+    sleep_delays = []
+
+    class RemoteProtocolError(Exception):
+        pass
+
+    async def fake_discover(batch_id):
+        calls.append(batch_id)
+        if len(calls) < 3:
+            raise RemoteProtocolError("peer closed connection without response")
+        return {"posts_created": 3, "state": "S2_SEEDED"}
+
+    async def fake_sleep(delay):
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr(topic_handlers, "discover_topics_for_batch", fake_discover)
+    monkeypatch.setattr(topic_handlers.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        topic_handlers,
+        "update_seeding_progress",
+        lambda batch_id, **progress: progress_updates.append((batch_id, progress)),
+    )
+
+    asyncio.run(topic_handlers._run_batch_discovery_task("batch-transport-retry"))
+
+    assert calls == ["batch-transport-retry"] * 3
+    assert sleep_delays == [0.5, 1.0]
+    assert [progress["attempt"] for _, progress in progress_updates] == [2, 3]
+    assert all(progress["is_retrying"] is True for _, progress in progress_updates)
+    assert topic_handlers.is_batch_discovery_active("batch-transport-retry") is False
+
+
 def test_semantic_video_projection_deduplicates_canonical_compatibility_candidates(
     monkeypatch,
 ):

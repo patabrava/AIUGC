@@ -1424,12 +1424,82 @@ def is_batch_discovery_active(batch_id: str) -> bool:
         return True
 
 
+_DISCOVERY_TRANSIENT_MAX_ATTEMPTS = 5
+_DISCOVERY_TRANSIENT_RETRY_BASE_SECONDS = 0.5
+_DISCOVERY_TRANSIENT_ERROR_MARKERS = (
+    "remoteprotocolerror",
+    "localprotocolerror",
+    "connectionterminated",
+    "streamidtoolow",
+    "readerror",
+    "writeerror",
+    "connecterror",
+    "broken pipe",
+    "connection reset",
+    "connection aborted",
+    "connection refused",
+    "unexpected eof",
+    "json could not be generated",
+)
+
+
+def _is_transient_discovery_error(exc: Exception) -> bool:
+    error_text = " ".join(
+        str(value)
+        for value in (
+            type(exc).__name__,
+            exc,
+            getattr(exc, "message", ""),
+            getattr(exc, "details", ""),
+        )
+        if value
+    ).casefold()
+    return any(marker in error_text for marker in _DISCOVERY_TRANSIENT_ERROR_MARKERS)
+
+
+async def _discover_topics_with_transport_retry(batch_id: str) -> Dict[str, Any]:
+    for attempt in range(1, _DISCOVERY_TRANSIENT_MAX_ATTEMPTS + 1):
+        try:
+            return await discover_topics_for_batch(batch_id)
+        except Exception as exc:
+            if (
+                not _is_transient_discovery_error(exc)
+                or attempt >= _DISCOVERY_TRANSIENT_MAX_ATTEMPTS
+            ):
+                raise
+            delay_seconds = _DISCOVERY_TRANSIENT_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+            update_seeding_progress(
+                batch_id,
+                stage="retrying",
+                stage_label="Temporary connection interrupted",
+                detail_message="Topic generation is resuming automatically.",
+                attempt=attempt + 1,
+                max_attempts=_DISCOVERY_TRANSIENT_MAX_ATTEMPTS,
+                is_retrying=True,
+                retry_message=(
+                    "A temporary provider connection ended early; the batch will "
+                    "continue automatically."
+                ),
+            )
+            logger.warning(
+                "batch_autoseed_transport_retry",
+                batch_id=batch_id,
+                attempt=attempt,
+                max_attempts=_DISCOVERY_TRANSIENT_MAX_ATTEMPTS,
+                delay_seconds=delay_seconds,
+                error_class=type(exc).__name__,
+                error=str(exc),
+            )
+            await asyncio.sleep(delay_seconds)
+    raise AssertionError("unreachable discovery retry state")
+
+
 async def _run_batch_discovery_task(batch_id: str) -> None:
     task = asyncio.current_task()
     if task is not None:
         _mark_discovery_task(batch_id, task)
     try:
-        result = await discover_topics_for_batch(batch_id)
+        result = await _discover_topics_with_transport_retry(batch_id)
         logger.info(
             "batch_autoseed_complete",
             batch_id=batch_id,
