@@ -2116,6 +2116,96 @@ def test_sixteen_second_final_transcript_accepts_only_the_passed_take_consensus(
     ) is False
 
 
+def test_sixteen_second_final_transcript_preserves_operator_accepted_take_words():
+    from app.features.shot_production.runner import (
+        _accept_final_transcript_consensus,
+    )
+
+    first_expected = ["prüfe", "wege", "heute"]
+    first_actual = ["prüfen", "sie", "wege", "heute"]
+    second_words = ["frage", "früh", "nach"]
+    final_qa = {
+        "passed": False,
+        "word_error_rate": 0.10,
+        "expected_words": first_expected + second_words,
+        "actual_words": first_actual + second_words,
+        "first_word_present": False,
+        "last_word_present": True,
+        "foreign_words": [],
+    }
+    takes = [
+        {
+            "transcript_qa": {
+                "passed": True,
+                "manual_review_accepted": True,
+                "word_error_rate": 0.125,
+                "expected_words": first_expected,
+                "actual_words": first_actual,
+            }
+        },
+        {
+            "transcript_qa": {
+                "passed": True,
+                "word_error_rate": 0.0,
+                "expected_words": second_words,
+                "actual_words": second_words,
+            }
+        },
+    ]
+
+    assert _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=object(),
+        requested_duration_seconds=16.0,
+    ) is True
+
+    final_qa["actual_words"] = ["unbekannt", *first_actual[1:], *second_words]
+    assert _accept_final_transcript_consensus(
+        final_qa,
+        takes,
+        acoustic_plan=object(),
+        requested_duration_seconds=16.0,
+    ) is False
+
+
+def test_acoustic_word_repetition_advisory_requires_independent_exact_consensus():
+    from app.features.shot_production.runner import (
+        _accept_acoustic_word_repetition_advisory,
+    )
+
+    report = {
+        "blocking_reasons": ["broken speech cadence"],
+        "observed_differences": ["word repetition at seam"],
+        "no_click": True,
+        "no_breath_restart": True,
+        "no_duplicated_breath": True,
+        "no_room_tone_reset": True,
+        "speaker_continuous": True,
+        "evidence_sufficient": True,
+    }
+    final_qa = {
+        "passed": True,
+        "accepted_by": (
+            "manual_reviewed_take_transcripts_plus_exact_stitched_consensus"
+        ),
+    }
+
+    assert _accept_acoustic_word_repetition_advisory(
+        report,
+        deterministic_reasons=[],
+        final_transcript_qa=final_qa,
+        seam_qa={"passed": True},
+    ) is True
+
+    assert _accept_acoustic_word_repetition_advisory(
+        report,
+        deterministic_reasons=["energy_delta_exceeded"],
+        final_transcript_qa=final_qa,
+        seam_qa={"passed": True},
+    ) is False
+
+
 def test_acoustic_plan_contract_rejects_seam_energy_delta_above_six_db():
     from app.features.shot_production.audio_seams import (
         AcousticSeamPlan,

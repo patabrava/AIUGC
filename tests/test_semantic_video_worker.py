@@ -729,6 +729,81 @@ def test_worker_multitake_evaluator_qa_failure_is_advisory_and_never_auto_retrie
     }
 
 
+def test_worker_transcript_failure_requires_retry_instead_of_entering_impossible_identity_stage():
+    repo = FakeRepo(stage="transcript_qa", take_count=2)
+    stages = FakeStages(
+        {
+            "passed": False,
+            "failed_take_indexes": [0],
+            "artifacts": {
+                "qa_failure": {
+                    "stage": "transcript_qa",
+                    "message": "Approved speech did not match the generated take.",
+                }
+            },
+        }
+    )
+    vertex = FakeVertex()
+    worker = _worker(repo, vertex, stages)
+
+    result = worker.tick("run-1")
+
+    assert result.action == "retry_approval_required"
+    assert result.stage == "retry_approval_required"
+    assert repo.run["stage"] == "retry_approval_required"
+    assert vertex.submit_calls == []
+    retry_event = next(event for event in repo.events if event[0] == "retry_required")
+    assert retry_event[1] == (0,)
+    assert retry_event[2]["qa_failure"]["stage"] == "transcript_qa"
+    assert not any(
+        event[0] == "advance" and event[1:3] == ("transcript_qa", "identity_qa")
+        for event in repo.events
+    )
+
+
+def test_worker_resumed_transcript_advisory_records_manual_override_then_advances():
+    repo = FakeRepo(stage="transcript_qa", take_count=2)
+    repo.run["artifact_manifest"] = {
+        "qa_advisory": {
+            "required": True,
+            "stage": "transcript_qa",
+            "failed_take_indexes": [0],
+        }
+    }
+
+    class ResumedTranscriptStages(FakeStages):
+        def __init__(self):
+            super().__init__({"passed": True})
+            self.accept_calls = []
+
+        def accept_transcript_advisory(self, *, run, takes):
+            self.accept_calls.append((run, takes))
+            return {
+                "passed": True,
+                "artifacts": {
+                    "transcript_manual_review": {
+                        "accepted": True,
+                        "take_indexes": [0],
+                    }
+                },
+            }
+
+        def run_stage(self, *, stage, run, takes):
+            raise AssertionError("Automated transcript QA must not rerun after manual acceptance.")
+
+    stages = ResumedTranscriptStages()
+    worker = _worker(repo, FakeVertex(), stages)
+
+    result = worker.tick("run-1")
+
+    assert result.action == "stage_advanced"
+    assert result.stage == "identity_qa"
+    assert stages.accept_calls
+    advance = next(event for event in repo.events if event[0] == "advance")
+    assert advance[1:3] == ("transcript_qa", "identity_qa")
+    assert advance[3]["transcript_manual_review"]["accepted"] is True
+
+
 def test_worker_still_blocks_when_composition_qa_cannot_produce_delivery():
     repo = FakeRepo(stage="acoustic_qa", take_count=2)
     stages = FakeStages(
@@ -1059,6 +1134,106 @@ def test_production_stage_runner_materializes_canonical_exact_16s_contract(tmp_p
         "minimum": 16.0 - (1.0 / 24.0),
         "maximum": 16.0 + (1.0 / 24.0),
     }
+
+
+def test_materialized_identity_manifest_preserves_accepted_transcript_advisory(tmp_path):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    master, takes = _takes(2)
+    raw_payloads = {}
+    prior_takes = []
+    for index, take in enumerate(takes):
+        raw_bytes = f"raw-take-{index}".encode()
+        raw_url = f"https://storage/raw-{index}.mp4"
+        raw_payloads[raw_url] = raw_bytes
+        take.update(
+            submission_state="completed",
+            raw_artifact_uri=raw_url,
+            raw_artifact_sha256=sha256(raw_bytes).hexdigest(),
+        )
+        prior_takes.append(
+            {
+                "index": index,
+                "attempt": 1,
+                "transcript": {
+                    "full_text": f"take {index}",
+                    "words": [
+                        {"word": "take", "start": 0.2, "end": 0.5},
+                        {"word": str(index), "start": 6.8, "end": 7.0},
+                    ],
+                },
+                "transcript_qa": {
+                    "passed": index == 1,
+                    "final_word_end_seconds": 7.0,
+                    "first_word_start_seconds": 0.2 if index == 1 else None,
+                },
+                "trim_window": (
+                    {
+                        "source": "deepgram_word_window",
+                        "start_seconds": 0.0,
+                        "end_seconds": 7.2,
+                    }
+                    if index == 1
+                    else None
+                ),
+            }
+        )
+
+    master_url = "https://storage/master.png"
+
+    class ManifestStorage:
+        def download_video(self, *, video_url, correlation_id):
+            del correlation_id
+            if video_url in {
+                master_url,
+                "https://storage/actor-front.png",
+                "https://storage/actor-three-quarter.png",
+            }:
+                return master
+            return raw_payloads[video_url]
+
+    run = {
+        "id": "run-manual-transcript-review",
+        "stage": "identity_qa",
+        "requested_duration_seconds": 16,
+        "master_hash": sha256(master).hexdigest(),
+        "master_snapshot": {
+            "storage_uri": master_url,
+            "sha256": sha256(master).hexdigest(),
+            "byte_length": len(master),
+            "mime_type": "image/png",
+        },
+        "reference_snapshot": _actor_reference_snapshot(master),
+        "script_hash": sha256(b"script").hexdigest(),
+        "script_snapshot": {"text": "Ein exakter Testtext fuer zwei Takes."},
+        "artifact_manifest": {
+            "qa_advisory": {
+                "required": True,
+                "stage": "transcript_qa",
+                "failed_take_indexes": [0],
+            },
+            "pipeline_manifest": {
+                "status": "transcript_qa_passed",
+                "takes": prior_takes,
+            },
+        },
+    }
+
+    runner = ProductionStageRunner(storage=ManifestStorage(), work_root=tmp_path)
+    manifest_path = runner._materialize_manifest(run, takes)  # noqa: SLF001
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    first_qa = manifest["takes"][0]["transcript_qa"]
+    assert first_qa["passed"] is True
+    assert first_qa["automated_passed"] is False
+    assert first_qa["manual_review_accepted"] is True
+    assert first_qa["first_word_start_seconds"] == 0.2
+    assert manifest["takes"][0]["trim_window"] == {
+        "start_seconds": 0.0,
+        "end_seconds": 7.25,
+        "source": "deepgram_word_window",
+    }
+    assert manifest["takes"][1]["transcript_qa"]["passed"] is True
 
 
 @pytest.mark.parametrize(

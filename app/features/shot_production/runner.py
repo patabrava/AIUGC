@@ -2217,6 +2217,25 @@ def _accept_final_transcript_consensus(
         and final_qa.get("last_word_present")
         and not final_qa.get("foreign_words")
     )
+    manual_review_consensus = bool(
+        8.5 < requested_duration_seconds < 24.0
+        and len(ordered_takes) >= 2
+        and acoustic_plan is not None
+        and passed_take_consensus
+        and any(
+            (take.get("transcript_qa") or {}).get(
+                "manual_review_accepted"
+            )
+            is True
+            for take in ordered_takes
+        )
+        and expected_words
+        and tuple(expected_words) == concatenated_expected_words
+        and tuple(actual_words) == concatenated_actual_words
+        and 0.0 < word_error_rate <= 0.15
+        and final_qa.get("last_word_present")
+        and not final_qa.get("foreign_words")
+    )
     long_form_consensus = bool(
         not final_qa.get("passed")
         and requested_duration_seconds >= 24.0
@@ -2231,7 +2250,12 @@ def _accept_final_transcript_consensus(
     )
     return bool(
         not final_qa.get("passed")
-        and (single_take_consensus or multi_take_consensus or long_form_consensus)
+        and (
+            single_take_consensus
+            or multi_take_consensus
+            or manual_review_consensus
+            or long_form_consensus
+        )
     )
 
 
@@ -2248,6 +2272,40 @@ def _seam_word_counts_for_final_transcript(
         if all(count > 0 for count in actual_counts):
             return actual_counts
     return tuple(int(take["beat"]["word_count"]) for take in ordered_takes)
+
+
+def _accept_acoustic_word_repetition_advisory(
+    report: Dict[str, Any],
+    *,
+    deterministic_reasons: Sequence[str],
+    final_transcript_qa: Dict[str, Any],
+    seam_qa: Dict[str, Any],
+) -> bool:
+    """Reconcile one qualitative repetition claim with exact stitched-word evidence."""
+    blocking_reasons = {
+        str(reason).strip().lower()
+        for reason in report.get("blocking_reasons") or []
+        if str(reason).strip()
+    }
+    observed = " ".join(
+        str(value).strip().lower()
+        for value in report.get("observed_differences") or []
+    )
+    return bool(
+        not deterministic_reasons
+        and final_transcript_qa.get("passed") is True
+        and final_transcript_qa.get("accepted_by")
+        == "manual_reviewed_take_transcripts_plus_exact_stitched_consensus"
+        and seam_qa.get("passed") is True
+        and blocking_reasons == {"broken speech cadence"}
+        and "word repetition" in observed
+        and report.get("no_click") is True
+        and report.get("no_breath_restart") is True
+        and report.get("no_duplicated_breath") is True
+        and report.get("no_room_tone_reset") is True
+        and report.get("speaker_continuous") is True
+        and report.get("evidence_sufficient") is True
+    )
 
 
 @_manifest_locked
@@ -2762,11 +2820,22 @@ def compose_and_caption(
         final_qa_payload["provider_failure_reasons"] = list(final_qa.failure_reasons)
         final_qa_payload["passed"] = True
         final_qa_payload["failure_reasons"] = []
-        final_qa_payload["accepted_by"] = (
-            "repeated_single_take_transcript_consensus"
-            if len(ordered) == 1
-            else "exact_take_transcripts_plus_speech_safe_acoustic_plan"
-        )
+        if any(
+            (take.get("transcript_qa") or {}).get(
+                "manual_review_accepted"
+            )
+            is True
+            for take in ordered
+        ):
+            final_qa_payload["accepted_by"] = (
+                "manual_reviewed_take_transcripts_plus_exact_stitched_consensus"
+            )
+        else:
+            final_qa_payload["accepted_by"] = (
+                "repeated_single_take_transcript_consensus"
+                if len(ordered) == 1
+                else "exact_take_transcripts_plus_speech_safe_acoustic_plan"
+            )
     payload["final_transcript_qa"] = final_qa_payload
     _atomic_write_json(manifest_path, payload)
     if not final_qa_payload["passed"]:
@@ -2844,11 +2913,27 @@ def compose_and_caption(
         report_payload["model"] = str(acoustic_model or DEFAULT_ACOUSTIC_QA_MODEL)
         report_payload["rubric_version"] = ACOUSTIC_QA_RUBRIC_VERSION
         report_payload["passed"] = bool(report.passed and not deterministic_reasons)
+        if _accept_acoustic_word_repetition_advisory(
+            report_payload,
+            deterministic_reasons=deterministic_reasons,
+            final_transcript_qa=final_qa_payload,
+            seam_qa=seam_qa,
+        ):
+            report_payload["provider_passed"] = False
+            report_payload["provider_blocking_reasons"] = list(
+                report_payload.get("blocking_reasons") or []
+            )
+            report_payload["passed"] = True
+            report_payload["accepted_by"] = (
+                "exact_stitched_transcript_plus_deterministic_seam_consensus"
+            )
         qualitative_failed_seam_indexes = [
             int(verdict.seam_index)
             for verdict in (getattr(report, "seam_verdicts", ()) or ())
             if not verdict.passed
         ]
+        if report_payload["passed"]:
+            qualitative_failed_seam_indexes = []
         if not report.passed and not qualitative_failed_seam_indexes:
             qualitative_failed_seam_indexes = list(range(len(clips)))
         failed_seam_indexes = sorted(

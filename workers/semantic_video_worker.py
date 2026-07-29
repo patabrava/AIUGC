@@ -326,6 +326,48 @@ class ProductionStageRunner:
             },
         }
 
+    def accept_transcript_advisory(
+        self,
+        *,
+        run: Mapping[str, Any],
+        takes: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Persist the operator's $0 transcript-review override for later stages."""
+        manifest_path = self._materialize_manifest(run, takes)
+        payload = self._read_manifest(manifest_path)
+        reviewed_indexes: list[int] = []
+        for take in payload.get("takes") or []:
+            transcript_qa = take.get("transcript_qa")
+            if not isinstance(transcript_qa, dict) or transcript_qa.get("passed") is True:
+                continue
+            transcript_qa["automated_passed"] = False
+            transcript_qa["manual_review_accepted"] = True
+            transcript_qa["passed"] = True
+            take["status"] = "transcribed"
+            reviewed_indexes.append(int(take["index"]))
+        if not reviewed_indexes:
+            raise StateTransitionError(
+                "Transcript advisory resume requires persisted failed transcript evidence."
+            )
+        payload["status"] = "transcript_qa_passed"
+        manifest_path.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "passed": True,
+            "artifacts": {
+                "pipeline_manifest": payload,
+                "transcript_qa": [
+                    take.get("transcript_qa") for take in payload.get("takes") or []
+                ],
+                "transcript_manual_review": {
+                    "accepted": True,
+                    "take_indexes": reviewed_indexes,
+                },
+            },
+        }
+
     @staticmethod
     def _runner():
         from app.features.shot_production import runner
@@ -420,6 +462,14 @@ class ProductionStageRunner:
         artifacts = dict(artifact_manifest) if isinstance(artifact_manifest, Mapping) else {}
         prior = artifacts.get("pipeline_manifest")
         prior_manifest = dict(prior) if isinstance(prior, Mapping) else {}
+        qa_advisory = artifacts.get("qa_advisory")
+        transcript_advisory_was_accepted = (
+            str(run.get("stage") or "") != "transcript_qa"
+            and prior_manifest.get("status") == "transcript_qa_passed"
+            and isinstance(qa_advisory, Mapping)
+            and qa_advisory.get("required") is True
+            and qa_advisory.get("stage") == "transcript_qa"
+        )
         prior_takes = {
             (int(take.get("index") or 0), int(take.get("attempt") or 1)): take
             for take in prior_manifest.get("takes") or []
@@ -493,9 +543,68 @@ class ProductionStageRunner:
                     "storage_uri": raw_uri,
                 },
                 "transcript": previous.get("transcript"),
-                "transcript_qa": previous.get("transcript_qa"),
+                "transcript_qa": deepcopy_rows(
+                    [previous.get("transcript_qa")]
+                )[0]
+                if isinstance(previous.get("transcript_qa"), Mapping)
+                else None,
                 "trim_window": previous.get("trim_window"),
             }
+            transcript_qa = row.get("transcript_qa")
+            manual_review_was_persisted = (
+                isinstance(transcript_qa, dict)
+                and transcript_qa.get("manual_review_accepted") is True
+            )
+            if (
+                (transcript_advisory_was_accepted or manual_review_was_persisted)
+                and isinstance(transcript_qa, dict)
+            ):
+                transcript_qa.setdefault(
+                    "automated_passed",
+                    transcript_qa.get("passed") is True,
+                )
+                transcript_qa["manual_review_accepted"] = True
+                transcript_qa["passed"] = True
+                row["status"] = "transcribed"
+                transcript = row.get("transcript")
+                words = (
+                    transcript.get("words")
+                    if isinstance(transcript, Mapping)
+                    else None
+                )
+                if (
+                    transcript_qa.get("first_word_start_seconds") is None
+                    and isinstance(words, list)
+                    and words
+                    and isinstance(words[0], Mapping)
+                ):
+                    transcript_qa["first_word_start_seconds"] = float(
+                        words[0].get("start") or 0.0
+                    )
+                if not row.get("trim_window"):
+                    first_word_start = transcript_qa.get(
+                        "first_word_start_seconds"
+                    )
+                    final_word_end = transcript_qa.get(
+                        "final_word_end_seconds"
+                    )
+                    if first_word_start is None or final_word_end is None:
+                        raise StateTransitionError(
+                            "Manual transcript review requires persisted word timestamps.",
+                            {"take_index": index},
+                        )
+                    row["trim_window"] = {
+                        "start_seconds": (
+                            max(0.0, float(first_word_start) - 0.25)
+                            if index > 0
+                            else 0.0
+                        ),
+                        "end_seconds": min(
+                            float(row["duration_seconds"]),
+                            float(final_word_end) + 0.25,
+                        ),
+                        "source": "deepgram_word_window",
+                    }
             manifest_takes.append(row)
 
         requested_duration = int(run.get("requested_duration_seconds") or 0)
@@ -1439,11 +1548,29 @@ class SemanticVideoWorker:
         run_id = str(run["id"])
         stage = str(run["stage"])
         try:
-            result = self.stage_runner.run_stage(
-                stage=stage,
-                run=dict(run),
-                takes=deepcopy_rows(takes),
+            artifact_manifest = run.get("artifact_manifest")
+            qa_advisory = (
+                artifact_manifest.get("qa_advisory")
+                if isinstance(artifact_manifest, Mapping)
+                else None
             )
+            if (
+                stage == "transcript_qa"
+                and isinstance(qa_advisory, Mapping)
+                and qa_advisory.get("required") is True
+                and qa_advisory.get("stage") == "transcript_qa"
+                and not run.get("failure_envelope")
+            ):
+                result = self.stage_runner.accept_transcript_advisory(
+                    run=dict(run),
+                    takes=deepcopy_rows(takes),
+                )
+            else:
+                result = self.stage_runner.run_stage(
+                    stage=stage,
+                    run=dict(run),
+                    takes=deepcopy_rows(takes),
+                )
         except ThirdPartyError as exc:
             if stage != "identity_qa":
                 raise
@@ -1484,7 +1611,13 @@ class SemanticVideoWorker:
                     failed_stage=stage,
                     artifacts=artifacts,
                 )
-            if stage in {"transcript_qa", "identity_qa", "voice_qa"}:
+            # Transcript QA is a hard dependency for every later production
+            # stage: contact sheets, voice QA, and composition all consume its
+            # verified speech window. Advancing a failed transcript as an
+            # advisory creates an impossible run that workers reclaim forever.
+            # Identity and voice evaluator failures remain advisory because
+            # their downstream stages can still produce a reviewable delivery.
+            if stage in {"identity_qa", "voice_qa"}:
                 failed_indexes = sorted(
                     {int(index) for index in result.get("failed_take_indexes") or []}
                 )
