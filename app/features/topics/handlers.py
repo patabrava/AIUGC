@@ -1032,16 +1032,25 @@ def _create_semantic_post_from_candidate(
         source_urls=[source["url"] for source in sources],
         maximum_seconds=contract.maximum_duration_seconds,
     )
-    recovery_source = str(candidate.get("semantic_recovery_source") or "").strip()
+    recovery_sources = tuple(
+        source
+        for source in dict.fromkeys(
+            (
+                str(candidate.get("semantic_recovery_source") or "").strip(),
+                str(_SEMANTIC_RECOVERY_COPY[post_type]["source"]).strip(),
+            )
+        )
+        if source
+    )
     uses_slot_recovery = bool(
         candidate.get("semantic_recovery_title")
-        and recovery_source
-        and (
-            classify_script_overlap(generated.script, recovery_source)
+        and any(
+            classify_script_overlap(generated.script, source)
             or _semantic_script_uses_recovery_source(
                 generated.script,
-                recovery_source,
+                source,
             )
+            for source in recovery_sources
         )
     )
     if (
@@ -2087,17 +2096,17 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             slot_index = max(0, int(slot_id.rsplit(":", 1)[-1]) - 1)
             if post_type_counts[post_type] > 1:
                 candidate = dict(candidate)
-                candidate.setdefault(
-                    "semantic_recovery_source",
-                    _semantic_slot_recovery_source(post_type, slot_index),
+                candidate["semantic_recovery_source"] = (
+                    candidate.get("semantic_recovery_source")
+                    or _semantic_slot_recovery_source(post_type, slot_index)
                 )
-                candidate.setdefault(
-                    "semantic_recovery_title",
-                    _semantic_slot_recovery_title(post_type, slot_index),
+                candidate["semantic_recovery_title"] = (
+                    candidate.get("semantic_recovery_title")
+                    or _semantic_slot_recovery_title(post_type, slot_index)
                 )
-                candidate.setdefault(
-                    "semantic_recovery_cta",
-                    _SEMANTIC_RECOVERY_COPY[post_type]["cta"],
+                candidate["semantic_recovery_cta"] = (
+                    candidate.get("semantic_recovery_cta")
+                    or _SEMANTIC_RECOVERY_COPY[post_type]["cta"]
                 )
             family_identity = _semantic_family_identity(candidate)
             post, topic_record = _create_semantic_post_from_candidate(

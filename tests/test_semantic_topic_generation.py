@@ -404,10 +404,7 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
     candidate.update(
         {
             "semantic_recovery": True,
-            "semantic_recovery_source": handlers._semantic_slot_recovery_source(
-                post_type,
-                1,
-            ),
+            "semantic_recovery_source": "Unrelated legacy recovery source.",
             "semantic_recovery_title": handlers._semantic_slot_recovery_title(
                 post_type,
                 1,
@@ -437,7 +434,7 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
     monkeypatch.setattr(
         handlers,
         "_semantic_script_uses_recovery_source",
-        lambda *_args: True,
+        lambda _script, source: source == handlers._SEMANTIC_RECOVERY_COPY[post_type]["source"],
     )
     monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *_args: None)
     monkeypatch.setattr(handlers, "mark_topic_script_used", lambda **_kwargs: None)
