@@ -141,6 +141,12 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     monkeypatch.setattr(handlers, "list_topic_suggestions", fake_list_topic_suggestions)
     monkeypatch.setattr(handlers, "generate_lifestyle_topics", fake_generate_family)
     monkeypatch.setattr(handlers, "generate_product_topics", fake_generate_family)
+    if post_type == "lifestyle":
+        monkeypatch.setattr(
+            handlers,
+            "_build_lifestyle_fallback_candidates",
+            lambda **_kwargs: [candidate],
+        )
 
     semantic_calls = []
 
@@ -189,7 +195,7 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     result = handlers._discover_topics_for_batch_sync(batch["id"])
 
     assert result["posts_created"] == 1
-    assert input_tiers == [32]
+    assert input_tiers == ([] if post_type == "lifestyle" else [32])
     assert 50 not in input_tiers
     assert len(semantic_calls) == 1
     semantic_call = semantic_calls[0]
@@ -443,6 +449,32 @@ def test_semantic_lifestyle_force_fill_survives_exhausted_global_history(
     assert len(selected) == 1
     assert selected[0]["title"] == forced["title"]
     assert selected[0]["post_type"] == "lifestyle"
+
+
+def test_semantic_lifestyle_uses_deterministic_families_before_provider(monkeypatch):
+    monkeypatch.setattr(
+        handlers,
+        "generate_lifestyle_topics",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("provider topic generation should not block known-good recovery")
+        ),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "deduplicate_topics",
+        lambda values, *_args, **_kwargs: list(values),
+    )
+
+    selected = handlers._missing_semantic_lifestyle_candidates(
+        count=2,
+        used_family_identities=set(),
+        reserved_topics=[],
+        existing_topics=[],
+    )
+
+    assert len(selected) == 2
+    assert len({candidate["title"] for candidate in selected}) == 2
+    assert all(candidate["dialog_scripts"] for candidate in selected)
 
 
 def test_semantic_lifestyle_fallback_title_is_not_numbered_by_global_history(

@@ -873,14 +873,7 @@ def _missing_semantic_lifestyle_candidates(
         used_family_identities.update(selected_identities)
         return selected
 
-    candidates = reserve_lifestyle(
-        generate_lifestyle_topics(
-            count=count,
-            target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
-        ),
-        limit=count,
-        include_history=True,
-    )
+    candidates: List[Dict[str, Any]] = []
     for fallback_builder in (
         _build_lifestyle_fallback_candidates,
         _force_fill_lifestyle_candidates,
@@ -914,6 +907,18 @@ def _missing_semantic_lifestyle_candidates(
             include_history=False,
         )
         candidates.extend(additions)
+    remaining = count - len(candidates)
+    if remaining > 0:
+        candidates.extend(
+            reserve_lifestyle(
+                generate_lifestyle_topics(
+                    count=remaining,
+                    target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+                ),
+                limit=remaining,
+                include_history=True,
+            )
+        )
     return candidates
 
 
