@@ -429,9 +429,10 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
         lambda **_kwargs: SemanticScriptResult(
             script=recovery_script,
             contract_hash=contract.contract_hash,
-            provenance={"source": "deterministic_recovery", "post_type": post_type},
+            provenance={"source": "fallback", "post_type": post_type},
         ),
     )
+    monkeypatch.setattr(handlers, "classify_script_overlap", lambda *_args: True)
     monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *_args: None)
     monkeypatch.setattr(handlers, "mark_topic_script_used", lambda **_kwargs: None)
     created_posts = []

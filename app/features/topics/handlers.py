@@ -1016,7 +1016,16 @@ def _create_semantic_post_from_candidate(
         source_urls=[source["url"] for source in sources],
         maximum_seconds=contract.maximum_duration_seconds,
     )
-    if generated.provenance.get("source") == "deterministic_recovery":
+    recovery_source = str(candidate.get("semantic_recovery_source") or "").strip()
+    uses_slot_recovery = bool(
+        candidate.get("semantic_recovery_title")
+        and recovery_source
+        and classify_script_overlap(generated.script, recovery_source)
+    )
+    if (
+        generated.provenance.get("source") == "deterministic_recovery"
+        or uses_slot_recovery
+    ):
         recovery_copy = _SEMANTIC_RECOVERY_COPY[post_type]
         if candidate.get("semantic_recovery"):
             recovery_copy = {
