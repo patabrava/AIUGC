@@ -242,6 +242,35 @@ def test_batch_insert_retries_transient_postgrest_api_error(monkeypatch):
     assert sleeps == [0.25]
 
 
+def test_batch_creation_dependency_retries_transient_postgrest_api_error(monkeypatch):
+    calls = []
+    sleeps = []
+
+    def load_actor():
+        calls.append("actor")
+        if len(calls) == 1:
+            raise APIError(
+                {
+                    "code": "PGRST001",
+                    "details": None,
+                    "hint": None,
+                    "message": "Could not connect to the database",
+                }
+            )
+        return "active-actor"
+
+    monkeypatch.setattr(batch_queries.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    actor = batch_queries._execute_creation_dependency_with_retry(
+        "get_active_actor_identity",
+        load_actor,
+    )
+
+    assert actor == "active-actor"
+    assert calls == ["actor", "actor"]
+    assert sleeps == [0.25]
+
+
 def test_get_batch_posts_summary_retries_transient_request_errors(monkeypatch):
     fake_adapter = SimpleNamespace(
         client=_FakeClient(

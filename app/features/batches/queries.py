@@ -341,6 +341,36 @@ def _is_transient_insert_api_error(exc: APIError) -> bool:
     return any(marker in error_text for marker in _TRANSIENT_INSERT_API_ERROR_MARKERS)
 
 
+def _execute_creation_dependency_with_retry(operation_name: str, callback):
+    last_error: Optional[Exception] = None
+    for attempt, delay in enumerate((0.0, *_INSERT_RETRY_DELAYS), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            return callback()
+        except httpx.RequestError as exc:
+            last_error = exc
+        except APIError as exc:
+            if not _is_transient_insert_api_error(exc):
+                raise
+            last_error = exc
+        logger.warning(
+            "batch_creation_dependency_retry",
+            operation=operation_name,
+            attempt=attempt,
+            max_attempts=len(_INSERT_RETRY_DELAYS) + 1,
+            error_class=type(last_error).__name__,
+            error=str(last_error),
+        )
+    raise ThirdPartyError(
+        message=f"Database unavailable while preparing batch data for {operation_name}",
+        details={
+            "operation": operation_name,
+            "error": str(last_error) if last_error else "unknown",
+        },
+    )
+
+
 def _insert_batch_row(payload: Dict[str, Any], legacy_payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     stable_payload = dict(payload)
     stable_payload.setdefault("id", str(uuid4()))
@@ -478,13 +508,19 @@ def create_batch(
             )
         else:
             actor_identity_id, actor_snapshot = _semantic_actor_snapshot_from_active(
-                get_active_actor_identity()
+                _execute_creation_dependency_with_retry(
+                    "get_active_actor_identity",
+                    get_active_actor_identity,
+                )
             )
         batch_data["actor_identity_id"] = actor_identity_id
         batch_data["actor_identity_snapshot"] = actor_snapshot
 
     if is_character_consistency_mode(creation_mode):
-        actor_identity = get_active_actor_identity()
+        actor_identity = _execute_creation_dependency_with_retry(
+            "get_active_actor_identity",
+            get_active_actor_identity,
+        )
         if not actor_identity_is_ready(actor_identity):
             raise ValidationError(
                 "Cannot create a Character Consistency batch: no ready active ActorIdentity is selected. "
