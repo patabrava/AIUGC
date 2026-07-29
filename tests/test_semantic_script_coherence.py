@@ -85,7 +85,10 @@ LIFESTYLE_RECOVERY_SOURCE = (
     "Plane Rückweg und Akkureserve gemeinsam, damit ein längerer Ausflug nicht durch "
     "vermeidbare Unsicherheit vorzeitig endet. "
     "Notiere unterwegs funktionierende Zugänge, damit du gute Lösungen später "
-    "wiederfindest und anderen zuverlässig direkt weitergeben kannst."
+    "wiederfindest und anderen zuverlässig direkt weitergeben kannst. "
+    "Packe notwendige Hilfsmittel griffbereit ein, bevor du dein Zuhause verlässt. "
+    "Vereinbare für unterwegs vorher einen klaren Treffpunkt mit deiner vertrauten "
+    "Begleitung."
 )
 
 VALUE_RECOVERY_SOURCE = (
@@ -104,7 +107,9 @@ VALUE_RECOVERY_SOURCE = (
     "Teile geprüfte Zugänge mit anderen, damit verlässliche Hinweise schneller "
     "gefunden und gemeinsam aktuell gehalten werden können. "
     "Nimm für längere Wege Ladegerät, Medikamente und notwendige Hilfsmittel mit, "
-    "damit eine Verzögerung deinen Plan nicht sofort beendet."
+    "damit eine Verzögerung deinen Plan nicht sofort beendet. "
+    "Melde neue Hindernisse sofort mit genauer Ortsangabe an zuständige Stellen. "
+    "Hole vor wichtigen Wegen bei deiner Begleitung eine kurze Rückmeldung ein."
 )
 
 PRODUCT_RECOVERY_SOURCE = (
@@ -123,7 +128,9 @@ PRODUCT_RECOVERY_SOURCE = (
     "Vereinbare klare Wartungsintervalle, damit Verschleiß früh erkannt und die sichere "
     "Nutzung dauerhaft zuverlässig erhalten bleibt. "
     "Bewahre Kontaktdaten, Serviceunterlagen und Bedienhinweise griffbereit auf, damit "
-    "bei einer Störung schnell die passende Fachhilfe erreicht werden kann."
+    "bei einer Störung schnell die passende Fachhilfe erreicht werden kann. "
+    "Teste alle Bedienelemente selbst, bevor der tägliche Einsatz verbindlich beginnt. "
+    "Halte den Bereich um den Lift dauerhaft frei von losen Gegenständen."
 )
 
 
@@ -450,7 +457,7 @@ def test_valid_32_second_audited_source_bypasses_provider_regeneration(post_type
         ("product", PRODUCT_RECOVERY_SOURCE),
     ],
 )
-@pytest.mark.parametrize("seconds", [8, 16, 32, 40, 50, 60])
+@pytest.mark.parametrize("seconds", range(8, 61))
 def test_provider_exhaustion_uses_complete_family_recovery_source(
     post_type,
     recovery_source,

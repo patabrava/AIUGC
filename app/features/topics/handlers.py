@@ -163,7 +163,9 @@ _SEMANTIC_RECOVERY_COPY = {
             "Teile geprüfte Zugänge mit anderen, damit verlässliche Hinweise schneller "
             "gefunden und gemeinsam aktuell gehalten werden können. "
             "Nimm für längere Wege Ladegerät, Medikamente und notwendige Hilfsmittel "
-            "mit, damit eine Verzögerung deinen Plan nicht sofort beendet."
+            "mit, damit eine Verzögerung deinen Plan nicht sofort beendet. "
+            "Melde neue Hindernisse sofort mit genauer Ortsangabe an zuständige Stellen. "
+            "Hole vor wichtigen Wegen bei deiner Begleitung eine kurze Rückmeldung ein."
         ),
     },
     "lifestyle": {
@@ -185,7 +187,10 @@ _SEMANTIC_RECOVERY_COPY = {
             "Plane Rückweg und Akkureserve gemeinsam, damit ein längerer Ausflug nicht "
             "durch vermeidbare Unsicherheit vorzeitig endet. "
             "Notiere unterwegs funktionierende Zugänge, damit du gute Lösungen später "
-            "wiederfindest und anderen zuverlässig direkt weitergeben kannst."
+            "wiederfindest und anderen zuverlässig direkt weitergeben kannst. "
+            "Packe notwendige Hilfsmittel griffbereit ein, bevor du dein Zuhause verlässt. "
+            "Vereinbare für unterwegs vorher einen klaren Treffpunkt mit deiner vertrauten "
+            "Begleitung."
         ),
     },
     "product": {
@@ -207,7 +212,9 @@ _SEMANTIC_RECOVERY_COPY = {
             "Vereinbare klare Wartungsintervalle, damit Verschleiß früh erkannt und die "
             "sichere Nutzung dauerhaft zuverlässig erhalten bleibt. "
             "Bewahre Kontaktdaten, Serviceunterlagen und Bedienhinweise griffbereit auf, "
-            "damit bei einer Störung schnell die passende Fachhilfe erreicht werden kann."
+            "damit bei einer Störung schnell die passende Fachhilfe erreicht werden kann. "
+            "Teste alle Bedienelemente selbst, bevor der tägliche Einsatz verbindlich beginnt. "
+            "Halte den Bereich um den Lift dauerhaft frei von losen Gegenständen."
         ),
     },
 }
