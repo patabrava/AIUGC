@@ -405,6 +405,7 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
         {
             "semantic_recovery": True,
             "semantic_recovery_source": "Unrelated legacy recovery source.",
+            "semantic_recovery_title": "Unrelated legacy recovery title",
             "semantic_recovery_cta": handlers._SEMANTIC_RECOVERY_COPY[post_type]["cta"],
         }
     )

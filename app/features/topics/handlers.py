@@ -1064,7 +1064,15 @@ def _create_semantic_post_from_candidate(
             0,
             int(str(semantic_slot_id).rsplit(":", 1)[-1]) - 1,
         )
-        if uses_generated_fallback or uses_canonical_recovery:
+        if uses_canonical_recovery:
+            recovery_copy = {
+                "title": _semantic_slot_recovery_title(post_type, slot_index),
+                "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
+            }
+            seed_payload["semantic_recovery_source"] = canonical_recovery_source
+            seed_payload["semantic_recovery_title"] = recovery_copy["title"]
+            seed_payload["semantic_recovery_cta"] = recovery_copy["cta"]
+        elif uses_generated_fallback:
             recovery_copy = {
                 "title": (
                     candidate.get("semantic_recovery_title")
