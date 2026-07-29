@@ -226,6 +226,7 @@ def _complete_semantic_reference(
             completed.setdefault("scene_description", get_scene_bible(scene_key).scene_identity)
     wardrobe_key, wardrobe_description = select_semantic_wardrobe(
         post_id=str(post.get("id") or "semantic-video"),
+        rotation_seed=str(batch.get("id") or post.get("id") or "semantic-video"),
         rotation_index=(
             seed_data.get("semantic_rotation_index")
             if isinstance(seed_data.get("semantic_rotation_index"), int)

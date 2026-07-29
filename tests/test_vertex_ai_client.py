@@ -820,7 +820,6 @@ def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monke
     import base64
 
     from app.adapters.vertex_gemini_client import VertexGeminiClient
-
     captured = {}
     client = VertexGeminiClient()
 
@@ -857,6 +856,7 @@ def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monke
     )
 
     parts = captured["payload"]["contents"][0]["parts"]
+    assert "systemInstruction" not in captured["payload"]
     assert parts == [
         {"text": "Compose the actor in the room."},
         {
@@ -986,7 +986,6 @@ def test_llm_gemini_api_text_route_builds_ordered_input_media_payload():
 
 def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):
     from app.adapters.llm_client import LLMClient
-
     ordered_inputs = [
         {"mime_type": "image/png", "image_bytes": b"actor-front"},
         {"mime_type": "image/jpeg", "image_bytes": b"actor-three-quarter"},

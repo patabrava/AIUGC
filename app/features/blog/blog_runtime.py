@@ -18,8 +18,9 @@ from pydantic import ValidationError as PydanticValidationError
 from app.adapters.llm_client import get_llm_client
 from app.adapters.storage_client import get_storage_client
 from app.adapters.supabase_client import get_supabase
-from app.core.errors import ErrorCode, ThirdPartyError
+from app.core.errors import ErrorCode, ThirdPartyError  # noqa: F401
 from app.core.config import get_settings
+from app.core.image_generation_prompt import write_raw_camera_image_prompt
 from app.core.logging import get_logger
 from app.features.blog.queries import (
     _load_post_for_blog,
@@ -495,8 +496,9 @@ def generate_blog_image(post_id: str, *, image_prompt: Optional[str] = None) -> 
         effective_prompt = _build_blog_image_prompt(blog_content, dossier_payload)
 
     llm = get_llm_client()
+    renderer_prompt = write_raw_camera_image_prompt(client=llm, brief=effective_prompt)
     image_result = llm.generate_gemini_image(
-        prompt=effective_prompt,
+        prompt=renderer_prompt,
         model=None,
         temperature=0.8,
         max_tokens=2048,

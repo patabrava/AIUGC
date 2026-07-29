@@ -77,6 +77,7 @@ def test_generate_shot_frame_candidates_uses_two_actor_refs_then_location_and_st
         b"location",
     ]
     assert client.image_calls[0]["model"] == "gemini-3.1-flash-image"
+    assert "system_prompt" not in client.image_calls[0]
     assert client.image_calls[0]["aspect_ratio"] == "9:16"
     assert "Image 1" in client.image_calls[0]["prompt"]
     assert "Image 2" in client.image_calls[0]["prompt"]

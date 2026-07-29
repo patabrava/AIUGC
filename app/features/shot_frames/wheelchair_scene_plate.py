@@ -11,6 +11,7 @@ from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ValidationError
+from app.core.image_generation_prompt import write_raw_camera_image_prompt
 from app.features.shot_frames.service import ShotFrameReference
 
 
@@ -84,7 +85,10 @@ def build_canonical_scene_plate_prompt(
         "the same adult woman from Images 1 and 2 inside Image 3. Preserve her exact facial geometry, "
         "hairline, hair, apparent age, body proportions, and ordinary camera-file skin texture with visible "
         "pores, natural tonal variation, natural under-eye and lip texture, mild facial asymmetry, and "
-        "realistic hairline flyaways. Do not average her into a new face. She is seated upright in a manual "
+        "realistic hairline flyaways. Images 1 and 2 provide identity only: do not copy their clothing. "
+        "Replace every visible upper-body garment from those references with the requested outfit below; "
+        "its garment type and color must be visibly unmistakable. Do not average her into a new face. "
+        "She is seated upright in a manual "
         "wheelchair. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Her upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
@@ -110,7 +114,9 @@ def build_derived_scene_plate_prompt(
         "Image 2 is the unchanged front identity reference for the same woman and exists only to prevent "
         "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact woman from Images 1 "
         "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
-        "face size from Image 1. Apply only the modest candidate-specific horizontal viewpoint and shoulder "
+        "face size from Image 1. Image 1's clothing is not authoritative: replace every visible upper-body "
+        "garment with the requested outfit below, making its garment type and color visibly unmistakable. "
+        "Apply only the modest candidate-specific horizontal viewpoint and shoulder "
         "angle described below; preserve the overall medium-close-up framing contract. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
@@ -226,8 +232,9 @@ def generate_scene_plate(
         raise ValidationError("Scene-plate generation requires a prompt.")
 
     client = llm_client or get_llm_client()
+    renderer_prompt = write_raw_camera_image_prompt(client=client, brief=normalized_prompt)
     return client.generate_gemini_image(
-        prompt=normalized_prompt,
+        prompt=renderer_prompt,
         model=image_model,
         temperature=0.2,
         aspect_ratio="9:16",

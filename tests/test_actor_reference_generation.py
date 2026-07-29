@@ -24,7 +24,9 @@ class _GeminiClient:
             "model": ACTOR_THREE_QUARTER_MODEL,
         }
 
-    def generate_gemini_text(self, **_kwargs):
+    def generate_gemini_text(self, **kwargs):
+        if "platform neutral image prompt writer" in kwargs.get("system_prompt", ""):
+            return "An unretouched casting-style camera photo of the exact supplied adult actor from a left three-quarter viewpoint, with unchanged facial geometry, ordinary daylight, natural skin texture, and no beauty retouching."
         component_value = self.same_person
         confidence = self.confidences[self.text_call_count]
         self.text_call_count += 1
@@ -57,6 +59,7 @@ def test_gemini_pro_derives_three_quarter_from_only_canonical_front():
 
     assert len(client.image_calls) == 3
     for call in client.image_calls:
+        assert "system_prompt" not in call
         assert call["model"] == "gemini-3-pro-image"
         assert call["input_images"] == [
             {"mime_type": "image/png", "image_bytes": b"canonical-front"}

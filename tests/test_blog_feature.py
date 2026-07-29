@@ -158,6 +158,10 @@ def test_gemini_image_generation_maps_nanobanana_alias():
     assert call.args[0] == "/models/gemini-2.5-flash-image:generateContent"
     assert call.kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
     assert call.kwargs["json"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
+    assert "systemInstruction" not in call.kwargs["json"]
+    assert call.kwargs["json"]["contents"][0]["parts"][0] == {
+        "text": "Quadratisches Coverbild"
+    }
 
 
 def test_gemini_image_generation_maps_stale_31_preview_alias_to_current_model():
@@ -614,8 +618,14 @@ def test_generate_blog_image_converts_provider_png_to_webp_before_upload(monkeyp
     }
 
     class _FakeLLM:
-        def generate_gemini_image(self, **kwargs):
+        def generate_gemini_text(self, **kwargs):
             assert kwargs["prompt"] == "Quadratisches Coverbild"
+            assert "Do not generate the image." in kwargs["system_prompt"]
+            return "A straight-out-of-camera photographic study for a plain square editorial cover."
+
+        def generate_gemini_image(self, **kwargs):
+            assert kwargs["prompt"].startswith("A straight-out-of-camera")
+            assert "system_prompt" not in kwargs
             return {
                 "image_bytes": png_bytes,
                 "mime_type": "image/png",
@@ -675,6 +685,9 @@ def test_generate_blog_image_uploads_webflow_required_dimensions(monkeypatch):
     }
 
     class _FakeLLM:
+        def generate_gemini_text(self, **_kwargs):
+            return "A straight-out-of-camera photographic study for a plain landscape editorial cover."
+
         def generate_gemini_image(self, **_kwargs):
             return {
                 "image_bytes": png_buffer.getvalue(),

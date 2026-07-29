@@ -5,13 +5,15 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
+from app.core.image_generation_prompt import (
+    RAW_CAMERA_SYSTEM_PROMPT_PATH as RAW_CAMERA_SYSTEM_PROMPT_PATH,  # noqa: F401
+    load_raw_camera_system_prompt,
+)
 
-RAW_CAMERA_SYSTEM_PROMPT_PATH = Path(__file__).with_name("raw_camera_casting_system_prompt.txt")
 
 
 @dataclass(frozen=True)
@@ -37,10 +39,6 @@ class ShotFrameGenerationResult:
     prompt_writer_output: str
     composition_prompt: str
     candidates: List[ShotFrameCandidate]
-
-
-def load_raw_camera_system_prompt() -> str:
-    return RAW_CAMERA_SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def _validate_reference(reference: ShotFrameReference, expected_role: str) -> None:

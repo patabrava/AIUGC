@@ -7,6 +7,7 @@ from typing import Any
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ValidationError
+from app.core.image_generation_prompt import write_raw_camera_image_prompt
 from app.features.shot_frames.identity_qa import evaluate_actor_reference_pair
 
 
@@ -34,10 +35,11 @@ def generate_verified_three_quarter_reference(
         raise ValidationError("Canonical actor front reference requires image bytes and an image MIME type.")
 
     client = llm_client or get_llm_client()
+    renderer_prompt = write_raw_camera_image_prompt(client=client, brief=ACTOR_THREE_QUARTER_PROMPT)
     candidates = []
     for index in range(1, ACTOR_THREE_QUARTER_CANDIDATE_COUNT + 1):
         generated = client.generate_gemini_image(
-            prompt=ACTOR_THREE_QUARTER_PROMPT,
+            prompt=renderer_prompt,
             model=ACTOR_THREE_QUARTER_MODEL,
             temperature=0,
             aspect_ratio="9:16",

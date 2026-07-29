@@ -6,6 +6,7 @@ from threading import Barrier, Lock
 
 from PIL import Image, ImageDraw
 
+from app.features.semantic_videos.visual_contract import SEMANTIC_WARDROBES
 from app.features.shot_frames.service import ShotFrameReference
 from app.features.shot_production.planner import EditorialBeat
 
@@ -78,6 +79,9 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
         def generate_gemini_image(self, **kwargs):
             self.calls.append(kwargs)
             marker = f"plate-{len(self.calls)}".encode()
@@ -114,10 +118,12 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
         for call in client.calls
     )
     assert all(call["model"] == "gemini-3-pro-image" for call in client.calls)
+    assert all("system_prompt" not in call for call in client.calls)
     assert all(call["image_size"] == "2K" for call in client.calls)
     assert actor_front.image_bytes == b"front"
     assert actor_support.image_bytes == b"support"
     assert all("manual wheelchair" in call["prompt"] for call in client.calls)
+    assert all("do not copy their clothing" in call["prompt"] for call in client.calls)
     assert all("visible pores" in call["prompt"] for call in client.calls)
     assert all("face averaging" in call["prompt"] for call in client.calls)
     assert len(set(result.prompts)) == 3
@@ -137,6 +143,9 @@ def test_scene_plate_candidates_generate_concurrently_and_keep_candidate_order()
     call_number = 0
 
     class ConcurrentClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
         def generate_gemini_image(self, **kwargs):
             nonlocal call_number
             with call_lock:
@@ -173,6 +182,9 @@ def test_scene_plate_candidate_progress_reports_real_generation_phases():
     phases: list[tuple[str, dict]] = []
 
     class DistinctClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
         def generate_gemini_image(self, **kwargs):
             prompt = kwargs["prompt"]
             index = next(
@@ -231,6 +243,9 @@ def test_scene_plate_candidates_regenerate_perceptual_duplicates_with_distinct_p
     calls_lock = Lock()
 
     class DiversityClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
         def generate_gemini_image(self, **kwargs):
             prompt = kwargs["prompt"]
             with calls_lock:
@@ -274,6 +289,9 @@ def test_scene_plate_candidates_keep_valid_images_when_diversity_recovery_is_exh
     )
 
     class ConvergingClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
         def generate_gemini_image(self, **kwargs):
             return {
                 "image_bytes": _png(value=128),
@@ -315,6 +333,9 @@ def test_scene_plate_candidates_derive_every_option_from_established_actor_ancho
     class RecordingClient:
         def __init__(self) -> None:
             self.calls: list[dict] = []
+
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
 
         def generate_gemini_image(self, **kwargs):
             self.calls.append(kwargs)
@@ -424,7 +445,11 @@ def test_semantic_wardrobe_rotation_is_distinct_for_first_three_posts_and_overri
     from app.features.semantic_videos.visual_contract import select_semantic_wardrobe
 
     rotated = [
-        select_semantic_wardrobe(post_id=f"post-{index}", rotation_index=index)
+        select_semantic_wardrobe(
+            post_id=f"post-{index}",
+            rotation_index=index,
+            rotation_seed="batch-1",
+        )
         for index in range(3)
     ]
 
@@ -433,8 +458,24 @@ def test_semantic_wardrobe_rotation_is_distinct_for_first_three_posts_and_overri
     assert select_semantic_wardrobe(
         post_id="post-override",
         rotation_index=0,
+        rotation_seed="batch-1",
         wardrobe_description="navy blue cotton blouse",
     ) == ("custom", "navy blue cotton blouse")
+
+
+def test_semantic_single_post_batches_do_not_all_default_to_cream_sweater():
+    from app.features.semantic_videos.visual_contract import select_semantic_wardrobe
+
+    selected = {
+        select_semantic_wardrobe(
+            post_id=f"post-{index}",
+            rotation_index=0,
+            rotation_seed=f"batch-{index}",
+        )[0]
+        for index in range(12)
+    }
+
+    assert selected == set(SEMANTIC_WARDROBES)
 
 
 def test_scene_plate_master_is_bound_to_frozen_visual_contract_not_actor_front_bytes():

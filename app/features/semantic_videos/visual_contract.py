@@ -226,6 +226,7 @@ def select_semantic_wardrobe(
     *,
     post_id: str,
     rotation_index: int | None = None,
+    rotation_seed: str | None = None,
     wardrobe_key: str | None = None,
     wardrobe_description: str | None = None,
 ) -> tuple[str, str]:
@@ -237,7 +238,12 @@ def select_semantic_wardrobe(
         return explicit_key, SEMANTIC_WARDROBES[explicit_key]
     keys = tuple(SEMANTIC_WARDROBES)
     if isinstance(rotation_index, int) and not isinstance(rotation_index, bool):
-        selected = keys[max(0, rotation_index) % len(keys)]
+        # Live Semantic batches commonly contain one post, making their ordinal
+        # zero. A stable batch offset preserves within-batch rotation without
+        # collapsing every separate one-post batch onto the cream sweater.
+        seed = str(rotation_seed or post_id or "semantic-video")
+        offset = int(sha256(seed.encode("utf-8")).hexdigest(), 16) % len(keys)
+        selected = keys[(offset + max(0, rotation_index)) % len(keys)]
         return selected, SEMANTIC_WARDROBES[selected]
     digest = sha256(str(post_id or "semantic-video").encode("utf-8")).hexdigest()
     selected = keys[int(digest, 16) % len(keys)]
