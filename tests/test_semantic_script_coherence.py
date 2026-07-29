@@ -77,7 +77,15 @@ LIFESTYLE_RECOVERY_SOURCE = (
     "Speichere wichtige Adressen und Telefonnummern vorher griffbereit, damit du bei "
     "Änderungen nicht lange suchen musst. "
     "So bleibt mehr Energie für dein eigentliches Ziel, und kleine Barrieren "
-    "bestimmen nicht deinen gesamten Tagesablauf."
+    "bestimmen nicht deinen gesamten Tagesablauf. "
+    "Prüfe Wetter, Untergrund und Ruheplätze vorab, damit spontane Änderungen nicht "
+    "deine gesamte Kraft für den Tag verbrauchen. "
+    "Sprich Begleitung und Treffpunkte vorher ab, damit alle Beteiligten bei "
+    "Verspätungen denselben einfachen Ausweichplan kennen. "
+    "Plane Rückweg und Akkureserve gemeinsam, damit ein längerer Ausflug nicht durch "
+    "vermeidbare Unsicherheit vorzeitig endet. "
+    "Notiere unterwegs funktionierende Zugänge, damit du gute Lösungen später "
+    "wiederfindest und anderen zuverlässig direkt weitergeben kannst."
 )
 
 VALUE_RECOVERY_SOURCE = (
@@ -88,7 +96,15 @@ VALUE_RECOVERY_SOURCE = (
     "Frage bei Veranstaltern oder Behörden früh nach Zugängen, Begleitung und einer "
     "verlässlichen Ausweichroute für deinen Termin. "
     "So sparst du unnötige Umwege und kannst Entscheidungen auf klare, überprüfbare "
-    "Informationen statt Vermutungen stützen."
+    "Informationen statt Vermutungen stützen. "
+    "Speichere bestätigte Öffnungszeiten und Ansprechpartner direkt, damit du bei "
+    "kurzfristigen Änderungen schnell verlässliche Auskunft erhältst. "
+    "Vergleiche mindestens zwei erreichbare Routen, bevor du dich auf eine Verbindung "
+    "für deinen wichtigen Termin festlegst. "
+    "Teile geprüfte Zugänge mit anderen, damit verlässliche Hinweise schneller "
+    "gefunden und gemeinsam aktuell gehalten werden können. "
+    "Nimm für längere Wege Ladegerät, Medikamente und notwendige Hilfsmittel mit, "
+    "damit eine Verzögerung deinen Plan nicht sofort beendet."
 )
 
 PRODUCT_RECOVERY_SOURCE = (
@@ -99,7 +115,15 @@ PRODUCT_RECOVERY_SOURCE = (
     "Eine verständliche Steuerung und klar erreichbare Haltepunkte erleichtern dir "
     "die regelmäßige Nutzung ohne unnötige Umwege. "
     "Kläre Wartung, mögliche Nachrüstung und die gewünschte Ausstattung früh, damit "
-    "die Lösung langfristig zu dir passt."
+    "die Lösung langfristig zu dir passt. "
+    "Lass dir Notabsenkung, Sicherheitsstopps und tägliche Bedienung praktisch zeigen, "
+    "bevor du den Plattformlift regelmäßig alleine nutzt. "
+    "Prüfe Stromanschluss, Parkposition und freie Durchgänge gemeinsam, damit der Lift "
+    "keine neuen Hindernisse im Zuhause schafft. "
+    "Vereinbare klare Wartungsintervalle, damit Verschleiß früh erkannt und die sichere "
+    "Nutzung dauerhaft zuverlässig erhalten bleibt. "
+    "Bewahre Kontaktdaten, Serviceunterlagen und Bedienhinweise griffbereit auf, damit "
+    "bei einer Störung schnell die passende Fachhilfe erreicht werden kann."
 )
 
 
@@ -426,7 +450,7 @@ def test_valid_32_second_audited_source_bypasses_provider_regeneration(post_type
         ("product", PRODUCT_RECOVERY_SOURCE),
     ],
 )
-@pytest.mark.parametrize("seconds", [8, 16, 32])
+@pytest.mark.parametrize("seconds", [8, 16, 32, 40, 50, 60])
 def test_provider_exhaustion_uses_complete_family_recovery_source(
     post_type,
     recovery_source,
