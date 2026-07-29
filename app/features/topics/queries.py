@@ -613,7 +613,7 @@ def create_post_for_batch(
                 response = posts_table.upsert(
                     post_data,
                     on_conflict="id",
-                    ignore_duplicates=True,
+                    ignore_duplicates=False,
                 ).execute()
             else:
                 response = posts_table.insert(post_data).execute()

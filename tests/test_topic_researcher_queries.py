@@ -1670,12 +1670,14 @@ def test_semantic_post_retry_is_idempotent_after_lost_insert_response(mock_get_s
             self.mode = ""
             self.filters = {}
             self.upsert_attempts = 0
+            self.upsert_kwargs = {}
 
         def table(self, *_args, **_kwargs):
             return self
 
-        def upsert(self, payload, **_kwargs):
+        def upsert(self, payload, **kwargs):
             self.payload = dict(payload)
+            self.upsert_kwargs = dict(kwargs)
             self.mode = "upsert"
             return self
 
@@ -1696,12 +1698,12 @@ def test_semantic_post_retry_is_idempotent_after_lost_insert_response(mock_get_s
                 self.upsert_attempts += 1
                 post_id = self.payload["id"]
                 inserted = post_id not in self.rows
-                if inserted:
+                if inserted or not self.upsert_kwargs.get("ignore_duplicates"):
                     self.rows[post_id] = dict(self.payload)
                 if self.upsert_attempts == 1:
                     request = httpx.Request("POST", "https://example.supabase.co/rest/v1/posts")
                     raise httpx.ConnectError("response lost after commit", request=request)
-                return _FakeResponse([self.rows[post_id]] if inserted else [])
+                return _FakeResponse([self.rows[post_id]])
             if self.mode == "select":
                 post_id = self.filters.get("id")
                 return _FakeResponse([self.rows[post_id]] if post_id in self.rows else [])
@@ -1731,3 +1733,25 @@ def test_semantic_post_retry_is_idempotent_after_lost_insert_response(mock_get_s
     assert fake_table.upsert_attempts == 2
     assert len(fake_table.rows) == 1
     assert post["id"] == next(iter(fake_table.rows))
+    assert fake_table.upsert_kwargs["ignore_duplicates"] is False
+
+    corrected = create_post_for_batch(
+        batch_id="1f899446-81a7-4d1d-a36d-4b57bc7535a0",
+        post_type="value",
+        topic_title="Geprüfte Zugänge teilen und Umwege vermeiden",
+        topic_rotation="Geprüfte Zugänge sparen im Alltag zuverlässig Umwege.",
+        topic_cta="Speichere dir den Hinweis.",
+        spoken_duration=8,
+        seed_data={
+            "script": "Geprüfte Zugänge sparen im Alltag zuverlässig Umwege.",
+            "target_duration_seconds": 8,
+            "semantic_slot_id": "value:1",
+        },
+        target_length_tier=None,
+    )
+
+    assert len(fake_table.rows) == 1
+    assert corrected["topic_title"] == "Geprüfte Zugänge teilen und Umwege vermeiden"
+    assert corrected["topic_rotation"] == (
+        "Geprüfte Zugänge sparen im Alltag zuverlässig Umwege."
+    )
