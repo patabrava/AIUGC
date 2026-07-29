@@ -208,6 +208,16 @@ def test_audited_32_second_source_with_raw_url_uses_family_recovery():
             "So ist man immer gut unterwegs.",
             "generic padding",
         ),
+        (
+            "Ein individuell gefertigter Treppenlift gibt dir Freiheit, jede "
+            "Treppe mühelos zu überwinden, und das ist toll.",
+            "generic padding",
+        ),
+        (
+            "Der 5-Sekunden-Check für barrierefreie Toiletten Dieses Dossier "
+            "sammelt Fakten und zur schnellen Bewertung von WC-Anlagen.",
+            "recovery scaffolding",
+        ),
     ],
 )
 def test_non_substantive_source_sentences_are_rejected(script, message):

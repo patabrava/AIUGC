@@ -43,7 +43,10 @@ _INTERNAL_FALLBACK_COPY = re.compile(
 _AUDIENCE_COPY_SCAFFOLDING = re.compile(
     r"\b(?:wichtig\s+bleibt|wichtig)\s*:\s*[„\"]|"
     r"\bprüfe\s+für\s+deine\s+nächste\s+wichtige\s+entscheidung\s+bitte\s+erneut\b|"
-    r"\baußerdem\s+gilt\s*:",
+    r"\baußerdem\s+gilt\s*:|"
+    r"\bdieses\s+(?:dossier|merkblatt|dokument|artikel)\s+"
+    r"(?:sammelt|beschreibt|erklärt|zeigt)\b|"
+    r"\bfakten\s+und\s+zur\s+\w+",
     re.IGNORECASE,
 )
 _AUDIENCE_EXTERNAL_REFERENCE = re.compile(
@@ -56,10 +59,11 @@ _AUDIENCE_ANAPHORIC_OPENING = re.compile(
     re.IGNORECASE,
 )
 _AUDIENCE_GENERIC_PADDING = re.compile(
-    r"(?:^|(?<=[.!?])\s+)(?:"
+    r"(?:^|(?<=[.!?,])\s+)(?:"
     r"(?:doch\s+)?es\s+gibt\s+eine\s+lösung|"
     r"so\s+ist\s+man\s+(?:immer\s+)?gut\s+unterwegs|"
-    r"eine\s+sorge\s+weniger(?:\s+im\s+alltag)?"
+    r"eine\s+sorge\s+weniger(?:\s+im\s+alltag)?|"
+    r"(?:und\s+)?das\s+ist\s+(?:toll|super|großartig)"
     r")[.!?](?=\s|$)",
     re.IGNORECASE,
 )
