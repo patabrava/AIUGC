@@ -1049,15 +1049,15 @@ def _create_semantic_post_from_candidate(
         or uses_slot_recovery
     ):
         recovery_copy = _SEMANTIC_RECOVERY_COPY[post_type]
-        if candidate.get("semantic_recovery"):
-            recovery_copy = {
-                "title": candidate.get("title"),
-                "cta": candidate.get("cta"),
-            }
-        elif candidate.get("semantic_recovery_title"):
+        if candidate.get("semantic_recovery_title"):
             recovery_copy = {
                 "title": candidate["semantic_recovery_title"],
                 "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
+            }
+        elif candidate.get("semantic_recovery"):
+            recovery_copy = {
+                "title": candidate.get("title"),
+                "cta": candidate.get("cta"),
             }
         title = str(recovery_copy["title"])
         cta = str(recovery_copy["cta"])

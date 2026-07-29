@@ -403,6 +403,7 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
     candidate = _candidate(post_type)
     candidate.update(
         {
+            "semantic_recovery": True,
             "semantic_recovery_source": handlers._semantic_slot_recovery_source(
                 post_type,
                 1,
