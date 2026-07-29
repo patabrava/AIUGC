@@ -8,7 +8,7 @@ from postgrest.exceptions import APIError
 
 from app.adapters.magnific_client import get_magnific_client
 from app.adapters.magnific_client import list_lora_rows, normalize_lora_training_status
-from app.adapters.supabase_client import get_supabase
+from app.adapters.supabase_client import execute_supabase_read, get_supabase
 from app.core.errors import ErrorCode, FlowForgeException
 from app.core.logging import get_logger
 from app.features.characters.actor_identity import (
@@ -797,13 +797,15 @@ def get_approved_scene_reference_for_post(post_id: str) -> Optional[dict[str, An
 def list_scene_references_for_posts(post_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     if not post_ids:
         return {}
-    response = (
-        get_supabase()
-        .client.table("scene_reference_images")
-        .select("*")
-        .in_("post_id", post_ids)
-        .order("created_at", desc=True)
-        .execute()
+    response = execute_supabase_read(
+        "scene_references_for_posts",
+        lambda database: (
+            database.table("scene_reference_images")
+            .select("*")
+            .in_("post_id", post_ids)
+            .order("created_at", desc=True)
+            .execute()
+        ),
     )
     rows = getattr(response, "data", None) or []
     grouped: dict[str, list[dict[str, Any]]] = {}

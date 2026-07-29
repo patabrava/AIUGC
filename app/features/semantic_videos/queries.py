@@ -7,7 +7,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 from postgrest.exceptions import APIError
 
-from app.adapters.supabase_client import get_supabase
+from app.adapters.supabase_client import execute_supabase_read, get_supabase
 from app.core.errors import NotFoundError, StateTransitionError, ValidationError
 from app.features.characters.scene_reference import get_scene_bible
 from app.features.scenes.queries import (
@@ -300,14 +300,17 @@ def load_semantic_video_context(post_id: str, *, client=None) -> dict[str, Any]:
 
 
 def get_run_by_post(post_id: str, *, client=None) -> Optional[dict[str, Any]]:
-    response = (
-        _client(client)
-        .table("semantic_video_runs")
-        .select("*")
-        .eq("post_id", post_id)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+    response = execute_supabase_read(
+        "semantic_video_run_by_post",
+        lambda database: (
+            database.table("semantic_video_runs")
+            .select("*")
+            .eq("post_id", post_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        ),
+        client=client,
     )
     rows = _rows(response)
     return rows[0] if rows else None
@@ -664,26 +667,32 @@ def persist_semantic_video_plan(
 
 
 def list_attempts(run_id: str, *, client=None) -> list[dict[str, Any]]:
-    response = (
-        _client(client)
-        .table("semantic_video_takes")
-        .select("*")
-        .eq("run_id", run_id)
-        .order("take_index")
-        .order("attempt")
-        .execute()
+    response = execute_supabase_read(
+        "semantic_video_attempts",
+        lambda database: (
+            database.table("semantic_video_takes")
+            .select("*")
+            .eq("run_id", run_id)
+            .order("take_index")
+            .order("attempt")
+            .execute()
+        ),
+        client=client,
     )
     return _rows(response)
 
 
 def list_approvals(run_id: str, *, client=None) -> list[dict[str, Any]]:
-    response = (
-        _client(client)
-        .table("semantic_video_approvals")
-        .select("*")
-        .eq("run_id", run_id)
-        .order("created_at")
-        .execute()
+    response = execute_supabase_read(
+        "semantic_video_approvals",
+        lambda database: (
+            database.table("semantic_video_approvals")
+            .select("*")
+            .eq("run_id", run_id)
+            .order("created_at")
+            .execute()
+        ),
+        client=client,
     )
     return _rows(response)
 

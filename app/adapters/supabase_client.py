@@ -6,7 +6,10 @@ Per Constitution § VI: Vanilla-First Implementation
 
 import os
 import re
-from typing import Optional
+import threading
+import time
+from collections.abc import Callable
+from typing import Any, Optional
 import httpx
 from supabase import create_client, Client
 from supabase.lib.client_options import SyncClientOptions
@@ -16,6 +19,20 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 _SUPABASE_KEY_PROBE_TIMEOUT_SECONDS = float(os.getenv("SUPABASE_KEY_PROBE_TIMEOUT_SECONDS", "4"))
 _SUPABASE_POSTGREST_TIMEOUT_SECONDS = float(os.getenv("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "8"))
+_SUPABASE_READ_RETRY_DELAYS = (0.0, 0.15, 0.35)
+_TRANSIENT_DATABASE_ERROR_MARKERS = (
+    "connection reset",
+    "connection refused",
+    "connection terminated",
+    "connection closed",
+    "peer closed connection",
+    "server disconnected",
+    "remoteprotocolerror",
+    "readerror",
+    "writeerror",
+    "connecterror",
+    "pooltimeout",
+)
 
 
 class _SupabaseProbeTransientError(RuntimeError):
@@ -86,6 +103,7 @@ class SupabaseAdapter:
     
     _instance: Optional["SupabaseAdapter"] = None
     _client: Optional[Client] = None
+    _client_lock = threading.RLock()
     
     def __new__(cls):
         if cls._instance is None:
@@ -94,7 +112,9 @@ class SupabaseAdapter:
     
     def __init__(self):
         """Initialize Supabase client if not already initialized."""
-        if self._client is None:
+        with self._client_lock:
+            if self._client is not None:
+                return
             settings = get_settings()
             candidates = []
             service_key = _normalize_supabase_key(settings.supabase_service_key or "")
@@ -150,6 +170,19 @@ class SupabaseAdapter:
 
             if self._client is None and last_error is not None:
                 raise last_error
+
+    def reconnect(self, *, failed_client: Optional[Client] = None) -> Client:
+        """Replace a failed shared transport without disrupting a newer client."""
+        with self._client_lock:
+            if (
+                failed_client is not None
+                and self._client is not None
+                and self._client is not failed_client
+            ):
+                return self._client
+            self._client = None
+            self.__init__()
+            return self.client
     
     @property
     def client(self) -> Client:
@@ -165,7 +198,7 @@ class SupabaseAdapter:
         """
         try:
             # Simple query to verify connection
-            response = self.client.table("batches").select("id").limit(1).execute()
+            self.client.table("batches").select("id").limit(1).execute()
             return True
         except Exception as e:
             logger.error(
@@ -178,3 +211,55 @@ class SupabaseAdapter:
 def get_supabase() -> SupabaseAdapter:
     """Get Supabase adapter singleton."""
     return SupabaseAdapter()
+
+
+def _is_transient_database_transport_error(exc: Exception) -> bool:
+    if isinstance(exc, httpx.RequestError):
+        return True
+    error_text = " ".join(
+        str(value)
+        for value in (
+            type(exc).__name__,
+            exc,
+            getattr(exc, "message", ""),
+            getattr(exc, "details", ""),
+        )
+        if value
+    ).casefold()
+    return any(marker in error_text for marker in _TRANSIENT_DATABASE_ERROR_MARKERS)
+
+
+def execute_supabase_read(
+    operation: str,
+    callback: Callable[[Client], Any],
+    *,
+    client: Optional[Client] = None,
+) -> Any:
+    """Retry a read on a fresh singleton client after transport corruption."""
+    adapter = get_supabase() if client is None else None
+    active_client = client if client is not None else adapter.client
+    last_error: Optional[Exception] = None
+    for attempt, delay in enumerate(_SUPABASE_READ_RETRY_DELAYS, start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            return callback(active_client)
+        except Exception as exc:
+            if not _is_transient_database_transport_error(exc):
+                raise
+            last_error = exc
+            logger.warning(
+                "supabase_read_transport_retry",
+                operation=operation,
+                attempt=attempt,
+                error_class=type(exc).__name__,
+                error=str(exc),
+            )
+            if (
+                attempt < len(_SUPABASE_READ_RETRY_DELAYS)
+                and adapter is not None
+            ):
+                active_client = adapter.reconnect(failed_client=active_client)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"Supabase read {operation} failed without an error.")
