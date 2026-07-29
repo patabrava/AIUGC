@@ -14,6 +14,7 @@ from typing import Any, Mapping, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Request
+from fastapi.responses import RedirectResponse
 
 from app.adapters.storage_client import get_storage_client
 from app.core.errors import NotFoundError, StateTransitionError, SuccessResponse, ValidationError
@@ -1632,7 +1633,14 @@ def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request)
 
 
 @router.get("/{post_id}/progress", response_model=SuccessResponse)
-def get_progress(post_id: str):
+def get_progress(post_id: str, request: Request):
+    if "text/html" in request.headers.get("accept", ""):
+        context = load_semantic_video_context(post_id)
+        batch_id = str(context["batch"]["id"])
+        return RedirectResponse(
+            url=f"/batches/{batch_id}#semantic-video-post-{post_id}",
+            status_code=303,
+        )
     run = _run_or_404(post_id)
     takes = list_attempts(str(run["id"]))
     master_snapshot = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}

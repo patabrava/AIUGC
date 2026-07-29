@@ -1537,6 +1537,23 @@ def test_progress_endpoint_reports_persisted_generated_and_verified_counts(monke
     assert "queued" in payload["status_message"]
 
 
+def test_progress_endpoint_redirects_browser_navigation_to_batch_workflow(monkeypatch):
+    _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    response = client.get(
+        "/semantic-videos/posts/post-1/progress",
+        headers={"accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "/batches/batch-1#semantic-video-post-post-1"
+    )
+
+
 def test_progress_endpoint_exposes_elapsed_and_estimated_remaining_time(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
