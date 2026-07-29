@@ -21,16 +21,20 @@ def _words(count: int) -> str:
 
 
 def _complete_semantic_script(word_counts: list[int]) -> str:
-    filler = ("konkret", "frühzeitig", "sicher", "praktisch", "bewusst", "direkt")
+    sentence_banks = [
+        "Geprüfte Aufzugsmeldungen zeigen früh verlässliche Alternativen für spontane Termine ohne unnötige Wartezeit und hektische Rückwege heute deutlich",
+        "Breite Wendeflächen erleichtern sichere Richtungswechsel im engen Eingangsbereich und bewahren täglich wertvolle Kraft bei jedem Besuch zuverlässig",
+        "Aktuelle Baustellenhinweise verhindern überraschende Sperrungen während wichtiger Fahrten und nennen erreichbare Ersatzrouten rechtzeitig vor der Abreise klar",
+        "Gespeicherte Ansprechpartner organisieren passende Unterstützung direkt sobald technische Störungen auftreten oder fremde Hilfe kurzfristig notwendig wird unkompliziert",
+        "Niedrige Bedienelemente ermöglichen selbstständige Nutzung zuhause weil Tasten bequem erreichbar bleiben und klare Symbole jeden Schritt verständlich begleiten",
+        "Rutschfeste Bodenflächen geben dem Rollstuhl stabilen Halt beim Einsteigen und senken das Risiko gefährlicher Bewegungen auf nassen Wegen",
+        "Regelmäßige Wartung erhält die zuverlässige Funktion langfristig erkennt Verschleiß früh und schützt geplante Abläufe vor vermeidbaren Ausfällen wirksam",
+        "Früh gebuchte Mobilitätshilfen sichern ruhige Bahnreisen nennen eindeutige Treffpunkte und vermeiden belastende Suche auf unbekannten Bahnsteigen zuverlässig",
+    ]
     sentences = []
     for index, word_count in enumerate(word_counts):
-        prefix = ["Dieser", f"Hinweis{index}", "hilft", "dir"]
-        suffix = ["bei", "einer", "klaren", "Entscheidung", "weiter"]
-        middle = [
-            filler[offset % len(filler)]
-            for offset in range(word_count - len(prefix) - len(suffix))
-        ]
-        sentences.append(" ".join([*prefix, *middle, *suffix]) + ".")
+        words = sentence_banks[index].split()
+        sentences.append(" ".join(words[:word_count]) + ".")
     return " ".join(sentences)
 
 
@@ -136,7 +140,7 @@ def test_generated_script_must_fit_same_contract_and_strips_response_wrappers():
         requested_duration_seconds=50,
     )
     assert validation.minimum_take_count == 7
-    assert result.script.startswith("Dieser Hinweis0")
+    assert result.script.startswith("Geprüfte Aufzugsmeldungen")
     assert "```" not in result.script
     assert result.contract_hash == validation.contract_hash
     assert result.provenance["source"] == "gemini"

@@ -83,7 +83,10 @@ def _fit_lifestyle_script_to_tier(script: str, *, target_length_tier: Optional[i
 
 
 def _topic_hint(topic_template: str) -> str:
-    words = re.findall(r"[A-Za-z0-9]+", str(topic_template or ""))
+    words = re.findall(
+        r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+",
+        str(topic_template or ""),
+    )
     if not words:
         return "dein Alltag"
     return " ".join(words[:3])
@@ -117,16 +120,16 @@ def _synthesize_lifestyle_dialog_scripts(
     *,
     target_length_tier: Optional[int],
 ) -> DialogScripts:
-    hint = _topic_hint(topic_template)
     script = _fit_lifestyle_script_to_tier(
-        " ".join(
-            [
-                f"Wenn {hint} im Alltag mehr Kraft kostet, merkst du das oft erst nach mehreren kleinen Umwegen.",
-                "Prüfe den Weg vorher kurz und plane einen einfachen Ausweichschritt ein.",
-                "Damit musst du unterwegs weniger improvisieren und bleibst im Kopf deutlich ruhiger.",
-                "Genau solche Routinen nehmen Druck raus, wenn der Alltag sowieso schon genug Energie kostet.",
-                "So bleibt mehr Kraft für das, was du eigentlich vorhast, statt für zusätzliche Barrieren draufzugehen.",
-            ]
+        (
+            "Prüfe neue Wege vorab auf erreichbare Zugänge, Toiletten und mögliche "
+            "Umwege, bevor du deinen Ausflug beginnst. "
+            "Plane eine kurze Pause und eine gut erreichbare Alternative ein, falls "
+            "dein direkter Weg unerwartet blockiert ist. "
+            "Speichere wichtige Adressen und Telefonnummern griffbereit, damit du bei "
+            "Änderungen nicht lange nach Hilfe suchen musst. "
+            "So bleibt deine Energie für das eigentliche Ziel, statt durch vermeidbare "
+            "Barrieren verloren zu gehen."
         ),
         target_length_tier=target_length_tier,
     )
@@ -182,7 +185,7 @@ def generate_lifestyle_topics(
                     previously_used_hooks=retry_hooks if retry_hooks else None,
                     profile=resolved_profile,
                 )
-            except ValidationError as exc:
+            except (ValidationError, ValueError) as exc:
                 logger.warning(
                     "lifestyle_topic_generation_retry",
                     template_title=topic_template,
@@ -234,6 +237,7 @@ def generate_lifestyle_topics(
 
         if topic_data is None:
             topic_template = shuffled_templates[index % len(shuffled_templates)]
+            used_synthetic_fallback = False
             try:
                 dialog_scripts = generate_dialog_scripts_fn(
                     topic=topic_template,
@@ -241,7 +245,7 @@ def generate_lifestyle_topics(
                     previously_used_hooks=used_hooks if used_hooks else None,
                     profile=resolved_profile,
                 )
-            except ValidationError as exc:
+            except (ValidationError, ValueError) as exc:
                 logger.warning(
                     "lifestyle_topic_provider_exhausted_synthesizing_fallback",
                     template_title=topic_template,
@@ -252,6 +256,7 @@ def generate_lifestyle_topics(
                     topic_template,
                     target_length_tier=target_length_tier,
                 )
+                used_synthetic_fallback = True
             main_script = _fit_lifestyle_script_to_tier(
                 dialog_scripts.problem_agitate_solution[0],
                 target_length_tier=target_length_tier,
@@ -263,7 +268,11 @@ def generate_lifestyle_topics(
                 words = rotation.split()
                 cta = " ".join(words[-4:]) if len(words) > 4 else rotation
             topic_data = {
-                "title": _derive_lifestyle_title(main_script, rotation, topic_template),
+                "title": (
+                    topic_template
+                    if used_synthetic_fallback
+                    else _derive_lifestyle_title(main_script, rotation, topic_template)
+                ),
                 "template_title": topic_template,
                 "rotation": rotation,
                 "cta": cta,

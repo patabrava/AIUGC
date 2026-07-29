@@ -794,7 +794,10 @@ def _missing_semantic_lifestyle_candidates(
         remaining = count - len(candidates)
         if remaining <= 0:
             break
-        dedupe_inputs = lifestyle_existing + lifestyle_reserved
+        # Deterministic availability fallbacks are a batch-local recovery lane.
+        # Global history may shape the provider lane, but it must not number or
+        # exhaust the known-good fallback titles.
+        dedupe_inputs = lifestyle_reserved
         additions = reserve_lifestyle(
             fallback_builder(
                 count=remaining,

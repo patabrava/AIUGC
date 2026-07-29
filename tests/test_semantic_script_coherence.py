@@ -109,26 +109,17 @@ class _UnavailableLLM:
 
 
 def _sentence(index: int, word_count: int) -> str:
-    words = [
-        "Dieser",
-        f"Hinweis{index}",
-        "erklärt",
-        "dir",
-        "einen",
-        "konkreten",
-        "Zusammenhang",
-        "für",
-        "deine",
-        "nächste",
-        "sichere",
-        "Entscheidung",
-        "im",
-        "Alltag",
-        "klar",
-        "verständlich",
-        "und",
-        "vollständig",
+    sentence_banks = [
+        "Geprüfte Aufzugsmeldungen zeigen früh verlässliche Alternativen für spontane Termine ohne unnötige Wartezeit und hektische Rückwege heute deutlich",
+        "Breite Wendeflächen erleichtern sichere Richtungswechsel im engen Eingangsbereich und bewahren täglich wertvolle Kraft bei jedem Besuch zuverlässig",
+        "Aktuelle Baustellenhinweise verhindern überraschende Sperrungen während wichtiger Fahrten und nennen erreichbare Ersatzrouten rechtzeitig vor der Abreise klar",
+        "Gespeicherte Ansprechpartner organisieren passende Unterstützung direkt sobald technische Störungen auftreten oder fremde Hilfe kurzfristig notwendig wird unkompliziert",
+        "Niedrige Bedienelemente ermöglichen selbstständige Nutzung zuhause weil Tasten bequem erreichbar bleiben und klare Symbole jeden Schritt verständlich begleiten",
+        "Rutschfeste Bodenflächen geben dem Rollstuhl stabilen Halt beim Einsteigen und senken das Risiko gefährlicher Bewegungen auf nassen Wegen",
+        "Regelmäßige Wartung erhält die zuverlässige Funktion langfristig erkennt Verschleiß früh und schützt geplante Abläufe vor vermeidbaren Ausfällen wirksam",
+        "Früh gebuchte Mobilitätshilfen sichern ruhige Bahnreisen nennen eindeutige Treffpunkte und vermeiden belastende Suche auf unbekannten Bahnsteigen zuverlässig",
     ]
+    words = sentence_banks[index].split()
     return f"{' '.join(words[:word_count])}."
 
 
@@ -174,6 +165,34 @@ def test_acronym_source_heading_is_rejected_as_non_audience_copy():
         validate_semantic_script_audience_copy(script)
 
 
+@pytest.mark.parametrize(
+    "script",
+    [
+        (
+            "Als Rollstuhlnutzerin kennst du diese Unsicherheit, wenn Menschen "
+            "vermeintlich helfen wollen. Doch diese gut gemeinte, aber fehlgeleitete "
+            "Unterstützung führt oft zu unangebrachten Fragen oder bevormundendem "
+            "Verhalten. Stattdessen basiert ein respektvoller Umgang auf Natürlichkeit "
+            "und der Wahrnehmung als vollwertige Person. Schluss mit übergriffiger "
+            "Pseudo Hilfe. Dies führt häufig zu übergriffigem Verhalten und "
+            "unangebrachten Fragen, die bei Betroffenen als verletzend oder "
+            "diskriminierend empfunden werden."
+        ),
+        (
+            "Wenn PNV Umwege und im Alltag mehr Kraft kostet, merkst du das oft erst "
+            "nach mehreren kleinen Umwegen. Genau solche Routinen nehmen Druck raus, "
+            "wenn der Alltag sowieso schon genug Energie kostet. So bleibt mehr Kraft "
+            "für das, was du eigentlich vorhast, statt für zusätzliche Barrieren "
+            "draufzugehen. Gerade bei Wenn PNV Umwege summieren sich kleine Umwege "
+            "schneller, als viele von außen erwarten."
+        ),
+    ],
+)
+def test_repeated_live_source_claims_are_rejected_as_non_audience_copy(script):
+    with pytest.raises(ValueError, match="repeated source"):
+        validate_semantic_script_audience_copy(script)
+
+
 def test_audited_32_second_source_with_raw_url_uses_family_recovery():
     source = (
         "Als Rollstuhlnutzerin kennst du das: Ständig diese übergriffigen Blicke und "
@@ -199,6 +218,33 @@ def test_audited_32_second_source_with_raw_url_uses_family_recovery():
     validate_semantic_script_audience_copy(result.script)
     assert result.provenance["source"] == "deterministic_recovery"
     assert "http" not in result.script.casefold()
+
+
+def test_repetitive_audited_32_second_source_uses_family_recovery():
+    source = (
+        "Als Rollstuhlnutzerin kennst du diese Unsicherheit, wenn Menschen "
+        "vermeintlich helfen wollen. Doch diese gut gemeinte, aber fehlgeleitete "
+        "Unterstützung führt oft zu unangebrachten Fragen oder bevormundendem "
+        "Verhalten. Stattdessen basiert ein respektvoller Umgang auf Natürlichkeit "
+        "und der Wahrnehmung als vollwertige Person. Schluss mit übergriffiger "
+        "Pseudo Hilfe. Dies führt häufig zu übergriffigem Verhalten und "
+        "unangebrachten Fragen, die bei Betroffenen als verletzend oder "
+        "diskriminierend empfunden werden."
+    )
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Respektvoll helfen",
+        cta="Speichere dir die Hinweise.",
+        facts=[source],
+        recovery_facts=[VALUE_RECOVERY_SOURCE],
+        requested_duration_seconds=32,
+        llm_client=_UnavailableLLM(),
+    )
+
+    validate_semantic_script_audience_copy(result.script)
+    assert result.provenance["source"] == "deterministic_recovery"
+    assert "unangebrachten Fragen" not in result.script
 
 
 @pytest.mark.parametrize(

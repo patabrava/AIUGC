@@ -343,6 +343,31 @@ def test_semantic_lifestyle_force_fill_survives_exhausted_global_history(
     assert selected[0]["post_type"] == "lifestyle"
 
 
+def test_semantic_lifestyle_fallback_title_is_not_numbered_by_global_history(
+    monkeypatch,
+):
+    historical = [
+        {
+            "post_type": "lifestyle",
+            "title": fallback["title"],
+            "rotation": fallback["rotation"],
+        }
+        for fallback in handlers._LIFESTYLE_FALLBACK_CANDIDATES
+    ]
+    monkeypatch.setattr(handlers, "generate_lifestyle_topics", lambda **_kwargs: [])
+
+    selected = handlers._missing_semantic_lifestyle_candidates(
+        count=1,
+        used_family_identities=set(),
+        reserved_topics=[],
+        existing_topics=historical,
+    )
+
+    assert len(selected) == 1
+    assert selected[0]["title"] == handlers._LIFESTYLE_FALLBACK_CANDIDATES[0]["title"]
+    assert not re.search(r"\s\d+$", selected[0]["title"])
+
+
 def test_semantic_lifestyle_facts_use_full_dialog_script_before_short_rotation():
     full_script = _seven_take_script()
 

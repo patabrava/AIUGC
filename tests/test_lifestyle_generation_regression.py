@@ -10,6 +10,7 @@ from app.core.errors import ValidationError
 from app.core.video_profiles import get_script_duration_bounds, script_word_count
 import app.features.topics.lifestyle_runtime as lifestyle_runtime
 from app.features.topics.schemas import DialogScripts
+from app.features.topics.semantic_scripts import validate_semantic_script_audience_copy
 from app.features.topics.topic_validation import detect_spoken_copy_issues, get_prompt2_word_bounds
 
 
@@ -147,6 +148,44 @@ def test_generate_lifestyle_topics_synthesizes_tier_valid_fallback_after_prompt2
     min_words, max_words = get_script_duration_bounds("lifestyle", 32)
     assert min_words <= script_word_count(script) <= max_words, script
     assert len(calls) == 4
+    validate_semantic_script_audience_copy(script)
+    assert "PNV" not in script
+    assert generated[0]["title"] in {
+        "ÖPNV, Umwege und clevere Alltagsroutinen",
+        "Spontane Wege ohne Zusatzdruck planen",
+        "Freizeit mit Rollstuhl genießen",
+        "Alltägliche Herausforderungen meistern",
+        "Rollstuhl Alltag - praktische Hinweise",
+        "Barrierefreiheit im Alltag erleben",
+        "Erfahrungen aus der Gemeinschaft teilen",
+        "Wohnung, Türen und enge Übergänge entspannter meistern",
+        "Selbstbestimmt unterwegs trotz kleiner Barrieren",
+        "Was im Rollstuhl-Alltag wirklich Energie spart",
+    }
+
+
+@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
+def test_generate_lifestyle_topics_recovers_from_provider_value_error(
+    target_length_tier,
+):
+    def failing_generate_dialog_scripts(*_args, **_kwargs):
+        raise ValueError("provider returned an invalid topic-family payload")
+
+    generated = lifestyle_runtime.generate_lifestyle_topics(
+        count=1,
+        seed=20260514,
+        target_length_tier=target_length_tier,
+        generate_dialog_scripts_fn=failing_generate_dialog_scripts,
+    )
+
+    script = generated[0]["dialog_scripts"].problem_agitate_solution[0]
+    min_words, max_words = get_script_duration_bounds(
+        "lifestyle",
+        target_length_tier,
+    )
+    validate_semantic_script_audience_copy(script)
+    assert len(generated) == 1
+    assert min_words <= script_word_count(script) <= max_words
 
 
 def test_lifestyle_synthetic_fallback_uses_real_umlauts_and_no_anglicisms():

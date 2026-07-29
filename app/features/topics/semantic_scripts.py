@@ -70,6 +70,60 @@ _AUDIENCE_GENERIC_PADDING = re.compile(
     r")[.!?](?=\s|$)",
     re.IGNORECASE,
 )
+_AUDIENCE_REPETITION_STOPWORDS = frozenset(
+    {
+        "als",
+        "auch",
+        "auf",
+        "aus",
+        "bei",
+        "das",
+        "dein",
+        "deine",
+        "deinem",
+        "deinen",
+        "deiner",
+        "dem",
+        "den",
+        "der",
+        "des",
+        "die",
+        "dies",
+        "diese",
+        "diesem",
+        "diesen",
+        "dieser",
+        "dieses",
+        "doch",
+        "du",
+        "ein",
+        "eine",
+        "einem",
+        "einen",
+        "einer",
+        "eines",
+        "er",
+        "es",
+        "für",
+        "im",
+        "in",
+        "ist",
+        "mit",
+        "nach",
+        "nicht",
+        "oder",
+        "sie",
+        "so",
+        "und",
+        "von",
+        "vor",
+        "wenn",
+        "wie",
+        "zu",
+        "zum",
+        "zur",
+    }
+)
 _WORD_PATTERN = re.compile(
     r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*"
 )
@@ -452,6 +506,44 @@ def validate_semantic_script_audience_copy(script: str) -> None:
             "Semantic UGC script contains generic padding instead of a substantive "
             f"audience statement: {padding_match.group(0)!r}."
         )
+    sentences = [
+        sentence.strip()
+        for sentence in _SENTENCE_SPLIT.split(cleaned)
+        if sentence.strip()
+    ]
+    tokenized_sentences = [
+        [token.casefold() for token in _WORD_PATTERN.findall(sentence)]
+        for sentence in sentences
+    ]
+    seen_phrases: set[tuple[str, str, str]] = set()
+    for tokens in tokenized_sentences:
+        for start in range(max(0, len(tokens) - 2)):
+            phrase = tuple(tokens[start : start + 3])
+            if sum(token not in _AUDIENCE_REPETITION_STOPWORDS for token in phrase) < 2:
+                continue
+            if phrase in seen_phrases:
+                raise ValueError(
+                    "Semantic UGC script contains a repeated source phrase instead of advancing "
+                    f"the audience copy: {' '.join(phrase)!r}."
+                )
+            seen_phrases.add(phrase)
+    content_sets = [
+        {
+            token
+            for token in tokens
+            if token not in _AUDIENCE_REPETITION_STOPWORDS and len(token) > 2
+        }
+        for tokens in tokenized_sentences
+    ]
+    for left_index, left_tokens in enumerate(content_sets):
+        for right_tokens in content_sets[left_index + 1 :]:
+            shared = left_tokens & right_tokens
+            smaller_size = min(len(left_tokens), len(right_tokens))
+            if len(shared) >= 4 and smaller_size and len(shared) / smaller_size >= 0.35:
+                raise ValueError(
+                    "Semantic UGC script contains a repeated source claim instead of adding a "
+                    f"new audience statement: {sorted(shared)!r}."
+                )
     if "…" in cleaned or "..." in cleaned:
         raise ValueError(
             "Semantic UGC script must use complete statements without omitted source fragments."
