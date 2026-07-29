@@ -303,6 +303,62 @@ def test_get_batch_status_requeues_stalled_s1_batch(monkeypatch):
     assert scheduled == [("batch-recover", "status_recovery")]
 
 
+def test_get_batch_status_requeues_partial_semantic_batch_with_stale_retry_progress(
+    monkeypatch,
+):
+    scheduled = []
+    progress_state = {
+        "stage": "retrying",
+        "stage_label": "Temporary connection interrupted",
+        "is_retrying": True,
+    }
+
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_by_id",
+        lambda batch_id: {
+            "id": batch_id,
+            "brand": "Partial Semantic",
+            "state": "S1_SETUP",
+            "creation_mode": "semantic_ugc",
+            "updated_at": "2026-07-29T15:00:00+00:00",
+            "post_type_counts": {"value": 1, "lifestyle": 1, "product": 1},
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda batch_id: {
+            "posts_count": 2,
+            "posts_by_state": {"value": 1, "product": 1},
+        },
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "semantic_batch_posts_are_resumable",
+        lambda batch, posts_by_state: True,
+    )
+    monkeypatch.setattr(batch_handlers, "get_seeding_progress", lambda batch_id: dict(progress_state))
+    monkeypatch.setattr(batch_handlers, "is_batch_discovery_active", lambda batch_id: False)
+    monkeypatch.setattr(
+        batch_handlers,
+        "update_seeding_progress",
+        lambda batch_id, **progress: progress_state.update(progress) or dict(progress_state),
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "schedule_batch_discovery",
+        lambda batch_id, reason: scheduled.append((batch_id, reason)) or True,
+    )
+
+    response = asyncio.run(batch_handlers.get_batch_status("batch-partial-stale"))
+
+    assert response.ok is True
+    assert response.data["progress"]["stage"] == "booting"
+    assert response.data["progress"]["posts_created"] == 2
+    assert scheduled == [("batch-partial-stale", "status_recovery")]
+
+
 def test_get_batch_status_skips_manual_drafts_even_on_legacy_rows(monkeypatch):
     scheduled = []
 

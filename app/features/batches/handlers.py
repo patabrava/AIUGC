@@ -1650,6 +1650,23 @@ async def get_batch_status(batch_id: str):
                         schedule_batch_discovery(batch_id, reason="coverage_recovery")
                         _COVERAGE_RECOVERY_LAST_SCHEDULED_AT[batch_id] = now
                 progress = get_seeding_progress(batch_id) or progress
+            else:
+                progress = update_seeding_progress(
+                    batch_id,
+                    state=batch["state"],
+                    stage="booting",
+                    stage_label="Resuming interrupted topic generation",
+                    detail_message="The saved scripts are intact. Generating the missing script families now.",
+                    posts_created=posts_summary["posts_count"],
+                    expected_posts=sum((batch.get("post_type_counts") or {}).values()),
+                    current_post_type=None,
+                    attempt=None,
+                    max_attempts=None,
+                    is_retrying=True,
+                    retry_message="A stale generation run was detected and restarted automatically.",
+                )
+                schedule_batch_discovery(batch_id, reason="status_recovery")
+                progress = get_seeding_progress(batch_id) or progress
 
         payload = {
             "id": batch["id"],
