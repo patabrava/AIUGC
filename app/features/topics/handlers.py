@@ -143,16 +143,50 @@ _LIFESTYLE_FALLBACK_CANDIDATES: List[Dict[str, str]] = [
     },
 ]
 
-_SEMANTIC_LIFESTYLE_RECOVERY_SOURCE = (
-    "Prüfe unbekannte Wege vorab auf Zugänge, erreichbare Toiletten und mögliche "
-    "Umwege, bevor du deinen Ausflug startest. "
-    "Plane eine kurze Pause und eine erreichbare Alternative ein, falls der direkte "
-    "Weg unterwegs plötzlich blockiert ist. "
-    "Speichere wichtige Adressen und Telefonnummern vorher griffbereit, damit du bei "
-    "Änderungen nicht lange suchen musst. "
-    "So bleibt mehr Energie für dein eigentliches Ziel, und kleine Barrieren "
-    "bestimmen nicht deinen gesamten Tagesablauf."
-)
+_SEMANTIC_RECOVERY_COPY = {
+    "value": {
+        "title": "Barrieren früh erkennen und Wege besser planen",
+        "cta": "Speichere dir diese Prüfschritte.",
+        "source": (
+            "Prüfe öffentliche Wege heute vorab auf abgesenkte Bordsteine, sichere "
+            "Querungen und erreichbare Alternativen für unerwartete Sperrungen. "
+            "Dokumentiere konkrete Barrieren mit Ort, Zeitpunkt und Foto, damit "
+            "zuständige Stellen den Hinweis nachvollziehen können. "
+            "Frage bei Veranstaltern oder Behörden früh nach Zugängen, Begleitung und "
+            "einer verlässlichen Ausweichroute für deinen Termin. "
+            "So sparst du unnötige Umwege und kannst Entscheidungen auf klare, "
+            "überprüfbare Informationen statt Vermutungen stützen."
+        ),
+    },
+    "lifestyle": {
+        "title": "Unbekannte Wege ohne unnötigen Zusatzdruck planen",
+        "cta": "Speichere dir diese Planung.",
+        "source": (
+            "Prüfe unbekannte Wege vorab auf Zugänge, erreichbare Toiletten und "
+            "mögliche Umwege, bevor du deinen Ausflug startest. "
+            "Plane eine kurze Pause und eine erreichbare Alternative ein, falls der "
+            "direkte Weg unterwegs plötzlich blockiert ist. "
+            "Speichere wichtige Adressen und Telefonnummern vorher griffbereit, damit "
+            "du bei Änderungen nicht lange suchen musst. "
+            "So bleibt mehr Energie für dein eigentliches Ziel, und kleine Barrieren "
+            "bestimmen nicht deinen gesamten Tagesablauf."
+        ),
+    },
+    "product": {
+        "title": "Plattformlift passend für den Alltag planen",
+        "cta": "Kläre die passende Lösung für dein Zuhause.",
+        "source": (
+            "Ein Plattformlift kann gerade, kurvige, steile oder enge Treppen für "
+            "deinen Alltag wieder sicher nutzbar machen. "
+            "Vor dem Einbau werden Fahrweg, Platz, Tragkraft und Bedienung gemeinsam "
+            "an deine konkrete Wohnsituation angepasst. "
+            "Eine verständliche Steuerung und klar erreichbare Haltepunkte erleichtern "
+            "dir die regelmäßige Nutzung ohne unnötige Umwege. "
+            "Kläre Wartung, mögliche Nachrüstung und die gewünschte Ausstattung früh, "
+            "damit die Lösung langfristig zu dir passt."
+        ),
+    },
+}
 
 
 def _build_lifestyle_fallback_candidates(
@@ -829,17 +863,18 @@ def _create_semantic_post_from_candidate(
         title=title,
         cta=cta,
         facts=facts,
-        recovery_facts=(
-            [_SEMANTIC_LIFESTYLE_RECOVERY_SOURCE]
-            if post_type == "lifestyle"
-            else None
-        ),
+        recovery_facts=[_SEMANTIC_RECOVERY_COPY[post_type]["source"]],
         requested_duration_seconds=contract.requested_duration_seconds,
         actor_context=_semantic_actor_context(batch),
         research_provenance=research_provenance,
         source_urls=[source["url"] for source in sources],
         maximum_seconds=contract.maximum_duration_seconds,
     )
+    if generated.provenance.get("source") == "deterministic_recovery":
+        title = _SEMANTIC_RECOVERY_COPY[post_type]["title"]
+        cta = _SEMANTIC_RECOVERY_COPY[post_type]["cta"]
+        seed_payload["canonical_topic"] = title
+        seed_payload["cta"] = cta
     validation = validate_semantic_script(
         generated.script,
         requested_duration_seconds=contract.requested_duration_seconds,

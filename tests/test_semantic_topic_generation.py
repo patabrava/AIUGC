@@ -191,7 +191,7 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     assert semantic_call["cta"] == candidate["cta"]
     assert semantic_call["facts"][0] == candidate["script"]
     assert len(semantic_call["facts"]) <= 8
-    assert bool(semantic_call["recovery_facts"]) is (post_type == "lifestyle")
+    assert len(semantic_call["recovery_facts"]) == 1
     assert "Nora" in semantic_call["actor_context"]
 
     created = created_posts[0]
@@ -210,6 +210,53 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     assert len(created["seed_data"]["semantic_planned_beats"]) == 7
     if post_type == "value":
         assert created["seed_data"]["source_urls"] == candidate["source_urls"]
+
+
+@pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
+def test_deterministic_recovery_uses_matching_family_metadata(monkeypatch, post_type):
+    contract = build_semantic_duration_contract(8)
+    candidate = _candidate(post_type)
+    recovery = handlers._SEMANTIC_RECOVERY_COPY[post_type]
+    recovery_script = (
+        "Prüfe deinen Weg früh und speichere eine verlässliche Alternative für "
+        "unerwartete Hindernisse vor deinem Termin."
+    )
+    monkeypatch.setattr(
+        handlers,
+        "generate_semantic_script",
+        lambda **_kwargs: SemanticScriptResult(
+            script=recovery_script,
+            contract_hash=contract.contract_hash,
+            provenance={
+                "source": "deterministic_recovery",
+                "post_type": post_type,
+            },
+        ),
+    )
+    monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *_args: None)
+    monkeypatch.setattr(handlers, "mark_topic_script_used", lambda **_kwargs: None)
+    created_posts = []
+    monkeypatch.setattr(
+        handlers,
+        "create_post_for_batch",
+        lambda **kwargs: created_posts.append(kwargs) or {"id": "post-recovery"},
+    )
+
+    handlers._create_semantic_post_from_candidate(
+        batch={"id": "batch-recovery", "actor_identity_snapshot": {"name": "Nora"}},
+        post_type=post_type,
+        candidate=candidate,
+        contract=contract,
+        semantic_slot_id=f"{post_type}:0",
+        semantic_family_identity=f"family:{post_type}",
+        semantic_rotation_index=0,
+    )
+
+    created = created_posts[0]
+    assert created["topic_title"] == recovery["title"]
+    assert created["topic_cta"] == recovery["cta"]
+    assert created["seed_data"]["canonical_topic"] == recovery["title"]
+    assert created["seed_data"]["cta"] == recovery["cta"]
 
 
 def test_semantic_provider_failure_builds_distinct_fact_aware_fallback():

@@ -1360,6 +1360,39 @@ def _build_audience_safe_fallback_script(
     return script
 
 
+def _build_ranked_fallback_script(
+    *,
+    title: str,
+    cta: str,
+    facts: tuple[str, ...],
+    recovery_facts: tuple[str, ...],
+    contract: SemanticDurationContract,
+) -> tuple[str, str]:
+    last_error: Optional[ValueError] = None
+    for source, source_facts in (
+        ("fallback", facts),
+        ("deterministic_recovery", recovery_facts),
+    ):
+        if not source_facts:
+            continue
+        try:
+            script = _build_audience_safe_fallback_script(
+                title=title,
+                cta=cta,
+                facts=source_facts,
+                contract=contract,
+            )
+        except ValueError as exc:
+            last_error = exc
+            continue
+        return script, source
+    if last_error is not None:
+        raise last_error
+    raise ValueError(
+        "Semantic UGC generation has no complete source statements for recovery."
+    )
+
+
 def generate_semantic_script(
     *,
     post_type: str,
@@ -1379,7 +1412,6 @@ def generate_semantic_script(
     normalized_post_type = _normalize_post_type(post_type)
     fact_values = _normalize_facts(facts)
     recovery_fact_values = _normalize_facts(recovery_facts)
-    fallback_fact_values = (*fact_values, *recovery_fact_values)
     contract = build_semantic_duration_contract(
         requested_duration_seconds,
         maximum_seconds=maximum_seconds,
@@ -1441,7 +1473,7 @@ def generate_semantic_script(
                     script=script,
                     contract_hash=contract.contract_hash,
                     provenance=_build_result_provenance(
-                        source="fallback",
+                        source="deterministic_recovery",
                         post_type=normalized_post_type,
                         research_provenance=research_provenance,
                         source_urls=source_urls,
@@ -1467,17 +1499,18 @@ def generate_semantic_script(
             thinking_budget=0,
         )
     except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
-        script = _build_audience_safe_fallback_script(
+        script, fallback_source = _build_ranked_fallback_script(
             title=title,
             cta=cta,
-            facts=fallback_fact_values,
+            facts=fact_values,
+            recovery_facts=recovery_fact_values,
             contract=contract,
         )
         return SemanticScriptResult(
             script=script,
             contract_hash=contract.contract_hash,
             provenance=_build_result_provenance(
-                source="fallback",
+                source=fallback_source,
                 post_type=normalized_post_type,
                 research_provenance=research_provenance,
                 source_urls=source_urls,
@@ -1509,17 +1542,18 @@ def generate_semantic_script(
                 thinking_budget=0,
             )
         except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
-            script = _build_audience_safe_fallback_script(
+            script, fallback_source = _build_ranked_fallback_script(
                 title=title,
                 cta=cta,
-                facts=fallback_fact_values,
+                facts=fact_values,
+                recovery_facts=recovery_fact_values,
                 contract=contract,
             )
             return SemanticScriptResult(
                 script=script,
                 contract_hash=contract.contract_hash,
                 provenance=_build_result_provenance(
-                    source="fallback",
+                    source=fallback_source,
                     post_type=normalized_post_type,
                     research_provenance=research_provenance,
                     source_urls=source_urls,
@@ -1548,17 +1582,18 @@ def generate_semantic_script(
                     thinking_budget=0,
                 )
             except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
-                script = _build_audience_safe_fallback_script(
+                script, fallback_source = _build_ranked_fallback_script(
                     title=title,
                     cta=cta,
-                    facts=fallback_fact_values,
+                    facts=fact_values,
+                    recovery_facts=recovery_fact_values,
                     contract=contract,
                 )
                 return SemanticScriptResult(
                     script=script,
                     contract_hash=contract.contract_hash,
                     provenance=_build_result_provenance(
-                        source="fallback",
+                        source=fallback_source,
                         post_type=normalized_post_type,
                         research_provenance=research_provenance,
                         source_urls=source_urls,
@@ -1574,13 +1609,13 @@ def generate_semantic_script(
                 )
                 validate_semantic_script_audience_copy(recovery_script)
             except ValueError:
-                script = _build_audience_safe_fallback_script(
+                script, source = _build_ranked_fallback_script(
                     title=title,
                     cta=cta,
-                    facts=fallback_fact_values,
+                    facts=fact_values,
+                    recovery_facts=recovery_fact_values,
                     contract=contract,
                 )
-                source = "fallback"
             else:
                 script = recovery_script
                 source = "gemini_recovery"

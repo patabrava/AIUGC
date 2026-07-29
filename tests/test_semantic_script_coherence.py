@@ -80,6 +80,28 @@ LIFESTYLE_RECOVERY_SOURCE = (
     "bestimmen nicht deinen gesamten Tagesablauf."
 )
 
+VALUE_RECOVERY_SOURCE = (
+    "Prüfe öffentliche Wege heute vorab auf abgesenkte Bordsteine, sichere Querungen "
+    "und erreichbare Alternativen für unerwartete Sperrungen. "
+    "Dokumentiere konkrete Barrieren mit Ort, Zeitpunkt und Foto, damit zuständige "
+    "Stellen den Hinweis nachvollziehen können. "
+    "Frage bei Veranstaltern oder Behörden früh nach Zugängen, Begleitung und einer "
+    "verlässlichen Ausweichroute für deinen Termin. "
+    "So sparst du unnötige Umwege und kannst Entscheidungen auf klare, überprüfbare "
+    "Informationen statt Vermutungen stützen."
+)
+
+PRODUCT_RECOVERY_SOURCE = (
+    "Ein Plattformlift kann gerade, kurvige, steile oder enge Treppen für deinen "
+    "Alltag wieder sicher nutzbar machen. "
+    "Vor dem Einbau werden Fahrweg, Platz, Tragkraft und Bedienung gemeinsam an deine "
+    "konkrete Wohnsituation angepasst. "
+    "Eine verständliche Steuerung und klar erreichbare Haltepunkte erleichtern dir "
+    "die regelmäßige Nutzung ohne unnötige Umwege. "
+    "Kläre Wartung, mögliche Nachrüstung und die gewünschte Ausstattung früh, damit "
+    "die Lösung langfristig zu dir passt."
+)
+
 
 class _UnavailableLLM:
     def generate_gemini_text(self, **_kwargs):
@@ -233,14 +255,26 @@ def test_valid_32_second_audited_source_bypasses_provider_regeneration(post_type
     assert "außerdem gilt" not in result.script.casefold()
 
 
+@pytest.mark.parametrize(
+    ("post_type", "recovery_source"),
+    [
+        ("value", VALUE_RECOVERY_SOURCE),
+        ("lifestyle", LIFESTYLE_RECOVERY_SOURCE),
+        ("product", PRODUCT_RECOVERY_SOURCE),
+    ],
+)
 @pytest.mark.parametrize("seconds", [8, 16, 32])
-def test_lifestyle_provider_exhaustion_uses_complete_recovery_source(seconds):
+def test_provider_exhaustion_uses_complete_family_recovery_source(
+    post_type,
+    recovery_source,
+    seconds,
+):
     result = generate_semantic_script(
-        post_type="lifestyle",
+        post_type=post_type,
         title="Spontane Freizeit planbar machen",
         cta="Speichere dir diese Planung.",
-        facts=[INCOMPATIBLE_LIFESTYLE_SOURCE],
-        recovery_facts=[LIFESTYLE_RECOVERY_SOURCE],
+        facts=["Kurzer Hinweis."],
+        recovery_facts=[recovery_source],
         requested_duration_seconds=seconds,
         llm_client=_UnavailableLLM(),
     )
@@ -251,7 +285,7 @@ def test_lifestyle_provider_exhaustion_uses_complete_recovery_source(seconds):
 
     validate_semantic_script_audience_copy(result.script)
     assert validation.planned_take_count == validation.minimum_take_count
-    assert result.provenance["source"] == "fallback"
+    assert result.provenance["source"] == "deterministic_recovery"
     assert "außerdem gilt" not in result.script.casefold()
     assert "…" not in result.script
 
