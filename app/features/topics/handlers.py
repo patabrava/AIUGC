@@ -365,6 +365,22 @@ def _semantic_slot_recovery_title(post_type: str, slot_index: int) -> str:
     return titles[slot_index % len(titles)]
 
 
+def _semantic_script_uses_recovery_source(script: str, recovery_source: str) -> bool:
+    def statements(value: str) -> set[str]:
+        return {
+            re.sub(r"\s+", " ", statement).strip().casefold()
+            for statement in re.split(r"(?<=[.!?])\s+", value)
+            if statement.strip()
+        }
+
+    script_statements = statements(script)
+    recovery_statements = statements(recovery_source)
+    if not script_statements or not recovery_statements:
+        return False
+    matched = len(script_statements & recovery_statements)
+    return matched >= max(2, (len(script_statements) + 1) // 2)
+
+
 def _force_fill_lifestyle_candidates(
     *,
     count: int,
@@ -1020,7 +1036,13 @@ def _create_semantic_post_from_candidate(
     uses_slot_recovery = bool(
         candidate.get("semantic_recovery_title")
         and recovery_source
-        and classify_script_overlap(generated.script, recovery_source)
+        and (
+            classify_script_overlap(generated.script, recovery_source)
+            or _semantic_script_uses_recovery_source(
+                generated.script,
+                recovery_source,
+            )
+        )
     )
     if (
         generated.provenance.get("source") == "deterministic_recovery"

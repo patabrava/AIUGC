@@ -432,7 +432,12 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
             provenance={"source": "fallback", "post_type": post_type},
         ),
     )
-    monkeypatch.setattr(handlers, "classify_script_overlap", lambda *_args: True)
+    monkeypatch.setattr(handlers, "classify_script_overlap", lambda *_args: None)
+    monkeypatch.setattr(
+        handlers,
+        "_semantic_script_uses_recovery_source",
+        lambda *_args: True,
+    )
     monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *_args: None)
     monkeypatch.setattr(handlers, "mark_topic_script_used", lambda **_kwargs: None)
     created_posts = []
@@ -457,6 +462,18 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
     assert created["topic_title"] == expected_title
     assert created["seed_data"]["canonical_topic"] == expected_title
     assert created["topic_title"] != candidate["title"]
+
+
+@pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
+def test_recovery_source_detection_accepts_cropped_rotated_scripts(post_type):
+    recovery_source = handlers._semantic_slot_recovery_source(post_type, 1)
+    recovery_statements = re.split(r"(?<=[.!?])\s+", recovery_source)
+    cropped_script = " ".join(recovery_statements[:7])
+
+    assert handlers._semantic_script_uses_recovery_source(
+        cropped_script,
+        recovery_source,
+    )
 
 
 def test_semantic_provider_failure_builds_distinct_fact_aware_fallback():
