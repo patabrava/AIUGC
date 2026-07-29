@@ -163,6 +163,17 @@ def test_raw_source_url_is_rejected_as_non_audience_copy():
         validate_semantic_script_audience_copy(script)
 
 
+def test_acronym_source_heading_is_rejected_as_non_audience_copy():
+    script = (
+        "Halte für wichtige Geräte immer einen geladenen Reserve-Akku bereit. "
+        "Implantierte Defibrillatoren (ICD): Eine schnelle Batterieentleerung kann "
+        "die lebensrettende Schockfunktion beeinträchtigen."
+    )
+
+    with pytest.raises(ValueError, match="external reference"):
+        validate_semantic_script_audience_copy(script)
+
+
 def test_audited_32_second_source_with_raw_url_uses_family_recovery():
     source = (
         "Als Rollstuhlnutzerin kennst du das: Ständig diese übergriffigen Blicke und "

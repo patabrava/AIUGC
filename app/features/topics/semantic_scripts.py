@@ -52,7 +52,9 @@ _AUDIENCE_COPY_SCAFFOLDING = re.compile(
 )
 _AUDIENCE_EXTERNAL_REFERENCE = re.compile(
     r"(?:https?://|www\.)\S+|"
-    r"\b(?:quelle|source|weitere\s+informationen)\s*:\s*\S+",
+    r"\b(?:quelle|source|weitere\s+informationen)\s*:\s*\S+|"
+    r"(?:^|(?<=[.!?])\s+)[A-ZÄÖÜ][^.!?]{0,60}"
+    r"\([A-Z0-9-]{2,10}\)\s*:",
     re.IGNORECASE,
 )
 _AUDIENCE_ANAPHORIC_OPENING = re.compile(
