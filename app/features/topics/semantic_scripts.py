@@ -1366,6 +1366,7 @@ def generate_semantic_script(
     title: str,
     cta: str,
     facts: Optional[Iterable[str]],
+    recovery_facts: Optional[Iterable[str]] = None,
     requested_duration_seconds: int,
     llm_client: Optional[Any] = None,
     language: str = "Deutsch",
@@ -1377,6 +1378,8 @@ def generate_semantic_script(
     """Generate and validate one dynamic Semantic UGC script."""
     normalized_post_type = _normalize_post_type(post_type)
     fact_values = _normalize_facts(facts)
+    recovery_fact_values = _normalize_facts(recovery_facts)
+    fallback_fact_values = (*fact_values, *recovery_fact_values)
     contract = build_semantic_duration_contract(
         requested_duration_seconds,
         maximum_seconds=maximum_seconds,
@@ -1423,6 +1426,27 @@ def generate_semantic_script(
                     source_urls=source_urls,
                 ),
             )
+        if recovery_fact_values:
+            try:
+                script = _build_audience_safe_fallback_script(
+                    title=title,
+                    cta=cta,
+                    facts=recovery_fact_values,
+                    contract=contract,
+                )
+            except ValueError:
+                pass
+            else:
+                return SemanticScriptResult(
+                    script=script,
+                    contract_hash=contract.contract_hash,
+                    provenance=_build_result_provenance(
+                        source="fallback",
+                        post_type=normalized_post_type,
+                        research_provenance=research_provenance,
+                        source_urls=source_urls,
+                    ),
+                )
     prompt = build_semantic_script_prompt(
         post_type=normalized_post_type,
         title=title,
@@ -1446,7 +1470,7 @@ def generate_semantic_script(
         script = _build_audience_safe_fallback_script(
             title=title,
             cta=cta,
-            facts=fact_values,
+            facts=fallback_fact_values,
             contract=contract,
         )
         return SemanticScriptResult(
@@ -1488,7 +1512,7 @@ def generate_semantic_script(
             script = _build_audience_safe_fallback_script(
                 title=title,
                 cta=cta,
-                facts=fact_values,
+                facts=fallback_fact_values,
                 contract=contract,
             )
             return SemanticScriptResult(
@@ -1527,7 +1551,7 @@ def generate_semantic_script(
                 script = _build_audience_safe_fallback_script(
                     title=title,
                     cta=cta,
-                    facts=fact_values,
+                    facts=fallback_fact_values,
                     contract=contract,
                 )
                 return SemanticScriptResult(
@@ -1553,7 +1577,7 @@ def generate_semantic_script(
                 script = _build_audience_safe_fallback_script(
                     title=title,
                     cta=cta,
-                    facts=fact_values,
+                    facts=fallback_fact_values,
                     contract=contract,
                 )
                 source = "fallback"

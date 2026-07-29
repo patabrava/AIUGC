@@ -191,6 +191,7 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     assert semantic_call["cta"] == candidate["cta"]
     assert semantic_call["facts"][0] == candidate["script"]
     assert len(semantic_call["facts"]) <= 8
+    assert bool(semantic_call["recovery_facts"]) is (post_type == "lifestyle")
     assert "Nora" in semantic_call["actor_context"]
 
     created = created_posts[0]

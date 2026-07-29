@@ -143,6 +143,17 @@ _LIFESTYLE_FALLBACK_CANDIDATES: List[Dict[str, str]] = [
     },
 ]
 
+_SEMANTIC_LIFESTYLE_RECOVERY_SOURCE = (
+    "Prüfe unbekannte Wege vorab auf Zugänge, erreichbare Toiletten und mögliche "
+    "Umwege, bevor du deinen Ausflug startest. "
+    "Plane eine kurze Pause und eine erreichbare Alternative ein, falls der direkte "
+    "Weg unterwegs plötzlich blockiert ist. "
+    "Speichere wichtige Adressen und Telefonnummern vorher griffbereit, damit du bei "
+    "Änderungen nicht lange suchen musst. "
+    "So bleibt mehr Energie für dein eigentliches Ziel, und kleine Barrieren "
+    "bestimmen nicht deinen gesamten Tagesablauf."
+)
+
 
 def _build_lifestyle_fallback_candidates(
     *,
@@ -818,6 +829,11 @@ def _create_semantic_post_from_candidate(
         title=title,
         cta=cta,
         facts=facts,
+        recovery_facts=(
+            [_SEMANTIC_LIFESTYLE_RECOVERY_SOURCE]
+            if post_type == "lifestyle"
+            else None
+        ),
         requested_duration_seconds=contract.requested_duration_seconds,
         actor_context=_semantic_actor_context(batch),
         research_provenance=research_provenance,

@@ -59,6 +59,27 @@ PRODUCTION_SAFE_SOURCE = (
     "deine konkrete Wohnsituation sinnvoll abgestimmt."
 )
 
+INCOMPATIBLE_LIFESTYLE_SOURCE = (
+    "Spontane Freizeit braucht im Rollstuhl oft mehr Planung als man von außen sieht. "
+    "Mit einer klaren Routine bleibst du im Alltag trotzdem deutlich entspannter. "
+    "Genau solche Kleinigkeiten entscheiden oft darüber, ob sich ein Weg leicht oder "
+    "unnötig anstrengend anfühlt. "
+    "Darüber wird selten gesprochen, obwohl es im Rollstuhl-Alltag ständig wieder "
+    "passiert. "
+    "Wenn du das einmal sauber gelöst hast, sparst du dir später Zeit, Kraft und Nerven."
+)
+
+LIFESTYLE_RECOVERY_SOURCE = (
+    "Prüfe unbekannte Wege vorab auf Zugänge, erreichbare Toiletten und mögliche "
+    "Umwege, bevor du deinen Ausflug startest. "
+    "Plane eine kurze Pause und eine erreichbare Alternative ein, falls der direkte "
+    "Weg unterwegs plötzlich blockiert ist. "
+    "Speichere wichtige Adressen und Telefonnummern vorher griffbereit, damit du bei "
+    "Änderungen nicht lange suchen musst. "
+    "So bleibt mehr Energie für dein eigentliches Ziel, und kleine Barrieren "
+    "bestimmen nicht deinen gesamten Tagesablauf."
+)
+
 
 class _UnavailableLLM:
     def generate_gemini_text(self, **_kwargs):
@@ -210,6 +231,29 @@ def test_valid_32_second_audited_source_bypasses_provider_regeneration(post_type
     assert validation.planned_take_count == 4
     assert result.script.count("Plattformlift") == 1
     assert "außerdem gilt" not in result.script.casefold()
+
+
+@pytest.mark.parametrize("seconds", [8, 16, 32])
+def test_lifestyle_provider_exhaustion_uses_complete_recovery_source(seconds):
+    result = generate_semantic_script(
+        post_type="lifestyle",
+        title="Spontane Freizeit planbar machen",
+        cta="Speichere dir diese Planung.",
+        facts=[INCOMPATIBLE_LIFESTYLE_SOURCE],
+        recovery_facts=[LIFESTYLE_RECOVERY_SOURCE],
+        requested_duration_seconds=seconds,
+        llm_client=_UnavailableLLM(),
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=seconds,
+    )
+
+    validate_semantic_script_audience_copy(result.script)
+    assert validation.planned_take_count == validation.minimum_take_count
+    assert result.provenance["source"] == "fallback"
+    assert "außerdem gilt" not in result.script.casefold()
+    assert "…" not in result.script
 
 
 @pytest.mark.parametrize("seconds", range(8, 61))
