@@ -323,6 +323,22 @@ def test_non_substantive_source_sentences_are_rejected(script, message):
         validate_semantic_script_audience_copy(script)
 
 
+def test_semantic_script_rejects_verbatim_editorial_topic_title():
+    title = (
+        "Handreichung oder Hürde? Die drei größten Helfer-Fehler, "
+        "die Rollstuhlfahrende nerven"
+    )
+    script = (
+        "Gut gemeinte Hilfe wird zur Hürde, wenn sie ohne Rückfrage beginnt. "
+        "Handreichung oder Hürde? Die drei größten Helfer-Fehler, die "
+        "Rollstuhlfahrende nerven. Frage zuerst, welche Unterstützung wirklich "
+        "gewünscht ist."
+    )
+
+    with pytest.raises(ValueError, match="editorial topic title"):
+        validate_semantic_script_audience_copy(script, topic_title=title)
+
+
 @pytest.mark.parametrize(
     "source",
     [

@@ -473,9 +473,27 @@ def validate_semantic_script(
     )
 
 
-def validate_semantic_script_audience_copy(script: str) -> None:
+def validate_semantic_script_audience_copy(
+    script: str,
+    *,
+    topic_title: Optional[str] = None,
+) -> None:
     """Reject recovery/debug scaffolding that must never become spoken UGC copy."""
     cleaned = " ".join(str(script or "").split())
+    normalized_script_words = [
+        token.casefold() for token in _WORD_PATTERN.findall(cleaned)
+    ]
+    normalized_title_words = [
+        token.casefold() for token in _WORD_PATTERN.findall(str(topic_title or ""))
+    ]
+    if (
+        len(normalized_title_words) >= 8
+        and " ".join(normalized_title_words) in " ".join(normalized_script_words)
+    ):
+        raise ValueError(
+            "Semantic UGC script repeats the editorial topic title instead of "
+            "turning it into natural audience copy."
+        )
     match = _INTERNAL_FALLBACK_COPY.search(cleaned)
     if match:
         raise ValueError(
@@ -1490,7 +1508,7 @@ def _build_audience_safe_fallback_script(
         facts=facts,
         contract=contract,
     )
-    validate_semantic_script_audience_copy(script)
+    validate_semantic_script_audience_copy(script, topic_title=title)
     return script
 
 
@@ -1559,7 +1577,10 @@ def generate_semantic_script(
                     requested_duration_seconds=requested_duration_seconds,
                     maximum_seconds=contract.maximum_duration_seconds,
                 )
-                validate_semantic_script_audience_copy(audited_script)
+                validate_semantic_script_audience_copy(
+                    audited_script,
+                    topic_title=title,
+                )
             except ValueError:
                 continue
             return SemanticScriptResult(
@@ -1660,7 +1681,7 @@ def generate_semantic_script(
             requested_duration_seconds=requested_duration_seconds,
             maximum_seconds=contract.maximum_duration_seconds,
         )
-        validate_semantic_script_audience_copy(script)
+        validate_semantic_script_audience_copy(script, topic_title=title)
     except ValueError as validation_error:
         repair_prompt = _build_semantic_repair_prompt(
             original_prompt=prompt,
@@ -1701,7 +1722,10 @@ def generate_semantic_script(
                 requested_duration_seconds=requested_duration_seconds,
                 maximum_seconds=contract.maximum_duration_seconds,
             )
-            validate_semantic_script_audience_copy(repaired_script)
+            validate_semantic_script_audience_copy(
+                repaired_script,
+                topic_title=title,
+            )
         except ValueError:
             recovery_prompt = _build_semantic_recovery_prompt(
                 original_prompt=prompt,
@@ -1741,7 +1765,10 @@ def generate_semantic_script(
                     requested_duration_seconds=requested_duration_seconds,
                     maximum_seconds=contract.maximum_duration_seconds,
                 )
-                validate_semantic_script_audience_copy(recovery_script)
+                validate_semantic_script_audience_copy(
+                    recovery_script,
+                    topic_title=title,
+                )
             except ValueError:
                 script, source = _build_ranked_fallback_script(
                     title=title,

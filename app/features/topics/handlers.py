@@ -914,7 +914,7 @@ def _create_semantic_post_from_candidate(
         requested_duration_seconds=contract.requested_duration_seconds,
         maximum_seconds=contract.maximum_duration_seconds,
     )
-    validate_semantic_script_audience_copy(generated.script)
+    validate_semantic_script_audience_copy(generated.script, topic_title=title)
     if generated.contract_hash != contract.contract_hash:
         raise ValueError("Semantic script result does not match the batch duration contract.")
 
