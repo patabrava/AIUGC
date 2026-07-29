@@ -46,6 +46,11 @@ _AUDIENCE_COPY_SCAFFOLDING = re.compile(
     r"\baußerdem\s+gilt\s*:",
     re.IGNORECASE,
 )
+_AUDIENCE_EXTERNAL_REFERENCE = re.compile(
+    r"(?:https?://|www\.)\S+|"
+    r"\b(?:quelle|source|weitere\s+informationen)\s*:\s*\S+",
+    re.IGNORECASE,
+)
 _WORD_PATTERN = re.compile(
     r"[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*"
 )
@@ -409,6 +414,12 @@ def validate_semantic_script_audience_copy(script: str) -> None:
         raise ValueError(
             "Semantic UGC script contains recovery scaffolding instead of audience copy: "
             f"{scaffold_match.group(0)!r}."
+        )
+    reference_match = _AUDIENCE_EXTERNAL_REFERENCE.search(cleaned)
+    if reference_match:
+        raise ValueError(
+            "Semantic UGC script contains an external reference instead of spoken "
+            f"audience copy: {reference_match.group(0)!r}."
         )
     if "…" in cleaned or "..." in cleaned:
         raise ValueError(

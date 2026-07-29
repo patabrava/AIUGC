@@ -153,6 +153,43 @@ def test_screenshot_fragment_collage_is_rejected_as_non_audience_copy():
         validate_semantic_script_audience_copy(SCREENSHOT_FAILURE)
 
 
+def test_raw_source_url_is_rejected_as_non_audience_copy():
+    script = (
+        "Die passende Antwort findest du bei BUNTE: "
+        "https://www.bunte.de/family/leben-und-erziehen/."
+    )
+
+    with pytest.raises(ValueError, match="external reference"):
+        validate_semantic_script_audience_copy(script)
+
+
+def test_audited_32_second_source_with_raw_url_uses_family_recovery():
+    source = (
+        "Als Rollstuhlnutzerin kennst du das: Ständig diese übergriffigen Blicke und "
+        "dummen Fragen im Alltag. "
+        "Netzseiten zeigen, wie du ruhig reagieren und dich gegen aufdringliche "
+        "Bemerkungen wehren kannst. "
+        "Dieses Phänomen ist tief in gesellschaftlichen Normen und Erwartungen "
+        "verwurzelt und betrifft Menschen in verschiedensten Lebenssituationen. "
+        "Die passende Antwort steht hier: "
+        "https://www.bunte.de/family/leben-und-erziehen/psycho-fallen.html."
+    )
+
+    result = generate_semantic_script(
+        post_type="value",
+        title="Die unsichtbare Last",
+        cta="Speichere dir die Hinweise.",
+        facts=[source],
+        recovery_facts=[VALUE_RECOVERY_SOURCE],
+        requested_duration_seconds=32,
+        llm_client=_UnavailableLLM(),
+    )
+
+    validate_semantic_script_audience_copy(result.script)
+    assert result.provenance["source"] == "deterministic_recovery"
+    assert "http" not in result.script.casefold()
+
+
 @pytest.mark.parametrize("seconds", [8, 16, 32])
 def test_provider_failure_recovers_only_from_complete_kassenschalter_statements(seconds):
     result = generate_semantic_script(
