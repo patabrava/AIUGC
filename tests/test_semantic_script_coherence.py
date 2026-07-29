@@ -48,6 +48,17 @@ KASSENSCHALTER_SOURCES = [
     ),
 ]
 
+PRODUCTION_SAFE_SOURCE = (
+    "Ein Plattformlift macht tägliche Wege zuhause zuverlässig planbar. "
+    "Die Bedienung bleibt auch bei häufiger Nutzung gut verständlich. "
+    "Breite Plattformen geben Rollstühlen beim Auffahren genügend Platz. "
+    "Klare Haltepunkte erleichtern das sichere Einsteigen im eigenen Zuhause. "
+    "Vor dem Einbau prüfst du gemeinsam Platz, Bedienung, Fahrweg und die passende "
+    "Position für deine täglichen Wege. "
+    "So bleibt die gewählte Lösung langfristig verlässlich, ruhig nutzbar und auf "
+    "deine konkrete Wohnsituation sinnvoll abgestimmt."
+)
+
 
 class _UnavailableLLM:
     def generate_gemini_text(self, **_kwargs):
@@ -116,7 +127,9 @@ def test_provider_failure_recovers_only_from_complete_kassenschalter_statements(
 
     validate_semantic_script_audience_copy(result.script)
     assert validation.planned_take_count == validation.minimum_take_count
-    assert result.provenance["source"] == "fallback"
+    assert result.provenance["source"] == (
+        "audited_source" if seconds == 32 else "fallback"
+    )
     assert "Wichtig bleibt" not in result.script
     assert "…" not in result.script
     assert all(
@@ -136,6 +149,67 @@ def test_provider_failure_refuses_short_fragments_instead_of_padding_them(second
             requested_duration_seconds=seconds,
             llm_client=_UnavailableLLM(),
         )
+
+
+@pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
+@pytest.mark.parametrize("seconds", [8, 16, 32])
+def test_full_family_duration_matrix_recovers_without_fragments_or_padding(
+    post_type,
+    seconds,
+):
+    client = _UnavailableLLM()
+    result = generate_semantic_script(
+        post_type=post_type,
+        title="Planbare Wege zuhause",
+        cta="Prüfe die passende Lösung für deinen Alltag.",
+        facts=[PRODUCTION_SAFE_SOURCE],
+        requested_duration_seconds=seconds,
+        llm_client=client,
+    )
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=seconds,
+    )
+    beats = plan_editorial_beats(result.script)
+
+    validate_semantic_script_audience_copy(result.script)
+    assert validation.planned_take_count == validation.minimum_take_count
+    assert len({beat.text.casefold() for beat in beats}) == len(beats)
+    assert "außerdem gilt" not in result.script.casefold()
+    assert "…" not in result.script
+    assert all(8 <= script_word_count(beat.text) <= 18 for beat in beats)
+    assert result.provenance["source"] == (
+        "audited_source" if seconds == 32 else "fallback"
+    )
+
+
+@pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
+def test_valid_32_second_audited_source_bypasses_provider_regeneration(post_type):
+    class _MustNotRun:
+        def generate_gemini_text(self, **_kwargs):
+            raise AssertionError("validated audited source should bypass Gemini")
+
+    result = generate_semantic_script(
+        post_type=post_type,
+        title="Planbare Wege zuhause",
+        cta="Prüfe die passende Lösung für deinen Alltag.",
+        facts=[
+            PRODUCTION_SAFE_SOURCE,
+            PRODUCTION_SAFE_SOURCE.replace("Plattformlift", "Plattform-Lift"),
+        ],
+        requested_duration_seconds=32,
+        llm_client=_MustNotRun(),
+    )
+
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=32,
+    )
+    validate_semantic_script_audience_copy(result.script)
+    assert result.provenance["source"] == "audited_source"
+    assert validation.planned_take_count == 4
+    assert result.script.count("Plattformlift") == 1
+    assert "außerdem gilt" not in result.script.casefold()
 
 
 @pytest.mark.parametrize("seconds", range(8, 61))

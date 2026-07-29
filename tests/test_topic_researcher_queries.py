@@ -1,4 +1,5 @@
 """Tests for topic_research_cron_runs CRUD functions."""
+import httpx
 import os
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -1654,3 +1655,79 @@ def test_create_post_for_batch_injects_target_tier_into_seed_data(mock_get_sb):
 
     assert post["id"] == "post-1"
     assert fake_table.payload["seed_data"]["target_length_tier"] == 16
+
+
+@patch("app.features.topics.queries.get_supabase")
+def test_semantic_post_retry_is_idempotent_after_lost_insert_response(mock_get_sb, monkeypatch):
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self):
+            self.rows = {}
+            self.payload = None
+            self.mode = ""
+            self.filters = {}
+            self.upsert_attempts = 0
+
+        def table(self, *_args, **_kwargs):
+            return self
+
+        def upsert(self, payload, **_kwargs):
+            self.payload = dict(payload)
+            self.mode = "upsert"
+            return self
+
+        def select(self, *_args, **_kwargs):
+            self.mode = "select"
+            self.filters = {}
+            return self
+
+        def eq(self, key, value):
+            self.filters[key] = value
+            return self
+
+        def limit(self, _value):
+            return self
+
+        def execute(self):
+            if self.mode == "upsert":
+                self.upsert_attempts += 1
+                post_id = self.payload["id"]
+                inserted = post_id not in self.rows
+                if inserted:
+                    self.rows[post_id] = dict(self.payload)
+                if self.upsert_attempts == 1:
+                    request = httpx.Request("POST", "https://example.supabase.co/rest/v1/posts")
+                    raise httpx.ConnectError("response lost after commit", request=request)
+                return _FakeResponse([self.rows[post_id]] if inserted else [])
+            if self.mode == "select":
+                post_id = self.filters.get("id")
+                return _FakeResponse([self.rows[post_id]] if post_id in self.rows else [])
+            return _FakeResponse([])
+
+    fake_table = _FakeTable()
+    mock_get_sb.return_value = type("SB", (), {"client": fake_table})()
+    monkeypatch.setattr("app.features.topics.queries.time.sleep", lambda _seconds: None)
+
+    from app.features.topics.queries import create_post_for_batch
+
+    post = create_post_for_batch(
+        batch_id="1f899446-81a7-4d1d-a36d-4b57bc7535a0",
+        post_type="value",
+        topic_title="Planbare Wege",
+        topic_rotation="Planbare Wege sparen im Alltag zuverlässig Kraft.",
+        topic_cta="Speichere dir den Hinweis.",
+        spoken_duration=8,
+        seed_data={
+            "script": "Planbare Wege sparen im Alltag zuverlässig Kraft.",
+            "target_duration_seconds": 8,
+            "semantic_slot_id": "value:1",
+        },
+        target_length_tier=None,
+    )
+
+    assert fake_table.upsert_attempts == 2
+    assert len(fake_table.rows) == 1
+    assert post["id"] == next(iter(fake_table.rows))

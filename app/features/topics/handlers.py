@@ -498,7 +498,13 @@ def _semantic_fact_inputs(
     seed_payload: Dict[str, Any],
 ) -> List[str]:
     canonical_script = " ".join(
-        str(candidate.get("script") or candidate.get("rotation") or "").split()
+        str(
+            candidate.get("script")
+            or seed_payload.get("script")
+            or seed_payload.get("dialog_script")
+            or candidate.get("rotation")
+            or ""
+        ).split()
     )
     facts: List[str] = []
     maximum_fact_inputs = 8
@@ -685,15 +691,56 @@ def _missing_semantic_lifestyle_candidates(
     reserved_topics: List[Dict[str, Any]],
     existing_topics: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    candidates = _reserve_semantic_candidates(
+    lifestyle_existing = [
+        topic
+        for topic in existing_topics
+        if str(topic.get("post_type") or "").strip() in {"", "lifestyle"}
+    ]
+    lifestyle_reserved = [
+        topic
+        for topic in reserved_topics
+        if str(topic.get("post_type") or "").strip() in {"", "lifestyle"}
+    ]
+    lifestyle_identities = {
+        identity
+        for topic in lifestyle_reserved
+        if (identity := _semantic_family_identity(topic))
+    }
+
+    def reserve_lifestyle(
+        values: List[Dict[str, Any]],
+        *,
+        limit: int,
+        include_history: bool,
+    ) -> List[Dict[str, Any]]:
+        selected = _select_semantic_candidates(
+            values,
+            count=limit,
+            used_family_identities=lifestyle_identities,
+            existing_topics=(
+                lifestyle_existing + lifestyle_reserved
+                if include_history
+                else lifestyle_reserved
+            ),
+        )
+        for candidate in selected:
+            candidate.setdefault("post_type", "lifestyle")
+        lifestyle_reserved.extend(selected)
+        reserved_topics.extend(selected)
+        selected_identities = {
+            _semantic_family_identity(candidate) for candidate in selected
+        }
+        lifestyle_identities.update(selected_identities)
+        used_family_identities.update(selected_identities)
+        return selected
+
+    candidates = reserve_lifestyle(
         generate_lifestyle_topics(
             count=count,
             target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
         ),
-        count=count,
-        used_family_identities=used_family_identities,
-        reserved_topics=reserved_topics,
-        dedupe_topics=existing_topics,
+        limit=count,
+        include_history=True,
     )
     for fallback_builder in (
         _build_lifestyle_fallback_candidates,
@@ -702,8 +749,8 @@ def _missing_semantic_lifestyle_candidates(
         remaining = count - len(candidates)
         if remaining <= 0:
             break
-        dedupe_inputs = existing_topics + reserved_topics
-        additions = _reserve_semantic_candidates(
+        dedupe_inputs = lifestyle_existing + lifestyle_reserved
+        additions = reserve_lifestyle(
             fallback_builder(
                 count=remaining,
                 existing_titles={
@@ -718,10 +765,11 @@ def _missing_semantic_lifestyle_candidates(
                 ],
                 target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
             ),
-            count=remaining,
-            used_family_identities=used_family_identities,
-            reserved_topics=reserved_topics,
-            dedupe_topics=existing_topics,
+            limit=remaining,
+            # These builders are the established availability fallback after
+            # history-wide similarity filtering is exhausted. They already
+            # protect exact title/script reuse and must remain batch-lane scoped.
+            include_history=False,
         )
         candidates.extend(additions)
     return candidates

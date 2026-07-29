@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import re
 import time
 from typing import Any, Dict, List, Optional
+from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 
@@ -589,6 +590,17 @@ def create_post_for_batch(
         "seed_data": resolved_seed_data,
         "publish_caption": resolve_selected_caption(resolved_seed_data) or topic_rotation or topic_cta or topic_title,
     }
+    semantic_slot_id = str(resolved_seed_data.get("semantic_slot_id") or "").strip()
+    if semantic_slot_id:
+        # Semantic discovery may resume after an insert succeeded but its HTTP
+        # response was lost. A stable primary key makes every retry and concurrent
+        # recovery attempt resolve to the same durable slot instead of duplicating it.
+        post_data["id"] = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"aiugc:semantic-post:{batch_id}:{semantic_slot_id}",
+            )
+        )
 
     response = None
     last_error: Optional[Exception] = None
@@ -596,7 +608,15 @@ def create_post_for_batch(
         if delay:
             time.sleep(delay)
         try:
-            response = supabase.client.table("posts").insert(post_data).execute()
+            posts_table = supabase.client.table("posts")
+            if semantic_slot_id:
+                response = posts_table.upsert(
+                    post_data,
+                    on_conflict="id",
+                    ignore_duplicates=True,
+                ).execute()
+            else:
+                response = posts_table.insert(post_data).execute()
             break
         except httpx.TimeoutException as exc:
             raise ThirdPartyError(
@@ -624,6 +644,14 @@ def create_post_for_batch(
             },
         ) from last_error
 
+    if not response.data and semantic_slot_id:
+        response = (
+            supabase.client.table("posts")
+            .select("*")
+            .eq("id", post_data["id"])
+            .limit(1)
+            .execute()
+        )
     if not response.data:
         raise Exception("Failed to create post")
     

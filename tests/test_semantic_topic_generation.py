@@ -189,7 +189,8 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     assert semantic_call["requested_duration_seconds"] == 50
     assert semantic_call["post_type"] == post_type
     assert semantic_call["cta"] == candidate["cta"]
-    assert semantic_call["facts"] == [candidate["script"]]
+    assert semantic_call["facts"][0] == candidate["script"]
+    assert len(semantic_call["facts"]) <= 8
     assert "Nora" in semantic_call["actor_context"]
 
     created = created_posts[0]
@@ -220,10 +221,7 @@ def test_semantic_provider_failure_builds_distinct_fact_aware_fallback():
         post_type="product",
         title="Stufenloser Zugang",
         cta="Prüfe den passenden Zugang.",
-        facts=[
-            "Der Lift schafft einen stufenlosen Zugang für planbare Wege im Alltag.",
-            "Die Bedienung ist für wiederkehrende Abläufe mit klaren Schritten ausgelegt.",
-        ],
+        facts=[_seven_take_script()],
         requested_duration_seconds=50,
         llm_client=FailingClient(),
         actor_context="Nora spricht ruhig und direkt.",
@@ -239,6 +237,80 @@ def test_semantic_provider_failure_builds_distinct_fact_aware_fallback():
     assert result.provenance["source"] == "fallback"
     assert validation.planned_take_count == 7
     assert len(sentences) == len(set(sentences)) == 7
+
+
+@pytest.mark.parametrize("requested_duration_seconds", [8, 16, 32])
+def test_semantic_lifestyle_force_fill_survives_exhausted_global_history(
+    monkeypatch,
+    requested_duration_seconds,
+):
+    historical = {
+        "post_type": "lifestyle",
+        "title": "Barrierefreiheit spart im Alltag spürbar Kraft",
+        "rotation": "Ein bereits verwendeter Lifestyle-Text bleibt in der Historie.",
+    }
+    forced = {
+        "post_type": "lifestyle",
+        "title": f"Planbare spontane Wege {requested_duration_seconds}",
+        "rotation": "Spontane Wege werden leichter, wenn du Hürden und Pausen vorher mitplanst.",
+        "cta": "Speichere dir diese Routine.",
+        "dialog_scripts": SimpleNamespace(
+            problem_agitate_solution=[
+                "Spontane Wege werden leichter, wenn du Hürden und Pausen vorher mitplanst."
+            ],
+            testimonial=[],
+            transformation=[],
+            description="Planbare Wege im Alltag.",
+        ),
+        "framework": "PAL",
+    }
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_lifestyle_topics",
+        lambda **_kwargs: [dict(historical)],
+    )
+    monkeypatch.setattr(
+        handlers,
+        "_build_lifestyle_fallback_candidates",
+        lambda **_kwargs: [dict(forced)],
+    )
+    monkeypatch.setattr(
+        handlers,
+        "_force_fill_lifestyle_candidates",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("first deterministic fallback should fill the slot")
+        ),
+    )
+
+    selected = handlers._missing_semantic_lifestyle_candidates(
+        count=1,
+        used_family_identities=set(),
+        reserved_topics=[],
+        existing_topics=[historical],
+    )
+
+    assert len(selected) == 1
+    assert selected[0]["title"] == forced["title"]
+    assert selected[0]["post_type"] == "lifestyle"
+
+
+def test_semantic_lifestyle_facts_use_full_dialog_script_before_short_rotation():
+    full_script = _seven_take_script()
+
+    facts = handlers._semantic_fact_inputs(
+        {
+            "rotation": "Kurzer Themenanker für die Lifestyle-Karte.",
+        },
+        {
+            "script": full_script,
+            "dialog_script": full_script,
+            "source_context": "Der Alltagshinweis stammt aus einem vollständigen Dialog.",
+        },
+    )
+
+    assert facts[0] == full_script
+    assert "Kurzer Themenanker" not in facts[0]
 
 
 def test_semantic_post_insert_removes_internal_canonical_tier(monkeypatch):

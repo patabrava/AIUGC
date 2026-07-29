@@ -42,7 +42,8 @@ _INTERNAL_FALLBACK_COPY = re.compile(
 )
 _AUDIENCE_COPY_SCAFFOLDING = re.compile(
     r"\b(?:wichtig\s+bleibt|wichtig)\s*:\s*[„\"]|"
-    r"\bprüfe\s+für\s+deine\s+nächste\s+wichtige\s+entscheidung\s+bitte\s+erneut\b",
+    r"\bprüfe\s+für\s+deine\s+nächste\s+wichtige\s+entscheidung\s+bitte\s+erneut\b|"
+    r"\baußerdem\s+gilt\s*:",
     re.IGNORECASE,
 )
 _WORD_PATTERN = re.compile(
@@ -106,6 +107,16 @@ class _FallbackSourceQuote:
 @dataclass(frozen=True)
 class _FallbackSourceUnit:
     quotes: tuple[_FallbackSourceQuote, ...]
+
+
+@dataclass(frozen=True)
+class _CompleteSourceBeat:
+    text: str
+    source_index: int
+    sentence_start: int
+    sentence_end: int
+    word_count: int
+    token_signature: frozenset[str]
 
 
 @lru_cache(maxsize=None)
@@ -1215,10 +1226,11 @@ def _build_fallback_script(
     return script
 
 
-def _complete_source_sentences(values: Sequence[str]) -> tuple[str, ...]:
-    """Extract intact, audience-readable source sentences without inventing copy."""
-    sentences: list[str] = []
-    for value in values:
+def _complete_source_beats(values: Sequence[str]) -> tuple[_CompleteSourceBeat, ...]:
+    """Build non-fragment beats from complete adjacent source statements."""
+    beats: list[_CompleteSourceBeat] = []
+    accepted_signatures: list[frozenset[str]] = []
+    for source_index, value in enumerate(values):
         cleaned_value = re.sub(r"\[cite:[^\]]+\]", "", str(value or ""), flags=re.IGNORECASE)
         cleaned_value = re.sub(r"\*+", "", cleaned_value)
         cleaned_value = " ".join(cleaned_value.split())
@@ -1227,38 +1239,48 @@ def _complete_source_sentences(values: Sequence[str]) -> tuple[str, ...]:
             for sentence in _SENTENCE_SPLIT.split(cleaned_value)
             if _COMPLETE_STATEMENT_END.search(sentence.strip())
         ]
-        index = 0
-        while index < len(source_sentences):
-            sentence = source_sentences[index]
-            sentence = sentence.strip(" -")
-            word_count = script_word_count(sentence)
-            if index + 1 < len(source_sentences):
-                next_sentence = source_sentences[index + 1]
-                next_word_count = script_word_count(next_sentence)
-                merged_word_count = word_count + next_word_count + 2
+        for start in range(len(source_sentences)):
+            grouped: list[str] = []
+            grouped_words = 0
+            for end in range(start, len(source_sentences)):
+                sentence = source_sentences[end].strip(" -")
+                grouped_words += script_word_count(sentence)
+                if grouped_words > SAFE_WORDS_PER_TAKE:
+                    break
+                grouped.append(sentence)
+                if grouped_words < _MINIMUM_COHERENT_WORDS_PER_TAKE:
+                    continue
+                text = " ".join(grouped)
                 if (
-                    min(word_count, next_word_count) < _MINIMUM_COHERENT_WORDS_PER_TAKE
-                    and _MINIMUM_COHERENT_WORDS_PER_TAKE
-                    <= merged_word_count
-                    <= SAFE_WORDS_PER_TAKE
+                    _AUDIENCE_COPY_SCAFFOLDING.search(text)
+                    or "…" in text
+                    or "..." in text
                 ):
-                    sentence = (
-                        f"{sentence.rstrip('.!?')}; außerdem gilt: {next_sentence}"
+                    continue
+                signature = frozenset(
+                    word.casefold()
+                    for word in _WORD_PATTERN.findall(text)
+                    if len(word) > 2
+                )
+                if not signature:
+                    continue
+                if any(
+                    len(signature & existing) / max(1, len(signature | existing)) >= 0.8
+                    for existing in accepted_signatures
+                ):
+                    continue
+                beats.append(
+                    _CompleteSourceBeat(
+                        text=text,
+                        source_index=source_index,
+                        sentence_start=start,
+                        sentence_end=end + 1,
+                        word_count=grouped_words,
+                        token_signature=signature,
                     )
-                    word_count = merged_word_count
-                    index += 1
-            index += 1
-            if not (
-                _MINIMUM_COHERENT_WORDS_PER_TAKE
-                <= word_count
-                <= SAFE_WORDS_PER_TAKE
-            ):
-                continue
-            if _AUDIENCE_COPY_SCAFFOLDING.search(sentence) or "…" in sentence or "..." in sentence:
-                continue
-            if sentence not in sentences:
-                sentences.append(sentence)
-    return tuple(sentences)
+                )
+                accepted_signatures.append(signature)
+    return tuple(beats)
 
 
 def _build_complete_statement_fallback_script(
@@ -1269,13 +1291,17 @@ def _build_complete_statement_fallback_script(
     contract: SemanticDurationContract,
 ) -> str:
     """Select complete sourced statements; fail closed instead of splicing fragments."""
-    source_sentences = _complete_source_sentences(
+    source_beats = _complete_source_beats(
         (*facts, str(cta or ""), str(title or ""))
     )
     required_count = contract.minimum_take_count
-    best: Optional[tuple[str, ...]] = None
+    best: Optional[tuple[_CompleteSourceBeat, ...]] = None
 
-    def search(start: int, selected: tuple[str, ...], total_words: int) -> None:
+    def search(
+        start: int,
+        selected: tuple[_CompleteSourceBeat, ...],
+        total_words: int,
+    ) -> None:
         nonlocal best
         if best is not None:
             return
@@ -1284,15 +1310,23 @@ def _build_complete_statement_fallback_script(
             if contract.minimum_words <= total_words <= contract.maximum_words:
                 best = selected
             return
-        if len(source_sentences) - start < remaining:
+        if len(source_beats) - start < remaining:
             return
-        for index in range(start, len(source_sentences)):
-            sentence = source_sentences[index]
-            sentence_words = script_word_count(sentence)
-            next_total = total_words + sentence_words
+        for index in range(start, len(source_beats)):
+            beat = source_beats[index]
+            if selected:
+                previous = selected[-1]
+                if (
+                    beat.source_index == previous.source_index
+                    and beat.sentence_start < previous.sentence_end
+                ):
+                    continue
+                if beat.token_signature == previous.token_signature:
+                    continue
+            next_total = total_words + beat.word_count
             if next_total > contract.maximum_words:
                 continue
-            search(index + 1, (*selected, sentence), next_total)
+            search(index + 1, (*selected, beat), next_total)
 
     search(0, (), 0)
     if best is None:
@@ -1300,7 +1334,7 @@ def _build_complete_statement_fallback_script(
             "Semantic UGC generation could not build the requested duration from "
             "complete sourced statements; refusing fragment-based fallback copy."
         )
-    script = " ".join(best)
+    script = " ".join(beat.text for beat in best)
     validate_semantic_script(
         script,
         requested_duration_seconds=contract.requested_duration_seconds,
@@ -1347,6 +1381,48 @@ def generate_semantic_script(
         requested_duration_seconds,
         maximum_seconds=maximum_seconds,
     )
+    if requested_duration_seconds == 32:
+        for audited_value in fact_values:
+            audited_script = _strip_response_wrappers(audited_value)
+            try:
+                validate_semantic_script(
+                    audited_script,
+                    requested_duration_seconds=requested_duration_seconds,
+                    maximum_seconds=contract.maximum_duration_seconds,
+                )
+                validate_semantic_script_audience_copy(audited_script)
+            except ValueError:
+                continue
+            return SemanticScriptResult(
+                script=audited_script,
+                contract_hash=contract.contract_hash,
+                provenance=_build_result_provenance(
+                    source="audited_source",
+                    post_type=normalized_post_type,
+                    research_provenance=research_provenance,
+                    source_urls=source_urls,
+                ),
+            )
+        try:
+            script = _build_audience_safe_fallback_script(
+                title=title,
+                cta=cta,
+                facts=fact_values,
+                contract=contract,
+            )
+        except ValueError:
+            pass
+        else:
+            return SemanticScriptResult(
+                script=script,
+                contract_hash=contract.contract_hash,
+                provenance=_build_result_provenance(
+                    source="audited_source",
+                    post_type=normalized_post_type,
+                    research_provenance=research_provenance,
+                    source_urls=source_urls,
+                ),
+            )
     prompt = build_semantic_script_prompt(
         post_type=normalized_post_type,
         title=title,
