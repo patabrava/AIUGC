@@ -115,21 +115,21 @@ VALUE_RECOVERY_SOURCE = (
 PRODUCT_RECOVERY_SOURCE = (
     "Ein Plattformlift kann gerade, kurvige, steile oder enge Treppen für deinen "
     "Alltag wieder sicher nutzbar machen. "
-    "Vor dem Einbau werden Fahrweg, Platz, Tragkraft und Bedienung gemeinsam an deine "
+    "Vor dem Einbau des Lifts werden Fahrweg, Platz, Tragkraft und Bedienung gemeinsam an deine "
     "konkrete Wohnsituation angepasst. "
-    "Eine verständliche Steuerung und klar erreichbare Haltepunkte erleichtern dir "
+    "Eine verständliche Liftsteuerung und klar erreichbare Haltepunkte erleichtern dir "
     "die regelmäßige Nutzung ohne unnötige Umwege. "
     "Kläre Wartung, mögliche Nachrüstung und die gewünschte Ausstattung früh, damit "
-    "die Lösung langfristig zu dir passt. "
+    "die Liftlösung langfristig zu dir passt. "
     "Lass dir Notabsenkung, Sicherheitsstopps und tägliche Bedienung praktisch zeigen, "
     "bevor du den Plattformlift regelmäßig alleine nutzt. "
     "Prüfe Stromanschluss, Parkposition und freie Durchgänge gemeinsam, damit der Lift "
     "keine neuen Hindernisse im Zuhause schafft. "
-    "Vereinbare klare Wartungsintervalle, damit Verschleiß früh erkannt und die sichere "
+    "Vereinbare klare Lift-Wartungsintervalle, damit Verschleiß früh erkannt und die sichere "
     "Nutzung dauerhaft zuverlässig erhalten bleibt. "
-    "Bewahre Kontaktdaten, Serviceunterlagen und Bedienhinweise griffbereit auf, damit "
+    "Bewahre Lift-Kontaktdaten, Serviceunterlagen und Bedienhinweise griffbereit auf, damit "
     "bei einer Störung schnell die passende Fachhilfe erreicht werden kann. "
-    "Teste alle Bedienelemente selbst, bevor der tägliche Einsatz verbindlich beginnt. "
+    "Teste alle Lift-Bedienelemente selbst, bevor der tägliche Einsatz verbindlich beginnt. "
     "Halte den Bereich um den Lift dauerhaft frei von losen Gegenständen."
 )
 
@@ -352,6 +352,34 @@ def test_semantic_script_rejects_verbatim_editorial_topic_title():
 
     with pytest.raises(ValueError, match="editorial topic title"):
         validate_semantic_script_audience_copy(script, topic_title=title)
+
+
+def test_semantic_product_script_rejects_vague_pronoun_copy():
+    script = (
+        "Manchmal überrascht mich die Vielseitigkeit unserer Lösungen für den "
+        "Alltag immer noch. Heute nutze ich ihn drinnen und draußen."
+    )
+
+    with pytest.raises(ValueError, match="must name the lift"):
+        validate_semantic_script_audience_copy(script, post_type="product")
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        (
+            "Reedereien verlangen auf manchen Reisen eine Begleitperson. "
+            "Mehr Platz und breitere Türen als in Standardkabinen."
+        ),
+        (
+            "Treppen unterscheiden sich in vielen Wohnungen deutlich. "
+            "Gerade, kurvig, mal steil, mal eng."
+        ),
+    ],
+)
+def test_semantic_script_rejects_punctuated_sentence_fragments(script):
+    with pytest.raises(ValueError, match="sentence fragment"):
+        validate_semantic_script_audience_copy(script)
 
 
 @pytest.mark.parametrize(

@@ -146,8 +146,15 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
 
     def fake_generate_semantic_script(**kwargs):
         semantic_calls.append(kwargs)
+        script = _seven_take_script()
+        if post_type == "product":
+            script = script.replace(
+                "Barrierefreie Wege sparen",
+                "Ein Plattformlift spart",
+                1,
+            )
         return SemanticScriptResult(
-            script=_seven_take_script(),
+            script=script,
             contract_hash=contract.contract_hash,
             provenance={
                 "source": "gemini",
@@ -196,7 +203,14 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
 
     created = created_posts[0]
     assert created["target_length_tier"] is None
-    assert created["topic_rotation"] == _seven_take_script()
+    expected_script = _seven_take_script()
+    if post_type == "product":
+        expected_script = expected_script.replace(
+            "Barrierefreie Wege sparen",
+            "Ein Plattformlift spart",
+            1,
+        )
+    assert created["topic_rotation"] == expected_script
     assert created["spoken_duration"] == 50.0
     assert "target_length_tier" not in created["seed_data"]
     assert created["seed_data"]["target_duration_seconds"] == 50
@@ -221,6 +235,11 @@ def test_deterministic_recovery_uses_matching_family_metadata(monkeypatch, post_
         "Prüfe deinen Weg früh und speichere eine verlässliche Alternative für "
         "unerwartete Hindernisse vor deinem Termin."
     )
+    if post_type == "product":
+        recovery_script = (
+            "Ein Plattformlift schafft sicheren Treppenzugang und wird passend "
+            "zu deinem Zuhause geplant, erklärt und zuverlässig bedient."
+        )
     monkeypatch.setattr(
         handlers,
         "generate_semantic_script",
@@ -269,7 +288,13 @@ def test_semantic_provider_failure_builds_distinct_fact_aware_fallback():
         post_type="product",
         title="Stufenloser Zugang",
         cta="Prüfe den passenden Zugang.",
-        facts=[_seven_take_script()],
+        facts=[
+            _seven_take_script().replace(
+                "Barrierefreie Wege sparen",
+                "Ein Plattformlift spart",
+                1,
+            )
+        ],
         requested_duration_seconds=50,
         llm_client=FailingClient(),
         actor_context="Nora spricht ruhig und direkt.",

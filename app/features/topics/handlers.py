@@ -199,21 +199,21 @@ _SEMANTIC_RECOVERY_COPY = {
         "source": (
             "Ein Plattformlift kann gerade, kurvige, steile oder enge Treppen für "
             "deinen Alltag wieder sicher nutzbar machen. "
-            "Vor dem Einbau werden Fahrweg, Platz, Tragkraft und Bedienung gemeinsam "
+            "Vor dem Einbau des Lifts werden Fahrweg, Platz, Tragkraft und Bedienung gemeinsam "
             "an deine konkrete Wohnsituation angepasst. "
-            "Eine verständliche Steuerung und klar erreichbare Haltepunkte erleichtern "
+            "Eine verständliche Liftsteuerung und klar erreichbare Haltepunkte erleichtern "
             "dir die regelmäßige Nutzung ohne unnötige Umwege. "
             "Kläre Wartung, mögliche Nachrüstung und die gewünschte Ausstattung früh, "
-            "damit die Lösung langfristig zu dir passt. "
+            "damit die Liftlösung langfristig zu dir passt. "
             "Lass dir Notabsenkung, Sicherheitsstopps und tägliche Bedienung praktisch "
             "zeigen, bevor du den Plattformlift regelmäßig alleine nutzt. "
             "Prüfe Stromanschluss, Parkposition und freie Durchgänge gemeinsam, damit "
             "der Lift keine neuen Hindernisse im Zuhause schafft. "
-            "Vereinbare klare Wartungsintervalle, damit Verschleiß früh erkannt und die "
+            "Vereinbare klare Lift-Wartungsintervalle, damit Verschleiß früh erkannt und die "
             "sichere Nutzung dauerhaft zuverlässig erhalten bleibt. "
-            "Bewahre Kontaktdaten, Serviceunterlagen und Bedienhinweise griffbereit auf, "
+            "Bewahre Lift-Kontaktdaten, Serviceunterlagen und Bedienhinweise griffbereit auf, "
             "damit bei einer Störung schnell die passende Fachhilfe erreicht werden kann. "
-            "Teste alle Bedienelemente selbst, bevor der tägliche Einsatz verbindlich beginnt. "
+            "Teste alle Lift-Bedienelemente selbst, bevor der tägliche Einsatz verbindlich beginnt. "
             "Halte den Bereich um den Lift dauerhaft frei von losen Gegenständen."
         ),
     },
@@ -914,7 +914,11 @@ def _create_semantic_post_from_candidate(
         requested_duration_seconds=contract.requested_duration_seconds,
         maximum_seconds=contract.maximum_duration_seconds,
     )
-    validate_semantic_script_audience_copy(generated.script, topic_title=title)
+    validate_semantic_script_audience_copy(
+        generated.script,
+        topic_title=title,
+        post_type=post_type,
+    )
     if generated.contract_hash != contract.contract_hash:
         raise ValueError("Semantic script result does not match the batch duration contract.")
 

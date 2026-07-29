@@ -75,6 +75,19 @@ _AUDIENCE_GENERIC_PADDING = re.compile(
     r"\bmacht\s+den\s+alltag\s+wirklich\s+einfacher\b",
     re.IGNORECASE,
 )
+_AUDIENCE_SENTENCE_FRAGMENT = re.compile(
+    r"(?:^|(?<=[.!?])\s+)(?:"
+    r"(?:mehr|weniger)\s+[A-ZÄÖÜa-zäöüß-]+\s+und\s+"
+    r"[A-ZÄÖÜa-zäöüß-]+\s+[A-ZÄÖÜa-zäöüß-]+\s+als\s+(?:in|bei|auf)\b|"
+    r"(?:gerade|kurvig|steil|eng)(?:,\s*(?:mal\s+)?(?:gerade|kurvig|steil|eng)){2,}"
+    r")",
+    re.IGNORECASE,
+)
+_PRODUCT_AUDIENCE_MARKER = re.compile(
+    r"\b(?:plattform|treppen|rollstuhl|hub|sitz)?lift\w*\b|"
+    r"\baufzug\w*\b",
+    re.IGNORECASE,
+)
 _AUDIENCE_REPETITION_STOPWORDS = frozenset(
     {
         "als",
@@ -482,6 +495,7 @@ def validate_semantic_script_audience_copy(
     script: str,
     *,
     topic_title: Optional[str] = None,
+    post_type: Optional[str] = None,
 ) -> None:
     """Reject recovery/debug scaffolding that must never become spoken UGC copy."""
     cleaned = " ".join(str(script or "").split())
@@ -499,6 +513,12 @@ def validate_semantic_script_audience_copy(
             "Semantic UGC script repeats the editorial topic title instead of "
             "turning it into natural audience copy."
         )
+    if str(post_type or "").strip().casefold() == "product":
+        if not _PRODUCT_AUDIENCE_MARKER.search(cleaned):
+            raise ValueError(
+                "Semantic UGC product copy must name the lift or elevator product "
+                "instead of relying on vague pronouns or generic solutions."
+            )
     match = _INTERNAL_FALLBACK_COPY.search(cleaned)
     if match:
         raise ValueError(
@@ -528,6 +548,12 @@ def validate_semantic_script_audience_copy(
         raise ValueError(
             "Semantic UGC script contains generic padding instead of a substantive "
             f"audience statement: {padding_match.group(0)!r}."
+        )
+    fragment_match = _AUDIENCE_SENTENCE_FRAGMENT.search(cleaned)
+    if fragment_match:
+        raise ValueError(
+            "Semantic UGC script contains a punctuated sentence fragment instead "
+            f"of a complete audience statement: {fragment_match.group(0)!r}."
         )
     sentences = [
         sentence.strip()
@@ -1502,6 +1528,7 @@ def _build_complete_statement_fallback_script(
 
 def _build_audience_safe_fallback_script(
     *,
+    post_type: str,
     title: str,
     cta: str,
     facts: tuple[str, ...],
@@ -1513,12 +1540,17 @@ def _build_audience_safe_fallback_script(
         facts=facts,
         contract=contract,
     )
-    validate_semantic_script_audience_copy(script, topic_title=title)
+    validate_semantic_script_audience_copy(
+        script,
+        topic_title=title,
+        post_type=post_type,
+    )
     return script
 
 
 def _build_ranked_fallback_script(
     *,
+    post_type: str,
     title: str,
     cta: str,
     facts: tuple[str, ...],
@@ -1534,6 +1566,7 @@ def _build_ranked_fallback_script(
             continue
         try:
             script = _build_audience_safe_fallback_script(
+                post_type=post_type,
                 title=title,
                 cta=cta,
                 facts=source_facts,
@@ -1585,6 +1618,7 @@ def generate_semantic_script(
                 validate_semantic_script_audience_copy(
                     audited_script,
                     topic_title=title,
+                    post_type=normalized_post_type,
                 )
             except ValueError:
                 continue
@@ -1600,6 +1634,7 @@ def generate_semantic_script(
             )
         try:
             script = _build_audience_safe_fallback_script(
+                post_type=normalized_post_type,
                 title=title,
                 cta=cta,
                 facts=fact_values,
@@ -1621,6 +1656,7 @@ def generate_semantic_script(
         if recovery_fact_values:
             try:
                 script = _build_audience_safe_fallback_script(
+                    post_type=normalized_post_type,
                     title=title,
                     cta=cta,
                     facts=recovery_fact_values,
@@ -1660,6 +1696,7 @@ def generate_semantic_script(
         )
     except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
         script, fallback_source = _build_ranked_fallback_script(
+            post_type=normalized_post_type,
             title=title,
             cta=cta,
             facts=fact_values,
@@ -1686,7 +1723,11 @@ def generate_semantic_script(
             requested_duration_seconds=requested_duration_seconds,
             maximum_seconds=contract.maximum_duration_seconds,
         )
-        validate_semantic_script_audience_copy(script, topic_title=title)
+        validate_semantic_script_audience_copy(
+            script,
+            topic_title=title,
+            post_type=normalized_post_type,
+        )
     except ValueError as validation_error:
         repair_prompt = _build_semantic_repair_prompt(
             original_prompt=prompt,
@@ -1703,6 +1744,7 @@ def generate_semantic_script(
             )
         except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
             script, fallback_source = _build_ranked_fallback_script(
+                post_type=normalized_post_type,
                 title=title,
                 cta=cta,
                 facts=fact_values,
@@ -1730,6 +1772,7 @@ def generate_semantic_script(
             validate_semantic_script_audience_copy(
                 repaired_script,
                 topic_title=title,
+                post_type=normalized_post_type,
             )
         except ValueError:
             recovery_prompt = _build_semantic_recovery_prompt(
@@ -1746,6 +1789,7 @@ def generate_semantic_script(
                 )
             except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
                 script, fallback_source = _build_ranked_fallback_script(
+                    post_type=normalized_post_type,
                     title=title,
                     cta=cta,
                     facts=fact_values,
@@ -1773,9 +1817,11 @@ def generate_semantic_script(
                 validate_semantic_script_audience_copy(
                     recovery_script,
                     topic_title=title,
+                    post_type=normalized_post_type,
                 )
             except ValueError:
                 script, source = _build_ranked_fallback_script(
+                    post_type=normalized_post_type,
                     title=title,
                     cta=cta,
                     facts=fact_values,
