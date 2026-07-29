@@ -151,6 +151,49 @@ def test_get_batch_by_id_retries_transient_request_errors(monkeypatch):
     assert sleeps == [0.15, 0.35]
 
 
+def test_batch_query_retries_lower_level_remote_protocol_errors(monkeypatch):
+    calls = []
+    sleeps = []
+
+    class RemoteProtocolError(Exception):
+        pass
+
+    def load():
+        calls.append("load")
+        if len(calls) == 1:
+            raise RemoteProtocolError("peer closed connection without response")
+        return "loaded"
+
+    monkeypatch.setattr(batch_queries.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    assert batch_queries._execute_with_retry("list_batches", load) == "loaded"
+    assert calls == ["load", "load"]
+    assert sleeps == [0.15]
+
+
+def test_creation_dependency_retries_lower_level_remote_protocol_errors(monkeypatch):
+    calls = []
+    sleeps = []
+
+    class RemoteProtocolError(Exception):
+        pass
+
+    def load():
+        calls.append("load")
+        if len(calls) == 1:
+            raise RemoteProtocolError("server disconnected")
+        return "actor"
+
+    monkeypatch.setattr(batch_queries.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    assert (
+        batch_queries._execute_creation_dependency_with_retry("get_active_actor", load)
+        == "actor"
+    )
+    assert calls == ["load", "load"]
+    assert sleeps == [0.25]
+
+
 def test_batch_insert_retries_timeout_with_one_stable_id(monkeypatch):
     inserted_payloads = []
     sleeps = []
@@ -190,6 +233,49 @@ def test_batch_insert_retries_timeout_with_one_stable_id(monkeypatch):
     created = batch_queries._insert_batch_row({"brand": "Stress"})
 
     assert created["brand"] == "Stress"
+    assert created["id"]
+    assert inserted_payloads == [
+        {"brand": "Stress", "id": created["id"]},
+        {"brand": "Stress", "id": created["id"]},
+    ]
+    assert sleeps == [0.25]
+
+
+def test_batch_insert_retries_lower_level_remote_protocol_errors(monkeypatch):
+    inserted_payloads = []
+    sleeps = []
+
+    class RemoteProtocolError(Exception):
+        pass
+
+    class InsertQuery:
+        def __init__(self):
+            self.payload = None
+
+        def insert(self, payload):
+            self.payload = dict(payload)
+            inserted_payloads.append(self.payload)
+            return self
+
+        def execute(self):
+            if len(inserted_payloads) == 1:
+                raise RemoteProtocolError("peer closed connection without response")
+            return SimpleNamespace(data=[self.payload])
+
+    class InsertClient:
+        def table(self, name):
+            assert name == "batches"
+            return InsertQuery()
+
+    monkeypatch.setattr(
+        batch_queries,
+        "get_supabase",
+        lambda: SimpleNamespace(client=InsertClient()),
+    )
+    monkeypatch.setattr(batch_queries.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    created = batch_queries._insert_batch_row({"brand": "Stress"})
+
     assert created["id"]
     assert inserted_payloads == [
         {"brand": "Stress", "id": created["id"]},

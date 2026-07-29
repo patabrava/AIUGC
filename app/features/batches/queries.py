@@ -36,6 +36,28 @@ _TRANSIENT_INSERT_API_ERROR_MARKERS = (
     "timeout",
     "upstream",
 )
+_TRANSIENT_DATABASE_ERROR_MARKERS = (
+    "connecterror",
+    "connectionerror",
+    "connectionnotavailable",
+    "connectionterminated",
+    "localprotocolerror",
+    "networkerror",
+    "pooltimeout",
+    "readerror",
+    "remoteprotocolerror",
+    "streamclosed",
+    "streamidtoolow",
+    "writeerror",
+    "broken pipe",
+    "connection aborted",
+    "connection closed",
+    "connection refused",
+    "connection reset",
+    "peer closed connection",
+    "server disconnected",
+    "unexpected eof",
+)
 BATCH_LIST_FIELDS = (
     "id,brand,state,creation_mode,post_type_counts,manual_post_count,"
     "target_length_tier,target_duration_seconds,video_pipeline_route,"
@@ -301,6 +323,22 @@ def sync_pending_character_consistency_batches_to_actor(*, active_actor, correla
     return synced
 
 
+def _is_transient_database_transport_error(exc: Exception) -> bool:
+    if isinstance(exc, httpx.RequestError):
+        return True
+    error_text = " ".join(
+        str(value)
+        for value in (
+            type(exc).__name__,
+            exc,
+            getattr(exc, "message", ""),
+            getattr(exc, "details", ""),
+        )
+        if value
+    ).casefold()
+    return any(marker in error_text for marker in _TRANSIENT_DATABASE_ERROR_MARKERS)
+
+
 def _execute_with_retry(operation_name: str, callback):
     last_error: Optional[Exception] = None
     for attempt, delay in enumerate((0.0, *_QUERY_RETRY_DELAYS), start=1):
@@ -319,12 +357,15 @@ def _execute_with_retry(operation_name: str, callback):
                 message=f"Database unavailable while loading batch data for {operation_name}",
                 details={"operation": operation_name, "error": str(exc)},
             ) from exc
-        except httpx.RequestError as exc:
+        except Exception as exc:
+            if not _is_transient_database_transport_error(exc):
+                raise
             last_error = exc
             logger.warning(
                 "batch_query_retryable_request_error",
                 operation=operation_name,
                 attempt=attempt,
+                error_class=type(exc).__name__,
                 error=str(exc),
             )
     raise ThirdPartyError(
@@ -348,10 +389,12 @@ def _execute_creation_dependency_with_retry(operation_name: str, callback):
             time.sleep(delay)
         try:
             return callback()
-        except httpx.RequestError as exc:
-            last_error = exc
         except APIError as exc:
             if not _is_transient_insert_api_error(exc):
+                raise
+            last_error = exc
+        except Exception as exc:
+            if not _is_transient_database_transport_error(exc):
                 raise
             last_error = exc
         logger.warning(
@@ -412,15 +455,6 @@ def _insert_batch_row(payload: Dict[str, Any], legacy_payload: Optional[Dict[str
             if not response.data:
                 raise RuntimeError("Failed to create batch")
             return response.data[0]
-        except httpx.RequestError as exc:
-            last_error = exc
-            logger.warning(
-                "batch_insert_retryable_request_error",
-                batch_id=stable_payload["id"],
-                attempt=attempt,
-                max_attempts=len(_INSERT_RETRY_DELAYS) + 1,
-                error=str(exc),
-            )
         except APIError as exc:
             if not _is_transient_insert_api_error(exc):
                 raise
@@ -431,6 +465,18 @@ def _insert_batch_row(payload: Dict[str, Any], legacy_payload: Optional[Dict[str
                 attempt=attempt,
                 max_attempts=len(_INSERT_RETRY_DELAYS) + 1,
                 error_code=getattr(exc, "code", None),
+                error=str(exc),
+            )
+        except Exception as exc:
+            if not _is_transient_database_transport_error(exc):
+                raise
+            last_error = exc
+            logger.warning(
+                "batch_insert_retryable_request_error",
+                batch_id=stable_payload["id"],
+                attempt=attempt,
+                max_attempts=len(_INSERT_RETRY_DELAYS) + 1,
+                error_class=type(exc).__name__,
                 error=str(exc),
             )
 
