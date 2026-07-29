@@ -71,7 +71,8 @@ _AUDIENCE_GENERIC_PADDING = re.compile(
     r"so\s+ist\s+man\s+(?:immer\s+)?gut\s+unterwegs|"
     r"eine\s+sorge\s+weniger(?:\s+im\s+alltag)?|"
     r"(?:und\s+)?das\s+ist\s+(?:toll|super|großartig)"
-    r")[.!?](?=\s|$)",
+    r")[.!?](?=\s|$)|"
+    r"\bmacht\s+den\s+alltag\s+wirklich\s+einfacher\b",
     re.IGNORECASE,
 )
 _AUDIENCE_REPETITION_STOPWORDS = frozenset(

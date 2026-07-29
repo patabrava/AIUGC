@@ -326,6 +326,11 @@ def test_repetitive_audited_32_second_source_uses_family_recovery():
             "kompliziert? Das gibt mir ein echt gutes Gefühl der Freiheit.",
             "generic padding",
         ),
+        (
+            "Die flexible Anpassung von Stuhl zu Plattform auf derselben Schiene "
+            "macht den Alltag wirklich einfacher.",
+            "generic padding",
+        ),
     ],
 )
 def test_non_substantive_source_sentences_are_rejected(script, message):
