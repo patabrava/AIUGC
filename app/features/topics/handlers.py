@@ -1032,41 +1032,51 @@ def _create_semantic_post_from_candidate(
         source_urls=[source["url"] for source in sources],
         maximum_seconds=contract.maximum_duration_seconds,
     )
-    recovery_sources = tuple(
-        source
-        for source in dict.fromkeys(
-            (
-                str(candidate.get("semantic_recovery_source") or "").strip(),
-                str(_SEMANTIC_RECOVERY_COPY[post_type]["source"]).strip(),
+    candidate_recovery_source = str(
+        candidate.get("semantic_recovery_source") or ""
+    ).strip()
+    canonical_recovery_source = str(
+        _SEMANTIC_RECOVERY_COPY[post_type]["source"]
+    ).strip()
+
+    def overlaps_recovery(source: str) -> bool:
+        return bool(
+            source
+            and (
+                classify_script_overlap(generated.script, source)
+                or _semantic_script_uses_recovery_source(
+                    generated.script,
+                    source,
+                )
             )
         )
-        if source
-    )
-    uses_slot_recovery = bool(
-        candidate.get("semantic_recovery_title")
-        and any(
-            classify_script_overlap(generated.script, source)
-            or _semantic_script_uses_recovery_source(
-                generated.script,
-                source,
-            )
-            for source in recovery_sources
-        )
-    )
+
+    uses_candidate_recovery = overlaps_recovery(candidate_recovery_source)
+    uses_canonical_recovery = overlaps_recovery(canonical_recovery_source)
+    uses_recovery = uses_candidate_recovery or uses_canonical_recovery
     if (
         generated.provenance.get("source") == "deterministic_recovery"
-        or uses_slot_recovery
+        or uses_recovery
     ):
         recovery_copy = _SEMANTIC_RECOVERY_COPY[post_type]
-        if candidate.get("semantic_recovery_title"):
+        slot_index = max(
+            0,
+            int(str(semantic_slot_id).rsplit(":", 1)[-1]) - 1,
+        )
+        if uses_canonical_recovery:
             recovery_copy = {
-                "title": candidate["semantic_recovery_title"],
+                "title": _semantic_slot_recovery_title(post_type, slot_index),
                 "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
             }
         elif candidate.get("semantic_recovery"):
             recovery_copy = {
                 "title": candidate.get("title"),
                 "cta": candidate.get("cta"),
+            }
+        elif candidate.get("semantic_recovery_title"):
+            recovery_copy = {
+                "title": candidate["semantic_recovery_title"],
+                "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
             }
         title = str(recovery_copy["title"])
         cta = str(recovery_copy["cta"])
