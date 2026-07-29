@@ -491,6 +491,24 @@ def validate_semantic_script(
     )
 
 
+def semantic_script_uses_recovery_source(script: str, recovery_source: str) -> bool:
+    """Return whether complete recovery statements make up most of a script."""
+
+    def statements(value: str) -> set[str]:
+        return {
+            re.sub(r"\s+", " ", statement).strip().casefold()
+            for statement in re.split(r"(?<=[.!?])\s+", value)
+            if statement.strip()
+        }
+
+    script_statements = statements(script)
+    recovery_statements = statements(recovery_source)
+    if not script_statements or not recovery_statements:
+        return False
+    matched = len(script_statements & recovery_statements)
+    return matched >= max(2, (len(script_statements) + 1) // 2)
+
+
 def validate_semantic_script_audience_copy(
     script: str,
     *,
@@ -1851,6 +1869,7 @@ __all__ = [
     "SemanticScriptValidationResult",
     "build_semantic_script_prompt",
     "generate_semantic_script",
+    "semantic_script_uses_recovery_source",
     "validate_semantic_script",
     "validate_semantic_script_audience_copy",
 ]

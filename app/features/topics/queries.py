@@ -19,6 +19,7 @@ from app.core.logging import get_logger
 
 _POSTS_INSERT_RETRY_DELAYS = (0.15, 0.35, 0.75, 1.5)
 from app.features.topics.captions import resolve_selected_caption
+from app.features.topics.semantic_scripts import semantic_script_uses_recovery_source
 from app.features.topics.seed_builders import clean_source_url, select_relevant_sources
 from app.features.topics.topic_validation import (
     classify_script_overlap,
@@ -580,6 +581,30 @@ def create_post_for_batch(
             )
             resolved_seed_data["script_duration_contract"] = contract
     
+    recovery_source = str(
+        resolved_seed_data.get("semantic_recovery_source") or ""
+    ).strip()
+    recovery_title = str(
+        resolved_seed_data.get("semantic_recovery_title") or ""
+    ).strip()
+    effective_script = (
+        resolve_effective_script_text(resolved_seed_data)
+        or str(topic_rotation or "").strip()
+    )
+    if (
+        recovery_source
+        and recovery_title
+        and semantic_script_uses_recovery_source(effective_script, recovery_source)
+    ):
+        topic_title = recovery_title
+        resolved_seed_data["canonical_topic"] = recovery_title
+        recovery_cta = str(
+            resolved_seed_data.get("semantic_recovery_cta") or ""
+        ).strip()
+        if recovery_cta:
+            topic_cta = recovery_cta
+            resolved_seed_data["cta"] = recovery_cta
+
     post_data = {
         "batch_id": batch_id,
         "post_type": post_type,

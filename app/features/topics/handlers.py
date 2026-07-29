@@ -68,6 +68,7 @@ from app.features.shot_production.planner import plan_editorial_beats
 from app.features.characters.actor_identity import is_manual_creation_mode, is_semantic_ugc_mode
 from app.features.topics.semantic_scripts import (
     generate_semantic_script,
+    semantic_script_uses_recovery_source,
     validate_semantic_script,
     validate_semantic_script_audience_copy,
 )
@@ -366,19 +367,7 @@ def _semantic_slot_recovery_title(post_type: str, slot_index: int) -> str:
 
 
 def _semantic_script_uses_recovery_source(script: str, recovery_source: str) -> bool:
-    def statements(value: str) -> set[str]:
-        return {
-            re.sub(r"\s+", " ", statement).strip().casefold()
-            for statement in re.split(r"(?<=[.!?])\s+", value)
-            if statement.strip()
-        }
-
-    script_statements = statements(script)
-    recovery_statements = statements(recovery_source)
-    if not script_statements or not recovery_statements:
-        return False
-    matched = len(script_statements & recovery_statements)
-    return matched >= max(2, (len(script_statements) + 1) // 2)
+    return semantic_script_uses_recovery_source(script, recovery_source)
 
 
 def _force_fill_lifestyle_candidates(
@@ -1010,6 +999,14 @@ def _create_semantic_post_from_candidate(
     semantic_rotation_index: int,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     seed_payload = _semantic_seed_payload(post_type, candidate)
+    for field in (
+        "semantic_recovery_source",
+        "semantic_recovery_title",
+        "semantic_recovery_cta",
+    ):
+        value = candidate.get(field)
+        if value:
+            seed_payload[field] = value
     sources = _semantic_source_urls(candidate, seed_payload)
     facts = _semantic_fact_inputs(candidate, seed_payload)
     title = str(candidate.get("title") or seed_payload.get("canonical_topic") or "").strip()

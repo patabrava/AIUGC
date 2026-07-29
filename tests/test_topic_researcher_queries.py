@@ -1735,23 +1735,29 @@ def test_semantic_post_retry_is_idempotent_after_lost_insert_response(mock_get_s
     assert post["id"] == next(iter(fake_table.rows))
     assert fake_table.upsert_kwargs["ignore_duplicates"] is False
 
+    recovery_script = (
+        "Prüfe öffentliche Wege früh auf sichere Zugänge und erreichbare Alternativen. "
+        "Teile geprüfte Zugänge, damit andere unnötige Umwege zuverlässig vermeiden."
+    )
     corrected = create_post_for_batch(
         batch_id="1f899446-81a7-4d1d-a36d-4b57bc7535a0",
         post_type="value",
-        topic_title="Geprüfte Zugänge teilen und Umwege vermeiden",
-        topic_rotation="Geprüfte Zugänge sparen im Alltag zuverlässig Umwege.",
+        topic_title="Veralteter, nicht passender Forschungstitel",
+        topic_rotation=recovery_script,
         topic_cta="Speichere dir den Hinweis.",
         spoken_duration=8,
         seed_data={
-            "script": "Geprüfte Zugänge sparen im Alltag zuverlässig Umwege.",
-            "target_duration_seconds": 8,
+            "script": recovery_script,
+            "target_duration_seconds": 50,
             "semantic_slot_id": "value:1",
+            "semantic_recovery_source": recovery_script,
+            "semantic_recovery_title": (
+                "Geprüfte Zugänge teilen und Umwege vermeiden"
+            ),
         },
         target_length_tier=None,
     )
 
     assert len(fake_table.rows) == 1
     assert corrected["topic_title"] == "Geprüfte Zugänge teilen und Umwege vermeiden"
-    assert corrected["topic_rotation"] == (
-        "Geprüfte Zugänge sparen im Alltag zuverlässig Umwege."
-    )
+    assert corrected["topic_rotation"] == recovery_script
