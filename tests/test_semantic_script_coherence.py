@@ -311,6 +311,11 @@ def test_repetitive_audited_32_second_source_uses_family_recovery():
             "(TAKE 2) Mit einem passenden Lift wird sie wieder nutzbar.",
             "recovery scaffolding",
         ),
+        (
+            "TAKE 1 Als Rollstuhlfahrerin antworte ich selbst auf direkte Fragen. "
+            "Meine Begleitung unterstützt nur, wenn ich ausdrücklich darum bitte.",
+            "recovery scaffolding",
+        ),
     ],
 )
 def test_non_substantive_source_sentences_are_rejected(script, message):
