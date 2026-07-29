@@ -1298,6 +1298,92 @@ def _build_batch_detail_view(batch_detail: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _recover_stale_semantic_batch(
+    batch: dict,
+    posts_summary: dict,
+    progress: dict | None,
+) -> dict | None:
+    """Resume an interrupted semantic seed run from any user-visible batch route."""
+    semantic_resume_is_safe = semantic_batch_posts_are_resumable(
+        batch,
+        posts_summary["posts_by_state"],
+    )
+    if (
+        batch["state"] != BatchState.S1_SETUP.value
+        or (posts_summary["posts_count"] != 0 and not semantic_resume_is_safe)
+        or is_batch_discovery_active(batch["id"])
+    ):
+        return progress
+
+    expected_posts = sum((batch.get("post_type_counts") or {}).values())
+    batch_id = batch["id"]
+    if progress is None or progress.get("stage") in {"failed", "completed"}:
+        start_seeding_interaction(
+            batch_id=batch_id,
+            brand=batch["brand"],
+            expected_posts=expected_posts,
+        )
+        schedule_batch_discovery(batch_id, reason="status_recovery")
+        return get_seeding_progress(batch_id)
+
+    if progress.get("stage") == "coverage_pending":
+        if has_required_family_coverage(batch):
+            progress = update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="booting",
+                stage_label="Audited family coverage ready",
+                detail_message="Audited family coverage is now sufficient. Resuming topic generation.",
+                posts_created=posts_summary["posts_count"],
+                expected_posts=expected_posts,
+                current_post_type=None,
+                attempt=None,
+                max_attempts=None,
+                is_retrying=False,
+                retry_message=None,
+            )
+            _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.pop(batch_id, None)
+            schedule_batch_discovery(batch_id, reason="coverage_recovery")
+        else:
+            now = asyncio.get_running_loop().time()
+            last_scheduled = _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.get(batch_id, 0.0)
+            progress = update_seeding_progress(
+                batch_id,
+                state=batch["state"],
+                stage="coverage_pending",
+                stage_label="Waiting for audited family coverage",
+                detail_message="Audited coverage is still short. Rechecking the topic bank in the background.",
+                posts_created=posts_summary["posts_count"],
+                expected_posts=expected_posts,
+                current_post_type=None,
+                attempt=None,
+                max_attempts=None,
+                is_retrying=True,
+                retry_message="Coverage is still short; the batch will keep retrying in the background.",
+            )
+            if last_scheduled == 0.0 or (now - last_scheduled) >= _COVERAGE_RECOVERY_COOLDOWN_SECONDS:
+                schedule_batch_discovery(batch_id, reason="coverage_recovery")
+                _COVERAGE_RECOVERY_LAST_SCHEDULED_AT[batch_id] = now
+        return get_seeding_progress(batch_id) or progress
+
+    progress = update_seeding_progress(
+        batch_id,
+        state=batch["state"],
+        stage="booting",
+        stage_label="Resuming interrupted topic generation",
+        detail_message="The saved scripts are intact. Generating the missing script families now.",
+        posts_created=posts_summary["posts_count"],
+        expected_posts=expected_posts,
+        current_post_type=None,
+        attempt=None,
+        max_attempts=None,
+        is_retrying=True,
+        retry_message="A stale generation run was detected and restarted automatically.",
+    )
+    schedule_batch_discovery(batch_id, reason="status_recovery")
+    return get_seeding_progress(batch_id) or progress
+
+
 @router.get("", response_model=SuccessResponse)
 async def list_batches_endpoint(
     request: Request,
@@ -1353,6 +1439,12 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         
         batch = get_batch_by_id(batch_id)
         posts_summary = get_batch_posts_summary(batch_id)
+        if not _batch_has_manual_drafts(batch):
+            _recover_stale_semantic_batch(
+                batch,
+                posts_summary,
+                get_seeding_progress(batch_id),
+            )
         posts_data = get_posts_by_batch(batch_id)
         raw_scene_references_by_post = character_queries.list_scene_references_for_posts(
             [str(p.get("id")) for p in posts_data if p.get("id")]
@@ -1594,79 +1686,7 @@ async def get_batch_status(batch_id: str):
             }
             return SuccessResponse(data=payload)
 
-        semantic_resume_is_safe = semantic_batch_posts_are_resumable(
-            batch,
-            posts_summary["posts_by_state"],
-        )
-        if (
-            batch["state"] == BatchState.S1_SETUP.value
-            and (posts_summary["posts_count"] == 0 or semantic_resume_is_safe)
-            and not is_batch_discovery_active(batch_id)
-        ):
-            if progress is None or progress.get("stage") in {"failed", "completed"}:
-                start_seeding_interaction(
-                    batch_id=batch["id"],
-                    brand=batch["brand"],
-                    expected_posts=sum((batch.get("post_type_counts") or {}).values()),
-                )
-                schedule_batch_discovery(batch_id, reason="status_recovery")
-                progress = get_seeding_progress(batch_id)
-            elif progress.get("stage") == "coverage_pending":
-                if has_required_family_coverage(batch):
-                    progress = update_seeding_progress(
-                        batch_id,
-                        state=batch["state"],
-                        stage="booting",
-                        stage_label="Audited family coverage ready",
-                        detail_message="Audited family coverage is now sufficient. Resuming topic generation.",
-                        posts_created=posts_summary["posts_count"],
-                        expected_posts=sum((batch.get("post_type_counts") or {}).values()),
-                        current_post_type=None,
-                        attempt=None,
-                        max_attempts=None,
-                        is_retrying=False,
-                        retry_message=None,
-                    )
-                    _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.pop(batch_id, None)
-                    schedule_batch_discovery(batch_id, reason="coverage_recovery")
-                else:
-                    now = asyncio.get_running_loop().time()
-                    last_scheduled = _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.get(batch_id, 0.0)
-                    progress = update_seeding_progress(
-                        batch_id,
-                        state=batch["state"],
-                        stage="coverage_pending",
-                        stage_label="Waiting for audited family coverage",
-                        detail_message="Audited coverage is still short. Rechecking the topic bank in the background.",
-                        posts_created=posts_summary["posts_count"],
-                        expected_posts=sum((batch.get("post_type_counts") or {}).values()),
-                        current_post_type=None,
-                        attempt=None,
-                        max_attempts=None,
-                        is_retrying=True,
-                        retry_message="Coverage is still short; the batch will keep retrying in the background.",
-                    )
-                    if last_scheduled == 0.0 or (now - last_scheduled) >= _COVERAGE_RECOVERY_COOLDOWN_SECONDS:
-                        schedule_batch_discovery(batch_id, reason="coverage_recovery")
-                        _COVERAGE_RECOVERY_LAST_SCHEDULED_AT[batch_id] = now
-                progress = get_seeding_progress(batch_id) or progress
-            else:
-                progress = update_seeding_progress(
-                    batch_id,
-                    state=batch["state"],
-                    stage="booting",
-                    stage_label="Resuming interrupted topic generation",
-                    detail_message="The saved scripts are intact. Generating the missing script families now.",
-                    posts_created=posts_summary["posts_count"],
-                    expected_posts=sum((batch.get("post_type_counts") or {}).values()),
-                    current_post_type=None,
-                    attempt=None,
-                    max_attempts=None,
-                    is_retrying=True,
-                    retry_message="A stale generation run was detected and restarted automatically.",
-                )
-                schedule_batch_discovery(batch_id, reason="status_recovery")
-                progress = get_seeding_progress(batch_id) or progress
+        progress = _recover_stale_semantic_batch(batch, posts_summary, progress)
 
         payload = {
             "id": batch["id"],

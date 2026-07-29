@@ -359,6 +359,57 @@ def test_get_batch_status_requeues_partial_semantic_batch_with_stale_retry_progr
     assert scheduled == [("batch-partial-stale", "status_recovery")]
 
 
+def test_batch_detail_view_triggers_partial_semantic_recovery(monkeypatch):
+    recovered = []
+    batch = {
+        "id": "batch-detail-partial",
+        "brand": "Partial Semantic",
+        "state": "S1_SETUP",
+        "creation_mode": "semantic_ugc",
+        "post_type_counts": {"value": 1, "lifestyle": 1, "product": 1},
+    }
+    summary = {
+        "posts_count": 1,
+        "posts_by_state": {"value": 1},
+    }
+    progress = {"stage": "retrying", "is_retrying": True}
+
+    monkeypatch.setattr(batch_handlers, "get_batch_by_id", lambda _batch_id: batch)
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_batch_posts_summary",
+        lambda _batch_id: summary,
+    )
+    monkeypatch.setattr(batch_handlers, "_batch_has_manual_drafts", lambda _batch: False)
+    monkeypatch.setattr(
+        batch_handlers,
+        "get_seeding_progress",
+        lambda _batch_id: progress,
+    )
+    monkeypatch.setattr(
+        batch_handlers,
+        "_recover_stale_semantic_batch",
+        lambda seen_batch, seen_summary, seen_progress: recovered.append(
+            (seen_batch, seen_summary, seen_progress)
+        ),
+    )
+    monkeypatch.setattr(
+        topic_queries,
+        "get_posts_by_batch",
+        lambda _batch_id: (_ for _ in ()).throw(RuntimeError("stop after recovery")),
+    )
+
+    with pytest.raises(Exception):
+        asyncio.run(
+            batch_handlers.get_batch_endpoint(
+                request=object(),
+                batch_id="batch-detail-partial",
+            )
+        )
+
+    assert recovered == [(batch, summary, progress)]
+
+
 def test_get_batch_status_skips_manual_drafts_even_on_legacy_rows(monkeypatch):
     scheduled = []
 
