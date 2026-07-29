@@ -1054,11 +1054,12 @@ def _create_semantic_post_from_candidate(
     uses_candidate_recovery = overlaps_recovery(candidate_recovery_source)
     uses_canonical_recovery = overlaps_recovery(canonical_recovery_source)
     uses_recovery = uses_candidate_recovery or uses_canonical_recovery
-    uses_deterministic_recovery = (
-        generated.provenance.get("source") == "deterministic_recovery"
-    )
+    uses_generated_fallback = generated.provenance.get("source") in {
+        "fallback",
+        "deterministic_recovery",
+    }
     if (
-        uses_deterministic_recovery
+        uses_generated_fallback
         or uses_recovery
     ):
         recovery_copy = _SEMANTIC_RECOVERY_COPY[post_type]
@@ -1066,7 +1067,7 @@ def _create_semantic_post_from_candidate(
             0,
             int(str(semantic_slot_id).rsplit(":", 1)[-1]) - 1,
         )
-        if uses_deterministic_recovery or uses_canonical_recovery:
+        if uses_generated_fallback or uses_canonical_recovery:
             recovery_copy = {
                 "title": (
                     candidate.get("semantic_recovery_title")

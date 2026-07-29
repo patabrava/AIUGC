@@ -459,7 +459,12 @@ def test_repeated_slot_recovery_replaces_mismatched_source_title(monkeypatch, po
 
 
 @pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
-def test_deterministic_recovery_prefers_assigned_slot_title(monkeypatch, post_type):
+@pytest.mark.parametrize("provenance_source", ["fallback", "deterministic_recovery"])
+def test_generated_fallback_prefers_assigned_slot_title(
+    monkeypatch,
+    post_type,
+    provenance_source,
+):
     class FailingClient:
         def generate_gemini_text(self, **_kwargs):
             raise httpx.ConnectError(
@@ -497,7 +502,7 @@ def test_deterministic_recovery_prefers_assigned_slot_title(monkeypatch, post_ty
             script=recovery_script,
             contract_hash=contract.contract_hash,
             provenance={
-                "source": "deterministic_recovery",
+                "source": provenance_source,
                 "post_type": post_type,
             },
         ),
