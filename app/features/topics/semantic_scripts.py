@@ -42,6 +42,7 @@ _INTERNAL_FALLBACK_COPY = re.compile(
 )
 _AUDIENCE_COPY_SCAFFOLDING = re.compile(
     r"(?:\(|\[)?\s*take\s*\d+\b\s*(?:\)|\]|:|-)?|"
+    r"(?:^|(?<=[.!?])\s+)[A-ZÄÖÜ][^.!?():]{0,38}:|"
     r"\b(?:wichtig\s+bleibt|wichtig)\s*:\s*[„\"]|"
     r"\bprüfe\s+für\s+deine\s+nächste\s+wichtige\s+entscheidung\s+bitte\s+erneut\b|"
     r"\baußerdem\s+gilt\s*:|"
@@ -63,7 +64,10 @@ _AUDIENCE_ANAPHORIC_OPENING = re.compile(
 )
 _AUDIENCE_GENERIC_PADDING = re.compile(
     r"(?:^|(?<=[.!?,])\s+)(?:"
+    r"kennst\s+du\s+das\s+gefühl,\s+wenn\s+du\s+(?:denkst|glaubst)|"
     r"(?:doch\s+)?es\s+gibt\s+eine\s+lösung|"
+    r"das\s+gibt\s+mir\s+ein\s+(?:echt(?:\s+wirklich)?|wirklich)?\s*"
+    r"gutes\s+gefühl(?:\s+der\s+freiheit)?|"
     r"so\s+ist\s+man\s+(?:immer\s+)?gut\s+unterwegs|"
     r"eine\s+sorge\s+weniger(?:\s+im\s+alltag)?|"
     r"(?:und\s+)?das\s+ist\s+(?:toll|super|großartig)"

@@ -307,6 +307,11 @@ def test_repetitive_audited_32_second_source_uses_family_recovery():
             "recovery scaffolding",
         ),
         (
+            "Bordsteinkanten erschweren sichere Wege im Rollstuhl-Alltag. "
+            "Getrennte Überquerungsstelle: Diese Variante sieht zwei Bereiche vor.",
+            "recovery scaffolding",
+        ),
+        (
             "(TAKE 1) Eine Treppe schien mir oft unüberwindbar. "
             "(TAKE 2) Mit einem passenden Lift wird sie wieder nutzbar.",
             "recovery scaffolding",
@@ -315,6 +320,11 @@ def test_repetitive_audited_32_second_source_uses_family_recovery():
             "TAKE 1 Als Rollstuhlfahrerin antworte ich selbst auf direkte Fragen. "
             "Meine Begleitung unterstützt nur, wenn ich ausdrücklich darum bitte.",
             "recovery scaffolding",
+        ),
+        (
+            "Kennst du das Gefühl, wenn du denkst, eine Treppe ist einfach zu "
+            "kompliziert? Das gibt mir ein echt gutes Gefühl der Freiheit.",
+            "generic padding",
         ),
     ],
 )
