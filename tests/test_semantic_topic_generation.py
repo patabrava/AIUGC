@@ -310,6 +310,42 @@ def test_semantic_value_batch_uses_distinct_recovery_families_when_bank_is_empty
 
 
 @pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
+def test_repeated_semantic_family_slots_have_distinct_contract_safe_recovery(
+    post_type,
+):
+    class FailingClient:
+        def generate_gemini_text(self, **_kwargs):
+            raise httpx.ConnectError(
+                "offline",
+                request=httpx.Request("POST", "https://provider.invalid"),
+            )
+
+    sources = [
+        handlers._semantic_slot_recovery_source(post_type, slot_index)
+        for slot_index in (0, 1)
+    ]
+    scripts = [
+        generate_semantic_script(
+            post_type=post_type,
+            title=f"{post_type} recovery {slot_index}",
+            cta="Speichere dir diese Hinweise.",
+            facts=["Kurzer Hinweis."],
+            recovery_facts=[source],
+            requested_duration_seconds=50,
+            llm_client=FailingClient(),
+        ).script
+        for slot_index, source in enumerate(sources)
+    ]
+
+    assert sources[0] != sources[1]
+    assert scripts[0] != scripts[1]
+    assert all(
+        validate_semantic_script(script, requested_duration_seconds=50)
+        for script in scripts
+    )
+
+
+@pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
 def test_deterministic_recovery_uses_matching_family_metadata(monkeypatch, post_type):
     contract = build_semantic_duration_contract(8)
     candidate = _candidate(post_type)

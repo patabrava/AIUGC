@@ -297,9 +297,14 @@ def _build_lifestyle_fallback_candidates(
     return candidates
 
 
-def _build_semantic_value_recovery_candidates(count: int) -> List[Dict[str, Any]]:
+def _build_semantic_value_recovery_candidates(
+    count: int,
+    *,
+    start_index: int = 0,
+) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
-    for index, recovery in enumerate(_SEMANTIC_VALUE_RECOVERY_CANDIDATES, start=1):
+    recoveries = _SEMANTIC_VALUE_RECOVERY_CANDIDATES[start_index:]
+    for index, recovery in enumerate(recoveries, start=start_index + 1):
         source = str(recovery["source"])
         candidates.append(
             {
@@ -324,6 +329,19 @@ def _build_semantic_value_recovery_candidates(count: int) -> List[Dict[str, Any]
         if len(candidates) >= count:
             break
     return candidates
+
+
+def _semantic_slot_recovery_source(post_type: str, slot_index: int) -> str:
+    source = str(_SEMANTIC_RECOVERY_COPY[post_type]["source"])
+    statements = [
+        statement.strip()
+        for statement in re.split(r"(?<=[.!?])\s+", source)
+        if statement.strip()
+    ]
+    if slot_index <= 0 or len(statements) < 2:
+        return source
+    offset = (slot_index * max(1, len(statements) // 2)) % len(statements)
+    return " ".join((*statements[offset:], *statements[:offset]))
 
 
 def _force_fill_lifestyle_candidates(
@@ -1912,7 +1930,10 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
         if post_type == "value" and len(suggestions) < missing_count:
             suggestions.extend(
                 _reserve_semantic_candidates(
-                    _build_semantic_value_recovery_candidates(missing_count),
+                    _build_semantic_value_recovery_candidates(
+                        missing_count - len(suggestions),
+                        start_index=len(suggestions),
+                    ),
                     count=missing_count - len(suggestions),
                     used_family_identities=reserved_family_identities,
                     reserved_topics=reserved_topics,
@@ -2008,6 +2029,14 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             )
 
         for slot_id, candidate in zip(slots, candidates):
+            slot_index = max(0, int(slot_id.rsplit(":", 1)[-1]) - 1)
+            if post_type_counts[post_type] > 1:
+                candidate = dict(candidate)
+                candidate.setdefault(
+                    "semantic_recovery_source",
+                    _semantic_slot_recovery_source(post_type, slot_index),
+                )
+                candidate["semantic_recovery"] = True
             family_identity = _semantic_family_identity(candidate)
             post, topic_record = _create_semantic_post_from_candidate(
                 batch=batch,
