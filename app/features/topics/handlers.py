@@ -219,6 +219,40 @@ _SEMANTIC_RECOVERY_COPY = {
     },
 }
 
+_SEMANTIC_VALUE_RECOVERY_CANDIDATES = (
+    {
+        "title": _SEMANTIC_RECOVERY_COPY["value"]["title"],
+        "cta": _SEMANTIC_RECOVERY_COPY["value"]["cta"],
+        "source": _SEMANTIC_RECOVERY_COPY["value"]["source"],
+    },
+    {
+        "title": "Digitale Angebote auf echte Zugänglichkeit prüfen",
+        "cta": "Speichere dir diese digitale Prüfliste.",
+        "source": (
+            "Prüfe vor einem digitalen Antrag, ob Formulare vollständig mit Tastatur, "
+            "Sprachausgabe und klarer Vergrößerung bedienbar sind. "
+            "Speichere Vorgangsnummer, Frist und zuständige Kontaktstelle direkt, damit "
+            "du bei technischen Problemen einen belastbaren Nachweis behältst. "
+            "Fordere eine zugängliche Alternative an, wenn ein Pflichtfeld, ein Dokument "
+            "oder die Identifikation für dich nicht selbstständig nutzbar ist. "
+            "Beschreibe die konkrete Barriere mit Gerät, Browser und Arbeitsschritt, "
+            "damit der Support den Fehler gezielt nachvollziehen kann. "
+            "Lass dir wichtige Zusagen schriftlich bestätigen, statt dich bei Fristen "
+            "nur auf eine telefonische Auskunft zu verlassen. "
+            "Prüfe vor einer Videosprechstunde Untertitel, Chat und erreichbare Hilfe, "
+            "damit technische Hürden nicht erst während des Termins sichtbar werden. "
+            "Halte notwendige Unterlagen in einem klar benannten Ordner bereit, damit "
+            "du Rückfragen ohne langes Suchen beantworten kannst. "
+            "Plane bei wichtigen Anträgen genügend Zeit für eine barrierefreie "
+            "Ersatzlösung ein, bevor eine verbindliche Frist endet. "
+            "Teile wiederkehrende Zugangsprobleme mit der zuständigen Stelle und bitte "
+            "um eine konkrete Rückmeldung zur geplanten Korrektur. "
+            "Bewahre die bestätigte Lösung zusammen mit deinen Unterlagen auf, damit "
+            "du sie beim nächsten Vorgang schnell wiederverwenden kannst."
+        ),
+    },
+)
+
 
 def _build_lifestyle_fallback_candidates(
     *,
@@ -260,6 +294,35 @@ def _build_lifestyle_fallback_candidates(
         )
         existing_titles.add(title.lower())
         existing_scripts.append(rotation)
+    return candidates
+
+
+def _build_semantic_value_recovery_candidates(count: int) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for index, recovery in enumerate(_SEMANTIC_VALUE_RECOVERY_CANDIDATES, start=1):
+        source = str(recovery["source"])
+        candidates.append(
+            {
+                "id": f"semantic-value-recovery-{index}",
+                "family_id": f"semantic-value-recovery-{index}",
+                "family_fingerprint": f"semantic-value-recovery-{index}",
+                "title": str(recovery["title"]),
+                "rotation": source,
+                "script": source,
+                "cta": str(recovery["cta"]),
+                "spoken_duration": float(_SEMANTIC_TOPIC_INPUT_TIER),
+                "post_type": "value",
+                "semantic_recovery": True,
+                "semantic_recovery_source": source,
+                "seed_payload": {
+                    "canonical_topic": str(recovery["title"]),
+                    "script": source,
+                    "facts": [source],
+                },
+            }
+        )
+        if len(candidates) >= count:
+            break
     return candidates
 
 
@@ -897,7 +960,12 @@ def _create_semantic_post_from_candidate(
         title=title,
         cta=cta,
         facts=facts,
-        recovery_facts=[_SEMANTIC_RECOVERY_COPY[post_type]["source"]],
+        recovery_facts=[
+            str(
+                candidate.get("semantic_recovery_source")
+                or _SEMANTIC_RECOVERY_COPY[post_type]["source"]
+            )
+        ],
         requested_duration_seconds=contract.requested_duration_seconds,
         actor_context=_semantic_actor_context(batch),
         research_provenance=research_provenance,
@@ -905,8 +973,16 @@ def _create_semantic_post_from_candidate(
         maximum_seconds=contract.maximum_duration_seconds,
     )
     if generated.provenance.get("source") == "deterministic_recovery":
-        title = _SEMANTIC_RECOVERY_COPY[post_type]["title"]
-        cta = _SEMANTIC_RECOVERY_COPY[post_type]["cta"]
+        recovery_copy = (
+            {
+                "title": candidate.get("title"),
+                "cta": candidate.get("cta"),
+            }
+            if candidate.get("semantic_recovery")
+            else _SEMANTIC_RECOVERY_COPY[post_type]
+        )
+        title = str(recovery_copy["title"])
+        cta = str(recovery_copy["cta"])
         seed_payload["canonical_topic"] = title
         seed_payload["cta"] = cta
     validation = validate_semantic_script(
@@ -1828,6 +1904,15 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             used_family_identities=reserved_family_identities,
             reserved_topics=reserved_topics,
         )
+        if post_type == "value" and len(suggestions) < missing_count:
+            suggestions.extend(
+                _reserve_semantic_candidates(
+                    _build_semantic_value_recovery_candidates(missing_count),
+                    count=missing_count - len(suggestions),
+                    used_family_identities=reserved_family_identities,
+                    reserved_topics=reserved_topics,
+                )
+            )
         preselected_suggestions[post_type] = suggestions
         if len(suggestions) >= missing_count:
             continue

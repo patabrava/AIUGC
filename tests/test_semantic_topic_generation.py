@@ -226,6 +226,83 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
         assert created["seed_data"]["source_urls"] == candidate["source_urls"]
 
 
+def test_semantic_value_batch_uses_distinct_recovery_families_when_bank_is_empty(
+    monkeypatch,
+):
+    contract = build_semantic_duration_contract(50)
+    batch = {
+        "id": "batch-semantic-value-recovery",
+        "brand": "Recovery",
+        "state": "S1_SETUP",
+        "creation_mode": "semantic_ugc",
+        "target_duration_seconds": 50,
+        "target_length_tier": None,
+        "post_type_counts": {"value": 2, "lifestyle": 0, "product": 0},
+        "actor_identity_snapshot": {"name": "Nora"},
+    }
+    monkeypatch.setattr(handlers, "get_batch_by_id", lambda _batch_id: batch)
+    monkeypatch.setattr(handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+    monkeypatch.setattr(handlers, "get_posts_by_batch", lambda _batch_id: [])
+    monkeypatch.setattr(handlers, "get_all_topics_from_registry", lambda: [])
+    monkeypatch.setattr(handlers, "list_topic_suggestions", lambda **_kwargs: [])
+    monkeypatch.setattr(handlers, "update_seeding_progress", lambda *args, **kwargs: {})
+    monkeypatch.setattr(handlers, "mark_topic_family_used", lambda *args, **kwargs: None)
+    monkeypatch.setattr(handlers, "mark_topic_script_used", lambda *args, **kwargs: None)
+    monkeypatch.setattr(handlers, "deduplicate_topics", lambda values, *args, **kwargs: values)
+    monkeypatch.setattr(
+        handlers,
+        "_schedule_coverage_warmup",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("substantive recovery families should avoid coverage blocking")
+        ),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "_attach_publish_captions",
+        lambda **kwargs: dict(kwargs["seed_payload"]),
+    )
+
+    semantic_calls = []
+
+    def fake_generate_semantic_script(**kwargs):
+        semantic_calls.append(kwargs)
+        script = _seven_take_script()
+        if len(semantic_calls) == 2:
+            script = script.replace(
+                "Barrierefreie Wege sparen täglich Kraft",
+                "Zugängliche Online-Dienste sparen täglich Kraft",
+                1,
+            )
+        return SemanticScriptResult(
+            script=script,
+            contract_hash=contract.contract_hash,
+            provenance={"source": "fallback", "post_type": "value"},
+        )
+
+    monkeypatch.setattr(handlers, "generate_semantic_script", fake_generate_semantic_script)
+    created_posts = []
+    monkeypatch.setattr(
+        handlers,
+        "create_post_for_batch",
+        lambda **kwargs: created_posts.append(kwargs)
+        or {"id": f"post-{len(created_posts)}", "post_type": "value"},
+    )
+    monkeypatch.setattr(
+        handlers,
+        "update_batch_state",
+        lambda batch_id, state: {**batch, "state": state.value},
+    )
+
+    result = handlers._discover_topics_for_batch_sync(batch["id"])
+
+    assert result["posts_created"] == 2
+    assert len(created_posts) == 2
+    assert len({post["topic_title"] for post in created_posts}) == 2
+    assert len({post["topic_rotation"] for post in created_posts}) == 2
+    assert len({call["recovery_facts"][0] for call in semantic_calls}) == 2
+    assert all(len(call["recovery_facts"][0].split()) >= 100 for call in semantic_calls)
+
+
 @pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])
 def test_deterministic_recovery_uses_matching_family_metadata(monkeypatch, post_type):
     contract = build_semantic_duration_contract(8)
