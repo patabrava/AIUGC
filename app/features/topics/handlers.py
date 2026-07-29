@@ -344,6 +344,27 @@ def _semantic_slot_recovery_source(post_type: str, slot_index: int) -> str:
     return " ".join((*statements[offset:], *statements[:offset]))
 
 
+_SEMANTIC_SLOT_RECOVERY_TITLES = {
+    "value": (
+        "Barrieren früh erkennen und Wege besser planen",
+        "Geprüfte Zugänge teilen und Umwege vermeiden",
+    ),
+    "lifestyle": (
+        "Unbekannte Wege ohne unnötigen Zusatzdruck planen",
+        "Ausflüge mit Pausen und Alternativen absichern",
+    ),
+    "product": (
+        "Plattformlift passend für den Alltag planen",
+        "Liftbetrieb, Wartung und freie Wege abstimmen",
+    ),
+}
+
+
+def _semantic_slot_recovery_title(post_type: str, slot_index: int) -> str:
+    titles = _SEMANTIC_SLOT_RECOVERY_TITLES[post_type]
+    return titles[slot_index % len(titles)]
+
+
 def _force_fill_lifestyle_candidates(
     *,
     count: int,
@@ -996,14 +1017,17 @@ def _create_semantic_post_from_candidate(
         maximum_seconds=contract.maximum_duration_seconds,
     )
     if generated.provenance.get("source") == "deterministic_recovery":
-        recovery_copy = (
-            {
+        recovery_copy = _SEMANTIC_RECOVERY_COPY[post_type]
+        if candidate.get("semantic_recovery"):
+            recovery_copy = {
                 "title": candidate.get("title"),
                 "cta": candidate.get("cta"),
             }
-            if candidate.get("semantic_recovery")
-            else _SEMANTIC_RECOVERY_COPY[post_type]
-        )
+        elif candidate.get("semantic_recovery_title"):
+            recovery_copy = {
+                "title": candidate["semantic_recovery_title"],
+                "cta": candidate.get("semantic_recovery_cta") or recovery_copy["cta"],
+            }
         title = str(recovery_copy["title"])
         cta = str(recovery_copy["cta"])
         seed_payload["canonical_topic"] = title
@@ -2036,7 +2060,14 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
                     "semantic_recovery_source",
                     _semantic_slot_recovery_source(post_type, slot_index),
                 )
-                candidate["semantic_recovery"] = True
+                candidate.setdefault(
+                    "semantic_recovery_title",
+                    _semantic_slot_recovery_title(post_type, slot_index),
+                )
+                candidate.setdefault(
+                    "semantic_recovery_cta",
+                    _SEMANTIC_RECOVERY_COPY[post_type]["cta"],
+                )
             family_identity = _semantic_family_identity(candidate)
             post, topic_record = _create_semantic_post_from_candidate(
                 batch=batch,
