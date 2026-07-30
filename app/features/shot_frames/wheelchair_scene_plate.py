@@ -5,12 +5,13 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
+import time
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
 
 from app.adapters.llm_client import get_llm_client
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 from app.core.image_generation_prompt import write_raw_camera_image_prompt
 from app.features.shot_frames.service import ShotFrameReference
 
@@ -49,6 +50,9 @@ _PERCEPTUAL_HASH_WIDTH = 16
 _PERCEPTUAL_HASH_HEIGHT = 16
 _NEAR_DUPLICATE_HASH_DISTANCE = 8
 _NEAR_DUPLICATE_MEAN_RGB_DELTA = 3.0
+_PROVIDER_MAX_ATTEMPTS = 3
+_PROVIDER_RETRY_BASE_SECONDS = 1.0
+_TRANSIENT_PROVIDER_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 @dataclass(frozen=True)
@@ -205,6 +209,19 @@ def _duplicate_candidate_positions(
     return tuple(duplicate_positions)
 
 
+def _is_retryable_provider_error(error: ThirdPartyError) -> bool:
+    status_code = error.details.get("status_code")
+    if status_code is None:
+        # Transport failures and successful responses without image data do not
+        # carry an HTTP status, but another render can safely resolve both.
+        return True
+    try:
+        normalized_status = int(status_code)
+    except (TypeError, ValueError):
+        return True
+    return normalized_status in _TRANSIENT_PROVIDER_STATUS_CODES
+
+
 def generate_scene_plate(
     *,
     references: Sequence[ShotFrameReference],
@@ -297,7 +314,9 @@ def generate_scene_plate_candidates(
         canonical_reference = None
         start_index = 1
         derivation_mode = "bootstrap"
-    def generate_candidate(specification: tuple[int, int]) -> ScenePlateCandidate:
+    def generate_candidate_once(
+        specification: tuple[int, int],
+    ) -> ScenePlateCandidate:
         index, attempt = specification
         variation_directive = _variation_directive(index=index, attempt=attempt)
         if derivation_mode == "bootstrap":
@@ -340,6 +359,34 @@ def generate_scene_plate_candidates(
     def report_progress(phase: str, **details: Any) -> None:
         if progress_callback is not None:
             progress_callback(phase, details)
+
+    def generate_candidate(
+        specification: tuple[int, int],
+    ) -> ScenePlateCandidate:
+        candidate_index, diversity_attempt = specification
+        for provider_attempt in range(1, _PROVIDER_MAX_ATTEMPTS + 1):
+            try:
+                return generate_candidate_once(specification)
+            except ThirdPartyError as exc:
+                if (
+                    provider_attempt >= _PROVIDER_MAX_ATTEMPTS
+                    or not _is_retryable_provider_error(exc)
+                ):
+                    raise
+                report_progress(
+                    "generating_images",
+                    candidate_count=candidate_count,
+                    candidate_index=candidate_index,
+                    diversity_attempt=diversity_attempt,
+                    provider_attempt=provider_attempt + 1,
+                    retrying=True,
+                )
+                time.sleep(
+                    _PROVIDER_RETRY_BASE_SECONDS
+                    * (2 ** (provider_attempt - 1))
+                    + (candidate_index * 0.25)
+                )
+        raise AssertionError("Scene-plate provider retry loop exhausted unexpectedly.")
 
     # Every candidate is an independent provider request over immutable inputs.
     # Run the fixed set together so operator latency is one image-generation wait,

@@ -84,7 +84,11 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
 
         def generate_gemini_image(self, **kwargs):
             self.calls.append(kwargs)
-            marker = f"plate-{len(self.calls)}".encode()
+            marker = next(
+                f"plate-{index}".encode()
+                for index in range(1, 4)
+                if f"Candidate {index} composition:" in kwargs["prompt"]
+            )
             return {
                 "image_bytes": marker,
                 "mime_type": "image/png",
@@ -172,6 +176,100 @@ def test_scene_plate_candidates_generate_concurrently_and_keep_candidate_order()
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
     assert len({candidate.image_bytes for candidate in result.candidates}) == 3
+
+
+def test_scene_plate_candidates_retry_only_the_transiently_failed_candidate(monkeypatch):
+    from app.core.errors import ThirdPartyError
+    from app.features.shot_frames import wheelchair_scene_plate
+
+    attempts: dict[int, int] = {}
+    attempts_lock = Lock()
+
+    class TransientClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_image(self, **kwargs):
+            prompt = kwargs["prompt"]
+            index = next(
+                candidate_index
+                for candidate_index in range(1, 4)
+                if f"Candidate {candidate_index} composition:" in prompt
+            )
+            with attempts_lock:
+                attempts[index] = attempts.get(index, 0) + 1
+                attempt = attempts[index]
+            if index == 2 and attempt == 1:
+                raise ThirdPartyError(
+                    "Vertex Gemini generateContent failed",
+                    {"status_code": 503},
+                )
+            return {
+                "image_bytes": f"candidate-{index}".encode(),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(wheelchair_scene_plate.time, "sleep", sleeps.append)
+    result = wheelchair_scene_plate.generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=TransientClient(),
+    )
+
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert attempts == {1: 1, 2: 2, 3: 1}
+    assert sleeps == [1.5]
+
+
+def test_scene_plate_candidates_do_not_retry_permanent_provider_contract_errors(
+    monkeypatch,
+):
+    from app.core.errors import ThirdPartyError
+    from app.features.shot_frames import wheelchair_scene_plate
+
+    calls = 0
+
+    class InvalidRequestClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_image(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise ThirdPartyError(
+                "Vertex Gemini generateContent failed",
+                {"status_code": 400},
+            )
+
+    monkeypatch.setattr(
+        wheelchair_scene_plate.time,
+        "sleep",
+        lambda _seconds: None,
+    )
+    try:
+        wheelchair_scene_plate.generate_scene_plate_candidates(
+            actor_references=[
+                _reference("actor_front", b"front"),
+                _reference("actor_three_quarter", b"support"),
+            ],
+            location_reference=_reference("location", b"location"),
+            scene="the exact supplied garden patio",
+            wardrobe="light-grey cardigan over a plain white top",
+            llm_client=InvalidRequestClient(),
+        )
+    except ThirdPartyError:
+        pass
+    else:
+        raise AssertionError("Permanent provider error should fail the candidate set.")
+
+    assert calls == 3
 
 
 def test_scene_plate_candidate_progress_reports_real_generation_phases():
