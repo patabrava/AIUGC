@@ -94,6 +94,7 @@ services:
     <<: *runtime-base
     environment:
       <<: *app-env
+      DISABLE_BACKGROUND_SCHEDULERS: "true"
       SERVICE_CMD: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
@@ -135,3 +136,10 @@ services:
     environment:
       <<: *app-env
       SERVICE_CMD: python -m workers.caption_worker
+
+  publish-scheduler:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      PUBLISH_SCHEDULER_POLL_SECONDS: ${PUBLISH_SCHEDULER_POLL_SECONDS:-60}
+      SERVICE_CMD: python -m workers.publish_scheduler

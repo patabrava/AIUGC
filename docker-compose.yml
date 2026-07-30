@@ -78,3 +78,14 @@ services:
     environment:
       VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}
     command: python -m workers.caption_worker
+
+  publish-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    environment:
+      PUBLISH_SCHEDULER_POLL_SECONDS: ${PUBLISH_SCHEDULER_POLL_SECONDS:-60}
+    command: python -m workers.publish_scheduler

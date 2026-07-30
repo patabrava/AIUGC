@@ -93,11 +93,37 @@ def test_all_compose_contracts_run_the_dedicated_semantic_video_worker():
         assert "workers.semantic_video_worker" in str(command)
 
 
+def test_all_compose_contracts_run_one_dedicated_publish_scheduler():
+    paths = [
+        COMPOSE_PATH,
+        *LEGACY_COMPOSE_PATHS,
+        Path(__file__).resolve().parents[1] / "docker-compose.hostinger-runtime.yaml",
+    ]
+    for path in paths:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        scheduler = data["services"]["publish-scheduler"]
+        command = scheduler.get("environment", {}).get("SERVICE_CMD") or scheduler.get("command")
+        assert "workers.publish_scheduler" in str(command)
+
+        web = data["services"]["web"]
+        assert str(web["environment"]["DISABLE_BACKGROUND_SCHEDULERS"]).lower() in {
+            "true",
+            "${disable_background_schedulers:-true}",
+        }
+
+
 def test_github_deploy_renders_dedicated_semantic_video_worker():
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert '"  semantic-video-worker:"' in workflow_text
     assert '"    command: python -m workers.semantic_video_worker"' in workflow_text
+
+
+def test_github_deploy_renders_dedicated_publish_scheduler():
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert '"  publish-scheduler:"' in workflow_text
+    assert '"    command: python -m workers.publish_scheduler"' in workflow_text
 
 
 def test_legacy_compose_files_follow_production_build_contract():

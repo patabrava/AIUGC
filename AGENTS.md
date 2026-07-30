@@ -255,6 +255,7 @@ Rules that become generally useful across repos should later move into `bridgeco
 
 ## 10) Specific repo rules
 
+- Production scheduled publishing must have exactly one active dispatch owner: keep web-process schedulers disabled when `publish-scheduler` is deployed, and require every production compose/deploy renderer to run `python -m workers.publish_scheduler`; a deployment contract that disables the web scheduler without provisioning this worker is invalid.
 - Docker dependency installs must retain the BuildKit pip cache and explicit timeout/retry settings so transient package-download stalls do not restart the full dependency layer.
 - Detail-page reads that use the shared Supabase/PostgREST client must replace that client after transient transport corruption and retry the read on the fresh client; concurrent recovery must preserve any newer client, while schema, validation, and contract errors continue to fail closed.
 - Semantic UGC operator pages must project one current workspace from persisted workflow truth: the final individual script review advances S2 automatically, each page renders only controls and evidence for the current Scripts, Scene, Plan, Produce, Delivery, or Publish step, and completing a step must not require a duplicate batch-level confirmation. Delivery approval must reconcile stale S4/S5 state through completed-video and QA truth to S7 in one request, then reload at `#publish-workflow` rather than preserving a delivery anchor that no longer exists.

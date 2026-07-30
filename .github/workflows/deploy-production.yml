@@ -206,6 +206,13 @@ jobs:
               "    restart: unless-stopped",
               "    environment: *app-env",
               "    command: python -m workers.caption_worker",
+              "",
+              "  publish-scheduler:",
+              f"    image: {image_ref}",
+              "    pull_policy: always",
+              "    restart: unless-stopped",
+              "    environment: *app-env",
+              "    command: python -m workers.publish_scheduler",
           ]
           compose_text = "\n".join(compose_lines) + "\n"
 
