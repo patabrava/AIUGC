@@ -146,7 +146,7 @@ def test_initialize_pilot_records_minimum_two_shots_and_complete_request_audit(t
         "Manchmal fühlt sich jeder Zentimeter Steigung wie ein unnötiger Kampf an. Das zehrt an den Kräften.",
     ]
     assert [take["duration_seconds"] for take in payload["takes"]] == [8, 8]
-    assert [take["seed"] for take in payload["takes"]] == [240711, 240712]
+    assert [take["seed"] for take in payload["takes"]] == [240711, 240711]
     assert all(take["model"] == "veo-3.1-generate-001" for take in payload["takes"])
     assert all(take["aspect_ratio"] == "9:16" for take in payload["takes"])
     assert all(take["negative_prompt"] for take in payload["takes"])

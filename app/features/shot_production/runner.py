@@ -3583,7 +3583,7 @@ def reset_failed_take(
         )
     take["attempt"] = next_attempt
     take["attempt_history"] = history
-    take["seed"] = int(payload["base_seed"]) + int(take["index"]) + (next_attempt - 1) * 1000
+    take["seed"] = int(payload["base_seed"]) + (next_attempt - 1) * 1000
     take["prompt"] = next_prompt
     take["negative_prompt"] = EFFECTIVE_NEGATIVE_PROMPT
     take["status"] = "planned"
@@ -3820,7 +3820,7 @@ def revise_failed_beat(
     take["attempt_history"] = attempt_history
     take["beat"] = asdict(revised_beat)
     take["duration_seconds"] = revised_beat.provider_duration_seconds
-    take["seed"] = int(payload["base_seed"]) + index + (next_attempt - 1) * 1000
+    take["seed"] = int(payload["base_seed"]) + (next_attempt - 1) * 1000
     take["prompt"] = build_veo_take_prompt(revised_beat)
     take["status"] = "planned"
     take["submission"] = None

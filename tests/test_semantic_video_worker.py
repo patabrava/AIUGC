@@ -4,8 +4,10 @@ from copy import deepcopy
 from hashlib import sha256
 import io
 import json
+import os
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 
 from PIL import Image
@@ -1134,6 +1136,76 @@ def test_production_stage_runner_materializes_canonical_exact_16s_contract(tmp_p
         "minimum": 16.0 - (1.0 / 24.0),
         "maximum": 16.0 + (1.0 / 24.0),
     }
+
+
+def test_production_stage_runner_reclaims_stale_workspaces_before_materializing(
+    tmp_path,
+):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    master, takes = _takes(2)
+    raw_payloads = {}
+    for index, take in enumerate(takes):
+        raw_bytes = f"raw-take-{index}".encode()
+        raw_url = f"https://storage/raw-{index}.mp4"
+        raw_payloads[raw_url] = raw_bytes
+        take.update(
+            submission_state="completed",
+            raw_artifact_uri=raw_url,
+            raw_artifact_sha256=sha256(raw_bytes).hexdigest(),
+        )
+
+    class ManifestStorage:
+        def download_video(self, *, video_url, correlation_id):
+            del correlation_id
+            if video_url in {
+                "https://storage/master.png",
+                "https://storage/actor-front.png",
+                "https://storage/actor-three-quarter.png",
+            }:
+                return master
+            return raw_payloads[video_url]
+
+    stale = tmp_path / "stale-run"
+    recent = tmp_path / "recent-run"
+    stale.mkdir()
+    recent.mkdir()
+    (stale / "large-local-artifact.mp4").write_bytes(b"stale")
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+
+    run = {
+        "id": "active-run",
+        "created_at": "2026-07-30T00:00:00+00:00",
+        "updated_at": "2026-07-30T00:00:00+00:00",
+        "requested_duration_seconds": 16,
+        "master_hash": sha256(master).hexdigest(),
+        "master_snapshot": {
+            "storage_uri": "https://storage/master.png",
+            "sha256": sha256(master).hexdigest(),
+            "byte_length": len(master),
+            "mime_type": "image/png",
+        },
+        "reference_snapshot": _actor_reference_snapshot(master),
+        "script_hash": sha256(b"script").hexdigest(),
+        "script_snapshot": {"text": "Ein exakter Testtext fuer zwei Takes."},
+    }
+    runner = ProductionStageRunner(
+        storage=ManifestStorage(),
+        work_root=tmp_path,
+        workspace_retention_seconds=60,
+        workspace_max_count=4,
+    )
+
+    manifest_path = runner._materialize_manifest(run, takes)  # noqa: SLF001
+
+    assert manifest_path.is_file()
+    assert not stale.exists()
+    assert recent.is_dir()
+    assert (tmp_path / "active-run").is_dir()
+
+    runner.cleanup_run_workspace("active-run")
+    assert not (tmp_path / "active-run").exists()
 
 
 def test_materialized_identity_manifest_preserves_accepted_transcript_advisory(tmp_path):

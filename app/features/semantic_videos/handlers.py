@@ -192,7 +192,8 @@ def _generation_progress(
         return percent, elapsed, None, "Generation stopped. Review the available result and status."
     return percent, elapsed, 0, "The paid video is generated. Finishing delivery checks."
 _FINAL_WORD_TARGET_PATTERN = re.compile(
-    r"(?:final spoken word near|final word ends no later than)\s+"
+    r"(?:final spoken word near|final word ends no later than|"
+    r"finishes the final word around)\s+"
     r"([0-9]+(?:\.[0-9]+)?)\s+seconds",
     re.IGNORECASE,
 )

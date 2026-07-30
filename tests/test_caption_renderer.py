@@ -8,6 +8,7 @@ from app.adapters.caption_renderer import (
     burn_captions,
     CaptionRendererError,
     _fit_caption_layout,
+    _fit_transcript_to_video_duration,
     _render_caption_frame,
 )
 from PIL import Image, ImageDraw
@@ -78,11 +79,44 @@ class TestCaptionFrameRendering:
         assert img0.tobytes() != img1.tobytes()
 
 
+class TestCaptionTiming:
+    def test_fit_transcript_to_video_duration_compresses_overlong_schedule(self):
+        transcript = WordLevelTranscript(
+            words=[
+                Word("Das", 0.0, 1.0),
+                Word("passt", 7.8, 8.4),
+                Word("wirklich", 8.4, 8.9),
+            ],
+            full_text="Das passt wirklich",
+        )
+        fitted = _fit_transcript_to_video_duration(
+            transcript,
+            video_duration_seconds=8.0,
+            fps=25.0,
+        )
+        assert fitted.words[-1].end <= 8.0
+        assert fitted.words[-1].end == pytest.approx(7.96)
+        assert fitted.words[1].start < 7.8
+
+    def test_fit_transcript_to_video_duration_leaves_valid_schedule_unchanged(self):
+        transcript = WordLevelTranscript(
+            words=[Word("Passt", 0.2, 1.0)],
+            full_text="Passt",
+        )
+        fitted = _fit_transcript_to_video_duration(
+            transcript,
+            video_duration_seconds=8.0,
+            fps=25.0,
+        )
+        assert fitted is transcript
+
+
 class TestBurnCaptions:
     @patch("app.adapters.caption_renderer.subprocess.run")
+    @patch("app.adapters.caption_renderer._get_video_duration", return_value=8.0)
     @patch("app.adapters.caption_renderer._get_video_fps", return_value=30.0)
     @patch("app.adapters.caption_renderer._get_video_dimensions", return_value=(1080, 1920))
-    def test_burn_success(self, mock_dims, mock_fps, mock_run):
+    def test_burn_success(self, mock_dims, mock_fps, mock_duration, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         transcript = WordLevelTranscript(words=[Word("Test", 0.0, 0.5)], full_text="Test")
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
@@ -102,9 +136,10 @@ class TestBurnCaptions:
                 os.unlink(output_path)
 
     @patch("app.adapters.caption_renderer.subprocess.run")
+    @patch("app.adapters.caption_renderer._get_video_duration", return_value=8.0)
     @patch("app.adapters.caption_renderer._get_video_fps", return_value=30.0)
     @patch("app.adapters.caption_renderer._get_video_dimensions", return_value=(1080, 1920))
-    def test_burn_ffmpeg_failure_raises(self, mock_dims, mock_fps, mock_run):
+    def test_burn_ffmpeg_failure_raises(self, mock_dims, mock_fps, mock_duration, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="codec error")
         transcript = WordLevelTranscript(words=[Word("Test", 0.0, 0.5)], full_text="Test")
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
@@ -117,9 +152,10 @@ class TestBurnCaptions:
             os.unlink(input_path)
 
     @patch("app.adapters.caption_renderer.subprocess.run")
+    @patch("app.adapters.caption_renderer._get_video_duration", return_value=8.0)
     @patch("app.adapters.caption_renderer._get_video_fps", return_value=30.0)
     @patch("app.adapters.caption_renderer._get_video_dimensions", return_value=(1080, 1920))
-    def test_burn_uses_half_open_overlay_windows_to_avoid_boundary_overlap(self, mock_dims, mock_fps, mock_run):
+    def test_burn_uses_half_open_overlay_windows_to_avoid_boundary_overlap(self, mock_dims, mock_fps, mock_duration, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         transcript = WordLevelTranscript(
             words=[

@@ -67,6 +67,49 @@ def test_missing_deepgram_word_gets_interpolated():
     assert result.words[1].end == 1.2
 
 
+def test_missing_word_run_uses_next_anchor_without_cumulative_lag():
+    transcript = WordLevelTranscript(
+        words=[
+            Word(word="Das", start=0.2, end=0.4),
+            Word(word="passt", start=1.0, end=1.25),
+            Word(word="wieder", start=1.35, end=1.65),
+        ],
+        full_text="Das passt wieder",
+    )
+    script = "Das hier kleine wichtige Detail passt wieder"
+    result = align_transcript_to_script(transcript=transcript, script=script)
+
+    words = [word.word for word in result.words]
+    assert words == ["Das", "hier", "kleine", "wichtige", "Detail", "passt", "wieder"]
+    assert result.words[1].start == 0.4
+    assert result.words[4].end == 1.0
+    assert result.words[5].start == 1.0
+    assert result.words[6].start == 1.35
+
+
+def test_trailing_missing_words_are_bounded_to_prevent_invisible_caption_tail():
+    transcript = WordLevelTranscript(
+        words=[
+            Word(word="Das", start=0.2, end=0.4),
+            Word(word="passt", start=0.5, end=0.8),
+        ],
+        full_text="Das passt",
+    )
+    script = "Das passt noch mit einem kurzen Nachsatz"
+    result = align_transcript_to_script(transcript=transcript, script=script)
+
+    assert [word.word for word in result.words] == [
+        "Das",
+        "passt",
+        "noch",
+        "mit",
+        "einem",
+        "kurzen",
+        "Nachsatz",
+    ]
+    assert result.words[-1].end <= 1.3
+
+
 def test_empty_transcript_returns_empty():
     transcript = WordLevelTranscript(words=[], full_text="")
     script = "Ab Juli wird"

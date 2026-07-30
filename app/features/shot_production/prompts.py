@@ -30,6 +30,10 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "dolly",
     "orbit",
     "camera movement",
+    "cut",
+    "scene transition",
+    "wipe transition",
+    "end card",
     "push-in",
     "reframe",
     "posture reset",
@@ -46,12 +50,12 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "gibberish text",
 )
 EFFECTIVE_NEGATIVE_PROMPT = (
-    "face change, age change, hair change, wardrobe change, room change, extra person, "
-    "wheelchair change, cropped wheelchair, standing, walking, "
-    "camera movement, camera pan, camera tilt, camera zoom, push-in, dolly, orbit, reframe, "
-    "posture reset, generated text, subtitles, music, "
-    "background voices, extra speech, hands entering frame, repeated dialogue, English speech, "
-    "logos, watermarks, gibberish text"
+    "identity drift, face change, facial distortion, age change, hair change, wardrobe change, "
+    "room change, extra person, wheelchair change, wheelchair deformation, cropped wheelchair, "
+    "standing, walking, camera movement, camera pan, camera tilt, camera zoom, push-in, dolly, "
+    "orbit, reframe, posture reset, cut, jump cut, scene transition, wipe transition, end card, "
+    "freeze frame, generated text, subtitles, captions, music, background voices, extra speech, "
+    "hands entering frame, repeated dialogue, English speech, logos, watermarks, gibberish text"
 )
 
 
@@ -83,9 +87,8 @@ class VeoTakeRequest:
 def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
     if not visual_contract:
         return (
-            "Preserve the exact upper-body outfit and exact location shown in the first frame. "
-            "She remains seated in the exact same visible manual wheelchair; keep at least one "
-            "armrest and part of the rear wheel or silver hand rim in frame."
+            "The input frame's subject, wardrobe, wheelchair, room, lighting, camera position, "
+            "and composition remain visually consistent throughout the take."
         )
     required = (
         "scene_description",
@@ -103,10 +106,8 @@ def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
             {"missing_fields": missing},
         )
     return (
-        f"Keep the frozen location exactly as shown and described: {normalized['scene_description']} "
-        f"Keep her upper-body outfit exactly: {normalized['wardrobe_description']}. "
-        f"Keep the wheelchair exactly: {normalized['wheelchair_description']} "
-        f"Keep the framing exactly: {normalized['framing_description']}"
+        "The input frame's subject, wardrobe, wheelchair, room, lighting, camera position, "
+        "and composition remain visually consistent throughout the take."
     )
 
 
@@ -123,20 +124,23 @@ def build_veo_take_prompt(
         1.5 if is_final_take and beat.provider_duration_seconds >= 6 else 1.0
     )
     final_word_target = beat.provider_duration_seconds - delivery_tail_seconds
-    return (
-        "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's exact identity, "
-        "facial geometry, apparent age, hair, seated posture, camera position, and framing exactly as shown. "
-        f"{_visual_contract_text(visual_contract)} Continue as "
-        "restrained, natural phone-camera UGC with a subtle conversational expression, subtle blinking, and "
-        "minimal head movement. Use the same warm adult German female voice across every take, speaking native German "
-        "with natural conversational pacing and close smartphone microphone sound. Use the shot duration naturally, "
-        f"pacing the beat to place the final spoken word near {final_word_target:.1f} seconds without sounding slow or theatrical. "
-        "She says exactly this German beat once: "
-        f"“{dialogue}” Do not speak any other words or any English. After the final word, naturally stop speaking, "
-        "close her mouth, and keep quiet eye contact. The camera remains locked in the exact same position after the final "
-        "word: no pan, tilt, zoom, dolly, orbit, or reframing. She may keep subtle blinking and natural breathing without "
-        "moving the camera. Do not freeze or perform an artificial end pose. Keep every frame "
-        "completely free of on-screen text: no captions, subtitles, logos, watermarks, letters, symbols, or gibberish glyphs."
+    return "\n".join(
+        (
+            "One continuous, unedited vertical smartphone UGC take, animated from the supplied first frame.",
+            "Camera: static fixed shot at the input frame's exact eye-level angle and composition. "
+            "The camera stays completely still from the opening frame through the final frame.",
+            f"Visual continuity: {_visual_contract_text(visual_contract)}",
+            "Subject motion: the seated woman maintains relaxed eye contact with a restrained conversational "
+            "expression, natural lip movement, subtle blinking, natural breathing, and minimal head movement.",
+            f"Timing: she begins speaking promptly and finishes the final word around {final_word_target:.1f} seconds "
+            "at a natural conversational pace. After the final word, her mouth rests closed while relaxed eye "
+            "contact, natural breathing, and subtle blinking continue in the same uninterrupted static shot "
+            "through the final frame.",
+            "Audio: one warm adult female voice speaking native German with natural conversational cadence and "
+            "clean close smartphone-microphone sound. Quiet home-office room tone.",
+            "Dialogue: the complete spoken performance is this one line, delivered once exactly as written.",
+            f"The woman says: {dialogue}",
+        )
     )
 
 
@@ -204,7 +208,7 @@ def compile_veo_take_requests(
                 model=VEO_MODEL,
                 aspect_ratio=VEO_ASPECT_RATIO,
                 duration_seconds=beat.provider_duration_seconds,
-                seed=base_seed + beat.index,
+                seed=base_seed,
             )
         )
     return tuple(requests)

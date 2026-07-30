@@ -27,6 +27,13 @@ class _JsonRequest:
         return self.payload
 
 
+class _HtmxJsonRequest(_JsonRequest):
+    headers = {
+        "content-type": "application/json",
+        "hx-request": "true",
+    }
+
+
 class _FakeQuery:
     def __init__(self, table_name, db):
         self.table_name = table_name
@@ -141,6 +148,46 @@ async def test_qa_approval_recovers_stale_semantic_batch_directly_to_publish(mon
     assert response.data["batch_advanced"] is True
     assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
     assert db["posts"][0]["qa_pass"] is True
+
+
+@pytest.mark.asyncio
+async def test_semantic_delivery_approval_redirects_htmx_to_publish(monkeypatch):
+    db = {
+        "batches": [
+            {
+                "id": "batch-1",
+                "state": "S6_QA",
+                "creation_mode": "semantic_ugc",
+            }
+        ],
+        "posts": [
+            {
+                "id": "post-final",
+                "batch_id": "batch-1",
+                "qa_pass": None,
+                "video_prompt_json": None,
+                "video_status": "caption_completed",
+                "seed_data": {"script_review_status": "approved"},
+            }
+        ],
+    }
+    fake_client = _FakeSupabaseClient(db)
+    monkeypatch.setattr(
+        qa_handlers,
+        "get_supabase",
+        lambda: SimpleNamespace(client=fake_client),
+    )
+
+    response = await qa_handlers.approve_qa(
+        "post-final",
+        _HtmxJsonRequest({"approved": True}),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["hx-redirect"] == (
+        "/batches/batch-1#publish-workflow"
+    )
+    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
 
 
 @pytest.mark.asyncio

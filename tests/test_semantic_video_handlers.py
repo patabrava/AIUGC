@@ -3109,7 +3109,7 @@ def test_retry_approval_uses_latest_failed_prompt_for_acoustic_overshoot_feedbac
             "qa_failed" if take["take_index"] == 1 else "completed"
         )
         if take["take_index"] == 1:
-            assert "final spoken word near 6.5 seconds" in take["request_contract"][
+            assert "finishes the final word around 6.5 seconds" in take["request_contract"][
                 "prompt"
             ]
             take["retry_guidance"] = {

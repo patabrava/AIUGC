@@ -242,36 +242,35 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
     assert VEO_MODEL == "veo-3.1-generate-001"
     assert [request.aspect_ratio for request in requests] == ["9:16"] * 4
     assert [request.duration_seconds for request in requests] == [4, 6, 4, 6]
-    assert [request.seed for request in requests] == [240711, 240712, 240713, 240714]
+    assert [request.seed for request in requests] == [240711] * 4
 
     for index, (beat, request) in enumerate(zip(beats, requests)):
         assert request.beat == beat
         assert request.prompt.count(beat.text) == 1
-        assert "sole visual truth" in request.prompt
+        assert request.prompt.startswith("One continuous, unedited vertical smartphone UGC take")
         assert "cream knit sweater" not in request.prompt
-        assert "same visible manual wheelchair" in request.prompt
-        assert "rear wheel or silver hand rim" in request.prompt
+        assert "input frame's subject, wardrobe, wheelchair, room" in request.prompt
         assert "native German" in request.prompt
-        assert "naturally stop" in request.prompt
         assert "38-year-old" not in request.prompt
         assert "hazel" not in request.prompt
         assert "terracotta" not in request.prompt
-        assert "seated posture" in request.prompt.lower()
+        assert "seated woman" in request.prompt.lower()
         assert "hands" not in request.prompt.lower()
         assert "gestures" not in request.prompt.lower()
         assert "subtle blinking" in request.prompt.lower()
         assert "minimal head movement" in request.prompt.lower()
-        assert "same warm adult german female voice" in request.prompt.lower()
+        assert "one warm adult female voice speaking native german" in request.prompt.lower()
         expected_final_word_time = request.duration_seconds - (
             1.5 if index == len(requests) - 1 else 1.0
         )
-        assert f"final spoken word near {expected_final_word_time:.1f} seconds" in request.prompt.lower()
-        assert "do not speak any other words" in request.prompt.lower()
-        assert "do not freeze" in request.prompt.lower()
-        assert "camera remains locked" in request.prompt.lower()
-        assert "no pan, tilt, zoom, dolly, orbit, or reframing" in request.prompt.lower()
-        assert "every frame completely free of on-screen text" in request.prompt.lower()
-        assert "captions, subtitles, logos, watermarks" in request.prompt.lower()
+        assert f"final word around {expected_final_word_time:.1f} seconds" in request.prompt.lower()
+        assert "complete spoken performance is this one line" in request.prompt.lower()
+        assert f"The woman says: {beat.text}" in request.prompt
+        assert f"“{beat.text}”" not in request.prompt
+        assert "camera stays completely still" in request.prompt.lower()
+        assert "same uninterrupted static shot through the final frame" in request.prompt.lower()
+        assert "do not" not in request.prompt.lower()
+        assert "no " not in request.prompt.lower()
         assert "hold the unchanged frame" not in request.prompt.lower()
         assert request.negative_prompt == EFFECTIVE_NEGATIVE_PROMPT
         assert request.negative_prompt.strip()
@@ -302,6 +301,10 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         "dolly",
         "orbit",
         "camera movement",
+        "cut",
+        "scene transition",
+        "wipe transition",
+        "end card",
         "push-in",
         "reframe",
         "posture reset",

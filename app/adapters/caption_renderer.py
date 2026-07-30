@@ -193,6 +193,51 @@ def _get_video_dimensions(video_path: str) -> tuple[int, int]:
         return 1080, 1920
 
 
+def _get_video_duration(video_path: str) -> float:
+    """Get video duration in seconds using ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        return 0.0
+    try:
+        duration = float(result.stdout.strip())
+    except ValueError:
+        return 0.0
+    return duration if duration > 0.0 else 0.0
+
+
+def _fit_transcript_to_video_duration(
+    transcript: WordLevelTranscript,
+    *,
+    video_duration_seconds: float,
+    fps: float,
+) -> WordLevelTranscript:
+    """Compress an overlong caption schedule into the visible video timeline."""
+    words = transcript.words or []
+    if not words or video_duration_seconds <= 0:
+        return transcript
+    safe_fps = max(float(fps or 0.0), 1.0)
+    final_caption_end = max(float(word.end or 0.0) for word in words)
+    visible_end = max(video_duration_seconds - (1.0 / safe_fps), video_duration_seconds * 0.98)
+    if final_caption_end <= visible_end + 1e-6:
+        return transcript
+    scale = visible_end / final_caption_end
+    fitted_words = [
+        Word(
+            word=word.word,
+            start=round(max(float(word.start or 0.0), 0.0) * scale, 6),
+            end=round(max(float(word.end or 0.0), 0.0) * scale, 6),
+        )
+        for word in words
+    ]
+    return WordLevelTranscript(words=fitted_words, full_text=transcript.full_text)
+
+
 def _build_word_overlay_segments(words: list[Word], *, fps: float) -> list[tuple[float, float, Word]]:
     """Build monotonic half-open overlay windows for each caption word."""
     if not words:
@@ -264,6 +309,12 @@ def burn_captions(
         video_width, video_height = _get_video_dimensions(video_path)
 
     fps = _get_video_fps(video_path)
+    video_duration = _get_video_duration(video_path)
+    transcript = _fit_transcript_to_video_duration(
+        transcript,
+        video_duration_seconds=video_duration,
+        fps=fps,
+    )
     font_size = max(int(video_width * 0.1), 72)
 
     # Create temp directory for overlay frames

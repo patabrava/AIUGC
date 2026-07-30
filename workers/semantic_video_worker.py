@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import threading
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence
@@ -41,6 +42,8 @@ logger = get_logger(__name__)
 DEFAULT_MAX_INFLIGHT = 2
 DEFAULT_LEASE_SECONDS = 120
 DEFAULT_HEARTBEAT_SECONDS = 40.0
+DEFAULT_WORKSPACE_RETENTION_SECONDS = 1800
+DEFAULT_WORKSPACE_MAX_COUNT = 4
 EXECUTABLE_STAGES = frozenset(
     {
         "generating",
@@ -219,11 +222,35 @@ class ProductionStageRunner:
         storage: Optional[Any] = None,
         deepgram: Optional[Any] = None,
         work_root: Optional[Path] = None,
+        workspace_retention_seconds: Optional[int] = None,
+        workspace_max_count: Optional[int] = None,
     ) -> None:
         self.storage = storage or get_storage_client()
         self.deepgram = deepgram
         self.work_root = Path(
             work_root or os.getenv("SEMANTIC_VIDEO_WORK_ROOT", "/tmp/semantic-video-worker")
+        )
+        self.workspace_retention_seconds = max(
+            60,
+            int(
+                workspace_retention_seconds
+                if workspace_retention_seconds is not None
+                else os.getenv(
+                    "SEMANTIC_VIDEO_WORKSPACE_RETENTION_SECONDS",
+                    str(DEFAULT_WORKSPACE_RETENTION_SECONDS),
+                )
+            ),
+        )
+        self.workspace_max_count = max(
+            2,
+            int(
+                workspace_max_count
+                if workspace_max_count is not None
+                else os.getenv(
+                    "SEMANTIC_VIDEO_WORKSPACE_MAX_COUNT",
+                    str(DEFAULT_WORKSPACE_MAX_COUNT),
+                )
+            ),
         )
 
     def run_stage(
@@ -461,6 +488,60 @@ class ProductionStageRunner:
             self.deepgram = get_deepgram_client()
         return self.deepgram
 
+    def _prepare_workspace(self, run_id: str) -> Path:
+        """Bound disposable local artifacts before materializing the active run."""
+        self.work_root.mkdir(parents=True, exist_ok=True)
+        active = self.work_root / run_id
+        now = time.time()
+        candidates: list[tuple[float, Path]] = []
+        for path in self.work_root.iterdir():
+            if path == active or not path.is_dir():
+                continue
+            try:
+                modified_at = path.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            candidates.append((modified_at, path))
+
+        candidates.sort(key=lambda item: item[0])
+        excess_count = max(
+            0,
+            len(candidates) - (self.workspace_max_count - 1),
+        )
+        stale_cutoff = now - self.workspace_retention_seconds
+        reclaimed: list[str] = []
+        for position, (modified_at, path) in enumerate(candidates):
+            if modified_at > stale_cutoff and position >= excess_count:
+                continue
+            try:
+                shutil.rmtree(path)
+            except FileNotFoundError:
+                continue
+            reclaimed.append(path.name)
+        if reclaimed:
+            logger.info(
+                "semantic_video_workspaces_reclaimed",
+                active_run_id=run_id,
+                reclaimed_count=len(reclaimed),
+                reclaimed_run_ids=reclaimed,
+            )
+
+        active.mkdir(parents=True, exist_ok=True)
+        os.utime(active, None)
+        return active
+
+    def cleanup_run_workspace(self, run_id: str) -> None:
+        """Remove a delivered run's rematerializable local workspace."""
+        run_dir = self.work_root / str(run_id)
+        try:
+            shutil.rmtree(run_dir)
+        except FileNotFoundError:
+            return
+        logger.info(
+            "semantic_video_workspace_removed",
+            run_id=str(run_id),
+        )
+
     def _materialize_manifest(
         self,
         run: Mapping[str, Any],
@@ -468,9 +549,8 @@ class ProductionStageRunner:
     ) -> Path:
         pipeline = self._runner()
         run_id = str(run["id"])
-        run_dir = self.work_root / run_id
+        run_dir = self._prepare_workspace(run_id)
         raw_dir = run_dir / "raw"
-        run_dir.mkdir(parents=True, exist_ok=True)
         raw_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = run_dir / "manifest.json"
 
@@ -1762,6 +1842,9 @@ class SemanticVideoWorker:
                 artifact_manifest=artifacts,
             )
             self._reconcile_completed_batch(run)
+            cleanup = getattr(self.stage_runner, "cleanup_run_workspace", None)
+            if callable(cleanup):
+                cleanup(run_id)
             return WorkerTickResult(run_id, "completed", "completed")
         next_stage = NEXT_STAGE[stage]
         self.repo.advance_stage(
@@ -1866,6 +1949,9 @@ class SemanticVideoWorker:
             artifact_manifest=completion_artifacts,
         )
         self._reconcile_completed_batch(run)
+        cleanup = getattr(self.stage_runner, "cleanup_run_workspace", None)
+        if callable(cleanup):
+            cleanup(run_id)
         logger.warning(
             "semantic_video_single_take_delivered_with_qa_advisory",
             run_id=run_id,

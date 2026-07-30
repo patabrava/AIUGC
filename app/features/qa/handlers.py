@@ -9,8 +9,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 import json
 import httpx
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 
 from app.adapters.supabase_client import get_supabase
 from app.core.errors import FlowForgeException, SuccessResponse, ErrorCode
@@ -303,7 +305,7 @@ async def approve_qa(post_id: str, req: Request):
                     correlation_id=correlation_id,
                 )
         
-        return SuccessResponse(
+        response_payload = SuccessResponse(
             data={
                 **QAApprovalResponse(
                     post_id=post_id,
@@ -314,6 +316,21 @@ async def approve_qa(post_id: str, req: Request):
                 "batch_advanced": should_advance
             }
         )
+        if (
+            should_advance
+            and batch_id
+            and req.headers.get("hx-request", "").lower() == "true"
+        ):
+            return JSONResponse(
+                content=response_payload.model_dump(mode="json"),
+                headers={
+                    "HX-Redirect": (
+                        f"/batches/{quote(str(batch_id), safe='')}"
+                        "#publish-workflow"
+                    )
+                },
+            )
+        return response_payload
     
     except FlowForgeException:
         raise

@@ -184,10 +184,11 @@ def test_compile_semantic_video_plan_builds_canonical_seven_take_costed_payload(
         assert request["visual_contract_hash"] == compiled.run_payload["plan_snapshot"][
             "visual_contract_hash"
         ]
-        assert "the exact supplied garden patio" in request["prompt"]
-        assert "light-grey cardigan over a plain white top" in request["prompt"]
-        assert "manual wheelchair" in request["prompt"]
+        assert "the exact supplied garden patio" not in request["prompt"]
+        assert "light-grey cardigan over a plain white top" not in request["prompt"]
+        assert "input frame's subject, wardrobe, wheelchair, room" in request["prompt"]
         assert "cream knit sweater" not in request["prompt"]
+    assert {take["seed"] for take in compiled.take_payloads} == {240713}
     assert re.fullmatch(r"[0-9a-f]{64}", compiled.plan_hash)
     json.dumps(compiled.run_payload, sort_keys=True)
     json.dumps(compiled.take_payloads, sort_keys=True)
