@@ -1056,6 +1056,10 @@ def generate_candidates(
                     stale_reason = (
                         "The pending scene plates predate the immutable actor-anchor lineage."
                     )
+            if stale_reason is None and stage == "awaiting_paid_approval":
+                stale_reason = (
+                    "The operator requested fresh scene plates before paid generation."
+                )
             if stale_reason is not None:
                 _assert_visual_restart_has_no_paid_evidence(str(existing["id"]))
                 cancel_run_transition(

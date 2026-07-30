@@ -2185,6 +2185,69 @@ def test_candidate_endpoint_rejects_missing_reference_readiness_before_provider_
     assert calls == []
 
 
+def test_candidate_endpoint_regenerates_approved_unpaid_scene_plates(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker="approved-unpaid-refresh"),
+        raising=False,
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert response.status_code == 200, response.text
+    assert state["run"]["id"] == "run-2"
+    assert state["run"]["stage"] == "awaiting_reference_approval"
+    assert len(state["run"]["master_snapshot"]["candidates"]) == 3
+    assert len(storage.upload_calls) == 3
+
+
+def test_candidate_endpoint_blocks_approved_scene_restart_with_paid_evidence(
+    monkeypatch,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    state["takes"] = [
+        {
+            "id": "take-1",
+            "run_id": "run-1",
+            "take_index": 0,
+            "attempt": 1,
+            "submission_state": "submitted",
+            "operation_id": "operations/paid-take",
+        }
+    ]
+    original_run = deepcopy(state["run"])
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs),
+        raising=False,
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert response.status_code == 409, response.text
+    assert "paid take evidence exists" in response.json()["message"]
+    assert state["run"] == original_run
+    assert provider_calls == []
+    assert storage.download_calls == []
+    assert storage.upload_calls == []
+
+
 @pytest.mark.parametrize(
     "stage",
     [
