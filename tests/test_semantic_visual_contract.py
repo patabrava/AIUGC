@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 from io import BytesIO
 from threading import Barrier, Lock
+from time import sleep
 
 from PIL import Image, ImageDraw
 
@@ -137,12 +138,12 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
     )
 
 
-def test_scene_plate_candidates_generate_concurrently_and_keep_candidate_order():
+def test_scene_plate_candidates_generate_with_bounded_concurrency_and_keep_candidate_order():
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
 
-    barrier = Barrier(3)
+    barrier = Barrier(2)
     call_lock = Lock()
     call_number = 0
 
@@ -155,7 +156,8 @@ def test_scene_plate_candidates_generate_concurrently_and_keep_candidate_order()
             with call_lock:
                 call_number += 1
                 marker = call_number
-            barrier.wait(timeout=2)
+            if marker <= 2:
+                barrier.wait(timeout=2)
             return {
                 "image_bytes": f"parallel-{marker}".encode(),
                 "mime_type": "image/png",
@@ -226,6 +228,56 @@ def test_scene_plate_candidates_retry_only_the_transiently_failed_candidate(monk
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
     assert attempts == {1: 1, 2: 2, 3: 1}
     assert sleeps == [1.5]
+
+
+def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threads():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    active = 0
+    peak_active = 0
+    active_lock = Lock()
+
+    class PeakTrackingClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_image(self, **kwargs):
+            nonlocal active, peak_active
+            with active_lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            try:
+                sleep(0.03)
+                prompt = kwargs["prompt"]
+                index = next(
+                    candidate_index
+                    for candidate_index in range(1, 4)
+                    if f"Candidate {candidate_index} composition:" in prompt
+                )
+                return {
+                    "image_bytes": f"candidate-{index}".encode(),
+                    "mime_type": "image/png",
+                    "model": kwargs["model"],
+                }
+            finally:
+                with active_lock:
+                    active -= 1
+
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=PeakTrackingClient(),
+    )
+
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert peak_active == 2
 
 
 def test_scene_plate_candidates_do_not_retry_permanent_provider_contract_errors(

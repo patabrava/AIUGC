@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
+from threading import BoundedSemaphore
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
@@ -53,6 +54,12 @@ _NEAR_DUPLICATE_MEAN_RGB_DELTA = 3.0
 _PROVIDER_MAX_ATTEMPTS = 3
 _PROVIDER_RETRY_BASE_SECONDS = 1.0
 _TRANSIENT_PROVIDER_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+# Gemini image generation has a tighter burst capacity than ordinary
+# generateContent calls. Candidate threads and concurrent operator requests
+# share this gate, so retries wait for real image capacity instead of expiring
+# while sibling renders are still in flight.
+_SCENE_PLATE_IMAGE_CONCURRENCY = 2
+_SCENE_PLATE_IMAGE_SEMAPHORE = BoundedSemaphore(_SCENE_PLATE_IMAGE_CONCURRENCY)
 
 
 @dataclass(frozen=True)
@@ -250,14 +257,15 @@ def generate_scene_plate(
 
     client = llm_client or get_llm_client()
     renderer_prompt = write_raw_camera_image_prompt(client=client, brief=normalized_prompt)
-    return client.generate_gemini_image(
-        prompt=renderer_prompt,
-        model=image_model,
-        temperature=0.2,
-        aspect_ratio="9:16",
-        image_size=image_size,
-        input_images=[item.as_gemini_input() for item in references],
-    )
+    with _SCENE_PLATE_IMAGE_SEMAPHORE:
+        return client.generate_gemini_image(
+            prompt=renderer_prompt,
+            model=image_model,
+            temperature=0.2,
+            aspect_ratio="9:16",
+            image_size=image_size,
+            input_images=[item.as_gemini_input() for item in references],
+        )
 
 
 def _as_role(reference: ShotFrameReference, role: str) -> ShotFrameReference:
