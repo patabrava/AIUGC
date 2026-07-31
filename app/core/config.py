@@ -286,7 +286,7 @@ class Settings(BaseSettings):
         description="Trusted Veo price per provider second for Semantic UGC approvals",
     )
     semantic_scene_plate_model: str = Field(
-        default="gemini-3-pro-image",
+        default="gemini-3.1-flash-image",
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_MODEL"),
         min_length=1,
         description="Stable Gemini image model used only for Semantic UGC scene plates.",
@@ -296,7 +296,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_IMAGE_SIZE"),
     )
     semantic_scene_plate_contract_version: str = Field(
-        default="pro-identity-diverse-two-stage-v6",
+        default="flash-identity-diverse-resumable-v7",
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_CONTRACT_VERSION"),
         min_length=1,
     )

@@ -10,6 +10,7 @@ from hashlib import sha256
 import json
 import math
 import re
+from threading import Lock
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
@@ -30,6 +31,7 @@ from app.features.shot_frames.identity_qa import (
     scene_identity_result_metadata,
 )
 from app.features.shot_frames.wheelchair_scene_plate import (
+    ScenePlateCandidate,
     generate_scene_plate_candidates,
 )
 from app.features.shot_production.duration import build_semantic_duration_contract
@@ -1209,28 +1211,249 @@ def generate_candidates(
         reservation_seconds=_CANDIDATE_RESERVATION_SECONDS,
     )
     reserved_revision = int(reserved.get("revision") or 0)
+    correlation_id = str(
+        getattr(request.state, "correlation_id", "semantic-scene-plates")
+    )
+    expected_derivation_mode = (
+        "canonical_anchor" if canonical_anchor_snapshot is not None else "bootstrap"
+    )
+    partial_candidates_lock = Lock()
+    partial_candidates_by_index: dict[int, dict[str, Any]] = {}
 
     def persist_candidate_progress(
         phase: str,
         details: Mapping[str, Any] | None = None,
     ) -> None:
-        progress_payload = {
-            "phase": phase,
-            "details": dict(details or {}),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        try:
-            update_candidate_generation_progress(
-                run_id=str(reserved["id"]),
-                reserved_revision=reserved_revision,
-                reservation_token=reservation_token,
-                progress=progress_payload,
+        with partial_candidates_lock:
+            progress_details = dict(details or {})
+            progress_details["partial_candidates"] = [
+                deepcopy(partial_candidates_by_index[index])
+                for index in sorted(partial_candidates_by_index)
+            ]
+            progress_payload = {
+                "phase": phase,
+                "details": progress_details,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                update_candidate_generation_progress(
+                    run_id=str(reserved["id"]),
+                    reserved_revision=reserved_revision,
+                    reservation_token=reservation_token,
+                    progress=progress_payload,
+                )
+            except Exception as exc:  # progress must never delay or fail generation
+                logger.warning(
+                    "semantic_video_candidate_progress_update_failed",
+                    run_id=str(reserved.get("id") or ""),
+                    phase=phase,
+                    error=str(exc),
+                )
+
+    def validate_and_store_candidate(candidate: ScenePlateCandidate) -> dict[str, Any]:
+        candidate_hash = sha256(candidate.image_bytes).hexdigest()
+        candidate_mime_type = str(candidate.mime_type).strip().lower()
+        if candidate_mime_type not in {"image/png", "image/jpeg"}:
+            raise StateTransitionError(
+                "Semantic scene-plate provider returned an unsupported image MIME type.",
+                {"mime_type": candidate_mime_type},
             )
-        except Exception as exc:  # progress must never delay or fail generation
-            logger.warning(
-                "semantic_video_candidate_progress_update_failed",
+        candidate_extension = "png" if candidate_mime_type == "image/png" else "jpg"
+        if str(candidate.provider_model) != settings.semantic_scene_plate_model:
+            raise StateTransitionError(
+                "Semantic scene-plate provider returned an unexpected model.",
+                {
+                    "expected_model": settings.semantic_scene_plate_model,
+                    "actual_model": candidate.provider_model,
+                },
+            )
+        try:
+            identity_report = evaluate_scene_plate_identity(
+                {
+                    "mime_type": actor_front_snapshot["mime_type"],
+                    "image_bytes": actor_front.image_bytes,
+                    "byte_length": actor_front_snapshot["byte_length"],
+                    "sha256": actor_front_snapshot["sha256"],
+                },
+                {
+                    "mime_type": actor_three_quarter_snapshot["mime_type"],
+                    "image_bytes": actor_three_quarter.image_bytes,
+                    "byte_length": actor_three_quarter_snapshot["byte_length"],
+                    "sha256": actor_three_quarter_snapshot["sha256"],
+                },
+                {
+                    "mime_type": candidate.mime_type,
+                    "image_bytes": candidate.image_bytes,
+                    "byte_length": len(candidate.image_bytes),
+                    "sha256": candidate_hash,
+                },
+                model=settings.semantic_scene_identity_gate_model,
+                minimum_confidence=settings.semantic_scene_identity_min_confidence,
+            )
+            identity_gate_result = scene_identity_result_metadata(
+                identity_report,
+                evaluator_model=settings.semantic_scene_identity_gate_model,
+                actor_reference_fingerprint=actor_reference_fingerprint,
+                candidate_sha256=candidate_hash,
+            )
+        except Exception as exc:  # each candidate fails closed without discarding siblings
+            identity_gate_result = failed_scene_identity_result(
+                evaluator_model=settings.semantic_scene_identity_gate_model,
+                actor_reference_fingerprint=actor_reference_fingerprint,
+                candidate_sha256=candidate_hash,
+                reason_code="identity_evaluator_unavailable_or_invalid",
+                message=str(exc),
+            )
+        uploaded = get_storage_client().upload_image(
+            image_bytes=candidate.image_bytes,
+            file_name=(
+                f"semantic-{post_id}-scene-plate-{candidate.index}-"
+                f"{candidate_hash[:12]}.{candidate_extension}"
+            ),
+            correlation_id=correlation_id,
+            content_type=candidate_mime_type,
+        )
+        persisted_candidate = {
+            "index": int(candidate.index),
+            "storage_uri": str(uploaded["url"]),
+            "storage_key": uploaded.get("storage_key"),
+            "mime_type": candidate_mime_type,
+            "byte_length": len(candidate.image_bytes),
+            "sha256": candidate_hash,
+            "provider_model": str(candidate.provider_model),
+            "prompt": str(candidate.prompt),
+            "visual_contract_hash": visual_contract["contract_hash"],
+            "actor_reference_fingerprint": actor_reference_fingerprint,
+            "generation_contract_hash": generation_contract["contract_hash"],
+            "identity_gate_result": identity_gate_result,
+            "derivation_mode": expected_derivation_mode,
+            "canonical_anchor_id": (
+                canonical_anchor_snapshot["id"]
+                if canonical_anchor_snapshot is not None
+                else None
+            ),
+            "canonical_anchor_sha256": (
+                canonical_anchor_snapshot["master_sha256"]
+                if canonical_anchor_snapshot is not None
+                else None
+            ),
+            "canonical_anchor_source_run_id": (
+                canonical_anchor_snapshot.get("source_run_id")
+                if canonical_anchor_snapshot is not None
+                else None
+            ),
+        }
+        logger.info(
+            "semantic_scene_identity_gate_completed",
+            post_id=post_id,
+            run_id=str(reserved.get("id") or ""),
+            correlation_id=correlation_id,
+            model=settings.semantic_scene_identity_gate_model,
+            contract_version=SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION,
+            contract_hash=generation_contract["contract_hash"][:12],
+            actor_reference_fingerprint=actor_reference_fingerprint[:12],
+            candidate_index=int(candidate.index),
+            candidate_sha256=candidate_hash[:12],
+            passed=identity_gate_result["passed"],
+            confidence=identity_gate_result["confidence"],
+            blocking_reasons=list(identity_gate_result["blocking_reasons"]),
+        )
+        return persisted_candidate
+
+    def persist_ready_candidate(candidate: ScenePlateCandidate) -> None:
+        persisted_candidate = validate_and_store_candidate(candidate)
+        with partial_candidates_lock:
+            partial_candidates_by_index[int(candidate.index)] = persisted_candidate
+            completed_candidates = len(partial_candidates_by_index)
+        persist_candidate_progress(
+            "generating_images",
+            {
+                "candidate_count": payload.candidate_count,
+                "completed_candidates": completed_candidates,
+                "latest_candidate_index": int(candidate.index),
+            },
+        )
+
+    prior_progress = reserved.get("candidate_generation_progress")
+    prior_details = (
+        prior_progress.get("details")
+        if isinstance(prior_progress, Mapping)
+        and isinstance(prior_progress.get("details"), Mapping)
+        else {}
+    )
+    prior_partial_candidates = (
+        prior_details.get("partial_candidates")
+        if isinstance(prior_details.get("partial_candidates"), list)
+        else []
+    )
+    resumable_metadata = []
+    for row in prior_partial_candidates:
+        if (
+            isinstance(row, Mapping)
+            and int(row.get("index") or 0) in {1, 2, 3}
+            and str(row.get("provider_model") or "") == settings.semantic_scene_plate_model
+            and str(row.get("visual_contract_hash") or "") == visual_contract["contract_hash"]
+            and str(row.get("actor_reference_fingerprint") or "")
+            == actor_reference_fingerprint
+            and str(row.get("generation_contract_hash") or "")
+            == generation_contract["contract_hash"]
+            and str(row.get("derivation_mode") or "") == expected_derivation_mode
+            and str(row.get("storage_uri") or "").strip()
+            and str(row.get("prompt") or "").strip()
+        ):
+            resumable_metadata.append(dict(row))
+
+    def download_partial_candidate(
+        row: dict[str, Any],
+    ) -> tuple[ScenePlateCandidate, dict[str, Any]]:
+        image_bytes = get_storage_client().download_video(
+            video_url=str(row["storage_uri"]),
+            correlation_id=correlation_id,
+        )
+        actual_hash = sha256(image_bytes).hexdigest()
+        if (
+            actual_hash != str(row.get("sha256") or "")
+            or len(image_bytes) != int(row.get("byte_length") or 0)
+        ):
+            raise StateTransitionError(
+                "Persisted partial scene-plate bytes changed before resume.",
+                {"candidate_index": row.get("index")},
+            )
+        return (
+            ScenePlateCandidate(
+                index=int(row["index"]),
+                image_bytes=image_bytes,
+                mime_type=str(row["mime_type"]),
+                provider_model=str(row["provider_model"]),
+                prompt=str(row["prompt"]),
+            ),
+            row,
+        )
+
+    initial_candidates: list[ScenePlateCandidate] = []
+    if resumable_metadata:
+        try:
+            with ThreadPoolExecutor(
+                max_workers=len(resumable_metadata),
+                thread_name_prefix="semantic-scene-partial",
+            ) as executor:
+                resumed = list(executor.map(download_partial_candidate, resumable_metadata))
+            for candidate, row in resumed:
+                initial_candidates.append(candidate)
+                partial_candidates_by_index[candidate.index] = row
+            logger.info(
+                "semantic_scene_plate_partial_generation_resumed",
+                post_id=post_id,
                 run_id=str(reserved.get("id") or ""),
-                phase=phase,
+                candidate_indexes=sorted(partial_candidates_by_index),
+            )
+        except Exception as exc:
+            initial_candidates = []
+            partial_candidates_by_index.clear()
+            logger.warning(
+                "semantic_scene_plate_partial_generation_discarded",
+                post_id=post_id,
+                run_id=str(reserved.get("id") or ""),
                 error=str(exc),
             )
 
@@ -1244,6 +1467,9 @@ def generate_candidates(
             candidate_count=payload.candidate_count,
             image_model=settings.semantic_scene_plate_model,
             image_size=settings.semantic_scene_plate_image_size,
+            traffic_key=str(reserved["id"]),
+            initial_candidates=initial_candidates,
+            candidate_ready_callback=persist_ready_candidate,
             progress_callback=persist_candidate_progress,
         )
         if len(generated.candidates) != payload.candidate_count:
@@ -1251,12 +1477,6 @@ def generate_candidates(
                 "Semantic scene-plate generation returned an unexpected candidate count.",
                 {"expected": payload.candidate_count, "actual": len(generated.candidates)},
             )
-        correlation_id = str(
-            getattr(request.state, "correlation_id", "semantic-scene-plates")
-        )
-        expected_derivation_mode = (
-            "canonical_anchor" if canonical_anchor_snapshot is not None else "bootstrap"
-        )
         derivation_mode = str(
             getattr(generated, "derivation_mode", expected_derivation_mode)
         ).strip()
@@ -1276,128 +1496,43 @@ def generate_candidates(
                 action="continuing_with_identity_validation",
             )
 
-        def validate_and_store_candidate(candidate: Any) -> dict[str, Any]:
-            candidate_hash = sha256(candidate.image_bytes).hexdigest()
-            candidate_mime_type = str(candidate.mime_type).strip().lower()
-            if candidate_mime_type not in {"image/png", "image/jpeg"}:
-                raise StateTransitionError(
-                    "Semantic scene-plate provider returned an unsupported image MIME type.",
-                    {"mime_type": candidate_mime_type},
-                )
-            candidate_extension = "png" if candidate_mime_type == "image/png" else "jpg"
-            if str(candidate.provider_model) != settings.semantic_scene_plate_model:
-                raise StateTransitionError(
-                    "Semantic scene-plate provider returned an unexpected model.",
-                    {
-                        "expected_model": settings.semantic_scene_plate_model,
-                        "actual_model": candidate.provider_model,
-                    },
-                )
-            try:
-                identity_report = evaluate_scene_plate_identity(
-                    {
-                        "mime_type": actor_front_snapshot["mime_type"],
-                        "image_bytes": actor_front.image_bytes,
-                        "byte_length": actor_front_snapshot["byte_length"],
-                        "sha256": actor_front_snapshot["sha256"],
-                    },
-                    {
-                        "mime_type": actor_three_quarter_snapshot["mime_type"],
-                        "image_bytes": actor_three_quarter.image_bytes,
-                        "byte_length": actor_three_quarter_snapshot["byte_length"],
-                        "sha256": actor_three_quarter_snapshot["sha256"],
-                    },
-                    {
-                        "mime_type": candidate.mime_type,
-                        "image_bytes": candidate.image_bytes,
-                        "byte_length": len(candidate.image_bytes),
-                        "sha256": candidate_hash,
-                    },
-                    model=settings.semantic_scene_identity_gate_model,
-                    minimum_confidence=settings.semantic_scene_identity_min_confidence,
-                )
-                identity_gate_result = scene_identity_result_metadata(
-                    identity_report,
-                    evaluator_model=settings.semantic_scene_identity_gate_model,
-                    actor_reference_fingerprint=actor_reference_fingerprint,
-                    candidate_sha256=candidate_hash,
-                )
-            except Exception as exc:  # each candidate fails closed without discarding siblings
-                identity_gate_result = failed_scene_identity_result(
-                    evaluator_model=settings.semantic_scene_identity_gate_model,
-                    actor_reference_fingerprint=actor_reference_fingerprint,
-                    candidate_sha256=candidate_hash,
-                    reason_code="identity_evaluator_unavailable_or_invalid",
-                    message=str(exc),
-                )
-            uploaded = get_storage_client().upload_image(
-                image_bytes=candidate.image_bytes,
-                file_name=(
-                    f"semantic-{post_id}-scene-plate-{candidate.index}-"
-                    f"{candidate_hash[:12]}.{candidate_extension}"
-                ),
-                correlation_id=correlation_id,
-                content_type=candidate_mime_type,
-            )
-            persisted_candidate = {
-                "index": int(candidate.index),
-                "storage_uri": str(uploaded["url"]),
-                "storage_key": uploaded.get("storage_key"),
-                "mime_type": candidate_mime_type,
-                "byte_length": len(candidate.image_bytes),
-                "sha256": candidate_hash,
-                "provider_model": str(candidate.provider_model),
-                "visual_contract_hash": visual_contract["contract_hash"],
-                "actor_reference_fingerprint": actor_reference_fingerprint,
-                "generation_contract_hash": generation_contract["contract_hash"],
-                "identity_gate_result": identity_gate_result,
-                "derivation_mode": derivation_mode,
-                "canonical_anchor_id": (
-                    canonical_anchor_snapshot["id"]
-                    if canonical_anchor_snapshot is not None
-                    else None
-                ),
-                "canonical_anchor_sha256": (
-                    canonical_anchor_snapshot["master_sha256"]
-                    if canonical_anchor_snapshot is not None
-                    else None
-                ),
-                "canonical_anchor_source_run_id": (
-                    canonical_anchor_snapshot.get("source_run_id")
-                    if canonical_anchor_snapshot is not None
-                    else None
-                ),
-            }
-            logger.info(
-                "semantic_scene_identity_gate_completed",
-                post_id=post_id,
-                run_id=str(reserved.get("id") or ""),
-                correlation_id=correlation_id,
-                model=settings.semantic_scene_identity_gate_model,
-                contract_version=SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION,
-                contract_hash=generation_contract["contract_hash"][:12],
-                actor_reference_fingerprint=actor_reference_fingerprint[:12],
-                candidate_index=int(candidate.index),
-                candidate_sha256=candidate_hash[:12],
-                passed=identity_gate_result["passed"],
-                confidence=identity_gate_result["confidence"],
-                blocking_reasons=list(identity_gate_result["blocking_reasons"]),
-            )
-            return persisted_candidate
-
         persist_candidate_progress(
             "checking_identity",
             {"candidate_count": len(generated.candidates)},
         )
-        # Identity checks and uploads are candidate-local. Keep the output ordered
-        # while avoiding another three-call serial provider chain after generation.
-        with ThreadPoolExecutor(
-            max_workers=len(generated.candidates),
-            thread_name_prefix="semantic-scene-plate-qa",
-        ) as executor:
-            candidates = list(
-                executor.map(validate_and_store_candidate, generated.candidates)
-            )
+        candidates_needing_persistence = []
+        for candidate in generated.candidates:
+            persisted = partial_candidates_by_index.get(int(candidate.index))
+            if (
+                not isinstance(persisted, Mapping)
+                or str(persisted.get("sha256") or "")
+                != sha256(candidate.image_bytes).hexdigest()
+            ):
+                candidates_needing_persistence.append(candidate)
+        if candidates_needing_persistence:
+            with ThreadPoolExecutor(
+                max_workers=len(candidates_needing_persistence),
+                thread_name_prefix="semantic-scene-identity",
+            ) as executor:
+                persisted_candidates = list(
+                    executor.map(
+                        validate_and_store_candidate,
+                        candidates_needing_persistence,
+                    )
+                )
+            with partial_candidates_lock:
+                for persisted in persisted_candidates:
+                    partial_candidates_by_index[int(persisted["index"])] = persisted
+        candidates = [
+            {
+                key: value
+                for key, value in partial_candidates_by_index[
+                    int(candidate.index)
+                ].items()
+                if key != "prompt"
+            }
+            for candidate in generated.candidates
+        ]
         persist_candidate_progress(
             "saving_candidates",
             {"candidate_count": len(candidates)},
@@ -1453,10 +1588,6 @@ def generate_candidates(
             reserved_revision=reserved_revision,
             reservation_token=reservation_token,
             run_updates=run_payload,
-        )
-        persist_candidate_progress(
-            "ready",
-            {"candidate_count": len(candidates)},
         )
     except Exception:
         try:

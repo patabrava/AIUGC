@@ -64,7 +64,7 @@ def _scene_plate_result(*, marker: str = "candidate") -> SimpleNamespace:
                 index=index,
                 image_bytes=_png_bytes(accent=50 + index),
                 mime_type="image/png",
-                provider_model="gemini-3-pro-image",
+                provider_model="gemini-3.1-flash-image",
                 prompt=prompts[index - 1],
             )
             for index in range(1, 4)
@@ -408,7 +408,7 @@ def _install_repository(monkeypatch):
         "mime_type": "image/png",
         "byte_length": len(master),
         "sha256": master_hash,
-        "provider_model": "gemini-3-pro-image",
+        "provider_model": generation_contract["model"],
         "visual_contract_hash": visual_contract["contract_hash"],
         "actor_reference_fingerprint": actor_fingerprint,
         "generation_contract_hash": generation_contract["contract_hash"],
@@ -1729,7 +1729,7 @@ def test_candidate_endpoint_generates_three_wheelchair_scene_plates_from_ordered
     assert len({candidate["storage_uri"] for candidate in candidates}) == 3
     assert len({candidate["sha256"] for candidate in candidates}) == 3
     assert {candidate["provider_model"] for candidate in candidates} == {
-        "gemini-3-pro-image"
+        "gemini-3.1-flash-image"
     }
     assert {candidate["visual_contract_hash"] for candidate in candidates} == {
         state["run"]["reference_snapshot"]["visual_contract"]["contract_hash"]
@@ -2098,13 +2098,22 @@ def test_candidate_endpoint_returns_the_finalized_persisted_candidate_contract(m
 
 def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
+    from app.features.shot_frames.wheelchair_scene_plate import ScenePlateCandidate
     from app.main import app
 
     state["context"]["reference"].pop("master")
     provider_calls = []
+    first_candidate = ScenePlateCandidate(
+        index=1,
+        image_bytes=_png_bytes(accent=91),
+        mime_type="image/png",
+        provider_model="gemini-3.1-flash-image",
+        prompt="resumable candidate one",
+    )
 
     def fail_after_provider_invocation(**kwargs):
         provider_calls.append(kwargs)
+        kwargs["candidate_ready_callback"](first_candidate)
         raise RuntimeError("simulated provider result uncertainty")
 
     monkeypatch.setattr(
@@ -2121,13 +2130,43 @@ def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monke
     )
     assert first.status_code == 500, first.text
     assert len(provider_calls) == 1
-    assert storage.upload_calls == []
+    assert len(storage.upload_calls) == 1
+    partial_candidates = state["run"]["candidate_generation_progress"]["details"][
+        "partial_candidates"
+    ]
+    assert [candidate["index"] for candidate in partial_candidates] == [1]
     assert state["candidate_reservation"] is None
+
+    resumed_indexes = []
+
+    def resume_generation(**kwargs):
+        initial_candidates = list(kwargs["initial_candidates"])
+        resumed_indexes.extend(candidate.index for candidate in initial_candidates)
+        new_candidates = [
+            ScenePlateCandidate(
+                index=index,
+                image_bytes=_png_bytes(accent=90 + index),
+                mime_type="image/png",
+                provider_model="gemini-3.1-flash-image",
+                prompt=f"resumable candidate {index}",
+            )
+            for index in (2, 3)
+        ]
+        for candidate in new_candidates:
+            kwargs["candidate_ready_callback"](candidate)
+        return SimpleNamespace(
+            candidates=tuple(initial_candidates + new_candidates),
+            prompts=tuple(
+                candidate.prompt for candidate in initial_candidates + new_candidates
+            ),
+            derivation_mode="bootstrap",
+            remaining_duplicate_candidate_indexes=(),
+        )
 
     monkeypatch.setattr(
         handlers,
         "generate_scene_plate_candidates",
-        lambda **_kwargs: _scene_plate_result(marker="retry"),
+        resume_generation,
         raising=False,
     )
     second = client.post(
@@ -2136,6 +2175,7 @@ def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monke
     )
 
     assert second.status_code == 200, second.text
+    assert resumed_indexes == [1]
     assert len(storage.upload_calls) == 3
 
 
@@ -2322,7 +2362,7 @@ def test_candidate_endpoint_rejects_every_unintended_existing_stage_before_exter
                     index=index,
                     image_bytes=f"candidate-{index}".encode(),
                     mime_type="image/png",
-                    provider_model="gemini-3-pro-image",
+                    provider_model="gemini-3.1-flash-image",
                 )
                 for index in range(1, 4)
             ],
@@ -2372,7 +2412,7 @@ def test_candidate_endpoint_rejects_missing_or_stale_existing_revision_before_ex
                     index=index,
                     image_bytes=f"candidate-{index}".encode(),
                     mime_type="image/png",
-                    provider_model="gemini-3-pro-image",
+                    provider_model="gemini-3.1-flash-image",
                 )
                 for index in range(1, 4)
             ],
@@ -2494,7 +2534,9 @@ def test_master_approval_uses_one_atomic_transition(monkeypatch):
         "mime_type": "image/png",
         "byte_length": len(_storage.master),
         "sha256": sha256(_storage.master).hexdigest(),
-        "provider_model": "gemini-3-pro-image",
+        "provider_model": state["context"]["reference"][
+            "scene_plate_generation_contract"
+        ]["model"],
         "visual_contract_hash": state["context"]["reference"]["visual_contract"][
             "contract_hash"
         ],

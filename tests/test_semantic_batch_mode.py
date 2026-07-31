@@ -21,6 +21,7 @@ from app.features.characters.actor_identity import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PRODUCTION_DEPLOY_WORKFLOW = ROOT / ".github/workflows/deploy-production.yml"
 MIGRATION = ROOT / "supabase/migrations/20260713000000_semantic_ugc_production.sql"
 MANUAL_MODE_MIGRATION = ROOT / "supabase/migrations/20260714000000_manual_semantic_ugc_mode.sql"
 QA_RESUME_MIGRATION = ROOT / "supabase/migrations/20260715000200_semantic_video_qa_resume.sql"
@@ -40,6 +41,10 @@ CANDIDATE_RELEASE_MIGRATION = (
 )
 CANDIDATE_PROGRESS_MIGRATION = (
     ROOT / "supabase/migrations/20260728020000_semantic_scene_plate_progress.sql"
+)
+CANDIDATE_PROGRESS_COALESCE_FIX_MIGRATION = (
+    ROOT
+    / "supabase/migrations/20260731090000_semantic_scene_plate_progress_coalesce_fix.sql"
 )
 IDENTITY_QA_RESUME_MIGRATION = (
     ROOT
@@ -953,6 +958,27 @@ def test_candidate_progress_migration_is_token_fenced_and_service_role_only():
     assert "candidate_reservation_expires_at > pg_catalog.clock_timestamp()" in sql
     assert "'regenerating_duplicates'" in sql
     assert "to service_role" in sql
+
+
+def test_candidate_progress_coalesce_fix_uses_postgres_special_form():
+    sql = CANDIDATE_PROGRESS_COALESCE_FIX_MIGRATION.read_text().lower()
+
+    assert "update_semantic_video_candidate_progress" in sql
+    assert "coalesce(p_progress -> 'details', '{}'::jsonb)" in sql
+    assert "pg_catalog.coalesce" not in sql
+    assert "run.candidate_reservation_token = p_reservation_token" in sql
+    assert "to service_role" in sql
+
+
+def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
+    workflow = PRODUCTION_DEPLOY_WORKFLOW.read_text()
+
+    assert '"SEMANTIC_SCENE_PLATE_MODEL": "gemini-3.1-flash-image"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-diverse-resumable-v7"' in workflow
+    assert '"VERTEX_GEMINI_IMAGE_LOCATION": "global"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY": "2"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS": "3"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS": "30"' in workflow
 
 
 def test_visual_remediation_migration_replaces_no_paid_request_and_invalidates_visual_cache():

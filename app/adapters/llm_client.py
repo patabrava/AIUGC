@@ -782,6 +782,7 @@ class LLMClient:
         aspect_ratio: str = "1:1",
         image_size: str = "1K",
         input_images: Optional[List[Dict[str, Any]]] = None,
+        provider_max_attempts: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Generate a single image using Gemini and return image bytes plus mime type."""
         if self.gemini_provider == "vertex":
@@ -795,6 +796,7 @@ class LLMClient:
                 aspect_ratio=aspect_ratio,
                 image_size=image_size,
                 input_images=input_images,
+                provider_max_attempts=provider_max_attempts,
             )
 
         target_model = self._resolve_gemini_image_model(model)

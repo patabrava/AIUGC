@@ -5,7 +5,9 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
-from threading import BoundedSemaphore
+import os
+import random
+from threading import Condition
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
@@ -51,15 +53,103 @@ _PERCEPTUAL_HASH_WIDTH = 16
 _PERCEPTUAL_HASH_HEIGHT = 16
 _NEAR_DUPLICATE_HASH_DISTANCE = 8
 _NEAR_DUPLICATE_MEAN_RGB_DELTA = 3.0
-_PROVIDER_MAX_ATTEMPTS = 2
-_PROVIDER_RETRY_BASE_SECONDS = 1.0
+_PROVIDER_MAX_ATTEMPTS = 3
 _TRANSIENT_PROVIDER_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
-# Gemini image generation has a tighter burst capacity than ordinary
-# generateContent calls. Keep two renders in flight across the web process:
-# one serialized render made multi-post batches take 15+ minutes, while the
-# Vertex adapter already bounds and retries transient provider pressure.
-_SCENE_PLATE_IMAGE_CONCURRENCY = 2
-_SCENE_PLATE_IMAGE_SEMAPHORE = BoundedSemaphore(_SCENE_PLATE_IMAGE_CONCURRENCY)
+_SCENE_PLATE_IMAGE_MAX_CONCURRENCY = max(
+    1, int(os.environ.get("SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY", "2"))
+)
+_SCENE_PLATE_SUCCESS_RAMP = max(
+    1, int(os.environ.get("SEMANTIC_SCENE_PLATE_SUCCESS_RAMP", "3"))
+)
+_SCENE_PLATE_START_INTERVAL_SECONDS = max(
+    0.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS", "3"))
+)
+_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS = max(
+    1.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS", "30"))
+)
+_SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS = max(
+    1.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS", "10"))
+)
+
+
+class _ScenePlateImageTrafficGate:
+    """Fair, adaptive process-wide traffic shaping for expensive image calls."""
+
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._pending: list[tuple[object, str]] = []
+        self._active = 0
+        self._current_limit = 1
+        self._healthy_successes = 0
+        self._last_started_key = ""
+        self._next_start_at = 0.0
+        self._cooldown_until = 0.0
+
+    def _next_waiter_locked(self) -> Optional[object]:
+        if not self._pending:
+            return None
+        if len({key for _, key in self._pending}) > 1:
+            for waiter, key in self._pending:
+                if key != self._last_started_key:
+                    return waiter
+        return self._pending[0][0]
+
+    def acquire(self, traffic_key: str) -> None:
+        waiter = object()
+        normalized_key = str(traffic_key or "semantic-scene-plate")
+        with self._condition:
+            self._pending.append((waiter, normalized_key))
+            while True:
+                now = time.monotonic()
+                ready_at = max(self._next_start_at, self._cooldown_until)
+                if (
+                    self._next_waiter_locked() is waiter
+                    and self._active < self._current_limit
+                    and now >= ready_at
+                ):
+                    self._pending = [
+                        item for item in self._pending if item[0] is not waiter
+                    ]
+                    self._active += 1
+                    self._last_started_key = normalized_key
+                    self._next_start_at = (
+                        now + _SCENE_PLATE_START_INTERVAL_SECONDS
+                    )
+                    self._condition.notify_all()
+                    return
+                timeout = max(0.05, min(1.0, ready_at - now))
+                self._condition.wait(timeout=timeout)
+
+    def release(self, *, succeeded: bool, status_code: Optional[int]) -> None:
+        with self._condition:
+            self._active = max(0, self._active - 1)
+            now = time.monotonic()
+            if succeeded:
+                self._healthy_successes += 1
+                if (
+                    self._healthy_successes >= _SCENE_PLATE_SUCCESS_RAMP
+                    and self._current_limit < _SCENE_PLATE_IMAGE_MAX_CONCURRENCY
+                ):
+                    self._current_limit += 1
+                    self._healthy_successes = 0
+            else:
+                self._healthy_successes = 0
+                self._current_limit = 1
+                if status_code == 429:
+                    cooldown = _SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS
+                elif status_code in _TRANSIENT_PROVIDER_STATUS_CODES:
+                    cooldown = _SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS
+                else:
+                    cooldown = 0.0
+                if cooldown:
+                    self._cooldown_until = max(
+                        self._cooldown_until,
+                        now + cooldown + random.uniform(0.0, cooldown * 0.25),
+                    )
+            self._condition.notify_all()
+
+
+_SCENE_PLATE_IMAGE_TRAFFIC_GATE = _ScenePlateImageTrafficGate()
 
 
 @dataclass(frozen=True)
@@ -234,8 +324,9 @@ def generate_scene_plate(
     references: Sequence[ShotFrameReference],
     prompt: str,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3-pro-image",
+    image_model: str = "gemini-3.1-flash-image",
     image_size: str = "2K",
+    traffic_key: Optional[str] = None,
 ) -> dict[str, Any]:
     if len(references) != 3 or tuple(item.role for item in references) != _REFERENCE_ROLES:
         raise ValidationError(
@@ -257,7 +348,7 @@ def generate_scene_plate(
 
     client = llm_client or get_llm_client()
     renderer_prompt = write_raw_camera_image_prompt(client=client, brief=normalized_prompt)
-    with _SCENE_PLATE_IMAGE_SEMAPHORE:
+    def render() -> dict[str, Any]:
         return client.generate_gemini_image(
             prompt=renderer_prompt,
             model=image_model,
@@ -265,7 +356,34 @@ def generate_scene_plate(
             aspect_ratio="9:16",
             image_size=image_size,
             input_images=[item.as_gemini_input() for item in references],
+            # Scene-plate retries are coordinated by the adaptive traffic gate.
+            # Disabling the adapter's nested retry prevents retry storms.
+            provider_max_attempts=1,
         )
+    if not traffic_key:
+        return render()
+    _SCENE_PLATE_IMAGE_TRAFFIC_GATE.acquire(traffic_key)
+    try:
+        result = render()
+    except ThirdPartyError as exc:
+        status_code = exc.details.get("status_code")
+        try:
+            normalized_status = int(status_code) if status_code is not None else None
+        except (TypeError, ValueError):
+            normalized_status = None
+        _SCENE_PLATE_IMAGE_TRAFFIC_GATE.release(
+            succeeded=False,
+            status_code=normalized_status,
+        )
+        raise
+    except Exception:
+        _SCENE_PLATE_IMAGE_TRAFFIC_GATE.release(
+            succeeded=False,
+            status_code=None,
+        )
+        raise
+    _SCENE_PLATE_IMAGE_TRAFFIC_GATE.release(succeeded=True, status_code=None)
+    return result
 
 
 def _as_role(reference: ShotFrameReference, role: str) -> ShotFrameReference:
@@ -285,8 +403,11 @@ def generate_scene_plate_candidates(
     wardrobe: str,
     candidate_count: int = 3,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3-pro-image",
+    image_model: str = "gemini-3.1-flash-image",
     image_size: str = "2K",
+    traffic_key: Optional[str] = None,
+    initial_candidates: Sequence[ScenePlateCandidate] = (),
+    candidate_ready_callback: Optional[Callable[[ScenePlateCandidate], None]] = None,
     progress_callback: Optional[
         Callable[[str, Mapping[str, Any]], None]
     ] = None,
@@ -355,14 +476,16 @@ def generate_scene_plate_candidates(
             llm_client=client,
             image_model=image_model,
             image_size=image_size,
+            traffic_key=traffic_key,
         )
-        return ScenePlateCandidate(
+        candidate = ScenePlateCandidate(
             index=index,
             image_bytes=generated["image_bytes"],
             mime_type=str(generated["mime_type"]),
             provider_model=str(generated["model"]),
             prompt=prompt,
         )
+        return candidate
 
     def report_progress(phase: str, **details: Any) -> None:
         if progress_callback is not None:
@@ -374,7 +497,7 @@ def generate_scene_plate_candidates(
         candidate_index, diversity_attempt = specification
         for provider_attempt in range(1, _PROVIDER_MAX_ATTEMPTS + 1):
             try:
-                return generate_candidate_once(specification)
+                candidate = generate_candidate_once(specification)
             except ThirdPartyError as exc:
                 if (
                     provider_attempt >= _PROVIDER_MAX_ATTEMPTS
@@ -389,11 +512,12 @@ def generate_scene_plate_candidates(
                     provider_attempt=provider_attempt + 1,
                     retrying=True,
                 )
-                time.sleep(
-                    _PROVIDER_RETRY_BASE_SECONDS
-                    * (2 ** (provider_attempt - 1))
-                    + (candidate_index * 0.25)
-                )
+                continue
+            if candidate_ready_callback is not None:
+                # Persistence is deliberately outside the provider retry loop:
+                # a storage/checkpoint failure must not purchase another image.
+                candidate_ready_callback(candidate)
+            return candidate
         raise AssertionError("Scene-plate provider retry loop exhausted unexpectedly.")
 
     # Every candidate is an independent provider request over immutable inputs.
@@ -404,19 +528,31 @@ def generate_scene_plate_candidates(
         candidate_count=candidate_count,
         completed_candidates=0,
     )
-    with ThreadPoolExecutor(
-        max_workers=candidate_count,
-        thread_name_prefix="semantic-scene-plate",
-    ) as executor:
-        candidates = list(
-            executor.map(
-                generate_candidate,
-                (
-                    (index, 1)
-                    for index in range(start_index, candidate_count + 1)
-                ),
+    initial_by_index = {candidate.index: candidate for candidate in initial_candidates}
+    if (
+        len(initial_by_index) != len(tuple(initial_candidates))
+        or any(index < start_index or index > candidate_count for index in initial_by_index)
+    ):
+        raise ValidationError("Initial scene-plate candidates have invalid indexes.")
+    missing_specifications = [
+        (index, 1)
+        for index in range(start_index, candidate_count + 1)
+        if index not in initial_by_index
+    ]
+    generated_candidates: list[ScenePlateCandidate] = []
+    if missing_specifications:
+        with ThreadPoolExecutor(
+            max_workers=len(missing_specifications),
+            thread_name_prefix="semantic-scene-plate",
+        ) as executor:
+            generated_candidates = list(
+                executor.map(generate_candidate, missing_specifications)
             )
-        )
+    candidates = [
+        initial_by_index.get(index)
+        or next(candidate for candidate in generated_candidates if candidate.index == index)
+        for index in range(start_index, candidate_count + 1)
+    ]
     report_progress(
         "checking_diversity",
         candidate_count=candidate_count,

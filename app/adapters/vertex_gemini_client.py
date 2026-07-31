@@ -199,6 +199,7 @@ class VertexGeminiClient:
         aspect_ratio: str = "1:1",
         image_size: str = "1K",
         input_images: Optional[List[Dict[str, Any]]] = None,
+        provider_max_attempts: Optional[int] = None,
     ) -> Dict[str, Any]:
         target_model = model or self._settings.vertex_gemini_image_model
         payload = self._build_generate_content_payload(
@@ -219,6 +220,7 @@ class VertexGeminiClient:
             location=self._settings.vertex_gemini_image_location or self._settings.vertex_ai_location,
             payload=payload,
             log_event="vertex_gemini_generate_image",
+            max_attempts=provider_max_attempts,
         )
         image_payload = self._extract_image_bytes(data)
         return {
@@ -306,11 +308,17 @@ class VertexGeminiClient:
         location: str,
         payload: Dict[str, Any],
         log_event: str,
+        max_attempts: Optional[int] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         url = self._build_generate_content_url(model=model, location=location)
         last_exc: Optional[Exception] = None
-        for attempt in range(_VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS):
+        attempt_limit = (
+            _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS
+            if max_attempts is None
+            else max(1, int(max_attempts))
+        )
+        for attempt in range(attempt_limit):
             response = None
             with _VERTEX_REQUEST_SEMAPHORE:
                 client = self._http_client
@@ -338,7 +346,7 @@ class VertexGeminiClient:
                 # Outside the semaphore: rebuild the client (one thread wins;
                 # others piggy-back on the rebuilt instance), then back off.
                 self._recycle_http_client(client_generation)
-                if attempt < _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS - 1:
+                if attempt < attempt_limit - 1:
                     time.sleep(_vertex_retry_delay_seconds(attempt=attempt))
                     continue
                 raise ThirdPartyError(
@@ -348,7 +356,7 @@ class VertexGeminiClient:
                         "error": str(last_exc)[:300],
                         "model": model,
                         "location": location,
-                        "attempts": _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS,
+                        "attempts": attempt_limit,
                     },
                 ) from last_exc
 
@@ -361,7 +369,7 @@ class VertexGeminiClient:
             )
             if (
                 is_transient
-                and attempt < _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS - 1
+                and attempt < attempt_limit - 1
             ):
                 delay_seconds = _vertex_retry_delay_seconds(
                     attempt=attempt,
@@ -370,7 +378,7 @@ class VertexGeminiClient:
                 logger.warning(
                     f"{log_event}_http_retry",
                     attempt=attempt + 1,
-                    max_attempts=_VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS,
+                    max_attempts=attempt_limit,
                     status_code=response.status_code,
                     delay_seconds=delay_seconds,
                     model=model,

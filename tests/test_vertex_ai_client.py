@@ -564,6 +564,35 @@ def test_vertex_gemini_generate_content_respects_capped_retry_after(
     assert sleeps == [expected_sleep]
 
 
+def test_vertex_gemini_generate_content_allows_retry_owner_to_disable_nested_retries(
+    monkeypatch,
+):
+    gemini_module, client, mock_http = _gemini_post_client(
+        monkeypatch,
+        [
+            _gemini_response(
+                429,
+                body='{"error":{"status":"RESOURCE_EXHAUSTED"}}',
+            )
+        ],
+    )
+    sleeps = []
+    monkeypatch.setattr(gemini_module.time, "sleep", sleeps.append)
+
+    with pytest.raises(ThirdPartyError) as exc_info:
+        client._post_generate_content(
+            model="gemini-3.1-flash-image",
+            location="global",
+            payload={"contents": []},
+            log_event="test_vertex_gemini",
+            max_attempts=1,
+        )
+
+    assert mock_http.post.call_count == 1
+    assert sleeps == []
+    assert exc_info.value.details["attempts"] == 1
+
+
 def test_vertex_gemini_generate_content_fails_non_transient_4xx_without_retry(
     monkeypatch,
 ):
@@ -1007,6 +1036,7 @@ def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):
         aspect_ratio="9:16",
         image_size="2K",
         input_images=ordered_inputs,
+        provider_max_attempts=None,
     )
 
     assert result["model"] == "gemini-3.1-flash-image"
@@ -1019,4 +1049,5 @@ def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):
         aspect_ratio="9:16",
         image_size="2K",
         input_images=ordered_inputs,
+        provider_max_attempts=None,
     )

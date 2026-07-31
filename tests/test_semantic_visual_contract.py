@@ -122,7 +122,8 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
         == [b"front", b"support", b"location"]
         for call in client.calls
     )
-    assert all(call["model"] == "gemini-3-pro-image" for call in client.calls)
+    assert all(call["model"] == "gemini-3.1-flash-image" for call in client.calls)
+    assert all(call["provider_max_attempts"] == 1 for call in client.calls)
     assert all("system_prompt" not in call for call in client.calls)
     assert all(call["image_size"] == "2K" for call in client.calls)
     assert actor_front.image_bytes == b"front"
@@ -209,8 +210,6 @@ def test_scene_plate_candidates_retry_only_the_transiently_failed_candidate(monk
                 "model": kwargs["model"],
             }
 
-    sleeps: list[float] = []
-    monkeypatch.setattr(wheelchair_scene_plate.time, "sleep", sleeps.append)
     result = wheelchair_scene_plate.generate_scene_plate_candidates(
         actor_references=[
             _reference("actor_front", b"front"),
@@ -224,13 +223,63 @@ def test_scene_plate_candidates_retry_only_the_transiently_failed_candidate(monk
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
     assert attempts == {1: 1, 2: 2, 3: 1}
-    assert sleeps == [1.5]
 
 
-def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threads():
+def test_scene_plate_checkpoint_failure_does_not_purchase_another_image():
+    from app.core.errors import ThirdPartyError
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
+
+    attempts: dict[int, int] = {}
+    attempts_lock = Lock()
+
+    class SuccessfulProvider:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_image(self, **kwargs):
+            index = next(
+                candidate_index
+                for candidate_index in range(1, 4)
+                if f"Candidate {candidate_index} composition:" in kwargs["prompt"]
+            )
+            with attempts_lock:
+                attempts[index] = attempts.get(index, 0) + 1
+            return {
+                "image_bytes": f"candidate-{index}".encode(),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    def fail_checkpoint(candidate):
+        if candidate.index == 2:
+            raise ThirdPartyError("storage checkpoint failed", {"status_code": 503})
+
+    try:
+        generate_scene_plate_candidates(
+            actor_references=[
+                _reference("actor_front", b"front"),
+                _reference("actor_three_quarter", b"support"),
+            ],
+            location_reference=_reference("location", b"location"),
+            scene="the exact supplied garden patio",
+            wardrobe="light-grey cardigan over a plain white top",
+            llm_client=SuccessfulProvider(),
+            candidate_ready_callback=fail_checkpoint,
+        )
+    except ThirdPartyError:
+        pass
+    else:
+        raise AssertionError("Checkpoint failure should fail the request.")
+
+    assert attempts == {1: 1, 2: 1, 3: 1}
+
+
+def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threads(
+    monkeypatch,
+):
+    from app.features.shot_frames import wheelchair_scene_plate
 
     active = 0
     peak_active = 0
@@ -262,7 +311,22 @@ def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threa
                 with active_lock:
                     active -= 1
 
-    result = generate_scene_plate_candidates(
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_IMAGE_TRAFFIC_GATE",
+        wheelchair_scene_plate._ScenePlateImageTrafficGate(),
+    )
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_START_INTERVAL_SECONDS",
+        0.0,
+    )
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_SUCCESS_RAMP",
+        1,
+    )
+    result = wheelchair_scene_plate.generate_scene_plate_candidates(
         actor_references=[
             _reference("actor_front", b"front"),
             _reference("actor_three_quarter", b"support"),
@@ -271,6 +335,7 @@ def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threa
         scene="the exact supplied garden patio",
         wardrobe="light-grey cardigan over a plain white top",
         llm_client=PeakTrackingClient(),
+        traffic_key="run-1",
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
@@ -569,7 +634,7 @@ def test_scene_plate_generation_contract_binds_model_gate_and_actor_fingerprint(
         settings=settings,
     )
 
-    assert contract["model"] == "gemini-3-pro-image"
+    assert contract["model"] == "gemini-3.1-flash-image"
     assert contract["image_size"] == "2K"
     assert contract["reference_roles"] == [
         "actor_front",
