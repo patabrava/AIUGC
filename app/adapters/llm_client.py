@@ -597,6 +597,7 @@ class LLMClient:
         thinking_budget: Optional[int] = None,
         input_images: Optional[List[Dict[str, Any]]] = None,
         input_media: Optional[List[Dict[str, Any]]] = None,
+        location: Optional[str] = None,
     ) -> str:
         """Generate plain text using Gemini generateContent."""
         if self.gemini_provider == "vertex":
@@ -609,6 +610,8 @@ class LLMClient:
                 "thinking_budget": thinking_budget,
                 "input_images": input_images,
             }
+            if location is not None:
+                vertex_kwargs["location"] = location
             if input_media is not None:
                 vertex_kwargs["input_media"] = input_media
             return get_vertex_gemini_client().generate_text(

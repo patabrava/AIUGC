@@ -110,6 +110,9 @@ def build_scene_plate_generation_contract(
         "identity_evaluator_model": str(
             resolved.semantic_scene_identity_gate_model
         ).strip(),
+        "identity_evaluator_location": str(
+            resolved.semantic_scene_identity_gate_location
+        ).strip(),
         "identity_evaluator_contract_version": (
             SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION
         ),

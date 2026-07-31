@@ -132,6 +132,7 @@ class VertexGeminiClient:
         thinking_budget: Optional[int] = None,
         input_images: Optional[List[Dict[str, Any]]] = None,
         input_media: Optional[List[Dict[str, Any]]] = None,
+        location: Optional[str] = None,
     ) -> str:
         target_model = model or self._settings.vertex_gemini_model
         payload = self._build_generate_content_payload(
@@ -145,7 +146,7 @@ class VertexGeminiClient:
         )
         data = self._post_generate_content(
             model=target_model,
-            location=self._settings.vertex_ai_location,
+            location=location or self._settings.vertex_ai_location,
             payload=payload,
             log_event="vertex_gemini_generate_text",
         )

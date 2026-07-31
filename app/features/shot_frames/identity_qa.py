@@ -284,12 +284,14 @@ def _evaluate_report_with_consistency_retry(
     images: Sequence[Mapping[str, Any]],
     component_fields: Sequence[str],
     minimum_confidence: float,
+    location: Optional[str] = None,
 ) -> dict[str, Any]:
     raw = llm_client.generate_gemini_text(
         prompt=prompt,
         model=model,
         temperature=0,
         input_images=images,
+        location=location,
     )
     parsed = _parse_report(
         raw,
@@ -308,6 +310,7 @@ def _evaluate_report_with_consistency_retry(
         model=model,
         temperature=0,
         input_images=images,
+        location=location,
     )
     return _parse_report(
         corrected_raw,
@@ -324,6 +327,7 @@ def evaluate_scene_plate_identity(
     llm_client: Optional[Any] = None,
     model: str,
     minimum_confidence: float = 0.90,
+    location: Optional[str] = None,
 ) -> SceneIdentityQAReport:
     images = [
         _validated_image(actor_front, label="actor_front"),
@@ -338,6 +342,7 @@ def evaluate_scene_plate_identity(
             images=images,
             component_fields=_SCENE_COMPONENTS,
             minimum_confidence=minimum_confidence,
+            location=location,
         )
     )
 

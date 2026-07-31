@@ -1289,6 +1289,7 @@ def generate_candidates(
                 },
                 model=settings.semantic_scene_identity_gate_model,
                 minimum_confidence=settings.semantic_scene_identity_min_confidence,
+                location=settings.semantic_scene_identity_gate_location,
             )
             identity_gate_result = scene_identity_result_metadata(
                 identity_report,

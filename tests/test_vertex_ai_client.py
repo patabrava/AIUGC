@@ -760,6 +760,26 @@ def test_vertex_gemini_text_generation_preserves_ordered_input_images(monkeypatc
     ]
 
 
+def test_vertex_gemini_text_generation_accepts_global_location_override(monkeypatch):
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    captured = {}
+    client = VertexGeminiClient()
+
+    def _fake_post_generate_content(**kwargs):
+        captured.update(kwargs)
+        return {"candidates": [{"content": {"parts": [{"text": "accepted"}]}}]}
+
+    monkeypatch.setattr(client, "_post_generate_content", _fake_post_generate_content)
+
+    assert client.generate_text(
+        prompt="Check identity.",
+        model="gemini-2.5-flash",
+        location="global",
+    ) == "accepted"
+    assert captured["location"] == "global"
+
+
 def test_vertex_gemini_text_generation_preserves_ordered_input_media(monkeypatch):
     import base64
 

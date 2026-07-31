@@ -711,15 +711,15 @@ def generate_scene_plate_candidates(
                 )
                 for position, image in enumerate(bundle_images)
             ]
-            callback_error: Optional[Exception] = None
             if candidate_ready_callback is not None:
-                for candidate in generated_candidates:
-                    try:
-                        candidate_ready_callback(candidate)
-                    except Exception as exc:  # noqa: BLE001
-                        callback_error = callback_error or exc
-            if callback_error is not None:
-                raise callback_error
+                with ThreadPoolExecutor(
+                    max_workers=len(generated_candidates),
+                    thread_name_prefix="semantic-scene-plate-checkpoint",
+                ) as executor:
+                    # The callback performs identity QA, upload, and token-fenced
+                    # persistence. Each candidate remains isolated, while the
+                    # three slow multimodal checks share one wall-clock wait.
+                    list(executor.map(candidate_ready_callback, generated_candidates))
 
         bundled_indexes = {candidate.index for candidate in generated_candidates}
         remaining_specifications = [

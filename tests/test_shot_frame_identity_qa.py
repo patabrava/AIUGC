@@ -61,6 +61,7 @@ def test_scene_identity_gate_uses_fixed_original_reference_order_and_server_pass
         llm_client=llm,
         model="gemini-2.5-pro",
         minimum_confidence=0.90,
+        location="global",
     )
 
     assert report.passed is True
@@ -69,6 +70,7 @@ def test_scene_identity_gate_uses_fixed_original_reference_order_and_server_pass
         {"mime_type": "image/png", "image_bytes": b"support"},
         {"mime_type": "image/png", "image_bytes": b"candidate"},
     ]
+    assert llm.calls[0]["location"] == "global"
     assert "immutable original references" in llm.calls[0]["prompt"]
     assert "confidence in actor-identity preservation only" in llm.calls[0]["prompt"]
     assert "do not reduce it for an expected change of room" in llm.calls[0]["prompt"]

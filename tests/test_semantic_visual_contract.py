@@ -180,7 +180,7 @@ def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
-    assert persisted_indexes == [1, 2, 3]
+    assert sorted(persisted_indexes) == [1, 2, 3]
     assert len(client.bundle_calls) == 1
     call = client.bundle_calls[0]
     assert call["provider_max_attempts"] == 1

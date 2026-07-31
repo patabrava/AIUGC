@@ -296,7 +296,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_IMAGE_SIZE"),
     )
     semantic_scene_plate_contract_version: str = Field(
-        default="flash-identity-bundled-resumable-v8",
+        default="flash-identity-bundled-global-v9",
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_CONTRACT_VERSION"),
         min_length=1,
     )
@@ -305,6 +305,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SEMANTIC_SCENE_IDENTITY_GATE_MODEL"),
         min_length=1,
         description="Current stable multimodal Gemini model used for scene and final-video identity QA.",
+    )
+    semantic_scene_identity_gate_location: str = Field(
+        default="global",
+        validation_alias=AliasChoices("SEMANTIC_SCENE_IDENTITY_GATE_LOCATION"),
+        min_length=1,
+        description="Vertex location used for low-latency scene-plate identity checks.",
     )
     semantic_scene_identity_min_confidence: float = Field(
         default=0.90,
