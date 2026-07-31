@@ -2047,6 +2047,7 @@ def test_candidate_endpoint_verifies_ordered_references_and_persists_scene_plate
     assert all(candidate["sha256"] != sha256(storage.objects["https://storage/front.png"]).hexdigest() for candidate in candidates)
     assert state["run"]["stage"] == "awaiting_reference_approval"
     assert state["run"]["master_snapshot"]["candidates"] == candidates
+    assert state["run"]["candidate_generation_progress"]["phase"] == "ready"
 
 
 def test_candidate_endpoint_returns_the_finalized_persisted_candidate_contract(monkeypatch):

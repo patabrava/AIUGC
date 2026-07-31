@@ -1589,6 +1589,10 @@ def generate_candidates(
             reservation_token=reservation_token,
             run_updates=run_payload,
         )
+        persist_candidate_progress(
+            "ready",
+            {"candidate_count": len(candidates)},
+        )
     except Exception:
         try:
             release_candidate_reservation(

@@ -342,6 +342,29 @@ def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threa
     assert peak_active == 2
 
 
+def test_scene_plate_traffic_gate_round_robins_every_waiting_run():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        _ScenePlateImageTrafficGate,
+    )
+
+    gate = _ScenePlateImageTrafficGate()
+    waiter_a = object()
+    waiter_b = object()
+    waiter_c = object()
+    gate._pending = [
+        (waiter_a, "run-a"),
+        (waiter_b, "run-b"),
+        (waiter_c, "run-c"),
+    ]
+
+    gate._last_started_key = "run-a"
+    assert gate._next_waiter_locked() is waiter_b
+    gate._last_started_key = "run-b"
+    assert gate._next_waiter_locked() is waiter_c
+    gate._last_started_key = "run-c"
+    assert gate._next_waiter_locked() is waiter_a
+
+
 def test_scene_plate_candidates_do_not_retry_permanent_provider_contract_errors(
     monkeypatch,
 ):

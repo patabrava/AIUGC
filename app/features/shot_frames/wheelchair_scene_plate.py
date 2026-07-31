@@ -88,11 +88,17 @@ class _ScenePlateImageTrafficGate:
     def _next_waiter_locked(self) -> Optional[object]:
         if not self._pending:
             return None
-        if len({key for _, key in self._pending}) > 1:
-            for waiter, key in self._pending:
-                if key != self._last_started_key:
-                    return waiter
-        return self._pending[0][0]
+        pending_keys = list(dict.fromkeys(key for _, key in self._pending))
+        if len(pending_keys) == 1:
+            target_key = pending_keys[0]
+        elif self._last_started_key in pending_keys:
+            previous_index = pending_keys.index(self._last_started_key)
+            target_key = pending_keys[(previous_index + 1) % len(pending_keys)]
+        else:
+            target_key = pending_keys[0]
+        return next(
+            waiter for waiter, key in self._pending if key == target_key
+        )
 
     def acquire(self, traffic_key: str) -> None:
         waiter = object()
