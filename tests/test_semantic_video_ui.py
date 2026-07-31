@@ -725,9 +725,10 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert "Original front reference" in html
     assert "Original three-quarter reference" in html
     assert "Identity gate passed · 96% confidence" in html
-    assert "same actor as both original references" in html
+    assert "Approving confirms that the selected scene plate shows the same actor as both original references" in html
     assert "Regenerate wheelchair scene plates" in html
-    assert "Approve selected scene plate" in html
+    assert "Approve selected scene plate and confirm identity" in html
+    assert "data-identity-attestation" not in html
     assert "Frozen visual contract" in html
     assert "An accessible garden patio in soft daylight." in html
     assert "light-grey cardigan over a plain white top" in html
@@ -974,6 +975,9 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "retry-approve" in source
     assert "qa-resume" in source
     assert "master-approve" in source
+    assert "reconcileMasterApproval(root)" in source
+    assert "progress.stage !== 'awaiting_reference_approval'" in source
+    assert "data-identity-attestation" not in source
     assert "candidate_generation_status" in source
     assert "candidate_generation_phase" in source
     assert "showCandidateLoading(root)" in source

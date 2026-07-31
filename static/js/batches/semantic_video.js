@@ -49,7 +49,9 @@
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
             const message = payload?.error?.message || payload?.message || payload?.detail || 'Semantic video request failed.';
-            throw new Error(typeof message === 'string' ? message : 'Semantic video request failed.');
+            const error = new Error(typeof message === 'string' ? message : 'Semantic video request failed.');
+            error.status = response.status;
+            throw error;
         }
         return payload.data || payload;
     }
@@ -323,6 +325,25 @@
         if (immediate) pollProgress(root);
     }
 
+    async function reconcileMasterApproval(root) {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+                const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`, {method: 'GET'});
+                updateProgress(root, progress);
+                if (progress.stage !== 'awaiting_reference_approval') {
+                    reloadAtWorkflow(root);
+                    return true;
+                }
+            } catch (_error) {
+                // Preserve the original approval error when persisted state is unavailable.
+            }
+            if (attempt < 2) {
+                await new Promise((resolve) => window.setTimeout(resolve, 750));
+            }
+        }
+        return false;
+    }
+
     async function runAction(root, button, path, body, pendingMessage) {
         button.disabled = true;
         if (!['candidates', 'plan'].includes(path)) setStatus(root, pendingMessage);
@@ -333,6 +354,9 @@
             });
             reloadAtWorkflow(root);
         } catch (error) {
+            if (path === 'master-approve' && await reconcileMasterApproval(root)) {
+                return;
+            }
             if (path === 'candidates') {
                 await pollProgress(root);
                 if (root.dataset.candidateGenerationStatus === 'generating') {
@@ -352,16 +376,14 @@
         root.dataset.semanticBound = 'true';
         const revision = () => Number(root.dataset.revision || 0);
         const approvalButton = action(root, 'approve-master');
-        const attestation = root.querySelector('[data-identity-attestation]');
         const updateMasterApprovalState = () => {
             if (!approvalButton || root.dataset.stage !== 'awaiting_reference_approval') return;
             const selected = root.querySelector('input[type="radio"][data-identity-passed="true"]:checked');
-            approvalButton.disabled = !(selected && attestation?.checked);
+            approvalButton.disabled = !selected;
         };
         root.querySelectorAll('input[type="radio"][data-identity-passed="true"]').forEach((input) => {
             input.addEventListener('change', updateMasterApprovalState);
         });
-        attestation?.addEventListener('change', updateMasterApprovalState);
         updateMasterApprovalState();
 
         action(root, 'generate-candidates')?.addEventListener('click', (event) => {
@@ -374,14 +396,13 @@
         action(root, 'approve-master')?.addEventListener('click', (event) => {
             const selected = root.querySelector('input[type="radio"][data-identity-passed="true"]:checked');
             if (!selected) return setStatus(root, 'Select a candidate whose identity gate passed.', true);
-            if (!attestation?.checked) return setStatus(root, 'Confirm the original-actor identity attestation first.', true);
             runAction(root, event.currentTarget, 'master-approve', {
                 candidate_index: Number(selected.value),
                 expected_revision: revision(),
                 identity_attestation: true,
                 attestation_version: 'semantic-actor-identity-v1',
                 reason: null,
-            }, 'Approving identity-verified master frame…');
+            }, 'Approving the selected scene plate and confirming identity…');
         });
         action(root, 'create-plan')?.addEventListener('click', (event) => {
             showPlanLoading(root);

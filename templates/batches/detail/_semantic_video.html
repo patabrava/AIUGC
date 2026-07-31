@@ -224,10 +224,9 @@
                 </div>
             </fieldset>
 
-            <label class="mt-4 flex items-start gap-3 rounded-xl border border-[#006AAB]/15 bg-white p-3 text-sm text-[#1C2740]">
-                <input type="checkbox" class="mt-0.5 h-4 w-4 rounded border-[#006AAB]/40 text-[#006AAB] focus:ring-[#006AAB]" data-identity-attestation {% if item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>
-                <span>I confirm that this is the same actor as both original references, without material age, facial-geometry, or realism drift.</span>
-            </label>
+            <p id="identity-approval-help-{{ item.post_id }}" class="mt-4 rounded-xl border border-[#006AAB]/15 bg-white p-3 text-sm text-[#1C2740]">
+                Approving confirms that the selected scene plate shows the same actor as both original references, without material age, facial-geometry, or realism drift.
+            </p>
             {% if not item.has_passed_candidate %}
             <p class="mt-2 text-sm font-semibold text-red-800" role="alert">No candidate passed the original-actor identity gate. Regenerate all three candidates.</p>
             {% endif %}
@@ -236,7 +235,7 @@
             {% if semantic_step == 'scene' %}
             <div class="mt-5 flex flex-wrap gap-2">
                 <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" {% if semantic_locked or item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.candidates or item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate wheelchair scene plates{% else %}Generate wheelchair scene plates{% endif %}</button>
-                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" {% if semantic_locked or item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve selected scene plate</button>
+                <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" aria-describedby="identity-approval-help-{{ item.post_id }}" {% if semantic_locked or item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve selected scene plate and confirm identity</button>
             </div>
             <section
                 class="{% if not item.candidates %}hidden {% endif %}mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3"

@@ -400,6 +400,7 @@ def test_supabase_adapter_uses_valid_service_key(monkeypatch):
         "key": "ey.service.payload",
         "postgrest_timeout": supabase_client_module._SUPABASE_POSTGREST_TIMEOUT_SECONDS,
     }
+    assert captured["postgrest_timeout"] >= 30
 
 
 def test_supabase_adapter_falls_back_when_service_key_is_malformed(monkeypatch):
