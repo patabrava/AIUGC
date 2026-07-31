@@ -1606,7 +1606,7 @@ def test_progress_endpoint_reports_scene_plate_generation_state(monkeypatch):
     assert generating_payload["candidate_generation_phase"] == "checking_diversity"
     assert generating_payload["candidate_count"] == 3
     assert generating_payload["progress_percent"] == 58
-    assert generating_payload["estimated_remaining_seconds"] == 90
+    assert generating_payload["estimated_remaining_seconds"] == 75
     assert "visually distinct" in generating_payload["status_message"]
     assert "paid video" not in generating_payload["status_message"].lower()
 

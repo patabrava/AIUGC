@@ -70,6 +70,9 @@ _SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS = max(
 _SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS = max(
     1.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS", "10"))
 )
+_SCENE_PLATE_BUNDLE_ENABLED = os.environ.get(
+    "SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 
 class _ScenePlateImageTrafficGate:
@@ -413,6 +416,86 @@ def generate_scene_plate(
     return result
 
 
+def generate_scene_plate_bundle(
+    *,
+    references: Sequence[ShotFrameReference],
+    prompts: Sequence[str],
+    llm_client: Any,
+    image_model: str,
+    image_size: str,
+    traffic_key: Optional[str],
+) -> list[dict[str, Any]]:
+    """Render multiple standalone plates in one provider round trip."""
+    if len(prompts) < 2:
+        raise ValidationError("Scene-plate bundles require at least two prompts.")
+    output_contract = (
+        f"Create exactly {len(prompts)} SEPARATE standalone output images in this one "
+        "response, in the numbered order below. Do not create a collage, contact sheet, "
+        "grid, split screen, triptych, or borders. Every output must be a complete "
+        "independent vertical 9:16 photograph at the requested resolution. Keep the exact "
+        "same actor identity, wheelchair, wardrobe, and location across all outputs while "
+        "applying the numbered camera variation for each image.\n\n"
+        + "\n\n".join(
+            f"OUTPUT IMAGE {index}:\n{prompt}"
+            for index, prompt in enumerate(prompts, start=1)
+        )
+        + f"\n\nReturn exactly {len(prompts)} separate images and no combined image."
+    )
+    renderer_prompt = write_raw_camera_image_prompt(
+        client=llm_client,
+        brief=output_contract,
+    )
+    renderer_prompt = (
+        f"{renderer_prompt}\n\nOUTPUT FORMAT REQUIREMENT: Return exactly "
+        f"{len(prompts)} separate image parts in numbered order. Never combine them."
+    )
+
+    def render() -> dict[str, Any]:
+        return llm_client.generate_gemini_images(
+            prompt=renderer_prompt,
+            model=image_model,
+            temperature=0.2,
+            aspect_ratio="9:16",
+            image_size=image_size,
+            input_images=[item.as_gemini_input() for item in references],
+            provider_max_attempts=1,
+        )
+
+    if traffic_key:
+        _SCENE_PLATE_IMAGE_TRAFFIC_GATE.acquire(traffic_key)
+    try:
+        generated = render()
+    except ThirdPartyError as exc:
+        if traffic_key:
+            status_code = exc.details.get("status_code")
+            try:
+                normalized_status = int(status_code) if status_code is not None else None
+            except (TypeError, ValueError):
+                normalized_status = None
+            _SCENE_PLATE_IMAGE_TRAFFIC_GATE.release(
+                succeeded=False,
+                status_code=normalized_status,
+            )
+        raise
+    except Exception:
+        if traffic_key:
+            _SCENE_PLATE_IMAGE_TRAFFIC_GATE.release(
+                succeeded=False,
+                status_code=None,
+            )
+        raise
+    if traffic_key:
+        _SCENE_PLATE_IMAGE_TRAFFIC_GATE.release(succeeded=True, status_code=None)
+
+    images = generated.get("images")
+    if not isinstance(images, list) or not images:
+        raise ThirdPartyError(
+            "Gemini scene-plate bundle returned no images.",
+            {"model": image_model},
+        )
+    return [dict(image) for image in images[: len(prompts)]]
+
+
 def _as_role(reference: ShotFrameReference, role: str) -> ShotFrameReference:
     return ShotFrameReference(
         role=role,
@@ -470,9 +553,9 @@ def generate_scene_plate_candidates(
         canonical_reference = None
         start_index = 1
         derivation_mode = "bootstrap"
-    def generate_candidate_once(
+    def build_candidate_request(
         specification: tuple[int, int],
-    ) -> ScenePlateCandidate:
+    ) -> tuple[tuple[ShotFrameReference, ...], str]:
         index, attempt = specification
         variation_directive = _variation_directive(index=index, attempt=attempt)
         if derivation_mode == "bootstrap":
@@ -497,6 +580,13 @@ def generate_scene_plate_candidates(
                 wardrobe=wardrobe,
                 variation_directive=variation_directive,
             )
+        return references, prompt
+
+    def generate_candidate_once(
+        specification: tuple[int, int],
+    ) -> ScenePlateCandidate:
+        index, _attempt = specification
+        references, prompt = build_candidate_request(specification)
         generated = generate_scene_plate(
             references=references,
             prompt=prompt,
@@ -547,9 +637,9 @@ def generate_scene_plate_candidates(
             return candidate
         raise AssertionError("Scene-plate provider retry loop exhausted unexpectedly.")
 
-    # Every candidate is an independent provider request over immutable inputs.
-    # Run the fixed set together so operator latency is one image-generation wait,
-    # rather than the sum of three provider waits. executor.map preserves indexes.
+    # Fresh sets use Gemini's ordered multi-image response so operator latency is
+    # one provider wait. Partial resumes, omitted outputs, and diversity repair
+    # retain the independently retryable single-image path.
     report_progress(
         "generating_images",
         candidate_count=candidate_count,
@@ -568,13 +658,83 @@ def generate_scene_plate_candidates(
     ]
     generated_candidates: list[ScenePlateCandidate] = []
     if missing_specifications:
-        with ThreadPoolExecutor(
-            max_workers=len(missing_specifications),
-            thread_name_prefix="semantic-scene-plate",
-        ) as executor:
-            generated_candidates = list(
-                executor.map(generate_candidate, missing_specifications)
-            )
+        can_bundle = (
+            _SCENE_PLATE_BUNDLE_ENABLED
+            and not initial_by_index
+            and len(missing_specifications) == candidate_count
+            and callable(getattr(client, "generate_gemini_images", None))
+        )
+        if can_bundle:
+            bundle_requests = [
+                build_candidate_request(specification)
+                for specification in missing_specifications
+            ]
+            bundle_references = bundle_requests[0][0]
+            bundle_prompts = [request[1] for request in bundle_requests]
+            bundle_images: list[dict[str, Any]] = []
+            for provider_attempt in range(1, _PROVIDER_MAX_ATTEMPTS + 1):
+                try:
+                    bundle_images = generate_scene_plate_bundle(
+                        references=bundle_references,
+                        prompts=bundle_prompts,
+                        llm_client=client,
+                        image_model=image_model,
+                        image_size=image_size,
+                        traffic_key=traffic_key,
+                    )
+                    break
+                except ThirdPartyError as exc:
+                    if (
+                        provider_attempt >= _PROVIDER_MAX_ATTEMPTS
+                        or not _is_retryable_provider_error(exc)
+                    ):
+                        report_progress(
+                            "generating_images",
+                            candidate_count=candidate_count,
+                            bundle_fallback=True,
+                        )
+                        break
+                    report_progress(
+                        "generating_images",
+                        candidate_count=candidate_count,
+                        provider_attempt=provider_attempt + 1,
+                        retrying=True,
+                        bundled=True,
+                    )
+            generated_candidates = [
+                ScenePlateCandidate(
+                    index=missing_specifications[position][0],
+                    image_bytes=image["image_bytes"],
+                    mime_type=str(image["mime_type"]),
+                    provider_model=str(image_model),
+                    prompt=bundle_prompts[position],
+                )
+                for position, image in enumerate(bundle_images)
+            ]
+            callback_error: Optional[Exception] = None
+            if candidate_ready_callback is not None:
+                for candidate in generated_candidates:
+                    try:
+                        candidate_ready_callback(candidate)
+                    except Exception as exc:  # noqa: BLE001
+                        callback_error = callback_error or exc
+            if callback_error is not None:
+                raise callback_error
+
+        bundled_indexes = {candidate.index for candidate in generated_candidates}
+        remaining_specifications = [
+            specification
+            for specification in missing_specifications
+            if specification[0] not in bundled_indexes
+        ]
+        if remaining_specifications:
+            with ThreadPoolExecutor(
+                max_workers=len(remaining_specifications),
+                thread_name_prefix="semantic-scene-plate",
+            ) as executor:
+                generated_candidates.extend(
+                    executor.map(generate_candidate, remaining_specifications)
+                )
     candidates = [
         initial_by_index.get(index)
         or next(candidate for candidate in generated_candidates if candidate.index == index)
@@ -639,6 +799,7 @@ __all__ = [
     "build_canonical_scene_plate_prompt",
     "build_derived_scene_plate_prompt",
     "generate_scene_plate",
+    "generate_scene_plate_bundle",
     "generate_scene_plate_candidates",
     "scene_plates_are_near_duplicates",
 ]

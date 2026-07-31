@@ -139,6 +139,170 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
     )
 
 
+def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    class BundledClient:
+        def __init__(self) -> None:
+            self.bundle_calls: list[dict] = []
+
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_images(self, **kwargs):
+            self.bundle_calls.append(kwargs)
+            return {
+                "images": [
+                    {"image_bytes": _png(block="left", value=70), "mime_type": "image/png"},
+                    {"image_bytes": _png(block="right", value=130), "mime_type": "image/png"},
+                    {"image_bytes": _png(block="left", value=200), "mime_type": "image/png"},
+                ],
+                "model": kwargs["model"],
+            }
+
+        def generate_gemini_image(self, **_kwargs):
+            raise AssertionError("Fresh bundled generation must not buy a single-image call.")
+
+    client = BundledClient()
+    persisted_indexes: list[int] = []
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=client,
+        candidate_ready_callback=lambda candidate: persisted_indexes.append(candidate.index),
+    )
+
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert persisted_indexes == [1, 2, 3]
+    assert len(client.bundle_calls) == 1
+    call = client.bundle_calls[0]
+    assert call["provider_max_attempts"] == 1
+    assert call["image_size"] == "2K"
+    assert "exactly 3 separate image parts" in call["prompt"]
+    assert "Never combine them" in call["prompt"]
+    assert [item["image_bytes"] for item in call["input_images"]] == [
+        b"front",
+        b"support",
+        b"location",
+    ]
+
+
+def test_scene_plate_partial_multi_image_response_generates_only_missing_output():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    class PartialBundledClient:
+        def __init__(self) -> None:
+            self.single_indexes: list[int] = []
+
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_images(self, **kwargs):
+            return {
+                "images": [
+                    {"image_bytes": _png(block="left", value=70), "mime_type": "image/png"},
+                    {"image_bytes": _png(block="right", value=130), "mime_type": "image/png"},
+                ],
+                "model": kwargs["model"],
+            }
+
+        def generate_gemini_image(self, **kwargs):
+            index = next(
+                candidate_index
+                for candidate_index in range(1, 4)
+                if f"Candidate {candidate_index} composition:" in kwargs["prompt"]
+            )
+            self.single_indexes.append(index)
+            return {
+                "image_bytes": _png(block="left", value=200),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    client = PartialBundledClient()
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=client,
+    )
+
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert client.single_indexes == [3]
+
+
+def test_scene_plate_unsupported_bundle_falls_back_to_reliable_single_image_path():
+    from app.core.errors import ThirdPartyError
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    class UnsupportedBundleClient:
+        def __init__(self) -> None:
+            self.bundle_calls = 0
+            self.single_indexes: list[int] = []
+
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_images(self, **_kwargs):
+            self.bundle_calls += 1
+            raise ThirdPartyError(
+                "Multi-image output is unavailable.",
+                {"status_code": 400},
+            )
+
+        def generate_gemini_image(self, **kwargs):
+            index = next(
+                candidate_index
+                for candidate_index in range(1, 4)
+                if f"Candidate {candidate_index} composition:" in kwargs["prompt"]
+            )
+            self.single_indexes.append(index)
+            return {
+                "image_bytes": _png(
+                    block="left" if index % 2 else "right",
+                    value=60 + (index * 60),
+                ),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    client = UnsupportedBundleClient()
+    phases: list[tuple[str, dict]] = []
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=client,
+        progress_callback=lambda phase, details: phases.append(
+            (phase, dict(details))
+        ),
+    )
+
+    assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
+    assert client.bundle_calls == 1
+    assert sorted(client.single_indexes) == [1, 2, 3]
+    assert any(details.get("bundle_fallback") is True for _phase, details in phases)
+
+
 def test_scene_plate_candidates_generate_with_bounded_concurrency_and_keep_candidate_order():
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,

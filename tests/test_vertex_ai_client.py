@@ -909,6 +909,68 @@ def test_vertex_gemini_image_generation_preserves_ordered_reference_images(monke
     ]
 
 
+def test_vertex_gemini_multi_image_generation_extracts_every_image_part(monkeypatch):
+    import base64
+
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    captured = {}
+    client = VertexGeminiClient()
+
+    def _fake_post_generate_content(**kwargs):
+        captured.update(kwargs)
+        return {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"text": "first"},
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/png",
+                                    "data": base64.b64encode(b"one").decode("ascii"),
+                                }
+                            },
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",
+                                    "data": base64.b64encode(b"two").decode("ascii"),
+                                }
+                            },
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/webp",
+                                    "data": base64.b64encode(b"three").decode("ascii"),
+                                }
+                            },
+                        ]
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(client, "_post_generate_content", _fake_post_generate_content)
+
+    result = client.generate_images(
+        prompt="Return three separate images.",
+        model="gemini-3.1-flash-image",
+        aspect_ratio="9:16",
+        image_size="2K",
+        provider_max_attempts=1,
+    )
+
+    assert result["images"] == [
+        {"image_bytes": b"one", "mime_type": "image/png"},
+        {"image_bytes": b"two", "mime_type": "image/jpeg"},
+        {"image_bytes": b"three", "mime_type": "image/webp"},
+    ]
+    assert captured["max_attempts"] == 1
+    assert captured["payload"]["generationConfig"] == {
+        "responseModalities": ["IMAGE"],
+        "imageConfig": {"aspectRatio": "9:16", "imageSize": "2K"},
+    }
+
+
 def test_llm_vertex_text_route_forwards_ordered_input_images(monkeypatch):
     from app.adapters.llm_client import LLMClient
 
@@ -1050,4 +1112,45 @@ def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):
         image_size="2K",
         input_images=ordered_inputs,
         provider_max_attempts=None,
+    )
+
+
+def test_llm_vertex_multi_image_route_uses_one_provider_request(monkeypatch):
+    from app.adapters.llm_client import LLMClient
+
+    vertex_client = MagicMock()
+    vertex_client.generate_images.return_value = {
+        "images": [
+            {"image_bytes": b"one", "mime_type": "image/png"},
+            {"image_bytes": b"two", "mime_type": "image/png"},
+            {"image_bytes": b"three", "mime_type": "image/png"},
+        ],
+        "model": "gemini-3.1-flash-image",
+    }
+    monkeypatch.setattr(
+        "app.adapters.llm_client.get_vertex_gemini_client",
+        lambda: vertex_client,
+    )
+    client = LLMClient()
+    client.gemini_provider = "vertex"
+
+    result = client.generate_gemini_images(
+        prompt="Return three separate images.",
+        model="gemini-3.1-flash-image",
+        aspect_ratio="9:16",
+        image_size="2K",
+        provider_max_attempts=1,
+    )
+
+    assert len(result["images"]) == 3
+    vertex_client.generate_images.assert_called_once_with(
+        prompt="Return three separate images.",
+        system_prompt=None,
+        model="gemini-3.1-flash-image",
+        max_tokens=None,
+        temperature=None,
+        aspect_ratio="9:16",
+        image_size="2K",
+        input_images=None,
+        provider_max_attempts=1,
     )

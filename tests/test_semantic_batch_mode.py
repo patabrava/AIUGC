@@ -974,7 +974,8 @@ def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
     workflow = PRODUCTION_DEPLOY_WORKFLOW.read_text()
 
     assert '"SEMANTIC_SCENE_PLATE_MODEL": "gemini-3.1-flash-image"' in workflow
-    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-diverse-resumable-v7"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED": "true"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-bundled-resumable-v8"' in workflow
     assert '"VERTEX_GEMINI_IMAGE_LOCATION": "global"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY": "1"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS": "5"' in workflow

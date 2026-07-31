@@ -94,7 +94,7 @@ _SCENE_PLATE_AUDIT_TEXT = (
     "actor-free location before any Veo request."
 )
 _TYPICAL_EIGHT_SECOND_VEO_SECONDS = 180
-_TYPICAL_SCENE_PLATE_SECONDS = 90
+_TYPICAL_SCENE_PLATE_SECONDS = 75
 _CANDIDATE_PHASE_PROGRESS = {
     "preparing_references": (
         5,
@@ -102,7 +102,7 @@ _CANDIDATE_PHASE_PROGRESS = {
     ),
     "generating_images": (
         20,
-        "Generating and safely pacing all three wheelchair scene plates.",
+        "Generating all three wheelchair scene plates in one provider pass.",
     ),
     "checking_diversity": (
         58,
@@ -1895,7 +1895,7 @@ def get_progress(post_id: str, request: Request):
                 ),
             )
             status_message = (
-                "Generating three distinct wheelchair scene plates and checking "
+                "Generating three distinct wheelchair scene plates in one pass and checking "
                 "composition plus actor identity. Remaining time is an estimate."
             )
     elif (

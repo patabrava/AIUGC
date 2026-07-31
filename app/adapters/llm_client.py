@@ -875,6 +875,96 @@ class LLMClient:
                 details={"error": str(exc), "model": target_model},
             ) from exc
 
+    def generate_gemini_images(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        aspect_ratio: str = "1:1",
+        image_size: str = "1K",
+        input_images: Optional[List[Dict[str, Any]]] = None,
+        provider_max_attempts: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Generate multiple images in one Gemini response."""
+        if self.gemini_provider == "vertex":
+            target_model = self._resolve_gemini_image_model(model) if model else None
+            return get_vertex_gemini_client().generate_images(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=target_model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+                input_images=input_images,
+                provider_max_attempts=provider_max_attempts,
+            )
+
+        target_model = self._resolve_gemini_image_model(model)
+        full_prompt = self._merge_prompts(system_prompt, prompt)
+        payload: Dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": self._build_gemini_content_parts(
+                        text=full_prompt,
+                        input_images=input_images,
+                    ),
+                }
+            ],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {
+                    "aspectRatio": aspect_ratio,
+                    "imageSize": image_size,
+                },
+            },
+        }
+        if max_tokens is not None:
+            payload["generationConfig"]["maxOutputTokens"] = max_tokens
+        if temperature is not None:
+            payload["generationConfig"]["temperature"] = temperature
+
+        try:
+            response = self.gemini_http_client.post(
+                f"/models/{target_model}:generateContent",
+                params=self._gemini_params(),
+                json=payload,
+            )
+            if response.status_code >= 400:
+                raise ThirdPartyError(
+                    message="Gemini image generation failed",
+                    details={
+                        "status_code": response.status_code,
+                        "body": response.text,
+                        "model": target_model,
+                    },
+                )
+            data = response.json()
+            images = self._extract_gemini_images_bytes(data)
+            return {
+                "images": [
+                    {
+                        "image_bytes": image["bytes"],
+                        "mime_type": image["mime_type"],
+                    }
+                    for image in images
+                ],
+                "model": target_model,
+                "aspect_ratio": aspect_ratio,
+                "image_size": image_size,
+                "raw_response": data,
+            }
+        except ThirdPartyError:
+            raise
+        except Exception as exc:
+            raise ThirdPartyError(
+                message="Gemini image generation failed",
+                details={"error": str(exc), "model": target_model},
+            ) from exc
+
     def generate_gemini_deep_research(
         self,
         prompt: str,
@@ -1742,7 +1832,11 @@ class LLMClient:
         raise ThirdPartyError(message="Gemini response missing text output", details={"response": data})
 
     def _extract_gemini_image_bytes(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._extract_gemini_images_bytes(data)[0]
+
+    def _extract_gemini_images_bytes(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         candidates = data.get("candidates") or []
+        images: List[Dict[str, Any]] = []
         for candidate in candidates:
             content = candidate.get("content") or {}
             for part in content.get("parts", []) or []:
@@ -1755,12 +1849,16 @@ class LLMClient:
                     import base64
 
                     try:
-                        return {"bytes": base64.b64decode(b64), "mime_type": mime_type}
+                        images.append(
+                            {"bytes": base64.b64decode(b64), "mime_type": mime_type}
+                        )
                     except Exception as exc:  # noqa: BLE001
                         raise ValidationError(
                             message="Gemini image output could not be decoded",
                             details={"error": str(exc)},
                         ) from exc
+        if images:
+            return images
         raise ThirdPartyError(message="Gemini image response missing inline image data", details={"response": data})
 
     def _extract_gemini_interaction_text(self, data: Dict[str, Any]) -> str:

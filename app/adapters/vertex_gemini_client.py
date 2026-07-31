@@ -232,6 +232,56 @@ class VertexGeminiClient:
             "raw_response": data,
         }
 
+    def generate_images(
+        self,
+        *,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        aspect_ratio: str = "1:1",
+        image_size: str = "1K",
+        input_images: Optional[List[Dict[str, Any]]] = None,
+        provider_max_attempts: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Generate every inline image returned by one Gemini request."""
+        target_model = model or self._settings.vertex_gemini_image_model
+        payload = self._build_generate_content_payload(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            input_images=input_images,
+        )
+        payload.setdefault("generationConfig", {})
+        payload["generationConfig"]["responseModalities"] = ["IMAGE"]
+        payload["generationConfig"]["imageConfig"] = {
+            "aspectRatio": aspect_ratio,
+            "imageSize": image_size,
+        }
+        data = self._post_generate_content(
+            model=target_model,
+            location=self._settings.vertex_gemini_image_location or self._settings.vertex_ai_location,
+            payload=payload,
+            log_event="vertex_gemini_generate_images",
+            max_attempts=provider_max_attempts,
+        )
+        image_payloads = self._extract_images_bytes(data)
+        return {
+            "images": [
+                {
+                    "image_bytes": image_payload["bytes"],
+                    "mime_type": image_payload["mime_type"],
+                }
+                for image_payload in image_payloads
+            ],
+            "model": target_model,
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
+            "raw_response": data,
+        }
+
     def generate_grounded_research(
         self,
         *,
@@ -553,17 +603,27 @@ class VertexGeminiClient:
         raise ThirdPartyError(message="Vertex Gemini response missing text", details={"response": data})
 
     def _extract_image_bytes(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._extract_images_bytes(data)[0]
+
+    def _extract_images_bytes(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+        images: List[Dict[str, Any]] = []
         for part in parts:
             if not isinstance(part, dict):
                 continue
             inline_data = part.get("inlineData") or part.get("inline_data") or {}
             encoded = inline_data.get("data")
             if encoded:
-                return {
-                    "bytes": base64.b64decode(encoded),
-                    "mime_type": inline_data.get("mimeType") or inline_data.get("mime_type") or "image/png",
-                }
+                images.append(
+                    {
+                        "bytes": base64.b64decode(encoded),
+                        "mime_type": inline_data.get("mimeType")
+                        or inline_data.get("mime_type")
+                        or "image/png",
+                    }
+                )
+        if images:
+            return images
         raise ThirdPartyError(message="Vertex Gemini response missing image data", details={"response": data})
 
     def _merge_prompts(self, system_prompt: Optional[str], prompt: str) -> str:
