@@ -37,7 +37,6 @@ from app.features.batches.queries import (
     get_batch_posts_summary,
     create_manual_draft_posts,
 )
-from app.core.video_profiles import normalize_target_length_tier
 from app.features.topics.handlers import discover_topics_for_batch
 from app.features.topics.handlers import (
     get_seeding_events,
@@ -149,21 +148,6 @@ def _semantic_ugc_template_context() -> Dict[str, Any]:
     }
 
 
-def _resolve_form_target_length_tier(form, creation_mode: str) -> Optional[int]:
-    if is_semantic_ugc_mode(creation_mode):
-        return None
-
-    values = []
-    if hasattr(form, "getlist"):
-        values = [value for value in form.getlist("target_length_tier") if str(value or "").strip()]
-    if not values:
-        value = form.get("target_length_tier", 8)
-        values = [value] if str(value or "").strip() else [8]
-
-    selected_value = values[-1] if is_manual_creation_mode(creation_mode) else values[0]
-    return int(selected_value or 8)
-
-
 def _resolve_form_target_duration_seconds(form, creation_mode: str) -> Optional[int]:
     if not is_semantic_ugc_mode(creation_mode):
         return None
@@ -192,8 +176,8 @@ async def _parse_create_batch_request(request: Request) -> CreateBatchRequest:
         "product": int(form.get("post_type_counts.product", 0) or 0),
     }
     creation_mode = str(
-        form.get("creation_mode", "automated") or "automated"
-    ).strip() or "automated"
+        form.get("creation_mode", "semantic_ugc") or "semantic_ugc"
+    ).strip() or "semantic_ugc"
     manual_post_count = form.get("manual_post_count")
     return CreateBatchRequest.model_validate(
         {
@@ -203,7 +187,7 @@ async def _parse_create_batch_request(request: Request) -> CreateBatchRequest:
             "manual_post_count": (
                 int(manual_post_count) if manual_post_count not in {None, ""} else None
             ),
-            "target_length_tier": _resolve_form_target_length_tier(form, creation_mode),
+            "target_length_tier": None,
             "target_duration_seconds": _resolve_form_target_duration_seconds(
                 form,
                 creation_mode,
@@ -284,15 +268,10 @@ async def create_batch_endpoint(request: Request):
                 details,
             ) from exc
 
-        target_length_tier = (
-            None
-            if is_semantic_ugc_mode(payload.creation_mode)
-            else normalize_target_length_tier(payload.target_length_tier)
-        )
         batch = create_batch(
             brand=payload.brand,
             post_type_counts=payload.post_type_counts.model_dump() if payload.post_type_counts else {},
-            target_length_tier=target_length_tier,
+            target_length_tier=None,
             target_duration_seconds=payload.target_duration_seconds,
             creation_mode=payload.creation_mode,
             manual_post_count=payload.manual_post_count,
@@ -303,7 +282,7 @@ async def create_batch_endpoint(request: Request):
             create_manual_draft_posts(
                 batch_id=batch["id"],
                 manual_post_count=payload.manual_post_count or 0,
-                target_length_tier=normalize_target_length_tier(payload.target_length_tier),
+                target_length_tier=8,
             )
             batch = update_batch_state(batch["id"], BatchState.S2_SEEDED)
         else:

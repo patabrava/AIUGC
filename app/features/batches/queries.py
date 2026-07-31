@@ -747,19 +747,19 @@ def duplicate_batch(batch_id: str, new_brand: Optional[str] = None) -> Dict[str,
     """Duplicate a batch with a new brand name."""
     # Get original batch
     original = get_batch_by_id(batch_id)
+    creation_mode = str(original.get("creation_mode") or "")
+    if not is_semantic_ugc_mode(creation_mode):
+        raise ValidationError(
+            "Only Semantic UGC and Manual Semantic UGC batches can be duplicated.",
+            {"batch_id": batch_id, "creation_mode": creation_mode},
+        )
     
     # Create new batch
     brand = new_brand or f"{original['brand']} (Copy)"
-    creation_mode = str(original.get("creation_mode") or "automated")
-    target_length_tier = (
-        original.get("target_length_tier")
-        if is_semantic_ugc_mode(creation_mode)
-        else original.get("target_length_tier") or 8
-    )
     new_batch = create_batch(
         brand,
         original.get("post_type_counts") or {},
-        target_length_tier,
+        None,
         target_duration_seconds=original.get("target_duration_seconds"),
         creation_mode=creation_mode,
         manual_post_count=original.get("manual_post_count"),

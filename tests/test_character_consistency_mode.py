@@ -15,7 +15,7 @@ os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
 os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
 os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://cdn.example.com")
 
-from app.features.batches.schemas import CreateBatchRequest
+from app.features.batches.schemas import CreateBatchRequest  # noqa: E402
 
 
 def _set_gate(reference_set_id: str = "set-1") -> dict:
@@ -51,54 +51,26 @@ def _lora_metadata(angle_key: str = "front_mid", reference_set_id: str = "set-1"
     }
 
 
-def test_creation_mode_accepts_character_consistency():
-    payload = CreateBatchRequest.model_validate(
-        {
-            "brand": "Test Brand",
-            "creation_mode": "character_consistency",
-            "post_type_counts": {"value": 1, "lifestyle": 1, "product": 1},
-        }
-    )
-
-    assert payload.creation_mode == "character_consistency"
-
-
-def test_creation_mode_accepts_character_consistency_light():
-    payload = CreateBatchRequest.model_validate(
-        {
-            "brand": "Test Brand",
-            "creation_mode": "character_consistency_light",
-            "post_type_counts": {"value": 1, "lifestyle": 1, "product": 1},
-        }
-    )
-
-    assert payload.creation_mode == "character_consistency_light"
-
-
-def test_creation_mode_accepts_character_consistency_mid():
-    payload = CreateBatchRequest.model_validate(
-        {
-            "brand": "Test Brand",
-            "creation_mode": "character_consistency_mid",
-            "post_type_counts": {"value": 1, "lifestyle": 1, "product": 1},
-        }
-    )
-
-    assert payload.creation_mode == "character_consistency_mid"
-
-
-def test_creation_mode_accepts_manual_character_consistency():
-    payload = CreateBatchRequest.model_validate(
-        {
-            "brand": "Test Brand",
-            "creation_mode": "manual_character_consistency",
-            "manual_post_count": 3,
-        }
-    )
-
-    assert payload.creation_mode == "manual_character_consistency"
-    assert payload.manual_post_count == 3
-    assert payload.post_type_counts is None
+@pytest.mark.parametrize(
+    "creation_mode",
+    [
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+        "manual_character_consistency",
+    ],
+)
+def test_creation_mode_rejects_retired_character_consistency_modes(creation_mode):
+    with pytest.raises(PydanticValidationError):
+        CreateBatchRequest.model_validate(
+            {
+                "brand": "Test Brand",
+                "creation_mode": creation_mode,
+                "post_type_counts": {"value": 1, "lifestyle": 1, "product": 1},
+                "manual_post_count": 3,
+                "target_duration_seconds": 16,
+            }
+        )
 
 
 def test_creation_mode_rejects_unknown_value():

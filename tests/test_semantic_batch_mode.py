@@ -105,6 +105,18 @@ def test_semantic_batch_uses_numeric_duration_only():
     assert payload.target_length_tier is None
 
 
+def test_semantic_ugc_is_the_default_new_batch_mode():
+    payload = CreateBatchRequest.model_validate(
+        {
+            "brand": "AYRA",
+            "post_type_counts": _post_counts(),
+            "target_duration_seconds": 50,
+        }
+    )
+
+    assert payload.creation_mode == "semantic_ugc"
+
+
 def test_manual_semantic_batch_uses_manual_drafts_and_numeric_duration():
     payload = CreateBatchRequest.model_validate(
         {
@@ -176,14 +188,24 @@ def test_semantic_batch_requires_duration_and_post_counts():
         )
 
 
-def test_legacy_batch_cannot_use_semantic_duration_authority():
+@pytest.mark.parametrize(
+    "creation_mode",
+    [
+        "automated",
+        "manual",
+        "manual_character_consistency",
+        "character_consistency",
+        "character_consistency_light",
+        "character_consistency_mid",
+    ],
+)
+def test_batch_creation_rejects_retired_modes(creation_mode):
     with pytest.raises(ValidationError):
         CreateBatchRequest.model_validate(
             {
                 "brand": "AYRA",
-                "creation_mode": "automated",
+                "creation_mode": creation_mode,
                 "post_type_counts": _post_counts(),
-                "target_length_tier": 16,
                 "target_duration_seconds": 50,
             }
         )
@@ -775,9 +797,14 @@ def test_semantic_batch_form_has_accessible_conditional_duration_controls():
     )
     assert manual_semantic_option in source
     assert source.index(semantic_option) < source.index(manual_semantic_option)
-    assert source.index(semantic_option) < source.index(
-        '<option value="manual_character_consistency">Manual Character Consistency</option>'
-    )
+    mode_select = source.split('name="creation_mode"', 1)[1].split("</select>", 1)[0]
+    assert mode_select.count("<option ") == 2
+    assert '<option value="automated">' not in source
+    assert '<option value="manual">' not in source
+    assert '<option value="manual_character_consistency">' not in source
+    assert '<option value="character_consistency">' not in source
+    assert '<option value="character_consistency_mid">' not in source
+    assert '<option value="character_consistency_light">' not in source
     assert 'data-semantic-ugc-mode-option' in source
     assert 'data-semantic-ugc-duration-panel' in source
     assert 'Recommended for longer AIUGC videos' in source

@@ -94,9 +94,9 @@ Ctrl+C
 
 The API will be available at `http://127.0.0.1:8000` while the server is running.
 
-## ActorIdentity LoRA Verification
+## Legacy ActorIdentity LoRA Verification
 
-New `character_consistency` batches require a ready Magnific-backed ActorIdentity. Legacy batches that already have `character_snapshot` continue to use the old three-image route.
+New batch creation supports only `semantic_ugc` and `manual_semantic_ugc`. The ActorIdentity LoRA checks below remain for historical Character Consistency records and provider regression coverage.
 
 Focused local regression:
 ```bash
@@ -118,15 +118,6 @@ When using a shared Supabase project for local browser checks, disable backgroun
 ```bash
 DISABLE_BACKGROUND_SCHEDULERS=1 DISABLE_STARTUP_RECOVERY_CHECKS=1 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-
-Manual runtime acceptance path:
-1. Open `/settings/character`.
-2. Confirm a seven-image ActorTrainingSet is rejected with `422`.
-3. Submit the eight NanoBanana/R2 image URLs through the ActorIdentity training form.
-4. Poll until Magnific training stores a ready LoRA id.
-5. Create a new `character_consistency` batch.
-6. Build prompts, generate a scene still, approve the scene reference, then submit video.
-7. Confirm QA approval stays blocked until the post-video identity gate is manually passed.
 
 ### Environment Variables
 

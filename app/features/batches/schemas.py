@@ -35,21 +35,15 @@ class CreateBatchRequest(BaseModel):
     """Request to create a new batch."""
     brand: str = Field(..., min_length=1, max_length=100, description="Brand name")
     creation_mode: Literal[
-        "automated",
-        "manual",
-        "manual_character_consistency",
-        "character_consistency",
-        "character_consistency_light",
-        "character_consistency_mid",
         "semantic_ugc",
         "manual_semantic_ugc",
     ] = Field(
-        default="automated",
-        description="Batch creation mode, including the duration-driven semantic_ugc route.",
+        default="semantic_ugc",
+        description="Supported Semantic UGC batch creation mode.",
     )
     post_type_counts: Optional[PostTypeCounts] = Field(
         default=None,
-        description="Post type distribution for automated batches",
+        description="Post type distribution for Semantic UGC batches",
     )
     manual_post_count: Optional[int] = Field(
         default=None,
@@ -100,25 +94,15 @@ class CreateBatchRequest(BaseModel):
 
     @validator('manual_post_count', always=True)
     def validate_manual_post_count(cls, v, values):
-        if values.get("creation_mode") in {
-            "manual",
-            "manual_character_consistency",
-            "manual_semantic_ugc",
-        } and v is None:
-            raise ValueError("Manual post count must be provided for manual batches")
+        if values.get("creation_mode") == "manual_semantic_ugc" and v is None:
+            raise ValueError("Manual post count must be provided for Manual Semantic UGC batches")
         return v
 
     @validator('post_type_counts', always=True)
     def validate_creation_mode_contract(cls, v, values):
-        creation_mode = values.get("creation_mode") or "automated"
-        if creation_mode in {
-            "automated",
-            "character_consistency",
-            "character_consistency_light",
-            "character_consistency_mid",
-            "semantic_ugc",
-        } and v is None:
-            raise ValueError("Post type counts are required for automated and character consistency batches")
+        creation_mode = values.get("creation_mode") or "semantic_ugc"
+        if creation_mode == "semantic_ugc" and v is None:
+            raise ValueError("Post type counts are required for Semantic UGC batches")
         return v
 
     @validator('target_length_tier')
@@ -131,17 +115,10 @@ class CreateBatchRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_duration_authority(self):
-        if self.creation_mode in {"semantic_ugc", "manual_semantic_ugc"}:
-            if self.target_duration_seconds is None:
-                raise ValueError("Target duration seconds are required for Semantic UGC batches")
-            build_semantic_duration_contract(self.target_duration_seconds)
-            self.target_length_tier = None
-            return self
-
-        if self.target_duration_seconds is not None:
-            raise ValueError("Target duration seconds are only valid for Semantic UGC batches")
-        if self.target_length_tier is None:
-            raise ValueError("Target length tier is required for legacy batch modes")
+        if self.target_duration_seconds is None:
+            raise ValueError("Target duration seconds are required for Semantic UGC batches")
+        build_semantic_duration_contract(self.target_duration_seconds)
+        self.target_length_tier = None
         return self
 
 

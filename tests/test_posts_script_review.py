@@ -300,6 +300,65 @@ def test_final_semantic_script_approval_advances_batch_without_second_confirmati
     assert storage["batches"][0]["state"] == "S4_SCRIPTED"
 
 
+def test_final_automated_script_approval_advances_batch_without_second_confirmation(
+    monkeypatch,
+):
+    storage = {
+        "posts": [
+            {
+                "id": "post-product",
+                "batch_id": "batch-automated",
+                "post_type": "product",
+                "seed_data": {
+                    "script": "Der erste freigegebene Produkthinweis.",
+                    "script_review_status": "approved",
+                },
+                "video_prompt_json": None,
+                "video_status": "pending",
+            },
+            {
+                "id": "post-lifestyle",
+                "batch_id": "batch-automated",
+                "post_type": "lifestyle",
+                "seed_data": {
+                    "script": "Der zweite freigegebene Alltagshinweis.",
+                    "script_review_status": "approved",
+                },
+                "video_prompt_json": None,
+                "video_status": "pending",
+            },
+            {
+                "id": "post-value",
+                "batch_id": "batch-automated",
+                "post_type": "value",
+                "seed_data": {
+                    "script": "Der letzte noch offene Informationshinweis.",
+                    "script_review_status": "pending",
+                },
+                "video_prompt_json": None,
+                "video_status": "pending",
+            },
+        ],
+        "batches": [
+            {
+                "id": "batch-automated",
+                "state": "S2_SEEDED",
+                "creation_mode": "automated",
+            }
+        ],
+    }
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    response = TestClient(app, base_url="http://localhost").put(
+        "/posts/post-value/script-review",
+        data={"action": "approved"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["batch_state"] == "S4_SCRIPTED"
+    assert storage["batches"][0]["state"] == "S4_SCRIPTED"
+
+
 def test_approve_manual_semantic_script_persists_scene_and_outfit_overrides(monkeypatch):
     script = (
         "Ein barrierefreier Zugang macht deinen Alltag leichter, weil du dich sicher, ruhig "

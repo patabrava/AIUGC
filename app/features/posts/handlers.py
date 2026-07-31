@@ -72,15 +72,15 @@ def _parse_json_document(value):
     return value or {}
 
 
-def _advance_semantic_batch_when_scripts_are_reviewed(
+def _advance_batch_when_scripts_are_reviewed(
     *,
     batch_id: str,
     supabase_client,
 ) -> Optional[str]:
-    """Advance Semantic UGC as soon as its final active script is reviewed."""
+    """Advance a seeded batch as soon as its final active script is reviewed."""
     batch_response = (
         supabase_client.table("batches")
-        .select("state,creation_mode")
+        .select("state")
         .eq("id", batch_id)
         .execute()
     )
@@ -89,11 +89,7 @@ def _advance_semantic_batch_when_scripts_are_reviewed(
 
     batch = batch_response.data[0]
     current_state = str(batch.get("state") or "")
-    if (
-        str(batch.get("creation_mode") or "")
-        not in {"semantic_ugc", "manual_semantic_ugc"}
-        or current_state != BatchState.S2_SEEDED.value
-    ):
+    if current_state != BatchState.S2_SEEDED.value:
         return current_state or None
 
     posts_response = (
@@ -120,14 +116,14 @@ def _advance_semantic_batch_when_scripts_are_reviewed(
         {"state": BatchState.S4_SCRIPTED.value}
     ).eq("id", batch_id).execute()
     logger.info(
-        "semantic_scripts_auto_approved",
+        "batch_scripts_auto_approved",
         batch_id=batch_id,
         approved_count=approved_count,
         new_state=BatchState.S4_SCRIPTED.value,
     )
     return reconcile_batch_video_pipeline_state(
         batch_id=batch_id,
-        correlation_id=f"semantic_script_review_{batch_id}",
+        correlation_id=f"script_review_{batch_id}",
         supabase_client=supabase_client,
     )
 
@@ -613,7 +609,7 @@ async def update_post_script_review(post_id: str, request: Request):
 
         batch_state = None
         if action in {"approved", "removed"} and post.get("batch_id"):
-            batch_state = _advance_semantic_batch_when_scripts_are_reviewed(
+            batch_state = _advance_batch_when_scripts_are_reviewed(
                 batch_id=post["batch_id"],
                 supabase_client=supabase,
             )

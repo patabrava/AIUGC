@@ -11,6 +11,7 @@ from starlette.datastructures import FormData
 
 from app.features.batches import queries as batch_queries
 from app.features.batches.schemas import BatchDetailResponse, BatchResponse, CreateBatchRequest, PostDetail
+from app.core.errors import ValidationError as FlowForgeValidationError
 
 
 class _FakeResponse:
@@ -171,20 +172,6 @@ def test_manual_character_consistency_request_requires_manual_post_count():
         )
 
 
-def test_automated_batch_request_still_accepts_type_counts():
-    payload = CreateBatchRequest.model_validate(
-        {
-            "brand": "ACME",
-            "creation_mode": "automated",
-            "post_type_counts": {"value": 2, "lifestyle": 1, "product": 0},
-            "target_length_tier": 16,
-        }
-    )
-
-    assert payload.creation_mode == "automated"
-    assert payload.post_type_counts.total == 3
-
-
 @pytest.mark.parametrize(
     "creation_mode",
     [
@@ -196,40 +183,11 @@ def test_automated_batch_request_still_accepts_type_counts():
         "character_consistency_mid",
     ],
 )
-@pytest.mark.parametrize("target_length_tier", [8, 16, 32])
-def test_every_legacy_batch_mode_keeps_fixed_duration_tiers(creation_mode, target_length_tier):
+def test_every_legacy_batch_mode_is_rejected_for_new_batches(creation_mode):
     request = {
         "brand": "ACME",
         "creation_mode": creation_mode,
-        "target_length_tier": target_length_tier,
-    }
-    if creation_mode in {"manual", "manual_character_consistency"}:
-        request["manual_post_count"] = 1
-    else:
-        request["post_type_counts"] = {"value": 1, "lifestyle": 0, "product": 0}
-
-    payload = CreateBatchRequest.model_validate(request)
-
-    assert payload.target_length_tier == target_length_tier
-    assert getattr(payload, "target_duration_seconds", None) is None
-
-
-@pytest.mark.parametrize(
-    "creation_mode",
-    [
-        "automated",
-        "manual",
-        "manual_character_consistency",
-        "character_consistency",
-        "character_consistency_light",
-        "character_consistency_mid",
-    ],
-)
-def test_every_legacy_batch_mode_still_rejects_non_tier_duration(creation_mode):
-    request = {
-        "brand": "ACME",
-        "creation_mode": creation_mode,
-        "target_length_tier": 50,
+        "target_duration_seconds": 16,
     }
     if creation_mode in {"manual", "manual_character_consistency"}:
         request["manual_post_count"] = 1
@@ -337,7 +295,7 @@ def test_create_manual_draft_posts_uses_blank_post_type(monkeypatch):
     assert [row["seed_data"]["semantic_rotation_index"] for row in captured] == [0, 1]
 
 
-def test_duplicate_batch_preserves_manual_mode(monkeypatch):
+def test_duplicate_batch_rejects_retired_manual_mode(monkeypatch):
     original = {
         "id": "batch-1",
         "brand": "ACME",
@@ -346,20 +304,10 @@ def test_duplicate_batch_preserves_manual_mode(monkeypatch):
         "manual_post_count": 4,
         "target_length_tier": 16,
     }
-    created_calls = []
-
     monkeypatch.setattr(batch_queries, "get_batch_by_id", lambda batch_id: original)
-    monkeypatch.setattr(
-        batch_queries,
-        "create_batch",
-        lambda *args, **kwargs: created_calls.append((args, kwargs)) or {"id": "batch-2", "creation_mode": kwargs.get("creation_mode"), "manual_post_count": kwargs.get("manual_post_count")},
-    )
 
-    duplicate = batch_queries.duplicate_batch("batch-1", new_brand="ACME Copy")
-
-    assert duplicate["creation_mode"] == "manual"
-    assert duplicate["manual_post_count"] == 4
-    assert created_calls[0][1]["creation_mode"] == "manual"
+    with pytest.raises(FlowForgeValidationError):
+        batch_queries.duplicate_batch("batch-1", new_brand="ACME Copy")
 
 
 def test_batch_and_post_detail_models_accept_manual_mode():
@@ -402,6 +350,7 @@ def test_batch_and_post_detail_models_accept_manual_mode():
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(reason="Retired creation mode; rejection is covered by the creation contract.")
 async def test_create_batch_endpoint_manual_mode_creates_drafts_and_skips_discovery(monkeypatch):
     os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
     os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -482,6 +431,7 @@ async def test_create_batch_endpoint_manual_mode_creates_drafts_and_skips_discov
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(reason="Retired creation mode; rejection is covered by the creation contract.")
 async def test_create_batch_endpoint_manual_character_consistency_creates_drafts_and_skips_discovery(monkeypatch):
     os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
     os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -570,6 +520,7 @@ async def test_create_batch_endpoint_manual_character_consistency_creates_drafts
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(reason="Retired creation mode; rejection is covered by the creation contract.")
 async def test_create_batch_endpoint_form_keeps_automated_duration_when_hidden_manual_field_submits(monkeypatch):
     os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
     os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -630,6 +581,7 @@ async def test_create_batch_endpoint_form_keeps_automated_duration_when_hidden_m
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(reason="Retired creation mode; rejection is covered by the creation contract.")
 async def test_create_batch_endpoint_manual_mode_redirects_to_detail_page(monkeypatch):
     os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
     os.environ.setdefault("SUPABASE_KEY", "test-key")
