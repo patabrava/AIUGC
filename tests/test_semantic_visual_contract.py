@@ -138,7 +138,7 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
     )
 
 
-def test_scene_plate_candidates_serialize_image_renders_and_keep_candidate_order():
+def test_scene_plate_candidates_generate_with_bounded_concurrency_and_keep_candidate_order():
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
@@ -274,7 +274,7 @@ def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threa
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
-    assert peak_active == 1
+    assert peak_active == 2
 
 
 def test_scene_plate_candidates_do_not_retry_permanent_provider_contract_errors(

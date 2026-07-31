@@ -51,14 +51,14 @@ _PERCEPTUAL_HASH_WIDTH = 16
 _PERCEPTUAL_HASH_HEIGHT = 16
 _NEAR_DUPLICATE_HASH_DISTANCE = 8
 _NEAR_DUPLICATE_MEAN_RGB_DELTA = 3.0
-_PROVIDER_MAX_ATTEMPTS = 3
+_PROVIDER_MAX_ATTEMPTS = 2
 _PROVIDER_RETRY_BASE_SECONDS = 1.0
 _TRANSIENT_PROVIDER_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 # Gemini image generation has a tighter burst capacity than ordinary
-# generateContent calls. Candidate threads and concurrent operator requests
-# share this gate, so retries wait for real image capacity instead of expiring
-# while sibling renders are still in flight.
-_SCENE_PLATE_IMAGE_CONCURRENCY = 1
+# generateContent calls. Keep two renders in flight across the web process:
+# one serialized render made multi-post batches take 15+ minutes, while the
+# Vertex adapter already bounds and retries transient provider pressure.
+_SCENE_PLATE_IMAGE_CONCURRENCY = 2
 _SCENE_PLATE_IMAGE_SEMAPHORE = BoundedSemaphore(_SCENE_PLATE_IMAGE_CONCURRENCY)
 
 
