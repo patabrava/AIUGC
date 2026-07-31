@@ -326,6 +326,11 @@ def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threa
         "_SCENE_PLATE_SUCCESS_RAMP",
         1,
     )
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_IMAGE_MAX_CONCURRENCY",
+        2,
+    )
     result = wheelchair_scene_plate.generate_scene_plate_candidates(
         actor_references=[
             _reference("actor_front", b"front"),

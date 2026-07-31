@@ -102,7 +102,7 @@ _CANDIDATE_PHASE_PROGRESS = {
     ),
     "generating_images": (
         20,
-        "Generating all three wheelchair scene plates in parallel.",
+        "Generating and safely pacing all three wheelchair scene plates.",
     ),
     "checking_diversity": (
         58,
