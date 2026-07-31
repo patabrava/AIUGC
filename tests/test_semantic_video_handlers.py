@@ -2209,6 +2209,44 @@ def test_candidate_endpoint_regenerates_approved_unpaid_scene_plates(monkeypatch
     assert len(storage.upload_calls) == 3
 
 
+def test_candidate_endpoint_replaces_unapproved_candidate_set_with_a_fresh_run(
+    monkeypatch,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    generated_markers = iter(("initial-candidates", "fresh-candidates"))
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **_kwargs: _scene_plate_result(marker=next(generated_markers)),
+        raising=False,
+    )
+    client = TestClient(app, base_url="http://localhost")
+
+    initial = client.post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+    assert initial.status_code == 200, initial.text
+    assert state["run"]["id"] == "run-1"
+    assert len(state["run"]["master_snapshot"]["candidates"]) == 3
+
+    # The production finalization RPC releases the active fence even though
+    # historical reservation metadata can remain on the finalized run.
+    state["candidate_reservation"] = None
+    refreshed = client.post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3, "expected_revision": 0},
+    )
+
+    assert refreshed.status_code == 200, refreshed.text
+    assert state["run"]["id"] == "run-2"
+    assert state["run"]["stage"] == "awaiting_reference_approval"
+    assert len(state["run"]["master_snapshot"]["candidates"]) == 3
+    assert len(storage.upload_calls) == 6
+
+
 def test_candidate_endpoint_blocks_approved_scene_restart_with_paid_evidence(
     monkeypatch,
 ):

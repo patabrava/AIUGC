@@ -781,6 +781,35 @@ def test_awaiting_paid_visual_can_be_regenerated_from_live_panel():
     assert "never discards paid take evidence" in html
 
 
+def test_unapproved_candidate_set_is_labeled_as_regeneration():
+    env = Environment(loader=FileSystemLoader("templates"))
+    html = env.get_template("batches/detail/_semantic_video.html").render(
+        batch=_semantic_batch(),
+        batch_view={
+            "semantic_workflow": {"current_step": {"key": "scene"}},
+            "semantic_video": {
+                "requested_duration_seconds": 16,
+                "posts": [
+                    {
+                        "post_id": "post-candidate-refresh",
+                        "topic_title": "Refresh candidates",
+                        "revision": 0,
+                        "stage": "awaiting_reference_approval",
+                        "script_review_status": "approved",
+                        "candidates": [{"index": 1, "storage_uri": "https://cdn/one.png"}],
+                        "visual_contract": {},
+                        "actor_references": [],
+                        "has_passed_candidate": False,
+                        "requested_duration_seconds": 16,
+                    }
+                ],
+            },
+        },
+    )
+
+    assert "Regenerate wheelchair scene plates" in html
+
+
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
 def test_semantic_post_card_omits_unused_legacy_prompt(creation_mode):
     env = Environment(loader=FileSystemLoader("templates"))

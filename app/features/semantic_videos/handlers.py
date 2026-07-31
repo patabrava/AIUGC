@@ -1056,6 +1056,18 @@ def generate_candidates(
                     stale_reason = (
                         "The pending scene plates predate the immutable actor-anchor lineage."
                     )
+                else:
+                    persisted_master = existing.get("master_snapshot")
+                    persisted_candidates = (
+                        persisted_master.get("candidates")
+                        if isinstance(persisted_master, Mapping)
+                        and isinstance(persisted_master.get("candidates"), list)
+                        else []
+                    )
+                    if persisted_candidates:
+                        stale_reason = (
+                            "The operator requested fresh scene plates before reference approval."
+                        )
             if stale_reason is None and stage == "awaiting_paid_approval":
                 stale_reason = (
                     "The operator requested fresh scene plates before paid generation."
