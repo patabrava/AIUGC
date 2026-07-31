@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 from io import BytesIO
-from threading import Barrier, Lock
+from threading import Lock
 from time import sleep
 
 from PIL import Image, ImageDraw
@@ -138,12 +138,11 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
     )
 
 
-def test_scene_plate_candidates_generate_with_bounded_concurrency_and_keep_candidate_order():
+def test_scene_plate_candidates_serialize_image_renders_and_keep_candidate_order():
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
 
-    barrier = Barrier(2)
     call_lock = Lock()
     call_number = 0
 
@@ -156,8 +155,6 @@ def test_scene_plate_candidates_generate_with_bounded_concurrency_and_keep_candi
             with call_lock:
                 call_number += 1
                 marker = call_number
-            if marker <= 2:
-                barrier.wait(timeout=2)
             return {
                 "image_bytes": f"parallel-{marker}".encode(),
                 "mime_type": "image/png",
@@ -277,7 +274,7 @@ def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threa
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
-    assert peak_active == 2
+    assert peak_active == 1
 
 
 def test_scene_plate_candidates_do_not_retry_permanent_provider_contract_errors(

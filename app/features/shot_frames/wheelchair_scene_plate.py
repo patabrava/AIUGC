@@ -58,7 +58,7 @@ _TRANSIENT_PROVIDER_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 # generateContent calls. Candidate threads and concurrent operator requests
 # share this gate, so retries wait for real image capacity instead of expiring
 # while sibling renders are still in flight.
-_SCENE_PLATE_IMAGE_CONCURRENCY = 2
+_SCENE_PLATE_IMAGE_CONCURRENCY = 1
 _SCENE_PLATE_IMAGE_SEMAPHORE = BoundedSemaphore(_SCENE_PLATE_IMAGE_CONCURRENCY)
 
 
