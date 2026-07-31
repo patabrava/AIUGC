@@ -975,7 +975,7 @@ def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
 
     assert '"SEMANTIC_SCENE_PLATE_MODEL": "gemini-3.1-flash-image"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED": "true"' in workflow
-    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-bundled-global-v9"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-batched-qa-global-v10"' in workflow
     assert '"SEMANTIC_SCENE_IDENTITY_GATE_LOCATION": "global"' in workflow
     assert '"VERTEX_GEMINI_IMAGE_LOCATION": "global"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY": "1"' in workflow

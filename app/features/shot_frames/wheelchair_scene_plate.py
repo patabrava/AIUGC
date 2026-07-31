@@ -518,6 +518,9 @@ def generate_scene_plate_candidates(
     traffic_key: Optional[str] = None,
     initial_candidates: Sequence[ScenePlateCandidate] = (),
     candidate_ready_callback: Optional[Callable[[ScenePlateCandidate], None]] = None,
+    candidate_batch_ready_callback: Optional[
+        Callable[[Sequence[ScenePlateCandidate]], None]
+    ] = None,
     progress_callback: Optional[
         Callable[[str, Mapping[str, Any]], None]
     ] = None,
@@ -711,7 +714,12 @@ def generate_scene_plate_candidates(
                 )
                 for position, image in enumerate(bundle_images)
             ]
-            if candidate_ready_callback is not None:
+            if candidate_batch_ready_callback is not None and generated_candidates:
+                # The provider already returned the complete ordered set. Preserve
+                # that shape so identity QA can validate all candidates in one
+                # multimodal request instead of paying three model waits.
+                candidate_batch_ready_callback(tuple(generated_candidates))
+            elif candidate_ready_callback is not None:
                 with ThreadPoolExecutor(
                     max_workers=len(generated_candidates),
                     thread_name_prefix="semantic-scene-plate-checkpoint",

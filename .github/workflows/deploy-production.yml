@@ -117,7 +117,7 @@ jobs:
                   "MAGNIFIC_API_KEY": os.environ["PROD_MAGNIFIC_API_KEY"].strip(),
                   "SCENE_REFERENCE_STYLE_LORAS": "bathroom_accessibility_a=bathroom-accessibility-a:65,car_transfer_residential_a=car-transfer-residential-a:65,home_living_room_advice_a=home-living-room-advice-a:65",
                   "SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED": "true",
-                  "SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-bundled-global-v9",
+                  "SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-batched-qa-global-v10",
                   "SEMANTIC_SCENE_PLATE_IMAGE_SIZE": "2K",
                   "SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY": "1",
                   "SEMANTIC_SCENE_PLATE_MODEL": "gemini-3.1-flash-image",

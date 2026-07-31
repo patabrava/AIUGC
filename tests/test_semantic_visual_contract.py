@@ -167,6 +167,7 @@ def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
 
     client = BundledClient()
     persisted_indexes: list[int] = []
+    batch_callback_calls: list[list[int]] = []
     result = generate_scene_plate_candidates(
         actor_references=[
             _reference("actor_front", b"front"),
@@ -177,10 +178,14 @@ def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
         wardrobe="light-grey cardigan over a plain white top",
         llm_client=client,
         candidate_ready_callback=lambda candidate: persisted_indexes.append(candidate.index),
+        candidate_batch_ready_callback=lambda candidates: batch_callback_calls.append(
+            [candidate.index for candidate in candidates]
+        ),
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
-    assert sorted(persisted_indexes) == [1, 2, 3]
+    assert persisted_indexes == []
+    assert batch_callback_calls == [[1, 2, 3]]
     assert len(client.bundle_calls) == 1
     call = client.bundle_calls[0]
     assert call["provider_max_attempts"] == 1

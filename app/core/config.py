@@ -296,7 +296,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_IMAGE_SIZE"),
     )
     semantic_scene_plate_contract_version: str = Field(
-        default="flash-identity-bundled-global-v9",
+        default="flash-identity-batched-qa-global-v10",
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_CONTRACT_VERSION"),
         min_length=1,
     )

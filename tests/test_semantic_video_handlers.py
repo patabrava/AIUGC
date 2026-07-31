@@ -1803,6 +1803,73 @@ def test_candidate_endpoint_evaluates_identity_gates_concurrently(monkeypatch):
     assert all(candidate["identity_gate_result"]["passed"] for candidate in candidates)
 
 
+def test_candidate_endpoint_uses_one_batched_identity_gate_for_complete_set(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.features.shot_frames.identity_qa import SceneIdentityQAReport
+    from app.main import app
+
+    state["context"]["reference"].pop("master")
+    generation_result = _scene_plate_result(marker="batched-qa")
+    batch_calls = []
+
+    def generate_complete_set(**kwargs):
+        kwargs["candidate_batch_ready_callback"](generation_result.candidates)
+        return generation_result
+
+    def evaluate_complete_set(*args, **kwargs):
+        batch_calls.append((args, kwargs))
+        return tuple(
+            SceneIdentityQAReport(
+                same_person=True,
+                facial_geometry_consistent=True,
+                apparent_age_consistent=True,
+                hairline_and_hair_consistent=True,
+                skin_texture_natural=True,
+                not_beautified_or_stylized=True,
+                no_face_artifacts=True,
+                confidence=0.99,
+                blocking_reasons=(),
+                observed_differences=(),
+                passed=True,
+            )
+            for _candidate in generation_result.candidates
+        )
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        generate_complete_set,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "evaluate_scene_plate_identities",
+        evaluate_complete_set,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "evaluate_scene_plate_identity",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("complete sets must not use per-candidate identity calls")
+        ),
+        raising=False,
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(batch_calls) == 1
+    assert len(storage.upload_calls) == 3
+    assert all(
+        candidate["identity_gate_result"]["passed"]
+        for candidate in response.json()["data"]["candidates"]
+    )
+
+
 def test_candidate_endpoint_derives_all_candidates_from_atomic_actor_anchor(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
     from app.features.semantic_videos.visual_contract import (

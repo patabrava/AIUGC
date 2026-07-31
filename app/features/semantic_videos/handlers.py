@@ -11,7 +11,7 @@ import json
 import math
 import re
 from threading import Lock
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from fastapi import APIRouter, Request
@@ -26,6 +26,7 @@ from app.features.shot_frames.service import (
     ShotFrameReference,
 )
 from app.features.shot_frames.identity_qa import (
+    evaluate_scene_plate_identities,
     evaluate_scene_plate_identity,
     failed_scene_identity_result,
     scene_identity_result_metadata,
@@ -1250,7 +1251,10 @@ def generate_candidates(
                     error=str(exc),
                 )
 
-    def validate_and_store_candidate(candidate: ScenePlateCandidate) -> dict[str, Any]:
+    def validate_and_store_candidate(
+        candidate: ScenePlateCandidate,
+        identity_report: Any | None = None,
+    ) -> dict[str, Any]:
         candidate_hash = sha256(candidate.image_bytes).hexdigest()
         candidate_mime_type = str(candidate.mime_type).strip().lower()
         if candidate_mime_type not in {"image/png", "image/jpeg"}:
@@ -1268,7 +1272,7 @@ def generate_candidates(
                 },
             )
         try:
-            identity_report = evaluate_scene_plate_identity(
+            resolved_identity_report = identity_report or evaluate_scene_plate_identity(
                 {
                     "mime_type": actor_front_snapshot["mime_type"],
                     "image_bytes": actor_front.image_bytes,
@@ -1292,7 +1296,7 @@ def generate_candidates(
                 location=settings.semantic_scene_identity_gate_location,
             )
             identity_gate_result = scene_identity_result_metadata(
-                identity_report,
+                resolved_identity_report,
                 evaluator_model=settings.semantic_scene_identity_gate_model,
                 actor_reference_fingerprint=actor_reference_fingerprint,
                 candidate_sha256=candidate_hash,
@@ -1360,6 +1364,71 @@ def generate_candidates(
             blocking_reasons=list(identity_gate_result["blocking_reasons"]),
         )
         return persisted_candidate
+
+    def persist_ready_candidate_batch(
+        ready_candidates: Sequence[ScenePlateCandidate],
+    ) -> None:
+        ordered_candidates = tuple(ready_candidates)
+        try:
+            identity_reports = evaluate_scene_plate_identities(
+                {
+                    "mime_type": actor_front_snapshot["mime_type"],
+                    "image_bytes": actor_front.image_bytes,
+                    "byte_length": actor_front_snapshot["byte_length"],
+                    "sha256": actor_front_snapshot["sha256"],
+                },
+                {
+                    "mime_type": actor_three_quarter_snapshot["mime_type"],
+                    "image_bytes": actor_three_quarter.image_bytes,
+                    "byte_length": actor_three_quarter_snapshot["byte_length"],
+                    "sha256": actor_three_quarter_snapshot["sha256"],
+                },
+                [
+                    {
+                        "mime_type": candidate.mime_type,
+                        "image_bytes": candidate.image_bytes,
+                        "byte_length": len(candidate.image_bytes),
+                        "sha256": sha256(candidate.image_bytes).hexdigest(),
+                    }
+                    for candidate in ordered_candidates
+                ],
+                model=settings.semantic_scene_identity_gate_model,
+                minimum_confidence=settings.semantic_scene_identity_min_confidence,
+                location=settings.semantic_scene_identity_gate_location,
+            )
+        except Exception as exc:
+            logger.warning(
+                "semantic_scene_identity_batch_fallback",
+                post_id=post_id,
+                run_id=str(reserved.get("id") or ""),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
+            identity_reports = (None,) * len(ordered_candidates)
+        with ThreadPoolExecutor(
+            max_workers=len(ordered_candidates),
+            thread_name_prefix="semantic-scene-store",
+        ) as executor:
+            persisted_candidates = list(
+                executor.map(
+                    lambda pair: validate_and_store_candidate(*pair),
+                    zip(ordered_candidates, identity_reports),
+                )
+            )
+        with partial_candidates_lock:
+            for persisted_candidate in persisted_candidates:
+                partial_candidates_by_index[
+                    int(persisted_candidate["index"])
+                ] = persisted_candidate
+            completed_candidates = len(partial_candidates_by_index)
+        persist_candidate_progress(
+            "generating_images",
+            {
+                "candidate_count": payload.candidate_count,
+                "completed_candidates": completed_candidates,
+                "batched_identity_evaluation": True,
+            },
+        )
 
     def persist_ready_candidate(candidate: ScenePlateCandidate) -> None:
         persisted_candidate = validate_and_store_candidate(candidate)
@@ -1471,6 +1540,7 @@ def generate_candidates(
             traffic_key=str(reserved["id"]),
             initial_candidates=initial_candidates,
             candidate_ready_callback=persist_ready_candidate,
+            candidate_batch_ready_callback=persist_ready_candidate_batch,
             progress_callback=persist_candidate_progress,
         )
         if len(generated.candidates) != payload.candidate_count:
