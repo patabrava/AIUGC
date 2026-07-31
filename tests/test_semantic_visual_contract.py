@@ -234,6 +234,7 @@ def test_scene_plate_partial_multi_image_response_generates_only_missing_output(
             }
 
     client = PartialBundledClient()
+    batched_indexes = []
     result = generate_scene_plate_candidates(
         actor_references=[
             _reference("actor_front", b"front"),
@@ -243,10 +244,14 @@ def test_scene_plate_partial_multi_image_response_generates_only_missing_output(
         scene="the exact supplied garden patio",
         wardrobe="light-grey cardigan over a plain white top",
         llm_client=client,
+        candidate_batch_ready_callback=lambda candidates: batched_indexes.append(
+            [candidate.index for candidate in candidates]
+        ),
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
     assert client.single_indexes == [3]
+    assert batched_indexes == [[1, 2, 3]]
 
 
 def test_scene_plate_unsupported_bundle_falls_back_to_reliable_single_image_path():

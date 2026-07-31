@@ -611,6 +611,24 @@ def generate_scene_plate_candidates(
         if progress_callback is not None:
             progress_callback(phase, details)
 
+    defer_complete_set_callback = False
+
+    def persist_deferred_candidates(
+        ready_candidates: Sequence[ScenePlateCandidate],
+    ) -> None:
+        if (
+            len(ready_candidates) == candidate_count
+            and candidate_batch_ready_callback is not None
+        ):
+            candidate_batch_ready_callback(tuple(ready_candidates))
+            return
+        if candidate_ready_callback is not None and ready_candidates:
+            with ThreadPoolExecutor(
+                max_workers=len(ready_candidates),
+                thread_name_prefix="semantic-scene-plate-checkpoint",
+            ) as executor:
+                list(executor.map(candidate_ready_callback, ready_candidates))
+
     def generate_candidate(
         specification: tuple[int, int],
     ) -> ScenePlateCandidate:
@@ -633,7 +651,7 @@ def generate_scene_plate_candidates(
                     retrying=True,
                 )
                 continue
-            if candidate_ready_callback is not None:
+            if candidate_ready_callback is not None and not defer_complete_set_callback:
                 # Persistence is deliberately outside the provider retry loop:
                 # a storage/checkpoint failure must not purchase another image.
                 candidate_ready_callback(candidate)
@@ -668,6 +686,7 @@ def generate_scene_plate_candidates(
             and callable(getattr(client, "generate_gemini_images", None))
         )
         if can_bundle:
+            defer_complete_set_callback = True
             bundle_requests = [
                 build_candidate_request(specification)
                 for specification in missing_specifications
@@ -714,20 +733,6 @@ def generate_scene_plate_candidates(
                 )
                 for position, image in enumerate(bundle_images)
             ]
-            if candidate_batch_ready_callback is not None and generated_candidates:
-                # The provider already returned the complete ordered set. Preserve
-                # that shape so identity QA can validate all candidates in one
-                # multimodal request instead of paying three model waits.
-                candidate_batch_ready_callback(tuple(generated_candidates))
-            elif candidate_ready_callback is not None:
-                with ThreadPoolExecutor(
-                    max_workers=len(generated_candidates),
-                    thread_name_prefix="semantic-scene-plate-checkpoint",
-                ) as executor:
-                    # The callback performs identity QA, upload, and token-fenced
-                    # persistence. Each candidate remains isolated, while the
-                    # three slow multimodal checks share one wall-clock wait.
-                    list(executor.map(candidate_ready_callback, generated_candidates))
 
         bundled_indexes = {candidate.index for candidate in generated_candidates}
         remaining_specifications = [
@@ -740,9 +745,19 @@ def generate_scene_plate_candidates(
                 max_workers=len(remaining_specifications),
                 thread_name_prefix="semantic-scene-plate",
             ) as executor:
-                generated_candidates.extend(
-                    executor.map(generate_candidate, remaining_specifications)
-                )
+                futures = [
+                    executor.submit(generate_candidate, specification)
+                    for specification in remaining_specifications
+                ]
+                failures = []
+                for future in futures:
+                    try:
+                        generated_candidates.append(future.result())
+                    except Exception as exc:
+                        failures.append(exc)
+            if failures:
+                persist_deferred_candidates(generated_candidates)
+                raise failures[0]
     candidates = [
         initial_by_index.get(index)
         or next(candidate for candidate in generated_candidates if candidate.index == index)
@@ -766,19 +781,24 @@ def generate_scene_plate_candidates(
             candidate_count=candidate_count,
             duplicate_candidate_indexes=duplicate_indexes,
         )
-        with ThreadPoolExecutor(
-            max_workers=len(duplicate_positions),
-            thread_name_prefix="semantic-scene-plate-diversity",
-        ) as executor:
-            replacements = list(
-                executor.map(
-                    generate_candidate,
-                    (
-                        (candidates[position].index, attempt)
-                        for position in duplicate_positions
-                    ),
-                )
-        )
+        try:
+            with ThreadPoolExecutor(
+                max_workers=len(duplicate_positions),
+                thread_name_prefix="semantic-scene-plate-diversity",
+            ) as executor:
+                replacements = list(
+                    executor.map(
+                        generate_candidate,
+                        (
+                            (candidates[position].index, attempt)
+                            for position in duplicate_positions
+                        ),
+                    )
+            )
+        except Exception:
+            if defer_complete_set_callback:
+                persist_deferred_candidates(candidates)
+            raise
         for position, replacement in zip(duplicate_positions, replacements):
             candidates[position] = replacement
         report_progress(
@@ -791,6 +811,11 @@ def generate_scene_plate_candidates(
     remaining_duplicate_candidate_indexes = tuple(
         candidates[position].index for position in remaining_duplicates
     )
+    if defer_complete_set_callback:
+        # Bundle responses may omit an image. Delay identity QA until single-image
+        # recovery and diversity repair have produced the final ordered set, then
+        # evaluate the three candidates together in one model call.
+        persist_deferred_candidates(candidates)
     return ScenePlateGenerationResult(
         candidates=tuple(candidates),
         prompts=tuple(candidate.prompt for candidate in candidates),
