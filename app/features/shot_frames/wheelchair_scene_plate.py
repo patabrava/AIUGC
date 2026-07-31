@@ -62,7 +62,7 @@ _SCENE_PLATE_SUCCESS_RAMP = max(
     1, int(os.environ.get("SEMANTIC_SCENE_PLATE_SUCCESS_RAMP", "3"))
 )
 _SCENE_PLATE_START_INTERVAL_SECONDS = max(
-    0.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS", "3"))
+    0.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS", "5"))
 )
 _SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS = max(
     1.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS", "30"))
@@ -130,6 +130,13 @@ class _ScenePlateImageTrafficGate:
         with self._condition:
             self._active = max(0, self._active - 1)
             now = time.monotonic()
+            # Vertex DSQ can reject a new request that begins immediately after
+            # a successful response. Preserve a quiet gap after completion,
+            # not merely between request start timestamps.
+            self._next_start_at = max(
+                self._next_start_at,
+                now + _SCENE_PLATE_START_INTERVAL_SECONDS,
+            )
             if succeeded:
                 self._healthy_successes += 1
                 if (

@@ -370,6 +370,23 @@ def test_scene_plate_traffic_gate_round_robins_every_waiting_run():
     assert gate._next_waiter_locked() is waiter_a
 
 
+def test_scene_plate_traffic_gate_spaces_next_start_after_response(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
+
+    gate = wheelchair_scene_plate._ScenePlateImageTrafficGate()
+    gate._active = 1
+    monkeypatch.setattr(wheelchair_scene_plate.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_START_INTERVAL_SECONDS",
+        5.0,
+    )
+
+    gate.release(succeeded=True, status_code=None)
+
+    assert gate._next_start_at == 105.0
+
+
 def test_scene_plate_candidates_do_not_retry_permanent_provider_contract_errors(
     monkeypatch,
 ):

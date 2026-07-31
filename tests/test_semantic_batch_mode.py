@@ -977,7 +977,7 @@ def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
     assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-diverse-resumable-v7"' in workflow
     assert '"VERTEX_GEMINI_IMAGE_LOCATION": "global"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY": "1"' in workflow
-    assert '"SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS": "3"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS": "5"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS": "30"' in workflow
 
 
