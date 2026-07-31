@@ -84,6 +84,9 @@ class _ScenePlateImageTrafficGate:
         self._last_started_key = ""
         self._next_start_at = 0.0
         self._cooldown_until = 0.0
+        self._adaptive_start_interval_seconds = (
+            _SCENE_PLATE_START_INTERVAL_SECONDS
+        )
 
     def _next_waiter_locked(self) -> Optional[object]:
         if not self._pending:
@@ -119,7 +122,7 @@ class _ScenePlateImageTrafficGate:
                     self._active += 1
                     self._last_started_key = normalized_key
                     self._next_start_at = (
-                        now + _SCENE_PLATE_START_INTERVAL_SECONDS
+                        now + self._adaptive_start_interval_seconds
                     )
                     self._condition.notify_all()
                     return
@@ -130,13 +133,6 @@ class _ScenePlateImageTrafficGate:
         with self._condition:
             self._active = max(0, self._active - 1)
             now = time.monotonic()
-            # Vertex DSQ can reject a new request that begins immediately after
-            # a successful response. Preserve a quiet gap after completion,
-            # not merely between request start timestamps.
-            self._next_start_at = max(
-                self._next_start_at,
-                now + _SCENE_PLATE_START_INTERVAL_SECONDS,
-            )
             if succeeded:
                 self._healthy_successes += 1
                 if (
@@ -150,6 +146,16 @@ class _ScenePlateImageTrafficGate:
                 self._current_limit = 1
                 if status_code == 429:
                     cooldown = _SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS
+                    self._adaptive_start_interval_seconds = max(
+                        self._adaptive_start_interval_seconds,
+                        min(
+                            cooldown,
+                            max(
+                                15.0,
+                                _SCENE_PLATE_START_INTERVAL_SECONDS * 3,
+                            ),
+                        ),
+                    )
                 elif status_code in _TRANSIENT_PROVIDER_STATUS_CODES:
                     cooldown = _SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS
                 else:
@@ -159,6 +165,14 @@ class _ScenePlateImageTrafficGate:
                         self._cooldown_until,
                         now + cooldown + random.uniform(0.0, cooldown * 0.25),
                     )
+            # Vertex DSQ can reject a new request that begins immediately after
+            # a successful response. Preserve a quiet gap after completion,
+            # not merely between request start timestamps. Once a 429 proves
+            # the configured gap too small, retain the learned wider interval.
+            self._next_start_at = max(
+                self._next_start_at,
+                now + self._adaptive_start_interval_seconds,
+            )
             self._condition.notify_all()
 
 

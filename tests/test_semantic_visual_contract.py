@@ -316,6 +316,7 @@ def test_scene_plate_candidates_bound_image_render_bursts_across_candidate_threa
         "_SCENE_PLATE_IMAGE_TRAFFIC_GATE",
         wheelchair_scene_plate._ScenePlateImageTrafficGate(),
     )
+    wheelchair_scene_plate._SCENE_PLATE_IMAGE_TRAFFIC_GATE._adaptive_start_interval_seconds = 0.0
     monkeypatch.setattr(
         wheelchair_scene_plate,
         "_SCENE_PLATE_START_INTERVAL_SECONDS",
@@ -385,6 +386,34 @@ def test_scene_plate_traffic_gate_spaces_next_start_after_response(monkeypatch):
     gate.release(succeeded=True, status_code=None)
 
     assert gate._next_start_at == 105.0
+
+
+def test_scene_plate_traffic_gate_learns_wider_spacing_after_quota_error(
+    monkeypatch,
+):
+    from app.features.shot_frames import wheelchair_scene_plate
+
+    gate = wheelchair_scene_plate._ScenePlateImageTrafficGate()
+    gate._active = 1
+    monkeypatch.setattr(wheelchair_scene_plate.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(wheelchair_scene_plate.random, "uniform", lambda *_args: 0.0)
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_START_INTERVAL_SECONDS",
+        5.0,
+    )
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS",
+        30.0,
+    )
+    gate._adaptive_start_interval_seconds = 5.0
+
+    gate.release(succeeded=False, status_code=429)
+
+    assert gate._adaptive_start_interval_seconds == 15.0
+    assert gate._next_start_at == 115.0
+    assert gate._cooldown_until == 130.0
 
 
 def test_scene_plate_candidates_do_not_retry_permanent_provider_contract_errors(
