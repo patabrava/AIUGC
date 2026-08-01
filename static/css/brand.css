@@ -178,3 +178,42 @@ h1, h2, h3, h4, h5, h6,
 .brand-workflow-banner--qa {
     background: linear-gradient(135deg, rgba(255, 217, 160, 0.28), rgba(255, 255, 255, 0.94));
 }
+@keyframes action-feedback-spin {
+    to { transform: rotate(360deg); }
+}
+
+button:not(:disabled) {
+    transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+    transition-duration: 120ms;
+}
+
+button:not(:disabled):active {
+    transform: scale(0.98);
+}
+
+button[data-action-pending="true"] {
+    align-items: center;
+    cursor: wait;
+    display: inline-flex;
+    gap: 0.5rem;
+    opacity: 0.78;
+}
+
+.action-feedback-spinner {
+    animation: action-feedback-spin 650ms linear infinite;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 9999px;
+    display: inline-block;
+    flex: 0 0 auto;
+    height: 0.9rem;
+    width: 0.9rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button:not(:disabled),
+    .action-feedback-spinner {
+        animation-duration: 1ms;
+        transition-duration: 1ms;
+    }
+}

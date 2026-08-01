@@ -345,6 +345,16 @@
     }
 
     async function runAction(root, button, path, body, pendingMessage) {
+        const pendingLabels = {
+            candidates: 'Generating scene plates…',
+            'master-approve': 'Approving scene plate…',
+            plan: 'Building plan…',
+            approve: 'Starting generation…',
+            'retry-approve': 'Starting retry…',
+            'qa-resume': 'Continuing QA…',
+        };
+        const pendingLabel = pendingLabels[path] || 'Working…';
+        const feedbackState = window.beginActionFeedback(button, pendingLabel);
         button.disabled = true;
         if (!['candidates', 'plan'].includes(path)) setStatus(root, pendingMessage);
         try {
@@ -366,6 +376,7 @@
                 stopPolling(root);
             }
             if (path === 'plan') showPlanError(root, error.message);
+            window.endActionFeedback(button, feedbackState);
             button.disabled = false;
             if (path !== 'plan') setStatus(root, error.message, true);
         }
