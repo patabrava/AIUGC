@@ -602,27 +602,67 @@ def stitch_segments(
                 if declared_padding < 0.0:
                     raise ValueError("Acoustic plan delivery padding cannot be negative")
             if delivery_retime_ratio > 1.0 + 1e-9:
-                expected_retime_ratio = target_duration_seconds / content_duration
+                expected_retimed_duration = content_duration * delivery_retime_ratio
+                expected_padding = max(
+                    0.0,
+                    target_duration_seconds - expected_retimed_duration,
+                )
+                expected_retime_ratio = (
+                    target_duration_seconds - expected_padding
+                ) / content_duration
                 if abs(delivery_retime_ratio - expected_retime_ratio) > 1e-4:
                     raise ValueError(
                         "Acoustic plan delivery retime ratio does not match its native source windows"
                     )
-                if declared_padding is not None and declared_padding > 1e-9:
+                if expected_padding > frame_duration_seconds + 1e-6:
                     raise ValueError(
-                        "Bounded A/V retime cannot be combined with synthetic delivery padding"
+                        "Bounded A/V retime would require more than one frame of delivery padding"
                     )
+                if (
+                    declared_padding is not None
+                    and abs(declared_padding - expected_padding) > 1e-4
+                ):
+                    raise ValueError(
+                        "Acoustic plan delivery padding does not match its retimed source windows"
+                    )
+                delivery_padding_seconds = expected_padding
                 delivery_audio_tempo = 1.0 / delivery_retime_ratio
-                delivery_mode = "bounded_av_retime"
-                filter_parts.append(
-                    f"[{base_video_label}]setpts={delivery_retime_ratio:.9f}*PTS,"
-                    f"fps={fps:.5f},trim=duration={target_duration_seconds:.6f},"
-                    "setpts=PTS-STARTPTS[vout]"
-                )
-                filter_parts.append(
-                    f"[{final_audio_label}]atempo={delivery_audio_tempo:.9f},"
-                    f"atrim=duration={target_duration_seconds:.6f},"
-                    "asetpts=PTS-STARTPTS[adelivery]"
-                )
+                retimed_duration = target_duration_seconds - delivery_padding_seconds
+                if delivery_padding_seconds > 1e-9:
+                    delivery_mode = "bounded_av_retime_encoder_rounding"
+                    filter_parts.append(
+                        f"[{base_video_label}]setpts={delivery_retime_ratio:.9f}*PTS,"
+                        f"fps={fps:.5f},trim=duration={retimed_duration:.6f},"
+                        "setpts=PTS-STARTPTS[vretimed]"
+                    )
+                    filter_parts.append(
+                        f"[{final_audio_label}]atempo={delivery_audio_tempo:.9f},"
+                        f"atrim=duration={retimed_duration:.6f},"
+                        "asetpts=PTS-STARTPTS[aretimed]"
+                    )
+                    filter_parts.append(
+                        f"[vretimed]tpad=stop_mode=clone:"
+                        f"stop_duration={frame_duration_seconds:.6f},"
+                        f"trim=duration={target_duration_seconds:.6f},"
+                        "setpts=PTS-STARTPTS[vout]"
+                    )
+                    filter_parts.append(
+                        f"[aretimed]apad=pad_dur={frame_duration_seconds:.6f},"
+                        f"atrim=duration={target_duration_seconds:.6f},"
+                        "asetpts=PTS-STARTPTS[adelivery]"
+                    )
+                else:
+                    delivery_mode = "bounded_av_retime"
+                    filter_parts.append(
+                        f"[{base_video_label}]setpts={delivery_retime_ratio:.9f}*PTS,"
+                        f"fps={fps:.5f},trim=duration={target_duration_seconds:.6f},"
+                        "setpts=PTS-STARTPTS[vout]"
+                    )
+                    filter_parts.append(
+                        f"[{final_audio_label}]atempo={delivery_audio_tempo:.9f},"
+                        f"atrim=duration={target_duration_seconds:.6f},"
+                        "asetpts=PTS-STARTPTS[adelivery]"
+                    )
             else:
                 delivery_padding_seconds = native_shortfall_seconds
                 if (

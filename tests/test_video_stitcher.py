@@ -382,6 +382,62 @@ def test_stitch_uses_bounded_av_retime_for_live_exact_16_shortfall(tmp_path):
     assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
 
 
+def test_stitch_retimes_exact_16_delivery_with_one_frame_encoder_rounding(tmp_path):
+    segment_videos = []
+    for index, color in enumerate(("red", "blue")):
+        path = str(tmp_path / f"retime-rounding-take-{index}.mp4")
+        _make_clip(path, seconds=8, color=color, width=90, height=160)
+        with open(path, "rb") as fh:
+            segment_videos.append(fh.read())
+
+    content_duration = 14.51
+    frame_duration = 1.0 / 24.0
+    retime_ratio = (16.0 - frame_duration) / content_duration
+    final_bytes, meta = stitch_segments(
+        segment_videos=segment_videos,
+        post_id="post_retime_rounding_16",
+        correlation_id="corr_retime_rounding_16",
+        target_duration_seconds=16.0,
+        acoustic_plan={
+            "takes": [
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 7.25,
+                    "video_start_seconds": 0.0,
+                    "video_end_seconds": 7.25,
+                    "gain_db": 0.0,
+                },
+                {
+                    "audio_start_seconds": 0.0,
+                    "audio_end_seconds": 7.30,
+                    "video_start_seconds": 0.0,
+                    "video_end_seconds": 7.30,
+                    "gain_db": 0.0,
+                },
+            ],
+            "seams": [
+                {"overlap_seconds": 0.04, "visual_cut_position_seconds": 0.02}
+            ],
+            "target_duration_seconds": 16.0,
+            "content_duration_seconds": content_duration,
+            "delivery_padding_seconds": frame_duration,
+            "delivery_retime_ratio": retime_ratio,
+        },
+    )
+
+    output_path = str(tmp_path / "retimed-rounded-exact-16.mp4")
+    with open(output_path, "wb") as fh:
+        fh.write(final_bytes)
+
+    assert _probe_duration(output_path) == pytest.approx(16.0, abs=1 / 24)
+    assert meta["stitch_delivery_mode"] == "bounded_av_retime_encoder_rounding"
+    assert meta["stitch_delivery_retime_ratio"] == pytest.approx(retime_ratio)
+    assert meta["stitch_delivery_padding_s"] == pytest.approx(frame_duration, abs=1e-6)
+    assert meta["stitch_delivery_native_shortfall_s"] == pytest.approx(1.49)
+    assert meta["stitch_end_pan_protection_applied"] is True
+    assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
+
+
 def test_stitch_rejects_exact_16_delivery_that_needs_a_frozen_multi_second_outro(tmp_path):
     segment_videos = []
     for index, color in enumerate(("red", "blue")):
