@@ -1142,7 +1142,10 @@ def plan_acoustic_seams(
     )
     planned = _derive_video_windows(ordered, seams, gains, fps=fps)
     planning_floor = (
-        float(target_duration_seconds)
+        max(
+            min_duration_seconds,
+            float(target_duration_seconds) - (1.0 / fps),
+        )
         if target_duration_seconds is not None
         else max(0.0, min_duration_seconds - (1.0 / fps))
     )

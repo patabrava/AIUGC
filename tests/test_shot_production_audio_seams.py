@@ -740,6 +740,25 @@ def test_exact_16_retime_bound_recovers_live_shortfall_with_one_frame_padding():
     assert content_duration * ratio + padding == pytest.approx(16.0)
 
 
+def test_planner_uses_the_one_frame_floor_before_exact_16_retime():
+    takes = (
+        _evidence(0, duration=8.0, first_word=0.32, final_word=6.26),
+        _evidence(1, duration=8.0, first_word=0.16, final_word=7.22),
+    )
+
+    plan = plan_acoustic_seams(
+        takes,
+        min_duration_seconds=16 - (1 / 24),
+        max_duration_seconds=16 + (1 / 24),
+        target_duration_seconds=16.0,
+        max_seam_word_gap_seconds=0.48,
+    )
+
+    assert plan.delivery_retime_ratio <= 1.10
+    assert plan.delivery_padding_seconds <= 1 / 24 + 1e-9
+    assert plan.final_duration_seconds == pytest.approx(16.0)
+
+
 @pytest.mark.parametrize(
     (
         "overlap_seconds",
