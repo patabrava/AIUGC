@@ -713,7 +713,7 @@ def test_planner_retimes_live_exact_16_shortfall_after_consuming_native_windows(
         max_seam_word_gap_seconds=0.48,
     )
 
-    assert plan.content_duration_seconds == pytest.approx(15.193, abs=0.02)
+    assert plan.content_duration_seconds == pytest.approx(15.163, abs=0.02)
     assert plan.delivery_retime_ratio == pytest.approx(
         16.0 / plan.content_duration_seconds
     )
@@ -721,7 +721,9 @@ def test_planner_retimes_live_exact_16_shortfall_after_consuming_native_windows(
     assert plan.delivery_padding_seconds == 0.0
     assert plan.final_duration_seconds == 16.0
     assert (
-        plan.seams[0].final_word_gap_seconds * plan.delivery_retime_ratio
+        plan.seams[0].final_word_gap_seconds
+        * plan.delivery_retime_ratio
+        * (16.0 / 15.5)
         <= 0.48 + 1e-9
     )
 
@@ -757,6 +759,12 @@ def test_planner_uses_the_one_frame_floor_before_exact_16_retime():
     assert plan.delivery_retime_ratio <= 1.10
     assert plan.delivery_padding_seconds <= 1 / 24 + 1e-9
     assert plan.final_duration_seconds == pytest.approx(16.0)
+    assert (
+        plan.seams[0].final_word_gap_seconds
+        * plan.delivery_retime_ratio
+        * (16.0 / 15.5)
+        <= 0.48 + 1e-9
+    )
 
 
 @pytest.mark.parametrize(

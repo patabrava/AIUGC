@@ -12,6 +12,10 @@ import subprocess
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from app.core.errors import ValidationError
+from app.features.shot_production.duration import (
+    EXACT_SHORT_FORM_DURATION_SECONDS,
+    SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS,
+)
 
 
 ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v2"
@@ -845,6 +849,7 @@ def _extend_delivery_windows(
     max_seam_word_gap_seconds: float,
     max_delivery_padding_seconds: float = 0.0,
     max_delivery_retime_ratio: float = 1.0,
+    max_delivered_timeline_ratio: Optional[float] = None,
 ) -> Tuple[Tuple[PlannedTakeWindow, ...], Tuple[PlannedSeam, ...]]:
     if (
         not math.isfinite(max_delivery_padding_seconds)
@@ -856,6 +861,13 @@ def _extend_delivery_windows(
         or max_delivery_retime_ratio < 1.0
     ):
         raise ValidationError("Acoustic delivery retime allowance is invalid.")
+    if max_delivered_timeline_ratio is None:
+        max_delivered_timeline_ratio = max_delivery_retime_ratio
+    if (
+        not math.isfinite(max_delivered_timeline_ratio)
+        or max_delivered_timeline_ratio < max_delivery_retime_ratio
+    ):
+        raise ValidationError("Acoustic delivered timeline allowance is invalid.")
     result = list(planned)
     adjusted_seams = list(seams)
     current_duration = _planned_duration(result, seams)
@@ -892,7 +904,7 @@ def _extend_delivery_windows(
         for index, capacity in enumerate(raw_capacities)
     ]
     native_seam_gap_ceiling = (
-        max_seam_word_gap_seconds / max_delivery_retime_ratio
+        max_seam_word_gap_seconds / max_delivered_timeline_ratio
     )
     capacities = [
         min(
@@ -1149,6 +1161,23 @@ def plan_acoustic_seams(
         if target_duration_seconds is not None
         else max(0.0, min_duration_seconds - (1.0 / fps))
     )
+    terminal_delivery_retime_ratio = (
+        float(target_duration_seconds)
+        / (
+            float(target_duration_seconds)
+            - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+        )
+        if (
+            target_duration_seconds is not None
+            and math.isclose(
+                float(target_duration_seconds),
+                float(EXACT_SHORT_FORM_DURATION_SECONDS),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+        )
+        else 1.0
+    )
     planned, seams = _extend_delivery_windows(
         planned,
         ordered,
@@ -1161,6 +1190,11 @@ def plan_acoustic_seams(
         ),
         max_delivery_retime_ratio=(
             MAX_EXACT_DELIVERY_RETIME_RATIO
+            if target_duration_seconds is not None
+            else 1.0
+        ),
+        max_delivered_timeline_ratio=(
+            MAX_EXACT_DELIVERY_RETIME_RATIO * terminal_delivery_retime_ratio
             if target_duration_seconds is not None
             else 1.0
         ),
@@ -1183,7 +1217,9 @@ def plan_acoustic_seams(
         )
     delivery_timing_failures = delivered_seam_timing_failures(
         seams,
-        delivery_retime_ratio=delivery_retime_ratio,
+        delivery_retime_ratio=(
+            delivery_retime_ratio * terminal_delivery_retime_ratio
+        ),
         max_seam_word_gap_seconds=max_seam_word_gap_seconds,
     )
     if delivery_timing_failures:
