@@ -823,6 +823,21 @@ def test_worker_still_blocks_when_composition_qa_cannot_produce_delivery():
     assert any(event[0] == "retry_required" for event in repo.events)
 
 
+def test_default_worker_id_carries_the_database_contract_fence():
+    from workers.semantic_video_worker import SemanticVideoWorker
+
+    repo = FakeRepo(stage="generating", take_count=1)
+    worker = SemanticVideoWorker(
+        repo=repo,
+        vertex=FakeVertex(),
+        storage=FakeStorage(repo.master),
+        stage_runner=FakeStages({"passed": True}),
+        video_loader=lambda uri: f"video:{uri}".encode(),
+    )
+
+    assert worker.worker_id.startswith("semantic-video-contract-v2-")
+
+
 def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():
     repo = FakeRepo(stage="identity_qa", take_count=1)
     raw_hash = "d" * 64

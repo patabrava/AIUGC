@@ -256,6 +256,7 @@ Rules that become generally useful across repos should later move into `bridgeco
 ## 10) Specific repo rules
 
 - Production scheduled publishing must have exactly one active dispatch owner: keep web-process schedulers disabled when `publish-scheduler` is deployed, and require every production compose/deploy renderer to run `python -m workers.publish_scheduler`; a deployment contract that disables the web scheduler without provisioning this worker is invalid.
+- Semantic video lease claims must be contract-version fenced in PostgreSQL, and the deployed worker ID must carry the accepted contract prefix; bump the fence when an obsolete or orphaned worker could process runs under stale generation or delivery rules.
 - Docker dependency installs must retain the BuildKit pip cache and explicit timeout/retry settings so transient package-download stalls do not restart the full dependency layer.
 - Detail-page reads that use the shared Supabase/PostgREST client must replace that client after transient transport corruption and retry the read on the fresh client; concurrent recovery must preserve any newer client, while schema, validation, and contract errors continue to fail closed.
 - Semantic video worker workspaces under `SEMANTIC_VIDEO_WORK_ROOT` are disposable caches: prune stale non-active run directories before QA/composition, bound retained workspace count, and remove the active workspace after durable delivery so `/tmp` exhaustion cannot trap runs in a lease/retry loop.

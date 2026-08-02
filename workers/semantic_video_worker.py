@@ -1294,7 +1294,7 @@ class SemanticVideoWorker:
         self.storage = storage or get_storage_client()
         self.stage_runner = stage_runner or ProductionStageRunner(storage=self.storage)
         self.video_loader = video_loader
-        self.worker_id = worker_id or f"semantic-video-{os.getpid()}"
+        self.worker_id = worker_id or f"semantic-video-contract-v2-{os.getpid()}"
         self.max_inflight = max_inflight
         self.lease_seconds = lease_seconds
         self.heartbeat_seconds = float(resolved_heartbeat_seconds)

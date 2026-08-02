@@ -23,6 +23,9 @@ TRANSCRIPT_ADVISORY_RESUME_MIGRATION = (
 ACOUSTIC_QA_RESUME_MIGRATION = (
     ROOT / "supabase/migrations/20260802000000_semantic_video_acoustic_qa_resume.sql"
 )
+WORKER_CONTRACT_FENCE_MIGRATION = (
+    ROOT / "supabase/migrations/20260802000100_semantic_video_worker_contract_fence.sql"
+)
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_worker_rpc_test"
 BATCH_ID = "00000000-0000-0000-0000-000000000101"
@@ -92,6 +95,15 @@ def test_acoustic_qa_resume_reuses_existing_takes_without_paid_work():
     assert "SET submission_state = 'completed'" in sql
     assert "semantic_video_approvals" not in sql
     assert "semantic_video_takes" in sql
+    assert "TO service_role" in sql
+
+
+def test_semantic_worker_contract_fence_rejects_old_deployments():
+    sql = WORKER_CONTRACT_FENCE_MIGRATION.read_text()
+
+    assert "worker_id NOT LIKE 'semantic-video-contract-v2-%'" in sql
+    assert "worker contract is stale" in sql
+    assert "FOR UPDATE SKIP LOCKED" in sql
     assert "TO service_role" in sql
 
 
