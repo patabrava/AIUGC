@@ -15,7 +15,7 @@ from app.core.errors import ValidationError
 
 
 ACOUSTIC_ANALYZER_VERSION = "native-acoustic-seams-v2"
-MAX_EXACT_DELIVERY_RETIME_RATIO = 1.06
+MAX_EXACT_DELIVERY_RETIME_RATIO = 1.10
 SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS = 0.350
 MAX_MEASURED_TERMINAL_RESET_AUDIO_L_CUT_SECONDS = 0.100
 _MEASURED_TERMINAL_RESET_POST_WORD_GUARD_SECONDS = 0.0
@@ -1070,6 +1070,26 @@ def _extend_delivery_windows(
     return tuple(result), tuple(adjusted_seams)
 
 
+def _exact_delivery_timing(
+    *,
+    content_duration_seconds: float,
+    target_duration_seconds: float,
+    fps: float,
+) -> Tuple[float, float]:
+    full_ratio = target_duration_seconds / content_duration_seconds
+    if full_ratio <= MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
+        return full_ratio, 0.0
+
+    encoder_padding = 1.0 / fps
+    retimed_target = target_duration_seconds - encoder_padding
+    floor_ratio = retimed_target / content_duration_seconds
+    if floor_ratio <= MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
+        return floor_ratio, encoder_padding
+    raise ValidationError(
+        "Acoustic exact delivery exceeds the bounded A/V retime allowance."
+    )
+
+
 def plan_acoustic_seams(
     takes: Sequence[TakeAudioEvidence],
     *,
@@ -1153,12 +1173,11 @@ def plan_acoustic_seams(
         target_duration_seconds is not None
         and delivery_padding > 1.0 / fps + 1e-9
     ):
-        delivery_retime_ratio = float(target_duration_seconds) / content_duration
-        if delivery_retime_ratio > MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
-            raise ValidationError(
-                "Acoustic exact delivery exceeds the bounded A/V retime allowance."
-            )
-        delivery_padding = 0.0
+        delivery_retime_ratio, delivery_padding = _exact_delivery_timing(
+            content_duration_seconds=content_duration,
+            target_duration_seconds=float(target_duration_seconds),
+            fps=fps,
+        )
     delivery_timing_failures = delivered_seam_timing_failures(
         seams,
         delivery_retime_ratio=delivery_retime_ratio,

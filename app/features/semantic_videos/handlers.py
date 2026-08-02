@@ -2476,6 +2476,7 @@ def resume_qa_only_review(post_id: str, payload: QAReviewResumeRequest):
         "transcript_qa",
         "identity_qa",
         "voice_qa",
+        "acoustic_qa",
     }:
         raise StateTransitionError(
             "Semantic video run does not have a resumable advisory QA failure."

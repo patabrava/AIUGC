@@ -3039,7 +3039,11 @@ def test_identity_qa_resume_reuses_durable_takes_without_paid_approval(monkeypat
     assert state["approvals"] == []
 
 
-def test_identity_qa_failure_can_resume_without_a_paid_take_retry(monkeypatch):
+@pytest.mark.parametrize("qa_stage", ["identity_qa", "acoustic_qa"])
+def test_generated_take_qa_failure_can_resume_without_a_paid_take_retry(
+    monkeypatch,
+    qa_stage,
+):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
 
@@ -3050,8 +3054,8 @@ def test_identity_qa_failure_can_resume_without_a_paid_take_retry(monkeypatch):
             "plan_hash": "a" * 64,
             "artifact_manifest": {
                 "qa_failure": {
-                    "stage": "identity_qa",
-                    "message": "Actor identity changed.",
+                    "stage": qa_stage,
+                    "message": "Generated-take QA requires a zero-cost recheck.",
                     "retry_mode": "paid_take",
                 }
             },
@@ -3063,7 +3067,7 @@ def test_identity_qa_failure_can_resume_without_a_paid_take_retry(monkeypatch):
         lambda **_kwargs: {
             **state["run"],
             "revision": 5,
-            "stage": "identity_qa",
+            "stage": qa_stage,
         },
     )
 
@@ -3073,7 +3077,7 @@ def test_identity_qa_failure_can_resume_without_a_paid_take_retry(monkeypatch):
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["stage"] == "identity_qa"
+    assert response.json()["data"]["stage"] == qa_stage
 
 
 def test_retry_approval_recovers_provider_internal_failure_without_qa_guidance(monkeypatch):

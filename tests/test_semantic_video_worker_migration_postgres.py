@@ -20,6 +20,9 @@ COMPLETED_REPAIR_MIGRATION = (
 TRANSCRIPT_ADVISORY_RESUME_MIGRATION = (
     ROOT / "supabase/migrations/20260730000000_semantic_video_transcript_advisory_resume.sql"
 )
+ACOUSTIC_QA_RESUME_MIGRATION = (
+    ROOT / "supabase/migrations/20260802000000_semantic_video_acoustic_qa_resume.sql"
+)
 CONTAINER = os.getenv("SEMANTIC_UGC_POSTGRES_CONTAINER")
 DATABASE = "semantic_ugc_worker_rpc_test"
 BATCH_ID = "00000000-0000-0000-0000-000000000101"
@@ -76,6 +79,19 @@ def test_transcript_advisory_resume_persists_the_worker_control_marker():
     assert "'qa_advisory'" in sql
     assert "'paid_retry_required', FALSE" in sql
     assert "GRANT EXECUTE ON FUNCTION public.resume_semantic_video_qa_review" in sql
+    assert "TO service_role" in sql
+
+
+def test_acoustic_qa_resume_reuses_existing_takes_without_paid_work():
+    sql = ACOUSTIC_QA_RESUME_MIGRATION.read_text()
+
+    assert "'acoustic_qa'" in sql
+    assert "WHEN resume_stage = 'acoustic_qa'" in sql
+    assert "- 'acoustic_plan_failure'" in sql
+    assert "- 'acoustic_preroll_normalization'" in sql
+    assert "SET submission_state = 'completed'" in sql
+    assert "semantic_video_approvals" not in sql
+    assert "semantic_video_takes" in sql
     assert "TO service_role" in sql
 
 

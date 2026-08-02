@@ -284,8 +284,10 @@ def test_semantic_projection_ignores_stale_pipeline_qa_attempt(monkeypatch):
     assert item["latest_attempts"][0]["attempt"] == 2
 
 
-def test_identity_qa_service_failure_renders_free_resume_instead_of_paid_retry(
+@pytest.mark.parametrize("qa_stage", ["identity_qa", "acoustic_qa"])
+def test_generated_take_qa_failure_renders_free_resume_instead_of_paid_retry(
     monkeypatch,
+    qa_stage,
 ):
     run = {
         "id": "run-identity-service-failure",
@@ -303,8 +305,8 @@ def test_identity_qa_service_failure_renders_free_resume_instead_of_paid_retry(
         },
         "artifact_manifest": {
             "qa_failure": {
-                "stage": "identity_qa",
-                "message": "Vertex Gemini generateContent failed",
+                "stage": qa_stage,
+                "message": "Existing generated takes require a QA recheck",
                 "failure_type": "qa_service_unavailable",
                 "retry_mode": "qa_only",
             }
@@ -343,8 +345,8 @@ def test_identity_qa_service_failure_renders_free_resume_instead_of_paid_retry(
     item = view["semantic_video"]["posts"][0]
 
     assert item["qa_resume_available"] is True
-    assert item["qa_resume_stage"] == "identity_qa"
-    assert item["qa_resume_message"] == "Vertex Gemini generateContent failed"
+    assert item["qa_resume_stage"] == qa_stage
+    assert item["qa_resume_message"] == "Existing generated takes require a QA recheck"
 
     html = Environment(loader=FileSystemLoader("templates")).get_template(
         "batches/detail/_semantic_video.html"

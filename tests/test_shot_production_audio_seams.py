@@ -11,6 +11,7 @@ from app.features.shot_production.audio_seams import (
     PlannedSeam,
     PlannedTakeWindow,
     TakeAudioEvidence,
+    _exact_delivery_timing,
     _extend_delivery_windows,
     acoustic_analysis_cache_key,
     analyze_audio_frames,
@@ -716,13 +717,27 @@ def test_planner_retimes_live_exact_16_shortfall_after_consuming_native_windows(
     assert plan.delivery_retime_ratio == pytest.approx(
         16.0 / plan.content_duration_seconds
     )
-    assert 1.0 < plan.delivery_retime_ratio <= 1.06
+    assert 1.0 < plan.delivery_retime_ratio <= 1.10
     assert plan.delivery_padding_seconds == 0.0
     assert plan.final_duration_seconds == 16.0
     assert (
         plan.seams[0].final_word_gap_seconds * plan.delivery_retime_ratio
         <= 0.48 + 1e-9
     )
+
+
+def test_exact_16_retime_bound_recovers_live_shortfall_with_one_frame_padding():
+    content_duration = (16 - (1 / 24)) / 1.0994425147855447
+
+    ratio, padding = _exact_delivery_timing(
+        content_duration_seconds=content_duration,
+        target_duration_seconds=16.0,
+        fps=24.0,
+    )
+
+    assert 1.06 < ratio <= 1.10
+    assert padding == pytest.approx(1 / 24)
+    assert content_duration * ratio + padding == pytest.approx(16.0)
 
 
 @pytest.mark.parametrize(
@@ -854,7 +869,7 @@ def test_planner_keeps_internal_tail_excluded_during_exact_16_second_retime():
     assert plan.content_duration_seconds * plan.delivery_retime_ratio == pytest.approx(
         16.0
     )
-    assert 1.0 < plan.delivery_retime_ratio <= 1.06
+    assert 1.0 < plan.delivery_retime_ratio <= 1.10
     assert plan.delivery_padding_seconds == 0.0
     assert plan.takes[0].audio_end_seconds <= 7.65 + 1e-9
     assert plan.takes[0].video_end_seconds <= 7.65 + 1e-9
