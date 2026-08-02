@@ -1023,6 +1023,10 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert 'data-field="plan-cost-spinner"' in template_source
     assert 'aria-label="Production plan build progress"' in template_source
     assert 'role="progressbar"' in template_source
+    assert (
+        "semantic_step in ['plan', 'production'] and item.stage == "
+        "'retry_approval_required'"
+    ) in template_source
 
 
 def test_pending_script_keeps_semantic_production_out_of_the_script_step(monkeypatch):

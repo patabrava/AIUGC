@@ -335,7 +335,7 @@
             </section>
             {% endif %}
 
-            {% if semantic_step == 'production' and item.stage == 'retry_approval_required' %}
+            {% if semantic_step in ['plan', 'production'] and item.stage == 'retry_approval_required' %}
             <div class="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
                 {% if item.qa_resume_available %}
                 <p class="text-sm font-bold text-amber-950">Generated videos are ready for manual review</p>
@@ -351,7 +351,7 @@
                 <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Approve failed-take retry</button>
                 {% endif %}
             </div>
-            {% elif semantic_step == 'production' %}
+            {% elif semantic_step in ['plan', 'production'] %}
             <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
             <button type="button" class="hidden" data-action="resume-qa" disabled aria-hidden="true">Continue with generated videos · $0.00</button>
             {% endif %}
