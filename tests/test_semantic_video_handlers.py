@@ -1968,7 +1968,7 @@ def test_candidate_endpoint_rejects_changed_or_mismatched_actor_anchor(monkeypat
             "evaluator_model": state["context"]["reference"][
                 "scene_plate_generation_contract"
             ]["identity_evaluator_model"],
-            "evaluator_contract_version": "semantic-scene-identity-v3",
+            "evaluator_contract_version": "semantic-scene-identity-v2",
             "evaluated_actor_reference_fingerprint": actor_fingerprint,
             "candidate_sha256": sha256(anchor_bytes).hexdigest(),
             "component_results": {},

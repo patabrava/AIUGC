@@ -23,7 +23,7 @@ SCENE_PLATE_REFERENCE_ROLE_CONTRACT = (
     "actor_free_location",
 )
 SCENE_PLATE_ASPECT_RATIO = "9:16"
-SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION = "semantic-scene-identity-v3"
+SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION = "semantic-scene-identity-v2"
 SCENE_IDENTITY_ATTESTATION_VERSION = "semantic-actor-identity-v1"
 SCENE_IDENTITY_COMPONENT_FIELDS = (
     "same_person",

@@ -26,12 +26,16 @@ def test_scene_identity_migration_invalidates_legacy_anchors_and_keys_current_co
 
 
 def test_scene_identity_migration_requires_machine_gate_and_human_attestation():
+    from app.features.semantic_videos.visual_contract import (
+        SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION,
+    )
+
     sql = MIGRATION.read_text(encoding="utf-8").lower()
 
     assert "p_identity_attestation boolean" in sql
     assert "p_attestation_version text" in sql
     assert "semantic-actor-identity-v1" in sql
-    assert "semantic-scene-identity-v2" in sql
+    assert SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION.lower() in sql
     for field in (
         "same_person",
         "facial_geometry_consistent",
