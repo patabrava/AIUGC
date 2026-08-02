@@ -23,6 +23,10 @@ TRANSCRIPT_ADVISORY_RESUME_MIGRATION = (
 ACOUSTIC_QA_RESUME_MIGRATION = (
     ROOT / "supabase/migrations/20260802000000_semantic_video_acoustic_qa_resume.sql"
 )
+DELIVERY_QA_ADVISORY_RESUME_MIGRATION = (
+    ROOT
+    / "supabase/migrations/20260802000200_semantic_video_delivery_qa_advisory_resume.sql"
+)
 WORKER_CONTRACT_FENCE_MIGRATION = (
     ROOT / "supabase/migrations/20260802000100_semantic_video_worker_contract_fence.sql"
 )
@@ -89,6 +93,15 @@ def test_acoustic_qa_resume_reuses_existing_takes_without_paid_work():
     sql = ACOUSTIC_QA_RESUME_MIGRATION.read_text()
 
     assert "'acoustic_qa'" in sql
+
+
+def test_delivery_qa_resume_persists_explicit_operator_advisory():
+    sql = DELIVERY_QA_ADVISORY_RESUME_MIGRATION.read_text(encoding="utf-8")
+
+    assert "'qa_advisory'" in sql
+    assert "'stage', 'acoustic_qa'" in sql
+    assert "'paid_retry_required', FALSE" in sql
+    assert "SET submission_state = 'completed'" in sql
     assert "WHEN resume_stage = 'acoustic_qa'" in sql
     assert "- 'acoustic_plan_failure'" in sql
     assert "- 'acoustic_preroll_normalization'" in sql

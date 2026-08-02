@@ -457,6 +457,13 @@ class ProductionStageRunner:
     ) -> None:
         """Convert an advisory evaluator result into an explicit accepted gate."""
         if (
+            isinstance(qa_advisory, Mapping)
+            and qa_advisory.get("required") is True
+            and qa_advisory.get("stage") == "acoustic_qa"
+        ):
+            payload["delivery_qa_advisory"] = dict(qa_advisory)
+            return
+        if (
             not isinstance(qa_advisory, Mapping)
             or qa_advisory.get("required") is not True
             or qa_advisory.get("stage") != "identity_qa"

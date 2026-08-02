@@ -2492,6 +2492,41 @@ def test_composition_persists_failed_seam_verdict_and_adjacent_retry_indexes(tmp
     assert saved["acoustic_seam_qa"]["recommended_retry_take_indexes"] == [0, 1]
 
 
+def test_operator_qa_resume_accepts_delivery_findings_without_erasing_evidence():
+    from app.features.shot_production.runner import (
+        _accept_operator_delivery_qa_advisory,
+    )
+
+    payload = {
+        "delivery_qa_advisory": {
+            "required": True,
+            "stage": "acoustic_qa",
+            "paid_retry_required": False,
+        }
+    }
+    report = {
+        "passed": False,
+        "failed_seam_indexes": [0],
+        "failure_reasons": ["frozen_frames_intersect_visual_boundary"],
+        "requires_paid_regeneration": True,
+    }
+
+    assert _accept_operator_delivery_qa_advisory(
+        payload,
+        report,
+        report_kind="delivery_visual_qa",
+    ) is True
+    assert report["passed"] is True
+    assert report["provider_passed"] is False
+    assert report["manual_review_accepted"] is True
+    assert report["paid_retry_required"] is False
+    assert report["requires_paid_regeneration"] is False
+    assert report["failed_seam_indexes"] == [0]
+    assert report["failure_reasons"] == [
+        "frozen_frames_intersect_visual_boundary"
+    ]
+
+
 def test_acoustic_duration_failure_prefers_targeted_final_take_retry(tmp_path):
     from app.features.shot_production.runner import compose_and_caption, reset_failed_take
 

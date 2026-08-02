@@ -731,6 +731,29 @@ def test_worker_multitake_evaluator_qa_failure_is_advisory_and_never_auto_retrie
     }
 
 
+def test_acoustic_qa_resume_marks_delivery_findings_as_operator_advisory():
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    payload = {}
+
+    ProductionStageRunner._apply_downstream_qa_advisory(  # noqa: SLF001
+        payload,
+        {
+            "required": True,
+            "stage": "acoustic_qa",
+            "failed_take_indexes": [0],
+            "paid_retry_required": False,
+        },
+    )
+
+    assert payload["delivery_qa_advisory"] == {
+        "required": True,
+        "stage": "acoustic_qa",
+        "failed_take_indexes": [0],
+        "paid_retry_required": False,
+    }
+
+
 def test_worker_transcript_failure_requires_retry_instead_of_entering_impossible_identity_stage():
     repo = FakeRepo(stage="transcript_qa", take_count=2)
     stages = FakeStages(

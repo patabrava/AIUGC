@@ -19,7 +19,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from typing import Any, Callable, Dict, Iterator, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence
 from urllib.parse import quote
 
 import google.auth
@@ -2308,6 +2308,30 @@ def _accept_acoustic_word_repetition_advisory(
     )
 
 
+def _accept_operator_delivery_qa_advisory(
+    payload: Mapping[str, Any],
+    report: Dict[str, Any],
+    *,
+    report_kind: str,
+) -> bool:
+    advisory = payload.get("delivery_qa_advisory")
+    if (
+        not isinstance(advisory, Mapping)
+        or advisory.get("required") is not True
+        or advisory.get("stage") != "acoustic_qa"
+        or report.get("passed") is not False
+    ):
+        return False
+    report["provider_passed"] = False
+    report["manual_review_accepted"] = True
+    report["accepted_by"] = "operator_qa_resume_existing_paid_takes"
+    report["advisory_report_kind"] = report_kind
+    report["paid_retry_required"] = False
+    report["requires_paid_regeneration"] = False
+    report["passed"] = True
+    return True
+
+
 @_manifest_locked
 def compose_and_caption(
     manifest_path: Path,
@@ -2765,6 +2789,11 @@ def compose_and_caption(
         delivery_visual_qa["requires_paid_regeneration"] = bool(
             freeze_failed_seams
         )
+        _accept_operator_delivery_qa_advisory(
+            payload,
+            delivery_visual_qa,
+            report_kind="delivery_visual_qa",
+        )
         payload["delivery_visual_qa"] = delivery_visual_qa
         _atomic_write_json(manifest_path, payload)
         if not delivery_visual_qa.get("passed"):
@@ -2927,6 +2956,11 @@ def compose_and_caption(
             report_payload["accepted_by"] = (
                 "exact_stitched_transcript_plus_deterministic_seam_consensus"
             )
+        _accept_operator_delivery_qa_advisory(
+            payload,
+            report_payload,
+            report_kind="acoustic_seam_qa",
+        )
         qualitative_failed_seam_indexes = [
             int(verdict.seam_index)
             for verdict in (getattr(report, "seam_verdicts", ()) or ())
