@@ -27,6 +27,19 @@ def _png(*, block: str | None = None, value: int = 128) -> bytes:
     return output.getvalue()
 
 
+def _triptych_png() -> bytes:
+    image = Image.new("RGB", (180, 320), (70, 90, 110))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 104, 179, 108), fill=(255, 255, 255))
+    draw.rectangle((0, 211, 179, 215), fill=(255, 255, 255))
+    draw.rectangle((15, 15, 80, 90), fill=(180, 120, 90))
+    draw.rectangle((90, 125, 165, 195), fill=(80, 150, 105))
+    draw.rectangle((30, 230, 145, 305), fill=(145, 85, 155))
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
 def _visual_contract() -> dict:
     return {
         "version": "semantic_visual_contract_v1",
@@ -46,7 +59,7 @@ def _visual_contract() -> dict:
     }
 
 
-def test_take_prompt_uses_frozen_scene_outfit_and_wheelchair_without_old_room_lock():
+def test_take_prompt_uses_first_frame_as_visual_authority_without_re_describing_it():
     from app.features.shot_production.prompts import build_veo_take_prompt
 
     beat = EditorialBeat(
@@ -59,12 +72,12 @@ def test_take_prompt_uses_frozen_scene_outfit_and_wheelchair_without_old_room_lo
 
     prompt = build_veo_take_prompt(beat, visual_contract=_visual_contract())
 
-    assert "exact supplied garden patio" in prompt
-    assert "light-grey cardigan over a plain white top" in prompt
-    assert "manual wheelchair" in prompt
-    assert "rear wheel" in prompt
+    assert "animated from the supplied first frame" in prompt
+    assert "input frame's subject, wardrobe, wheelchair, room" in prompt
+    assert "exact supplied garden patio" not in prompt
+    assert "light-grey cardigan over a plain white top" not in prompt
     assert "cream knit sweater" not in prompt
-    assert "room, posture" not in prompt
+    assert "The woman says: Dieser Alltagstipp" in prompt
 
 
 def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_inputs():
@@ -139,10 +152,13 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
     )
 
 
-def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
+def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
+
+    monkeypatch.setattr(wheelchair_scene_plate, "_SCENE_PLATE_BUNDLE_ENABLED", True)
 
     class BundledClient:
         def __init__(self) -> None:
@@ -167,7 +183,6 @@ def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
 
     client = BundledClient()
     persisted_indexes: list[int] = []
-    batch_callback_calls: list[list[int]] = []
     result = generate_scene_plate_candidates(
         actor_references=[
             _reference("actor_front", b"front"),
@@ -178,14 +193,10 @@ def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
         wardrobe="light-grey cardigan over a plain white top",
         llm_client=client,
         candidate_ready_callback=lambda candidate: persisted_indexes.append(candidate.index),
-        candidate_batch_ready_callback=lambda candidates: batch_callback_calls.append(
-            [candidate.index for candidate in candidates]
-        ),
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
-    assert persisted_indexes == []
-    assert batch_callback_calls == [[1, 2, 3]]
+    assert sorted(persisted_indexes) == [1, 2, 3]
     assert len(client.bundle_calls) == 1
     call = client.bundle_calls[0]
     assert call["provider_max_attempts"] == 1
@@ -199,10 +210,13 @@ def test_scene_plate_fresh_candidates_use_one_multi_image_provider_request():
     ]
 
 
-def test_scene_plate_partial_multi_image_response_generates_only_missing_output():
+def test_scene_plate_partial_multi_image_response_generates_only_missing_output(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
+
+    monkeypatch.setattr(wheelchair_scene_plate, "_SCENE_PLATE_BUNDLE_ENABLED", True)
 
     class PartialBundledClient:
         def __init__(self) -> None:
@@ -234,7 +248,7 @@ def test_scene_plate_partial_multi_image_response_generates_only_missing_output(
             }
 
     client = PartialBundledClient()
-    batched_indexes = []
+    persisted_indexes: list[int] = []
     result = generate_scene_plate_candidates(
         actor_references=[
             _reference("actor_front", b"front"),
@@ -244,21 +258,22 @@ def test_scene_plate_partial_multi_image_response_generates_only_missing_output(
         scene="the exact supplied garden patio",
         wardrobe="light-grey cardigan over a plain white top",
         llm_client=client,
-        candidate_batch_ready_callback=lambda candidates: batched_indexes.append(
-            [candidate.index for candidate in candidates]
-        ),
+        candidate_ready_callback=lambda candidate: persisted_indexes.append(candidate.index),
     )
 
     assert [candidate.index for candidate in result.candidates] == [1, 2, 3]
     assert client.single_indexes == [3]
-    assert batched_indexes == [[1, 2, 3]]
+    assert sorted(persisted_indexes) == [1, 2, 3]
 
 
-def test_scene_plate_unsupported_bundle_falls_back_to_reliable_single_image_path():
+def test_scene_plate_unsupported_bundle_falls_back_to_reliable_single_image_path(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
     from app.core.errors import ThirdPartyError
     from app.features.shot_frames.wheelchair_scene_plate import (
         generate_scene_plate_candidates,
     )
+
+    monkeypatch.setattr(wheelchair_scene_plate, "_SCENE_PLATE_BUNDLE_ENABLED", True)
 
     class UnsupportedBundleClient:
         def __init__(self) -> None:
@@ -311,6 +326,132 @@ def test_scene_plate_unsupported_bundle_falls_back_to_reliable_single_image_path
     assert client.bundle_calls == 1
     assert sorted(client.single_indexes) == [1, 2, 3]
     assert any(details.get("bundle_fallback") is True for _phase, details in phases)
+
+
+def test_scene_plate_composite_layout_detector_rejects_triptych_not_single_frame():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        scene_plate_has_composite_layout,
+    )
+
+    assert scene_plate_has_composite_layout(_triptych_png()) is True
+    assert scene_plate_has_composite_layout(_png(block="left", value=120)) is False
+
+
+def test_scene_plate_bundle_composite_falls_back_to_three_standalone_frames(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    monkeypatch.setattr(wheelchair_scene_plate, "_SCENE_PLATE_BUNDLE_ENABLED", True)
+
+    class CompositeBundleClient:
+        def __init__(self) -> None:
+            self.bundle_calls = 0
+            self.single_indexes: list[int] = []
+
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_images(self, **kwargs):
+            self.bundle_calls += 1
+            return {
+                "images": [
+                    {"image_bytes": _triptych_png(), "mime_type": "image/png"},
+                    {"image_bytes": _png(block="right", value=130), "mime_type": "image/png"},
+                    {"image_bytes": _png(block="left", value=200), "mime_type": "image/png"},
+                ],
+                "model": kwargs["model"],
+            }
+
+        def generate_gemini_image(self, **kwargs):
+            index = next(
+                candidate_index
+                for candidate_index in range(1, 4)
+                if f"Candidate {candidate_index} composition:" in kwargs["prompt"]
+            )
+            self.single_indexes.append(index)
+            return {
+                "image_bytes": _png(
+                    block="left" if index % 2 else "right",
+                    value=40 + (index * 55),
+                ),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    client = CompositeBundleClient()
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=client,
+    )
+
+    assert client.bundle_calls == 1
+    assert sorted(client.single_indexes) == [1, 2, 3]
+    assert all(
+        not wheelchair_scene_plate.scene_plate_has_composite_layout(candidate.image_bytes)
+        for candidate in result.candidates
+    )
+
+
+def test_scene_plate_standalone_composite_retries_only_affected_candidate(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    monkeypatch.setattr(wheelchair_scene_plate, "_SCENE_PLATE_BUNDLE_ENABLED", False)
+
+    class CompositeThenValidClient:
+        def __init__(self) -> None:
+            self.attempts = {1: 0, 2: 0, 3: 0}
+
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_image(self, **kwargs):
+            index = next(
+                candidate_index
+                for candidate_index in range(1, 4)
+                if f"Candidate {candidate_index} composition:" in kwargs["prompt"]
+            )
+            self.attempts[index] += 1
+            if index == 2 and self.attempts[index] == 1:
+                image_bytes = _triptych_png()
+            else:
+                image_bytes = _png(
+                    block="left" if index % 2 else "right",
+                    value=40 + (index * 55),
+                )
+            return {
+                "image_bytes": image_bytes,
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    client = CompositeThenValidClient()
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"front"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="the exact supplied garden patio",
+        wardrobe="light-grey cardigan over a plain white top",
+        llm_client=client,
+    )
+
+    assert client.attempts == {1: 1, 2: 2, 3: 1}
+    assert all(
+        not wheelchair_scene_plate.scene_plate_has_composite_layout(candidate.image_bytes)
+        for candidate in result.candidates
+    )
 
 
 def test_scene_plate_candidates_generate_with_bounded_concurrency_and_keep_candidate_order():
@@ -543,6 +684,28 @@ def test_scene_plate_traffic_gate_round_robins_every_waiting_run():
     assert gate._next_waiter_locked() is waiter_c
     gate._last_started_key = "run-c"
     assert gate._next_waiter_locked() is waiter_a
+
+
+def test_scene_plate_traffic_gate_ramps_after_one_healthy_render(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
+
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_SUCCESS_RAMP",
+        1,
+    )
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_IMAGE_MAX_CONCURRENCY",
+        3,
+    )
+    gate = wheelchair_scene_plate._ScenePlateImageTrafficGate()
+    gate._active = 1
+
+    gate.release(succeeded=True, status_code=None)
+
+    assert gate._current_limit == 2
+    assert gate._healthy_successes == 0
 
 
 def test_scene_plate_traffic_gate_spaces_next_start_after_response(monkeypatch):

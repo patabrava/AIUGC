@@ -45,7 +45,7 @@ def test_gemini_provider_defaults_to_vertex_without_legacy_fallback(monkeypatch,
     assert settings.semantic_scene_plate_image_size == "2K"
     assert (
         settings.semantic_scene_plate_contract_version
-        == "flash-identity-batched-qa-global-v10"
+        == "flash-identity-independent-qa-global-v12"
     )
     assert settings.semantic_scene_identity_gate_location == "global"
     assert settings.semantic_scene_identity_gate_model == "gemini-2.5-flash"

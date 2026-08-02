@@ -74,54 +74,8 @@ def test_scene_identity_gate_uses_fixed_original_reference_order_and_server_pass
     assert "immutable original references" in llm.calls[0]["prompt"]
     assert "confidence in actor-identity preservation only" in llm.calls[0]["prompt"]
     assert "do not reduce it for an expected change of room" in llm.calls[0]["prompt"]
-
-
-def test_scene_identity_gate_batches_three_candidates_in_one_provider_call():
-    from app.features.shot_frames.identity_qa import evaluate_scene_plate_identities
-
-    reports = []
-    for index in range(1, 4):
-        report = json.loads(_scene_payload(confidence=0.90 + index / 100))
-        reports.append({"candidate_index": index, **report})
-    llm = _FakeLLM(json.dumps({"candidates": reports}))
-
-    result = evaluate_scene_plate_identities(
-        _image(b"front"),
-        _image(b"support"),
-        [_image(b"candidate-1"), _image(b"candidate-2"), _image(b"candidate-3")],
-        llm_client=llm,
-        model="gemini-2.5-flash",
-        location="global",
-    )
-
-    assert len(llm.calls) == 1
-    assert [image["image_bytes"] for image in llm.calls[0]["input_images"]] == [
-        b"front",
-        b"support",
-        b"candidate-1",
-        b"candidate-2",
-        b"candidate-3",
-    ]
-    assert llm.calls[0]["location"] == "global"
-    assert [report.confidence for report in result] == [0.91, 0.92, 0.93]
-    assert all(report.passed for report in result)
-
-
-def test_scene_identity_batch_rejects_missing_or_reordered_candidates():
-    from app.features.shot_frames.identity_qa import evaluate_scene_plate_identities
-
-    reports = []
-    for index in (2, 1, 3):
-        reports.append({"candidate_index": index, **json.loads(_scene_payload())})
-
-    with pytest.raises(ValidationError, match="out of order"):
-        evaluate_scene_plate_identities(
-            _image(b"front"),
-            _image(b"support"),
-            [_image(b"candidate-1"), _image(b"candidate-2"), _image(b"candidate-3")],
-            llm_client=_FakeLLM(json.dumps({"candidates": reports})),
-            model="gemini-2.5-flash",
-        )
+    assert "one continuous camera frame" in llm.calls[0]["prompt"]
+    assert "composite_layout" in llm.calls[0]["prompt"]
 
 
 @pytest.mark.parametrize(

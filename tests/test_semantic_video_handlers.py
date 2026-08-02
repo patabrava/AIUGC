@@ -1803,36 +1803,35 @@ def test_candidate_endpoint_evaluates_identity_gates_concurrently(monkeypatch):
     assert all(candidate["identity_gate_result"]["passed"] for candidate in candidates)
 
 
-def test_candidate_endpoint_uses_one_batched_identity_gate_for_complete_set(monkeypatch):
+def test_candidate_endpoint_uses_independent_identity_gate_for_each_complete_set_candidate(monkeypatch):
     handlers, state, storage = _install_repository(monkeypatch)
     from app.features.shot_frames.identity_qa import SceneIdentityQAReport
     from app.main import app
 
     state["context"]["reference"].pop("master")
     generation_result = _scene_plate_result(marker="batched-qa")
-    batch_calls = []
+    identity_candidate_hashes = []
 
     def generate_complete_set(**kwargs):
-        kwargs["candidate_batch_ready_callback"](generation_result.candidates)
+        assert "candidate_batch_ready_callback" not in kwargs
+        for candidate in generation_result.candidates:
+            kwargs["candidate_ready_callback"](candidate)
         return generation_result
 
-    def evaluate_complete_set(*args, **kwargs):
-        batch_calls.append((args, kwargs))
-        return tuple(
-            SceneIdentityQAReport(
-                same_person=True,
-                facial_geometry_consistent=True,
-                apparent_age_consistent=True,
-                hairline_and_hair_consistent=True,
-                skin_texture_natural=True,
-                not_beautified_or_stylized=True,
-                no_face_artifacts=True,
-                confidence=0.99,
-                blocking_reasons=(),
-                observed_differences=(),
-                passed=True,
-            )
-            for _candidate in generation_result.candidates
+    def evaluate_independent_candidate(_front, _support, candidate, **_kwargs):
+        identity_candidate_hashes.append(sha256(candidate["image_bytes"]).hexdigest())
+        return SceneIdentityQAReport(
+            same_person=True,
+            facial_geometry_consistent=True,
+            apparent_age_consistent=True,
+            hairline_and_hair_consistent=True,
+            skin_texture_natural=True,
+            not_beautified_or_stylized=True,
+            no_face_artifacts=True,
+            confidence=0.99,
+            blocking_reasons=(),
+            observed_differences=(),
+            passed=True,
         )
 
     monkeypatch.setattr(
@@ -1843,16 +1842,8 @@ def test_candidate_endpoint_uses_one_batched_identity_gate_for_complete_set(monk
     )
     monkeypatch.setattr(
         handlers,
-        "evaluate_scene_plate_identities",
-        evaluate_complete_set,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        handlers,
         "evaluate_scene_plate_identity",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("complete sets must not use per-candidate identity calls")
-        ),
+        evaluate_independent_candidate,
         raising=False,
     )
 
@@ -1862,7 +1853,8 @@ def test_candidate_endpoint_uses_one_batched_identity_gate_for_complete_set(monk
     )
 
     assert response.status_code == 200, response.text
-    assert len(batch_calls) == 1
+    assert len(identity_candidate_hashes) == 3
+    assert len(set(identity_candidate_hashes)) == 3
     assert len(storage.upload_calls) == 3
     assert all(
         candidate["identity_gate_result"]["passed"]
@@ -1976,7 +1968,7 @@ def test_candidate_endpoint_rejects_changed_or_mismatched_actor_anchor(monkeypat
             "evaluator_model": state["context"]["reference"][
                 "scene_plate_generation_contract"
             ]["identity_evaluator_model"],
-            "evaluator_contract_version": "semantic-scene-identity-v2",
+            "evaluator_contract_version": "semantic-scene-identity-v3",
             "evaluated_actor_reference_fingerprint": actor_fingerprint,
             "candidate_sha256": sha256(anchor_bytes).hexdigest(),
             "component_results": {},

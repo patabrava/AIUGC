@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
+import math
 import os
 import random
 from threading import Condition
@@ -56,10 +57,10 @@ _NEAR_DUPLICATE_MEAN_RGB_DELTA = 3.0
 _PROVIDER_MAX_ATTEMPTS = 3
 _TRANSIENT_PROVIDER_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _SCENE_PLATE_IMAGE_MAX_CONCURRENCY = max(
-    1, int(os.environ.get("SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY", "1"))
+    1, int(os.environ.get("SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY", "3"))
 )
 _SCENE_PLATE_SUCCESS_RAMP = max(
-    1, int(os.environ.get("SEMANTIC_SCENE_PLATE_SUCCESS_RAMP", "3"))
+    1, int(os.environ.get("SEMANTIC_SCENE_PLATE_SUCCESS_RAMP", "1"))
 )
 _SCENE_PLATE_START_INTERVAL_SECONDS = max(
     0.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS", "5"))
@@ -71,7 +72,7 @@ _SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS = max(
     1.0, float(os.environ.get("SEMANTIC_SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS", "10"))
 )
 _SCENE_PLATE_BUNDLE_ENABLED = os.environ.get(
-    "SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED", "true"
+    "SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -320,6 +321,67 @@ def scene_plates_are_near_duplicates(first: bytes, second: bytes) -> bool:
     )
 
 
+def scene_plate_has_composite_layout(image_bytes: bytes) -> bool:
+    """Detect strong horizontal separators characteristic of stacked contact sheets.
+
+    The production path requests one image per render. This narrow guard protects the
+    optional bundled path from accepting a provider-created triptych as one Veo frame.
+    It deliberately requires two separated, thin, near-white seams so ordinary room
+    edges and furniture lines do not become false positives.
+    """
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            rgb = image.convert("RGB")
+            if rgb.width >= rgb.height:
+                return False
+            analysis_width = min(256, rgb.width)
+            analysis_height = max(1, round(rgb.height * analysis_width / rgb.width))
+            sampled = rgb.resize((analysis_width, analysis_height))
+    except (OSError, UnidentifiedImageError):
+        return False
+
+    pixels = sampled.load()
+    assert pixels is not None
+    minimum_white_pixels = math.ceil(analysis_width * 0.96)
+    candidate_rows: list[int] = []
+    for row in range(2, analysis_height - 2):
+        white_pixels = sum(
+            1
+            for column in range(analysis_width)
+            if min(pixels[column, row]) >= 238
+            and max(pixels[column, row]) - min(pixels[column, row]) <= 10
+        )
+        if white_pixels < minimum_white_pixels:
+            continue
+        surrounding_delta = sum(
+            abs(pixels[column, row - 2][channel] - pixels[column, row + 2][channel])
+            for column in range(analysis_width)
+            for channel in range(3)
+        ) / (analysis_width * 3)
+        if surrounding_delta >= 12.0:
+            candidate_rows.append(row)
+
+    seam_groups: list[list[int]] = []
+    for row in candidate_rows:
+        if seam_groups and row <= seam_groups[-1][-1] + 1:
+            seam_groups[-1].append(row)
+        else:
+            seam_groups.append([row])
+    thin_seams = [
+        group
+        for group in seam_groups
+        if len(group) <= max(4, round(analysis_height * 0.012))
+    ]
+    if len(thin_seams) < 2:
+        return False
+    seam_centers = [sum(group) / len(group) for group in thin_seams]
+    return any(
+        second - first >= analysis_height * 0.18
+        for position, first in enumerate(seam_centers)
+        for second in seam_centers[position + 1 :]
+    )
+
+
 def _duplicate_candidate_positions(
     candidates: Sequence[ScenePlateCandidate],
 ) -> tuple[int, ...]:
@@ -337,6 +399,8 @@ def _duplicate_candidate_positions(
 
 
 def _is_retryable_provider_error(error: ThirdPartyError) -> bool:
+    if error.details.get("reason_code") == "composite_layout":
+        return True
     status_code = error.details.get("status_code")
     if status_code is None:
         # Transport failures and successful responses without image data do not
@@ -493,7 +557,23 @@ def generate_scene_plate_bundle(
             "Gemini scene-plate bundle returned no images.",
             {"model": image_model},
         )
-    return [dict(image) for image in images[: len(prompts)]]
+    selected_images = [dict(image) for image in images[: len(prompts)]]
+    composite_indexes = [
+        index
+        for index, image in enumerate(selected_images, start=1)
+        if isinstance(image.get("image_bytes"), bytes)
+        and scene_plate_has_composite_layout(image["image_bytes"])
+    ]
+    if composite_indexes:
+        raise ThirdPartyError(
+            "Gemini combined multiple scene plates into one image.",
+            {
+                "model": image_model,
+                "status_code": 422,
+                "composite_output_indexes": composite_indexes,
+            },
+        )
+    return selected_images
 
 
 def _as_role(reference: ShotFrameReference, role: str) -> ShotFrameReference:
@@ -518,9 +598,6 @@ def generate_scene_plate_candidates(
     traffic_key: Optional[str] = None,
     initial_candidates: Sequence[ScenePlateCandidate] = (),
     candidate_ready_callback: Optional[Callable[[ScenePlateCandidate], None]] = None,
-    candidate_batch_ready_callback: Optional[
-        Callable[[Sequence[ScenePlateCandidate]], None]
-    ] = None,
     progress_callback: Optional[
         Callable[[str, Mapping[str, Any]], None]
     ] = None,
@@ -598,6 +675,15 @@ def generate_scene_plate_candidates(
             image_size=image_size,
             traffic_key=traffic_key,
         )
+        if scene_plate_has_composite_layout(generated["image_bytes"]):
+            raise ThirdPartyError(
+                "Gemini combined multiple views into one scene plate.",
+                {
+                    "status_code": 422,
+                    "reason_code": "composite_layout",
+                    "candidate_index": index,
+                },
+            )
         candidate = ScenePlateCandidate(
             index=index,
             image_bytes=generated["image_bytes"],
@@ -616,12 +702,6 @@ def generate_scene_plate_candidates(
     def persist_deferred_candidates(
         ready_candidates: Sequence[ScenePlateCandidate],
     ) -> None:
-        if (
-            len(ready_candidates) == candidate_count
-            and candidate_batch_ready_callback is not None
-        ):
-            candidate_batch_ready_callback(tuple(ready_candidates))
-            return
         if candidate_ready_callback is not None and ready_candidates:
             with ThreadPoolExecutor(
                 max_workers=len(ready_candidates),
@@ -658,9 +738,9 @@ def generate_scene_plate_candidates(
             return candidate
         raise AssertionError("Scene-plate provider retry loop exhausted unexpectedly.")
 
-    # Fresh sets use Gemini's ordered multi-image response so operator latency is
-    # one provider wait. Partial resumes, omitted outputs, and diversity repair
-    # retain the independently retryable single-image path.
+    # Standalone renders are the production default because a multi-output image
+    # request can be interpreted as a collage. The bundle path is opt-in and has
+    # a structural rejection guard; partial resumes and repairs remain standalone.
     report_progress(
         "generating_images",
         candidate_count=candidate_count,
@@ -814,7 +894,7 @@ def generate_scene_plate_candidates(
     if defer_complete_set_callback:
         # Bundle responses may omit an image. Delay identity QA until single-image
         # recovery and diversity repair have produced the final ordered set, then
-        # evaluate the three candidates together in one model call.
+        # persist and evaluate every candidate through its own callback.
         persist_deferred_candidates(candidates)
     return ScenePlateGenerationResult(
         candidates=tuple(candidates),
@@ -834,5 +914,6 @@ __all__ = [
     "generate_scene_plate",
     "generate_scene_plate_bundle",
     "generate_scene_plate_candidates",
+    "scene_plate_has_composite_layout",
     "scene_plates_are_near_duplicates",
 ]

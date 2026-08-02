@@ -724,7 +724,8 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert "Original-actor identity review" in html
     assert "Original front reference" in html
     assert "Original three-quarter reference" in html
-    assert "Identity gate passed · 96% confidence" in html
+    assert "Identity verified · 96% evaluator confidence" in html
+    assert "not overall picture quality" in html
     assert "Approving confirms that the selected scene plate shows the same actor as both original references" in html
     assert "Regenerate wheelchair scene plates" in html
     assert "Approve selected scene plate and confirm identity" in html

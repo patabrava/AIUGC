@@ -5,12 +5,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
-from io import BytesIO
 import json
 import math
 from typing import Any, Mapping, Optional, Sequence, Tuple
-
-from PIL import Image, UnidentifiedImageError
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ValidationError
@@ -52,7 +49,10 @@ Image 3 is a generated Semantic UGC scene-plate candidate.
 Compare only the supplied images. Judge whether Image 3 preserves the same person, facial geometry, apparent age,
 hairline and hair, ordinary natural skin texture, and realistic unretouched appearance from both original
 references. Fail any beautification, face averaging, synthetic smoothing, age drift, identity substitution, or
-malformed eyes, mouth, teeth, or facial structure. Treat lighting, expression, pose, wardrobe, wheelchair, and
+malformed eyes, mouth, teeth, or facial structure. Image 3 must be one continuous camera frame containing one
+view of the actor. Fail a collage, contact sheet, grid, split screen, triptych, repeated actor, panel divider, or
+multiple competing compositions by setting no_face_artifacts false and naming composite_layout in
+blocking_reasons. Treat lighting, expression, pose, wardrobe, wheelchair, and
 background changes as non-identity differences unless they obscure or alter the face. The confidence value is
 confidence in actor-identity preservation only; do not reduce it for an expected change of room, lighting,
 camera distance, expression, seated pose, wardrobe, or wheelchair. When every identity component is true and
@@ -70,64 +70,6 @@ Return JSON only with exactly this shape:
   "confidence": 0.0,
   "blocking_reasons": [],
   "observed_differences": []
-}
-Use booleans for every component, a finite confidence number from 0 through 1, and arrays of specific strings."""
-
-_SCENE_BATCH_PROMPT = """Images 1 and 2 are immutable original references of the consented actor, in that order.
-Images 3, 4, and 5 are generated Semantic UGC scene-plate candidates 1, 2, and 3, respectively.
-
-Evaluate each candidate independently against both original references. Judge whether each candidate preserves the
-same person, facial geometry, apparent age, hairline and hair, ordinary natural skin texture, and realistic
-unretouched appearance. Fail any beautification, face averaging, synthetic smoothing, age drift, identity
-substitution, or malformed eyes, mouth, teeth, or facial structure. Treat lighting, expression, pose, wardrobe,
-wheelchair, and background changes as non-identity differences unless they obscure or alter the face. The confidence
-value is confidence in actor-identity preservation only; do not reduce it for an expected change of room, lighting,
-camera distance, expression, seated pose, wardrobe, or wheelchair. When every identity component is true and the
-only observed differences are those non-identity changes, return identity confidence of at least 0.90.
-
-Return JSON only with exactly this shape and exactly three ordered candidate objects:
-{
-  "candidates": [
-    {
-      "candidate_index": 1,
-      "same_person": true,
-      "facial_geometry_consistent": true,
-      "apparent_age_consistent": true,
-      "hairline_and_hair_consistent": true,
-      "skin_texture_natural": true,
-      "not_beautified_or_stylized": true,
-      "no_face_artifacts": true,
-      "confidence": 0.0,
-      "blocking_reasons": [],
-      "observed_differences": []
-    },
-    {
-      "candidate_index": 2,
-      "same_person": true,
-      "facial_geometry_consistent": true,
-      "apparent_age_consistent": true,
-      "hairline_and_hair_consistent": true,
-      "skin_texture_natural": true,
-      "not_beautified_or_stylized": true,
-      "no_face_artifacts": true,
-      "confidence": 0.0,
-      "blocking_reasons": [],
-      "observed_differences": []
-    },
-    {
-      "candidate_index": 3,
-      "same_person": true,
-      "facial_geometry_consistent": true,
-      "apparent_age_consistent": true,
-      "hairline_and_hair_consistent": true,
-      "skin_texture_natural": true,
-      "not_beautified_or_stylized": true,
-      "no_face_artifacts": true,
-      "confidence": 0.0,
-      "blocking_reasons": [],
-      "observed_differences": []
-    }
-  ]
 }
 Use booleans for every component, a finite confidence number from 0 through 1, and arrays of specific strings."""
 
@@ -265,21 +207,6 @@ def _validated_image(image: Mapping[str, Any], *, label: str) -> dict[str, Any]:
     return {"mime_type": mime_type, "image_bytes": image_bytes}
 
 
-def _compact_batch_identity_image(image: dict[str, Any]) -> dict[str, Any]:
-    """Bound five-image QA payloads while retaining identity-readable detail."""
-    try:
-        with Image.open(BytesIO(image["image_bytes"])) as source:
-            normalized = source.convert("RGB")
-            normalized.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
-            output = BytesIO()
-            normalized.save(output, format="JPEG", quality=92, optimize=True)
-    except (UnidentifiedImageError, OSError):
-        # Validation fixtures may use opaque bytes; production images are
-        # decoded and compacted. The original boundary checks still apply.
-        return image
-    return {"mime_type": "image/jpeg", "image_bytes": output.getvalue()}
-
-
 def _parse_report(
     raw_response: Any,
     *,
@@ -393,111 +320,6 @@ def _evaluate_report_with_consistency_retry(
         component_fields=component_fields,
         minimum_confidence=minimum_confidence,
     )
-
-
-def _parse_scene_batch_reports(
-    raw_response: Any,
-    *,
-    candidate_indexes: Sequence[int],
-    minimum_confidence: float,
-) -> tuple[dict[str, Any], ...]:
-    normalized = str(raw_response or "").strip()
-    lines = normalized.splitlines()
-    if (
-        len(lines) >= 3
-        and lines[0].strip().lower() in {"```", "```json"}
-        and lines[-1].strip() == "```"
-    ):
-        normalized = "\n".join(lines[1:-1]).strip()
-    try:
-        payload = json.loads(normalized)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValidationError("Actor identity QA response must contain valid JSON.") from exc
-    if not isinstance(payload, dict) or set(payload) != {"candidates"}:
-        raise ValidationError("Batched actor identity QA JSON does not match the strict schema.")
-    rows = payload["candidates"]
-    if not isinstance(rows, list) or len(rows) != len(candidate_indexes):
-        raise ValidationError(
-            "Batched actor identity QA returned an unexpected candidate count.",
-            {"expected": len(candidate_indexes)},
-        )
-    parsed_reports = []
-    for expected_index, row in zip(candidate_indexes, rows):
-        if not isinstance(row, dict) or row.get("candidate_index") != expected_index:
-            raise ValidationError(
-                "Batched actor identity QA returned candidates out of order.",
-                {"expected_candidate_index": expected_index},
-            )
-        report_payload = {key: value for key, value in row.items() if key != "candidate_index"}
-        parsed_reports.append(
-            _parse_report(
-                json.dumps(report_payload),
-                component_fields=_SCENE_COMPONENTS,
-                minimum_confidence=minimum_confidence,
-            )
-        )
-    return tuple(parsed_reports)
-
-
-def evaluate_scene_plate_identities(
-    actor_front: Mapping[str, Any],
-    actor_three_quarter: Mapping[str, Any],
-    candidates: Sequence[Mapping[str, Any]],
-    *,
-    llm_client: Optional[Any] = None,
-    model: str,
-    minimum_confidence: float = 0.90,
-    location: Optional[str] = None,
-) -> tuple[SceneIdentityQAReport, ...]:
-    """Evaluate a complete three-candidate set in one multimodal provider call."""
-    if len(candidates) != 3:
-        raise ValidationError("Batched scene identity QA requires exactly three candidates.")
-    images = [
-        _compact_batch_identity_image(
-            _validated_image(actor_front, label="actor_front")
-        ),
-        _compact_batch_identity_image(
-            _validated_image(actor_three_quarter, label="actor_three_quarter")
-        ),
-        *(
-            _compact_batch_identity_image(
-                _validated_image(candidate, label=f"candidate_{index}")
-            )
-            for index, candidate in enumerate(candidates, start=1)
-        ),
-    ]
-    client = llm_client or get_llm_client()
-    raw = client.generate_gemini_text(
-        prompt=_SCENE_BATCH_PROMPT,
-        model=model,
-        temperature=0,
-        input_images=images,
-        location=location,
-    )
-    parsed = _parse_scene_batch_reports(
-        raw,
-        candidate_indexes=(1, 2, 3),
-        minimum_confidence=minimum_confidence,
-    )
-    if any(
-        all(report[field] for field in _SCENE_COMPONENTS)
-        and not report["blocking_reasons"]
-        and report["confidence"] < float(minimum_confidence)
-        for report in parsed
-    ):
-        corrected_raw = client.generate_gemini_text(
-            prompt=_SCENE_BATCH_PROMPT + _CONFIDENCE_CONSISTENCY_CORRECTION,
-            model=model,
-            temperature=0,
-            input_images=images,
-            location=location,
-        )
-        parsed = _parse_scene_batch_reports(
-            corrected_raw,
-            candidate_indexes=(1, 2, 3),
-            minimum_confidence=minimum_confidence,
-        )
-    return tuple(SceneIdentityQAReport(**report) for report in parsed)
 
 
 def evaluate_scene_plate_identity(
