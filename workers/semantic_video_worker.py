@@ -1893,10 +1893,42 @@ class SemanticVideoWorker:
         take = takes[0]
         raw_uri = str(take["raw_artifact_uri"])
         raw_hash = str(take["raw_artifact_sha256"])
-        captioned = self.stage_runner.caption_advisory_single_take(
-            run=dict(run),
-            takes=deepcopy_rows(takes),
-        )
+        try:
+            captioned = self.stage_runner.caption_advisory_single_take(
+                run=dict(run),
+                takes=deepcopy_rows(takes),
+            )
+        except StateTransitionError as exc:
+            if str(exc) != "Advisory terminal protection would cut transcript-safe context.":
+                raise
+            terminal_failure = {
+                "stage": "acoustic_qa",
+                "message": str(exc),
+                "details": dict(exc.details or {}),
+                "failed_take_indexes": [int(take.get("take_index") or 0)],
+                "failure_type": "terminal_tail_speech_overlap",
+                "retry_mode": "localized_paid_take",
+            }
+            self.repo.require_retry_approval(
+                run_id=run_id,
+                worker_id=self.worker_id,
+                lease_token=lease_token,
+                expected_stage=failed_stage,
+                failed_take_indexes=terminal_failure["failed_take_indexes"],
+                evidence={
+                    **dict(artifacts),
+                    "qa_failure": terminal_failure,
+                    "guidance": (
+                        "Retry only the take whose verified final word overlaps the protected "
+                        "500 ms terminal window. Preserve every completed sibling take."
+                    ),
+                },
+            )
+            return WorkerTickResult(
+                run_id,
+                "retry_approval_required",
+                "terminal_speech_overlap_retry_required",
+            )
         caption_uri = str(captioned.get("url") or "")
         caption_hash = str(captioned.get("sha256") or "")
         if (

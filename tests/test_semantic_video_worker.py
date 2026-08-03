@@ -906,6 +906,61 @@ def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():
     assert stages.advisory_caption_calls
 
 
+def test_worker_requires_one_localized_retry_when_advisory_terminal_window_cuts_speech():
+    repo = FakeRepo(stage="identity_qa", take_count=1)
+    raw_hash = "d" * 64
+    repo.takes[0].update(
+        submission_state="completed",
+        raw_artifact_uri="https://storage/paid-8s.mp4",
+        raw_artifact_sha256=raw_hash,
+    )
+
+    class TerminalSpeechOverlapStages(FakeStages):
+        def caption_advisory_single_take(self, *, run, takes):
+            self.advisory_caption_calls.append((deepcopy(run), deepcopy(takes)))
+            raise StateTransitionError(
+                "Advisory terminal protection would cut transcript-safe context.",
+                {
+                    "transcript_safe_end_seconds": 7.87,
+                    "protected_source_end_seconds": 7.5,
+                },
+            )
+
+    stages = TerminalSpeechOverlapStages(
+        {
+            "passed": False,
+            "failed_take_indexes": [0],
+            "artifacts": {
+                "qa_failure": {
+                    "stage": "identity_qa",
+                    "message": "Identity QA is advisory.",
+                }
+            },
+        }
+    )
+    worker = _worker(repo, FakeVertex(), stages)
+
+    result = worker.tick("run-1")
+
+    assert result.action == "terminal_speech_overlap_retry_required"
+    assert result.stage == "retry_approval_required"
+    retry = next(event for event in repo.events if event[0] == "retry_required")
+    assert retry[1] == (0,)
+    assert retry[2]["qa_failure"] == {
+        "stage": "acoustic_qa",
+        "message": "Advisory terminal protection would cut transcript-safe context.",
+        "details": {
+            "transcript_safe_end_seconds": 7.87,
+            "protected_source_end_seconds": 7.5,
+        },
+        "failed_take_indexes": [0],
+        "failure_type": "terminal_tail_speech_overlap",
+        "retry_mode": "localized_paid_take",
+    }
+    assert "Retry only the take" in retry[2]["guidance"]
+    assert not any(event[0] == "complete_run" for event in repo.events)
+
+
 def test_worker_final_captioned_artifact_completes_post_directly():
     repo = FakeRepo(stage="uploading", take_count=1)
     stages = FakeStages(
