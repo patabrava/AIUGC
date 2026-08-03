@@ -938,6 +938,7 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         and plan_hash
         and qa_failure.get("stage")
         in {"transcript_qa", "identity_qa", "voice_qa", "acoustic_qa"}
+        and qa_failure.get("retry_mode") != "localized_paid_take"
     )
     contact_sheet = (
         pipeline_manifest.get("contact_sheet")

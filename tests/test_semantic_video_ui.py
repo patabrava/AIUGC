@@ -357,6 +357,77 @@ def test_generated_take_qa_failure_renders_free_resume_instead_of_paid_retry(
     assert 'data-action="approve-retry" data-cost-usd="6.40"' not in html
 
 
+def test_terminal_speech_overlap_renders_localized_paid_retry_instead_of_free_resume(
+    monkeypatch,
+):
+    run = {
+        "id": "run-terminal-speech-overlap",
+        "revision": 13,
+        "stage": "retry_approval_required",
+        "requested_duration_seconds": 8,
+        "plan_hash": "a" * 64,
+        "master_hash": "b" * 64,
+        "master_snapshot": {},
+        "plan_snapshot": {
+            "take_count": 1,
+            "billable_provider_seconds": 8,
+            "price_per_provider_second_usd": "0.40",
+            "estimated_cost_usd": "3.20",
+        },
+        "artifact_manifest": {
+            "qa_failure": {
+                "stage": "acoustic_qa",
+                "message": "Advisory terminal protection would cut transcript-safe context.",
+                "failure_type": "terminal_tail_speech_overlap",
+                "retry_mode": "localized_paid_take",
+                "failed_take_indexes": [0],
+            }
+        },
+    }
+    attempts = [
+        {
+            "take_index": 0,
+            "attempt": 1,
+            "submission_state": "qa_failed",
+            "provider_duration_seconds": 8,
+        }
+    ]
+    approvals = [
+        {"approval_type": "reference", "contract_hash": "b" * 64},
+        {"approval_type": "initial_plan", "contract_hash": "a" * 64},
+    ]
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: run,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_attempts",
+        lambda _run_id: attempts,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_approvals",
+        lambda _run_id: approvals,
+    )
+
+    view = batch_handlers._build_batch_detail_view(_semantic_batch())
+    item = view["semantic_video"]["posts"][0]
+
+    assert item["qa_resume_available"] is False
+    assert item["failed_take_indexes"] == [0]
+    assert item["retry_provider_seconds"] == 8
+    assert item["retry_estimated_cost_usd"] == "3.20"
+
+    html = Environment(loader=FileSystemLoader("templates")).get_template(
+        "batches/detail/_semantic_video.html"
+    ).render(batch=_semantic_batch(), batch_view=view)
+    assert "Retry only failed takes: 1" in html
+    assert 'data-action="approve-retry" data-cost-usd="3.20"' in html
+    assert "Continue with generated videos · $0.00" not in html
+
+
 def test_completed_semantic_panel_renders_run_artifact_urls_without_legacy_prompt(monkeypatch):
     run = {
         "id": "run-completed-artifacts",
@@ -980,10 +1051,11 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "master-approve" in source
     assert "reconcileMasterApproval(root)" in source
     assert "progress.stage !== 'awaiting_reference_approval'" in source
-    assert "synchronizePaidApproval(root, body)" in source
-    assert "reconcilePaidApproval(root)" in source
-    assert "path === 'approve' && error.status === 409" in source
-    assert "progress.stage !== 'awaiting_paid_approval'" in source
+    assert "synchronizePaidAction(root, path, body)" in source
+    assert "reconcilePaidAction(root, path)" in source
+    assert "['approve', 'retry-approve'].includes(path)" in source
+    assert "error.status === 409" in source
+    assert "path === 'approve' ? 'awaiting_paid_approval' : 'retry_approval_required'" in source
     assert "expected_revision: Number(progress.revision || 0)" in source
     assert "String(progress.plan_hash || '') !== String(body.plan_hash || '')" in source
     assert "data-identity-attestation" not in source

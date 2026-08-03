@@ -344,13 +344,14 @@
         return false;
     }
 
-    async function synchronizePaidApproval(root, body) {
+    async function synchronizePaidAction(root, path, body) {
         const progress = await requestJson(
             `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
             {method: 'GET'},
         );
         updateProgress(root, progress);
-        if (progress.stage !== 'awaiting_paid_approval') {
+        const expectedStage = path === 'approve' ? 'awaiting_paid_approval' : 'retry_approval_required';
+        if (progress.stage !== expectedStage) {
             reloadAtWorkflow(root);
             return null;
         }
@@ -360,14 +361,15 @@
         return {...body, expected_revision: Number(progress.revision || 0)};
     }
 
-    async function reconcilePaidApproval(root) {
+    async function reconcilePaidAction(root, path) {
         try {
             const progress = await requestJson(
                 `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
                 {method: 'GET'},
             );
             updateProgress(root, progress);
-            if (progress.stage !== 'awaiting_paid_approval') {
+            const expectedStage = path === 'approve' ? 'awaiting_paid_approval' : 'retry_approval_required';
+            if (progress.stage !== expectedStage) {
                 reloadAtWorkflow(root);
                 return true;
             }
@@ -391,8 +393,8 @@
         button.disabled = true;
         if (!['candidates', 'plan'].includes(path)) setStatus(root, pendingMessage);
         try {
-            if (path === 'approve') {
-                body = await synchronizePaidApproval(root, body);
+            if (['approve', 'retry-approve'].includes(path)) {
+                body = await synchronizePaidAction(root, path, body);
                 if (!body) return;
             }
             await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
@@ -404,7 +406,11 @@
             if (path === 'master-approve' && await reconcileMasterApproval(root)) {
                 return;
             }
-            if (path === 'approve' && error.status === 409 && await reconcilePaidApproval(root)) {
+            if (
+                ['approve', 'retry-approve'].includes(path)
+                && error.status === 409
+                && await reconcilePaidAction(root, path)
+            ) {
                 return;
             }
             if (path === 'candidates') {
