@@ -195,7 +195,7 @@ def _generation_progress(
     return percent, elapsed, 0, "The paid video is generated. Finishing delivery checks."
 _FINAL_WORD_TARGET_PATTERN = re.compile(
     r"(?:final spoken word near|final word ends no later than|"
-    r"finishes the final word around)\s+"
+    r"finishes the final word around|targeting the final spoken word around)\s+"
     r"([0-9]+(?:\.[0-9]+)?)\s+seconds",
     re.IGNORECASE,
 )
@@ -423,8 +423,8 @@ def _native_duration_retry_action(
         "For this retry, this timing overrides any earlier final-word timing target. "
         "Regenerate only the final take. Pace the exact spoken beat so its final word "
         f"ends no later than {conservative_deadline:.2f} seconds, then continue natural "
-        f"silent motion and room tone through {provider_duration:.2f} seconds. Do not "
-        "add speech or freeze."
+        f"silent motion and quiet source-location ambience through {provider_duration:.2f} seconds. "
+        "Keep the performance silent and fluid through the final frame."
     )
 
 

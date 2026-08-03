@@ -247,28 +247,37 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
     for index, (beat, request) in enumerate(zip(beats, requests)):
         assert request.beat == beat
         assert request.prompt.count(beat.text) == 1
-        assert request.prompt.startswith("One continuous, unedited vertical smartphone UGC take")
+        assert request.prompt.startswith(
+            f"Cinematography: one continuous, unedited {request.duration_seconds}-second "
+            "vertical smartphone UGC take"
+        )
         assert "cream knit sweater" not in request.prompt
-        assert "input frame's subject, wardrobe, wheelchair, room" in request.prompt
+        assert "source frame is the authority" in request.prompt
+        assert "scene and background" in request.prompt
+        assert "wardrobe, wheelchair, lighting, and visual style" in request.prompt
         assert "native German" in request.prompt
         assert "38-year-old" not in request.prompt
         assert "hazel" not in request.prompt
         assert "terracotta" not in request.prompt
         assert "seated woman" in request.prompt.lower()
-        assert "hands" not in request.prompt.lower()
-        assert "gestures" not in request.prompt.lower()
-        assert "subtle blinking" in request.prompt.lower()
-        assert "minimal head movement" in request.prompt.lower()
+        assert "exact visibility and relaxed resting positions" in request.prompt.lower()
+        assert "dialogue is spoken advice only" in request.prompt.lower()
+        assert "remains speech content rather than a physical cue" in request.prompt.lower()
+        assert "irregular natural blinking" in request.prompt.lower()
+        assert "minimal speech-coupled head movement" in request.prompt.lower()
         assert "one warm adult female voice speaking native german" in request.prompt.lower()
+        assert "consistent with the source-frame location" in request.prompt.lower()
+        assert "home-office" not in request.prompt.lower()
         expected_final_word_time = request.duration_seconds - (
-            1.5 if index == len(requests) - 1 else 1.0
+            1.5 if request.duration_seconds >= 6 else 1.0
         )
-        assert f"final word around {expected_final_word_time:.1f} seconds" in request.prompt.lower()
-        assert "complete spoken performance is this one line" in request.prompt.lower()
-        assert f"The woman says: {beat.text}" in request.prompt
-        assert f"“{beat.text}”" not in request.prompt
+        assert f"final spoken word around {expected_final_word_time:.1f} seconds" in request.prompt.lower()
+        assert "cut-ready ending:" in request.prompt.lower()
+        assert "as if the next sentence will follow immediately" in request.prompt.lower()
+        assert "mouth rests closed" not in request.prompt.lower()
+        assert "the dialogue is the complete spoken performance" in request.prompt.lower()
+        assert f"Dialogue: “{beat.text}”" in request.prompt
         assert "camera stays completely still" in request.prompt.lower()
-        assert "same uninterrupted static shot through the final frame" in request.prompt.lower()
         assert "do not" not in request.prompt.lower()
         assert "no " not in request.prompt.lower()
         assert "hold the unchanged frame" not in request.prompt.lower()
@@ -313,7 +322,13 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         "music",
         "background voices",
         "extra speech",
+        "hand gesture",
         "hands entering frame",
+        "post-dialogue hand movement",
+        "door-opening mime",
+        "gaze drop",
+        "held end pose",
+        "lip-sync drift",
         "repeated dialogue",
         "english speech",
         "logos",

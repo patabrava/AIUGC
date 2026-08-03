@@ -638,8 +638,8 @@ def _select_seam(
                 "For this retry, this timing overrides any earlier final-word timing "
                 f"target. Regenerate only take {previous.take_index}. Pace its exact spoken beat so "
                 f"the final word ends no later than {latest_safe_predecessor_final_word:.2f} "
-                f"seconds, then continue natural silent motion and matching room tone through "
-                f"{previous.provider_duration_seconds:.2f} seconds. Do not add speech or freeze."
+                f"seconds, then continue natural silent motion and matching source-location ambience through "
+                f"{previous.provider_duration_seconds:.2f} seconds. Keep the performance silent and fluid."
             )
         elif room_tone_mismatch:
             recommended_action = (
@@ -981,9 +981,9 @@ def _extend_delivery_windows(
                     "For this retry, this timing overrides any earlier final-word timing "
                     "target. Regenerate only the final take. Pace the exact spoken beat so "
                     f"its final word ends no later than {latest_safe_final_word_end:.2f} "
-                    "seconds, then continue natural silent motion and room tone through "
-                    f"{evidence[-1].provider_duration_seconds:.2f} seconds. Do not add speech "
-                    "or freeze."
+                    "seconds, then continue natural silent motion and quiet source-location ambience through "
+                    f"{evidence[-1].provider_duration_seconds:.2f} seconds. Keep the performance "
+                    "silent and fluid through the final frame."
                 ),
             },
         )

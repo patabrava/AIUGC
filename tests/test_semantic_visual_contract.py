@@ -5,6 +5,7 @@ from io import BytesIO
 from threading import Lock
 from time import sleep
 
+import pytest
 from PIL import Image, ImageDraw
 
 from app.features.semantic_videos.visual_contract import SEMANTIC_WARDROBES
@@ -73,11 +74,50 @@ def test_take_prompt_uses_first_frame_as_visual_authority_without_re_describing_
     prompt = build_veo_take_prompt(beat, visual_contract=_visual_contract())
 
     assert "animated from the supplied first frame" in prompt
-    assert "input frame's subject, wardrobe, wheelchair, room" in prompt
+    assert "source frame is the authority" in prompt
+    assert "scene and background" in prompt
+    assert "wardrobe, wheelchair, lighting, and visual style" in prompt
     assert "exact supplied garden patio" not in prompt
     assert "light-grey cardigan over a plain white top" not in prompt
     assert "cream knit sweater" not in prompt
-    assert "The woman says: Dieser Alltagstipp" in prompt
+    assert "home-office" not in prompt
+    assert "consistent with the source-frame location" in prompt
+    assert "Dialogue: “Dieser Alltagstipp" in prompt
+
+
+@pytest.mark.parametrize(
+    ("scene_description", "wardrobe_description"),
+    [
+        ("the exact supplied garden patio", "navy cotton blouse"),
+        ("the exact supplied accessible bathroom", "cream knit sweater"),
+        ("the exact supplied home office", "soft-beige blazer over a plain white top"),
+    ],
+)
+def test_take_prompt_preserves_dynamic_scene_and_wardrobe_through_source_frame_authority(
+    scene_description,
+    wardrobe_description,
+):
+    from app.features.shot_production.prompts import build_veo_take_prompt
+
+    contract = _visual_contract()
+    contract["scene_description"] = scene_description
+    contract["wardrobe_description"] = wardrobe_description
+    beat = EditorialBeat(
+        index=0,
+        text="Dieser Hinweis bleibt eine rein gesprochene Erklärung.",
+        word_count=7,
+        estimated_speech_seconds=4.0,
+        provider_duration_seconds=8,
+    )
+
+    prompt = build_veo_take_prompt(beat, visual_contract=contract)
+
+    assert scene_description not in prompt
+    assert wardrobe_description not in prompt
+    assert "source frame is the authority" in prompt
+    assert "scene and background" in prompt
+    assert "wardrobe, wheelchair, lighting, and visual style" in prompt
+    assert "consistent with the source-frame location" in prompt
 
 
 def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_inputs():

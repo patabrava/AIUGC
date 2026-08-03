@@ -186,7 +186,12 @@ def test_compile_semantic_video_plan_builds_canonical_seven_take_costed_payload(
         ]
         assert "the exact supplied garden patio" not in request["prompt"]
         assert "light-grey cardigan over a plain white top" not in request["prompt"]
-        assert "input frame's subject, wardrobe, wheelchair, room" in request["prompt"]
+        assert "source frame is the authority" in request["prompt"]
+        assert "scene and background" in request["prompt"]
+        assert "wardrobe, wheelchair, lighting, and visual style" in request["prompt"]
+        assert "home-office" not in request["prompt"].lower()
+        assert "dialogue is spoken advice only" in request["prompt"].lower()
+        assert "cut-ready ending:" in request["prompt"].lower()
         assert "cream knit sweater" not in request["prompt"]
     assert {take["seed"] for take in compiled.take_payloads} == {240713}
     assert re.fullmatch(r"[0-9a-f]{64}", compiled.plan_hash)

@@ -14,13 +14,16 @@ VEO_MODEL = "veo-3.1-generate-001"
 VEO_ASPECT_RATIO = "9:16"
 SUPPORTED_DURATIONS = frozenset({4, 6, 8})
 _REQUIRED_NEGATIVE_LOCKS = (
+    "identity drift",
     "face change",
+    "facial distortion",
     "age change",
     "hair change",
     "wardrobe change",
     "room change",
+    "lighting change",
     "wheelchair change",
-    "cropped wheelchair",
+    "wheelchair deformation",
     "standing",
     "walking",
     "extra person",
@@ -42,7 +45,13 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "music",
     "background voices",
     "extra speech",
+    "hand gesture",
     "hands entering frame",
+    "post-dialogue hand movement",
+    "door-opening mime",
+    "gaze drop",
+    "held end pose",
+    "lip-sync drift",
     "repeated dialogue",
     "english speech",
     "logos",
@@ -51,11 +60,19 @@ _REQUIRED_NEGATIVE_LOCKS = (
 )
 EFFECTIVE_NEGATIVE_PROMPT = (
     "identity drift, face change, facial distortion, age change, hair change, wardrobe change, "
-    "room change, extra person, wheelchair change, wheelchair deformation, cropped wheelchair, "
-    "standing, walking, camera movement, camera pan, camera tilt, camera zoom, push-in, dolly, "
-    "orbit, reframe, posture reset, cut, jump cut, scene transition, wipe transition, end card, "
-    "freeze frame, generated text, subtitles, captions, music, background voices, extra speech, "
-    "hands entering frame, repeated dialogue, English speech, logos, watermarks, gibberish text"
+    "room change, lighting change, extra person, wheelchair change, wheelchair deformation, "
+    "disconnected wheelchair components, standing, walking, body deformation, malformed hands, "
+    "extra fingers, fused fingers, hand gesture, demonstrative hand action, door-opening mime, "
+    "hand-position change, hands lifting, hands leaving resting position, hands entering frame, "
+    "post-dialogue gesture, post-dialogue hand movement, terminal hand motion, post-dialogue action, "
+    "body sway, posture reset, large head movement, exaggerated nodding, concluding nod, farewell "
+    "expression, completion smile, downward gaze, gaze drop, looking down, exaggerated mouth closure, "
+    "pursed-lip end pose, held end pose, frozen stare, robotic motion, stiff motion, mouth warping, "
+    "teeth artifacts, lip-sync drift, camera movement, camera shake, camera pan, camera tilt, camera "
+    "zoom, push-in, dolly, orbit, reframe, cut, jump cut, scene transition, wipe transition, end card, "
+    "freeze frame, repeated dialogue, extra speech, English speech, music, background voices, subtitles, "
+    "captions, generated text, logos, watermarks, gibberish text, plastic skin, waxy skin, over-smoothed "
+    "skin, beauty filter, CGI look, 3D render"
 )
 
 
@@ -87,8 +104,9 @@ class VeoTakeRequest:
 def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
     if not visual_contract:
         return (
-            "The input frame's subject, wardrobe, wheelchair, room, lighting, camera position, "
-            "and composition remain visually consistent throughout the take."
+            "The supplied source frame is the authority for the subject identity, scene and background, "
+            "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its exact framing "
+            "and visible boundaries throughout the take."
         )
     required = (
         "scene_description",
@@ -106,8 +124,9 @@ def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
             {"missing_fields": missing},
         )
     return (
-        "The input frame's subject, wardrobe, wheelchair, room, lighting, camera position, "
-        "and composition remain visually consistent throughout the take."
+        "The supplied source frame is the authority for the subject identity, scene and background, "
+        "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its exact framing "
+        "and visible boundaries throughout the take."
     )
 
 
@@ -115,31 +134,38 @@ def build_veo_take_prompt(
     beat: EditorialBeat,
     *,
     visual_contract: Optional[Mapping[str, Any]] = None,
-    is_final_take: bool = False,
 ) -> str:
     dialogue = str(beat.text or "").strip()
     if not dialogue:
         raise ValidationError("Veo take prompt requires a non-empty editorial beat.")
-    delivery_tail_seconds = (
-        1.5 if is_final_take and beat.provider_duration_seconds >= 6 else 1.0
-    )
+    delivery_tail_seconds = 1.5 if beat.provider_duration_seconds >= 6 else 1.0
     final_word_target = beat.provider_duration_seconds - delivery_tail_seconds
     return "\n".join(
         (
-            "One continuous, unedited vertical smartphone UGC take, animated from the supplied first frame.",
-            "Camera: static fixed shot at the input frame's exact eye-level angle and composition. "
-            "The camera stays completely still from the opening frame through the final frame.",
+            f"Cinematography: one continuous, unedited {beat.provider_duration_seconds}-second vertical "
+            "smartphone UGC take, animated from the supplied first frame.",
+            "Camera: static seated eye-level shot at the source frame's exact angle and composition. "
+            "The camera stays completely still.",
             f"Visual continuity: {_visual_contract_text(visual_contract)}",
-            "Subject motion: the seated woman maintains relaxed eye contact with a restrained conversational "
-            "expression, natural lip movement, subtle blinking, natural breathing, and minimal head movement.",
-            f"Timing: she begins speaking promptly and finishes the final word around {final_word_target:.1f} seconds "
-            "at a natural conversational pace. After the final word, her mouth rests closed while relaxed eye "
-            "contact, natural breathing, and subtle blinking continue in the same uninterrupted static shot "
-            "through the final frame.",
-            "Audio: one warm adult female voice speaking native German with natural conversational cadence and "
-            "clean close smartphone-microphone sound. Quiet home-office room tone.",
-            "Dialogue: the complete spoken performance is this one line, delivered once exactly as written.",
-            f"The woman says: {dialogue}",
+            "Subject motion: the seated woman speaks directly to the lens with accurate native-German lip and "
+            "jaw movement, a restrained conversational expression, irregular natural blinking, quiet breathing, "
+            "and minimal speech-coupled head movement. Her shoulders, torso, wheelchair, and visible body remain "
+            "stable. Her hands retain the exact visibility and relaxed resting positions established by the "
+            "source frame. She communicates through speech and facial expression while her hands remain at rest.",
+            "Performance interpretation: the dialogue is spoken advice only. Every reference to hands, support, "
+            "wheelchair frames, doors, pulling, pushing, or movement remains speech content rather than a physical "
+            "cue. Both hands remain relaxed in their exact source-frame resting positions for the full take.",
+            f"Timing: she begins speaking promptly and delivers the dialogue once at a natural conversational pace, "
+            f"targeting the final spoken word around {final_word_target:.1f} seconds.",
+            "Cut-ready ending: after the final syllable, her speech articulation resolves naturally while she "
+            "remains conversationally engaged with the lens, as if the next sentence will follow immediately. "
+            "Preserve the same seated posture, shoulder position, wheelchair position, gaze direction, and resting "
+            "hand positions through the final frame. Only subtle breathing and natural blinking continue. Maintain "
+            "fluid living presence without a concluding gesture, completion expression, or held end pose.",
+            f"Dialogue: “{dialogue}”",
+            "Audio: one warm adult female voice speaking native German with a natural conversational cadence and "
+            "consistent vocal identity. Clean close smartphone-microphone sound with quiet natural ambience "
+            "consistent with the source-frame location. The dialogue is the complete spoken performance.",
         )
     )
 
@@ -202,7 +228,6 @@ def compile_veo_take_requests(
                 prompt=build_veo_take_prompt(
                     beat,
                     visual_contract=visual_contract,
-                    is_final_take=expected_index == len(beats) - 1,
                 ),
                 negative_prompt=effective_negative_prompt,
                 model=VEO_MODEL,

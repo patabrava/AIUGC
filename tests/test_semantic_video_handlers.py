@@ -224,7 +224,7 @@ def test_retry_guidance_derives_exact_legacy_native_duration_deadline():
     assert guidance.count(generic_guidance) == 1
     assert "overrides any earlier final-word timing target" in guidance
     assert "final word ends no later than 6.60 seconds" in guidance
-    assert "room tone through 8.00 seconds" in guidance
+    assert "source-location ambience through 8.00 seconds" in guidance
 
 
 @pytest.mark.parametrize(
@@ -3316,9 +3316,7 @@ def test_retry_approval_uses_latest_failed_prompt_for_acoustic_overshoot_feedbac
             "qa_failed" if take["take_index"] == 1 else "completed"
         )
         if take["take_index"] == 1:
-            assert "finishes the final word around 6.5 seconds" in take["request_contract"][
-                "prompt"
-            ]
+            assert "final spoken word around 6.5 seconds" in take["request_contract"]["prompt"]
             take["retry_guidance"] = {
                 "guidance": "Correct the acoustic duration envelope.",
                 "qa_failure": {

@@ -485,7 +485,7 @@ def test_planner_targets_predecessor_when_its_final_word_leaves_no_safe_tail():
     assert "Regenerate only take 0" in details["recommended_action"]
     assert "overrides any earlier final-word timing target" in details["recommended_action"]
     assert "no later than 7.49 seconds" in details["recommended_action"]
-    assert "room tone through 8.00 seconds" in details["recommended_action"]
+    assert "source-location ambience through 8.00 seconds" in details["recommended_action"]
 
 
 def test_planner_recovers_measured_two_frame_terminal_reset_with_bounded_l_cut():
@@ -696,7 +696,7 @@ def test_planner_rejects_multi_second_padding_and_targets_the_final_take_for_ret
     assert latest_final_word < takes[-1].final_word_end_seconds
     assert required_tail > 0
     assert f"{latest_final_word:.2f} seconds" in recommended_action
-    assert "room tone through 8.00 seconds" in recommended_action
+    assert "source-location ambience through 8.00 seconds" in recommended_action
 
 
 def test_planner_retimes_live_exact_16_shortfall_after_consuming_native_windows():
