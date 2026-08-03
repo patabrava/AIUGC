@@ -252,6 +252,7 @@ Rules that become generally useful across repos should later move into `bridgeco
 
 - Every turn must classify the request by task signal, choose the Bridgecode route from the task-signal table, and expose the route with `BRIDGECODE_ROUTE: <task signal> → [GENERAL, ROUTE...] | MODE: <mode> | WHY: <one sentence>` before major action and once in the final handoff when a handoff is produced.
 - Browser diagnostics must use a separate tab, preserve the operator's active workflow tab, and close or restore every internal JSON/status endpoint tab before handoff so diagnostic state cannot be mistaken for an application crash.
+- When inspecting environment files, print only explicitly allowlisted non-secret keys and derived credential metadata; never emit raw `.env` line ranges or credential payloads into harness output.
 
 ## 10) Specific repo rules
 
