@@ -344,6 +344,39 @@
         return false;
     }
 
+    async function synchronizePaidApproval(root, body) {
+        const progress = await requestJson(
+            `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
+            {method: 'GET'},
+        );
+        updateProgress(root, progress);
+        if (progress.stage !== 'awaiting_paid_approval') {
+            reloadAtWorkflow(root);
+            return null;
+        }
+        if (String(progress.plan_hash || '') !== String(body.plan_hash || '')) {
+            throw new Error('Semantic video approval hash is stale. Reload the current production plan.');
+        }
+        return {...body, expected_revision: Number(progress.revision || 0)};
+    }
+
+    async function reconcilePaidApproval(root) {
+        try {
+            const progress = await requestJson(
+                `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
+                {method: 'GET'},
+            );
+            updateProgress(root, progress);
+            if (progress.stage !== 'awaiting_paid_approval') {
+                reloadAtWorkflow(root);
+                return true;
+            }
+        } catch (_error) {
+            // Preserve the original approval error when persisted state is unavailable.
+        }
+        return false;
+    }
+
     async function runAction(root, button, path, body, pendingMessage) {
         const pendingLabels = {
             candidates: 'Generating scene plates…',
@@ -358,6 +391,10 @@
         button.disabled = true;
         if (!['candidates', 'plan'].includes(path)) setStatus(root, pendingMessage);
         try {
+            if (path === 'approve') {
+                body = await synchronizePaidApproval(root, body);
+                if (!body) return;
+            }
             await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
                 method: 'POST',
                 body: JSON.stringify(body),
@@ -365,6 +402,9 @@
             reloadAtWorkflow(root);
         } catch (error) {
             if (path === 'master-approve' && await reconcileMasterApproval(root)) {
+                return;
+            }
+            if (path === 'approve' && error.status === 409 && await reconcilePaidApproval(root)) {
                 return;
             }
             if (path === 'candidates') {

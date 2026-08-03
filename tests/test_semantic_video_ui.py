@@ -980,6 +980,12 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "master-approve" in source
     assert "reconcileMasterApproval(root)" in source
     assert "progress.stage !== 'awaiting_reference_approval'" in source
+    assert "synchronizePaidApproval(root, body)" in source
+    assert "reconcilePaidApproval(root)" in source
+    assert "path === 'approve' && error.status === 409" in source
+    assert "progress.stage !== 'awaiting_paid_approval'" in source
+    assert "expected_revision: Number(progress.revision || 0)" in source
+    assert "String(progress.plan_hash || '') !== String(body.plan_hash || '')" in source
     assert "data-identity-attestation" not in source
     assert "candidate_generation_status" in source
     assert "candidate_generation_phase" in source
