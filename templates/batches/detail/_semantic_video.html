@@ -322,7 +322,8 @@
                         {% endif %}
                         {% if provider_prompt.raw_artifact_uri %}
                         <div class="mt-4 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
-                            <p class="text-xs font-bold uppercase tracking-wide text-emerald-900">Paid generated take</p>
+                            <p class="text-xs font-bold uppercase tracking-wide text-emerald-900">Raw Veo take</p>
+                            <p class="mt-1 text-xs text-emerald-900">Captions are added during final delivery.</p>
                             <video class="mt-2 aspect-[9/16] max-h-[32rem] w-full rounded-lg bg-black object-contain" controls preload="metadata" src="{{ provider_prompt.raw_artifact_uri }}">
                                 Your browser does not support video playback.
                             </video>

@@ -119,6 +119,8 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
     assert "$22.40" in html
     assert "video generated · QA needs attention" in html
     assert 'src="https://cdn.example.com/take-2.mp4"' in html
+    assert "Raw Veo take" in html
+    assert "Captions are added during final delivery." in html
     assert "Open generated take" in html
     assert "Retry only failed takes: 3, 6" in html
     assert "Retry only failed takes: 2, 5" not in html
