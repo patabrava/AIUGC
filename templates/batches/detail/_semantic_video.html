@@ -1,10 +1,21 @@
 {% set semantic = batch_view.semantic_video %}
 {% set semantic_locked = batch.state in ['S1_SETUP', 'S2_SEEDED'] %}
 {% set semantic_step = batch_view.semantic_workflow.current_step.key if batch_view.semantic_workflow else 'scene' %}
+{% set batch_plan = namespace(count=0, total_cost=0.0) %}
+{% if semantic_step == 'plan' and not semantic_locked %}
+    {% for item in semantic.posts %}
+        {% if item.stage == 'awaiting_paid_approval' and item.master_hash_is_current and item.plan_hash %}
+            {% set batch_plan.count = batch_plan.count + 1 %}
+            {% set batch_plan.total_cost = batch_plan.total_cost + (item.estimated_cost_usd | float) %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
 <section
     id="semantic-video-workflow"
     class="brand-panel mb-6 overflow-hidden rounded-2xl border border-[#006AAB]/15 bg-white shadow-sm"
     aria-labelledby="semantic-video-heading"
+    data-semantic-video-workflow
+    data-batch-id="{{ batch.id }}"
 >
     <div class="border-b border-[#006AAB]/10 bg-[#F6FAFF] px-5 py-4 sm:px-6">
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -22,6 +33,22 @@
                 Requested delivery: {{ semantic.requested_duration_seconds }}s
             </div>
         </div>
+        {% if semantic_step == 'plan' and batch_plan.count > 1 %}
+        <div class="mt-4 flex flex-col gap-3 rounded-xl border border-[#006AAB]/20 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <p class="font-bold text-[#1C2740]">Approve the complete batch</p>
+                <p class="mt-1 text-sm text-[#1C2740]/65">One confirmation starts all {{ batch_plan.count }} ready videos from their persisted plans.</p>
+            </div>
+            <button
+                type="button"
+                class="shrink-0 rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                data-action="approve-batch-plans"
+                data-ready-count="{{ batch_plan.count }}"
+                data-cost-usd="{{ '%.2f' | format(batch_plan.total_cost) }}"
+            >Approve &amp; generate all {{ batch_plan.count }} videos · ${{ '%.2f' | format(batch_plan.total_cost) }}</button>
+            <p class="hidden text-sm font-semibold text-[#1C2740] sm:basis-full" data-field="batch-plan-status" aria-live="polite"></p>
+        </div>
+        {% endif %}
     </div>
 
     <div class="space-y-5 p-4 sm:p-6">

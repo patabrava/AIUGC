@@ -538,6 +538,29 @@ def approve_initial_plan_transition(
     return dict(run), dict(approval)
 
 
+def approve_batch_initial_plans_transition(
+    batch_id: str,
+    *,
+    approvals: Sequence[Mapping[str, Any]],
+    approved_by: str,
+    reason: Optional[str],
+    client=None,
+) -> dict[str, Any]:
+    """Atomically approve the complete current set of ready plans in a batch."""
+    return _transition_result(
+        _client(client).rpc(
+            "approve_semantic_video_batch_initial_plans",
+            {
+                "p_batch_id": str(batch_id),
+                "p_approvals": [dict(item) for item in approvals],
+                "p_approved_by": approved_by,
+                "p_reason": reason,
+            },
+        ),
+        operation="batch initial plan approval",
+    )
+
+
 def approve_retry_transition(
     run_id: str,
     *,
@@ -1190,6 +1213,7 @@ def repair_completed_delivery(
 
 
 __all__ = [
+    "approve_batch_initial_plans_transition",
     "approve_initial_plan_transition",
     "approve_master_transition",
     "approve_retry_transition",

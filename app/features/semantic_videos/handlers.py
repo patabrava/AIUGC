@@ -39,6 +39,7 @@ from app.features.shot_production.provenance import (
     build_semantic_script_snapshot,
 )
 from app.features.semantic_videos.queries import (
+    approve_batch_initial_plans_transition,
     approve_initial_plan_transition,
     approve_master_transition,
     approve_retry_transition,
@@ -58,6 +59,8 @@ from app.features.semantic_videos.queries import (
 )
 from app.features.semantic_videos.schemas import (
     ApprovalResponse,
+    BatchApprovalResponse,
+    BatchPlanApprovalRequest,
     CancellationRequest,
     CancellationResponse,
     CandidateGenerationRequest,
@@ -87,6 +90,7 @@ from app.features.semantic_videos.visual_contract import (
 
 
 router = APIRouter(prefix="/semantic-videos/posts", tags=["semantic-videos"])
+batch_router = APIRouter(prefix="/semantic-videos/batches", tags=["semantic-videos"])
 logger = get_logger(__name__)
 
 _SCENE_PLATE_AUDIT_TEXT = (
@@ -2171,9 +2175,23 @@ def _assert_plan_sources_current(
         )
 
 
-@router.post("/{post_id}/approve", response_model=SuccessResponse)
-def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Request):
+def _prepare_initial_plan_approval(
+    *,
+    post_id: str,
+    payload: PlanApprovalRequest,
+    request: Request,
+    expected_batch_id: Optional[str] = None,
+) -> dict[str, Any]:
     run = _run_or_404(post_id)
+    if expected_batch_id is not None and str(run.get("batch_id") or "") != expected_batch_id:
+        raise StateTransitionError(
+            "Semantic video run does not belong to the requested batch.",
+            {
+                "post_id": post_id,
+                "expected_batch_id": expected_batch_id,
+                "actual_batch_id": run.get("batch_id"),
+            },
+        )
     revision = int(run.get("revision") or 0)
     if revision != payload.expected_revision:
         raise StateTransitionError(
@@ -2200,13 +2218,32 @@ def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Re
     takes = [take for take in all_takes if int(take.get("attempt") or 1) == 1]
     plan = run.get("plan_snapshot") if isinstance(run.get("plan_snapshot"), dict) else {}
     indexes = sorted(int(take["take_index"]) for take in takes)
-    updated, approval = approve_initial_plan_transition(
-        str(run["id"]),
-        expected_revision=revision,
-        plan_hash=payload.plan_hash,
-        approved_by=str(getattr(request.state, "user_email", "unknown")),
-        reason=payload.reason,
-    )
+    expected_seconds = int(plan.get("billable_provider_seconds") or 0)
+    expected_quota = int(plan.get("quota_units") or 0)
+    try:
+        expected_cost = Decimal(str(plan["estimated_cost_usd"]))
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        raise StateTransitionError("Semantic video persisted plan billing contract is invalid.") from exc
+    return {
+        "post_id": post_id,
+        "run": run,
+        "run_id": str(run["id"]),
+        "revision": revision,
+        "plan_hash": payload.plan_hash,
+        "indexes": indexes,
+        "expected_seconds": expected_seconds,
+        "expected_quota": expected_quota,
+        "expected_cost": expected_cost,
+    }
+
+
+def _initial_approval_response(
+    *,
+    updated: Mapping[str, Any],
+    approval: Mapping[str, Any],
+    prepared: Mapping[str, Any],
+) -> ApprovalResponse:
+    run_id = str(prepared["run_id"])
     try:
         approved_indexes = [int(index) for index in approval["approved_take_indexes"]]
         approved_seconds = int(approval["approved_provider_seconds"])
@@ -2217,18 +2254,15 @@ def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Re
         raise StateTransitionError(
             "Semantic video initial approval returned an incomplete persisted contract."
         ) from exc
-    expected_seconds = int(plan.get("billable_provider_seconds") or 0)
-    expected_quota = int(plan.get("quota_units") or 0)
-    try:
-        expected_cost = Decimal(str(plan["estimated_cost_usd"]))
-    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
-        raise StateTransitionError("Semantic video persisted plan billing contract is invalid.") from exc
     if (
-        approved_indexes != indexes
-        or approved_seconds != expected_seconds
-        or quota_units != expected_quota
-        or estimated_cost_value != expected_cost
-        or contract_hash != payload.plan_hash
+        str(updated.get("id") or "") != run_id
+        or str(updated.get("stage") or "") != "generating"
+        or str(approval.get("run_id") or "") != run_id
+        or approved_indexes != prepared["indexes"]
+        or approved_seconds != prepared["expected_seconds"]
+        or quota_units != prepared["expected_quota"]
+        or estimated_cost_value != prepared["expected_cost"]
+        or contract_hash != prepared["plan_hash"]
     ):
         raise StateTransitionError(
             "Semantic video initial approval returned a mismatched persisted contract."
@@ -2244,6 +2278,144 @@ def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Re
         approved_provider_seconds=approved_seconds,
         quota_units=quota_units,
         estimated_cost_usd=estimated_cost,
+    )
+    return response
+
+
+@router.post("/{post_id}/approve", response_model=SuccessResponse)
+def approve_initial_plan(post_id: str, payload: PlanApprovalRequest, request: Request):
+    prepared = _prepare_initial_plan_approval(
+        post_id=post_id,
+        payload=payload,
+        request=request,
+    )
+    updated, approval = approve_initial_plan_transition(
+        prepared["run_id"],
+        expected_revision=prepared["revision"],
+        plan_hash=prepared["plan_hash"],
+        approved_by=str(getattr(request.state, "user_email", "unknown")),
+        reason=payload.reason,
+    )
+    response = _initial_approval_response(
+        updated=updated,
+        approval=approval,
+        prepared=prepared,
+    )
+    return SuccessResponse(data=response.model_dump(mode="json"))
+
+
+@batch_router.post("/{batch_id}/approve", response_model=SuccessResponse)
+def approve_batch_initial_plans(
+    batch_id: str,
+    payload: BatchPlanApprovalRequest,
+    request: Request,
+):
+    prepared_items = [
+        _prepare_initial_plan_approval(
+            post_id=item.post_id,
+            payload=PlanApprovalRequest(
+                plan_hash=item.plan_hash,
+                expected_revision=item.expected_revision,
+                reason=payload.reason,
+            ),
+            request=request,
+            expected_batch_id=batch_id,
+        )
+        for item in payload.approvals
+    ]
+    prepared_by_run = {str(item["run_id"]): item for item in prepared_items}
+    if len(prepared_by_run) != len(prepared_items):
+        raise StateTransitionError("Semantic video batch approval contains duplicate runs.")
+
+    transition = approve_batch_initial_plans_transition(
+        batch_id,
+        approvals=[
+            {
+                "run_id": item["run_id"],
+                "expected_revision": item["revision"],
+                "plan_hash": item["plan_hash"],
+            }
+            for item in prepared_items
+        ],
+        approved_by=str(getattr(request.state, "user_email", "unknown")),
+        reason=payload.reason,
+    )
+    raw_approvals = transition.get("approvals")
+    if not isinstance(raw_approvals, list):
+        raise StateTransitionError(
+            "Semantic video batch approval returned an invalid approval list."
+        )
+
+    responses: list[ApprovalResponse] = []
+    returned_run_ids: set[str] = set()
+    for raw_item in raw_approvals:
+        if not isinstance(raw_item, Mapping):
+            raise StateTransitionError(
+                "Semantic video batch approval returned an invalid item."
+            )
+        updated = raw_item.get("run")
+        approval = raw_item.get("approval")
+        if not isinstance(updated, Mapping) or not isinstance(approval, Mapping):
+            raise StateTransitionError(
+                "Semantic video batch approval returned an incomplete item."
+            )
+        run_id = str(updated.get("id") or "")
+        prepared = prepared_by_run.get(run_id)
+        if prepared is None or run_id in returned_run_ids:
+            raise StateTransitionError(
+                "Semantic video batch approval returned an unexpected run."
+            )
+        returned_run_ids.add(run_id)
+        responses.append(
+            _initial_approval_response(
+                updated=updated,
+                approval=approval,
+                prepared=prepared,
+            )
+        )
+
+    expected_cost = sum(
+        (Decimal(str(item["expected_cost"])) for item in prepared_items),
+        Decimal("0"),
+    )
+    expected_seconds = sum(int(item["expected_seconds"]) for item in prepared_items)
+    expected_quota = sum(int(item["expected_quota"]) for item in prepared_items)
+    try:
+        returned_count = int(transition["approval_count"])
+        returned_seconds = int(transition["approved_provider_seconds"])
+        returned_quota = int(transition["quota_units"])
+        returned_cost = Decimal(str(transition["estimated_cost_usd"]))
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        raise StateTransitionError(
+            "Semantic video batch approval returned incomplete totals."
+        ) from exc
+    if (
+        str(transition.get("batch_id") or "") != batch_id
+        or returned_run_ids != set(prepared_by_run)
+        or returned_count != len(prepared_items)
+        or returned_seconds != expected_seconds
+        or returned_quota != expected_quota
+        or returned_cost != expected_cost
+    ):
+        raise StateTransitionError(
+            "Semantic video batch approval returned mismatched totals."
+        )
+
+    response = BatchApprovalResponse(
+        batch_id=batch_id,
+        approval_count=returned_count,
+        approved_provider_seconds=returned_seconds,
+        quota_units=returned_quota,
+        estimated_cost_usd=str(transition["estimated_cost_usd"]),
+        approvals=responses,
+    )
+    logger.info(
+        "semantic_video_batch_initial_plans_approved",
+        batch_id=batch_id,
+        approval_count=returned_count,
+        approved_provider_seconds=returned_seconds,
+        quota_units=returned_quota,
+        estimated_cost_usd=str(transition["estimated_cost_usd"]),
     )
     return SuccessResponse(data=response.model_dump(mode="json"))
 

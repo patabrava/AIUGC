@@ -56,6 +56,41 @@ class ApprovalResponse(BaseModel):
     estimated_cost_usd: str
 
 
+class BatchPlanApprovalItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    post_id: str = Field(min_length=1, max_length=100)
+    plan_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    expected_revision: int = Field(ge=0)
+
+
+class BatchPlanApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approvals: list[BatchPlanApprovalItem] = Field(min_length=2, max_length=100)
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("approvals")
+    @classmethod
+    def validate_unique_posts(
+        cls,
+        value: list[BatchPlanApprovalItem],
+    ) -> list[BatchPlanApprovalItem]:
+        post_ids = [item.post_id for item in value]
+        if len(set(post_ids)) != len(post_ids):
+            raise ValueError("Batch plan approval post IDs must be unique.")
+        return value
+
+
+class BatchApprovalResponse(BaseModel):
+    batch_id: str
+    approval_count: int = Field(ge=2)
+    approved_provider_seconds: int = Field(ge=1)
+    quota_units: int = Field(ge=2)
+    estimated_cost_usd: str
+    approvals: list[ApprovalResponse] = Field(min_length=2)
+
+
 class ProgressTakeResponse(BaseModel):
     take_index: int
     attempt: int
@@ -181,6 +216,9 @@ class CancellationResponse(BaseModel):
 
 __all__ = [
     "ApprovalResponse",
+    "BatchApprovalResponse",
+    "BatchPlanApprovalItem",
+    "BatchPlanApprovalRequest",
     "CancellationRequest",
     "CancellationResponse",
     "CandidateGenerationRequest",

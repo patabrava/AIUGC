@@ -1045,6 +1045,13 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
 
     assert "/progress" in source
     assert "confirm(" in source
+    assert "approveReadyBatchPlans(workflow, button)" in source
+    assert "approve-batch-plans" in source
+    assert "exact combined cost" in source
+    assert "roots.length !== expectedCount" in source
+    assert "/semantic-videos/batches/${encodeURIComponent(workflow.dataset.batchId)}/approve" in source
+    assert "approvals: approvals.map" in source
+    assert "result.approval_count" in source
     assert "data-cost-usd" in source
     assert "generated-takes" in source
     assert "verified-takes" in source
@@ -1109,6 +1116,55 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
         "semantic_step in ['plan', 'production'] and item.stage == "
         "'retry_approval_required'"
     ) in template_source
+
+
+def test_plan_step_offers_one_combined_approval_for_all_ready_videos():
+    env = Environment(loader=FileSystemLoader("templates"))
+    ready_posts = []
+    for index in range(3):
+        ready_posts.append(
+            {
+                "post_id": f"post-{index + 1}",
+                "topic_title": f"Ready video {index + 1}",
+                "revision": index + 2,
+                "stage": "awaiting_paid_approval",
+                "plan_hash": str(index + 1) * 64,
+                "master_state": "approved",
+                "master_hash_is_current": True,
+                "initial_plan_is_approved": False,
+                "requested_duration_seconds": 16,
+                "delivery_duration_seconds": None,
+                "take_count": 2,
+                "billable_provider_seconds": 16,
+                "price_per_provider_second_usd": "0.40",
+                "estimated_cost_usd": "6.40",
+                "generated_takes": 0,
+                "verified_takes": 0,
+                "failed_take_indexes": [],
+                "retry_provider_seconds": 0,
+                "retry_estimated_cost_usd": "0.00",
+                "provider_prompts": [],
+                "candidates": [],
+            }
+        )
+
+    html = env.get_template("batches/detail/_semantic_video.html").render(
+        batch={**_semantic_batch(), "state": "S4_SCRIPTED"},
+        batch_view={
+            "semantic_workflow": {"current_step": {"key": "plan"}},
+            "semantic_video": {
+                "requested_duration_seconds": 16,
+                "posts": ready_posts,
+            },
+        },
+    )
+
+    assert 'data-action="approve-batch-plans"' in html
+    assert 'data-ready-count="3"' in html
+    assert 'data-cost-usd="19.20"' in html
+    assert 'data-batch-id="batch-semantic"' in html
+    assert "Approve &amp; generate all 3 videos · $19.20" in html
+    assert html.count('data-action="approve-plan"') == 3
 
 
 def test_pending_script_keeps_semantic_production_out_of_the_script_step(monkeypatch):

@@ -43,6 +43,7 @@ SEMANTIC_UGC_POSTGRES_CONTAINER="$CONTAINER_NAME" \
   python3 -m pytest \
     tests/test_semantic_batch_migration_postgres.py \
     tests/test_semantic_actor_scene_plate_anchor_migration_postgres.py \
+    tests/test_semantic_video_batch_approval_migration_postgres.py \
     tests/test_semantic_video_plan_migration_postgres.py \
     tests/test_semantic_video_worker_migration_postgres.py \
     -q
@@ -99,6 +100,10 @@ BEGIN
     SELECT 1
     FROM supabase_migrations.schema_migrations
     WHERE version = '20260720000200'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM supabase_migrations.schema_migrations
+    WHERE version = '20260804000000'
   ) THEN
     RAISE EXCEPTION 'Supabase CLI did not record all Semantic UGC migrations';
   END IF;
@@ -110,6 +115,9 @@ BEGIN
   END IF;
   IF to_regprocedure('public.renew_semantic_video_lease(uuid,text,uuid,integer)') IS NULL THEN
     RAISE EXCEPTION 'Supabase CLI did not install Semantic UGC lease renewal RPC';
+  END IF;
+  IF to_regprocedure('public.approve_semantic_video_batch_initial_plans(uuid,jsonb,text,text)') IS NULL THEN
+    RAISE EXCEPTION 'Supabase CLI did not install Semantic UGC batch approval RPC';
   END IF;
   IF to_regclass('public.semantic_actor_scene_plate_anchors') IS NULL THEN
     RAISE EXCEPTION 'Supabase CLI did not install Semantic actor scene-plate anchors';

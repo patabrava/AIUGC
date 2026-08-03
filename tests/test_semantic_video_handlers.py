@@ -1657,6 +1657,143 @@ def test_initial_approval_appends_exact_hash_and_moves_run_to_generating(monkeyp
     assert approval["quota_units"] == 7
 
 
+def test_batch_initial_approval_uses_one_atomic_transition_for_every_ready_post(
+    monkeypatch,
+):
+    from app.features.semantic_videos import handlers
+    from app.main import app
+
+    post_ids = ["post-1", "post-2", "post-3"]
+    prepared = {}
+    for index, post_id in enumerate(post_ids, start=1):
+        prepared[post_id] = {
+            "post_id": post_id,
+            "run": {"id": f"run-{index}", "batch_id": "batch-1"},
+            "run_id": f"run-{index}",
+            "revision": index,
+            "plan_hash": str(index) * 64,
+            "indexes": [0, 1],
+            "expected_seconds": 16,
+            "expected_quota": 2,
+            "expected_cost": Decimal("6.40"),
+        }
+
+    prepare_calls = []
+
+    def prepare(**kwargs):
+        prepare_calls.append(kwargs)
+        return deepcopy(prepared[kwargs["post_id"]])
+
+    atomic_calls = []
+
+    def approve_batch(batch_id, *, approvals, approved_by, reason):
+        atomic_calls.append(
+            {
+                "batch_id": batch_id,
+                "approvals": deepcopy(approvals),
+                "approved_by": approved_by,
+                "reason": reason,
+            }
+        )
+        return {
+            "batch_id": batch_id,
+            "approval_count": 3,
+            "approved_provider_seconds": 48,
+            "quota_units": 6,
+            "estimated_cost_usd": "19.20",
+            "approvals": [
+                {
+                    "run": {
+                        "id": item["run_id"],
+                        "revision": item["expected_revision"] + 1,
+                        "stage": "generating",
+                    },
+                    "approval": {
+                        "id": f"approval-{index}",
+                        "run_id": item["run_id"],
+                        "contract_hash": item["plan_hash"],
+                        "approved_take_indexes": [0, 1],
+                        "approved_provider_seconds": 16,
+                        "quota_units": 2,
+                        "estimated_cost_usd": "6.40",
+                    },
+                }
+                for index, item in enumerate(approvals, start=1)
+            ],
+        }
+
+    monkeypatch.setattr(handlers, "_prepare_initial_plan_approval", prepare)
+    monkeypatch.setattr(
+        handlers,
+        "approve_batch_initial_plans_transition",
+        approve_batch,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "approve_initial_plan_transition",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("batch approval must not fan out through the per-post transition")
+        ),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/batches/batch-1/approve",
+        json={
+            "approvals": [
+                {
+                    "post_id": post_id,
+                    "plan_hash": prepared[post_id]["plan_hash"],
+                    "expected_revision": prepared[post_id]["revision"],
+                }
+                for post_id in post_ids
+            ],
+            "reason": "Approve complete batch",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]
+    assert payload["batch_id"] == "batch-1"
+    assert payload["approval_count"] == 3
+    assert payload["approved_provider_seconds"] == 48
+    assert payload["quota_units"] == 6
+    assert payload["estimated_cost_usd"] == "19.20"
+    assert len(payload["approvals"]) == 3
+    assert len(prepare_calls) == 3
+    assert all(call["expected_batch_id"] == "batch-1" for call in prepare_calls)
+    assert len(atomic_calls) == 1
+    assert [item["run_id"] for item in atomic_calls[0]["approvals"]] == [
+        "run-1",
+        "run-2",
+        "run-3",
+    ]
+
+
+def test_batch_initial_approval_rejects_duplicate_posts_before_transition(monkeypatch):
+    from app.features.semantic_videos import handlers
+    from app.main import app
+
+    transition_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "approve_batch_initial_plans_transition",
+        lambda *args, **kwargs: transition_calls.append((args, kwargs)),
+    )
+    item = {
+        "post_id": "post-1",
+        "plan_hash": "a" * 64,
+        "expected_revision": 1,
+    }
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/batches/batch-1/approve",
+        json={"approvals": [item, item], "reason": None},
+    )
+
+    assert response.status_code == 422, response.text
+    assert transition_calls == []
+
+
 @pytest.mark.parametrize("candidate_count", [1, 2, 4])
 def test_candidate_endpoint_requires_exactly_three_candidates_before_provider_call(
     monkeypatch,
@@ -2831,6 +2968,7 @@ def test_initial_approval_uses_one_atomic_transition(monkeypatch):
         state["run"].update({"revision": expected_revision + 1, "stage": "generating"})
         approval = {
             "id": "approval-atomic-initial",
+            "run_id": run_id,
             "contract_hash": plan_hash,
             "approved_take_indexes": list(range(7)),
             "approved_provider_seconds": 56,
@@ -3879,6 +4017,65 @@ def test_candidate_reservation_queries_use_atomic_rpcs_and_map_only_conflicts():
             reservation_token="token-3",
             reservation_seconds=300,
             client=_RecordingClient(unexpected),
+        )
+
+
+def test_batch_initial_approval_query_uses_one_transactional_rpc():
+    from app.features.semantic_videos.queries import (
+        approve_batch_initial_plans_transition,
+    )
+
+    expected = {
+        "batch_id": "batch-1",
+        "approval_count": 3,
+        "estimated_cost_usd": "19.20",
+        "approvals": [],
+    }
+    approvals = [
+        {
+            "run_id": f"run-{index}",
+            "expected_revision": index,
+            "plan_hash": str(index) * 64,
+        }
+        for index in range(1, 4)
+    ]
+    client = _RecordingClient(expected)
+
+    assert approve_batch_initial_plans_transition(
+        "batch-1",
+        approvals=approvals,
+        approved_by="operator@example.com",
+        reason="Approve complete batch",
+        client=client,
+    ) == expected
+    assert client.calls == [
+        {
+            "kind": "rpc",
+            "function": "approve_semantic_video_batch_initial_plans",
+            "payload": {
+                "p_batch_id": "batch-1",
+                "p_approvals": approvals,
+                "p_approved_by": "operator@example.com",
+                "p_reason": "Approve complete batch",
+            },
+        }
+    ]
+
+    conflict = APIError(
+        {
+            "code": "40001",
+            "details": None,
+            "hint": None,
+            "message": "semantic_video_conflict: ready batch plans changed",
+        }
+    )
+    with pytest.raises(StateTransitionError, match="batch initial plan approval"):
+        approve_batch_initial_plans_transition(
+            "batch-1",
+            approvals=approvals,
+            approved_by="operator@example.com",
+            reason=None,
+            client=_RecordingClient(conflict),
         )
 
 

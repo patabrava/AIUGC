@@ -61,6 +61,93 @@
         return window.confirm(`Approve ${kind} at the exact incremental cost of $${cost}? This may submit paid Veo work.`);
     }
 
+    function setBatchPlanStatus(workflow, message, isError = false) {
+        const target = workflow.querySelector('[data-field="batch-plan-status"]');
+        if (!target) return;
+        target.textContent = message;
+        target.classList.remove('hidden');
+        target.classList.toggle('text-red-700', isError);
+        target.classList.toggle('text-[#1C2740]', !isError);
+    }
+
+    async function approveReadyBatchPlans(workflow, button) {
+        const expectedCount = Number(button.dataset.readyCount || 0);
+        const cost = button.dataset.costUsd || '0.00';
+        if (!window.confirm(
+            `Approve all ${expectedCount} ready videos at the exact combined cost of $${cost}? This may submit paid Veo work.`,
+        )) return;
+
+        const roots = Array.from(workflow.querySelectorAll('[data-semantic-video-controller]'))
+            .filter((root) => {
+                const approveButton = action(root, 'approve-plan');
+                return root.dataset.stage === 'awaiting_paid_approval'
+                    && Boolean(root.dataset.planHash)
+                    && approveButton
+                    && !approveButton.disabled;
+            });
+        const feedbackState = window.beginActionFeedback(button, `Starting ${expectedCount} videos…`);
+        button.disabled = true;
+        roots.forEach((root) => {
+            const approveButton = action(root, 'approve-plan');
+            if (approveButton) approveButton.disabled = true;
+        });
+
+        try {
+            if (roots.length !== expectedCount) {
+                throw new Error('The ready-video count changed. Reload the current production plans.');
+            }
+
+            const approvals = [];
+            for (const root of roots) {
+                const progress = await requestJson(
+                    `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
+                    {method: 'GET'},
+                );
+                updateProgress(root, progress);
+                if (progress.stage !== 'awaiting_paid_approval') {
+                    throw new Error('A production plan changed before batch approval. Reload the current plans.');
+                }
+                if (String(progress.plan_hash || '') !== String(root.dataset.planHash || '')) {
+                    throw new Error('A production plan hash changed before batch approval. Reload the current plans.');
+                }
+                approvals.push({
+                    root,
+                    post_id: root.dataset.postId,
+                    expected_revision: Number(progress.revision || 0),
+                    plan_hash: progress.plan_hash,
+                });
+            }
+
+            const result = await requestJson(
+                `/semantic-videos/batches/${encodeURIComponent(workflow.dataset.batchId)}/approve`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        approvals: approvals.map(({post_id, plan_hash, expected_revision}) => ({
+                            post_id,
+                            plan_hash,
+                            expected_revision,
+                        })),
+                        reason: null,
+                    }),
+                },
+            );
+            if (Number(result.approval_count || 0) !== expectedCount) {
+                throw new Error('The server did not approve the complete ready batch. Reload the current plans.');
+            }
+            setBatchPlanStatus(workflow, `Started all ${expectedCount} videos.`);
+            window.location.reload();
+        } catch (error) {
+            window.endActionFeedback(button, feedbackState);
+            button.disabled = false;
+            roots.forEach((root) => {
+                const approveButton = action(root, 'approve-plan');
+                if (approveButton) approveButton.disabled = false;
+            });
+            setBatchPlanStatus(workflow, error.message, true);
+        }
+    }
+
     function updateProgress(root, progress) {
         const stage = field(root, 'stage');
         if (stage) stage.textContent = String(progress.stage || '').replaceAll('_', ' ');
@@ -488,6 +575,12 @@
 
     function init(scope = document) {
         scope.querySelectorAll('[data-semantic-video-controller]').forEach(bind);
+        scope.querySelectorAll('[data-semantic-video-workflow]').forEach((workflow) => {
+            if (workflow.dataset.semanticBatchBound === 'true') return;
+            workflow.dataset.semanticBatchBound = 'true';
+            const button = workflow.querySelector('[data-action="approve-batch-plans"]');
+            button?.addEventListener('click', () => approveReadyBatchPlans(workflow, button));
+        });
     }
 
     document.addEventListener('DOMContentLoaded', () => init());
