@@ -50,6 +50,10 @@ CANDIDATE_FAILURE_PROGRESS_MIGRATION = (
     ROOT
     / "supabase/migrations/20260804000200_semantic_scene_plate_failure_progress.sql"
 )
+CANDIDATE_ATOMIC_FAILURE_RELEASE_MIGRATION = (
+    ROOT
+    / "supabase/migrations/20260804000300_semantic_scene_plate_atomic_failure_release.sql"
+)
 IDENTITY_QA_RESUME_MIGRATION = (
     ROOT
     / "supabase/migrations/20260726010000_semantic_video_identity_qa_resume.sql"
@@ -985,6 +989,19 @@ def test_candidate_failure_progress_is_token_fenced_and_retryable():
     assert "legacy_released_generation" in sql
     assert "between 1 and 2" in sql
     assert "candidate_reservation_token is null" in sql
+    assert "to service_role" in sql
+
+
+def test_candidate_release_atomically_persists_retryable_failure_and_partials():
+    sql = CANDIDATE_ATOMIC_FAILURE_RELEASE_MIGRATION.read_text().lower()
+
+    assert "release_semantic_video_candidate_reservation" in sql
+    assert "candidate_generation_progress = case" in sql
+    assert "reservation_released_after_generation_failure" in sql
+    assert "completed_candidates" in sql
+    assert "partial_candidates" in sql
+    assert "candidate_reservation_token = null" in sql
+    assert "released_generation_recovered" in sql
     assert "to service_role" in sql
 
 

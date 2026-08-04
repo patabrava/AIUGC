@@ -1663,6 +1663,36 @@ def test_progress_endpoint_exposes_released_candidate_failure_as_resumable(monke
     assert "only the missing work" in payload["status_message"]
 
 
+def test_progress_endpoint_never_projects_released_active_generation_as_idle(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    state["run"]["stage"] = "awaiting_reference_approval"
+    state["run"]["master_snapshot"] = {}
+    state["run"]["candidate_reservation_token"] = None
+    state["run"]["candidate_reservation_expires_at"] = None
+    state["run"]["candidate_generation_progress"] = {
+        "phase": "generating_images",
+        "details": {
+            "candidate_count": 3,
+            "completed_candidates": 2,
+            "partial_candidates": [{"index": 1}, {"index": 3}],
+        },
+    }
+
+    response = client.get("/semantic-videos/posts/post-1/progress")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]
+    assert payload["candidate_generation_status"] == "stalled"
+    assert payload["candidate_generation_phase"] == "generating_images"
+    assert payload["progress_percent"] == 60
+    assert payload["estimated_remaining_seconds"] is None
+    assert "reservation expired" in payload["status_message"]
+
+
 def test_initial_approval_appends_exact_hash_and_moves_run_to_generating(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app

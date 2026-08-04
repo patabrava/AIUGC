@@ -1885,6 +1885,11 @@ def get_progress(post_id: str, request: Request):
         candidate_generation_status = "stalled"
     elif candidate_count == 3:
         candidate_generation_status = "ready"
+    elif candidate_generation_phase and candidate_generation_phase != "ready":
+        # A request can disappear after its exact reservation was released but
+        # before its best-effort failure progress write committed. Never project
+        # that durable active phase as idle; expose the resumable retry surface.
+        candidate_generation_status = "stalled"
     else:
         candidate_generation_status = "idle"
     latest: dict[int, dict[str, Any]] = {}
