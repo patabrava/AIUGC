@@ -973,6 +973,9 @@ class ProductionStageRunner:
                 acoustic_seams=len(takes) > 1,
             )
         payload = self._read_manifest(manifest_path)
+        cleared_acoustic_advisory = self._clear_superseded_acoustic_advisory(payload)
+        if cleared_acoustic_advisory:
+            pipeline._atomic_write_json(manifest_path, payload)  # noqa: SLF001
         stitch = payload.get("stitch") or {}
         stitch_path = Path(str(stitch.get("path") or ""))
         if not stitch_path.is_file():
@@ -1007,18 +1010,36 @@ class ProductionStageRunner:
                 "evaluated" if len(takes) > 1 else "not_applicable"
             ),
         }
-        return {
-            "passed": True,
-            "artifacts": {
-                "pipeline_manifest": payload,
-                "acoustic_qa": payload.get("acoustic_seam_qa")
-                or {"passed": True, "status": "not_applicable"},
-                "delivery": delivery,
-                # A successful recomposition supersedes any prior retry evidence.
-                # Persist JSON null so merge-style stage RPCs clear the stale value.
-                "qa_failure": None,
-            },
+        artifacts = {
+            "pipeline_manifest": payload,
+            "acoustic_qa": payload.get("acoustic_seam_qa")
+            or {"passed": True, "status": "not_applicable"},
+            "delivery": delivery,
+            # A successful recomposition supersedes any prior retry evidence.
+            # Persist JSON null so merge-style stage RPCs clear the stale value.
+            "qa_failure": None,
         }
+        if cleared_acoustic_advisory:
+            artifacts["qa_advisory"] = None
+        return {"passed": True, "artifacts": artifacts}
+
+    @staticmethod
+    def _clear_superseded_acoustic_advisory(payload: dict[str, Any]) -> bool:
+        advisory = payload.get("delivery_qa_advisory")
+        if not isinstance(advisory, Mapping) or advisory.get("stage") != "acoustic_qa":
+            return False
+        current_reports = (
+            payload.get("seam_qa"),
+            payload.get("acoustic_seam_qa"),
+            payload.get("delivery_visual_qa"),
+        )
+        if not all(
+            isinstance(report, Mapping) and report.get("passed") is True
+            for report in current_reports
+        ):
+            return False
+        payload.pop("delivery_qa_advisory", None)
+        return True
 
     def caption_advisory_single_take(
         self,

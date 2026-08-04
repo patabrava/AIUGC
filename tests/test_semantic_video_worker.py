@@ -1643,7 +1643,9 @@ def test_compose_delivery_repairs_one_failed_stitched_seam_without_new_paid_take
                     {
                         "status": "captioned",
                         "stitch": {"path": str(stitched)},
+                        "seam_qa": {"passed": True},
                         "acoustic_seam_qa": {"passed": True},
+                        "delivery_visual_qa": {"passed": True},
                         "seam_repair_history": [{"gaps_seconds": [0.62]}],
                     }
                 ),
@@ -1687,6 +1689,46 @@ def test_compose_delivery_repairs_one_failed_stitched_seam_without_new_paid_take
     assert pipeline.compose_calls == 2
     assert pipeline.repair_calls == 1
     assert result["artifacts"]["pipeline_manifest"]["seam_repair_history"]
+
+
+def test_successful_current_acoustic_gates_clear_a_superseded_advisory():
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    payload = {
+        "delivery_qa_advisory": {
+            "required": True,
+            "stage": "acoustic_qa",
+            "message": "An earlier stitched seam failed.",
+        },
+        "seam_qa": {"passed": True},
+        "acoustic_seam_qa": {"passed": True},
+        "delivery_visual_qa": {"passed": True},
+    }
+
+    cleared = ProductionStageRunner._clear_superseded_acoustic_advisory(payload)  # noqa: SLF001
+
+    assert cleared is True
+    assert "delivery_qa_advisory" not in payload
+
+
+def test_current_acoustic_advisory_remains_when_any_delivery_gate_still_fails():
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    payload = {
+        "delivery_qa_advisory": {
+            "required": True,
+            "stage": "acoustic_qa",
+            "message": "Manual review is still required.",
+        },
+        "seam_qa": {"passed": True},
+        "acoustic_seam_qa": {"passed": False},
+        "delivery_visual_qa": {"passed": True},
+    }
+
+    cleared = ProductionStageRunner._clear_superseded_acoustic_advisory(payload)  # noqa: SLF001
+
+    assert cleared is False
+    assert payload["delivery_qa_advisory"]["required"] is True
 
 
 def test_exhausted_stitched_seam_repair_requires_localized_paid_take_retry(tmp_path):
