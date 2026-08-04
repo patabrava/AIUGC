@@ -21,6 +21,22 @@
         window.location.reload();
     }
 
+    function settleCandidateAction(root) {
+        root.dataset.waitingForCandidates = 'false';
+        root.dataset.candidateGenerationStatus = 'ready';
+        stopPolling(root);
+        const siblingBusy = Array.from(
+            document.querySelectorAll('[data-semantic-video-controller]'),
+        ).some((candidateRoot) => (
+            candidateRoot !== root
+            && (
+                candidateRoot.dataset.waitingForCandidates === 'true'
+                || candidateRoot.dataset.candidateGenerationStatus === 'generating'
+            )
+        ));
+        if (!siblingBusy) reloadAtWorkflow(root);
+    }
+
     window.handleSemanticDeliveryDecision = function (event, postId) {
         if (!event.detail.successful) return;
         let payload = {};
@@ -197,6 +213,7 @@
         root.setAttribute('aria-busy', String(isBusy));
         root.dataset.revision = progress.revision;
         root.dataset.stage = progress.stage;
+        root.dataset.runId = progress.run_id || '';
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
         root.dataset.candidateGenerationStatus = progress.candidate_generation_status || 'idle';
         root.dataset.candidateGenerationPhase = progress.candidate_generation_phase || '';
@@ -383,8 +400,16 @@
             const postId = root.dataset.postId;
             const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(postId)}/progress`, {method: 'GET'});
             updateProgress(root, progress);
-            if (root.dataset.waitingForCandidates === 'true' && progress.candidate_generation_status === 'ready') {
-                window.location.reload();
+            const requestAdvanced = (
+                String(progress.run_id || '') !== String(root.dataset.candidateBaselineRunId || '')
+                || String(progress.revision ?? '') !== String(root.dataset.candidateBaselineRevision || '')
+            );
+            if (
+                root.dataset.waitingForCandidates === 'true'
+                && progress.candidate_generation_status === 'ready'
+                && requestAdvanced
+            ) {
+                settleCandidateAction(root);
                 return;
             }
             if (progress.stage === 'retry_approval_required' || progress.stage === 'completed') {
@@ -495,10 +520,16 @@
                 body = await synchronizePaidAction(root, path, body);
                 if (!body) return;
             }
-            await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
+            const result = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
                 method: 'POST',
                 body: JSON.stringify(body),
             });
+            if (path === 'candidates') {
+                root.dataset.runId = result.run_id || root.dataset.runId || '';
+                root.dataset.revision = String(result.revision ?? root.dataset.revision ?? '');
+                settleCandidateAction(root);
+                return;
+            }
             reloadAtWorkflow(root);
         } catch (error) {
             if (path === 'master-approve' && await reconcileMasterApproval(root)) {
@@ -543,6 +574,8 @@
 
         action(root, 'generate-candidates')?.addEventListener('click', (event) => {
             const expected = root.dataset.revision === '' ? null : revision();
+            root.dataset.candidateBaselineRunId = root.dataset.runId || '';
+            root.dataset.candidateBaselineRevision = root.dataset.revision || '';
             root.dataset.waitingForCandidates = 'true';
             showCandidateLoading(root);
             startPolling(root, true, false);

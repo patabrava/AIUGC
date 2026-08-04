@@ -1085,6 +1085,13 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "payload?.message" in source
     assert "startPolling(root, true, false)" in source
     assert "reloadAtWorkflow(root)" in source
+    assert "settleCandidateAction(root)" in source
+    assert "candidateBaselineRunId" in source
+    assert "candidateBaselineRevision" in source
+    assert "requestAdvanced" in source
+    assert "candidateRoot.dataset.waitingForCandidates === 'true'" in source
+    assert "candidateRoot.dataset.candidateGenerationStatus === 'generating'" in source
+    assert 'data-run-id="{{ item.run_id or \'\' }}"' in template_source
     assert "#semantic-video-post-" in source
     assert "handleSemanticDeliveryDecision" in source
     assert "'#publish-workflow'" in source

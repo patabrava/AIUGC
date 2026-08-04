@@ -58,6 +58,7 @@
             class="rounded-2xl border border-[#1C2740]/10 p-4 sm:p-5"
             data-semantic-video-controller
             data-post-id="{{ item.post_id }}"
+            data-run-id="{{ item.run_id or '' }}"
             data-revision="{{ item.revision if item.revision is not none else '' }}"
             data-plan-hash="{{ item.plan_hash }}"
             data-stage="{{ item.stage }}"
