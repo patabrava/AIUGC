@@ -818,6 +818,8 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "initial_plan_is_approved": False,
         "candidates": [],
         "actor_references": [],
+        "actor_reference_fingerprint": "",
+        "uses_shared_actor_references": False,
         "approved_master_url": "",
         "contact_sheet_url": "",
         "actor_identity_qa": None,
@@ -974,6 +976,9 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "initial_plan_is_approved": current_initial_approval,
         "candidates": candidates,
         "actor_references": actor_references,
+        "actor_reference_fingerprint": str(
+            reference.get("actor_reference_fingerprint") or ""
+        ).strip().lower(),
         "approved_master_url": str(master.get("storage_uri") or ""),
         "contact_sheet_url": str(
             contact_sheet.get("storage_uri") or contact_sheet.get("url") or ""
@@ -1035,16 +1040,46 @@ def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[D
     duration_contract = build_semantic_duration_contract(
         requested_duration_seconds
     )
+    posts = [
+        _build_semantic_video_post_projection(post)
+        for post in (batch_detail.get("posts") or [])
+    ]
+    reference_posts = [
+        post
+        for post in posts
+        if post.get("candidates") and len(post.get("actor_references") or []) == 2
+    ]
+    reference_fingerprints = {
+        str(post.get("actor_reference_fingerprint") or "").strip().lower()
+        for post in reference_posts
+    }
+    shared_actor_references = []
+    shared_actor_reference_fingerprint = ""
+    if (
+        reference_posts
+        and len(reference_fingerprints) == 1
+        and "" not in reference_fingerprints
+    ):
+        shared_actor_reference_fingerprint = next(iter(reference_fingerprints))
+        shared_actor_references = [
+            dict(reference)
+            for reference in reference_posts[0]["actor_references"]
+        ]
+        for post in reference_posts:
+            post["uses_shared_actor_references"] = True
+
     return {
         "requested_duration_seconds": requested_duration_seconds,
         "duration_contract": {
             **duration_contract.as_dict(),
             "contract_hash": duration_contract.contract_hash,
         },
-        "posts": [
-            _build_semantic_video_post_projection(post)
-            for post in (batch_detail.get("posts") or [])
-        ],
+        "posts": posts,
+        "shared_actor_references": shared_actor_references,
+        "shared_actor_reference_fingerprint": shared_actor_reference_fingerprint,
+        "actor_reference_mismatch": bool(
+            len(reference_posts) > 1 and not shared_actor_references
+        ),
     }
 
 

@@ -39,6 +39,78 @@ def _semantic_batch() -> dict:
     }
 
 
+def test_semantic_projection_shares_only_matching_actor_reference_fingerprints(monkeypatch):
+    batch = _semantic_batch()
+    batch["posts"].append({"id": "post-2"})
+    references = [
+        {"role": "actor_front", "storage_uri": "https://cdn/front.png"},
+        {
+            "role": "actor_three_quarter",
+            "storage_uri": "https://cdn/three-quarter.png",
+        },
+    ]
+    projections = {
+        "post-1": {
+            "post_id": "post-1",
+            "candidates": [{"index": 1}],
+            "actor_references": references,
+            "actor_reference_fingerprint": "a" * 64,
+            "uses_shared_actor_references": False,
+        },
+        "post-2": {
+            "post_id": "post-2",
+            "candidates": [{"index": 1}],
+            "actor_references": references,
+            "actor_reference_fingerprint": "a" * 64,
+            "uses_shared_actor_references": False,
+        },
+    }
+    monkeypatch.setattr(
+        batch_handlers,
+        "_build_semantic_video_post_projection",
+        lambda post: projections[post["id"]],
+    )
+
+    semantic = batch_handlers._build_semantic_video_projection(batch)
+
+    assert semantic["shared_actor_references"] == references
+    assert semantic["shared_actor_reference_fingerprint"] == "a" * 64
+    assert semantic["actor_reference_mismatch"] is False
+    assert all(post["uses_shared_actor_references"] for post in semantic["posts"])
+
+
+def test_semantic_projection_keeps_mismatched_actor_references_local(monkeypatch):
+    batch = _semantic_batch()
+    batch["posts"].append({"id": "post-2"})
+    projections = {
+        post_id: {
+            "post_id": post_id,
+            "candidates": [{"index": 1}],
+            "actor_references": [
+                {"role": "actor_front", "storage_uri": f"https://cdn/{post_id}-front.png"},
+                {
+                    "role": "actor_three_quarter",
+                    "storage_uri": f"https://cdn/{post_id}-three-quarter.png",
+                },
+            ],
+            "actor_reference_fingerprint": fingerprint * 64,
+            "uses_shared_actor_references": False,
+        }
+        for post_id, fingerprint in (("post-1", "a"), ("post-2", "b"))
+    }
+    monkeypatch.setattr(
+        batch_handlers,
+        "_build_semantic_video_post_projection",
+        lambda post: projections[post["id"]],
+    )
+
+    semantic = batch_handlers._build_semantic_video_projection(batch)
+
+    assert semantic["shared_actor_references"] == []
+    assert semantic["actor_reference_mismatch"] is True
+    assert not any(post["uses_shared_actor_references"] for post in semantic["posts"])
+
+
 def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkeypatch):
     run = {
         "id": "run-1",
@@ -722,6 +794,17 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
             },
             "semantic_video": {
                 "requested_duration_seconds": 50,
+                "shared_actor_references": [
+                    {
+                        "role": "actor_front",
+                        "storage_uri": "https://cdn/front.png",
+                    },
+                    {
+                        "role": "actor_three_quarter",
+                        "storage_uri": "https://cdn/three-quarter.png",
+                    },
+                ],
+                "actor_reference_mismatch": False,
                 "posts": [
                     {
                         "post_id": "post-1",
@@ -742,6 +825,8 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
                                 "storage_uri": "https://cdn/three-quarter.png",
                             },
                         ],
+                        "actor_reference_fingerprint": "a" * 64,
+                        "uses_shared_actor_references": True,
                         "has_passed_candidate": True,
                         "candidates": [
                             {
@@ -796,9 +881,16 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert 'aria-live="polite"' in html
     assert "Wheelchair scene plate candidates" in html
     assert 'aria-label="Select wheelchair scene plate candidate 1"' in html
-    assert "Original-actor identity review" in html
+    assert "Batch actor references" in html
+    assert "These two immutable references apply to every scene plate below." in html
+    assert "Original-actor identity review" not in html
     assert "Original front reference" in html
     assert "Original three-quarter reference" in html
+    assert 'data-action="compare-references"' in html
+    assert 'data-action="compare-candidate"' in html
+    assert "Compare identity" in html
+    assert "data-identity-compare-dialog" in html
+    assert 'aria-label="Close identity comparison"' in html
     assert "Identity verified · 96% evaluator confidence" in html
     assert "not overall picture quality" in html
     assert "Approving confirms that the selected scene plate shows the same actor as both original references" in html
@@ -814,6 +906,60 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert "Continue: Build free Veo plan" not in html
     assert 'data-action="approve-plan"' not in html
     assert "disabled" in html
+
+
+def test_semantic_partial_keeps_compact_local_references_for_fingerprint_mismatch():
+    env = Environment(loader=FileSystemLoader("templates"))
+    html = env.get_template("batches/detail/_semantic_video.html").render(
+        batch=_semantic_batch(),
+        batch_view={
+            "semantic_workflow": {"current_step": {"key": "scene"}},
+            "semantic_video": {
+                "requested_duration_seconds": 16,
+                "shared_actor_references": [],
+                "actor_reference_mismatch": True,
+                "posts": [
+                    {
+                        "post_id": "post-mismatch",
+                        "topic_title": "Reference mismatch",
+                        "revision": 2,
+                        "stage": "awaiting_reference_approval",
+                        "plan_hash": "",
+                        "script_review_status": "approved",
+                        "master_state": "candidates_ready",
+                        "master_hash_is_current": False,
+                        "initial_plan_is_approved": False,
+                        "actor_references": [
+                            {"role": "actor_front", "storage_uri": "https://cdn/local-front.png"},
+                            {
+                                "role": "actor_three_quarter",
+                                "storage_uri": "https://cdn/local-three-quarter.png",
+                            },
+                        ],
+                        "actor_reference_fingerprint": "b" * 64,
+                        "uses_shared_actor_references": False,
+                        "has_passed_candidate": True,
+                        "candidates": [
+                            {
+                                "index": 1,
+                                "storage_uri": "https://cdn/local-candidate.png",
+                                "identity_gate_result": {"passed": True, "confidence": 0.94},
+                            }
+                        ],
+                        "requested_duration_seconds": 16,
+                        "delivery_duration_seconds": None,
+                        "visual_contract": None,
+                    }
+                ],
+            },
+        },
+    )
+
+    assert "This post uses a different immutable reference fingerprint" in html
+    assert "h-20 w-14" in html
+    assert "aspect-[9/16] w-full rounded-lg bg-slate-100 object-cover" in html
+    assert 'data-actor-front-uri="https://cdn/local-front.png"' in html
+    assert "Compare identity" in html
 
 
 def test_awaiting_paid_visual_can_be_regenerated_from_live_panel():

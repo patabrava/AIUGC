@@ -576,6 +576,49 @@
         }
     }
 
+    function openIdentityComparison(workflow, trigger) {
+        const dialog = workflow.querySelector('[data-identity-compare-dialog]');
+        if (!dialog) return;
+        const root = trigger.closest('[data-semantic-video-controller]');
+        const frontUri = trigger.dataset.actorFrontUri || root?.dataset.actorFrontUri || '';
+        const threeQuarterUri = trigger.dataset.actorThreeQuarterUri || root?.dataset.actorThreeQuarterUri || '';
+        if (!frontUri || !threeQuarterUri) return;
+
+        const frontImage = dialog.querySelector('[data-compare-front]');
+        const threeQuarterImage = dialog.querySelector('[data-compare-three-quarter]');
+        const candidateImage = dialog.querySelector('[data-compare-candidate]');
+        const candidateFigure = dialog.querySelector('[data-compare-candidate-figure]');
+        const candidateLabel = dialog.querySelector('[data-compare-candidate-label]');
+        const summary = dialog.querySelector('[data-compare-summary]');
+        const candidateUri = trigger.dataset.candidateUri || '';
+
+        frontImage.src = frontUri;
+        threeQuarterImage.src = threeQuarterUri;
+        candidateFigure.hidden = !candidateUri;
+        if (candidateUri) {
+            candidateImage.src = candidateUri;
+            candidateLabel.textContent = trigger.dataset.candidateLabel || 'Scene plate candidate';
+            summary.textContent = trigger.dataset.gateSummary || 'Compare the candidate directly with both immutable actor references.';
+        } else {
+            candidateImage.removeAttribute('src');
+            summary.textContent = 'Review the immutable front and three-quarter references used for this scene review.';
+        }
+        dialog.showModal();
+    }
+
+    function bindIdentityComparison(workflow) {
+        const dialog = workflow.querySelector('[data-identity-compare-dialog]');
+        if (!dialog) return;
+        workflow.addEventListener('click', (event) => {
+            const trigger = event.target.closest('[data-action="compare-candidate"], [data-action="compare-references"]');
+            if (trigger) openIdentityComparison(workflow, trigger);
+        });
+        dialog.querySelector('[data-action="close-identity-compare"]')?.addEventListener('click', () => dialog.close());
+        dialog.addEventListener('click', (event) => {
+            if (event.target === dialog) dialog.close();
+        });
+    }
+
     function bind(root) {
         if (root.dataset.semanticBound === 'true') return;
         root.dataset.semanticBound = 'true';
@@ -641,6 +684,7 @@
         scope.querySelectorAll('[data-semantic-video-workflow]').forEach((workflow) => {
             if (workflow.dataset.semanticBatchBound === 'true') return;
             workflow.dataset.semanticBatchBound = 'true';
+            bindIdentityComparison(workflow);
             const button = workflow.querySelector('[data-action="approve-batch-plans"]');
             button?.addEventListener('click', () => approveReadyBatchPlans(workflow, button));
         });
