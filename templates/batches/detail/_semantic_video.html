@@ -413,7 +413,7 @@
                         hx-put="/qa/{{ item.post_id }}/approve"
                         hx-vals='{"approved": true}'
                         hx-swap="none"
-                        hx-on::after-request="window.handleSemanticDeliveryDecision(event, {{ item.post_id | tojson }})"
+                        data-semantic-delivery-post-id="{{ item.post_id }}"
                         class="brand-button-primary brand-focus rounded-xl px-4 py-2 text-sm font-bold text-white"
                     >
                         Approve delivery
@@ -423,7 +423,7 @@
                         hx-put="/qa/{{ item.post_id }}/approve"
                         hx-vals='{"approved": false}'
                         hx-swap="none"
-                        hx-on::after-request="window.handleSemanticDeliveryDecision(event, {{ item.post_id | tojson }})"
+                        data-semantic-delivery-post-id="{{ item.post_id }}"
                         class="rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-bold text-red-700"
                     >
                         Reject delivery

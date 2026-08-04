@@ -1089,7 +1089,10 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "handleSemanticDeliveryDecision" in source
     assert "'#publish-workflow'" in source
     assert "payload?.data?.batch_advanced" in source
-    assert "window.handleSemanticDeliveryDecision" in template_source
+    assert "event.detail?.elt || event.target" in source
+    assert "decision.dataset.semanticDeliveryPostId" in source
+    assert 'data-semantic-delivery-post-id="{{ item.post_id }}"' in template_source
+    assert "hx-on::after-request" not in template_source
     assert "progress.estimated_remaining_seconds" in source
     assert "progress.progress_percent" in source
     assert "updateStatStatus(root, progress)" in source

@@ -40,6 +40,16 @@
         window.location.reload();
     };
 
+    document.addEventListener('htmx:afterRequest', (event) => {
+        const trigger = event.detail?.elt || event.target;
+        const decision = trigger?.closest?.('[data-semantic-delivery-post-id]');
+        if (!decision) return;
+        window.handleSemanticDeliveryDecision(
+            event,
+            decision.dataset.semanticDeliveryPostId,
+        );
+    });
+
     async function requestJson(url, options = {}) {
         const response = await fetch(url, {
             credentials: 'same-origin',
