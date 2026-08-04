@@ -208,6 +208,8 @@ class ProductionStageRunner:
         "final_transcript",
         "final_transcript_qa",
         "seam_qa",
+        "composition_history",
+        "seam_repair_history",
         "acoustic_seam_plan",
         "acoustic_seam_qa",
         "delivery_visual_qa",
@@ -909,11 +911,13 @@ class ProductionStageRunner:
         if stage == "acoustic_qa":
             acoustic_plan_failure = payload.get("acoustic_plan_failure")
             if acoustic_qa_requires_localized_paid_retry(qa_failure, payload):
-                qa_failure["failure_type"] = (
-                    "acoustic_plan_failure"
-                    if isinstance(acoustic_plan_failure, Mapping)
-                    else "delivery_visual_regeneration"
-                )
+                if isinstance(acoustic_plan_failure, Mapping):
+                    failure_type = "acoustic_plan_failure"
+                elif payload.get("status") == "seam_qa_failed":
+                    failure_type = "seam_repair_exhausted"
+                else:
+                    failure_type = "delivery_visual_regeneration"
+                qa_failure["failure_type"] = failure_type
                 qa_failure["retry_mode"] = "localized_paid_take"
         return {
             "passed": False,
@@ -935,11 +939,39 @@ class ProductionStageRunner:
         manifest_path: Path,
     ) -> dict[str, Any]:
         pipeline = self._runner()
-        pipeline.compose_and_caption(
-            manifest_path,
-            self._deepgram(),
-            acoustic_seams=len(takes) > 1,
-        )
+        try:
+            pipeline.compose_and_caption(
+                manifest_path,
+                self._deepgram(),
+                acoustic_seams=len(takes) > 1,
+            )
+        except ValidationError:
+            failed_payload = self._read_manifest(manifest_path)
+            repair_history = failed_payload.get("seam_repair_history")
+            if (
+                str(failed_payload.get("status") or "") != "seam_qa_failed"
+                or (isinstance(repair_history, list) and repair_history)
+            ):
+                raise
+            seam_report = failed_payload.get("seam_qa") or {}
+            pipeline.repair_failed_seam_windows(
+                manifest_path,
+                reason=(
+                    "Automatically tighten the checksum-verified stitched seam after "
+                    f"final transcript QA measured gaps {seam_report.get('gaps_seconds') or []}."
+                ),
+            )
+            logger.info(
+                "semantic_video_seam_windows_repaired",
+                run_id=str(run["id"]),
+                failed_seam_indexes=seam_report.get("failed_seam_indexes") or [],
+                gaps_seconds=seam_report.get("gaps_seconds") or [],
+            )
+            pipeline.compose_and_caption(
+                manifest_path,
+                self._deepgram(),
+                acoustic_seams=len(takes) > 1,
+            )
         payload = self._read_manifest(manifest_path)
         stitch = payload.get("stitch") or {}
         stitch_path = Path(str(stitch.get("path") or ""))

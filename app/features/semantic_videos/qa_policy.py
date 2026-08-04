@@ -25,6 +25,7 @@ def acoustic_qa_requires_localized_paid_retry(
     manifest = pipeline_manifest if isinstance(pipeline_manifest, Mapping) else {}
     acoustic_plan_failure = manifest.get("acoustic_plan_failure")
     delivery_visual_qa = manifest.get("delivery_visual_qa")
+    seam_repair_history = manifest.get("seam_repair_history")
     details = qa_failure.get("details")
     return bool(
         (
@@ -38,6 +39,11 @@ def acoustic_qa_requires_localized_paid_retry(
         or (
             isinstance(details, Mapping)
             and details.get("requires_paid_regeneration") is True
+        )
+        or (
+            manifest.get("status") == "seam_qa_failed"
+            and isinstance(seam_repair_history, list)
+            and bool(seam_repair_history)
         )
     )
 

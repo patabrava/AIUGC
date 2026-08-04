@@ -1598,3 +1598,127 @@ def test_acoustic_plan_failure_requires_localized_paid_take_retry(tmp_path):
     assert failure["failed_take_indexes"] == [0, 1]
     assert failure["failure_type"] == "acoustic_plan_failure"
     assert failure["retry_mode"] == "localized_paid_take"
+
+
+def test_compose_delivery_repairs_one_failed_stitched_seam_without_new_paid_takes(
+    tmp_path,
+    monkeypatch,
+):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"status": "raw_completed"}), encoding="utf-8")
+    stitched = tmp_path / "stitched.mp4"
+    stitched.write_bytes(b"repaired-stitch")
+
+    class SeamRepairPipeline:
+        def __init__(self):
+            self.compose_calls = 0
+            self.repair_calls = 0
+
+        def compose_and_caption(self, path, deepgram, *, acoustic_seams):
+            del deepgram
+            assert acoustic_seams is True
+            self.compose_calls += 1
+            if self.compose_calls == 1:
+                path.write_text(
+                    json.dumps(
+                        {
+                            "status": "seam_qa_failed",
+                            "seam_qa": {
+                                "passed": False,
+                                "gaps_seconds": [0.62],
+                                "failed_seam_indexes": [0],
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                raise ValidationError(
+                    "Final stitched seam-gap QA failed.",
+                    {"gaps_seconds": [0.62]},
+                )
+            path.write_text(
+                json.dumps(
+                    {
+                        "status": "captioned",
+                        "stitch": {"path": str(stitched)},
+                        "acoustic_seam_qa": {"passed": True},
+                        "seam_repair_history": [{"gaps_seconds": [0.62]}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+        def repair_failed_seam_windows(self, path, *, reason):
+            assert "0.62" in reason
+            self.repair_calls += 1
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["status"] = "seam_repair_planned"
+            payload["seam_repair_history"] = [{"gaps_seconds": [0.62]}]
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+        def upload_final(self, path, *, storage_client):
+            del path, storage_client
+            return {
+                "url": "https://storage/repaired-captioned.mp4",
+                "sha256": "c" * 64,
+            }
+
+    pipeline = SeamRepairPipeline()
+    monkeypatch.setattr(
+        ProductionStageRunner,
+        "_runner",
+        staticmethod(lambda: pipeline),
+    )
+    runner = ProductionStageRunner(
+        storage=FakeStorage(b"master"),
+        deepgram=object(),
+        work_root=tmp_path,
+    )
+
+    result = runner._compose_upload_delivery(  # noqa: SLF001
+        {"id": "run-1", "artifact_prefix": "semantic/run-1"},
+        [{"take_index": 0}, {"take_index": 1}],
+        manifest_path,
+    )
+
+    assert result["passed"] is True
+    assert pipeline.compose_calls == 2
+    assert pipeline.repair_calls == 1
+    assert result["artifacts"]["pipeline_manifest"]["seam_repair_history"]
+
+
+def test_exhausted_stitched_seam_repair_requires_localized_paid_take_retry(tmp_path):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "seam_qa_failed",
+                "seam_qa": {
+                    "passed": False,
+                    "gaps_seconds": [0.64],
+                    "failed_seam_indexes": [0],
+                },
+                "seam_repair_history": [{"gaps_seconds": [0.62]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = ProductionStageRunner(storage=SimpleNamespace(), work_root=tmp_path)
+
+    result = runner._qa_failure(  # noqa: SLF001
+        "acoustic_qa",
+        manifest_path,
+        [{"take_index": 0}, {"take_index": 1}],
+        ValidationError(
+            "Final stitched seam-gap QA failed.",
+            {"gaps_seconds": [0.64]},
+        ),
+    )
+
+    failure = result["artifacts"]["qa_failure"]
+    assert failure["failure_type"] == "seam_repair_exhausted"
+    assert failure["retry_mode"] == "localized_paid_take"
