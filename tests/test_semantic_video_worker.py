@@ -1564,3 +1564,37 @@ def test_production_stage_runner_preserves_semantic_script_provenance(
     assert script["script_review_status"] == "approved"
     assert script["target_duration_seconds"] == 16
     assert "target_length_tier" not in script
+
+
+def test_acoustic_plan_failure_requires_localized_paid_take_retry(tmp_path):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "acoustic_plan_failed",
+                "acoustic_plan_failure": {
+                    "message": "Acoustic duration extension exceeds the seam energy limit.",
+                    "recommended_retry_take_indexes": [0, 1],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = ProductionStageRunner(storage=SimpleNamespace(), work_root=tmp_path)
+
+    result = runner._qa_failure(  # noqa: SLF001
+        "acoustic_qa",
+        manifest_path,
+        [{"take_index": 0}, {"take_index": 1}],
+        ValidationError(
+            "Acoustic duration extension exceeds the seam energy limit.",
+            {"seam_index": 0},
+        ),
+    )
+
+    failure = result["artifacts"]["qa_failure"]
+    assert failure["failed_take_indexes"] == [0, 1]
+    assert failure["failure_type"] == "acoustic_plan_failure"
+    assert failure["retry_mode"] == "localized_paid_take"

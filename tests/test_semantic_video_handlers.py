@@ -3922,6 +3922,46 @@ def test_persist_semantic_video_plan_query_uses_one_rpc_and_returns_exact_contra
         )
 
 
+def test_acoustic_plan_failure_rejects_zero_cost_qa_resume(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state, revision=4)
+    state["run"].update(
+        {
+            "stage": "retry_approval_required",
+            "plan_hash": "a" * 64,
+            "artifact_manifest": {
+                "qa_failure": {
+                    "stage": "acoustic_qa",
+                    "message": "Acoustic planning needs a new take.",
+                    "failed_take_indexes": [0, 1],
+                },
+                "pipeline_manifest": {
+                    "acoustic_plan_failure": {
+                        "recommended_retry_take_indexes": [0, 1],
+                    }
+                },
+            },
+        }
+    )
+    resume_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "resume_qa_review",
+        lambda **kwargs: resume_calls.append(kwargs),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/qa-resume",
+        json={"plan_hash": "a" * 64, "expected_revision": 4},
+    )
+
+    assert response.status_code == 409, response.text
+    assert "localized paid take retry" in response.json()["message"]
+    assert resume_calls == []
+
+
 def test_candidate_reservation_queries_use_atomic_rpcs_and_map_only_conflicts():
     from app.features.semantic_videos.queries import (
         finalize_candidate_generation,

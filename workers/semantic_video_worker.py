@@ -26,6 +26,9 @@ from app.adapters.vertex_ai_client import VertexAIClient
 from app.core.errors import StateTransitionError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
 from app.features.semantic_videos import queries
+from app.features.semantic_videos.qa_policy import (
+    acoustic_qa_requires_localized_paid_retry,
+)
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.features.semantic_videos.visual_contract import (
     build_actor_reference_fingerprint,
@@ -897,17 +900,27 @@ class ProductionStageRunner:
         if not failed:
             failed = [int(take["take_index"]) for take in takes]
         failed = sorted(set(failed))
+        qa_failure = {
+            "stage": stage,
+            "message": exc.message,
+            "details": exc.details,
+            "failed_take_indexes": failed,
+        }
+        if stage == "acoustic_qa":
+            acoustic_plan_failure = payload.get("acoustic_plan_failure")
+            if acoustic_qa_requires_localized_paid_retry(qa_failure, payload):
+                qa_failure["failure_type"] = (
+                    "acoustic_plan_failure"
+                    if isinstance(acoustic_plan_failure, Mapping)
+                    else "delivery_visual_regeneration"
+                )
+                qa_failure["retry_mode"] = "localized_paid_take"
         return {
             "passed": False,
             "failed_take_indexes": failed,
             "artifacts": {
                 "pipeline_manifest": payload,
-                "qa_failure": {
-                    "stage": stage,
-                    "message": exc.message,
-                    "details": exc.details,
-                    "failed_take_indexes": failed,
-                },
+                "qa_failure": qa_failure,
                 "guidance": (
                     f"Regenerate only the failed semantic beat and correct the {stage} evidence: "
                     f"{exc.message}"

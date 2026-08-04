@@ -57,6 +57,9 @@ from app.features.semantic_videos.queries import (
     reserve_candidate_generation,
     update_candidate_generation_progress,
 )
+from app.features.semantic_videos.qa_policy import (
+    acoustic_qa_requires_localized_paid_retry,
+)
 from app.features.semantic_videos.schemas import (
     ApprovalResponse,
     BatchApprovalResponse,
@@ -2652,6 +2655,19 @@ def resume_qa_only_review(post_id: str, payload: QAReviewResumeRequest):
     }:
         raise StateTransitionError(
             "Semantic video run does not have a resumable advisory QA failure."
+        )
+    pipeline_manifest = (
+        artifacts.get("pipeline_manifest")
+        if isinstance(artifacts.get("pipeline_manifest"), dict)
+        else {}
+    )
+    acoustic_paid_retry_required = acoustic_qa_requires_localized_paid_retry(
+        qa_failure,
+        pipeline_manifest,
+    )
+    if acoustic_paid_retry_required:
+        raise StateTransitionError(
+            "Semantic video acoustic QA requires a localized paid take retry."
         )
     updated = resume_qa_review(
         run_id=str(run["id"]),

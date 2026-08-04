@@ -1191,3 +1191,75 @@ def test_pending_script_keeps_semantic_production_out_of_the_script_step(monkeyp
     assert view["semantic_workflow"]["current_step"]["key"] == "scripts"
     assert 'data-action="generate-candidates"' not in html
     assert "Create and approve the scene" not in html
+
+
+def test_acoustic_plan_failure_renders_localized_paid_retry_for_legacy_evidence(
+    monkeypatch,
+):
+    run = {
+        "id": "run-acoustic-plan-failure",
+        "revision": 14,
+        "stage": "retry_approval_required",
+        "requested_duration_seconds": 16,
+        "plan_hash": "a" * 64,
+        "master_hash": "b" * 64,
+        "master_snapshot": {},
+        "plan_snapshot": {
+            "take_count": 2,
+            "billable_provider_seconds": 16,
+            "price_per_provider_second_usd": "0.40",
+            "estimated_cost_usd": "6.40",
+        },
+        "artifact_manifest": {
+            "qa_failure": {
+                "stage": "acoustic_qa",
+                "message": "Acoustic duration extension exceeds the seam energy limit.",
+                "failed_take_indexes": [0, 1],
+            },
+            "pipeline_manifest": {
+                "acoustic_plan_failure": {
+                    "recommended_retry_take_indexes": [0, 1],
+                }
+            },
+        },
+    }
+    attempts = [
+        {
+            "take_index": index,
+            "attempt": 1,
+            "submission_state": "qa_failed",
+            "provider_duration_seconds": 8,
+        }
+        for index in range(2)
+    ]
+    approvals = [
+        {"approval_type": "reference", "contract_hash": "b" * 64},
+        {"approval_type": "initial_plan", "contract_hash": "a" * 64},
+    ]
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: run,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_attempts",
+        lambda _run_id: attempts,
+    )
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "list_approvals",
+        lambda _run_id: approvals,
+    )
+
+    view = batch_handlers._build_batch_detail_view(_semantic_batch())
+    item = view["semantic_video"]["posts"][0]
+    assert item["qa_resume_available"] is False
+    assert item["retry_provider_seconds"] == 16
+    assert item["retry_estimated_cost_usd"] == "6.40"
+
+    html = Environment(loader=FileSystemLoader("templates")).get_template(
+        "batches/detail/_semantic_video.html"
+    ).render(batch=_semantic_batch(), batch_view=view)
+    assert 'data-action="approve-retry" data-cost-usd="6.40"' in html
+    assert "Continue with generated videos · $0.00" not in html
