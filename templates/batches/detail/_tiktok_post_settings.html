@@ -129,7 +129,7 @@
             </div>
 
             <div class="flex items-center justify-between">
-                <p class="text-[11px] text-gray-500" x-text="scope === 'batch' ? 'These defaults seed each TikTok post in this batch.' : 'TikTok settings are saved per post before publishing.'"></p>
+                <p class="text-[11px] text-gray-500" x-text="scope === 'batch' ? 'Defaults prefill each post. Consent is still saved per post.' : 'TikTok settings and consent are saved for this post.'"></p>
                 <button type="button" @click="save()" :disabled="!isValid || saving"
                         class="rounded-md px-4 py-2 text-xs font-semibold text-white shadow-sm transition disabled:cursor-not-allowed"
                         :class="isValid && !saving ? 'bg-[#006AAB] hover:bg-[#005a90]' : 'bg-gray-300'">

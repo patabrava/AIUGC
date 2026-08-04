@@ -171,6 +171,13 @@
             if (payload?.message) return payload.message;
             if (typeof payload?.detail === 'string') return payload.detail;
             if (payload?.detail?.message) return payload.detail.message;
+            if (Array.isArray(payload?.detail)) {
+                const messages = payload.detail
+                    .map((item) => item?.msg || item?.message)
+                    .filter(Boolean)
+                    .map((message) => String(message).replace(/^Value error,\s*/i, ''));
+                if (messages.length) return [...new Set(messages)].join(' ');
+            }
         } catch (_error) {
             return `Request failed (${response.status})`;
         }
@@ -452,6 +459,11 @@
     };
 
     window.batchPublishComponent = function (options = {}) {
+        const networkCatalog = [
+            { id: 'instagram', label: 'Instagram' },
+            { id: 'facebook', label: 'Facebook' },
+            { id: 'tiktok', label: 'TikTok' },
+        ];
         return {
             batchId: options.batchId,
             weekStart: '',
@@ -504,34 +516,102 @@
 
             get slotGridStyle() {
                 return {
-                    gridTemplateColumns: `repeat(${Math.max(this.slots.length, 1)}, minmax(0, 1fr))`,
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
                 };
             },
 
+            networkAvailable(networkId) {
+                const meta = options.metaState || {};
+                const tiktok = options.tiktokState || {};
+                if (networkId === 'instagram') {
+                    return !!(meta.publish_ready && meta.selected_instagram?.id);
+                }
+                if (networkId === 'facebook') {
+                    return !!(meta.publish_ready && meta.selected_page?.id);
+                }
+                if (networkId === 'tiktok') return !!tiktok.publish_ready;
+                return false;
+            },
+
+            networkAvailabilityLabel(networkId) {
+                return this.networkAvailable(networkId) ? 'Connected' : 'Connect account first';
+            },
+
             init() {
-                // Default week start to next Monday (or today if Monday)
                 const now = new Date();
-                const dayOfWeek = now.getDay();
-                const daysUntilMonday = dayOfWeek <= 1 ? (1 - dayOfWeek) : (8 - dayOfWeek);
-                const nextMonday = new Date(now);
-                nextMonday.setDate(now.getDate() + daysUntilMonday);
-                this.weekStart = nextMonday.toISOString().split('T')[0];
                 this.slots = this._buildSlots(this.posts.length);
-                this._syncSlotDays();
+
+                const persistedLocalValues = this.posts.map((post) => {
+                    if (!post.scheduledAt) return '';
+                    const scheduled = new Date(post.scheduledAt);
+                    if (Number.isNaN(scheduled.getTime())) return '';
+                    return window.zoneDateToLocalValue(scheduled, this.timezone);
+                });
+                const persistedDates = persistedLocalValues.filter(Boolean).map((value) => value.split('T')[0]);
+
+                if (persistedDates.length) {
+                    const earliest = new Date(`${[...persistedDates].sort()[0]}T12:00:00`);
+                    const monday = new Date(earliest);
+                    const mondayOffset = (earliest.getDay() + 6) % 7;
+                    monday.setDate(earliest.getDate() - mondayOffset);
+                    this.weekStart = monday.toISOString().split('T')[0];
+                    this._syncSlotDays();
+                    persistedLocalValues.forEach((value, index) => {
+                        if (!value) return;
+                        const [date, time] = value.split('T');
+                        this.slots[index].date = date;
+                        this.slots[index].time = time;
+                        this.updateSlotDate(index, date);
+                    });
+                } else {
+                    // Default new schedules to next Monday (or today if Monday).
+                    const dayOfWeek = now.getDay();
+                    const daysUntilMonday = dayOfWeek <= 1 ? (1 - dayOfWeek) : (8 - dayOfWeek);
+                    const nextMonday = new Date(now);
+                    nextMonday.setDate(now.getDate() + daysUntilMonday);
+                    this.weekStart = nextMonday.toISOString().split('T')[0];
+                    this._syncSlotDays();
+                }
 
                 // Watch weekStart and update slot days when it changes
                 this.$watch('weekStart', () => this._syncSlotDays());
 
-                // Auto-enable connected networks
+                // Rehydrate persisted targets; use connected defaults only for a new plan.
                 const meta = options.metaState || {};
                 const tiktok = options.tiktokState || {};
-                if (meta.publish_ready) {
-                    if (meta.selected_instagram?.id) this.networks.push('instagram');
-                    if (meta.selected_page?.id) this.networks.push('facebook');
+                const persistedNetworks = [...new Set(this.posts.flatMap((post) => post.socialNetworks || []))]
+                    .filter((networkId) => this.networkAvailable(networkId));
+                if (persistedNetworks.length) {
+                    this.networks = persistedNetworks;
+                } else {
+                    if (meta.publish_ready) {
+                        if (meta.selected_instagram?.id) this.networks.push('instagram');
+                        if (meta.selected_page?.id) this.networks.push('facebook');
+                    }
+                    if (tiktok.publish_ready) this.networks.push('tiktok');
                 }
-                if (tiktok.publish_ready) {
-                    this.networks.push('tiktok');
-                }
+            },
+
+            isDispatchLocked(post) {
+                return ['scheduled', 'publishing', 'published'].includes(String(post?.publishStatus || '').toLowerCase());
+            },
+
+            get editablePosts() {
+                return this.posts.filter((post) => !this.isDispatchLocked(post));
+            },
+
+            get hasActiveSchedule() {
+                return this.posts.length > 0 && this.editablePosts.length === 0;
+            },
+
+            get scheduleStatusReady() {
+                return this.hasActiveSchedule || this.canReview;
+            },
+
+            get scheduleStatusLabel() {
+                if (this.hasActiveSchedule) return 'Schedule active';
+                if (this.canReview) return 'Ready to review';
+                return `${this.readinessIssues.length} item${this.readinessIssues.length === 1 ? '' : 's'} to fix`;
             },
 
             get allSlotsSet() {
@@ -548,6 +628,79 @@
                 const dayRange = days.length === 1 ? days[0] : `${this.slots[0].day}\u2013${this.slots[this.slots.length - 1].day}`;
                 return `${this.posts.length} posts \u00b7 ${dayRange} \u00b7 ${nets || 'No networks selected'}`;
             },
+            scheduledLocalValue(index) {
+                const override = this.posts[index]?.timeOverride;
+                if (override) return override;
+                const slot = this.slots[index];
+                if (!slot?.date || !slot?.time) return '';
+                return `${slot.date}T${slot.time}`;
+            },
+            scheduledDate(index) {
+                const localValue = this.scheduledLocalValue(index);
+                return localValue ? window.zonedLocalValueToUtcDate(localValue, this.timezone) : null;
+            },
+            get scheduleConflicts() {
+                const entries = this.posts
+                    .map((_post, index) => ({ index, date: this.scheduledDate(index) }))
+                    .filter((entry) => entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
+                    .sort((a, b) => a.date - b.date);
+                const conflicts = [];
+                for (let i = 1; i < entries.length; i += 1) {
+                    const gapMinutes = (entries[i].date - entries[i - 1].date) / 60000;
+                    if (gapMinutes < 30) {
+                        conflicts.push({
+                            first: entries[i - 1].index,
+                            second: entries[i].index,
+                            gapMinutes: Math.max(0, Math.round(gapMinutes)),
+                        });
+                    }
+                }
+                return conflicts;
+            },
+            slotIssue(index) {
+                const slot = this.slots[index];
+                if (!slot?.date || !slot?.time) return 'Choose a date and time';
+                const scheduled = this.scheduledDate(index);
+                if (!scheduled || Number.isNaN(scheduled.getTime())) return 'Choose a valid date and time';
+                if (scheduled <= new Date()) return 'Choose a future time';
+                const conflict = this.scheduleConflicts.find((item) => item.first === index || item.second === index);
+                if (conflict) return `Only ${conflict.gapMinutes} min from another post`;
+                return '';
+            },
+            tiktokPostIssue(post) {
+                const settings = post.tiktokSettings || {};
+                if (!settings.title?.trim()) return 'TikTok title is missing';
+                if (!settings.privacy_level) return 'TikTok privacy is missing';
+                if (settings.commercial_disclosure && !settings.your_brand && !settings.branded_content) {
+                    return 'TikTok disclosure type is missing';
+                }
+                if (settings.branded_content && settings.privacy_level === 'SELF_ONLY') {
+                    return 'Branded TikTok content cannot be private';
+                }
+                if (!settings.consent_acknowledged) return 'TikTok consent is not saved';
+                return '';
+            },
+            get readinessIssues() {
+                const issues = [];
+                this.posts.forEach((post, index) => {
+                    if (this.isDispatchLocked(post)) return;
+                    const scheduleIssue = this.slotIssue(index);
+                    if (scheduleIssue) issues.push(`${post.title}: ${scheduleIssue}`);
+                    if (!post.caption?.trim()) issues.push(`${post.title}: add a caption`);
+                    if (this.networks.includes('tiktok')) {
+                        const tiktokIssue = this.tiktokPostIssue(post);
+                        if (tiktokIssue) issues.push(`${post.title}: ${tiktokIssue}`);
+                    }
+                });
+                if (!this.networks.length) issues.push('Select at least one connected destination');
+                this.networks.forEach((networkId) => {
+                    if (!this.networkAvailable(networkId)) {
+                        const network = networkCatalog.find((item) => item.id === networkId);
+                        issues.push(`${network?.label || networkId}: connect the account before scheduling`);
+                    }
+                });
+                return [...new Set(issues)];
+            },
             publishStatusLabel(post, index) {
                 const tiktokStatus = (post.publishResults?.tiktok?.status || '').toLowerCase();
                 if (post.publishStatus === 'publishing' && tiktokStatus === 'awaiting_user_action') {
@@ -563,7 +716,8 @@
                 if (post.publishStatus === 'scheduled') return 'Scheduled';
                 if (post.publishStatus === 'publishing') return 'Publishing...';
                 if (post.publishStatus === 'failed') return 'Failed';
-                return (post.caption && this.slots[index]?.time) ? 'Ready' : 'Needs attention';
+                const tiktokReady = !this.networks.includes('tiktok') || !this.tiktokPostIssue(post);
+                return (post.caption && !this.slotIssue(index) && tiktokReady) ? 'Ready' : 'Needs attention';
             },
             publishStatusClass(post, index) {
                 const tiktokStatus = (post.publishResults?.tiktok?.status || '').toLowerCase();
@@ -580,24 +734,17 @@
                 if (post.publishStatus === 'scheduled') return 'bg-[#006AAB]/10 text-[#006AAB]';
                 if (post.publishStatus === 'publishing') return 'bg-amber-100 text-amber-700';
                 if (post.publishStatus === 'failed') return 'bg-red-100 text-red-700';
-                return (post.caption && this.slots[index]?.time) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700';
+                const tiktokReady = !this.networks.includes('tiktok') || !this.tiktokPostIssue(post);
+                return (post.caption && !this.slotIssue(index) && tiktokReady) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700';
             },
             get warnings() {
-                const w = [];
-                this.posts.forEach((p, i) => {
-                    if (!p.caption || !p.caption.trim()) w.push(`"${p.title}" has no caption`);
-                    if (i >= this.slots.length && !p.timeOverride) w.push(`"${p.title}" has no time slot`);
-                });
-                if (this.networks.length === 0) w.push('No networks selected');
-                return w;
+                return this.readinessIssues;
+            },
+            get canReview() {
+                return this.editablePosts.length > 0 && this.readinessIssues.length === 0 && !this.saving;
             },
             get canArm() {
-                return this.posts.length > 0
-                    && this.slots.length >= this.posts.length
-                    && this.allSlotsSet
-                    && this.networks.length > 0
-                    && this.posts.every((p, i) => p.caption?.trim() && (i < this.slots.length || p.timeOverride))
-                    && !this.saving;
+                return this.canReview;
             },
 
             slotDateISO(i) {
@@ -606,9 +753,29 @@
             updateSlotDate(i, dateStr) {
                 if (!dateStr) return;
                 const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                const d = new Date(dateStr);
+                const d = new Date(`${dateStr}T12:00:00`);
                 this.slots[i].date = dateStr;
                 this.slots[i].day = dayNames[d.getDay()];
+            },
+            spaceConflictingSlots() {
+                const ordered = this.posts
+                    .map((_post, index) => ({ index, date: this.scheduledDate(index) }))
+                    .filter((entry) => entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
+                    .sort((a, b) => a.date - b.date)
+                    .map((entry) => entry.index);
+                let previous = null;
+                ordered.forEach((index) => {
+                    let scheduled = this.scheduledDate(index);
+                    if (!scheduled || Number.isNaN(scheduled.getTime())) return;
+                    if (previous && scheduled - previous < 30 * 60 * 1000) {
+                        scheduled = new Date(previous.getTime() + (30 * 60 * 1000));
+                        const [date, time] = window.zoneDateToLocalValue(scheduled, this.timezone).split('T');
+                        this.slots[index].date = date;
+                        this.slots[index].time = time;
+                        this.updateSlotDate(index, date);
+                    }
+                    previous = scheduled;
+                });
             },
             postSlotLabel(i) {
                 const post = this.posts[i];
@@ -640,6 +807,7 @@
             },
 
             toggleNetwork(id) {
+                if (!this.networkAvailable(id)) return;
                 if (this.networks.includes(id)) {
                     this.networks = this.networks.filter((n) => n !== id);
                 } else {

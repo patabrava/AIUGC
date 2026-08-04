@@ -43,10 +43,10 @@ class TestPostArmSpec:
         spec = PostArmSpec(
             post_id="abc",
             caption="Hello",
-            time_override="2026-03-24T16:00",
+            time_override="2036-03-25T16:00",
             networks_override=["instagram"],
         )
-        assert spec.time_override == "2026-03-24T16:00"
+        assert spec.time_override == "2036-03-25T16:00"
         assert spec.networks_override == ["instagram"]
 
     def test_empty_caption_rejected(self):
@@ -57,7 +57,7 @@ class TestPostArmSpec:
 class TestBatchArmRequest:
     def test_valid_request(self):
         req = BatchArmRequest(
-            week_start="2026-03-23",
+            week_start="2036-03-24",
             slots=[
                 SlotSpec(day="mon", time="09:00"),
                 SlotSpec(day="tue", time="14:00"),
@@ -78,7 +78,7 @@ class TestBatchArmRequest:
         """Canon 7.3: minimum 30-minute gap between any two posts."""
         with pytest.raises(PydanticValidationError, match="30"):
             BatchArmRequest(
-                week_start="2026-03-23",
+                week_start="2036-03-24",
                 slots=[
                     SlotSpec(day="mon", time="09:00"),
                     SlotSpec(day="mon", time="09:15"),
@@ -90,10 +90,19 @@ class TestBatchArmRequest:
                 ],
             )
 
+    def test_past_schedule_rejected_before_dispatch(self):
+        with pytest.raises(PydanticValidationError, match="future"):
+            BatchArmRequest(
+                week_start="2020-03-23",
+                slots=[SlotSpec(day="mon", time="09:00")],
+                default_networks=["instagram"],
+                posts=[PostArmSpec(post_id="p1", caption="Caption")],
+            )
+
     def test_empty_posts_rejected(self):
         with pytest.raises(PydanticValidationError):
             BatchArmRequest(
-                week_start="2026-03-23",
+                week_start="2036-03-24",
                 slots=[SlotSpec(day="mon", time="09:00")],
                 default_networks=["instagram"],
                 posts=[],
@@ -170,11 +179,11 @@ class TestBatchArmHandler:
         client = _FakeClient(storage)
 
         from app.features.publish.arm import arm_batch_dispatch
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             arm_batch_dispatch(
                 batch_id="b1",
                 request=BatchArmRequest(
-                    week_start="2026-03-23",
+                    week_start="2036-03-24",
                     slots=[
                         SlotSpec(day="mon", time="09:00"),
                         SlotSpec(day="tue", time="14:00"),
@@ -203,11 +212,11 @@ class TestBatchArmHandler:
         client = _FakeClient(storage)
 
         from app.features.publish.arm import arm_batch_dispatch
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             arm_batch_dispatch(
                 batch_id="b1",
                 request=BatchArmRequest(
-                    week_start="2026-03-23",
+                    week_start="2036-03-24",
                     slots=[SlotSpec(day="mon", time="09:00")],
                     default_networks=["instagram"],
                     posts=[PostArmSpec(post_id="p1", caption="Caption 1")],
@@ -228,11 +237,11 @@ class TestBatchArmHandler:
 
         from app.features.publish.arm import arm_batch_dispatch
         with pytest.raises(Exception, match="S7_PUBLISH_PLAN"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 arm_batch_dispatch(
                     batch_id="b1",
                     request=BatchArmRequest(
-                        week_start="2026-03-23",
+                        week_start="2036-03-24",
                         slots=[SlotSpec(day="mon", time="09:00")],
                         default_networks=["instagram"],
                         posts=[PostArmSpec(post_id="p1", caption="Cap")],
@@ -248,11 +257,11 @@ class TestBatchArmHandler:
 
         from app.features.publish.arm import arm_batch_dispatch
         with pytest.raises(Exception, match="video"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 arm_batch_dispatch(
                     batch_id="b1",
                     request=BatchArmRequest(
-                        week_start="2026-03-23",
+                        week_start="2036-03-24",
                         slots=[SlotSpec(day="mon", time="09:00")],
                         default_networks=["instagram"],
                         posts=[PostArmSpec(post_id="p1", caption="Cap")],
@@ -266,20 +275,20 @@ class TestBatchArmHandler:
         client = _FakeClient(storage)
 
         from app.features.publish.arm import arm_batch_dispatch
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             arm_batch_dispatch(
                 batch_id="b1",
                 request=BatchArmRequest(
-                    week_start="2026-03-23",
+                    week_start="2036-03-24",
                     slots=[SlotSpec(day="mon", time="09:00")],
                     default_networks=["instagram"],
-                    posts=[PostArmSpec(post_id="p1", caption="Cap", time_override="2026-03-25T18:00")],
+                    posts=[PostArmSpec(post_id="p1", caption="Cap", time_override="2036-03-26T18:00")],
                 ),
                 db=client,
             )
         )
         scheduled = storage["posts"][0]["scheduled_at"]
-        assert "2026-03-25" in scheduled
+        assert "2036-03-26" in scheduled
         assert result["armed_count"] == 1
 
     def test_arm_respects_networks_override(self):
@@ -299,11 +308,11 @@ class TestBatchArmHandler:
         client = _FakeClient(storage)
 
         from app.features.publish.arm import arm_batch_dispatch
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             arm_batch_dispatch(
                 batch_id="b1",
                 request=BatchArmRequest(
-                    week_start="2026-03-23",
+                    week_start="2036-03-24",
                     slots=[SlotSpec(day="mon", time="09:00")],
                     default_networks=["instagram", "facebook", "tiktok"],
                     posts=[PostArmSpec(post_id="p1", caption="Cap", networks_override=["tiktok"])],

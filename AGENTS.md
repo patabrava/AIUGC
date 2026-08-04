@@ -256,6 +256,8 @@ Rules that become generally useful across repos should later move into `bridgeco
 
 ## 10) Specific repo rules
 
+- TikTok direct-publish readiness comes from the connected account's `video.publish` scope plus live creator privacy options, regardless of its configured environment label; Post Now and scheduled dispatch must share this capability result and must never downgrade a proven direct-post account to draft mode solely because it is labeled sandbox.
+- Publish scheduling UI must mirror the `/publish/batches/{batch_id}/arm` boundary before enabling review: require future times, 30-minute spacing, connected selected networks, captions, and complete saved per-post TikTok settings/consent; render structured 422 details inside the active review surface so an arm rejection always names the corrective action.
 - Production scheduled publishing must have exactly one active dispatch owner: keep web-process schedulers disabled when `publish-scheduler` is deployed, and require every production compose/deploy renderer to run `python -m workers.publish_scheduler`; a deployment contract that disables the web scheduler without provisioning this worker is invalid.
 - Semantic video lease claims must be contract-version fenced in PostgreSQL, and the deployed worker ID must carry the accepted contract prefix; bump the fence when an obsolete or orphaned worker could process runs under stale generation or delivery rules.
 - Docker dependency installs must retain the BuildKit pip cache and explicit timeout/retry settings so transient package-download stalls do not restart the full dependency layer.

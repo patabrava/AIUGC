@@ -273,7 +273,7 @@ class BatchArmRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_min_gap(self) -> "BatchArmRequest":
-        """Canon 7.3: enforce 30-minute minimum gap between any two scheduled posts."""
+        """Require future dispatches with Canon 7.3's 30-minute minimum gap."""
         from zoneinfo import ZoneInfo
 
         day_offsets = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
@@ -291,9 +291,12 @@ class BatchArmRequest(BaseModel):
                 continue
             times.append(dt)
         times.sort()
+        now = datetime.now(timezone.utc)
+        if any(scheduled.astimezone(timezone.utc) <= now for scheduled in times):
+            raise ValueError("Every scheduled post must be in the future")
         for a, b in zip(times, times[1:]):
             if (b - a) < timedelta(minutes=30):
-                raise ValueError("Posts must be at least 30 minutes apart (Canon 7.3)")
+                raise ValueError("Scheduled posts must be at least 30 minutes apart")
         return self
 
 

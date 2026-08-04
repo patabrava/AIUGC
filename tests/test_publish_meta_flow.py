@@ -25,6 +25,24 @@ def test_publish_panel_distinguishes_tiktok_direct_and_draft_labels():
     assert "tiktokActionLabel" in panel
 
 
+def test_publish_panel_preflights_dispatch_contract_and_preserves_validation_errors():
+    detail_js = Path("static/js/batches/detail.js").read_text()
+    panel = Path("templates/batches/detail/_publish_panel.html").read_text()
+
+    assert "scheduleConflicts" in detail_js
+    assert "scheduled <= new Date()" in detail_js
+    assert "tiktokPostIssue" in detail_js
+    assert "persistedLocalValues" in detail_js
+    assert "persistedNetworks" in detail_js
+    assert "isDispatchLocked" in detail_js
+    assert "Schedule active" in panel
+    assert "Array.isArray(payload?.detail)" in detail_js
+    assert "Space posts 30 min apart" in panel
+    assert ':disabled="!canReview"' in panel
+    assert 'role="alert"' in panel
+    assert "x-collapse" not in panel
+
+
 class _FakeResponse:
     def __init__(self, data):
         self.data = data

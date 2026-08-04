@@ -336,7 +336,7 @@ def test_tiktok_publish_state_refreshes_expired_public_access_token(monkeypatch)
     assert "refresh_token_plain" not in state
 
 
-def test_tiktok_readiness_marks_sandbox_as_draft_only():
+def test_tiktok_readiness_uses_live_direct_post_capability_in_sandbox():
     readiness = tiktok._derive_tiktok_readiness(
         {
             "status": "connected",
@@ -349,10 +349,10 @@ def test_tiktok_readiness_marks_sandbox_as_draft_only():
         },
     )
 
-    assert readiness["publish_ready"] is False
+    assert readiness["publish_ready"] is True
     assert readiness["draft_ready"] is True
-    assert readiness["readiness_status"] == "draft_ready"
-    assert "draft upload" in readiness["readiness_reason"]
+    assert readiness["readiness_status"] == "publish_ready"
+    assert "post directly" in readiness["readiness_reason"]
 
 
 def test_tiktok_request_handles_oauth_error_payload(monkeypatch):

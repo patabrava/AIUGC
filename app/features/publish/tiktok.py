@@ -189,7 +189,6 @@ def _sanitize_creator_info(value: Dict[str, Any]) -> Dict[str, Any]:
 
 def _derive_tiktok_readiness(account: Dict[str, Any], creator_info: Optional[Dict[str, Any]] = None, *, creator_error: Optional[str] = None) -> Dict[str, Any]:
     status = str(account.get("status") or "disconnected")
-    environment = str(account.get("environment") or "").lower()
     scopes = _scope_set(str(account.get("scope") or ""))
     draft_ready = status == "connected" and "video.upload" in scopes
     publish_scope_ready = status == "connected" and "video.publish" in scopes
@@ -210,10 +209,6 @@ def _derive_tiktok_readiness(account: Dict[str, Any], creator_info: Optional[Dic
     elif status == "connected" and not creator_ready:
         readiness_status = "connected_not_publishable"
         readiness_reason = "TikTok creator settings are unavailable. Refresh the connection before posting."
-    elif status == "connected" and environment == "sandbox" and draft_ready:
-        readiness_status = "draft_ready"
-        readiness_reason = "TikTok sandbox mode only supports draft upload. Use Upload Draft to TikTok for testing."
-        publish_ready = False
     elif publish_ready:
         readiness_status = "publish_ready"
         readiness_reason = "This TikTok login can post directly from Lippe Lift Studio."

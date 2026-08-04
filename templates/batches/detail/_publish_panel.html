@@ -14,8 +14,8 @@
                 <p class="text-sm text-[#006AAB] mt-1">Set your week and posting times. Posts are auto-assigned Mon&rarr;Fri.</p>
             </div>
             <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold"
-                :class="allSlotsSet ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
-                x-text="slotsSetCount + '/' + slots.length + ' slots set'"></span>
+                :class="scheduleStatusReady ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-800'"
+                x-text="scheduleStatusLabel"></span>
         </div>
 
         {# Week start + network toggles #}
@@ -40,8 +40,10 @@
                 <label class="text-xs font-medium text-[#006AAB]">Networks</label>
                 <template x-for="net in [{id:'instagram',label:'IG',color:'purple'},{id:'facebook',label:'FB',color:'blue'},{id:'tiktok',label:'TT',color:'gray'}]" :key="net.id">
                     <button type="button" @click="toggleNetwork(net.id)"
+                        :disabled="!networkAvailable(net.id)"
+                        :title="networkAvailabilityLabel(net.id)"
                         class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition"
-                        :class="networks.includes(net.id) ? (net.color === 'purple' ? 'bg-[#006AAB]/10 border-[#006AAB] text-[#006AAB]' : net.color === 'blue' ? 'bg-[#006AAB]/10 border-blue-400 text-[#006AAB]' : 'bg-gray-800 border-gray-700 text-white') : 'bg-white border-gray-300 text-gray-500 hover:border-gray-400'">
+                        :class="!networkAvailable(net.id) ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : networks.includes(net.id) ? (net.color === 'purple' ? 'bg-[#006AAB]/10 border-[#006AAB] text-[#006AAB]' : net.color === 'blue' ? 'bg-[#006AAB]/10 border-blue-400 text-[#006AAB]' : 'bg-gray-800 border-gray-700 text-white') : 'bg-white border-gray-300 text-gray-500 hover:border-gray-400'">
                         <span class="inline-flex h-2 w-2 rounded-full" :class="networks.includes(net.id) ? 'bg-green-500' : 'bg-gray-300'"></span>
                         <span x-text="net.label"></span>
                     </button>
@@ -52,14 +54,24 @@
         {# Time slots row #}
         <div class="grid gap-3" :style="slotGridStyle">
             <template x-for="(slot, i) in slots" :key="i">
-                <div class="bg-white rounded-lg border border-[#006AAB]/30 p-3 text-center">
+                <div class="bg-white rounded-lg border p-3 text-center"
+                    :class="!isDispatchLocked(posts[i]) && slotIssue(i) ? 'border-red-300' : 'border-[#006AAB]/30'">
                     <div class="text-xs font-bold uppercase tracking-wide text-[#006AAB] mb-1" x-text="slot.day"></div>
                     <input type="date" :value="slotDateISO(i)" @change="updateSlotDate(i, $event.target.value)"
                         class="w-full text-center text-xs text-gray-500 mb-1 border-none bg-transparent focus:outline-none focus:ring-0 cursor-pointer px-0 py-0">
                     <input type="time" x-model="slot.time"
                         class="w-full text-center text-sm font-medium px-2 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-[#E58434] focus:border-transparent">
+                    <p x-show="!isDispatchLocked(posts[i]) && slotIssue(i)" class="mt-2 text-left text-[11px] font-medium text-red-700" x-text="slotIssue(i)"></p>
                 </div>
             </template>
+        </div>
+
+        <div x-show="scheduleConflicts.length" class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+            <p class="text-xs text-amber-900">TikTok and Meta dispatches need at least 30 minutes between posts.</p>
+            <button type="button" @click="spaceConflictingSlots()"
+                class="rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-[#E58434]">
+                Space posts 30 min apart
+            </button>
         </div>
     </div>
 
@@ -105,7 +117,7 @@
                     </div>
 
                     {# Expanded Panel #}
-                    <div x-show="expanded === post.id" x-collapse class="border-t border-gray-200 px-4 py-4 space-y-3">
+                    <div x-show="expanded === post.id" class="border-t border-gray-200 px-4 py-4 space-y-3">
                         <div>
                             <label class="block text-xs font-medium text-gray-700 mb-1">Caption</label>
                             <textarea x-model="post.caption" rows="3" maxlength="2200"
@@ -149,14 +161,14 @@
                                     accountAvatarUrl: {{ (batch_view.tiktok_publish_state or {}).get("avatar_url") | tojson }},
                                     durationSec: (post.videoMetadata && post.videoMetadata.duration_seconds) || 0,
                                     initial: {
-                                        title: (post.tiktokSettings && post.tiktokSettings.title) || (post.title || ""),
-                                        privacyLevel: (post.tiktokSettings && post.tiktokSettings.privacy_level) || null,
-                                        allowComment: !!(post.tiktokSettings && post.tiktokSettings.allow_comment),
-                                        allowDuet: !!(post.tiktokSettings && post.tiktokSettings.allow_duet),
-                                        allowStitch: !!(post.tiktokSettings && post.tiktokSettings.allow_stitch),
-                                        commercialDisclosure: !!(post.tiktokSettings && post.tiktokSettings.commercial_disclosure),
-                                        yourBrand: !!(post.tiktokSettings && post.tiktokSettings.your_brand),
-                                        brandedContent: !!(post.tiktokSettings && post.tiktokSettings.branded_content),
+                                        title: (post.tiktokSettings && post.tiktokSettings.title) || {{ (batch_view.tiktok_defaults or {}).get("title_template") | tojson }} || (post.title || ""),
+                                        privacyLevel: (post.tiktokSettings && post.tiktokSettings.privacy_level) || {{ (batch_view.tiktok_defaults or {}).get("privacy_level") | tojson }} || null,
+                                        allowComment: post.tiktokSettings ? !!post.tiktokSettings.allow_comment : {{ (batch_view.tiktok_defaults or {}).get("allow_comment", false) | tojson }},
+                                        allowDuet: post.tiktokSettings ? !!post.tiktokSettings.allow_duet : {{ (batch_view.tiktok_defaults or {}).get("allow_duet", false) | tojson }},
+                                        allowStitch: post.tiktokSettings ? !!post.tiktokSettings.allow_stitch : {{ (batch_view.tiktok_defaults or {}).get("allow_stitch", false) | tojson }},
+                                        commercialDisclosure: post.tiktokSettings ? !!post.tiktokSettings.commercial_disclosure : {{ (batch_view.tiktok_defaults or {}).get("commercial_disclosure", false) | tojson }},
+                                        yourBrand: post.tiktokSettings ? !!post.tiktokSettings.your_brand : {{ (batch_view.tiktok_defaults or {}).get("your_brand", false) | tojson }},
+                                        brandedContent: post.tiktokSettings ? !!post.tiktokSettings.branded_content : {{ (batch_view.tiktok_defaults or {}).get("branded_content", false) | tojson }},
                                         consentAcknowledged: !!(post.tiktokSettings && (post.tiktokSettings.consent_acknowledged || post.tiktokSettings.consentAcknowledged))
                                     },
                                     onSaved: function (payload) { post.tiktokSettings = payload; }
@@ -169,18 +181,34 @@
             </template>
         </div>
 
-        {# Review & Arm Button #}
-        <div class="mt-6 flex items-center justify-between">
-            <p class="text-xs text-gray-500" x-text="summaryLine"></p>
-            <button type="button" @click="showReviewModal = true"
-                :disabled="!allSlotsSet"
+        {# Dispatch readiness and review action #}
+        <div class="mt-6 rounded-lg border p-4"
+            :class="scheduleStatusReady ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'"
+            aria-live="polite">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0">
+                    <p class="text-sm font-semibold" :class="scheduleStatusReady ? 'text-green-900' : 'text-amber-950'"
+                        x-text="hasActiveSchedule ? 'Schedule active' : canReview ? 'Ready to schedule' : 'Finish dispatch setup'"></p>
+                    <p x-show="scheduleStatusReady" class="mt-1 text-xs text-green-800" x-text="summaryLine"></p>
+                    <ul x-show="!scheduleStatusReady" class="mt-2 space-y-1 text-xs text-amber-900">
+                        <template x-for="issue in readinessIssues" :key="issue">
+                            <li class="flex gap-2">
+                                <span aria-hidden="true">•</span>
+                                <span x-text="issue"></span>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+                <button x-show="!hasActiveSchedule" type="button" @click="showReviewModal = true; errorMessage = ''"
+                :disabled="!canReview"
                 class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition"
-                :class="allSlotsSet ? 'bg-[#006AAB] hover:bg-[#006AAB] focus:ring-2 focus:ring-offset-2 focus:ring-[#E58434]' : 'bg-gray-300 cursor-not-allowed'">
-                <span>Review &amp; Arm Dispatch</span>
+                :class="canReview ? 'bg-[#006AAB] hover:bg-[#005a90] focus:ring-2 focus:ring-offset-2 focus:ring-[#E58434]' : 'bg-gray-300 cursor-not-allowed'">
+                <span>Review schedule</span>
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
                 </svg>
             </button>
+            </div>
         </div>
 
         {# Status messages #}
@@ -202,7 +230,7 @@
             <div class="border-b border-gray-200 bg-[#006AAB]/5 px-6 py-5">
                 <div class="flex items-start justify-between">
                     <div>
-                        <h3 class="text-lg font-semibold text-gray-900">Review &amp; Arm Dispatch</h3>
+                        <h3 class="text-lg font-semibold text-gray-900">Review schedule</h3>
                         <p class="mt-1 text-sm text-gray-600" x-text="summaryLine"></p>
                     </div>
                     <button type="button" @click="showReviewModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-[var(--lippe-deep-blue)] hover:bg-gray-50">
@@ -266,6 +294,10 @@
                 </div>
             </div>
 
+            <div x-show="errorMessage" class="mx-6 mb-4 rounded-md border border-red-200 bg-red-50 p-3" role="alert">
+                <p class="text-sm font-medium text-red-800" x-text="errorMessage"></p>
+            </div>
+
             {# Confirm #}
             <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
                 <button type="button" @click="showReviewModal = false"
@@ -279,7 +311,7 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                     </svg>
-                    <span x-text="saving ? 'Arming...' : 'Confirm \u2014 Arm All Platforms'"></span>
+                    <span x-text="saving ? 'Scheduling...' : 'Schedule all posts'"></span>
                 </button>
             </div>
         </div>
