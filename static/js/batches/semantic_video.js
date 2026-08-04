@@ -521,10 +521,28 @@
                 body = await synchronizePaidAction(root, path, body);
                 if (!body) return;
             }
-            const result = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
-                method: 'POST',
-                body: JSON.stringify(body),
-            });
+            let result = null;
+            const maxAttempts = path === 'candidates' ? 2 : 1;
+            for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                try {
+                    result = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
+                        method: 'POST',
+                        body: JSON.stringify(body),
+                    });
+                    break;
+                } catch (error) {
+                    if (path !== 'candidates' || attempt + 1 >= maxAttempts) throw error;
+                    await pollProgress(root);
+                    if (root.dataset.candidateGenerationStatus === 'generating') {
+                        return;
+                    }
+                    body = {
+                        ...body,
+                        expected_revision: Number(root.dataset.revision || 0),
+                    };
+                    await new Promise((resolve) => window.setTimeout(resolve, 500));
+                }
+            }
             if (path === 'candidates') {
                 root.dataset.runId = result.run_id || root.dataset.runId || '';
                 root.dataset.revision = String(result.revision ?? root.dataset.revision ?? '');

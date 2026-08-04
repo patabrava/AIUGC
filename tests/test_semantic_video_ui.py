@@ -1090,6 +1090,12 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "candidateBaselineRevision" in source
     assert "requestAdvanced" in source
     assert "progress.stage === 'awaiting_reference_approval'" in source
+    assert "const maxAttempts = path === 'candidates' ? 2 : 1" in source
+    assert "attempt + 1 >= maxAttempts" in source
+    assert "await pollProgress(root)" in source
+    assert "root.dataset.candidateGenerationStatus === 'generating'" in source
+    assert "expected_revision: Number(root.dataset.revision || 0)" in source
+    assert "window.setTimeout(resolve, 500)" in source
     assert "candidateRoot.dataset.waitingForCandidates === 'true'" in source
     assert "candidateRoot.dataset.candidateGenerationStatus === 'generating'" in source
     assert 'data-run-id="{{ item.run_id or \'\' }}"' in template_source
