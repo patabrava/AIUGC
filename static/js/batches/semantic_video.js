@@ -395,7 +395,11 @@
     }
 
     async function pollProgress(root) {
-        if (!root.isConnected || root.dataset.stage === 'completed' || root.dataset.stage === 'failed') return;
+        const terminalWithoutImageRecovery = (
+            ['completed', 'failed'].includes(root.dataset.stage)
+            && root.dataset.waitingForCandidates !== 'true'
+        );
+        if (!root.isConnected || terminalWithoutImageRecovery) return;
         try {
             const postId = root.dataset.postId;
             const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(postId)}/progress`, {method: 'GET'});

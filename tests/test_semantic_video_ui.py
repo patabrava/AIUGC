@@ -1238,6 +1238,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "candidateBaselineRevision" in source
     assert "requestAdvanced" in source
     assert "progress.stage === 'awaiting_reference_approval'" in source
+    assert "root.dataset.waitingForCandidates !== 'true'" in source
     assert "const maxAttempts = 1" in source
     assert "attempt + 1 >= maxAttempts" in source
     assert "await pollProgress(root)" in source
