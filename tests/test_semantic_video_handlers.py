@@ -1630,6 +1630,39 @@ def test_progress_endpoint_reports_scene_plate_generation_state(monkeypatch):
     )
 
 
+def test_progress_endpoint_exposes_released_candidate_failure_as_resumable(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    state["run"]["stage"] = "awaiting_reference_approval"
+    state["run"]["master_snapshot"] = {}
+    state["run"]["candidate_reservation_token"] = None
+    state["run"]["candidate_reservation_expires_at"] = None
+    state["run"]["candidate_generation_progress"] = {
+        "phase": "failed",
+        "details": {
+            "candidate_count": 3,
+            "completed_candidates": 2,
+            "partial_candidates": [{"index": 1}, {"index": 2}],
+            "retryable": True,
+        },
+    }
+
+    response = client.get("/semantic-videos/posts/post-1/progress")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]
+    assert payload["candidate_generation_status"] == "stalled"
+    assert payload["candidate_generation_phase"] == "failed"
+    assert payload["candidate_count"] == 0
+    assert payload["progress_percent"] == 60
+    assert payload["estimated_remaining_seconds"] is None
+    assert "saving 2 of 3" in payload["status_message"]
+    assert "only the missing work" in payload["status_message"]
+
+
 def test_initial_approval_appends_exact_hash_and_moves_run_to_generating(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -2332,6 +2365,13 @@ def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monke
         "partial_candidates"
     ]
     assert [candidate["index"] for candidate in partial_candidates] == [1]
+    assert state["run"]["candidate_generation_progress"]["phase"] == "failed"
+    assert state["run"]["candidate_generation_progress"]["details"][
+        "completed_candidates"
+    ] == 1
+    assert state["run"]["candidate_generation_progress"]["details"][
+        "retryable"
+    ] is True
     assert state["candidate_reservation"] is None
 
     resumed_indexes = []

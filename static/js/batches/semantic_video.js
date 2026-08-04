@@ -214,6 +214,7 @@
             regenerating_duplicates: 'Replacing similar scene plates',
             checking_identity: 'Verifying actor identity',
             saving_candidates: 'Saving verified scene plates',
+            failed: 'Generation stopped — retry safely',
             ready: 'Ready for identity review',
         };
         const label = field(root, 'candidate-status-label');

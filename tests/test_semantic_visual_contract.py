@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from io import BytesIO
 from threading import Lock
@@ -724,6 +725,73 @@ def test_scene_plate_traffic_gate_round_robins_every_waiting_run():
     assert gate._next_waiter_locked() is waiter_c
     gate._last_started_key = "run-c"
     assert gate._next_waiter_locked() is waiter_a
+
+
+def test_scene_plate_production_default_keeps_one_provider_render_in_flight():
+    from app.features.shot_frames import wheelchair_scene_plate
+
+    assert wheelchair_scene_plate._SCENE_PLATE_IMAGE_MAX_CONCURRENCY == 1
+
+
+def test_three_simultaneous_posts_share_one_fair_provider_lane(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate
+
+    active = 0
+    peak_active = 0
+    active_lock = Lock()
+
+    class PeakTrackingClient:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs["prompt"]
+
+        def generate_gemini_image(self, **kwargs):
+            nonlocal active, peak_active
+            with active_lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            try:
+                sleep(0.005)
+                index = next(
+                    candidate_index
+                    for candidate_index in range(1, 4)
+                    if f"Candidate {candidate_index} composition:" in kwargs["prompt"]
+                )
+                return {
+                    "image_bytes": f"candidate-{index}".encode(),
+                    "mime_type": "image/png",
+                    "model": kwargs["model"],
+                }
+            finally:
+                with active_lock:
+                    active -= 1
+
+    monkeypatch.setattr(
+        wheelchair_scene_plate,
+        "_SCENE_PLATE_IMAGE_TRAFFIC_GATE",
+        wheelchair_scene_plate._ScenePlateImageTrafficGate(),
+    )
+    wheelchair_scene_plate._SCENE_PLATE_IMAGE_TRAFFIC_GATE._adaptive_start_interval_seconds = 0.0
+    monkeypatch.setattr(wheelchair_scene_plate, "_SCENE_PLATE_IMAGE_MAX_CONCURRENCY", 1)
+    client = PeakTrackingClient()
+
+    def generate_for_post(post_index):
+        return wheelchair_scene_plate.generate_scene_plate_candidates(
+            actor_references=[
+                _reference("actor_front", b"front"),
+                _reference("actor_three_quarter", b"support"),
+            ],
+            location_reference=_reference("location", b"location"),
+            scene=f"the exact supplied room for post {post_index}",
+            wardrobe="light-grey cardigan over a plain white top",
+            llm_client=client,
+            traffic_key=f"run-{post_index}",
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(executor.map(generate_for_post, range(3)))
+
+    assert all(len(result.candidates) == 3 for result in results)
+    assert peak_active == 1
 
 
 def test_scene_plate_traffic_gate_ramps_after_one_healthy_render(monkeypatch):

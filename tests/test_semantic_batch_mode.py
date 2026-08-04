@@ -46,6 +46,10 @@ CANDIDATE_PROGRESS_COALESCE_FIX_MIGRATION = (
     ROOT
     / "supabase/migrations/20260731090000_semantic_scene_plate_progress_coalesce_fix.sql"
 )
+CANDIDATE_FAILURE_PROGRESS_MIGRATION = (
+    ROOT
+    / "supabase/migrations/20260804000200_semantic_scene_plate_failure_progress.sql"
+)
 IDENTITY_QA_RESUME_MIGRATION = (
     ROOT
     / "supabase/migrations/20260726010000_semantic_video_identity_qa_resume.sql"
@@ -970,6 +974,20 @@ def test_candidate_progress_coalesce_fix_uses_postgres_special_form():
     assert "to service_role" in sql
 
 
+def test_candidate_failure_progress_is_token_fenced_and_retryable():
+    sql = CANDIDATE_FAILURE_PROGRESS_MIGRATION.read_text().lower()
+
+    assert "update_semantic_video_candidate_progress" in sql
+    assert "'failed'" in sql
+    assert "run.revision = p_reserved_revision" in sql
+    assert "run.candidate_reservation_token = p_reservation_token" in sql
+    assert "candidate_reservation_expires_at > pg_catalog.clock_timestamp()" in sql
+    assert "legacy_released_generation" in sql
+    assert "between 1 and 2" in sql
+    assert "candidate_reservation_token is null" in sql
+    assert "to service_role" in sql
+
+
 def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
     workflow = PRODUCTION_DEPLOY_WORKFLOW.read_text()
 
@@ -978,7 +996,7 @@ def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
     assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-independent-qa-global-v12"' in workflow
     assert '"SEMANTIC_SCENE_IDENTITY_GATE_LOCATION": "global"' in workflow
     assert '"VERTEX_GEMINI_IMAGE_LOCATION": "global"' in workflow
-    assert '"SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY": "3"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY": "1"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS": "5"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_SUCCESS_RAMP": "1"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS": "30"' in workflow

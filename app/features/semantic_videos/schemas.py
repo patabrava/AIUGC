@@ -114,6 +114,7 @@ class ProgressResponse(BaseModel):
             "regenerating_duplicates",
             "checking_identity",
             "saving_candidates",
+            "failed",
             "ready",
         ]
     ] = None

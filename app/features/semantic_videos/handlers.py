@@ -127,6 +127,10 @@ _CANDIDATE_PHASE_PROGRESS = {
         94,
         "Saving the verified scene-plate choices.",
     ),
+    "failed": (
+        20,
+        "Scene-plate generation stopped before all three candidates were ready.",
+    ),
     "ready": (
         100,
         "Wheelchair scene plates are ready for identity review.",
@@ -1604,7 +1608,31 @@ def generate_candidates(
             "ready",
             {"candidate_count": len(candidates)},
         )
-    except Exception:
+    except Exception as exc:
+        failure_details = getattr(exc, "details", {})
+        failure_details = (
+            failure_details if isinstance(failure_details, Mapping) else {}
+        )
+        provider_status = failure_details.get("status_code")
+        reason_code = str(failure_details.get("reason_code") or "").strip()
+        persist_candidate_progress(
+            "failed",
+            {
+                "candidate_count": payload.candidate_count,
+                "completed_candidates": len(partial_candidates_by_index),
+                "retryable": True,
+                "failure_code": str(
+                    getattr(getattr(exc, "code", None), "value", "generation_failed")
+                ),
+                "failure_reason": reason_code or None,
+                "provider_status": (
+                    int(provider_status)
+                    if isinstance(provider_status, int)
+                    or str(provider_status or "").isdigit()
+                    else None
+                ),
+            },
+        )
         try:
             release_candidate_reservation(
                 run_id=str(reserved["id"]),
@@ -1828,7 +1856,9 @@ def get_progress(post_id: str, request: Request):
             updated_at = datetime.fromisoformat(str(run.get("updated_at") or "").replace("Z", "+00:00"))
             if updated_at.tzinfo is None:
                 updated_at = updated_at.replace(tzinfo=timezone.utc)
-            if candidate_generation_phase == "ready" and candidate_count == 3:
+            if candidate_generation_phase == "failed":
+                candidate_generation_status = "stalled"
+            elif candidate_generation_phase == "ready" and candidate_count == 3:
                 candidate_generation_status = "ready"
             elif (
                 candidate_generation_phase
@@ -1851,6 +1881,8 @@ def get_progress(post_id: str, request: Request):
                     )
         except ValueError:
             candidate_generation_status = "stalled"
+    elif candidate_generation_phase == "failed":
+        candidate_generation_status = "stalled"
     elif candidate_count == 3:
         candidate_generation_status = "ready"
     else:
@@ -1917,10 +1949,26 @@ def get_progress(post_id: str, request: Request):
         estimated_remaining_seconds = 0
         status_message = "Wheelchair scene plates are ready for identity review."
     elif candidate_generation_status == "stalled":
+        candidate_details = (
+            candidate_progress.get("details")
+            if isinstance(candidate_progress.get("details"), Mapping)
+            else {}
+        )
+        completed_candidates = max(
+            0,
+            min(3, int(candidate_details.get("completed_candidates") or 0)),
+        )
+        progress_percent = max(progress_percent, completed_candidates * 30)
         estimated_remaining_seconds = None
         status_message = (
-            "Scene-plate generation did not finish before its reservation expired. "
-            "Retry generation."
+            f"Scene-plate generation stopped after saving {completed_candidates} of 3 "
+            "candidates. Retry generation; saved candidates will be reused and only "
+            "the missing work will run again."
+            if candidate_generation_phase == "failed"
+            else (
+                "Scene-plate generation did not finish before its reservation expired. "
+                "Retry generation."
+            )
         )
     progress = ProgressResponse(
         run_id=str(run["id"]),
