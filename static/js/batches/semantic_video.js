@@ -226,11 +226,11 @@
         const phase = String(progress.candidate_generation_phase || '');
         const labels = {
             preparing_references: 'Preparing references',
-            generating_images: 'Generating 3 scene plates',
-            checking_diversity: 'Checking scene diversity',
-            regenerating_duplicates: 'Replacing similar scene plates',
+            generating_images: 'Generating script image',
+            checking_diversity: 'Checking image composition',
+            regenerating_duplicates: 'Repairing image composition',
             checking_identity: 'Verifying actor identity',
-            saving_candidates: 'Saving verified scene plates',
+            saving_candidates: 'Saving verified image',
             failed: 'Generation stopped — retry safely',
             ready: 'Ready for identity review',
         };
@@ -506,6 +506,7 @@
     async function runAction(root, button, path, body, pendingMessage) {
         const pendingLabels = {
             candidates: 'Generating scene plates…',
+            'scene-image': 'Generating script image…',
             'master-approve': 'Approving scene plate…',
             plan: 'Building plan…',
             approve: 'Starting generation…',
@@ -515,14 +516,15 @@
         const pendingLabel = pendingLabels[path] || 'Working…';
         const feedbackState = window.beginActionFeedback(button, pendingLabel);
         button.disabled = true;
-        if (!['candidates', 'plan'].includes(path)) setStatus(root, pendingMessage);
+        if (!['candidates', 'scene-image', 'plan'].includes(path)) setStatus(root, pendingMessage);
         try {
+            const isSceneImageAction = path === 'scene-image';
             if (['approve', 'retry-approve'].includes(path)) {
                 body = await synchronizePaidAction(root, path, body);
                 if (!body) return;
             }
             let result = null;
-            const maxAttempts = path === 'candidates' ? 2 : 1;
+            const maxAttempts = 1;
             for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
                 try {
                     result = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
@@ -531,7 +533,7 @@
                     });
                     break;
                 } catch (error) {
-                    if (path !== 'candidates' || attempt + 1 >= maxAttempts) throw error;
+                    if (!isSceneImageAction || attempt + 1 >= maxAttempts) throw error;
                     await pollProgress(root);
                     if (root.dataset.candidateGenerationStatus === 'generating') {
                         return;
@@ -543,10 +545,12 @@
                     await new Promise((resolve) => window.setTimeout(resolve, 500));
                 }
             }
-            if (path === 'candidates') {
-                root.dataset.runId = result.run_id || root.dataset.runId || '';
+            if (isSceneImageAction) {
+                root.dataset.runId = result.job_id || root.dataset.runId || '';
                 root.dataset.revision = String(result.revision ?? root.dataset.revision ?? '');
-                settleCandidateAction(root);
+                root.dataset.candidateGenerationStatus = 'generating';
+                startPolling(root, true, true);
+                window.endActionFeedback(button, feedbackState);
                 return;
             }
             reloadAtWorkflow(root);
@@ -561,7 +565,7 @@
             ) {
                 return;
             }
-            if (path === 'candidates') {
+            if (isSceneImageAction) {
                 await pollProgress(root);
                 if (root.dataset.candidateGenerationStatus === 'generating') {
                     return;
@@ -641,7 +645,7 @@
             root.dataset.waitingForCandidates = 'true';
             showCandidateLoading(root);
             startPolling(root, true, false);
-            runAction(root, event.currentTarget, 'candidates', {candidate_count: 3, expected_revision: expected}, 'Preparing scene-plate generation…');
+            runAction(root, event.currentTarget, 'scene-image', {expected_revision: expected}, 'Queueing script-image generation…');
         });
         action(root, 'approve-master')?.addEventListener('click', (event) => {
             const selected = root.querySelector('input[type="radio"][data-identity-passed="true"]:checked');

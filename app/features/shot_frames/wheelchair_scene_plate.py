@@ -602,14 +602,16 @@ def generate_scene_plate_candidates(
         Callable[[str, Mapping[str, Any]], None]
     ] = None,
 ) -> ScenePlateGenerationResult:
-    """Generate three independent plates, or three derivatives from an approved anchor."""
+    """Generate one identity-locked plate, optionally derived from an approved anchor."""
     if len(actor_references) != 2:
         raise ValidationError(
             "Scene-plate generation requires exactly two immutable actor references.",
             {"actor_reference_count": len(actor_references)},
         )
-    if candidate_count != 3:
-        raise ValidationError("Semantic scene-plate generation requires exactly three candidates.")
+    if candidate_count not in {1, 3}:
+        raise ValidationError(
+            "Semantic scene-image generation supports one image or a legacy three-image set."
+        )
     expected_roles = ("actor_front", "actor_three_quarter")
     if tuple(reference.role for reference in actor_references) != expected_roles:
         raise ValidationError(

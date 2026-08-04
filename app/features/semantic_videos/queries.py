@@ -379,6 +379,85 @@ def reserve_candidate_generation(
     return _one_affected(response, operation="candidate reservation")
 
 
+def enqueue_scene_image_generation(
+    post_id: str,
+    *,
+    expected_revision: Optional[int],
+    requested_by: str,
+    correlation_id: str,
+    client=None,
+) -> dict[str, Any]:
+    """Idempotently enqueue one durable image-generation job for a script."""
+    response = _execute_transition_rpc(
+        _client(client).rpc(
+            "enqueue_semantic_scene_image",
+            {
+                "p_post_id": post_id,
+                "p_expected_revision": expected_revision,
+                "p_requested_by": requested_by,
+                "p_correlation_id": correlation_id,
+            },
+        ),
+        operation="scene image enqueue",
+    )
+    return _one_affected(response, operation="scene image enqueue")
+
+
+def get_scene_image_job(post_id: str, *, client=None) -> Optional[dict[str, Any]]:
+    response = (
+        _client(client)
+        .table("semantic_scene_image_jobs")
+        .select("*")
+        .eq("post_id", post_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = _rows(response)
+    return rows[0] if rows else None
+
+
+def claim_scene_image_job(
+    *, worker_id: str, lease_seconds: int, client=None
+) -> Optional[dict[str, Any]]:
+    response = _execute_transition_rpc(
+        _client(client).rpc(
+            "claim_semantic_scene_image",
+            {"p_worker_id": worker_id, "p_lease_seconds": lease_seconds},
+        ),
+        operation="scene image claim",
+    )
+    rows = _rows(response)
+    return rows[0] if rows else None
+
+
+def finish_scene_image_job(
+    *,
+    job_id: str,
+    worker_id: str,
+    lease_token: str,
+    status: str,
+    run_id: Optional[str] = None,
+    error: Optional[Mapping[str, Any]] = None,
+    client=None,
+) -> dict[str, Any]:
+    response = _execute_transition_rpc(
+        _client(client).rpc(
+            "finish_semantic_scene_image",
+            {
+                "p_job_id": job_id,
+                "p_worker_id": worker_id,
+                "p_lease_token": lease_token,
+                "p_status": status,
+                "p_run_id": run_id,
+                "p_error": dict(error) if error else None,
+            },
+        ),
+        operation="scene image completion",
+    )
+    return _one_affected(response, operation="scene image completion")
+
+
 def update_candidate_generation_progress(
     *,
     run_id: str,

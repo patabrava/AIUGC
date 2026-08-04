@@ -104,6 +104,10 @@ BEGIN
     SELECT 1
     FROM supabase_migrations.schema_migrations
     WHERE version = '20260804000000'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM supabase_migrations.schema_migrations
+    WHERE version = '20260804000400'
   ) THEN
     RAISE EXCEPTION 'Supabase CLI did not record all Semantic UGC migrations';
   END IF;
@@ -121,6 +125,16 @@ BEGIN
   END IF;
   IF to_regclass('public.semantic_actor_scene_plate_anchors') IS NULL THEN
     RAISE EXCEPTION 'Supabase CLI did not install Semantic actor scene-plate anchors';
+  END IF;
+  IF to_regclass('public.semantic_scene_image_jobs') IS NULL
+     OR to_regprocedure('public.enqueue_semantic_scene_image(uuid,integer,text,text)') IS NULL
+     OR to_regprocedure('public.claim_semantic_scene_image(text,integer)') IS NULL
+     OR to_regprocedure('public.finish_semantic_scene_image(uuid,text,uuid,text,uuid,jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'Supabase CLI did not install the Semantic scene-image queue';
+  END IF;
+  IF NOT has_table_privilege('service_role', 'public.semantic_scene_image_jobs', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.semantic_scene_image_jobs', 'SELECT') THEN
+    RAISE EXCEPTION 'Semantic scene-image queue privileges are unsafe';
   END IF;
   IF NOT has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'SELECT')
      OR has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'INSERT')

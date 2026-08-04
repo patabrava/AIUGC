@@ -136,6 +136,12 @@ class CandidateGenerationRequest(BaseModel):
     expected_revision: Optional[int] = Field(default=None, ge=0)
 
 
+class SceneImageGenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: Optional[int] = Field(default=None, ge=0)
+
+
 class CandidateResponse(BaseModel):
     index: int
     storage_uri: str
@@ -159,6 +165,13 @@ class CandidateGenerationResponse(BaseModel):
     revision: int
     stage: str
     candidates: list[CandidateResponse]
+
+
+class CandidateGenerationQueuedResponse(BaseModel):
+    job_id: str
+    post_id: str
+    status: Literal["queued", "processing"]
+    candidate_count: Literal[1] = 1
 
 
 class MasterApprovalRequest(BaseModel):

@@ -105,6 +105,19 @@ def test_all_compose_contracts_run_the_dedicated_semantic_video_worker():
         assert "workers.semantic_video_worker" in str(command)
 
 
+def test_all_compose_contracts_run_the_dedicated_semantic_scene_image_worker():
+    paths = [
+        COMPOSE_PATH,
+        *LEGACY_COMPOSE_PATHS,
+        Path(__file__).resolve().parents[1] / "docker-compose.hostinger-runtime.yaml",
+    ]
+    for path in paths:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        worker = data["services"]["semantic-scene-image-worker"]
+        command = worker.get("environment", {}).get("SERVICE_CMD") or worker.get("command")
+        assert "workers.semantic_scene_image_worker" in str(command)
+
+
 def test_all_compose_contracts_run_one_dedicated_publish_scheduler():
     paths = [
         COMPOSE_PATH,
@@ -129,6 +142,13 @@ def test_github_deploy_renders_dedicated_semantic_video_worker():
 
     assert '"  semantic-video-worker:"' in workflow_text
     assert '"    command: python -m workers.semantic_video_worker"' in workflow_text
+
+
+def test_github_deploy_renders_dedicated_semantic_scene_image_worker():
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert '"  semantic-scene-image-worker:"' in workflow_text
+    assert '"    command: python -m workers.semantic_scene_image_worker"' in workflow_text
 
 
 def test_github_deploy_renders_dedicated_publish_scheduler():

@@ -879,8 +879,8 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert 'id="semantic-video-workflow"' in html
     assert 'id="semantic-video-post-post-1"' in html
     assert 'aria-live="polite"' in html
-    assert "Wheelchair scene plate candidates" in html
-    assert 'aria-label="Select wheelchair scene plate candidate 1"' in html
+    assert "Generated script image" in html
+    assert 'aria-label="Select generated script image"' in html
     assert "Batch actor references" in html
     assert "These two immutable references apply to every scene plate below." in html
     assert "Original-actor identity review" not in html
@@ -894,8 +894,8 @@ def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     assert "Identity verified · 96% evaluator confidence" in html
     assert "not overall picture quality" in html
     assert "Approving confirms that the selected scene plate shows the same actor as both original references" in html
-    assert "Regenerate wheelchair scene plates" in html
-    assert "Approve selected scene plate and confirm identity" in html
+    assert "Regenerate script image" in html
+    assert "Approve image and confirm identity" in html
     assert "data-identity-attestation" not in html
     assert "Frozen visual contract" in html
     assert "An accessible garden patio in soft daylight." in html
@@ -1000,7 +1000,7 @@ def test_awaiting_paid_visual_can_be_regenerated_from_live_panel():
 
     button = html.split('data-action="generate-candidates"', 1)[1].split(">", 1)[0]
     assert "disabled" not in button
-    assert "Regenerate wheelchair scene plates" in html
+    assert "Regenerate script image" in html
     assert "never discards paid take evidence" in html
 
 
@@ -1030,7 +1030,7 @@ def test_unapproved_candidate_set_is_labeled_as_regeneration():
         },
     )
 
-    assert "Regenerate wheelchair scene plates" in html
+    assert "Regenerate script image" in html
 
 
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
@@ -1219,8 +1219,10 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "showCandidateLoading(root)" in source
     assert "recoverCandidateProgress(root)" in source
     assert "updateCandidateStatus(root, progress)" in source
-    assert "Generating 3 scene plates" in source
-    assert "Checking scene diversity" in source
+    assert "Generating script image" in source
+    assert "'scene-image'" in source
+    assert "const maxAttempts = 1" in source
+    assert "Checking image composition" in source
     assert "Verifying actor identity" in source
     assert "showPlanLoading(root)" in source
     assert "showPlanError(root, error.message)" in source
@@ -1236,7 +1238,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "candidateBaselineRevision" in source
     assert "requestAdvanced" in source
     assert "progress.stage === 'awaiting_reference_approval'" in source
-    assert "const maxAttempts = path === 'candidates' ? 2 : 1" in source
+    assert "const maxAttempts = 1" in source
     assert "attempt + 1 >= maxAttempts" in source
     assert "await pollProgress(root)" in source
     assert "root.dataset.candidateGenerationStatus === 'generating'" in source

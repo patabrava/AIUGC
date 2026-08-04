@@ -118,6 +118,16 @@ services:
       SEMANTIC_VIDEO_WORKER_POLL_SECONDS: ${SEMANTIC_VIDEO_WORKER_POLL_SECONDS:-5}
       SERVICE_CMD: python -m workers.semantic_video_worker
 
+  semantic-scene-image-worker:
+    <<: *runtime-base
+    environment:
+      <<: *app-env
+      SEMANTIC_SCENE_IMAGE_WORKER_CONCURRENCY: ${SEMANTIC_SCENE_IMAGE_WORKER_CONCURRENCY:-2}
+      SEMANTIC_SCENE_IMAGE_WORKER_POLL_SECONDS: ${SEMANTIC_SCENE_IMAGE_WORKER_POLL_SECONDS:-1}
+      SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY: ${SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY:-2}
+      SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS: ${SEMANTIC_SCENE_PLATE_START_INTERVAL_SECONDS:-1}
+      SERVICE_CMD: python -m workers.semantic_scene_image_worker
+
   expansion-worker:
     <<: *runtime-base
     environment:

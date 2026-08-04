@@ -46,6 +46,7 @@ from app.features.semantic_videos.queries import (
     cancel_run_transition,
     finalize_candidate_generation,
     get_actor_scene_plate_anchor,
+    get_scene_image_job,
     get_run_by_post,
     list_approvals as list_approvals,
     list_attempts,
@@ -55,6 +56,7 @@ from app.features.semantic_videos.queries import (
     release_candidate_reservation,
     resume_qa_review,
     reserve_candidate_generation,
+    enqueue_scene_image_generation,
     update_candidate_generation_progress,
 )
 from app.features.semantic_videos.qa_policy import (
@@ -68,6 +70,7 @@ from app.features.semantic_videos.schemas import (
     CancellationResponse,
     CandidateGenerationRequest,
     CandidateGenerationResponse,
+    CandidateGenerationQueuedResponse,
     CandidateResponse,
     MasterApprovalRequest,
     MasterApprovalResponse,
@@ -79,6 +82,7 @@ from app.features.semantic_videos.schemas import (
     ProgressTakeResponse,
     QAReviewResumeRequest,
     RetryApprovalRequest,
+    SceneImageGenerationRequest,
 )
 from app.features.semantic_videos.service import compile_semantic_video_plan
 from app.features.semantic_videos.visual_contract import (
@@ -109,7 +113,7 @@ _CANDIDATE_PHASE_PROGRESS = {
     ),
     "generating_images": (
         20,
-        "Generating and identity-checking three independent wheelchair scene plates.",
+        "Generating and identity-checking one image for this script.",
     ),
     "checking_diversity": (
         58,
@@ -133,9 +137,38 @@ _CANDIDATE_PHASE_PROGRESS = {
     ),
     "ready": (
         100,
-        "Wheelchair scene plates are ready for identity review.",
+        "The script image is ready for identity review.",
     ),
 }
+
+
+@router.post(
+    "/{post_id}/scene-image",
+    response_model=SuccessResponse,
+    status_code=202,
+)
+def enqueue_scene_image(
+    post_id: str,
+    payload: SceneImageGenerationRequest,
+    request: Request,
+):
+    """Queue one durable script image and return without waiting for the provider."""
+    context = load_semantic_video_context(post_id)
+    _approved_script(context["post"])
+    job = enqueue_scene_image_generation(
+        post_id,
+        expected_revision=payload.expected_revision,
+        requested_by=str(getattr(request.state, "user_email", "unknown")),
+        correlation_id=str(
+            getattr(request.state, "correlation_id", "semantic-scene-image")
+        ),
+    )
+    response = CandidateGenerationQueuedResponse(
+        job_id=str(job["id"]),
+        post_id=post_id,
+        status=str(job["status"]),
+    )
+    return SuccessResponse(data=response.model_dump(mode="json"))
 
 
 def _parse_progress_time(value: Any) -> Optional[datetime]:
@@ -1405,7 +1438,7 @@ def generate_candidates(
     for row in prior_partial_candidates:
         if (
             isinstance(row, Mapping)
-            and int(row.get("index") or 0) in {1, 2, 3}
+            and 1 <= int(row.get("index") or 0) <= payload.candidate_count
             and str(row.get("provider_model") or "") == settings.semantic_scene_plate_model
             and str(row.get("visual_contract_hash") or "") == visual_contract["contract_hash"]
             and str(row.get("actor_reference_fingerprint") or "")
@@ -1832,7 +1865,70 @@ def get_progress(post_id: str, request: Request):
             url=f"/batches/{batch_id}#semantic-video-post-{post_id}",
             status_code=303,
         )
-    run = _run_or_404(post_id)
+    run = get_run_by_post(post_id)
+    if not run:
+        job = get_scene_image_job(post_id)
+        if not job:
+            progress = ProgressResponse(
+                run_id="",
+                revision=0,
+                stage="not_started",
+                candidate_generation_status="idle",
+                candidate_generation_phase=None,
+                candidate_count=0,
+                plan_hash=None,
+                total_takes=0,
+                generated_takes=0,
+                verified_takes=0,
+                progress_percent=0,
+                elapsed_seconds=0,
+                estimated_remaining_seconds=None,
+                status_message="Ready to generate one script image.",
+                failed_take_indexes=[],
+                takes=[],
+            )
+            return SuccessResponse(data=progress.model_dump(mode="json"))
+        job_status = str(job.get("status") or "")
+        started_at = _parse_progress_time(
+            job.get("started_at") or job.get("created_at")
+        )
+        elapsed = (
+            max(0, int((datetime.now(timezone.utc) - started_at).total_seconds()))
+            if started_at
+            else 0
+        )
+        is_failed = job_status == "failed"
+        progress = ProgressResponse(
+            run_id=str(job["id"]),
+            revision=int(job.get("expected_revision") or 0),
+            stage="not_started",
+            candidate_generation_status="stalled" if is_failed else "generating",
+            candidate_generation_phase="failed" if is_failed else (
+                "preparing_references" if job_status == "queued" else "generating_images"
+            ),
+            candidate_count=0,
+            plan_hash=None,
+            total_takes=0,
+            generated_takes=0,
+            verified_takes=0,
+            progress_percent=20 if job_status == "processing" else (5 if not is_failed else 20),
+            elapsed_seconds=elapsed,
+            estimated_remaining_seconds=(
+                None if is_failed else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
+            ),
+            status_message=(
+                "Image generation failed safely. Retry to enqueue a fresh job."
+                if is_failed
+                else (
+                    "Generating one script image and checking actor identity."
+                    if job_status == "processing"
+                    else "Queued for fast script-image generation."
+                )
+            ),
+            failed_take_indexes=[],
+            takes=[],
+        )
+        return SuccessResponse(data=progress.model_dump(mode="json"))
     takes = list_attempts(str(run["id"]))
     master_snapshot = run.get("master_snapshot") if isinstance(run.get("master_snapshot"), dict) else {}
     candidates = master_snapshot.get("candidates") if isinstance(master_snapshot.get("candidates"), list) else []
@@ -1858,7 +1954,7 @@ def get_progress(post_id: str, request: Request):
                 updated_at = updated_at.replace(tzinfo=timezone.utc)
             if candidate_generation_phase == "failed":
                 candidate_generation_status = "stalled"
-            elif candidate_generation_phase == "ready" and candidate_count == 3:
+            elif candidate_generation_phase == "ready" and candidate_count in {1, 3}:
                 candidate_generation_status = "ready"
             elif (
                 candidate_generation_phase
@@ -1868,7 +1964,7 @@ def get_progress(post_id: str, request: Request):
                 candidate_generation_status = "generating"
             else:
                 finalization_persisted = (
-                    candidate_count == 3
+                    candidate_count in {1, 3}
                     and updated_at > reservation_started + timedelta(seconds=1)
                 )
                 if finalization_persisted:
@@ -1883,7 +1979,7 @@ def get_progress(post_id: str, request: Request):
             candidate_generation_status = "stalled"
     elif candidate_generation_phase == "failed":
         candidate_generation_status = "stalled"
-    elif candidate_count == 3:
+    elif candidate_count in {1, 3}:
         candidate_generation_status = "ready"
     elif candidate_generation_phase and candidate_generation_phase != "ready":
         # A request can disappear after its exact reservation was released but
@@ -1943,8 +2039,8 @@ def get_progress(post_id: str, request: Request):
                 ),
             )
             status_message = (
-                "Generating three distinct wheelchair scene plates in one pass and checking "
-                "composition plus actor identity. Remaining time is an estimate."
+                "Generating one script image and checking composition plus actor identity. "
+                "Remaining time is an estimate."
             )
     elif (
         candidate_generation_status == "ready"
@@ -1952,23 +2048,44 @@ def get_progress(post_id: str, request: Request):
     ):
         progress_percent = 100
         estimated_remaining_seconds = 0
-        status_message = "Wheelchair scene plates are ready for identity review."
+        status_message = (
+            "Wheelchair scene plates are ready for identity review."
+            if candidate_count == 3
+            else "The script image is ready for identity review."
+        )
     elif candidate_generation_status == "stalled":
         candidate_details = (
             candidate_progress.get("details")
             if isinstance(candidate_progress.get("details"), Mapping)
             else {}
         )
+        expected_candidate_count = max(
+            1,
+            int(candidate_details.get("candidate_count") or candidate_count or 1),
+        )
         completed_candidates = max(
             0,
-            min(3, int(candidate_details.get("completed_candidates") or 0)),
+            min(
+                expected_candidate_count,
+                int(candidate_details.get("completed_candidates") or 0),
+            ),
         )
-        progress_percent = max(progress_percent, completed_candidates * 30)
+        progress_percent = max(
+            progress_percent,
+            completed_candidates * max(1, 90 // expected_candidate_count),
+        )
         estimated_remaining_seconds = None
         status_message = (
-            f"Scene-plate generation stopped after saving {completed_candidates} of 3 "
-            "candidates. Retry generation; saved candidates will be reused and only "
-            "the missing work will run again."
+            (
+                f"Scene-plate generation stopped after saving {completed_candidates} of "
+                f"{expected_candidate_count} candidates. Retry generation; saved candidates "
+                "will be reused and only the missing work will run again."
+                if expected_candidate_count == 3
+                else (
+                    f"Script-image generation stopped after saving {completed_candidates} image. "
+                    "Retry generation; completed work will be reused."
+                )
+            )
             if candidate_generation_phase == "failed"
             else (
                 "Scene-plate generation did not finish before its reservation expired. "

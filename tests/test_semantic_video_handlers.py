@@ -1887,6 +1887,77 @@ def test_candidate_endpoint_requires_exactly_three_candidates_before_provider_ca
     assert provider_calls == []
 
 
+def test_scene_image_endpoint_enqueues_one_job_and_returns_202(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    queued = []
+
+    def enqueue(post_id, **kwargs):
+        queued.append((post_id, kwargs))
+        return {"id": "job-1", "post_id": post_id, "status": "queued"}
+
+    monkeypatch.setattr(handlers, "enqueue_scene_image_generation", enqueue)
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/scene-image",
+        json={"expected_revision": None},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["data"] == {
+        "job_id": "job-1",
+        "post_id": "post-1",
+        "status": "queued",
+        "candidate_count": 1,
+    }
+    assert queued[0][0] == "post-1"
+    assert queued[0][1]["expected_revision"] is None
+
+
+def test_progress_endpoint_projects_queued_scene_image_without_run(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["run"] = None
+    monkeypatch.setattr(
+        handlers,
+        "get_scene_image_job",
+        lambda _post_id: {
+            "id": "job-queued",
+            "status": "queued",
+            "expected_revision": None,
+            "created_at": "2026-08-04T20:00:00+00:00",
+        },
+    )
+    response = TestClient(app, base_url="http://localhost").get(
+        "/semantic-videos/posts/post-1/progress"
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]
+    assert payload["run_id"] == "job-queued"
+    assert payload["candidate_generation_status"] == "generating"
+    assert payload["candidate_generation_phase"] == "preparing_references"
+    assert payload["candidate_count"] == 0
+
+
+def test_progress_endpoint_returns_idle_instead_of_404_before_first_job(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["run"] = None
+    monkeypatch.setattr(handlers, "get_scene_image_job", lambda _post_id: None)
+    response = TestClient(app, base_url="http://localhost").get(
+        "/semantic-videos/posts/post-1/progress"
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]
+    assert payload["candidate_generation_status"] == "idle"
+    assert payload["stage"] == "not_started"
+    assert payload["status_message"] == "Ready to generate one script image."
+
+
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])
 def test_candidate_endpoint_generates_three_wheelchair_scene_plates_from_ordered_references(
     monkeypatch,
