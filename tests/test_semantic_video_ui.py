@@ -1089,6 +1089,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "candidateBaselineRunId" in source
     assert "candidateBaselineRevision" in source
     assert "requestAdvanced" in source
+    assert "progress.stage === 'awaiting_reference_approval'" in source
     assert "candidateRoot.dataset.waitingForCandidates === 'true'" in source
     assert "candidateRoot.dataset.candidateGenerationStatus === 'generating'" in source
     assert 'data-run-id="{{ item.run_id or \'\' }}"' in template_source

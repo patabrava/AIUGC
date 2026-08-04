@@ -407,6 +407,7 @@
             if (
                 root.dataset.waitingForCandidates === 'true'
                 && progress.candidate_generation_status === 'ready'
+                && progress.stage === 'awaiting_reference_approval'
                 && requestAdvanced
             ) {
                 settleCandidateAction(root);
